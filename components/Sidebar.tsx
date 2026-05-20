@@ -2,12 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
 import {
   PanelLeft,
+  Bot,
   BookText,
+  Building2,
+  Inbox,
   MoreHorizontal,
   ListFilter,
   MessageSquarePlus,
+  Network,
+  Users,
 } from "lucide-react";
 
 function NavItem({
@@ -18,7 +24,7 @@ function NavItem({
   trailing,
 }: {
   href: string;
-  icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+  icon: LucideIcon;
   label: string;
   active?: boolean;
   trailing?: React.ReactNode;
@@ -84,6 +90,7 @@ function HistoryItem({
 export default function Sidebar() {
   const pathname = usePathname();
   const isHome = pathname === "/";
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <aside className="relative flex h-full w-[232px] shrink-0 flex-col bg-sidebar after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-[#e6e6e3]">
@@ -99,8 +106,23 @@ export default function Sidebar() {
 
       {/* Primary nav */}
       <nav className="flex flex-col gap-px px-2 pt-1">
+        <NavItem href="/inbox" icon={Inbox} label="Inbox" active={isActive("/inbox")} />
         <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
-        <NavItem href="/wiki" icon={BookText} label="Wiki" active={pathname === "/wiki"} />
+        <NavItem href="/wiki" icon={BookText} label="Wiki" active={isActive("/wiki")} />
+        <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
+        <NavItem
+          href="/org-chart"
+          icon={Network}
+          label="Org Chart"
+          active={isActive("/org-chart")}
+        />
+        <NavItem href="/people" icon={Users} label="People" active={isActive("/people")} />
+        <NavItem
+          href="/companies"
+          icon={Building2}
+          label="Companies"
+          active={isActive("/companies")}
+        />
       </nav>
 
       {/* History */}
