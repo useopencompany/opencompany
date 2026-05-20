@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "setup": "npm install",
+    "run": "npm run dev -- --port ${CONDUCTOR_PORT:-3000}"
+  }
+}
