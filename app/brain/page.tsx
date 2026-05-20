@@ -1,11 +1,11 @@
 import Sidebar from "@/components/Sidebar";
-import WikiView from "@/components/WikiView";
+import BrainView from "@/components/BrainView";
 
-export default function WikiPage() {
+export default function BrainPage() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-canvas">
       <Sidebar />
-      <WikiView />
+      <BrainView />
     </div>
   );
 }
