@@ -1,0 +1,382 @@
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  ChevronRight,
+  CircleDashed,
+  ExternalLink,
+  History,
+  Link2,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  ScrollText,
+  ShieldAlert,
+  Tag,
+  Trash2,
+  Wrench,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  renderInline,
+  type Changelog,
+  type ChangeSection,
+  type InlineToken,
+  type Release,
+} from "@/lib/changelog";
+
+type CategoryStyle = {
+  icon: LucideIcon;
+  dot: string;
+  text: string;
+  pill: string;
+  border: string;
+};
+
+const CATEGORY_STYLES: Record<string, CategoryStyle> = {
+  Added: {
+    icon: Plus,
+    dot: "bg-[#16a34a]",
+    text: "text-[#15803d]",
+    pill: "bg-[#e9f5ec] text-[#15803d]",
+    border: "border-[#cfe7d6]",
+  },
+  Changed: {
+    icon: RefreshCw,
+    dot: "bg-[#2563eb]",
+    text: "text-[#1d4ed8]",
+    pill: "bg-[#e8eefc] text-[#1d4ed8]",
+    border: "border-[#d3deef]",
+  },
+  Deprecated: {
+    icon: CircleDashed,
+    dot: "bg-[#a16207]",
+    text: "text-[#854d0e]",
+    pill: "bg-[#fdf3df] text-[#854d0e]",
+    border: "border-[#ecd9aa]",
+  },
+  Removed: {
+    icon: Trash2,
+    dot: "bg-[#dc2626]",
+    text: "text-[#b91c1c]",
+    pill: "bg-[#fbeaea] text-[#b91c1c]",
+    border: "border-[#eecbcb]",
+  },
+  Fixed: {
+    icon: Wrench,
+    dot: "bg-[#7c3aed]",
+    text: "text-[#6d28d9]",
+    pill: "bg-[#efeafc] text-[#6d28d9]",
+    border: "border-[#d9cef0]",
+  },
+  Security: {
+    icon: ShieldAlert,
+    dot: "bg-[#b91c1c]",
+    text: "text-[#991b1b]",
+    pill: "bg-[#fbeaea] text-[#991b1b]",
+    border: "border-[#eecbcb]",
+  },
+};
+
+const FALLBACK_STYLE: CategoryStyle = {
+  icon: AlertTriangle,
+  dot: "bg-ink-muted",
+  text: "text-ink-muted",
+  pill: "bg-[#ececea] text-ink-muted",
+  border: "border-[#e4e4e0]",
+};
+
+function getCategoryStyle(category: string): CategoryStyle {
+  return CATEGORY_STYLES[category] ?? FALLBACK_STYLE;
+}
+
+function InlineMarkdown({ text }: { text: string }) {
+  const tokens = renderInline(text);
+  return (
+    <>
+      {tokens.map((token, i) => (
+        <InlineTokenView key={i} token={token} />
+      ))}
+    </>
+  );
+}
+
+function InlineTokenView({ token }: { token: InlineToken }) {
+  switch (token.kind) {
+    case "code":
+      return (
+        <code className="rounded bg-[#ececea] px-1 py-0.5 font-mono text-[12px] text-ink">
+          {token.text}
+        </code>
+      );
+    case "strong":
+      return <strong className="font-semibold text-ink">{token.text}</strong>;
+    case "link":
+      return (
+        <a
+          href={token.href}
+          className="text-ink underline decoration-[#d2d2cd] underline-offset-2 transition-colors hover:decoration-ink/60"
+        >
+          {token.text}
+        </a>
+      );
+    default:
+      return <>{token.text}</>;
+  }
+}
+
+function ReleasePill({ release }: { release: Release }) {
+  const isUnreleased = release.version.toLowerCase() === "unreleased";
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium tracking-[-0.005em] shadow-[0_1px_0_rgba(0,0,0,0.02)] ${
+        isUnreleased
+          ? "border-[#e4e4e0] bg-white text-ink-muted"
+          : "border-[#e6e6e3] bg-white text-ink"
+      }`}
+    >
+      <Tag size={11} strokeWidth={1.9} className={isUnreleased ? "text-ink-subtle" : "text-ink-muted"} />
+      <span className="font-mono text-[12px]">{release.version}</span>
+    </span>
+  );
+}
+
+function SectionBlock({ section }: { section: ChangeSection }) {
+  const style = getCategoryStyle(section.category);
+  const Icon = style.icon;
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <span
+          className={`inline-flex h-5 items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium tracking-[-0.005em] ${style.pill}`}
+        >
+          <Icon size={11} strokeWidth={2} />
+          {section.category}
+        </span>
+        <span className="text-[11px] text-ink-subtle">
+          {section.items.length} {section.items.length === 1 ? "entry" : "entries"}
+        </span>
+      </div>
+      <ul className="space-y-1.5">
+        {section.items.map((item, i) => (
+          <li
+            key={i}
+            className="flex gap-2 text-[13.5px] leading-6 tracking-[-0.005em] text-ink/90"
+          >
+            <span
+              aria-hidden
+              className={`mt-[9px] inline-block h-1.5 w-1.5 shrink-0 rounded-full ${style.dot}`}
+            />
+            <span className="min-w-0">
+              <InlineMarkdown text={item} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ReleaseCard({ release }: { release: Release }) {
+  const id = `release-${release.version.toLowerCase()}`;
+  return (
+    <section id={id} className="scroll-mt-20">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <ReleasePill release={release} />
+        {release.date && (
+          <span className="text-[12.5px] text-ink-muted">{release.date}</span>
+        )}
+        {release.yanked && (
+          <span className="inline-flex items-center gap-1 rounded-md bg-[#fbeaea] px-1.5 py-0.5 text-[11px] font-medium text-[#b91c1c]">
+            <AlertTriangle size={11} strokeWidth={2} />
+            YANKED
+          </span>
+        )}
+        {release.link && (
+          <a
+            href={release.link}
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
+          >
+            Compare
+            <ArrowUpRight size={12} strokeWidth={1.9} />
+          </a>
+        )}
+      </div>
+
+      {release.notes.length > 0 && (
+        <div className="mt-3 space-y-2 text-[13.5px] leading-6 tracking-[-0.005em] text-ink/85">
+          {release.notes.map((note, i) => (
+            <p key={i}>
+              <InlineMarkdown text={note} />
+            </p>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-4 rounded-lg border border-[#e6e6e3] bg-white p-4 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+        {release.sections.length === 0 ? (
+          <p className="text-[13px] text-ink-subtle">No changes recorded.</p>
+        ) : (
+          <div className="space-y-5">
+            {release.sections.map((section, i) => (
+              <SectionBlock key={i} section={section} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function IconButton({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      aria-label={label}
+      title={label}
+      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      {children}
+    </button>
+  );
+}
+
+function TopBar() {
+  return (
+    <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-[#eaeae6] bg-canvas/85 px-5 backdrop-blur-md">
+      <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-muted">
+        <span className="truncate">acta-website</span>
+        <ChevronRight size={13} strokeWidth={1.75} className="shrink-0 text-ink-subtle" />
+        <span className="truncate font-medium text-ink">CHANGELOG.md</span>
+      </div>
+      <div className="ml-auto flex items-center gap-1">
+        <a
+          href="https://keepachangelog.com/en/1.1.0/"
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
+        >
+          Keep a Changelog 1.1.0
+          <ExternalLink size={11} strokeWidth={1.9} />
+        </a>
+        <IconButton label="Copy link">
+          <Link2 size={14} strokeWidth={1.75} />
+        </IconButton>
+        <IconButton label="More actions">
+          <MoreHorizontal size={15} strokeWidth={1.75} />
+        </IconButton>
+      </div>
+    </div>
+  );
+}
+
+function OutlinePanel({ releases }: { releases: Release[] }) {
+  return (
+    <aside className="hidden w-[232px] shrink-0 border-l border-[#e6e6e3] bg-canvas px-4 py-4 xl:block">
+      <div className="sticky top-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+            Releases
+          </span>
+          <History size={13} strokeWidth={1.75} className="text-ink-subtle" />
+        </div>
+        <nav className="space-y-px">
+          {releases.map((release, index) => (
+            <a
+              key={release.version}
+              href={`#release-${release.version.toLowerCase()}`}
+              className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[12.5px] transition-colors duration-150 ${
+                index === 0
+                  ? "bg-[#ececea] font-medium text-ink"
+                  : "text-ink-muted hover:bg-[#ececea] hover:text-ink"
+              }`}
+            >
+              <span className="truncate font-mono">{release.version}</span>
+              {release.date && (
+                <span className="shrink-0 text-[11px] text-ink-subtle">
+                  {release.date}
+                </span>
+              )}
+            </a>
+          ))}
+        </nav>
+      </div>
+    </aside>
+  );
+}
+
+export default function ChangelogView({ changelog }: { changelog: Changelog }) {
+  const latest = changelog.releases.find(
+    (r) => r.version.toLowerCase() !== "unreleased",
+  );
+
+  return (
+    <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <TopBar />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-y-auto">
+            <article className="mx-auto w-full max-w-[760px] px-10 pb-16 pt-9">
+              <header className="border-b border-[#ececea] pb-7">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#ececea] text-ink">
+                    <ScrollText size={17} strokeWidth={1.8} />
+                  </span>
+                  <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
+                    Project changelog
+                  </span>
+                </div>
+                <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
+                  {changelog.title}
+                </h1>
+                {changelog.intro.length > 0 && (
+                  <div className="mt-3 max-w-[620px] space-y-3 text-[14px] leading-6 tracking-[-0.005em] text-ink-muted">
+                    {changelog.intro.map((paragraph, i) => (
+                      <p key={i}>
+                        <InlineMarkdown text={paragraph} />
+                      </p>
+                    ))}
+                  </div>
+                )}
+                {latest && (
+                  <div className="mt-5 flex flex-wrap items-center gap-2 text-[12px] text-ink-muted">
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-[#e8e8e4] bg-white px-2 py-1 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+                      <Tag size={12} strokeWidth={1.75} />
+                      Latest {latest.version}
+                    </span>
+                    {latest.date && (
+                      <span className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1">
+                        Released {latest.date}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1">
+                      {changelog.releases.length}{" "}
+                      {changelog.releases.length === 1 ? "entry" : "entries"} total
+                    </span>
+                  </div>
+                )}
+              </header>
+
+              <div className="mt-8 space-y-10">
+                {changelog.releases.length === 0 ? (
+                  <p className="text-[13.5px] text-ink-muted">
+                    No releases have been recorded yet.
+                  </p>
+                ) : (
+                  changelog.releases.map((release) => (
+                    <ReleaseCard key={release.version} release={release} />
+                  ))
+                )}
+              </div>
+            </article>
+          </div>
+          <OutlinePanel releases={changelog.releases} />
+        </div>
+      </section>
+    </main>
+  );
+}

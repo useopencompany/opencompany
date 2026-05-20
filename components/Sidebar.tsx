@@ -13,6 +13,7 @@ import {
   ListFilter,
   MessageSquarePlus,
   Network,
+  ScrollText,
   Users,
 } from "lucide-react";
 
@@ -122,6 +123,12 @@ export default function Sidebar() {
           icon={Building2}
           label="Companies"
           active={isActive("/companies")}
+        />
+        <NavItem
+          href="/changelog"
+          icon={ScrollText}
+          label="Changelog"
+          active={isActive("/changelog")}
         />
       </nav>
 
