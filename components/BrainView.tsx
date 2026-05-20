@@ -74,7 +74,7 @@ const commits = [
     sha: "6d91bb0",
   },
   {
-    message: "Initial wiki import",
+    message: "Initial brain import",
     author: "Nora",
     age: "5d",
     sha: "2ac4ef8",
@@ -260,7 +260,7 @@ function MarkdownArticle() {
             <BookOpenText size={17} strokeWidth={1.8} />
           </span>
           <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
-            Project wiki
+            Project brain
           </span>
         </div>
         <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
@@ -279,7 +279,7 @@ function MarkdownArticle() {
           </h2>
           <p className="mt-3">
             This repository contains the public Next.js website, Payload CMS admin surface, shared
-            schema definitions, and the scripts used to keep local development predictable. The wiki
+            schema definitions, and the scripts used to keep local development predictable. The brain
             is versioned with the codebase so product notes and implementation details move through
             review with the changes they describe.
           </p>
@@ -348,7 +348,7 @@ pnpm dev`}</code>
           </h2>
           <p className="mt-3">
             Pages and posts are edited in the Payload admin panel. Schema changes should include a
-            migration, fixture update, and a short note in this wiki when the editor workflow changes
+            migration, fixture update, and a short note in this brain when the editor workflow changes
             for content authors.
           </p>
           <blockquote className="mt-4 border-l-2 border-[#c9c9c2] pl-4 text-[13.5px] leading-6 text-ink-muted">
@@ -444,7 +444,7 @@ function TopBar() {
   );
 }
 
-export default function WikiView() {
+export default function BrainView() {
   return (
     <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
       <GitSidebar />
