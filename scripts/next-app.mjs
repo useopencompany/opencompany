@@ -10,7 +10,7 @@ const args = argv.slice(2);
 const env = { ...process.env };
 
 if (args[0] === "dev") {
-  env.INNGEST_DEV ??= "1";
+  env.INNGEST_DEV = "1";
   env.PORT ??= "3000";
   const hasPortArg = args.includes("-p") || args.includes("--port");
   if (!hasPortArg) {

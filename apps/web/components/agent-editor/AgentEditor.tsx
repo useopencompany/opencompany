@@ -1,110 +1,187 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { MentionList, type MentionListHandle } from "./MentionList";
-import { AGENT_MENTION_ITEMS } from "./tools";
+import { Mention } from "@tiptap/extension-mention";
+import { Extension, type JSONContent, mergeAttributes } from "@tiptap/react";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { useState } from "react";
+import { mentionSuggestion } from "./mentionSuggestion";
+import { findMentionItem } from "./tools";
 
 type Props = {
   initialBody: string;
   onChange: (body: string) => void;
 };
 
+const mentionExtension = Mention.configure({
+  HTMLAttributes: {
+    class: "agent-mention",
+  },
+  suggestion: mentionSuggestion,
+  renderText({ node, suggestion }) {
+    return `${suggestion?.char ?? "@"}${node.attrs.label ?? node.attrs.id}`;
+  },
+  renderHTML({ options, node }) {
+    const id = typeof node.attrs.id === "string" ? node.attrs.id : "";
+    const kind = id.startsWith("model:") ? "model" : id.startsWith("tool:") ? "tool" : undefined;
+
+    return [
+      "span",
+      mergeAttributes(options.HTMLAttributes, kind ? { "data-kind": kind } : {}),
+      `${node.attrs.mentionSuggestionChar ?? "@"}${node.attrs.label ?? node.attrs.id}`,
+    ];
+  },
+});
+
+const plainTextKeysExtension = Extension.create({
+  name: "plainTextKeys",
+  addKeyboardShortcuts() {
+    return {
+      Enter: () => this.editor.commands.setHardBreak(),
+      Tab: () => this.editor.commands.insertContent("  "),
+    };
+  },
+});
+
 export function AgentEditor({ initialBody, onChange }: Props) {
-  const [body, setBody] = useState(initialBody);
-  const [selectionStart, setSelectionStart] = useState(0);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mentionListRef = useRef<MentionListHandle>(null);
-  const mention = useMemo(() => currentMention(body, selectionStart), [body, selectionStart]);
-  const items = useMemo(() => {
-    if (!mention) return [];
-    const query = mention.query.toLowerCase();
-    return AGENT_MENTION_ITEMS.filter((item) => {
-      return (
-        item.kind.includes(query) ||
-        item.label.toLowerCase().includes(query) ||
-        item.description.toLowerCase().includes(query)
-      );
-    });
-  }, [mention]);
-
-  function update(nextBody: string, nextSelectionStart?: number) {
-    setBody(nextBody);
-    onChange(nextBody);
-    if (typeof nextSelectionStart === "number") {
-      window.requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        textareaRef.current?.setSelectionRange(nextSelectionStart, nextSelectionStart);
-        setSelectionStart(nextSelectionStart);
-      });
-    }
-  }
-
-  function insertMention(label: string) {
-    if (!mention) return;
-    const mentionToken = `@${label}`;
-    const suffix = body.slice(selectionStart);
-    const hasFollowingSpace = suffix.startsWith(" ");
-    const nextBody = `${body.slice(0, mention.start)}${mentionToken}${
-      hasFollowingSpace ? "" : " "
-    }${suffix}`;
-    update(nextBody, mention.start + mentionToken.length + 1);
-  }
+  const [isEmpty, setIsEmpty] = useState(initialBody.trim().length === 0);
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        blockquote: false,
+        bulletList: false,
+        codeBlock: false,
+        heading: false,
+        horizontalRule: false,
+        listItem: false,
+        orderedList: false,
+      }),
+      mentionExtension,
+      plainTextKeysExtension,
+    ],
+    content: bodyToTiptapDoc(initialBody),
+    editorProps: {
+      attributes: {
+        class:
+          "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
+      },
+    },
+    onUpdate: ({ editor }) => {
+      setIsEmpty(editor.isEmpty);
+      onChange(tiptapDocToBody(editor.getJSON()));
+    },
+    onCreate: ({ editor }) => {
+      setIsEmpty(editor.isEmpty);
+    },
+  });
 
   return (
     <div className="relative">
-      <textarea
-        ref={textareaRef}
-        value={body}
-        onChange={(event) => {
-          setSelectionStart(event.currentTarget.selectionStart);
-          update(event.currentTarget.value);
-        }}
-        onClick={(event) => setSelectionStart(event.currentTarget.selectionStart)}
-        onKeyUp={(event) => setSelectionStart(event.currentTarget.selectionStart)}
-        onSelect={(event) => setSelectionStart(event.currentTarget.selectionStart)}
-        onKeyDown={(event) => {
-          if (mention && items.length > 0) {
-            const handled = mentionListRef.current?.onKeyDown(event.nativeEvent);
-            if (handled) {
-              event.preventDefault();
-              return;
-            }
-          }
-
-          if (event.key === "Tab") {
-            event.preventDefault();
-            const start = event.currentTarget.selectionStart;
-            const end = event.currentTarget.selectionEnd;
-            const nextBody = `${body.slice(0, start)}  ${body.slice(end)}`;
-            update(nextBody, start + 2);
-          }
-        }}
-        placeholder="Describe what this agent should do. Mention models or tools with @."
-        spellCheck
-        className="min-h-[320px] w-full resize-none bg-transparent text-[13.5px] leading-7 text-ink/90 outline-none placeholder:text-ink-subtle/70"
-      />
-      {mention && (
-        <div className="absolute left-0 top-7 z-20">
-          <MentionList
-            ref={mentionListRef}
-            items={items}
-            query={mention.query}
-            command={(item) => insertMention(item.label)}
-          />
+      {isEmpty && (
+        <div className="pointer-events-none absolute left-0 top-0 text-[13.5px] leading-7 text-ink-subtle/70">
+          Describe what this agent should do. Mention models or tools with @.
         </div>
       )}
+      <EditorContent editor={editor} />
     </div>
   );
 }
 
-function currentMention(body: string, cursor: number) {
-  const before = body.slice(0, cursor);
-  const match = /(^|[\s([{])@([A-Za-z0-9_.\/-]*)$/.exec(before);
-  if (!match) return null;
-  const query = match[2] ?? "";
+function bodyToTiptapDoc(body: string): JSONContent {
+  const normalized = body.replace(/\r\n/g, "\n");
+  if (normalized.trim().length === 0) {
+    return { type: "doc", content: [{ type: "paragraph" }] };
+  }
 
   return {
-    start: cursor - query.length - 1,
-    query,
+    type: "doc",
+    content: normalized.split(/\n{2,}/).map((block) => ({
+      type: "paragraph",
+      content: parseInlineContent(block),
+    })),
   };
+}
+
+function parseInlineContent(text: string): JSONContent[] {
+  const content: JSONContent[] = [];
+  const lines = text.split("\n");
+
+  lines.forEach((line, lineIndex) => {
+    if (lineIndex > 0) content.push({ type: "hardBreak" });
+    content.push(...parseMentionText(line));
+  });
+
+  return content;
+}
+
+function parseMentionText(text: string): JSONContent[] {
+  const content: JSONContent[] = [];
+  let cursor = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "@") continue;
+    if (index > 0 && !/[\s([{]/.test(text[index - 1] ?? "")) continue;
+
+    let end = index + 1;
+    while (end < text.length && isMentionChar(text[end] ?? "")) end += 1;
+
+    const rawToken = text.slice(index + 1, end);
+    const token = rawToken.replace(/[.,;:!?)}\]]+$/g, "");
+    const trailing = rawToken.slice(token.length);
+    const item = findMentionItem(token);
+    if (!item) continue;
+
+    pushText(content, text.slice(cursor, index));
+    content.push({
+      type: "mention",
+      attrs: {
+        id: item.mentionId,
+        label: item.label,
+        mentionSuggestionChar: "@",
+      },
+    });
+    pushText(content, trailing);
+    cursor = end;
+    index = end - 1;
+  }
+
+  pushText(content, text.slice(cursor));
+  return content;
+}
+
+function pushText(content: JSONContent[], text: string) {
+  if (text.length === 0) return;
+  content.push({ type: "text", text });
+}
+
+function tiptapDocToBody(doc: JSONContent) {
+  return (doc.content ?? [])
+    .map((node) => nodeText(node))
+    .join("\n\n")
+    .replace(/\s+$/g, "");
+}
+
+function nodeText(node: JSONContent): string {
+  if (node.type === "text") return node.text ?? "";
+  if (node.type === "hardBreak") return "\n";
+  if (node.type === "mention") {
+    const label = typeof node.attrs?.label === "string" ? node.attrs.label : null;
+    const id = typeof node.attrs?.id === "string" ? node.attrs.id : "";
+    return `@${label ?? id}`;
+  }
+
+  return (node.content ?? []).map((child) => nodeText(child)).join("");
+}
+
+function isMentionChar(char: string) {
+  return (
+    (char >= "a" && char <= "z") ||
+    (char >= "A" && char <= "Z") ||
+    (char >= "0" && char <= "9") ||
+    char === "_" ||
+    char === "." ||
+    char === "/" ||
+    char === "-"
+  );
 }

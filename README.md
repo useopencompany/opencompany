@@ -1,6 +1,22 @@
 # opencompany
 
-A Next.js application for running and coordinating AI agents inside a company. Turborepo monorepo on Bun, Drizzle on Neon Postgres, WorkOS AuthKit for auth, deployed on Vercel.
+An open platform for running AI agents inside a company.
+
+Agents are **plain-text files** — Markdown with a small YAML header — versioned in a GitHub repo per workspace. The web app is the editor and the operations layer. GitHub is the source of truth. Vercel AI Gateway is the runtime.
+
+## The model
+
+- **Workspace** — a tenant. One company, one managed private GitHub repo, one set of members.
+- **Agent** — a `.agent` file at `agents/<slug>.agent` in the workspace repo. Title, instructions, model, tools — one file, no separate config.
+- **Mentions** — write `@exa` or `@deep` in the body. The editor parses mentions and rewrites the frontmatter, so the instructions stay the source of truth.
+- **Sync** — every save commits to Postgres immediately and queues an asynchronous GitHub write. The editor never blocks on GitHub.
+- **Runtime** — agents run through Vercel AI Gateway, which abstracts OpenAI, Anthropic, and other providers behind a single API.
+
+The `.agent` file is the contract. Anything that touches an agent — the UI, the sync worker, the runtime — reads or writes that format. See [docs/agent-file.md](./docs/agent-file.md) for the full spec.
+
+## Stack
+
+Turborepo on Bun · Next.js (App Router) · Drizzle on Neon Postgres · WorkOS AuthKit · Inngest background jobs · Vercel AI Gateway · GitHub App for managed repos · deployed on Vercel.
 
 ## Quick start
 
@@ -18,7 +34,7 @@ bun run dev
 - `packages/db` — shared Drizzle schema and client
 - `scripts` — setup, env-pull, and Neon branching automation
 - `drizzle` — checked-in migrations
-- `docs` — getting-started, database, and auth guides
+- `docs` — concept, format spec, and operational guides
 - `.claude/skills` — agent skills (`start-work`, `pre-merge-check`)
 
 ## Quality gates
@@ -27,7 +43,9 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 
 ## Docs
 
-- [Getting started](./docs/getting-started.md)
+- [The `.agent` file format](./docs/agent-file.md) — deep dive into the file that defines every agent
+- [Getting started](./docs/getting-started.md) — local dev setup in under five minutes
+- [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
 - [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
 - [Auth](./docs/auth.md) — WorkOS AuthKit, env vars, identity model
 - [Contributing](./CONTRIBUTING.md)

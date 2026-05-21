@@ -1,48 +1,67 @@
 ---
-title: Getting started
-description: Learn the core concepts behind Cursor and how to start your first agent session.
+title: Welcome to opencompany
+description: An open platform for running AI agents inside your company. Here's how it works.
 ---
 
-## What Cursor is
+## What opencompany is
 
-Cursor is a workspace for running coding agents against your product. It keeps the important pieces of agent work in one place: the repo context, the session history, the agent's output, and the changes that are ready for review.
+opencompany is a place to build and run the AI agents your company uses every day — for research, ops, sales, support, anything you'd normally hand to a teammate or a script.
 
-The app is organized around a few concepts that you will see throughout the product.
+The thing that makes it different is how agents are stored. Every agent is a **plain text file** in a private GitHub repo that belongs to your workspace. No proprietary database, no closed format. If you can read Markdown, you can read your agents.
 
-## Core concepts
+This means:
+
+- You can see exactly what an agent does — its instructions are right there in the file.
+- Every change is versioned in Git. You get history, diffs, and pull requests for free.
+- You can edit in the opencompany editor, in GitHub, or in your favorite code editor. They all read the same file.
+
+## The core ideas
 
 ### Workspace
 
-A workspace represents the product or repository you are working on. It gives sessions and agents the shared context they need, including project structure, recent activity, and product-specific knowledge.
-
-### Session
-
-A session is a focused conversation with an agent. Use a new session when you want to explore a problem, build a feature, fix a bug, or understand existing work. Sessions preserve the reasoning, files touched, and follow-up context for that task.
+A workspace is your company's space in opencompany. It has its own members, its own private GitHub repo, and its own set of agents. Most companies will only ever need one.
 
 ### Agent
 
-An agent is the worker that reads the codebase, plans changes, edits files, and checks its work. Agents can run independently, so you can keep one task moving while another investigates a separate question.
+An agent is one job your company wants done. "Research investors." "Triage incoming bugs." "Draft replies to support tickets." Each agent is a single `.agent` file with a title, instructions, the AI model that runs it, and the tools it can use.
 
-### Brain
+### Instructions
 
-Brain is the shared knowledge layer for the workspace. It is where reusable context should live so future sessions do not need to rediscover the same project details.
+The body of an agent file is just Markdown — the same plain text you'd use to write a doc. You describe the outcome you want, the constraints that matter, and how the agent should behave. The AI model reads it the same way a new teammate would read an SOP.
 
-### Inbox
+### Mentions
 
-Inbox is for work that needs attention. As the product grows, it will collect review requests, handoffs, and other items that should not get buried in session history.
+Inside the instructions, you can write `@exa` to give the agent web research, or `@deep` to run it on a more capable model. These `@` mentions are the only way to wire up models and tools — the editor reads them out of the instructions automatically, so you never have to keep two places in sync.
 
-## Start a session
+### Sync
 
-1. Open **New Session** from the sidebar.
-2. Choose the workspace and branch you want the agent to use.
-3. Describe the outcome you want in plain language.
-4. Review the agent's plan, then let it make the change.
-5. Check the resulting diff, tests, and notes before merging or handing off.
+Everything you save in the opencompany editor is committed to your workspace's GitHub repo. Edits in either place flow through. Your agents are yours, in Git, forever.
 
-Good session prompts describe the target outcome and the constraints that matter. For example, ask for a small user-facing docs page, mention that it should match the current app design, and call out any libraries or patterns you prefer.
+## A tiny example
 
-## What to review
+Here's what an agent file looks like end to end:
 
-Before you accept an agent's work, look at the files changed, the commands it ran, and any tests it could not run. If the work changes a user-facing flow, open the app and verify the flow yourself.
+```yaml
+---
+title: "Investor research"
+model: openai/gpt-5.4
+tools:
+  - exa
+---
 
-For larger changes, start a fresh session for follow-up review or cleanup instead of letting one session grow too broad.
+Find recent fund announcements with @exa. Write a one-paragraph brief for
+each fund covering thesis, check size, and a recent investment. Use @deep
+when summarizing — accuracy matters more than speed.
+```
+
+That's the whole thing. A header that says who this agent is and what it can use, and a body of instructions in plain English. To change the model, change `@deep`. To remove web research, remove `@exa`. The file always reflects exactly what the agent does.
+
+## What you can do today
+
+- **Create agents** in the editor at `/agents`. Give them a title, write instructions, and add `@` mentions for the model and tools you want.
+- **Edit agents** any time. Saves are instant — the GitHub commit happens in the background a few seconds later.
+- **Read the file format** in detail on the next page if you want to understand every option, or if you're planning to author agents directly in your editor.
+
+## Where to go next
+
+- [The `.agent` file](/docs/agent-file) — every field, every option, in plain language.

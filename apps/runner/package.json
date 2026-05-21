@@ -1,0 +1,25 @@
+{
+  "name": "@opencompany/runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "tsc --noEmit --project tsconfig.json"
+  },
+  "dependencies": {
+    "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/db": "workspace:*",
+    "ai": "^6.0.189",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "e2b": "^2.21.0",
+    "fastify": "^5.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  }
+}
