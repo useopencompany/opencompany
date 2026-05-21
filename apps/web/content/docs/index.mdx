@@ -1,0 +1,48 @@
+---
+title: Getting started
+description: Learn the core concepts behind Cursor and how to start your first agent session.
+---
+
+## What Cursor is
+
+Cursor is a workspace for running coding agents against your product. It keeps the important pieces of agent work in one place: the repo context, the session history, the agent's output, and the changes that are ready for review.
+
+The app is organized around a few concepts that you will see throughout the product.
+
+## Core concepts
+
+### Workspace
+
+A workspace represents the product or repository you are working on. It gives sessions and agents the shared context they need, including project structure, recent activity, and product-specific knowledge.
+
+### Session
+
+A session is a focused conversation with an agent. Use a new session when you want to explore a problem, build a feature, fix a bug, or understand existing work. Sessions preserve the reasoning, files touched, and follow-up context for that task.
+
+### Agent
+
+An agent is the worker that reads the codebase, plans changes, edits files, and checks its work. Agents can run independently, so you can keep one task moving while another investigates a separate question.
+
+### Brain
+
+Brain is the shared knowledge layer for the workspace. It is where reusable context should live so future sessions do not need to rediscover the same project details.
+
+### Inbox
+
+Inbox is for work that needs attention. As the product grows, it will collect review requests, handoffs, and other items that should not get buried in session history.
+
+## Start a session
+
+1. Open **New Session** from the sidebar.
+2. Choose the workspace and branch you want the agent to use.
+3. Describe the outcome you want in plain language.
+4. Review the agent's plan, then let it make the change.
+5. Check the resulting diff, tests, and notes before merging or handing off.
+
+Good session prompts describe the target outcome and the constraints that matter. For example, ask for a small user-facing docs page, mention that it should match the current app design, and call out any libraries or patterns you prefer.
+
+## What to review
+
+Before you accept an agent's work, look at the files changed, the commands it ran, and any tests it could not run. If the work changes a user-facing flow, open the app and verify the flow yourself.
+
+For larger changes, start a fresh session for follow-up review or cleanup instead of letting one session grow too broad.

@@ -1,3 +1,4 @@
+import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import Sidebar from "@/components/Sidebar";
 import { getCurrentWorkspace } from "@/lib/auth";
 
@@ -8,13 +9,15 @@ export default async function AppShell({ children }: { children: React.ReactNode
     authUser.email;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-      <Sidebar
-        userName={userName}
-        userEmail={authUser.email}
-        workspaceName={workspace.name}
-      />
-      {children}
-    </div>
+    <AuthKitProvider>
+      <div className="flex h-screen w-screen overflow-hidden bg-canvas">
+        <Sidebar
+          userName={userName}
+          userEmail={authUser.email}
+          workspaceName={workspace.name}
+        />
+        {children}
+      </div>
+    </AuthKitProvider>
   );
 }

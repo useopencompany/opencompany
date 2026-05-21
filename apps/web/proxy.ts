@@ -13,10 +13,12 @@ export default authkitProxy({
       "/auth/callback",
       "/auth/sign-in",
       "/auth/sign-up",
+      "/docs",
+      "/docs/:path*",
     ],
   },
 });
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|docs(?:/.*)?).*)"],
 };
