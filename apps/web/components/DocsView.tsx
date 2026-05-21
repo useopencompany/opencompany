@@ -86,7 +86,7 @@ function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
           </Link>
           <div className="min-w-0">
             <div className="truncate text-[13.5px] font-medium tracking-[-0.005em] text-ink">
-              Cursor Docs
+              opencompany docs
             </div>
             <div className="text-[11.5px] text-ink-subtle">User guide</div>
           </div>

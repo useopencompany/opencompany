@@ -1,0 +1,8 @@
+.git
+.context
+node_modules
+**/node_modules
+**/.next
+**/tsconfig.tsbuildinfo
+.turbo
+*.log

@@ -43,6 +43,13 @@
       "when": 1779378592880,
       "tag": "0005_many_pride",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779384174903,
+      "tag": "0006_common_fantastic_four",
+      "breakpoints": true
     }
   ]
 }

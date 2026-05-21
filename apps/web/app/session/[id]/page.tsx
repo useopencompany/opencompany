@@ -1,10 +1,32 @@
+import { notFound } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import ChatView from "@/components/ChatView";
+import SessionView from "@/components/SessionView";
+import { loadAgentSessionForPage } from "@/lib/agent-sessions/actions";
 
-export default function SessionPage() {
+export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const data = await loadAgentSessionForPage(id);
+  if (!data) notFound();
+
   return (
     <AppShell>
-      <ChatView />
+      <SessionView
+        session={data.session}
+        initialMessages={data.messages.map((message) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          status: message.status,
+        }))}
+        initialEvents={data.events.map((event) => ({
+          id: event.id,
+          type: event.type,
+          messageId: event.messageId,
+          payload: event.payload,
+        }))}
+        runnerUrl={data.runnerUrl}
+        streamToken={data.token}
+      />
     </AppShell>
   );
 }

@@ -1,5 +1,14 @@
 import { relations, sql } from "drizzle-orm";
-import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 export type TiptapDoc = {
   type: "doc";
@@ -145,6 +154,82 @@ export const agentSyncJobs = pgTable(
   }),
 );
 
+export const agentSessions = pgTable(
+  "agent_sessions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("Untitled session"),
+    status: text("status").notNull().default("created"),
+    modelProvider: text("model_provider").notNull().default("vercel-ai-gateway"),
+    modelName: text("model_name").notNull().default("openai/gpt-5.4-mini"),
+    e2bSandboxId: text("e2b_sandbox_id"),
+    workdir: text("workdir").notNull().default("/home/user/workspace"),
+    runLeaseId: text("run_lease_id"),
+    abortRequestedAt: timestamp("abort_requested_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agent_sessions_workspace_idx").on(table.workspaceId),
+    agentIdx: index("agent_sessions_agent_idx").on(table.agentId),
+    statusIdx: index("agent_sessions_status_idx").on(table.status),
+  }),
+);
+
+export const agentSessionMessages = pgTable(
+  "agent_session_messages",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    status: text("status").notNull().default("created"),
+    content: text("content").notNull().default(""),
+    toolName: text("tool_name"),
+    toolCallId: text("tool_call_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_messages_session_idx").on(table.sessionId),
+    sessionCreatedAtIdx: index("agent_session_messages_session_created_at_idx").on(
+      table.sessionId,
+      table.createdAt,
+    ),
+  }),
+);
+
+export const agentSessionEvents = pgTable(
+  "agent_session_events",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_events_session_idx").on(table.sessionId),
+    sessionEventIdx: index("agent_session_events_session_event_idx").on(table.sessionId, table.id),
+  }),
+);
+
 export const workspaceRepositories = pgTable(
   "workspace_repositories",
   {
@@ -188,6 +273,7 @@ export const onboardingResponses = pgTable(
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
+  agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
 }));
 
@@ -199,6 +285,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   memberships: many(workspaceMemberships),
   agents: many(agents),
   agentSyncJobs: many(agentSyncJobs),
+  agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   repository: one(workspaceRepositories, {
     fields: [workspaces.id],
@@ -206,7 +293,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   }),
 }));
 
-export const agentsRelations = relations(agents, ({ one }) => ({
+export const agentsRelations = relations(agents, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [agents.workspaceId],
     references: [workspaces.id],
@@ -214,6 +301,43 @@ export const agentsRelations = relations(agents, ({ one }) => ({
   syncJob: one(agentSyncJobs, {
     fields: [agents.id],
     references: [agentSyncJobs.agentId],
+  }),
+  sessions: many(agentSessions),
+}));
+
+export const agentSessionsRelations = relations(agentSessions, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [agentSessions.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [agentSessions.userId],
+    references: [users.id],
+  }),
+  agent: one(agents, {
+    fields: [agentSessions.agentId],
+    references: [agents.id],
+  }),
+  messages: many(agentSessionMessages),
+  events: many(agentSessionEvents),
+}));
+
+export const agentSessionMessagesRelations = relations(agentSessionMessages, ({ one, many }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionMessages.sessionId],
+    references: [agentSessions.id],
+  }),
+  events: many(agentSessionEvents),
+}));
+
+export const agentSessionEventsRelations = relations(agentSessionEvents, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionEvents.sessionId],
+    references: [agentSessions.id],
+  }),
+  message: one(agentSessionMessages, {
+    fields: [agentSessionEvents.messageId],
+    references: [agentSessionMessages.id],
   }),
 }));
 
@@ -261,6 +385,9 @@ export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
 export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
+export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;

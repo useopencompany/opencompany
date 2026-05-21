@@ -1,0 +1,210 @@
+---
+title: The .agent file
+description: Every agent in opencompany is a single text file. Here's what's in it and how to write one.
+---
+
+## The whole thing in one screen
+
+An `.agent` file has two parts: a short header with metadata, and a body of instructions you write in plain English.
+
+```yaml
+---
+title: "Fundraising copilot"
+model: openai/gpt-5.4
+tools:
+  - exa
+---
+
+Research investors with @exa. Use @deep for thesis write-ups.
+```
+
+That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
+
+## The header
+
+The header is YAML — a simple `key: value` format. It has three fields.
+
+### `title`
+
+The name of the agent. Used in the sidebar, in URLs, and as a hint to the model about what its job is.
+
+```yaml
+title: "Fundraising copilot"
+```
+
+If you leave it empty, opencompany fills in `"Untitled agent"` so the file is always valid.
+
+### `model`
+
+Which AI model runs this agent. Pick one of:
+
+| ID | What it's good for |
+| --- | --- |
+| `openai/gpt-5.4-mini` | The default. Fast and cheap. Use for most agents. |
+| `openai/gpt-5.4` | Slower, smarter. Use when accuracy matters more than speed. |
+| `anthropic/claude-haiku-4.5` | Cheap and fast, Claude flavor. |
+| `anthropic/claude-sonnet-4.6` | Smart and careful, especially good at code and structured writing. |
+
+If you type something that isn't on this list, opencompany falls back to `openai/gpt-5.4-mini`.
+
+All models are accessed through Vercel AI Gateway, so you never deal with provider API keys directly.
+
+### `tools`
+
+A list of capabilities the agent can use beyond text generation.
+
+```yaml
+tools:
+  - exa
+```
+
+| ID | What it does |
+| --- | --- |
+| `exa` | Web and people research. The agent can search the live internet. |
+
+Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file.
+
+## The body
+
+The body is plain Markdown. Whatever you write here, the model reads as its instructions. Treat it like an SOP for a new hire: describe the outcome, the constraints, and the style.
+
+A good body says:
+
+- **What success looks like.** "Return one paragraph per fund." "Always include a source link."
+- **What to avoid.** "Don't include funds with fewer than three investments this year."
+- **Who the output is for.** "Write for a founder reading on their phone."
+
+There's no length limit, but shorter is usually better. If the instructions are getting long, that's often a sign the agent should be two agents.
+
+## Mentions
+
+Inside the body you can write `@something` to attach a model or a tool. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
+
+```text
+Find investors with @exa.        ← tool: exa
+Use @deep for the write-up.      ← model: openai/gpt-5.4
+```
+
+This is what mentions can be:
+
+- A tool ID, like `@exa`
+- A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
+- A shortcut name (see below)
+
+If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
+
+### Shortcuts
+
+You don't have to type the full model name every time. These shortcuts work inside the body:
+
+| Shortcut | Stands for |
+| --- | --- |
+| `@fast` or `@default` | `openai/gpt-5.4-mini` |
+| `@deep` | `openai/gpt-5.4` |
+
+So writing "Use `@deep` for the summary" is the same as setting `model: openai/gpt-5.4` in the header.
+
+### What happens if the body has no model mention
+
+The agent runs on `openai/gpt-5.4-mini`. That's the default.
+
+### What happens if the body mentions two different models
+
+The last one wins. If you write "Start with `@fast`, then switch to `@deep`," the agent will run on `@deep`. (The model itself can't actually switch mid-run — the mention controls the configuration, not the runtime behavior.)
+
+## Saving and syncing
+
+When you save an agent:
+
+1. The change is stored immediately. Refresh, close the tab, do whatever — your edit is safe.
+2. A few seconds later, opencompany commits the file to your workspace's GitHub repo.
+3. If the commit fails for any reason (rare), you'll see a warning on the agent's row. Your work is still saved; only the GitHub copy is behind.
+
+You can also edit the file directly in GitHub or in your local editor. The next time opencompany reads from the repo, your changes show up.
+
+## Where files live
+
+In your workspace's GitHub repo, agents live under `agents/`:
+
+```text
+your-workspace-repo/
+└── agents/
+    ├── fundraising-copilot.agent
+    ├── ops-triage.agent
+    └── sales-research.agent
+```
+
+The filename comes from the title — lowercased, with spaces turned into dashes. Rename the title, and the next save will use the new filename.
+
+## Examples
+
+### A small one
+
+```yaml
+---
+title: "Notes"
+model: openai/gpt-5.4-mini
+tools: []
+---
+
+Summarize whatever I paste below in three bullets. Skip preamble.
+```
+
+### A research agent
+
+```yaml
+---
+title: "Investor research"
+model: openai/gpt-5.4
+tools:
+  - exa
+---
+
+Find investors active in seed-stage developer tools. For each fund:
+
+- Use @exa to find their most recent investment in the space.
+- Write one paragraph covering thesis, typical check size, and that recent
+  investment.
+- Include a link to one primary source per fund.
+
+Skip funds that haven't made an investment in the last 12 months.
+```
+
+### One where mentions do the work
+
+You can write only the instructions and let opencompany figure out the header:
+
+```yaml
+---
+title: "Research"
+model: openai/gpt-5.4
+tools:
+  - exa
+---
+
+Find investors with @exa. Run a deep pass with @deep before writing.
+```
+
+After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The `@deep` mention set the model.
+
+## How forgiving the format is
+
+You don't need to be careful with this file. The parser is built to never reject what you wrote.
+
+- Missing header? Treated as a body with default settings.
+- Unknown model name? Falls back to the default.
+- Unknown tool name? Dropped.
+- Weird whitespace or line endings? Cleaned up automatically.
+
+The goal is that you can write what's in your head, save, and trust that the file is valid.
+
+## Questions
+
+**Can I write `.agent` files by hand and commit them?**
+Yes. Push them to your workspace's GitHub repo, then trigger an import from the app. opencompany reads the format the same way no matter who wrote it.
+
+**Can two people edit the same agent at the same time?**
+Yes, but the last save wins for now. We're working on something better. In the meantime, if you're collaborating on a complex agent, it's worth coordinating.
+
+**How do I add a new model or tool?**
+That requires a code change — we ship a curated catalog so every workspace knows the same set of models and tools work. Open a request and we'll prioritize.

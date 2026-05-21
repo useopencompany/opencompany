@@ -9,7 +9,7 @@ const args = ["--yes", "--ignore-scripts=false", "inngest-cli@latest", "dev", "-
 const result = spawnSync("npx", args, {
   env: {
     ...env,
-    INNGEST_DEV: env.INNGEST_DEV || "1",
+    INNGEST_DEV: "1",
   },
   stdio: "inherit",
 });

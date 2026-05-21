@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { updateAgent } from "@/lib/agents/actions";
 
 type Props = {
@@ -82,6 +83,18 @@ export default function AgentDetail({
                       ? "Synced"
                       : ""}
             </span>
+            <button
+              onClick={() => {
+                if (timerRef.current) clearTimeout(timerRef.current);
+                flush();
+                startTransition(async () => {
+                  await createAgentSession(id);
+                });
+              }}
+              className="rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-[12px] text-ink/85 hover:bg-[#fafaf8]"
+            >
+              Start session
+            </button>
           </div>
         </div>
 

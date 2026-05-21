@@ -11,9 +11,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo dev --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev",
-    "dev:stream": "turbo dev --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev",
+    "dev": "turbo dev --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner",
+    "dev:stream": "turbo dev --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner",
     "dev:web": "turbo dev --ui=tui --filter=@opencompany/web",
+    "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",
+    "dev:kill-port": "node scripts/kill-port.mjs",
+    "dev:kill-3000": "node scripts/kill-port.mjs 3000",
     "build": "turbo build",
     "vercel-build": "bun run db:migrate && turbo build --filter=@opencompany/web",
     "start": "bun --filter @opencompany/web start",
