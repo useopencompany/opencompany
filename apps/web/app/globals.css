@@ -24,3 +24,51 @@ body {
 * {
   border-color: #e6e6e3;
 }
+
+.tiptap-agent p {
+  margin: 0 0 0.5em 0;
+}
+.tiptap-agent p:last-child {
+  margin-bottom: 0;
+}
+.tiptap-agent h2 {
+  margin: 1.2em 0 0.3em;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.tiptap-agent h3 {
+  margin: 1em 0 0.2em;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-subtle);
+}
+.tiptap-agent ul,
+.tiptap-agent ol {
+  padding-left: 1.25em;
+  margin: 0 0 0.5em;
+}
+.tiptap-agent p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+.agent-mention {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  margin: 0 1px;
+  border-radius: 5px;
+  border: 1px solid #e6e2d4;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgb(17 17 17 / 0.85);
+  vertical-align: -0.2em;
+  white-space: nowrap;
+}

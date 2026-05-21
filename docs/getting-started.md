@@ -1,12 +1,11 @@
 # Getting started
 
-Goal: get a local dev environment running with auth and a personal database in under five minutes.
+Goal: get a local dev environment running with auth and the shared dev database in under five minutes.
 
 ## Prerequisites
 
 - Node 20+ and Bun 1.3+
 - Access to this project's Vercel project for shared development environment variables.
-- (optional) A Neon account — https://console.neon.tech. The Neon CLI's `auth` command will create one for you.
 - (optional) A WorkOS account — https://dashboard.workos.com. Most local development should use the shared WorkOS staging/local environment from Vercel.
 
 ## The short version
@@ -20,13 +19,13 @@ bun run dev
 `bun run setup` is interactive and idempotent. It will:
 
 1. Copy `.env.example` → `.env.local` if missing.
-2. If WorkOS keys are placeholders, offer to pull shared Development env vars from Vercel into `.env.local`.
-3. Run `bunx neonctl auth` if you're not logged in (browser OAuth).
-4. Create a Neon branch matching your current Git branch and write `DATABASE_URL`.
-5. Run migrations.
-6. Optionally seed a dev user/workspace.
+2. If WorkOS keys or `DATABASE_URL` are placeholders, offer to pull shared Development env vars from Vercel into `.env.local`.
+3. Run migrations against `DATABASE_URL`.
+4. Optionally seed a dev user/workspace.
 
 Re-running it is safe.
+
+Per-branch Neon databases aren't part of the default setup right now — every checkout uses the `DATABASE_URL` from Vercel Development. The `db:branch:create` / `db:branch:delete` scripts are still around if you want to opt into branch isolation manually; see [database.md](./database.md).
 
 ## For agents
 
@@ -38,13 +37,13 @@ Emits a JSON state snapshot with a `nextSteps` array. Used by the `start-work` s
 
 ## Env vars
 
-Vercel is the source of truth for shared development env vars. Store the stable WorkOS dev/staging AuthKit values in Vercel's **Development** environment:
+Vercel is the source of truth for shared development env vars. Store the stable shared dev values in Vercel's **Development** environment:
 
+- `DATABASE_URL`
 - `WORKOS_CLIENT_ID`
 - `WORKOS_API_KEY`
 - `WORKOS_COOKIE_PASSWORD`
 - `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
-- `NEON_PROJECT_ID`
 
 Then pull them locally:
 
@@ -53,20 +52,18 @@ bunx vercel link      # one-time per checkout, if .vercel/ is missing
 bun run env:pull
 ```
 
-`bun run env:pull` pulls Vercel Development env vars to a temporary file and merges only shared setup keys into `.env.local`, so it does not overwrite branch-local values like `DATABASE_URL` and `NEON_BRANCH`.
+`bun run env:pull` pulls Vercel Development env vars to a temporary file and merges only the shared setup keys above into `.env.local`.
 
-Mark `WORKOS_API_KEY` and any other secrets as sensitive in Vercel. `NEON_PROJECT_ID` is project configuration, not a database password. Do not put `DATABASE_URL` in Vercel Development for local branch databases; setup writes that per checkout after creating the Neon branch.
+Mark `WORKOS_API_KEY` and `DATABASE_URL` as sensitive in Vercel.
 
 ## What's still manual
 
-- **Neon project id:** set `NEON_PROJECT_ID` in Vercel Development so new worktrees can create their branch database without relying on local `neonctl set-context` files. The branch script auto-selects `neondb` / `neondb_owner` when present; use `NEON_DATABASE_NAME` or `NEON_ROLE_NAME` only for nonstandard projects.
 - **Initial WorkOS bootstrap only:** if the shared WorkOS dev environment does not exist yet, run `bunx workos@latest install --integration next --redirect-uri http://localhost:3000/auth/callback --no-branch --no-commit` once, copy the resulting AuthKit env vars into Vercel Development, and keep using `bun run env:pull` after that.
 - **Production WorkOS:** create a production WorkOS environment in the dashboard and set the redirect URI to your prod callback URL. Keep production values in Vercel Production, separate from Development.
 
 ## Day-to-day
 
-- New Git branch → `bun run db:branch:create` (or re-run `bun run setup`). Each Git branch gets its own isolated Neon DB.
-- Delete a Git branch → `bun run db:branch:delete` to clean up its Neon branch.
 - Schema change → edit `apps/web/lib/db/schema.ts`, then `bun run db:generate`, then `bun run db:migrate`.
+- New env var in Vercel → `bun run env:pull` to refresh `.env.local`.
 
-See [database.md](./database.md) for the branching workflow and [auth.md](./auth.md) for the auth flow.
+See [database.md](./database.md) for the optional per-branch workflow and [auth.md](./auth.md) for the auth flow.

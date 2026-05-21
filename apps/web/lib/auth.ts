@@ -4,7 +4,12 @@ import { withAuth } from "@workos-inc/authkit-nextjs";
 import { eq } from "drizzle-orm";
 import type { User as WorkOSUser } from "@workos-inc/node";
 import { getDb } from "@/lib/db";
-import { users, workspaces, workspaceMemberships } from "@/lib/db/schema";
+import {
+  onboardingResponses,
+  users,
+  workspaces,
+  workspaceMemberships,
+} from "@/lib/db/schema";
 
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;
@@ -32,7 +37,9 @@ function defaultWorkspaceName(user: WorkOSUser) {
   return `${displayName(user)}'s Workspace`;
 }
 
-async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<CurrentWorkspaceContext> {
+export async function syncUserAndWorkspace(
+  authUser: WorkOSUser,
+): Promise<CurrentWorkspaceContext> {
   const db = getDb();
   const now = new Date();
   const userId = appUserId(authUser.id);
@@ -103,7 +110,18 @@ async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<CurrentWorksp
   };
 }
 
-export const getOptionalCurrentWorkspace = cache(async () => {
+export async function hasCompletedOnboarding(userId: string) {
+  const db = getDb();
+  const [response] = await db
+    .select({ userId: onboardingResponses.userId })
+    .from(onboardingResponses)
+    .where(eq(onboardingResponses.userId, userId))
+    .limit(1);
+
+  return Boolean(response);
+}
+
+export const getOptionalCurrentWorkspaceWithoutOnboarding = cache(async () => {
   const session = await withAuth();
 
   if (!session.user) {
@@ -113,16 +131,40 @@ export const getOptionalCurrentWorkspace = cache(async () => {
   return syncUserAndWorkspace(session.user);
 });
 
-export const getCurrentWorkspace = cache(async () => {
+export const getCurrentWorkspaceWithoutOnboarding = cache(async () => {
   const session = await withAuth({ ensureSignedIn: true });
   return syncUserAndWorkspace(session.user);
+});
+
+export const getOptionalCurrentWorkspace = cache(async () => {
+  const context = await getOptionalCurrentWorkspaceWithoutOnboarding();
+
+  if (!context) {
+    return null;
+  }
+
+  if (!(await hasCompletedOnboarding(context.user.id))) {
+    redirect("/onboarding");
+  }
+
+  return context;
+});
+
+export const getCurrentWorkspace = cache(async () => {
+  const context = await getCurrentWorkspaceWithoutOnboarding();
+
+  if (!(await hasCompletedOnboarding(context.user.id))) {
+    redirect("/onboarding");
+  }
+
+  return context;
 });
 
 export async function requireCurrentWorkspace() {
   const context = await getOptionalCurrentWorkspace();
 
   if (!context) {
-    redirect("/");
+    redirect("/signup");
   }
 
   return context;
