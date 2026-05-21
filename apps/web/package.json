@@ -14,6 +14,11 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "@tiptap/extension-mention": "^3.23.5",
+    "@tiptap/pm": "^3.23.5",
+    "@tiptap/react": "^3.23.5",
+    "@tiptap/starter-kit": "^3.23.5",
+    "@tiptap/suggestion": "^3.23.5",
     "@workos-inc/authkit-nextjs": "^4.1.0",
     "@workos-inc/node": "^9.3.1",
     "drizzle-orm": "^0.45.2",
@@ -22,7 +27,8 @@
     "lucide-react": "^1.16.0",
     "next": "16.2.6",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "tippy.js": "^6.3.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",

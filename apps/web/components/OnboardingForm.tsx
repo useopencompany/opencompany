@@ -1,0 +1,406 @@
+"use client";
+
+import { useActionState, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import {
+  agentExperienceOptions,
+  heardFromOptions,
+  helpAreaOptions,
+  teamSizeOptions,
+} from "@/lib/onboarding/options";
+import {
+  completeOnboarding,
+  type OnboardingActionState,
+} from "@/lib/onboarding/actions";
+
+const initialState: OnboardingActionState = {
+  errors: {},
+  values: {
+    heardFrom: "",
+    heardFromDetail: "",
+    role: "",
+    teamSize: "",
+    companyUrl: "",
+    agentExperience: "",
+    helpAreas: [],
+  },
+};
+
+const steps = [
+  {
+    title: "Where did you hear about Open Company?",
+    subtitle: "This helps us understand where useful teams are finding us.",
+  },
+  {
+    title: "Tell us about your team",
+    subtitle: "Just enough context to make the workspace feel right.",
+  },
+  {
+    title: "How familiar are you with agents?",
+    subtitle: "Use the answer that sounds closest to you.",
+  },
+  {
+    title: "Where should agents help first?",
+    subtitle: "Choose every area that matters right now.",
+  },
+] as const;
+
+function firstErrorMessage(errors: OnboardingActionState["errors"]) {
+  return (
+    errors.heardFrom ??
+    errors.heardFromDetail ??
+    errors.role ??
+    errors.teamSize ??
+    errors.companyUrl ??
+    errors.agentExperience ??
+    errors.helpAreas
+  );
+}
+
+function isValidCompanyUrl(value: string) {
+  if (!value) return true;
+
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+
+  try {
+    const url = new URL(withProtocol);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname.includes(".")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
+    >
+      <span>{pending ? "Saving" : "Start using Open Company"}</span>
+      <ArrowRight size={12} strokeWidth={2} />
+    </button>
+  );
+}
+
+function ChoiceButton({
+  children,
+  selected,
+  onClick,
+}: {
+  children: React.ReactNode;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-8 w-full items-center rounded-md border px-3 py-1.5 text-left text-[12.5px] font-medium tracking-[-0.005em] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+        selected
+          ? "border-[#d8d8d3] bg-[#e9e9e5] text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
+          : "border-[#e4e4e0] bg-white text-ink/85 hover:bg-[#f3f3f0]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export default function OnboardingForm({ userEmail }: { userEmail: string }) {
+  const [serverState, action] = useActionState(completeOnboarding, initialState);
+  const [step, setStep] = useState(0);
+  const [error, setError] = useState<string | undefined>();
+  const [values, setValues] = useState(initialState.values);
+
+  const currentStep = steps[step];
+  const isLastStep = step === steps.length - 1;
+  const displayedError = error || firstErrorMessage(serverState.errors);
+
+  function updateValue<Key extends keyof typeof values>(
+    key: Key,
+    value: (typeof values)[Key],
+  ) {
+    setValues((current) => ({ ...current, [key]: value }));
+    setError("");
+  }
+
+  function chooseHeardFrom(value: string) {
+    setValues((current) => ({
+      ...current,
+      heardFrom: value,
+      heardFromDetail: value === "other" ? current.heardFromDetail : "",
+    }));
+    setError("");
+  }
+
+  function toggleHelpArea(value: string) {
+    setValues((current) => {
+      const selected = current.helpAreas.includes(value);
+      return {
+        ...current,
+        helpAreas: selected
+          ? current.helpAreas.filter((area) => area !== value)
+          : [...current.helpAreas, value],
+      };
+    });
+    setError("");
+  }
+
+  function validateCurrentStep() {
+    if (step === 0 && !values.heardFrom) {
+      setError("Choose where you heard about Open Company.");
+      return false;
+    }
+    if (step === 0 && values.heardFrom === "other" && !values.heardFromDetail.trim()) {
+      setError("Tell us where you heard about Open Company.");
+      return false;
+    }
+    if (step === 1) {
+      if (!values.role.trim()) {
+        setError("Enter your role.");
+        return false;
+      }
+      if (!values.teamSize) {
+        setError("Choose your team size.");
+        return false;
+      }
+      if (!isValidCompanyUrl(values.companyUrl)) {
+        setError("Enter a valid company URL.");
+        return false;
+      }
+    }
+    if (step === 2 && !values.agentExperience) {
+      setError("Choose your experience level.");
+      return false;
+    }
+    if (step === 3 && values.helpAreas.length === 0) {
+      setError("Choose at least one area.");
+      return false;
+    }
+
+    setError("");
+    return true;
+  }
+
+  function goForward() {
+    if (!validateCurrentStep()) return;
+    setStep((current) => Math.min(current + 1, steps.length - 1));
+  }
+
+  return (
+    <main className="flex min-h-screen w-screen bg-canvas px-5">
+      <section className="mx-auto flex min-h-screen w-full max-w-[460px] flex-col pb-8 pt-[13vh]">
+        <form action={action}>
+          <input type="hidden" name="heardFrom" value={values.heardFrom} />
+          <input
+            type="hidden"
+            name="heardFromDetail"
+            value={values.heardFromDetail}
+          />
+          <input type="hidden" name="role" value={values.role} />
+          <input type="hidden" name="teamSize" value={values.teamSize} />
+          <input type="hidden" name="companyUrl" value={values.companyUrl} />
+          <input
+            type="hidden"
+            name="agentExperience"
+            value={values.agentExperience}
+          />
+          {values.helpAreas.map((area) => (
+            <input key={area} type="hidden" name="helpAreas" value={area} />
+          ))}
+
+          <div className="text-center">
+            <div className="mb-8 flex justify-center gap-1">
+              {steps.map((item, index) => (
+                <button
+                  key={item.title}
+                  type="button"
+                  aria-label={`Go to step ${index + 1}`}
+                  onClick={() => setStep(index)}
+                  className={`h-1 rounded-full transition-all ${
+                    index === step ? "w-5 bg-ink" : "w-1 bg-[#d2d2cd]"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
+              {currentStep.title}
+            </h1>
+            <p className="mx-auto mt-1.5 max-w-[360px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
+              {currentStep.subtitle}
+            </p>
+          </div>
+
+          <div className="mt-8">
+            {step === 0 ? (
+              <div className="space-y-2">
+                {heardFromOptions.map((option) => (
+                  <ChoiceButton
+                    key={option.value}
+                    selected={values.heardFrom === option.value}
+                    onClick={() => chooseHeardFrom(option.value)}
+                  >
+                    {option.label}
+                  </ChoiceButton>
+                ))}
+                {values.heardFrom === "other" ? (
+                  <label className="block pt-2">
+                    <span className="text-[12px] font-medium text-ink-subtle">
+                      Source
+                    </span>
+                    <input
+                      type="text"
+                      value={values.heardFromDetail}
+                      onChange={(event) =>
+                        updateValue("heardFromDetail", event.target.value)
+                      }
+                      placeholder="Where did you hear about us?"
+                      className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+
+            {step === 1 ? (
+              <div className="space-y-5">
+                <label className="block">
+                  <span className="text-[12px] font-medium text-ink-subtle">
+                    Role
+                  </span>
+                  <input
+                    type="text"
+                    value={values.role}
+                    onChange={(event) => updateValue("role", event.target.value)}
+                    placeholder="Founder, PM, engineer..."
+                    className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                  />
+                </label>
+
+                <fieldset>
+                  <legend className="text-[12px] font-medium text-ink-subtle">
+                    Team size
+                  </legend>
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {teamSizeOptions.map((option) => (
+                      <ChoiceButton
+                        key={option.value}
+                        selected={values.teamSize === option.value}
+                        onClick={() => updateValue("teamSize", option.value)}
+                      >
+                        {option.label}
+                      </ChoiceButton>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <label className="block">
+                  <span className="flex items-center gap-1.5 text-[12px] font-medium text-ink-subtle">
+                    <span>Company URL</span>
+                    <span className="rounded-[3px] bg-[#ececea] px-1 py-px text-[9px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                      Optional
+                    </span>
+                  </span>
+                  <input
+                    type="text"
+                    value={values.companyUrl}
+                    onChange={(event) =>
+                      updateValue("companyUrl", event.target.value)
+                    }
+                    placeholder="Optional"
+                    className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                  />
+                </label>
+              </div>
+            ) : null}
+
+            {step === 2 ? (
+              <div className="space-y-2">
+                {agentExperienceOptions.map((option) => (
+                  <ChoiceButton
+                    key={option.value}
+                    selected={values.agentExperience === option.value}
+                    onClick={() =>
+                      updateValue("agentExperience", option.value)
+                    }
+                  >
+                    {option.label}
+                  </ChoiceButton>
+                ))}
+              </div>
+            ) : null}
+
+            {step === 3 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {helpAreaOptions.map((option) => (
+                  <ChoiceButton
+                    key={option.value}
+                    selected={values.helpAreas.includes(option.value)}
+                    onClick={() => toggleHelpArea(option.value)}
+                  >
+                    {option.label}
+                  </ChoiceButton>
+                ))}
+              </div>
+            ) : null}
+
+            {displayedError ? (
+              <p className="mt-4 text-center text-[12px] leading-4 text-red-700">
+                {displayedError}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="mt-5 space-y-3">
+            {isLastStep ? (
+              <SubmitButton />
+            ) : (
+              <button
+                type="button"
+                onClick={goForward}
+                className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+              >
+                <span>Continue</span>
+                <ArrowRight size={12} strokeWidth={2} />
+              </button>
+            )}
+
+            {step > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setError("");
+                  setStep((current) => Math.max(current - 1, 0));
+                }}
+                className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-[#eeeeeb] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                <ArrowLeft size={12} strokeWidth={2} />
+                <span>Back</span>
+              </button>
+            ) : (
+              null
+            )}
+          </div>
+        </form>
+
+        <div className="mt-auto pt-8 text-center text-[12.5px] leading-5 text-ink-muted">
+          <div>Using {userEmail}</div>
+          <a
+            href="/auth/sign-out"
+            className="text-ink-subtle transition-colors hover:text-ink"
+          >
+            Use a different email
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}

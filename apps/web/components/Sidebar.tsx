@@ -124,7 +124,7 @@ function AccountMenu({
     detail?: string;
     href?: string;
   }> = [
-    { icon: Settings, label: "Settings" },
+    { icon: Settings, label: "Settings", href: "/settings" },
     { icon: Download, label: "Download Cursor macOS" },
     { icon: CircleEqual, label: "Appearance", detail: "System" },
     { icon: ScrollText, label: "Changelog", href: "/changelog" },

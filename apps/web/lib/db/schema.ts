@@ -1,5 +1,18 @@
-import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import {
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+export type TiptapDoc = {
+  type: "doc";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  content?: any[];
+};
 
 export const users = pgTable(
   "users",
@@ -24,6 +37,8 @@ export const workspaces = pgTable("workspaces", {
   createdByUserId: text("created_by_user_id")
     .notNull()
     .references(() => users.id, { onDelete: "restrict" }),
+  teamSize: text("team_size"),
+  companyUrl: text("company_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -49,9 +64,55 @@ export const workspaceMemberships = pgTable(
   }),
 );
 
+export const agents = pgTable(
+  "agents",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull().default("Untitled agent"),
+    content: jsonb("content")
+      .$type<TiptapDoc>()
+      .notNull()
+      .default(sql`'{"type":"doc","content":[]}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agents_workspace_idx").on(table.workspaceId),
+  }),
+);
+
+export const onboardingResponses = pgTable(
+  "onboarding_responses",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    heardFrom: text("heard_from").notNull(),
+    heardFromDetail: text("heard_from_detail"),
+    role: text("role").notNull(),
+    agentExperience: text("agent_experience").notNull(),
+    helpAreas: text("help_areas")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("onboarding_responses_workspace_idx").on(table.workspaceId),
+  }),
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
+  onboardingResponses: many(onboardingResponses),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
@@ -60,6 +121,15 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     references: [users.id],
   }),
   memberships: many(workspaceMemberships),
+  agents: many(agents),
+  onboardingResponses: many(onboardingResponses),
+}));
+
+export const agentsRelations = relations(agents, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [agents.workspaceId],
+    references: [workspaces.id],
+  }),
 }));
 
 export const workspaceMembershipsRelations = relations(workspaceMemberships, ({ one }) => ({
@@ -73,6 +143,19 @@ export const workspaceMembershipsRelations = relations(workspaceMemberships, ({ 
   }),
 }));
 
+export const onboardingResponsesRelations = relations(onboardingResponses, ({ one }) => ({
+  user: one(users, {
+    fields: [onboardingResponses.userId],
+    references: [users.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [onboardingResponses.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
+export type Agent = typeof agents.$inferSelect;
+export type OnboardingResponse = typeof onboardingResponses.$inferSelect;

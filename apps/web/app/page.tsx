@@ -1,13 +1,13 @@
 import AppShell from "@/components/AppShell";
-import LoginPanel from "@/components/LoginPanel";
 import MainPanel from "@/components/MainPanel";
 import { getOptionalCurrentWorkspace } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 export default async function Home() {
   const context = await getOptionalCurrentWorkspace();
 
   if (!context) {
-    return <LoginPanel />;
+    redirect("/signup");
   }
 
   return (
