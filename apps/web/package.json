@@ -13,6 +13,7 @@
     "typecheck": "bun run docs:generate && tsc --noEmit"
   },
   "dependencies": {
+    "@opencompany/analytics": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@tiptap/extension-mention": "^3.23.5",
     "@tiptap/pm": "^3.23.5",

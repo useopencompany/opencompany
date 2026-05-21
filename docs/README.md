@@ -3,6 +3,7 @@
 - [getting-started.md](./getting-started.md) — first-time setup, fastest path to a running dev environment.
 - [database.md](./database.md) — Neon branching workflow, schema changes, Drizzle.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
+- [analytics.md](./analytics.md) — PostHog analytics package, event registry, and privacy rules.
 
 ## Repo layout
 
