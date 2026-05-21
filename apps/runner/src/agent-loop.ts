@@ -6,18 +6,31 @@ import {
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
-  agents,
   agentSessionMessages,
   agentSessions,
+  agents,
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
-import { createGateway, jsonSchema, stepCountIs, streamText, tool, type ModelMessage, type ToolSet } from "ai";
+import {
+  createGateway,
+  jsonSchema,
+  type ModelMessage,
+  stepCountIs,
+  streamText,
+  type ToolSet,
+  tool,
+} from "ai";
 import { asc, eq } from "drizzle-orm";
-import { appendRuntimeEvent } from "./events";
 import type { RunnerEnv } from "./env";
+import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
-import { createOrConnectSandbox, prepareWorkspace, runSandboxTool, type SandboxHandle } from "./sandbox";
+import {
+  createOrConnectSandbox,
+  prepareWorkspace,
+  runSandboxTool,
+  type SandboxHandle,
+} from "./sandbox";
 
 const activeRuns = new Map<string, AbortController>();
 
@@ -177,7 +190,11 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     const message = error instanceof Error ? error.message : "Unknown runner error";
     await db
       .update(agentSessions)
-      .set({ status: controller.signal.aborted ? "aborting" : "failed", lastError: message, updatedAt: new Date() })
+      .set({
+        status: controller.signal.aborted ? "aborting" : "failed",
+        lastError: message,
+        updatedAt: new Date(),
+      })
       .where(eq(agentSessions.id, input.sessionId));
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -354,7 +371,10 @@ async function loadSession(sessionId: string) {
     .from(agentSessions)
     .innerJoin(agents, eq(agentSessions.agentId, agents.id))
     .innerJoin(workspaces, eq(agentSessions.workspaceId, workspaces.id))
-    .leftJoin(workspaceRepositories, eq(agentSessions.workspaceId, workspaceRepositories.workspaceId))
+    .leftJoin(
+      workspaceRepositories,
+      eq(agentSessions.workspaceId, workspaceRepositories.workspaceId),
+    )
     .where(eq(agentSessions.id, sessionId))
     .limit(1);
 

@@ -1,8 +1,13 @@
 "use client";
 
 import { Mention } from "@tiptap/extension-mention";
-import { Extension, type JSONContent, mergeAttributes } from "@tiptap/react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import {
+  EditorContent,
+  Extension,
+  type JSONContent,
+  mergeAttributes,
+  useEditor,
+} from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useState } from "react";
 import { mentionSuggestion } from "./mentionSuggestion";
@@ -63,8 +68,7 @@ export function AgentEditor({ initialBody, onChange }: Props) {
     content: bodyToTiptapDoc(initialBody),
     editorProps: {
       attributes: {
-        class:
-          "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
+        class: "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
       },
     },
     onUpdate: ({ editor }) => {

@@ -1,7 +1,7 @@
 import type { AgentRuntimeEvent, AgentRuntimeEventPayload } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { agentSessionEvents } from "@opencompany/db/schema";
-import { asc, eq, gt, and } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -25,12 +25,21 @@ export async function appendRuntimeEvent(
   return event;
 }
 
-export async function listSessionEvents(input: { sessionId: string; afterId: number; limit?: number }) {
+export async function listSessionEvents(input: {
+  sessionId: string;
+  afterId: number;
+  limit?: number;
+}) {
   const db = getDb();
   return db
     .select()
     .from(agentSessionEvents)
-    .where(and(eq(agentSessionEvents.sessionId, input.sessionId), gt(agentSessionEvents.id, input.afterId)))
+    .where(
+      and(
+        eq(agentSessionEvents.sessionId, input.sessionId),
+        gt(agentSessionEvents.id, input.afterId),
+      ),
+    )
     .orderBy(asc(agentSessionEvents.id))
     .limit(input.limit ?? 100);
 }

@@ -1,6 +1,6 @@
+import path from "node:path";
 import { resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
 import { Sandbox } from "e2b";
-import path from "node:path";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
 
@@ -41,7 +41,9 @@ export async function prepareWorkspace(input: {
     );
   }
 
-  await input.sandbox.commands.run(`mkdir -p ${shellQuote(input.workdir)} ${shellQuote(`${input.workdir}/.opencompany`)}`);
+  await input.sandbox.commands.run(
+    `mkdir -p ${shellQuote(input.workdir)} ${shellQuote(`${input.workdir}/.opencompany`)}`,
+  );
   await input.sandbox.files.write(`${input.workdir}/.opencompany/agent.md`, input.agentFile);
 }
 
@@ -56,11 +58,14 @@ export async function runSandboxTool(input: {
 
   if (input.name === "shell") {
     const command = readString(args, "command");
-    const result = await input.sandbox.commands.run(`cd ${shellQuote(input.workdir)} && ${command}`, {
-      timeoutMs: 120_000,
-      onStdout: (data: string) => input.onOutput?.("stdout", data),
-      onStderr: (data: string) => input.onOutput?.("stderr", data),
-    });
+    const result = await input.sandbox.commands.run(
+      `cd ${shellQuote(input.workdir)} && ${command}`,
+      {
+        timeoutMs: 120_000,
+        onStdout: (data: string) => input.onOutput?.("stdout", data),
+        onStderr: (data: string) => input.onOutput?.("stderr", data),
+      },
+    );
     return truncate({
       stdout: String(result.stdout ?? ""),
       stderr: String(result.stderr ?? ""),
@@ -70,7 +75,10 @@ export async function runSandboxTool(input: {
 
   if (input.name === "read_file") {
     const filePath = resolveWorkspacePath(input.workdir, readString(args, "path"));
-    return truncate({ path: relativePath(input.workdir, filePath), content: await input.sandbox.files.read(filePath) });
+    return truncate({
+      path: relativePath(input.workdir, filePath),
+      content: await input.sandbox.files.read(filePath),
+    });
   }
 
   if (input.name === "write_file") {
@@ -78,7 +86,10 @@ export async function runSandboxTool(input: {
     const content = readString(args, "content");
     await input.sandbox.commands.run(`mkdir -p ${shellQuote(path.posix.dirname(filePath))}`);
     await input.sandbox.files.write(filePath, content);
-    return { path: relativePath(input.workdir, filePath), bytes: Buffer.byteLength(content, "utf8") };
+    return {
+      path: relativePath(input.workdir, filePath),
+      bytes: Buffer.byteLength(content, "utf8"),
+    };
   }
 
   if (input.name === "list_files") {
@@ -88,13 +99,21 @@ export async function runSandboxTool(input: {
       `cd ${shellQuote(input.workdir)} && find ${shellQuote(relativePath(input.workdir, dirPath) || ".")} -maxdepth ${depth} -print | sort | head -200`,
       { timeoutMs: 30_000 },
     );
-    return truncate({ path: relativePath(input.workdir, dirPath) || ".", entries: String(result.stdout ?? "").split("\n").filter(Boolean) });
+    return truncate({
+      path: relativePath(input.workdir, dirPath) || ".",
+      entries: String(result.stdout ?? "")
+        .split("\n")
+        .filter(Boolean),
+    });
   }
 
   if (input.name === "git_diff") {
-    const result = await input.sandbox.commands.run(`cd ${shellQuote(input.workdir)} && git diff --`, {
-      timeoutMs: 60_000,
-    });
+    const result = await input.sandbox.commands.run(
+      `cd ${shellQuote(input.workdir)} && git diff --`,
+      {
+        timeoutMs: 60_000,
+      },
+    );
     return truncate({ diff: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") });
   }
 

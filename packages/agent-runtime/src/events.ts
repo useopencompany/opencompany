@@ -30,7 +30,12 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "tool.delta";
-      payload: { messageId: string; toolCallId: string; delta: string; stream?: "stdout" | "stderr" };
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        delta: string;
+        stream?: "stdout" | "stderr";
+      };
     }
   | {
       type: "tool.completed";

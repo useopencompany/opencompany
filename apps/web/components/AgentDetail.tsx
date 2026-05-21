@@ -81,7 +81,7 @@ export default function AgentDetail({
                     ? "GitHub sync failed"
                     : githubSyncStatus === "synced"
                       ? "Synced"
-                    : ""}
+                      : ""}
             </span>
             <button
               onClick={() => {

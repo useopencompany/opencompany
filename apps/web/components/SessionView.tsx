@@ -48,7 +48,9 @@ export default function SessionView({
   const lastEventId = useMemo(() => events.at(-1)?.id ?? 0, [events]);
 
   const applyRuntimeEvent = useCallback((event: RuntimeEvent) => {
-    setEvents((current) => (current.some((item) => item.id === event.id) ? current : [...current, event]));
+    setEvents((current) =>
+      current.some((item) => item.id === event.id) ? current : [...current, event],
+    );
 
     if (event.type === "message.created") {
       const messageId = readString(event.payload.messageId);
@@ -65,7 +67,9 @@ export default function SessionView({
       const delta = readString(event.payload.delta);
       setMessages((current) =>
         current.map((message) =>
-          message.id === messageId ? { ...message, content: `${message.content}${delta}` } : message,
+          message.id === messageId
+            ? { ...message, content: `${message.content}${delta}` }
+            : message,
         ),
       );
     }
@@ -168,7 +172,12 @@ export default function SessionView({
 
           <div className="space-y-1.5 border-t border-[#eeeeea] pt-4">
             {events
-              .filter((event) => event.type.includes("tool") || event.type.includes("command") || event.type.includes("file"))
+              .filter(
+                (event) =>
+                  event.type.includes("tool") ||
+                  event.type.includes("command") ||
+                  event.type.includes("file"),
+              )
               .slice(-12)
               .map((event) => (
                 <div key={event.id} className="flex items-center gap-2 text-[12px] text-ink-subtle">

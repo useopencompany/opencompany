@@ -7,10 +7,10 @@ import {
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
-  agents,
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
+  agents,
 } from "@opencompany/db/schema";
 import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";

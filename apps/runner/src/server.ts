@@ -85,7 +85,9 @@ export function createServer(env: RunnerEnv) {
       for (const event of events) {
         lastId = event.id;
         raw.write(`id: ${event.id}\n`);
-        raw.write(`data: ${JSON.stringify({ id: event.id, type: event.type, payload: event.payload, messageId: event.messageId })}\n\n`);
+        raw.write(
+          `data: ${JSON.stringify({ id: event.id, type: event.type, payload: event.payload, messageId: event.messageId })}\n\n`,
+        );
       }
     };
 
@@ -93,7 +95,9 @@ export function createServer(env: RunnerEnv) {
     const timer = setInterval(() => {
       void flush().catch((error) => {
         app.log.error(error);
-        raw.write(`event: session.error\ndata: ${JSON.stringify({ message: "Event stream failed." })}\n\n`);
+        raw.write(
+          `event: session.error\ndata: ${JSON.stringify({ message: "Event stream failed." })}\n\n`,
+        );
       });
     }, 300);
     const heartbeat = setInterval(() => {

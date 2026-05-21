@@ -28,7 +28,9 @@ export async function getGitHubInstallationToken() {
   );
 
   if (!response.ok) {
-    throw new Error(`GitHub installation token request failed with ${response.status}: ${await response.text()}`);
+    throw new Error(
+      `GitHub installation token request failed with ${response.status}: ${await response.text()}`,
+    );
   }
 
   const result = (await response.json()) as { token?: string; expires_at?: string };
@@ -38,7 +40,9 @@ export async function getGitHubInstallationToken() {
 
   cachedToken = {
     token: result.token,
-    expiresAt: result.expires_at ? new Date(result.expires_at).getTime() : Date.now() + 55 * 60 * 1000,
+    expiresAt: result.expires_at
+      ? new Date(result.expires_at).getTime()
+      : Date.now() + 55 * 60 * 1000,
   };
 
   return result.token;

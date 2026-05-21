@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import MainPanel from "@/components/MainPanel";
 import { getOptionalCurrentWorkspace } from "@/lib/auth";
