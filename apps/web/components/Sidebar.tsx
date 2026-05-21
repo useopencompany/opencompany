@@ -21,6 +21,7 @@ import {
   Settings,
   // Sparkles,
 } from "lucide-react";
+import FeedbackDialog from "@/components/FeedbackDialog";
 
 const SIDEBAR_STORAGE_KEY = "cursor-sidebar-collapsed";
 
@@ -132,17 +133,21 @@ function AccountMenu({
   userName,
   userEmail,
   onClose,
+  onFeedbackOpen,
 }: {
   userName: string;
   userEmail: string;
   onClose: () => void;
+  onFeedbackOpen: () => void;
 }) {
   const menuItems: Array<{
     icon: LucideIcon;
     label: string;
     detail?: string;
     href?: string;
+    action?: () => void;
   }> = [
+    { icon: MessageSquarePlus, label: "Feedback", action: onFeedbackOpen },
     { icon: Settings, label: "Settings", href: "/settings" },
     // { icon: Download, label: "Download Cursor macOS" },
     // { icon: CircleEqual, label: "Appearance", detail: "System" },
@@ -168,7 +173,7 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        {menuItems.map(({ icon: Icon, label, detail, href }) => {
+        {menuItems.map(({ icon: Icon, label, detail, href, action }) => {
           const inner = (
             <>
               <Icon size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
@@ -190,7 +195,15 @@ function AccountMenu({
             );
           }
           return (
-            <button key={label} type="button" onClick={onClose} className={className}>
+            <button
+              key={label}
+              type="button"
+              onClick={() => {
+                action?.();
+                onClose();
+              }}
+              className={className}
+            >
               {inner}
             </button>
           );
@@ -222,6 +235,7 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getStoredSidebarCollapsed);
   const footerRef = useRef<HTMLDivElement>(null);
   const isHome = pathname === "/";
@@ -337,6 +351,7 @@ export default function Sidebar({
                 userName={userName}
                 userEmail={userEmail}
                 onClose={() => setAccountMenuOpen(false)}
+                onFeedbackOpen={() => setFeedbackOpen(true)}
               />
             )}
             <div
@@ -390,6 +405,8 @@ export default function Sidebar({
           <PanelLeft size={15} strokeWidth={1.75} />
         </button>
       )}
+
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </>
   );
 }
