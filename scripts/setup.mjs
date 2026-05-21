@@ -4,10 +4,51 @@ import { existsSync, readFileSync, copyFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { stdin, stdout, argv, exit } from "node:process";
+import { stdin, stdout, argv, exit, versions } from "node:process";
 
 const CHECK_MODE = argv.includes("--check");
 const NON_INTERACTIVE = CHECK_MODE || argv.includes("--non-interactive");
+
+// WorkOS AuthKit installer requires >=20.20; .nvmrc pins us to 22.
+const MIN_NODE = [20, 20, 0];
+
+function assertNodeVersion() {
+  const current = versions.node.split(".").map(Number);
+  const tooOld =
+    current[0] < MIN_NODE[0] ||
+    (current[0] === MIN_NODE[0] && current[1] < MIN_NODE[1]) ||
+    (current[0] === MIN_NODE[0] && current[1] === MIN_NODE[1] && current[2] < MIN_NODE[2]);
+  if (!tooOld) return;
+  if (CHECK_MODE) {
+    console.log(
+      JSON.stringify(
+        {
+          node: `v${versions.node}`,
+          required: `>=${MIN_NODE.join(".")}`,
+          nextSteps: [
+            {
+              command: "nvm install && nvm use",
+              reason: `upgrade Node — .nvmrc pins this project to Node 22 (current: v${versions.node})`,
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    exit(1);
+  }
+  console.error(
+    `\n\x1b[31m✗ Node ${versions.node} is too old.\x1b[0m This project (and the WorkOS installer)\n` +
+      `  require Node >=${MIN_NODE.join(".")}. An \x1b[1m.nvmrc\x1b[0m pins it to Node 22.\n\n` +
+      `  Run:\n    \x1b[1mnvm install\x1b[0m   # one-time, installs the version from .nvmrc\n` +
+      `    \x1b[1mnvm use\x1b[0m       # switch this shell to it\n` +
+      `  then re-run \x1b[1mbun run setup\x1b[0m.\n`,
+  );
+  exit(1);
+}
+
+assertNodeVersion();
 
 const rl = NON_INTERACTIVE ? null : createInterface({ input: stdin, output: stdout });
 const ask = (q) => (rl ? rl.question(q) : Promise.resolve(""));
