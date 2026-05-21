@@ -1,16 +1,12 @@
-import { and, eq } from "drizzle-orm";
-import { notFound } from "next/navigation";
-import AppShell from "@/components/AppShell";
-import AgentDetail from "@/components/AgentDetail";
-import { getCurrentWorkspace } from "@/lib/auth";
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
+import { and, eq } from "drizzle-orm";
+import { notFound } from "next/navigation";
+import AgentDetail from "@/components/AgentDetail";
+import AppShell from "@/components/AppShell";
+import { getCurrentWorkspace } from "@/lib/auth";
 
-export default async function AgentPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function AgentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { workspace } = await getCurrentWorkspace();
   const db = getDb();
@@ -25,11 +21,7 @@ export default async function AgentPage({
 
   return (
     <AppShell>
-      <AgentDetail
-        id={agent.id}
-        initialName={agent.name}
-        initialContent={agent.content}
-      />
+      <AgentDetail id={agent.id} initialName={agent.name} initialContent={agent.content} />
     </AppShell>
   );
 }

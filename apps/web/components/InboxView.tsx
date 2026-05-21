@@ -117,10 +117,7 @@ function ChatBox() {
   );
 }
 
-const priorityStyles: Record<
-  Priority,
-  { label: string; dot: string; text: string }
-> = {
+const priorityStyles: Record<Priority, { label: string; dot: string; text: string }> = {
   urgent: { label: "Urgent", dot: "#dc2626", text: "text-[#b91c1c]" },
   high: { label: "High", dot: "#ea580c", text: "text-[#c2410c]" },
   med: { label: "Med", dot: "#ca8a04", text: "text-ink/80" },
@@ -133,10 +130,7 @@ function PriorityPill({ priority }: { priority: Priority }) {
     <span
       className={`inline-flex items-center gap-1 text-[11.5px] font-medium tracking-[-0.005em] ${s.text}`}
     >
-      <span
-        className="h-1.5 w-1.5 rounded-full"
-        style={{ backgroundColor: s.dot }}
-      />
+      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: s.dot }} />
       {s.label}
     </span>
   );
@@ -144,13 +138,7 @@ function PriorityPill({ priority }: { priority: Priority }) {
 
 function StatusGlyph({ status }: { status: Status }) {
   if (status === "in_progress") {
-    return (
-      <CircleDot
-        size={14}
-        strokeWidth={1.75}
-        className="text-[#ca8a04]"
-      />
-    );
+    return <CircleDot size={14} strokeWidth={1.75} className="text-[#ca8a04]" />;
   }
   return <Circle size={14} strokeWidth={1.75} className="text-ink/40" />;
 }
@@ -203,9 +191,7 @@ function TaskRow({ task }: { task: Task }) {
         </span>
         <span className="text-ink-subtle">{task.source}</span>
         <PriorityPill priority={task.priority} />
-        <span className="w-10 text-right tabular-nums text-ink-muted">
-          {task.due}
-        </span>
+        <span className="w-10 text-right tabular-nums text-ink-muted">{task.due}</span>
       </div>
 
       <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1 pl-6 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100">
@@ -234,9 +220,7 @@ function TaskList() {
     <section className="mt-8">
       <div className="flex items-end justify-between">
         <div>
-          <h2 className="text-[13.5px] font-semibold tracking-[-0.005em] text-ink">
-            Today
-          </h2>
+          <h2 className="text-[13.5px] font-semibold tracking-[-0.005em] text-ink">Today</h2>
           <p className="mt-0.5 text-[12px] text-ink-muted">
             {tasks.length} items pulled in from connected tools
           </p>
@@ -261,12 +245,7 @@ function Sparkline({ tone }: { tone: "up" | "down" }) {
   const down = "M0,6 L8,8 L16,7 L24,10 L32,11 L40,9 L48,13 L56,12 L64,16";
   const color = tone === "up" ? "#16a34a" : "#dc2626";
   return (
-    <svg
-      viewBox="0 0 64 22"
-      className="h-7 w-full"
-      preserveAspectRatio="none"
-      aria-hidden
-    >
+    <svg viewBox="0 0 64 22" className="h-7 w-full" preserveAspectRatio="none" aria-hidden>
       <path
         d={tone === "up" ? up : down}
         fill="none"
@@ -324,22 +303,14 @@ function KpiGrid() {
   return (
     <section className="mt-8">
       <div className="flex items-end justify-between">
-        <h2 className="text-[13.5px] font-semibold tracking-[-0.005em] text-ink">
-          This week
-        </h2>
+        <h2 className="text-[13.5px] font-semibold tracking-[-0.005em] text-ink">This week</h2>
         <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink">
           <span>Last 7 days</span>
           <ChevronDown size={12} strokeWidth={1.75} />
         </button>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <KpiCard
-          label="Inbox cleared"
-          value="42"
-          delta="+18%"
-          tone="up"
-          note="vs last week"
-        />
+        <KpiCard label="Inbox cleared" value="42" delta="+18%" tone="up" note="vs last week" />
         <KpiCard
           label="Avg time to response"
           value="2h 14m"
@@ -358,9 +329,7 @@ export default function InboxView() {
       <div className="mx-auto w-full max-w-[760px] px-6 pb-16 pt-10">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-              Inbox
-            </h1>
+            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Inbox</h1>
             <p className="mt-1 text-[13px] tracking-[-0.005em] text-ink-muted">
               One place to triage everything that needs your attention.
             </p>

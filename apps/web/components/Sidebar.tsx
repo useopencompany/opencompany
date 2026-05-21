@@ -1,11 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  PanelLeft,
   Bot,
   Brain,
   ChevronRight,
@@ -13,14 +9,18 @@ import {
   CircleHelp,
   // Download,
   Inbox,
-  LogOut,
-  MoreHorizontal,
   ListFilter,
+  LogOut,
   MessageSquarePlus,
+  MoreHorizontal,
+  PanelLeft,
   ScrollText,
   Settings,
   // Sparkles,
 } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
 
 const SIDEBAR_STORAGE_KEY = "cursor-sidebar-collapsed";
@@ -82,10 +82,7 @@ function NavItem({
   }
 
   return (
-    <Link
-      href={href}
-      className={className}
-    >
+    <Link href={href} className={className}>
       {content}
     </Link>
   );
@@ -108,9 +105,7 @@ function HistoryItem({
     <Link
       href={href}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active
-          ? "bg-[#e3e3df] text-ink"
-          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
       }`}
     >
       {dot ? (
@@ -360,12 +355,14 @@ export default function Sidebar({
               style={{
                 background:
                   "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
-                boxShadow:
-                  "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
               }}
             />
             <div className="flex min-w-0 flex-col leading-tight">
-              <span title={userEmail} className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink">
+              <span
+                title={userEmail}
+                className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
+              >
                 {userName}
               </span>
               <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>

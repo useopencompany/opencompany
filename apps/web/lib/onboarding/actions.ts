@@ -1,40 +1,16 @@
 "use server";
 
-import { eq } from "drizzle-orm";
-import { redirect } from "next/navigation";
 import { captureServerEvent } from "@opencompany/analytics/server";
-import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
 import { getDb } from "@opencompany/db/client";
 import { onboardingResponses, workspaces } from "@opencompany/db/schema";
+import { eq } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
 import {
-  agentExperienceValues,
-  heardFromValues,
-  helpAreaValues,
-  teamSizeValues,
-} from "@/lib/onboarding/options";
-
-type FieldErrors = Partial<
-  Record<
-    | "heardFrom"
-    | "heardFromDetail"
-    | "role"
-    | "teamSize"
-    | "companyUrl"
-    | "agentExperience"
-    | "helpAreas",
-    string
-  >
->;
-
-type OnboardingValues = {
-  heardFrom: string;
-  heardFromDetail: string;
-  role: string;
-  teamSize: string;
-  companyUrl: string;
-  agentExperience: string;
-  helpAreas: string[];
-};
+  type FieldErrors,
+  type OnboardingValues,
+  validateOnboardingValues,
+} from "@/lib/onboarding/validation";
 
 export type OnboardingActionState = {
   errors: FieldErrors;
@@ -44,25 +20,6 @@ export type OnboardingActionState = {
 function readString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value.trim() : "";
-}
-
-function isKnownValue(value: string, values: readonly string[]) {
-  return values.includes(value);
-}
-
-function normalizeCompanyUrl(value: string) {
-  if (!value) return null;
-
-  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
-
-  try {
-    const url = new URL(withProtocol);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    if (!url.hostname.includes(".")) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 export async function completeOnboarding(
@@ -81,43 +38,7 @@ export async function completeOnboarding(
       .filter((value): value is string => typeof value === "string"),
   };
 
-  const errors: FieldErrors = {};
-
-  if (!isKnownValue(values.heardFrom, heardFromValues)) {
-    errors.heardFrom = "Choose where you heard about opencompany.";
-  }
-
-  if (values.heardFrom === "other" && !values.heardFromDetail) {
-    errors.heardFromDetail = "Tell us where you heard about opencompany.";
-  } else if (values.heardFromDetail.length > 160) {
-    errors.heardFromDetail = "Keep the source under 160 characters.";
-  }
-
-  if (!values.role) {
-    errors.role = "Enter your role.";
-  } else if (values.role.length > 100) {
-    errors.role = "Keep your role under 100 characters.";
-  }
-
-  if (!isKnownValue(values.teamSize, teamSizeValues)) {
-    errors.teamSize = "Choose your team size.";
-  }
-
-  const companyUrl = normalizeCompanyUrl(values.companyUrl);
-  if (values.companyUrl && !companyUrl) {
-    errors.companyUrl = "Enter a valid company URL.";
-  }
-
-  if (!isKnownValue(values.agentExperience, agentExperienceValues)) {
-    errors.agentExperience = "Choose your experience level.";
-  }
-
-  const helpAreas = values.helpAreas.filter((value) =>
-    isKnownValue(value, helpAreaValues),
-  );
-  if (helpAreas.length === 0) {
-    errors.helpAreas = "Choose at least one area.";
-  }
+  const { errors, normalized } = validateOnboardingValues(values);
 
   if (Object.keys(errors).length > 0) {
     return { errors, values };
@@ -131,7 +52,7 @@ export async function completeOnboarding(
     .update(workspaces)
     .set({
       teamSize: values.teamSize,
-      companyUrl,
+      companyUrl: normalized.companyUrl,
       updatedAt: now,
     })
     .where(eq(workspaces.id, workspace.id));
@@ -142,11 +63,10 @@ export async function completeOnboarding(
       userId: user.id,
       workspaceId: workspace.id,
       heardFrom: values.heardFrom,
-      heardFromDetail:
-        values.heardFrom === "other" ? values.heardFromDetail : null,
+      heardFromDetail: values.heardFrom === "other" ? values.heardFromDetail : null,
       role: values.role,
       agentExperience: values.agentExperience,
-      helpAreas,
+      helpAreas: normalized.helpAreas,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -154,11 +74,10 @@ export async function completeOnboarding(
       set: {
         workspaceId: workspace.id,
         heardFrom: values.heardFrom,
-        heardFromDetail:
-          values.heardFrom === "other" ? values.heardFromDetail : null,
+        heardFromDetail: values.heardFrom === "other" ? values.heardFromDetail : null,
         role: values.role,
         agentExperience: values.agentExperience,
-        helpAreas,
+        helpAreas: normalized.helpAreas,
         updatedAt: now,
       },
     });
@@ -169,8 +88,8 @@ export async function completeOnboarding(
     heard_from: values.heardFrom,
     team_size: values.teamSize,
     agent_experience: values.agentExperience,
-    help_areas: helpAreas,
-    help_area_count: helpAreas.length,
+    help_areas: normalized.helpAreas,
+    help_area_count: normalized.helpAreas.length,
   });
 
   redirect("/");

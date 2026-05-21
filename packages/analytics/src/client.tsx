@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
 import posthog from "posthog-js";
+import { type ReactNode, useEffect } from "react";
 import type { AnalyticsEventName, AnalyticsEventProperties } from "./events";
 
 type AnalyticsIdentity = {

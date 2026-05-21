@@ -28,10 +28,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
       </h3>
     ),
     p: ({ children, ...props }) => (
-      <p
-        className="mt-3 text-[14px] leading-7 tracking-[-0.005em] text-ink-muted"
-        {...props}
-      >
+      <p className="mt-3 text-[14px] leading-7 tracking-[-0.005em] text-ink-muted" {...props}>
         {children}
       </p>
     ),
@@ -67,10 +64,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
       </a>
     ),
     code: ({ children, ...props }) => (
-      <code
-        className="rounded bg-[#ececea] px-1 py-0.5 font-mono text-[12px] text-ink"
-        {...props}
-      >
+      <code className="rounded bg-[#ececea] px-1 py-0.5 font-mono text-[12px] text-ink" {...props}>
         {children}
       </code>
     ),

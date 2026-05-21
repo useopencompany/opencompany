@@ -1,4 +1,5 @@
-import Link from "next/link";
+import type { Node, Root } from "fumadocs-core/page-tree";
+import type { TOCItemType } from "fumadocs-core/toc";
 import {
   ArrowLeft,
   BookOpenText,
@@ -7,14 +8,13 @@ import {
   FileText,
   PanelLeft,
 } from "lucide-react";
-import type { Root, Node } from "fumadocs-core/page-tree";
-import type { TOCItemType } from "fumadocs-core/toc";
 import type { MDXContent } from "mdx/types";
+import Link from "next/link";
 import { getMDXComponents } from "@/mdx-components";
 
 type DocsViewProps = {
   title: string;
-  description?: string;
+  description?: string | undefined;
   url: string;
   tree: Root;
   toc: TOCItemType[];
@@ -57,9 +57,7 @@ function TreeNode({ node, activeUrl }: { node: Node; activeUrl: string }) {
     <Link
       href={node.url}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active
-          ? "bg-[#e3e3df] text-ink"
-          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
       }`}
     >
       <FileText
@@ -169,14 +167,7 @@ function TableOfContents({ toc }: { toc: TOCItemType[] }) {
   );
 }
 
-export default function DocsView({
-  title,
-  description,
-  url,
-  tree,
-  toc,
-  body: MDX,
-}: DocsViewProps) {
+export default function DocsView({ title, description, url, tree, toc, body: MDX }: DocsViewProps) {
   return (
     <main className="flex h-screen w-screen overflow-hidden bg-canvas">
       <DocsSidebar tree={tree} activeUrl={url} />

@@ -130,10 +130,7 @@ function buildDescription({
   ].join("\n");
 }
 
-async function linearGraphql<T>(
-  query: string,
-  variables: Record<string, unknown>,
-): Promise<T> {
+async function linearGraphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
   const apiKey = process.env.LINEAR_API_KEY;
 
   if (!apiKey) {
@@ -327,9 +324,7 @@ export async function submitFeedback(
     return {
       ok: false,
       error:
-        error instanceof Error
-          ? error.message
-          : "Could not send feedback. Try again in a minute.",
+        error instanceof Error ? error.message : "Could not send feedback. Try again in a minute.",
     };
   }
 }

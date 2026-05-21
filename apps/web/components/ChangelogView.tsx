@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -15,13 +16,12 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import {
-  renderInline,
   type Changelog,
   type ChangeSection,
   type InlineToken,
   type Release,
+  renderInline,
 } from "@/lib/changelog";
 
 type CategoryStyle = {
@@ -134,7 +134,11 @@ function ReleasePill({ release }: { release: Release }) {
           : "border-[#e6e6e3] bg-white text-ink"
       }`}
     >
-      <Tag size={11} strokeWidth={1.9} className={isUnreleased ? "text-ink-subtle" : "text-ink-muted"} />
+      <Tag
+        size={11}
+        strokeWidth={1.9}
+        className={isUnreleased ? "text-ink-subtle" : "text-ink-muted"}
+      />
       <span className="font-mono text-[12px]">{release.version}</span>
     </span>
   );
@@ -182,9 +186,7 @@ function ReleaseCard({ release }: { release: Release }) {
     <section id={id} className="scroll-mt-20">
       <div className="flex flex-wrap items-center gap-2.5">
         <ReleasePill release={release} />
-        {release.date && (
-          <span className="text-[12.5px] text-ink-muted">{release.date}</span>
-        )}
+        {release.date && <span className="text-[12.5px] text-ink-muted">{release.date}</span>}
         {release.yanked && (
           <span className="inline-flex items-center gap-1 rounded-md bg-[#fbeaea] px-1.5 py-0.5 text-[11px] font-medium text-[#b91c1c]">
             <AlertTriangle size={11} strokeWidth={2} />
@@ -227,13 +229,7 @@ function ReleaseCard({ release }: { release: Release }) {
   );
 }
 
-function IconButton({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function IconButton({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <button
       aria-label={label}
@@ -297,9 +293,7 @@ function OutlinePanel({ releases }: { releases: Release[] }) {
             >
               <span className="truncate font-mono">{release.version}</span>
               {release.date && (
-                <span className="shrink-0 text-[11px] text-ink-subtle">
-                  {release.date}
-                </span>
+                <span className="shrink-0 text-[11px] text-ink-subtle">{release.date}</span>
               )}
             </a>
           ))}
@@ -310,9 +304,7 @@ function OutlinePanel({ releases }: { releases: Release[] }) {
 }
 
 export default function ChangelogView({ changelog }: { changelog: Changelog }) {
-  const latest = changelog.releases.find(
-    (r) => r.version.toLowerCase() !== "unreleased",
-  );
+  const latest = changelog.releases.find((r) => r.version.toLowerCase() !== "unreleased");
 
   return (
     <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">

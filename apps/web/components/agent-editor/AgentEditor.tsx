@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import type { TiptapDoc } from "@opencompany/db/schema";
+import Mention from "@tiptap/extension-mention";
+import type { UseEditorOptions } from "@tiptap/react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Mention from "@tiptap/extension-mention";
-import type { TiptapDoc } from "@opencompany/db/schema";
+import { useEffect } from "react";
 import { mentionSuggestion } from "./mentionSuggestion";
 
 type Props = {
@@ -13,7 +14,7 @@ type Props = {
 };
 
 export function AgentEditor({ initialContent, onChange }: Props) {
-  const editor = useEditor({
+  const editorOptions: UseEditorOptions = {
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
@@ -25,7 +26,6 @@ export function AgentEditor({ initialContent, onChange }: Props) {
         suggestion: mentionSuggestion,
       }),
     ],
-    content: hasContent(initialContent) ? initialContent : undefined,
     editorProps: {
       attributes: {
         class:
@@ -35,7 +35,13 @@ export function AgentEditor({ initialContent, onChange }: Props) {
     onUpdate({ editor }) {
       onChange(editor.getJSON() as TiptapDoc);
     },
-  });
+  };
+
+  if (hasContent(initialContent)) {
+    editorOptions.content = initialContent;
+  }
+
+  const editor = useEditor(editorOptions);
 
   useEffect(() => {
     return () => {

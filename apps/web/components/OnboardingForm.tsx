@@ -1,19 +1,16 @@
 "use client";
 
+import { captureEvent } from "@opencompany/analytics/client";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { ArrowLeft, ArrowRight } from "lucide-react";
-import { captureEvent } from "@opencompany/analytics/client";
+import { completeOnboarding, type OnboardingActionState } from "@/lib/onboarding/actions";
 import {
   agentExperienceOptions,
   heardFromOptions,
   helpAreaOptions,
   teamSizeOptions,
 } from "@/lib/onboarding/options";
-import {
-  completeOnboarding,
-  type OnboardingActionState,
-} from "@/lib/onboarding/actions";
 
 const initialState: OnboardingActionState = {
   errors: {},
@@ -66,10 +63,7 @@ function isValidCompanyUrl(value: string) {
 
   try {
     const url = new URL(withProtocol);
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      url.hostname.includes(".")
-    );
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".");
   } catch {
     return false;
   }
@@ -128,7 +122,7 @@ export default function OnboardingForm({
   const [error, setError] = useState<string | undefined>();
   const [values, setValues] = useState(initialState.values);
 
-  const currentStep = steps[step];
+  const currentStep = steps[step] ?? steps[0];
   const isLastStep = step === steps.length - 1;
   const displayedError = error || firstErrorMessage(serverState.errors);
 
@@ -139,10 +133,7 @@ export default function OnboardingForm({
     });
   }, [userId, workspaceId]);
 
-  function updateValue<Key extends keyof typeof values>(
-    key: Key,
-    value: (typeof values)[Key],
-  ) {
+  function updateValue<Key extends keyof typeof values>(key: Key, value: (typeof values)[Key]) {
     setValues((current) => ({ ...current, [key]: value }));
     setError("");
   }
@@ -215,19 +206,11 @@ export default function OnboardingForm({
       <section className="mx-auto flex min-h-screen w-full max-w-[460px] flex-col pb-8 pt-[13vh]">
         <form action={action}>
           <input type="hidden" name="heardFrom" value={values.heardFrom} />
-          <input
-            type="hidden"
-            name="heardFromDetail"
-            value={values.heardFromDetail}
-          />
+          <input type="hidden" name="heardFromDetail" value={values.heardFromDetail} />
           <input type="hidden" name="role" value={values.role} />
           <input type="hidden" name="teamSize" value={values.teamSize} />
           <input type="hidden" name="companyUrl" value={values.companyUrl} />
-          <input
-            type="hidden"
-            name="agentExperience"
-            value={values.agentExperience}
-          />
+          <input type="hidden" name="agentExperience" value={values.agentExperience} />
           {values.helpAreas.map((area) => (
             <input key={area} type="hidden" name="helpAreas" value={area} />
           ))}
@@ -269,15 +252,11 @@ export default function OnboardingForm({
                 ))}
                 {values.heardFrom === "other" ? (
                   <label className="block pt-2">
-                    <span className="text-[12px] font-medium text-ink-subtle">
-                      Source
-                    </span>
+                    <span className="text-[12px] font-medium text-ink-subtle">Source</span>
                     <input
                       type="text"
                       value={values.heardFromDetail}
-                      onChange={(event) =>
-                        updateValue("heardFromDetail", event.target.value)
-                      }
+                      onChange={(event) => updateValue("heardFromDetail", event.target.value)}
                       placeholder="Where did you hear about us?"
                       className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
                     />
@@ -289,9 +268,7 @@ export default function OnboardingForm({
             {step === 1 ? (
               <div className="space-y-5">
                 <label className="block">
-                  <span className="text-[12px] font-medium text-ink-subtle">
-                    Role
-                  </span>
+                  <span className="text-[12px] font-medium text-ink-subtle">Role</span>
                   <input
                     type="text"
                     value={values.role}
@@ -302,9 +279,7 @@ export default function OnboardingForm({
                 </label>
 
                 <fieldset>
-                  <legend className="text-[12px] font-medium text-ink-subtle">
-                    Team size
-                  </legend>
+                  <legend className="text-[12px] font-medium text-ink-subtle">Team size</legend>
                   <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {teamSizeOptions.map((option) => (
                       <ChoiceButton
@@ -328,9 +303,7 @@ export default function OnboardingForm({
                   <input
                     type="text"
                     value={values.companyUrl}
-                    onChange={(event) =>
-                      updateValue("companyUrl", event.target.value)
-                    }
+                    onChange={(event) => updateValue("companyUrl", event.target.value)}
                     placeholder="Optional"
                     className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
                   />
@@ -344,9 +317,7 @@ export default function OnboardingForm({
                   <ChoiceButton
                     key={option.value}
                     selected={values.agentExperience === option.value}
-                    onClick={() =>
-                      updateValue("agentExperience", option.value)
-                    }
+                    onClick={() => updateValue("agentExperience", option.value)}
                   >
                     {option.label}
                   </ChoiceButton>
@@ -401,18 +372,13 @@ export default function OnboardingForm({
                 <ArrowLeft size={12} strokeWidth={2} />
                 <span>Back</span>
               </button>
-            ) : (
-              null
-            )}
+            ) : null}
           </div>
         </form>
 
         <div className="mt-auto pt-8 text-center text-[12.5px] leading-5 text-ink-muted">
           <div>Using {userEmail}</div>
-          <a
-            href="/auth/sign-out"
-            className="text-ink-subtle transition-colors hover:text-ink"
-          >
+          <a href="/auth/sign-out" className="text-ink-subtle transition-colors hover:text-ink">
             Use a different email
           </a>
         </div>

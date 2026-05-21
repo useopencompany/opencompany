@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
 import { ExternalLink, Send, X } from "lucide-react";
-import { submitFeedback, type FeedbackActionState } from "@/lib/feedback/actions";
+import { useActionState, useEffect, useRef } from "react";
+import { type FeedbackActionState, submitFeedback } from "@/lib/feedback/actions";
 
 const kindOptions = [
   { value: "bug", label: "Bug" },

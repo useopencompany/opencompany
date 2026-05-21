@@ -1,10 +1,7 @@
-import { redirect } from "next/navigation";
 import { AnalyticsProvider } from "@opencompany/analytics/client";
+import { redirect } from "next/navigation";
 import OnboardingForm from "@/components/OnboardingForm";
-import {
-  getCurrentWorkspaceWithoutOnboarding,
-  hasCompletedOnboarding,
-} from "@/lib/auth";
+import { getCurrentWorkspaceWithoutOnboarding, hasCompletedOnboarding } from "@/lib/auth";
 
 export default async function OnboardingPage() {
   const { authUser, user, workspace } = await getCurrentWorkspaceWithoutOnboarding();
@@ -23,11 +20,7 @@ export default async function OnboardingPage() {
         lastName: authUser.lastName,
       }}
     >
-      <OnboardingForm
-        userEmail={authUser.email}
-        userId={user.id}
-        workspaceId={workspace.id}
-      />
+      <OnboardingForm userEmail={authUser.email} userId={user.id} workspaceId={workspace.id} />
     </AnalyticsProvider>
   );
 }

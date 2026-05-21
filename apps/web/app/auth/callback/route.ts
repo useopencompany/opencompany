@@ -1,5 +1,5 @@
-import { handleAuth } from "@workos-inc/authkit-nextjs";
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { handleAuth } from "@workos-inc/authkit-nextjs";
 
 import { syncUserAndWorkspace } from "@/lib/auth";
 

@@ -1,7 +1,7 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import type { TOCItemType } from "fumadocs-core/toc";
 import type { MDXContent } from "mdx/types";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
 import DocsView from "@/components/DocsView";
 import { source } from "@/lib/docs-source";
 

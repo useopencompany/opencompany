@@ -1,6 +1,6 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, copyFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
 
 const CHECK_MODE = argv.includes("--check");
@@ -114,7 +114,10 @@ function writeEnvValues(path, values) {
     if (!seen.has(key)) next.push(`${key}=${formatEnvValue(value)}`);
   }
 
-  writeFileSync(path, `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`);
+  writeFileSync(
+    path,
+    `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`,
+  );
 }
 
 function isPlaceholder(value) {
@@ -171,9 +174,10 @@ function pullSharedDevEnvFromVercel() {
     ".env.local",
     Object.fromEntries([
       ...SHARED_DEV_ENV_KEYS.map((key) => [key, pulled[key]]),
-      ...OPTIONAL_SHARED_DEV_ENV_KEYS.filter((key) => !isPlaceholder(pulled[key])).map(
-        (key) => [key, pulled[key]],
-      ),
+      ...OPTIONAL_SHARED_DEV_ENV_KEYS.filter((key) => !isPlaceholder(pulled[key])).map((key) => [
+        key,
+        pulled[key],
+      ]),
     ]),
   );
 }

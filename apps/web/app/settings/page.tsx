@@ -4,11 +4,13 @@ import { getCurrentWorkspace } from "@/lib/auth";
 
 function initialsFor(name: string, email: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  const first = parts[0];
+  const last = parts.at(-1);
+  if (first && last && parts.length >= 2) {
+    return `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
   }
-  if (parts.length === 1 && parts[0].length > 0) {
-    return parts[0].slice(0, 2).toUpperCase();
+  if (first) {
+    return first.slice(0, 2).toUpperCase();
   }
   return email.slice(0, 2).toUpperCase();
 }
@@ -25,7 +27,8 @@ export default async function SettingsPage() {
   const { authUser, workspace } = await getCurrentWorkspace();
   const displayName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
-    authUser.email.split("@")[0];
+    authUser.email.split("@")[0] ||
+    authUser.email;
 
   return (
     <AppShell>

@@ -41,7 +41,5 @@ export type HelpArea = (typeof helpAreaOptions)[number]["value"];
 
 export const heardFromValues = heardFromOptions.map((option) => option.value);
 export const teamSizeValues = teamSizeOptions.map((option) => option.value);
-export const agentExperienceValues = agentExperienceOptions.map(
-  (option) => option.value,
-);
+export const agentExperienceValues = agentExperienceOptions.map((option) => option.value);
 export const helpAreaValues = helpAreaOptions.map((option) => option.value);

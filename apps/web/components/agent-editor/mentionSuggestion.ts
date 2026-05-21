@@ -1,8 +1,8 @@
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
-import { AGENT_TOOLS, type AgentTool } from "./tools";
 import { MentionList, type MentionListHandle } from "./MentionList";
+import { AGENT_TOOLS, type AgentTool } from "./tools";
 
 export const mentionSuggestion: Omit<SuggestionOptions<AgentTool>, "editor"> = {
   char: "@",

@@ -6,16 +6,10 @@ export const metadata: Metadata = {
   description: "Company workspace for agents, inbox, and shared context.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased text-[13px] text-ink">
-        {children}
-      </body>
+      <body className="font-sans antialiased text-[13px] text-ink">{children}</body>
     </html>
   );
 }

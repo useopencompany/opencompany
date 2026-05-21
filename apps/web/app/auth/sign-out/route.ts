@@ -1,5 +1,5 @@
-import { signOut } from "@workos-inc/authkit-nextjs";
 import { captureServerEvent } from "@opencompany/analytics/server";
+import { signOut } from "@workos-inc/authkit-nextjs";
 import { getOptionalCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
 
 function signOutSource(request: Request) {
