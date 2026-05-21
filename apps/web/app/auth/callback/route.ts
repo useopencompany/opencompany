@@ -1,3 +1,10 @@
 import { handleAuth } from "@workos-inc/authkit-nextjs";
 
-export const GET = handleAuth({ returnPathname: "/" });
+import { syncUserAndWorkspace } from "@/lib/auth";
+
+export const GET = handleAuth({
+  returnPathname: "/onboarding",
+  onSuccess: async ({ user }) => {
+    await syncUserAndWorkspace(user);
+  },
+});

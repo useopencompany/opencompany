@@ -3,9 +3,17 @@ import { getWorkOSRedirectUri } from "@/lib/workos";
 
 export default authkitProxy({
   redirectUri: getWorkOSRedirectUri(),
+  signUpPaths: ["/auth/sign-up"],
   middlewareAuth: {
     enabled: true,
-    unauthenticatedPaths: ["/", "/auth/callback", "/auth/sign-in"],
+    unauthenticatedPaths: [
+      "/",
+      "/signin",
+      "/signup",
+      "/auth/callback",
+      "/auth/sign-in",
+      "/auth/sign-up",
+    ],
   },
 });
 

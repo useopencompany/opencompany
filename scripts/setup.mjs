@@ -1,8 +1,6 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, copyFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, argv, exit, versions } from "node:process";
 
@@ -18,7 +16,7 @@ const WORKOS_ENV_KEYS = [
   "WORKOS_COOKIE_PASSWORD",
   "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
 ];
-const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, "NEON_PROJECT_ID"];
+const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, "DATABASE_URL"];
 const VERCEL_ENV_PULL_PATH = ".env.vercel.local";
 
 function assertNodeVersion() {
@@ -129,18 +127,6 @@ function isPlaceholder(value) {
   );
 }
 
-function realEnvFrom(env, name) {
-  return isPlaceholder(env[name]) ? undefined : env[name];
-}
-
-function hasNeonAuth() {
-  const candidates = [
-    join(homedir(), ".config", "neonctl", "credentials.json"),
-    join(homedir(), ".neon", "credentials.json"),
-  ];
-  return candidates.some(existsSync);
-}
-
 function inspectState() {
   const env = parseEnv(".env.local");
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
@@ -150,14 +136,7 @@ function inspectState() {
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
-    neonProject: realEnvFrom(env, "NEON_PROJECT_ID") ? "ready" : "placeholder",
-    neonAuth: process.env.NEON_API_KEY
-      ? "api-key"
-      : hasNeonAuth()
-        ? "authed"
-        : "missing",
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
-    neonBranch: env.NEON_BRANCH || null,
   };
 }
 
@@ -239,21 +218,21 @@ async function ensureWorkOS(state) {
   ok("WorkOS configured");
 }
 
-async function ensureNeonProject(state) {
-  step("Neon project");
-  if (state.neonProject === "ready") {
-    ok("NEON_PROJECT_ID is set");
+async function ensureDatabaseUrl(state) {
+  step("Database URL");
+  if (state.databaseUrl === "set") {
+    ok("DATABASE_URL is set");
     return;
   }
 
-  warn("NEON_PROJECT_ID is missing from .env.local.");
+  warn("DATABASE_URL is missing from .env.local.");
   console.log(
-    "\n  This account has multiple Neon projects, so setup needs the shared\n" +
-      "  project id. Pull it from Vercel Development into .env.local.",
+    "\n  Pull the shared Development env from Vercel to fill DATABASE_URL\n" +
+      "  alongside the WorkOS keys.",
   );
 
   if (NON_INTERACTIVE) {
-    throw new Error("NEON_PROJECT_ID is missing. Run `bun run env:pull` or fill .env.local manually.");
+    throw new Error("DATABASE_URL is missing. Run `bun run env:pull` or fill .env.local manually.");
   }
 
   const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] "))
@@ -262,7 +241,7 @@ async function ensureNeonProject(state) {
 
   if (answer === "n" || answer === "no") {
     console.log(
-      "\n  Skipping. Set NEON_PROJECT_ID in .env.local, or add it to Vercel\n" +
+      "\n  Skipping. Set DATABASE_URL in .env.local, or add it to Vercel\n" +
         "  Development and run `bun run env:pull`. Then re-run `bun run setup`.",
     );
     exit(0);
@@ -271,34 +250,13 @@ async function ensureNeonProject(state) {
   pullSharedDevEnvFromVercel();
 
   const after = inspectState();
-  if (after.neonProject !== "ready") {
-    throw new Error("Vercel env pull finished but NEON_PROJECT_ID is still missing.");
+  if (after.databaseUrl !== "set") {
+    throw new Error("Vercel env pull finished but DATABASE_URL is still missing.");
   }
-  ok("Neon project configured");
+  ok("DATABASE_URL configured");
 }
 
-async function ensureNeonAuth(state) {
-  step("Neon authentication");
-  if (state.neonAuth !== "missing") {
-    ok(
-      state.neonAuth === "api-key"
-        ? "NEON_API_KEY is set — skipping browser login"
-        : "Already authenticated with Neon",
-    );
-    return;
-  }
-  if (NON_INTERACTIVE) {
-    throw new Error("Neon auth missing and we're non-interactive. Run `bunx neonctl auth` first.");
-  }
-  console.log("  Launching browser to log in to Neon...");
-  run("bunx", ["neonctl", "auth"]);
-  ok("Authenticated with Neon");
-}
-
-async function createBranchAndMigrate() {
-  step("Create Neon branch for this Git branch");
-  run("bun", ["run", "db:branch:create"]);
-
+async function runMigrations() {
   step("Run migrations");
   run("bun", ["run", "db:migrate"]);
 }
@@ -333,26 +291,20 @@ async function main() {
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
     }
-    if (state.workos === "placeholder" || state.neonProject === "placeholder") {
+    if (state.workos === "placeholder" || state.databaseUrl === "placeholder") {
       const missingShared = [
         ...state.workosMissingKeys,
-        ...(state.neonProject === "placeholder" ? ["NEON_PROJECT_ID"] : []),
+        ...(state.databaseUrl === "placeholder" ? ["DATABASE_URL"] : []),
       ];
       nextSteps.push({
         command: "bun run env:pull",
         reason: `pull shared development env vars from Vercel into .env.local (${missingShared.join(", ")})`,
       });
     }
-    if (state.neonAuth === "missing") {
+    if (state.workos === "ready" && state.databaseUrl === "set") {
       nextSteps.push({
-        command: "bunx neonctl auth",
-        reason: "browser login to Neon (interactive)",
-      });
-    }
-    if (state.workos === "ready" && state.neonAuth !== "missing" && state.databaseUrl === "placeholder") {
-      nextSteps.push({
-        command: "bun run db:branch:create && bun run db:migrate",
-        reason: "create per-branch DB and apply migrations (non-interactive, safe for agent)",
+        command: "bun run db:migrate",
+        reason: "apply migrations against the configured DATABASE_URL",
       });
     }
     console.log(JSON.stringify({ ...state, nextSteps }, null, 2));
@@ -360,15 +312,14 @@ async function main() {
   }
 
   console.log("\n\x1b[1mProject setup\x1b[0m");
-  console.log("Wiring up your local env, Neon branch DB, and migrations.\n");
+  console.log("Wiring up your local env and running migrations.\n");
 
   try {
     const state = inspectState();
     await ensureEnvFile(state);
     await ensureWorkOS(inspectState());
-    await ensureNeonProject(inspectState());
-    await ensureNeonAuth(inspectState());
-    await createBranchAndMigrate();
+    await ensureDatabaseUrl(inspectState());
+    await runMigrations();
     await maybeSeed();
 
     console.log(

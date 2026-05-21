@@ -3,8 +3,8 @@ import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cursor",
-  description: "Cursor agents dashboard",
+  title: "Open Company",
+  description: "Company workspace for agents, inbox, and shared context.",
 };
 
 export default function RootLayout({
