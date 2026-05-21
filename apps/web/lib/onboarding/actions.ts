@@ -3,8 +3,8 @@
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
-import { getDb } from "@/lib/db";
-import { onboardingResponses, workspaces } from "@/lib/db/schema";
+import { getDb } from "@opencompany/db/client";
+import { onboardingResponses, workspaces } from "@opencompany/db/schema";
 import {
   agentExperienceValues,
   heardFromValues,

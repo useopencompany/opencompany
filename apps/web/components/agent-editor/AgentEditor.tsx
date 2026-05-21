@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Mention from "@tiptap/extension-mention";
-import type { TiptapDoc } from "@/lib/db/schema";
+import type { TiptapDoc } from "@opencompany/db/schema";
 import { mentionSuggestion } from "./mentionSuggestion";
 
 type Props = {

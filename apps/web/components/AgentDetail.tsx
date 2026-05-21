@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 import { updateAgent } from "@/lib/agents/actions";
-import type { TiptapDoc } from "@/lib/db/schema";
+import type { TiptapDoc } from "@opencompany/db/schema";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 
 type Props = {

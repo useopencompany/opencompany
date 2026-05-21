@@ -13,7 +13,7 @@
     "typecheck": "bun run docs:generate && tsc --noEmit"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.1.0",
+    "@opencompany/db": "workspace:*",
     "@tiptap/extension-mention": "^3.23.5",
     "@tiptap/pm": "^3.23.5",
     "@tiptap/react": "^3.23.5",

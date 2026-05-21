@@ -20,8 +20,8 @@
     "typecheck": "turbo typecheck",
     "setup": "node scripts/setup.mjs",
     "env:pull": "node scripts/setup.mjs --pull-env",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "bun --filter @opencompany/db db:generate",
+    "db:migrate": "bun --filter @opencompany/db db:migrate",
     "db:seed": "node scripts/seed.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",
     "db:branch:delete": "node scripts/neon-branch.mjs delete"

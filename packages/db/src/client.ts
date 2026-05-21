@@ -4,9 +4,7 @@ import * as schema from "./schema";
 
 let db: NeonHttpDatabase<typeof schema> | undefined;
 
-function getDatabaseUrl() {
-  const databaseUrl = process.env.DATABASE_URL;
-
+function getDatabaseUrl(databaseUrl = process.env.DATABASE_URL) {
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required for database access.");
   }
@@ -14,9 +12,13 @@ function getDatabaseUrl() {
   return databaseUrl;
 }
 
+export function createDb(databaseUrl?: string) {
+  return drizzle(neon(getDatabaseUrl(databaseUrl)), { schema });
+}
+
 export function getDb() {
   if (!db) {
-    db = drizzle(neon(getDatabaseUrl()), { schema });
+    db = createDb();
   }
 
   return db;

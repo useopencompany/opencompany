@@ -3,13 +3,13 @@ import { redirect } from "next/navigation";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { eq } from "drizzle-orm";
 import type { User as WorkOSUser } from "@workos-inc/node";
-import { getDb } from "@/lib/db";
+import { getDb } from "@opencompany/db/client";
 import {
   onboardingResponses,
   users,
   workspaces,
   workspaceMemberships,
-} from "@/lib/db/schema";
+} from "@opencompany/db/schema";
 
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;

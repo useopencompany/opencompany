@@ -3,8 +3,8 @@
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getDb } from "@/lib/db";
-import { agents, type TiptapDoc } from "@/lib/db/schema";
+import { getDb } from "@opencompany/db/client";
+import { agents, type TiptapDoc } from "@opencompany/db/schema";
 import { getCurrentWorkspace } from "@/lib/auth";
 
 function newAgentId() {

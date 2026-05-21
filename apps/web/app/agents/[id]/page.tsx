@@ -3,8 +3,8 @@ import { notFound } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import AgentDetail from "@/components/AgentDetail";
 import { getCurrentWorkspace } from "@/lib/auth";
-import { getDb } from "@/lib/db";
-import { agents } from "@/lib/db/schema";
+import { getDb } from "@opencompany/db/client";
+import { agents } from "@opencompany/db/schema";
 
 export default async function AgentPage({
   params,

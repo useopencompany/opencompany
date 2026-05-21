@@ -21,7 +21,7 @@
       "name": "@opencompany/web",
       "version": "0.1.0",
       "dependencies": {
-        "@neondatabase/serverless": "^1.1.0",
+        "@opencompany/db": "workspace:*",
         "@tiptap/extension-mention": "^3.23.5",
         "@tiptap/pm": "^3.23.5",
         "@tiptap/react": "^3.23.5",
@@ -48,6 +48,19 @@
         "eslint-config-next": "16.2.6",
         "postcss": "8.5.15",
         "tailwindcss": "^4.3.0",
+        "typescript": "^6.0.3",
+      },
+    },
+    "packages/db": {
+      "name": "@opencompany/db",
+      "version": "0.1.0",
+      "dependencies": {
+        "@neondatabase/serverless": "^1.1.0",
+        "drizzle-orm": "^0.45.2",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "drizzle-kit": "^0.31.10",
         "typescript": "^6.0.3",
       },
     },
@@ -315,6 +328,8 @@
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
     "@nolyfill/is-core-module": ["@nolyfill/is-core-module@1.0.39", "", {}, "sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA=="],
+
+    "@opencompany/db": ["@opencompany/db@workspace:packages/db"],
 
     "@opencompany/web": ["@opencompany/web@workspace:apps/web"],
 
