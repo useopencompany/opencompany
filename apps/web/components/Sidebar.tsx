@@ -9,9 +9,9 @@ import {
   Bot,
   Brain,
   ChevronRight,
-  CircleEqual,
-  CircleHelp,
-  Download,
+  // CircleEqual,
+  // CircleHelp,
+  // Download,
   Inbox,
   LogOut,
   MoreHorizontal,
@@ -19,7 +19,7 @@ import {
   MessageSquarePlus,
   ScrollText,
   Settings,
-  Sparkles,
+  // Sparkles,
 } from "lucide-react";
 
 const SIDEBAR_STORAGE_KEY = "cursor-sidebar-collapsed";
@@ -44,22 +44,17 @@ function NavItem({
   label,
   active,
   trailing,
+  disabled,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
   active?: boolean;
   trailing?: React.ReactNode;
+  disabled?: boolean;
 }) {
-  return (
-    <Link
-      href={href}
-      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active
-          ? "bg-[#e3e3df] text-ink"
-          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
-      }`}
-    >
+  const content = (
+    <>
       <Icon
         size={14}
         strokeWidth={1.75}
@@ -67,6 +62,30 @@ function NavItem({
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
       {trailing && <span className="ml-auto flex items-center gap-1.5">{trailing}</span>}
+    </>
+  );
+  const className = `group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+    disabled
+      ? "cursor-not-allowed text-ink/35"
+      : active
+        ? "bg-[#e3e3df] text-ink"
+        : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+  }`;
+
+  if (disabled) {
+    return (
+      <div aria-disabled="true" className={className}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className={className}
+    >
+      {content}
     </Link>
   );
 }
@@ -125,10 +144,10 @@ function AccountMenu({
     href?: string;
   }> = [
     { icon: Settings, label: "Settings", href: "/settings" },
-    { icon: Download, label: "Download Cursor macOS" },
-    { icon: CircleEqual, label: "Appearance", detail: "System" },
+    // { icon: Download, label: "Download Cursor macOS" },
+    // { icon: CircleEqual, label: "Appearance", detail: "System" },
     { icon: ScrollText, label: "Changelog", href: "/changelog" },
-    { icon: CircleHelp, label: "Help" },
+    // { icon: CircleHelp, label: "Help" },
   ];
 
   return (
@@ -138,14 +157,14 @@ function AccountMenu({
           {userName}
         </div>
         <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
-        <button
+        {/* <button
           type="button"
           onClick={onClose}
           className="mt-3 flex h-7 w-full items-center justify-center gap-2 rounded-md border border-black/[0.09] bg-white/30 px-3 text-[13px] font-medium tracking-[-0.005em] text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)] transition-colors duration-150 hover:bg-white/70 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <Sparkles size={15} strokeWidth={1.85} className="text-ink/85" />
           Upgrade to Pro+
-        </button>
+        </button> */}
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
@@ -265,22 +284,24 @@ export default function Sidebar({
 
           {/* Primary nav */}
           <nav className="flex flex-col gap-px px-2 pt-1">
+            <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
+            <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
             <NavItem
               href="/inbox"
               icon={Inbox}
               label="Inbox"
               active={isActive("/inbox")}
               trailing={<SoonBadge />}
+              disabled
             />
-            <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
             <NavItem
               href="/brain"
               icon={Brain}
               label="Brain"
               active={isActive("/brain")}
               trailing={<SoonBadge />}
+              disabled
             />
-            <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
           </nav>
 
           {/* History */}
