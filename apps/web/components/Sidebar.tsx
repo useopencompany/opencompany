@@ -10,7 +10,7 @@ import {
   Brain,
   ChevronRight,
   // CircleEqual,
-  // CircleHelp,
+  CircleHelp,
   // Download,
   Inbox,
   LogOut,
@@ -147,7 +147,7 @@ function AccountMenu({
     // { icon: Download, label: "Download Cursor macOS" },
     // { icon: CircleEqual, label: "Appearance", detail: "System" },
     { icon: ScrollText, label: "Changelog", href: "/changelog" },
-    // { icon: CircleHelp, label: "Help" },
+    { icon: CircleHelp, label: "Docs", href: "/docs" },
   ];
 
   return (
