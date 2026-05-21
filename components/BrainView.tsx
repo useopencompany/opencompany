@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   PanelRight,
   Search,
+  Sparkles,
   Star,
 } from "lucide-react";
 
@@ -444,9 +445,30 @@ function TopBar() {
   );
 }
 
+function ComingSoonOverlay() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-canvas/70 backdrop-blur-[3px]">
+      <div className="pointer-events-auto mx-6 max-w-[380px] rounded-xl border border-[#e6e6e3] bg-white/95 px-6 py-5 text-center shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
+        <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-[#ececea] text-ink">
+          <Sparkles size={16} strokeWidth={1.8} />
+        </div>
+        <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
+          Coming soon
+        </div>
+        <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.01em] text-ink">
+          Brain
+        </h2>
+        <p className="mt-2 text-[13px] leading-5 text-ink-muted">
+          A versioned knowledge base for your repo. Not part of the MVP — check back soon.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function BrainView() {
   return (
-    <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
+    <main className="relative flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
       <GitSidebar />
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
@@ -457,6 +479,7 @@ export default function BrainView() {
           <OutlinePanel />
         </div>
       </section>
+      <ComingSoonOverlay />
     </main>
   );
 }
