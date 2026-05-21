@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./scripts/load-env.mjs";
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({

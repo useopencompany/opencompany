@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./load-env.mjs";
 import { neon } from "@neondatabase/serverless";
 
 const databaseUrl = process.env.DATABASE_URL;

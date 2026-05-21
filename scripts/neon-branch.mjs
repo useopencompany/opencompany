@@ -1,13 +1,23 @@
-import "dotenv/config";
+import "./load-env.mjs";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
+function realEnv(name) {
+  const value = process.env[name];
+  if (!value) return undefined;
+  // Treat .env.example placeholders ("...", "sk_test_...", etc.) as unset.
+  if (value === "..." || value.includes("...") || value.startsWith("replace-")) {
+    return undefined;
+  }
+  return value;
+}
+
 const action = process.argv[2];
-const projectId = process.env.NEON_PROJECT_ID;
-const parentBranch = process.env.NEON_PARENT_BRANCH;
-const databaseName = process.env.NEON_DATABASE_NAME;
-const roleName = process.env.NEON_ROLE_NAME;
-const apiKey = process.env.NEON_API_KEY;
+const projectId = realEnv("NEON_PROJECT_ID");
+const parentBranch = realEnv("NEON_PARENT_BRANCH");
+const databaseName = realEnv("NEON_DATABASE_NAME");
+const roleName = realEnv("NEON_ROLE_NAME");
+const apiKey = realEnv("NEON_API_KEY");
 
 if (!["create", "delete"].includes(action)) {
   throw new Error("Usage: node scripts/neon-branch.mjs <create|delete>");
@@ -49,15 +59,15 @@ function neon(args) {
   }
 
   try {
-    return execFileSync("npx", baseArgs, {
+    return execFileSync("bunx", baseArgs, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "inherit"],
     }).trim();
   } catch (error) {
     if (!projectId && !apiKey) {
       console.error(
-        "\nHint: run `npx neonctl auth` to log in, then either set NEON_PROJECT_ID\n" +
-          "or run `npx neonctl set-context --project-id <id>` to pin the project.\n",
+        "\nHint: run `bunx neonctl auth` to log in, then either set NEON_PROJECT_ID\n" +
+          "or run `bunx neonctl set-context --project-id <id>` to pin the project.\n",
       );
     }
     throw error;

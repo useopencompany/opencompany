@@ -1,3 +1,4 @@
+import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, copyFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -110,21 +111,21 @@ async function ensureWorkOS(state) {
       "  signup needed — and write the keys straight into .env.local.",
   );
 
-  const answer = (await ask("\n  Run `npx workos@latest install` now? [Y/n] "))
+  const answer = (await ask("\n  Run `bunx workos@latest install` now? [Y/n] "))
     .trim()
     .toLowerCase();
 
   if (answer === "n" || answer === "no") {
     console.log(
-      "\n  Skipping. Either run `npx workos@latest install` yourself, or paste\n" +
+      "\n  Skipping. Either run `bunx workos@latest install` yourself, or paste\n" +
         "  keys from https://dashboard.workos.com into .env.local manually.\n" +
         "  Generate WORKOS_COOKIE_PASSWORD with `openssl rand -base64 32`.\n" +
-        "  Then re-run `npm run setup`.",
+        "  Then re-run `bun run setup`.",
     );
     exit(0);
   }
 
-  run("npx", [
+  run("bunx", [
     "workos@latest",
     "install",
     "--integration",
@@ -157,19 +158,19 @@ async function ensureNeonAuth(state) {
     return;
   }
   if (NON_INTERACTIVE) {
-    throw new Error("Neon auth missing and we're non-interactive. Run `npx neonctl auth` first.");
+    throw new Error("Neon auth missing and we're non-interactive. Run `bunx neonctl auth` first.");
   }
   console.log("  Launching browser to log in to Neon...");
-  run("npx", ["neonctl", "auth"]);
+  run("bunx", ["neonctl", "auth"]);
   ok("Authenticated with Neon");
 }
 
 async function createBranchAndMigrate() {
   step("Create Neon branch for this Git branch");
-  run("npm", ["run", "db:branch:create"]);
+  run("bun", ["run", "db:branch:create"]);
 
   step("Run migrations");
-  run("npm", ["run", "db:migrate"]);
+  run("bun", ["run", "db:migrate"]);
 }
 
 async function maybeSeed() {
@@ -180,7 +181,7 @@ async function maybeSeed() {
   }
   const answer = (await ask("  Seed a dev user + workspace? [y/N] ")).trim().toLowerCase();
   if (answer === "y" || answer === "yes") {
-    run("npm", ["run", "db:seed"]);
+    run("bun", ["run", "db:seed"]);
     ok("Seeded");
   } else {
     ok("Skipped seed");
@@ -192,23 +193,23 @@ async function main() {
     const state = inspectState();
     const nextSteps = [];
     if (state.envFile === "missing") {
-      nextSteps.push({ command: "npm run setup", reason: "create .env.local" });
+      nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
     }
     if (state.workos === "placeholder") {
       nextSteps.push({
-        command: "npm run setup",
-        reason: "provision WorkOS via `npx workos@latest install` (interactive)",
+        command: "bun run setup",
+        reason: "provision WorkOS via `bunx workos@latest install` (interactive)",
       });
     }
     if (state.neonAuth === "missing") {
       nextSteps.push({
-        command: "npx neonctl auth",
+        command: "bunx neonctl auth",
         reason: "browser login to Neon (interactive)",
       });
     }
     if (state.workos === "ready" && state.neonAuth !== "missing" && state.databaseUrl === "placeholder") {
       nextSteps.push({
-        command: "npm run db:branch:create && npm run db:migrate",
+        command: "bun run db:branch:create && bun run db:migrate",
         reason: "create per-branch DB and apply migrations (non-interactive, safe for agent)",
       });
     }
@@ -228,7 +229,7 @@ async function main() {
     await maybeSeed();
 
     console.log(
-      "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mnpm run dev\x1b[0m and open http://localhost:3000\n",
+      "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m and open http://localhost:3000\n",
     );
   } finally {
     rl?.close();

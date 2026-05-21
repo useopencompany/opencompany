@@ -71,7 +71,7 @@ function CheckTable() {
   const rows: Array<{ check: string; command: React.ReactNode; result: React.ReactNode }> = [
     {
       check: "Dependencies",
-      command: <Code>pnpm install</Code>,
+      command: <Code>bun install</Code>,
       result: "903 packages",
     },
     {
@@ -81,24 +81,24 @@ function CheckTable() {
     },
     {
       check: "Dev server",
-      command: <Code>pnpm dev</Code>,
+      command: <Code>bun run dev</Code>,
       result: "Running on port 3000",
     },
     {
       check: "Lint",
-      command: <Code>pnpm lint</Code>,
+      command: <Code>bun run lint</Code>,
       result: "Passes (pre-existing warnings only).",
     },
     {
       check: "Integration tests",
       command: (
-        <Code>POSTGRES_URL=…payload_test pnpm test:int</Code>
+        <Code>POSTGRES_URL=…payload_test bun run test:int</Code>
       ),
       result: "1/1 passed",
     },
     {
       check: "E2E tests",
-      command: <Code>pnpm test:e2e</Code>,
+      command: <Code>bun run test:e2e</Code>,
       result: "1/1 passed",
     },
     {
@@ -150,7 +150,7 @@ function FilesChanged() {
   const files = [
     { name: "AGENTS.md", added: 33, removed: 0 },
     { name: "docker-compose.yml", added: 1, removed: 1 },
-    { name: "pnpm-lock.yaml", added: 10417, removed: 0 },
+    { name: "bun.lock", added: 10417, removed: 0 },
   ];
   return (
     <details
@@ -263,7 +263,7 @@ export default function ChatView() {
                 services, key commands, and non-obvious caveats.
               </li>
               <li>
-                Update script set to <Code>pnpm install</Code> + <Code>npx playwright install
+                Update script set to <Code>bun install</Code> + <Code>bunx playwright install
                 chromium</Code> (minimal dependency refresh).
               </li>
             </ul>
@@ -280,14 +280,14 @@ export default function ChatView() {
             <h3 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">Testing</h3>
             <ul className="space-y-1.5">
               <TestRow>
-                <Code>pnpm lint</Code> — passes with pre-existing warnings
+                <Code>bun run lint</Code> — passes with pre-existing warnings
               </TestRow>
               <TestRow>
-                <Code>pnpm test:int</Code> — 1 test passed (using separate{" "}
+                <Code>bun run test:int</Code> — 1 test passed (using separate{" "}
                 <Code>payload_test</Code> database)
               </TestRow>
               <TestRow>
-                <Code>pnpm test:e2e</Code> — 1 Playwright test passed (Chromium)
+                <Code>bun run test:e2e</Code> — 1 Playwright test passed (Chromium)
               </TestRow>
               <TestRow>
                 <Code>curl -I http://localhost:3000</Code> — 200 OK, X-Powered-By: Next.js,

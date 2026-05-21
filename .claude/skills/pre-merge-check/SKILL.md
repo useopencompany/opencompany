@@ -17,14 +17,14 @@ Always run lint and the schema/migration check. Other checks are conditional.
 
 ### 1. Lint (always)
 
-Run `npm run lint` (which is `tsc --noEmit`). If it fails, report the errors.
+Run `bun run lint` (which is `tsc --noEmit`). If it fails, report the errors.
 
 ### 2. Schema ↔ migration (always)
 
 If `lib/db/schema.ts` changed:
 
 - Verify a new file exists under `drizzle/` (compare `git diff --name-only origin/main...HEAD -- drizzle/`).
-- If schema changed without a new migration file: flag it, tell the user to run `npm run db:generate`.
+- If schema changed without a new migration file: flag it, tell the user to run `bun run db:generate`.
 - If both changed: open the migration SQL and sanity-check it matches the schema delta. Look for destructive ops (DROP, ALTER TYPE) and call them out.
 
 ### 3. Env vars ↔ `.env.example`
@@ -44,7 +44,7 @@ Trigger one or more checks based on what changed:
 | `scripts/setup.mjs`, `scripts/neon-branch.mjs`, `package.json` scripts section | `docs/getting-started.md` mentions the new/changed flow |
 | `lib/db/**`, `drizzle.config.ts`, `drizzle/**`, schema changes | `docs/database.md` reflects new tables / workflow |
 | `lib/auth.ts`, `middleware.ts`, `app/auth/**`, `components/LoginPanel.tsx` | `docs/auth.md` is accurate |
-| New top-level npm script | `docs/` mentions when to run it |
+| New top-level package script | `docs/` mentions when to run it |
 | `.env.example` changes | `docs/getting-started.md` or `docs/database.md` / `docs/auth.md` covers the new var |
 
 For each trigger, open the relevant doc and verify the changed concept is described. If not, flag it with a one-line suggestion of what to add.
@@ -55,7 +55,7 @@ Don't be pedantic about wording — only flag genuinely missing or misleading co
 
 If `package.json` changed:
 
-- Verify `package-lock.json` was committed too.
+- Verify `bun.lock` was committed too and `package-lock.json` was not reintroduced.
 - If a new runtime dep was added, briefly note what for in the PR summary suggestion.
 
 ### 6. WorkOS/Neon dashboard changes

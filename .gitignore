@@ -2,6 +2,7 @@ node_modules
 .next
 out
 .DS_Store
+.neon
 *.log
 *.tsbuildinfo
 .env*
