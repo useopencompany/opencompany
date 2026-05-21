@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
-import { updateAgent } from "@/lib/agents/actions";
 import type { TiptapDoc } from "@opencompany/db/schema";
+import { ChevronLeft } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { updateAgent } from "@/lib/agents/actions";
 
 type Props = {
   id: string;
@@ -56,11 +56,7 @@ export default function AgentDetail({ id, initialName, initialContent }: Props) 
             Agents
           </Link>
           <span className="tabular-nums text-ink-subtle">
-            {saveState === "saving"
-              ? "Saving…"
-              : saveState === "saved"
-                ? "Saved"
-                : ""}
+            {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
           </span>
         </div>
 

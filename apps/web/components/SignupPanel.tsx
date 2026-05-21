@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { ArrowRight, Building2, LogIn } from "lucide-react";
+import Link from "next/link";
 
 export default function SignupPanel() {
   return (
@@ -31,9 +31,7 @@ export default function SignupPanel() {
           </div>
 
           <div className="flex items-center justify-between border-t border-[#eeeeea] px-4 py-3">
-            <span className="text-[11.5px] text-ink-subtle">
-              Already have an account?
-            </span>
+            <span className="text-[11.5px] text-ink-subtle">Already have an account?</span>
             <Link
               href="/auth/sign-in"
               className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-[#f3f3f0] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"

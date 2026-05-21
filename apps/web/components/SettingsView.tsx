@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import Link from "next/link";
 import { Check, LogOut } from "lucide-react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
 import { updateWorkspaceName } from "@/lib/workspaces/actions";
 
 type Props = {
@@ -31,13 +31,9 @@ function Section({
     <section className="border-t border-[#eaeae6] py-7 first:border-t-0 first:pt-0">
       <div className="grid grid-cols-[200px_1fr] gap-8">
         <div>
-          <h2 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">
-            {title}
-          </h2>
+          <h2 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">{title}</h2>
           {description && (
-            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-              {description}
-            </p>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">{description}</p>
           )}
         </div>
         <div className="flex flex-col gap-4">{children}</div>
@@ -46,13 +42,7 @@ function Section({
   );
 }
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -71,13 +61,7 @@ function ReadOnly({ value }: { value: string }) {
   );
 }
 
-function ProfileAvatar({
-  avatarUrl,
-  initials,
-}: {
-  avatarUrl: string | null;
-  initials: string;
-}) {
+function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
   if (avatarUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -93,8 +77,7 @@ function ProfileAvatar({
       aria-hidden
       className="flex h-12 w-12 items-center justify-center rounded-full text-[14px] font-semibold text-white ring-1 ring-black/[0.06]"
       style={{
-        background:
-          "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
+        background: "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
       }}
     >
       {initials}
@@ -153,9 +136,7 @@ function WorkspaceNameForm({ initial }: { initial: string }) {
           Saved
         </span>
       )}
-      {error && (
-        <span className="text-[12px] text-[#b42318]">{error}</span>
-      )}
+      {error && <span className="text-[12px] text-[#b42318]">{error}</span>}
     </form>
   );
 }
@@ -165,31 +146,19 @@ export default function SettingsView({ profile, workspace }: Props) {
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-8 pb-24 pt-10">
         <div>
-          <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-            Settings
-          </h1>
+          <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Settings</h1>
           <p className="mt-1 text-[13px] tracking-[-0.005em] text-ink-muted">
             Manage your profile and workspace.
           </p>
         </div>
 
         <div className="mt-8">
-          <Section
-            title="Profile"
-            description="Managed by your identity provider (WorkOS)."
-          >
+          <Section title="Profile" description="Managed by your identity provider (WorkOS).">
             <div className="flex items-center gap-3">
-              <ProfileAvatar
-                avatarUrl={profile.avatarUrl}
-                initials={profile.initials}
-              />
+              <ProfileAvatar avatarUrl={profile.avatarUrl} initials={profile.initials} />
               <div className="min-w-0">
-                <div className="truncate text-[14px] font-medium text-ink">
-                  {profile.name}
-                </div>
-                <div className="truncate text-[12.5px] text-ink-muted">
-                  {profile.email}
-                </div>
+                <div className="truncate text-[14px] font-medium text-ink">{profile.name}</div>
+                <div className="truncate text-[12.5px] text-ink-muted">{profile.email}</div>
               </div>
             </div>
             <Field label="Email">
@@ -197,10 +166,7 @@ export default function SettingsView({ profile, workspace }: Props) {
             </Field>
           </Section>
 
-          <Section
-            title="Workspace"
-            description="Visible to everyone in this workspace."
-          >
+          <Section title="Workspace" description="Visible to everyone in this workspace.">
             <Field label="Workspace name">
               <WorkspaceNameForm initial={workspace.name} />
             </Field>
@@ -209,10 +175,7 @@ export default function SettingsView({ profile, workspace }: Props) {
             </Field>
           </Section>
 
-          <Section
-            title="Account"
-            description="Sign out of all sessions for this device."
-          >
+          <Section title="Account" description="Sign out of all sessions for this device.">
             <Link
               href="/auth/sign-out"
               className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"

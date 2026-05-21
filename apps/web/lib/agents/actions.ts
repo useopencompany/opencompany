@@ -1,10 +1,10 @@
 "use server";
 
+import { getDb } from "@opencompany/db/client";
+import { agents, type TiptapDoc } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getDb } from "@opencompany/db/client";
-import { agents, type TiptapDoc } from "@opencompany/db/schema";
 import { getCurrentWorkspace } from "@/lib/auth";
 
 function newAgentId() {
@@ -26,10 +26,7 @@ export async function createAgent() {
   redirect(`/agents/${id}`);
 }
 
-export async function updateAgent(
-  id: string,
-  patch: { name?: string; content?: TiptapDoc },
-) {
+export async function updateAgent(id: string, patch: { name?: string; content?: TiptapDoc }) {
   const { workspace } = await getCurrentWorkspace();
   const db = getDb();
 

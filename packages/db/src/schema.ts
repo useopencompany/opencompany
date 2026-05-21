@@ -1,12 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import {
-  index,
-  jsonb,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-} from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export type TiptapDoc = {
   type: "doc";
@@ -97,10 +90,7 @@ export const onboardingResponses = pgTable(
     heardFromDetail: text("heard_from_detail"),
     role: text("role").notNull(),
     agentExperience: text("agent_experience").notNull(),
-    helpAreas: text("help_areas")
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
+    helpAreas: text("help_areas").array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

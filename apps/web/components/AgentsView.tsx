@@ -1,8 +1,8 @@
-import Link from "next/link";
-import { AtSign, Bot } from "lucide-react";
-import { createAgent } from "@/lib/agents/actions";
 import type { Agent, TiptapDoc } from "@opencompany/db/schema";
-import { AGENT_TOOLS, findTool, type AgentTool } from "@/components/agent-editor/tools";
+import { AtSign, Bot } from "lucide-react";
+import Link from "next/link";
+import { AGENT_TOOLS, type AgentTool, findTool } from "@/components/agent-editor/tools";
+import { createAgent } from "@/lib/agents/actions";
 
 type TiptapNode = {
   type?: string;
@@ -75,9 +75,7 @@ function AgentRow({ agent }: { agent: Agent }) {
     >
       <MarkdownPreviewThumb mentions={mentions} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">
-          {agent.name}
-        </span>
+        <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">{agent.name}</span>
         <span className="truncate text-[12px] text-ink-muted">
           {mentions.length > 0
             ? `${mentions.length} tool${mentions.length === 1 ? "" : "s"} mentioned`
@@ -109,12 +107,10 @@ export default function AgentsView({ agents }: { agents: Agent[] }) {
       <div className="mx-auto w-full max-w-[680px] px-6 pb-16 pt-10">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-              Agents
-            </h1>
+            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Agents</h1>
             <p className="mt-1 text-[13px] tracking-[-0.005em] text-ink-muted">
-              Each agent is a natural-language brief. @-mention a tool to give
-              it capabilities. {toolCount} tool available.
+              Each agent is a natural-language brief. @-mention a tool to give it capabilities.{" "}
+              {toolCount} tool available.
             </p>
           </div>
           <NewAgentButton />
@@ -123,9 +119,7 @@ export default function AgentsView({ agents }: { agents: Agent[] }) {
         {agents.length === 0 ? (
           <div className="mt-12 flex flex-col items-center justify-center rounded-lg border border-dashed border-[#e0e0db] bg-white/50 px-6 py-16 text-center">
             <Bot size={20} strokeWidth={1.7} className="text-ink-subtle" />
-            <p className="mt-3 text-[13.5px] font-medium text-ink">
-              No agents yet
-            </p>
+            <p className="mt-3 text-[13.5px] font-medium text-ink">No agents yet</p>
             <p className="mt-1 text-[12.5px] text-ink-muted">
               Create your first agent to describe how it should work.
             </p>

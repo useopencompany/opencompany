@@ -1,8 +1,8 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, copyFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { argv, exit, stdin, stdout, versions } from "node:process";
 import { createInterface } from "node:readline/promises";
-import { stdin, stdout, argv, exit, versions } from "node:process";
 
 const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
@@ -114,7 +114,10 @@ function writeEnvValues(path, values) {
     if (!seen.has(key)) next.push(`${key}=${formatEnvValue(value)}`);
   }
 
-  writeFileSync(path, `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`);
+  writeFileSync(
+    path,
+    `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`,
+  );
 }
 
 function isPlaceholder(value) {
@@ -187,12 +190,12 @@ async function ensureWorkOS(state) {
   );
 
   if (NON_INTERACTIVE) {
-    throw new Error("WorkOS env vars are missing. Run `bun run env:pull` or fill .env.local manually.");
+    throw new Error(
+      "WorkOS env vars are missing. Run `bun run env:pull` or fill .env.local manually.",
+    );
   }
 
-  const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] "))
-    .trim()
-    .toLowerCase();
+  const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] ")).trim().toLowerCase();
 
   if (answer === "n" || answer === "no") {
     console.log(
@@ -235,9 +238,7 @@ async function ensureDatabaseUrl(state) {
     throw new Error("DATABASE_URL is missing. Run `bun run env:pull` or fill .env.local manually.");
   }
 
-  const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] "))
-    .trim()
-    .toLowerCase();
+  const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] ")).trim().toLowerCase();
 
   if (answer === "n" || answer === "no") {
     console.log(

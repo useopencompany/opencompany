@@ -1,0 +1,18 @@
+[allowlist]
+description = "Documented placeholder values are not secrets."
+condition = "OR"
+regexes = [
+  '''postgresql://\.\.\.''',
+  '''client_\.\.\.''',
+  '''sk_test_\.\.\.''',
+  '''replace-with-at-least-32-characters''',
+]
+paths = [
+  '''^\.git/''',
+  '''^node_modules/''',
+  '''^apps/web/\.next/''',
+  '''^apps/web/\.turbo/''',
+  '''^packages/db/\.turbo/''',
+  '''^apps/web/playwright-report/''',
+  '''^apps/web/test-results/''',
+]

@@ -6,6 +6,9 @@ out
 .neon
 *.log
 *.tsbuildinfo
+coverage
+playwright-report
+test-results
 .env*
 !.env.example
 .vercel/*

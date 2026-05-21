@@ -1,9 +1,6 @@
-import SignupPanel from "@/components/SignupPanel";
-import {
-  getOptionalCurrentWorkspaceWithoutOnboarding,
-  hasCompletedOnboarding,
-} from "@/lib/auth";
 import { redirect } from "next/navigation";
+import SignupPanel from "@/components/SignupPanel";
+import { getOptionalCurrentWorkspaceWithoutOnboarding, hasCompletedOnboarding } from "@/lib/auth";
 
 export default async function SignUpPage() {
   const context = await getOptionalCurrentWorkspaceWithoutOnboarding();

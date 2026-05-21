@@ -90,13 +90,7 @@ const outline = [
   "Deployment notes",
 ];
 
-function IconButton({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function IconButton({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <button
       aria-label={label}
@@ -108,13 +102,7 @@ function IconButton({
   );
 }
 
-function FileTreeItem({
-  item,
-  depth = 0,
-}: {
-  item: TreeItem;
-  depth?: number;
-}) {
+function FileTreeItem({ item, depth = 0 }: { item: TreeItem; depth?: number }) {
   const Icon = item.icon ?? Folder;
   const hasChildren = !!item.children?.length;
 
@@ -122,9 +110,7 @@ function FileTreeItem({
     <div>
       <button
         className={`group flex w-full items-center gap-1.5 rounded-md py-[5px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-          item.active
-            ? "bg-[#e7e7e3] text-ink"
-            : "text-ink/85 hover:bg-[#ececea] hover:text-ink"
+          item.active ? "bg-[#e7e7e3] text-ink" : "text-ink/85 hover:bg-[#ececea] hover:text-ink"
         }`}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
@@ -280,9 +266,9 @@ function MarkdownArticle() {
           </h2>
           <p className="mt-3">
             This repository contains the public Next.js website, Payload CMS admin surface, shared
-            schema definitions, and the scripts used to keep local development predictable. The brain
-            is versioned with the codebase so product notes and implementation details move through
-            review with the changes they describe.
+            schema definitions, and the scripts used to keep local development predictable. The
+            brain is versioned with the codebase so product notes and implementation details move
+            through review with the changes they describe.
           </p>
           <div className="mt-4 grid grid-cols-3 gap-2">
             {[
@@ -349,8 +335,8 @@ bun run dev`}</code>
           </h2>
           <p className="mt-3">
             Pages and posts are edited in the Payload admin panel. Schema changes should include a
-            migration, fixture update, and a short note in this brain when the editor workflow changes
-            for content authors.
+            migration, fixture update, and a short note in this brain when the editor workflow
+            changes for content authors.
           </p>
           <blockquote className="mt-4 border-l-2 border-[#c9c9c2] pl-4 text-[13.5px] leading-6 text-ink-muted">
             Keep editorial instructions close to the fields they describe. If a rule is easy to miss
@@ -455,9 +441,7 @@ function ComingSoonOverlay() {
         <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
           Coming soon
         </div>
-        <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.01em] text-ink">
-          Brain
-        </h2>
+        <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.01em] text-ink">Brain</h2>
         <p className="mt-2 text-[13px] leading-5 text-ink-muted">
           A versioned knowledge base for your repo. Not part of the MVP — check back soon.
         </p>

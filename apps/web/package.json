@@ -10,7 +10,10 @@
     "docs:generate": "fumadocs-mdx",
     "lint": "bun run docs:generate && eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck": "bun run docs:generate && tsc --noEmit"
+    "typecheck": "bun run docs:generate && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@opencompany/db": "workspace:*",
