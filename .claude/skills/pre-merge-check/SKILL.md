@@ -21,17 +21,17 @@ Run `bun run lint` (eslint) and `bun run typecheck` (`tsc --noEmit`). If either 
 
 ### 2. Schema ↔ migration (always)
 
-If `lib/db/schema.ts` changed:
+If `packages/db/src/schema.ts` changed:
 
 - Verify a new file exists under `drizzle/` (compare `git diff --name-only origin/main...HEAD -- drizzle/`).
-- If schema changed without a new migration file: flag it, tell the user to run `bun run db:generate`.
+- If schema changed without a new migration file: inspect the schema diff. If only file location/import/package wiring changed and table/index/relation definitions are identical, report it as FYI. Otherwise flag it and tell the user to run `bun run db:generate`.
 - If both changed: open the migration SQL and sanity-check it matches the schema delta. Look for destructive ops (DROP, ALTER TYPE) and call them out.
 
 ### 3. Env vars ↔ `.env.example`
 
 If any of these grew a new `process.env.X` reference, check `.env.example` lists it (commented out is fine for optional CI vars):
 
-- Anything under `lib/`, `app/`, `middleware.ts`, `scripts/`, `drizzle.config.ts`.
+- Anything under `apps/web/lib/`, `apps/web/app/`, `apps/web/proxy.ts`, `scripts/`, `packages/db/`.
 
 Use grep for `process\.env\.` in the diff to find new references. Flag any new env var missing from `.env.example`.
 
@@ -42,8 +42,8 @@ Trigger one or more checks based on what changed:
 | Files changed | Must check |
 |---|---|
 | `scripts/setup.mjs`, `scripts/neon-branch.mjs`, `package.json` scripts section | `docs/getting-started.md` mentions the new/changed flow |
-| `lib/db/**`, `drizzle.config.ts`, `drizzle/**`, schema changes | `docs/database.md` reflects new tables / workflow |
-| `lib/auth.ts`, `middleware.ts`, `app/auth/**`, `components/LoginPanel.tsx` | `docs/auth.md` is accurate |
+| `packages/db/**`, `drizzle/**`, schema changes | `docs/database.md` reflects new tables / workflow |
+| `apps/web/lib/auth.ts`, `apps/web/proxy.ts`, `apps/web/app/auth/**`, auth UI components | `docs/auth.md` is accurate |
 | New top-level package script | `docs/` mentions when to run it |
 | `.env.example` changes | `docs/getting-started.md` or `docs/database.md` / `docs/auth.md` covers the new var |
 
@@ -60,7 +60,7 @@ If `package.json` changed:
 
 ### 6. WorkOS/Neon dashboard changes
 
-If `middleware.ts` `unauthenticatedPaths` or `redirectUri` changed, or `NEXT_PUBLIC_WORKOS_REDIRECT_URI` semantics changed: remind the user to update the WorkOS dashboard allowlist in any environment that's affected (and note this in the PR description).
+If `apps/web/proxy.ts` `unauthenticatedPaths` or `redirectUri` changed, or `NEXT_PUBLIC_WORKOS_REDIRECT_URI` semantics changed: remind the user to update the WorkOS dashboard allowlist in any environment that's affected (and note this in the PR description).
 
 ## Output format
 

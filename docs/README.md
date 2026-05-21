@@ -7,9 +7,9 @@
 ## Repo layout
 
 - `apps/web` — the Next.js application.
+- `packages/db` — shared Drizzle schema and database client exports.
 - `scripts` — repo-wide setup, env, and database automation.
 - `drizzle` — checked-in database migrations.
-- `packages` — reserved for shared packages once there is a concrete need.
 
 ## Skills
 

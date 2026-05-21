@@ -4,7 +4,7 @@ We use [WorkOS AuthKit](https://www.authkit.com) for session management and [`@w
 
 ## The flow
 
-1. `apps/web/proxy.ts` wraps the app with `authkitProxy`. Anything outside the allowlist (`/`, `/auth/callback`, `/auth/sign-in`) requires a session.
+1. `apps/web/proxy.ts` wraps the app with `authkitProxy`. Anything outside the public allowlist (`/`, `/signin`, `/signup`, auth routes, and docs) requires a session.
 2. Unauthenticated user hits a gated route → redirected to WorkOS hosted UI.
 3. After login, WorkOS redirects to `/auth/callback` → AuthKit sets the session cookie.
 4. The first request to any page calls `getCurrentWorkspace()` in `apps/web/lib/auth.ts`, which upserts the user, default workspace, and owner membership into our Postgres.
@@ -14,7 +14,7 @@ We use [WorkOS AuthKit](https://www.authkit.com) for session management and [`@w
 
 - `getOptionalCurrentWorkspace()` — returns `null` if no session. Use on public-ish pages.
 - `getCurrentWorkspace()` — calls `withAuth({ ensureSignedIn: true })`, redirects to sign-in if missing.
-- `requireCurrentWorkspace()` — softer variant: redirects to `/` if not signed in.
+- `requireCurrentWorkspace()` — returns the current workspace or redirects unauthenticated users to `/signup`.
 
 All three are React-`cache()`'d so calling them multiple times per request is free.
 
@@ -26,7 +26,7 @@ In the WorkOS dashboard:
 - If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
 
-Vercel is the source of truth for shared Development env vars. Use `bun run env:pull` to merge shared setup values into `.env.local` without overwriting branch-local database values.
+Vercel is the source of truth for shared Development env vars. Use `bun run env:pull` to merge the shared setup values into `.env.local`, including `DATABASE_URL`.
 
 ## Env vars
 
@@ -62,3 +62,5 @@ export default async function Page() {
   // ...
 }
 ```
+
+Public routes currently include `/`, `/signin`, `/signup`, `/auth/callback`, `/auth/sign-in`, `/auth/sign-up`, `/docs`, and nested docs pages.

@@ -2,8 +2,8 @@
 
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getDb } from "@/lib/db";
-import { workspaces } from "@/lib/db/schema";
+import { getDb } from "@opencompany/db/client";
+import { workspaces } from "@opencompany/db/schema";
 import { getCurrentWorkspace } from "@/lib/auth";
 
 export async function updateWorkspaceName(name: string) {

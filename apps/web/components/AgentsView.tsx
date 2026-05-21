@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AtSign, Bot } from "lucide-react";
 import { createAgent } from "@/lib/agents/actions";
-import type { Agent, TiptapDoc } from "@/lib/db/schema";
+import type { Agent, TiptapDoc } from "@opencompany/db/schema";
 import { AGENT_TOOLS, findTool, type AgentTool } from "@/components/agent-editor/tools";
 
 type TiptapNode = {
