@@ -6,15 +6,20 @@
   "engines": {
     "node": ">=20.20.0"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "vercel-build": "bun run db:migrate && next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "typecheck": "tsc --noEmit",
+    "dev": "turbo dev --filter=@opencompany/web",
+    "build": "turbo build",
+    "vercel-build": "bun run db:migrate && turbo build --filter=@opencompany/web",
+    "start": "bun --filter @opencompany/web start",
+    "lint": "turbo lint",
+    "lint:fix": "turbo lint:fix",
+    "typecheck": "turbo typecheck",
     "setup": "node scripts/setup.mjs",
+    "env:pull": "node scripts/setup.mjs --pull-env",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "node scripts/seed.mjs",
@@ -23,28 +28,17 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
-    "@workos-inc/authkit-nextjs": "^4.1.0",
-    "drizzle-orm": "^0.45.2",
-    "lucide-react": "^1.16.0",
-    "next": "16.2.6",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "dotenv": "^17.4.2",
+    "vercel": "^54.2.0"
   },
   "overrides": {
     "postcss": "$postcss"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.3.0",
-    "@types/node": "^25.9.1",
-    "@types/react": "19.2.15",
-    "@types/react-dom": "19.2.3",
-    "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
-    "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
     "neonctl": "^2.22.0",
     "postcss": "8.5.15",
-    "tailwindcss": "^4.3.0",
+    "turbo": "^2.9.14",
     "typescript": "^6.0.3"
   }
 }

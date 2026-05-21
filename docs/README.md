@@ -4,6 +4,13 @@
 - [database.md](./database.md) — Neon branching workflow, schema changes, Drizzle.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
 
+## Repo layout
+
+- `apps/web` — the Next.js application.
+- `scripts` — repo-wide setup, env, and database automation.
+- `drizzle` — checked-in database migrations.
+- `packages` — reserved for shared packages once there is a concrete need.
+
 ## Skills
 
 Two [agent skills](https://agentskills.io) live in `.claude/skills/` and any skills-compatible agent on this repo will pick them up:

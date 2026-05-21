@@ -6,7 +6,7 @@ import ChangelogView from "@/components/ChangelogView";
 import { parseChangelog } from "@/lib/changelog";
 
 export default async function ChangelogPage() {
-  const filePath = path.join(process.cwd(), "CHANGELOG.md");
+  const filePath = path.resolve(process.cwd(), "..", "..", "CHANGELOG.md");
   const source = await fs.readFile(filePath, "utf8");
   const changelog = parseChangelog(source);
 

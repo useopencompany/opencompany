@@ -325,14 +325,14 @@ bun run dev`}</code>
           </h2>
           <div className="mt-4 overflow-hidden rounded-lg border border-[#e6e6e3] bg-white">
             {[
-              ["app/", "Routes, page shells, and server-rendered entry points."],
-              ["components/", "Reusable UI surfaces and app chrome."],
-              ["payload/", "CMS configuration, collections, fields, and migrations."],
-              ["tests/", "Integration and browser coverage for critical flows."],
+              ["apps/web/app/", "Routes, page shells, and server-rendered entry points."],
+              ["apps/web/components/", "Reusable UI surfaces and app chrome."],
+              ["apps/web/lib/", "Auth, database, WorkOS, and app helpers."],
+              ["drizzle/", "Checked-in database migrations."],
             ].map(([path, description], index) => (
               <div
                 key={path}
-                className={`grid grid-cols-[140px_1fr] gap-4 px-3 py-2.5 text-[13px] ${
+                className={`grid grid-cols-1 gap-1 px-3 py-2.5 text-[13px] sm:grid-cols-[minmax(0,180px)_1fr] sm:gap-4 ${
                   index !== 3 ? "border-b border-[#f0f0ec]" : ""
                 }`}
               >

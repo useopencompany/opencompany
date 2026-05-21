@@ -14,17 +14,17 @@ Neon branches are copy-on-write, so creation is instant and cheap (a few MB unti
 |---|---|
 | `bun run db:branch:create` | Creates a Neon branch matching the current Git branch, writes `DATABASE_URL` to `.env.local`. Idempotent. |
 | `bun run db:branch:delete` | Deletes the Neon branch matching the current Git branch. |
-| `bun run db:generate` | Generates a SQL migration from `lib/db/schema.ts` changes into `drizzle/`. |
+| `bun run db:generate` | Generates a SQL migration from `apps/web/lib/db/schema.ts` changes into `drizzle/`. |
 | `bun run db:migrate` | Applies pending migrations to whatever `DATABASE_URL` points at. |
 | `bun run db:seed` | Inserts a dev user + workspace (idempotent). |
 
 ## How branch resolution works
 
-`scripts/neon-branch.mjs` shells out to `neonctl` and lets it resolve the project from:
+`scripts/neon-branch.mjs` shells out to `neonctl` and resolves the project from `NEON_PROJECT_ID` in `.env.local`.
 
-1. `NEON_PROJECT_ID` env var (if set)
-2. `neon set-context --project-id <id>` config file (if set)
-3. Single-project auto-detect (if your account has exactly one project)
+For local development, set `NEON_PROJECT_ID` in Vercel Development and run `bun run env:pull`. This works across new worktrees because the project id is copied into each `.env.local`. Avoid relying on `bunx neonctl set-context --project-id <id>` for this repo: it writes a local `.neon` context file, which is worktree-local and gitignored here.
+
+When fetching a connection string, the script auto-selects `neondb` and `neondb_owner` if they exist. These are the right defaults for local migrations and app queries. Set `NEON_DATABASE_NAME` or `NEON_ROLE_NAME` only for nonstandard Neon projects.
 
 The Neon branch name is your current Git branch, lower-cased and sanitized to `[a-z0-9-]`, truncated to 63 chars.
 
@@ -44,7 +44,7 @@ When teammates pull your branch, their `db:migrate` will catch them up on their 
 
 - `DATABASE_URL` — pooled connection string for your prod Neon branch (usually `production` or `main`).
 - `NEON_API_KEY` — only needed if you also want to run branch scripts from CI.
-- `NEON_PROJECT_ID` — only needed if running branch scripts from CI.
+- `NEON_PROJECT_ID` — shared project config. Also set this in Vercel Development for local worktree setup.
 
 Vercel preview deployments can be wired to spin up their own Neon branch via the [Neon Vercel integration](https://neon.tech/docs/guides/vercel-overview) — out of scope for this doc.
 
