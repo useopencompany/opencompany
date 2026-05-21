@@ -1,0 +1,4 @@
+{
+  "installCommand": "bun install --frozen-lockfile",
+  "buildCommand": "bun run vercel-build"
+}

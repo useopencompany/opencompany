@@ -109,7 +109,15 @@ function HistoryItem({
   );
 }
 
-function AccountMenu({ onClose }: { onClose: () => void }) {
+function AccountMenu({
+  userName,
+  userEmail,
+  onClose,
+}: {
+  userName: string;
+  userEmail: string;
+  onClose: () => void;
+}) {
   const menuItems: Array<{
     icon: LucideIcon;
     label: string;
@@ -127,9 +135,9 @@ function AccountMenu({ onClose }: { onClose: () => void }) {
     <div className="absolute bottom-[52px] left-3 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-[#fbfbfa] shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
       <div className="px-3 pb-3 pt-3">
         <div className="text-[13.5px] font-medium leading-[1.2] tracking-[-0.01em] text-ink">
-          Louis Morgner
+          {userName}
         </div>
-        <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">louis@acta.so</div>
+        <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
         <button
           type="button"
           onClick={onClose}
@@ -171,20 +179,28 @@ function AccountMenu({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        <button
-          type="button"
+        <Link
+          href="/auth/sign-out"
           onClick={onClose}
           className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-[#eeeeeb] focus:outline-none focus-visible:bg-[#eeeeeb]"
         >
           <LogOut size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
           <span>Log Out</span>
-        </button>
+        </Link>
       </div>
     </div>
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  userName,
+  userEmail,
+  workspaceName,
+}: {
+  userName: string;
+  userEmail: string;
+  workspaceName: string;
+}) {
   const pathname = usePathname();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getStoredSidebarCollapsed);
@@ -295,7 +311,13 @@ export default function Sidebar() {
             ref={footerRef}
             className="relative flex items-center gap-2.5 border-t border-[#eaeae6] px-3 py-2.5"
           >
-            {accountMenuOpen && <AccountMenu onClose={() => setAccountMenuOpen(false)} />}
+            {accountMenuOpen && (
+              <AccountMenu
+                userName={userName}
+                userEmail={userEmail}
+                onClose={() => setAccountMenuOpen(false)}
+              />
+            )}
             <div
               aria-hidden
               className="h-6 w-6 shrink-0 rounded-full ring-1 ring-black/[0.06]"
@@ -307,10 +329,10 @@ export default function Sidebar() {
               }}
             />
             <div className="flex min-w-0 flex-col leading-tight">
-              <span className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink">
-                Louis Morgner
+              <span title={userEmail} className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink">
+                {userName}
               </span>
-              <span className="truncate text-[11px] text-ink-subtle">Pro</span>
+              <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
             </div>
             <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
               <button

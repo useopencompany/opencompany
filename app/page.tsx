@@ -1,11 +1,18 @@
-import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
+import LoginPanel from "@/components/LoginPanel";
 import MainPanel from "@/components/MainPanel";
+import { getOptionalCurrentWorkspace } from "@/lib/auth";
 
-export default function Home() {
+export default async function Home() {
+  const context = await getOptionalCurrentWorkspace();
+
+  if (!context) {
+    return <LoginPanel />;
+  }
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-      <Sidebar />
-      <MainPanel />
-    </div>
+    <AppShell>
+      <MainPanel workspaceName={context.workspace.name} />
+    </AppShell>
   );
 }

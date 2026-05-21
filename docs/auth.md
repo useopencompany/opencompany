@@ -1,0 +1,61 @@
+# Auth
+
+We use [WorkOS AuthKit](https://www.authkit.com) for session management and [`@workos-inc/authkit-nextjs`](https://www.npmjs.com/package/@workos-inc/authkit-nextjs) for the Next.js integration.
+
+## The flow
+
+1. `middleware.ts` wraps the app with `authkitMiddleware`. Anything outside the allowlist (`/`, `/auth/callback`, `/auth/sign-in`) requires a session.
+2. Unauthenticated user hits a gated route → redirected to WorkOS hosted UI.
+3. After login, WorkOS redirects to `/auth/callback` → AuthKit sets the session cookie.
+4. The first request to any page calls `getCurrentWorkspace()` in `lib/auth.ts`, which upserts the user, default workspace, and owner membership into our Postgres.
+5. Subsequent requests use the cached context via React `cache()`.
+
+## Key helpers in `lib/auth.ts`
+
+- `getOptionalCurrentWorkspace()` — returns `null` if no session. Use on public-ish pages.
+- `getCurrentWorkspace()` — calls `withAuth({ ensureSignedIn: true })`, redirects to sign-in if missing.
+- `requireCurrentWorkspace()` — softer variant: redirects to `/` if not signed in.
+
+All three are React-`cache()`'d so calling them multiple times per request is free.
+
+## Configuring WorkOS
+
+In the WorkOS dashboard:
+
+- **Redirects** must include `http://localhost:3000/auth/callback` for local dev and the production callback URL for deploys.
+- AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
+
+## Env vars
+
+| Var | Purpose |
+|---|---|
+| `WORKOS_CLIENT_ID` | Public client identifier. |
+| `WORKOS_API_KEY` | Secret server-side key. Never expose to the browser. |
+| `WORKOS_COOKIE_PASSWORD` | Encrypts the session cookie. Must be 32+ chars. Rotate by changing this — invalidates all sessions. |
+| `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | Callback URL. Must match WorkOS dashboard exactly. |
+
+## User and workspace identity
+
+We mint our own IDs rather than storing raw WorkOS IDs as primary keys:
+
+- `users.id` = `usr_<workos_id>`
+- `workspaces.id` for the default workspace = `wks_<users.id>`
+
+`users.workos_user_id` has a unique index so we can dedupe on upsert.
+
+## Sign-out
+
+`/auth/sign-out` clears the AuthKit cookie. The app row stays in Postgres — we don't delete user data on sign-out.
+
+## Adding a protected route
+
+Anything not in `middleware.ts`'s `unauthenticatedPaths` is protected by default. In the page itself:
+
+```ts
+import { getCurrentWorkspace } from "@/lib/auth";
+
+export default async function Page() {
+  const { user, workspace } = await getCurrentWorkspace();
+  // ...
+}
+```

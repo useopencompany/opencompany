@@ -313,9 +313,9 @@ function MarkdownArticle() {
             <li>Run the Next.js dev server and open the CMS admin route.</li>
           </ol>
           <pre className="mt-4 overflow-x-auto rounded-lg border border-[#e6e6e3] bg-[#111] px-4 py-3 text-[12px] leading-6 text-[#f5f5f0] shadow-[0_1px_2px_rgba(15,15,15,0.08)]">
-            <code>{`pnpm install
+            <code>{`bun install
 docker compose up -d
-pnpm dev`}</code>
+bun run dev`}</code>
           </pre>
         </section>
 

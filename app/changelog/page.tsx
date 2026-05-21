@@ -1,11 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
 import ChangelogView from "@/components/ChangelogView";
 import { parseChangelog } from "@/lib/changelog";
-
-export const dynamic = "force-static";
 
 export default async function ChangelogPage() {
   const filePath = path.join(process.cwd(), "CHANGELOG.md");
@@ -13,9 +11,8 @@ export default async function ChangelogPage() {
   const changelog = parseChangelog(source);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-      <Sidebar />
+    <AppShell>
       <ChangelogView changelog={changelog} />
-    </div>
+    </AppShell>
   );
 }
