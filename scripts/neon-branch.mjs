@@ -18,6 +18,8 @@ const parentBranch = realEnv("NEON_PARENT_BRANCH");
 const databaseName = realEnv("NEON_DATABASE_NAME");
 const roleName = realEnv("NEON_ROLE_NAME");
 const apiKey = realEnv("NEON_API_KEY");
+const DEFAULT_DATABASE_NAME = "neondb";
+const DEFAULT_ROLE_NAME = "neondb_owner";
 
 if (!["create", "delete"].includes(action)) {
   throw new Error("Usage: node scripts/neon-branch.mjs <create|delete>");
@@ -46,8 +48,8 @@ function neonBranchName() {
 function neon(args) {
   const baseArgs = ["neonctl", ...args];
 
-  // neonctl resolves the project from (in order): --project-id flag,
-  // `neon set-context` config, or single-project auto-detect.
+  // Always pass the project id when available so generated worktrees do not
+  // depend on local neonctl context files.
   if (projectId) {
     baseArgs.push("--project-id", projectId);
   }
@@ -66,24 +68,45 @@ function neon(args) {
   } catch (error) {
     if (!projectId && !apiKey) {
       console.error(
-        "\nHint: run `bunx neonctl auth` to log in, then either set NEON_PROJECT_ID\n" +
-          "or run `bunx neonctl set-context --project-id <id>` to pin the project.\n",
+        "\nHint: run `bun run env:pull` to copy NEON_PROJECT_ID from Vercel Development,\n" +
+          "or set NEON_PROJECT_ID in .env.local manually.\n",
+      );
+    } else if (args[0] === "connection-string" && !roleName) {
+      console.error(
+        "\nHint: this Neon project has multiple roles. The setup script normally\n" +
+          "auto-selects `neondb_owner`; set NEON_ROLE_NAME only for nonstandard projects.\n",
       );
     }
     throw error;
   }
 }
 
+function resourceName(items, preferredName, label, envName) {
+  const names = items.map((item) => item.name).filter(Boolean);
+  if (names.includes(preferredName)) return preferredName;
+  if (names.length === 1) return names[0];
+  throw new Error(
+    `Multiple Neon ${label}s found (${names.join(", ")}). Set ${envName} in .env.local to choose one.`,
+  );
+}
+
+function connectionDatabaseName(branchName) {
+  if (databaseName) return databaseName;
+  const databases = JSON.parse(neon(["databases", "list", "--branch", branchName, "--output", "json"]));
+  return resourceName(databases, DEFAULT_DATABASE_NAME, "databases", "NEON_DATABASE_NAME");
+}
+
+function connectionRoleName(branchName) {
+  if (roleName) return roleName;
+  const roles = JSON.parse(neon(["roles", "list", "--branch", branchName, "--output", "json"]));
+  return resourceName(roles, DEFAULT_ROLE_NAME, "roles", "NEON_ROLE_NAME");
+}
+
 function connectionString(branchName) {
   const args = ["connection-string", branchName, "--pooled"];
 
-  if (databaseName) {
-    args.push("--database-name", databaseName);
-  }
-
-  if (roleName) {
-    args.push("--role-name", roleName);
-  }
+  args.push("--database-name", connectionDatabaseName(branchName));
+  args.push("--role-name", connectionRoleName(branchName));
 
   return neon(args);
 }

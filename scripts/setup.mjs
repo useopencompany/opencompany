@@ -1,16 +1,25 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, copyFileSync } from "node:fs";
+import { existsSync, readFileSync, copyFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, argv, exit, versions } from "node:process";
 
 const CHECK_MODE = argv.includes("--check");
-const NON_INTERACTIVE = CHECK_MODE || argv.includes("--non-interactive");
+const PULL_ENV_MODE = argv.includes("--pull-env");
+const NON_INTERACTIVE = CHECK_MODE || PULL_ENV_MODE || argv.includes("--non-interactive");
 
-// WorkOS AuthKit installer requires >=20.20; .nvmrc pins us to 22.
+// .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
+const WORKOS_ENV_KEYS = [
+  "WORKOS_CLIENT_ID",
+  "WORKOS_API_KEY",
+  "WORKOS_COOKIE_PASSWORD",
+  "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
+];
+const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, "NEON_PROJECT_ID"];
+const VERCEL_ENV_PULL_PATH = ".env.vercel.local";
 
 function assertNodeVersion() {
   const current = versions.node.split(".").map(Number);
@@ -39,7 +48,7 @@ function assertNodeVersion() {
     exit(1);
   }
   console.error(
-    `\n\x1b[31m✗ Node ${versions.node} is too old.\x1b[0m This project (and the WorkOS installer)\n` +
+    `\n\x1b[31m✗ Node ${versions.node} is too old.\x1b[0m This project\n` +
       `  require Node >=${MIN_NODE.join(".")}. An \x1b[1m.nvmrc\x1b[0m pins it to Node 22.\n\n` +
       `  Run:\n    \x1b[1mnvm install\x1b[0m   # one-time, installs the version from .nvmrc\n` +
       `    \x1b[1mnvm use\x1b[0m       # switch this shell to it\n` +
@@ -88,6 +97,28 @@ function parseEnv(path) {
   return out;
 }
 
+function formatEnvValue(value) {
+  if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+function writeEnvValues(path, values) {
+  const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n") : [];
+  const seen = new Set();
+  const next = lines.map((line) => {
+    const match = line.match(/^([A-Z0-9_]+)=/);
+    if (!match || !(match[1] in values)) return line;
+    seen.add(match[1]);
+    return `${match[1]}=${formatEnvValue(values[match[1]])}`;
+  });
+
+  for (const [key, value] of Object.entries(values)) {
+    if (!seen.has(key)) next.push(`${key}=${formatEnvValue(value)}`);
+  }
+
+  writeFileSync(path, `${next.filter((line, index) => line !== "" || index < next.length - 1).join("\n")}\n`);
+}
+
 function isPlaceholder(value) {
   if (!value) return true;
   return (
@@ -96,6 +127,10 @@ function isPlaceholder(value) {
     value === "" ||
     value === "postgresql://..."
   );
+}
+
+function realEnvFrom(env, name) {
+  return isPlaceholder(env[name]) ? undefined : env[name];
 }
 
 function hasNeonAuth() {
@@ -108,14 +143,14 @@ function hasNeonAuth() {
 
 function inspectState() {
   const env = parseEnv(".env.local");
-  const workosKeys = ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"];
-  const workosMissing = workosKeys.filter((k) => isPlaceholder(env[k]));
+  const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
 
   return {
     envFile: existsSync(".env.local") ? "exists" : "missing",
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
+    neonProject: realEnvFrom(env, "NEON_PROJECT_ID") ? "ready" : "placeholder",
     neonAuth: process.env.NEON_API_KEY
       ? "api-key"
       : hasNeonAuth()
@@ -139,6 +174,26 @@ async function ensureEnvFile(state) {
   ok("Created .env.local from .env.example");
 }
 
+function pullSharedDevEnvFromVercel() {
+  run("bunx", ["vercel", "env", "pull", VERCEL_ENV_PULL_PATH, "--yes"]);
+
+  const pulled = parseEnv(VERCEL_ENV_PULL_PATH);
+  rmSync(VERCEL_ENV_PULL_PATH, { force: true });
+
+  const missing = SHARED_DEV_ENV_KEYS.filter((key) => isPlaceholder(pulled[key]));
+  if (missing.length > 0) {
+    throw new Error(
+      `Vercel Development env is missing shared setup values: ${missing.join(", ")}. ` +
+        "Add them in Vercel, then run `bun run env:pull` again.",
+    );
+  }
+
+  writeEnvValues(
+    ".env.local",
+    Object.fromEntries(SHARED_DEV_ENV_KEYS.map((key) => [key, pulled[key]])),
+  );
+}
+
 async function ensureWorkOS(state) {
   step("WorkOS credentials");
   if (state.workos === "ready") {
@@ -148,44 +203,78 @@ async function ensureWorkOS(state) {
 
   warn("WorkOS env vars in .env.local are still placeholders.");
   console.log(
-    "\n  The WorkOS CLI can provision a temporary dev environment for you — no\n" +
-      "  signup needed — and write the keys straight into .env.local.",
+    "\n  Pull the shared Development env from Vercel. This preserves local-only\n" +
+      "  values like DATABASE_URL while filling the WorkOS AuthKit keys.",
   );
 
-  const answer = (await ask("\n  Run `bunx workos@latest install` now? [Y/n] "))
+  if (NON_INTERACTIVE) {
+    throw new Error("WorkOS env vars are missing. Run `bun run env:pull` or fill .env.local manually.");
+  }
+
+  const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] "))
     .trim()
     .toLowerCase();
 
   if (answer === "n" || answer === "no") {
     console.log(
-      "\n  Skipping. Either run `bunx workos@latest install` yourself, or paste\n" +
-        "  keys from https://dashboard.workos.com into .env.local manually.\n" +
+      "\n  Skipping. Run `bunx vercel link` if this checkout is not linked, then\n" +
+        "  `bun run env:pull`, or paste keys from https://dashboard.workos.com\n" +
+        "  into .env.local manually.\n" +
         "  Generate WORKOS_COOKIE_PASSWORD with `openssl rand -base64 32`.\n" +
         "  Then re-run `bun run setup`.",
     );
     exit(0);
   }
 
-  run("bunx", [
-    "workos@latest",
-    "install",
-    "--integration",
-    "next",
-    "--redirect-uri",
-    "http://localhost:3000/auth/callback",
-    "--no-branch",
-    "--no-commit",
-  ]);
+  pullSharedDevEnvFromVercel();
 
-  // Re-check after install
+  // Re-check after pulling shared env.
   const after = inspectState();
   if (after.workos !== "ready") {
     throw new Error(
-      "WorkOS installer finished but .env.local still has placeholder values. " +
+      "Vercel env pull finished but .env.local still has placeholder WorkOS values. " +
         "Inspect .env.local and re-run setup.",
     );
   }
   ok("WorkOS configured");
+}
+
+async function ensureNeonProject(state) {
+  step("Neon project");
+  if (state.neonProject === "ready") {
+    ok("NEON_PROJECT_ID is set");
+    return;
+  }
+
+  warn("NEON_PROJECT_ID is missing from .env.local.");
+  console.log(
+    "\n  This account has multiple Neon projects, so setup needs the shared\n" +
+      "  project id. Pull it from Vercel Development into .env.local.",
+  );
+
+  if (NON_INTERACTIVE) {
+    throw new Error("NEON_PROJECT_ID is missing. Run `bun run env:pull` or fill .env.local manually.");
+  }
+
+  const answer = (await ask("\n  Run `bun run env:pull` now? [Y/n] "))
+    .trim()
+    .toLowerCase();
+
+  if (answer === "n" || answer === "no") {
+    console.log(
+      "\n  Skipping. Set NEON_PROJECT_ID in .env.local, or add it to Vercel\n" +
+        "  Development and run `bun run env:pull`. Then re-run `bun run setup`.",
+    );
+    exit(0);
+  }
+
+  pullSharedDevEnvFromVercel();
+
+  const after = inspectState();
+  if (after.neonProject !== "ready") {
+    throw new Error("Vercel env pull finished but NEON_PROJECT_ID is still missing.");
+  }
+  ok("Neon project configured");
 }
 
 async function ensureNeonAuth(state) {
@@ -230,16 +319,28 @@ async function maybeSeed() {
 }
 
 async function main() {
+  if (PULL_ENV_MODE) {
+    console.log("\n\x1b[1mPull shared dev env\x1b[0m");
+    await ensureEnvFile(inspectState());
+    pullSharedDevEnvFromVercel();
+    ok("Updated .env.local with shared setup values from Vercel");
+    return;
+  }
+
   if (CHECK_MODE) {
     const state = inspectState();
     const nextSteps = [];
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
     }
-    if (state.workos === "placeholder") {
+    if (state.workos === "placeholder" || state.neonProject === "placeholder") {
+      const missingShared = [
+        ...state.workosMissingKeys,
+        ...(state.neonProject === "placeholder" ? ["NEON_PROJECT_ID"] : []),
+      ];
       nextSteps.push({
-        command: "bun run setup",
-        reason: "provision WorkOS via `bunx workos@latest install` (interactive)",
+        command: "bun run env:pull",
+        reason: `pull shared development env vars from Vercel into .env.local (${missingShared.join(", ")})`,
       });
     }
     if (state.neonAuth === "missing") {
@@ -265,6 +366,7 @@ async function main() {
     const state = inspectState();
     await ensureEnvFile(state);
     await ensureWorkOS(inspectState());
+    await ensureNeonProject(inspectState());
     await ensureNeonAuth(inspectState());
     await createBranchAndMigrate();
     await maybeSeed();

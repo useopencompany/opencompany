@@ -4,13 +4,13 @@ We use [WorkOS AuthKit](https://www.authkit.com) for session management and [`@w
 
 ## The flow
 
-1. `middleware.ts` wraps the app with `authkitMiddleware`. Anything outside the allowlist (`/`, `/auth/callback`, `/auth/sign-in`) requires a session.
+1. `apps/web/proxy.ts` wraps the app with `authkitProxy`. Anything outside the allowlist (`/`, `/auth/callback`, `/auth/sign-in`) requires a session.
 2. Unauthenticated user hits a gated route → redirected to WorkOS hosted UI.
 3. After login, WorkOS redirects to `/auth/callback` → AuthKit sets the session cookie.
-4. The first request to any page calls `getCurrentWorkspace()` in `lib/auth.ts`, which upserts the user, default workspace, and owner membership into our Postgres.
+4. The first request to any page calls `getCurrentWorkspace()` in `apps/web/lib/auth.ts`, which upserts the user, default workspace, and owner membership into our Postgres.
 5. Subsequent requests use the cached context via React `cache()`.
 
-## Key helpers in `lib/auth.ts`
+## Key helpers in `apps/web/lib/auth.ts`
 
 - `getOptionalCurrentWorkspace()` — returns `null` if no session. Use on public-ish pages.
 - `getCurrentWorkspace()` — calls `withAuth({ ensureSignedIn: true })`, redirects to sign-in if missing.
@@ -23,7 +23,10 @@ All three are React-`cache()`'d so calling them multiple times per request is fr
 In the WorkOS dashboard:
 
 - **Redirects** must include `http://localhost:3000/auth/callback` for local dev and the production callback URL for deploys.
+- If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
+
+Vercel is the source of truth for shared Development env vars. Use `bun run env:pull` to merge shared setup values into `.env.local` without overwriting branch-local database values.
 
 ## Env vars
 
@@ -49,7 +52,7 @@ We mint our own IDs rather than storing raw WorkOS IDs as primary keys:
 
 ## Adding a protected route
 
-Anything not in `middleware.ts`'s `unauthenticatedPaths` is protected by default. In the page itself:
+Anything not in `apps/web/proxy.ts`'s `unauthenticatedPaths` is protected by default. In the page itself:
 
 ```ts
 import { getCurrentWorkspace } from "@/lib/auth";

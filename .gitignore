@@ -1,4 +1,5 @@
 node_modules
+.turbo
 .next
 out
 .DS_Store
@@ -7,3 +8,4 @@ out
 *.tsbuildinfo
 .env*
 !.env.example
+.vercel
