@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   ListFilter,
   MessageSquarePlus,
+  ScrollText,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -27,6 +28,14 @@ function getStoredSidebarCollapsed() {
   if (typeof window === "undefined") return false;
 
   return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+}
+
+function SoonBadge() {
+  return (
+    <span className="rounded-[3px] bg-[#ececea] px-1 py-px text-[8.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+      Soon
+    </span>
+  );
 }
 
 function NavItem({
@@ -101,10 +110,16 @@ function HistoryItem({
 }
 
 function AccountMenu({ onClose }: { onClose: () => void }) {
-  const menuItems = [
+  const menuItems: Array<{
+    icon: LucideIcon;
+    label: string;
+    detail?: string;
+    href?: string;
+  }> = [
     { icon: Settings, label: "Settings" },
     { icon: Download, label: "Download Cursor macOS" },
     { icon: CircleEqual, label: "Appearance", detail: "System" },
+    { icon: ScrollText, label: "Changelog", href: "/changelog" },
     { icon: CircleHelp, label: "Help" },
   ];
 
@@ -126,21 +141,33 @@ function AccountMenu({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        {menuItems.map(({ icon: Icon, label, detail }) => (
-          <button
-            key={label}
-            type="button"
-            onClick={onClose}
-            className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-[#eeeeeb] focus:outline-none focus-visible:bg-[#eeeeeb]"
-          >
-            <Icon size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-            {detail && <span className="text-ink-subtle">{detail}</span>}
-            {(detail || label === "Help") && (
-              <ChevronRight size={14} strokeWidth={1.8} className="shrink-0 text-ink/35" />
-            )}
-          </button>
-        ))}
+        {menuItems.map(({ icon: Icon, label, detail, href }) => {
+          const inner = (
+            <>
+              <Icon size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
+              <span className="min-w-0 flex-1 truncate">{label}</span>
+              {detail && <span className="text-ink-subtle">{detail}</span>}
+              {(detail || href || label === "Help") && (
+                <ChevronRight size={14} strokeWidth={1.8} className="shrink-0 text-ink/35" />
+              )}
+            </>
+          );
+          const className =
+            "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-[#eeeeeb] focus:outline-none focus-visible:bg-[#eeeeeb]";
+
+          if (href) {
+            return (
+              <Link key={label} href={href} onClick={onClose} className={className}>
+                {inner}
+              </Link>
+            );
+          }
+          return (
+            <button key={label} type="button" onClick={onClose} className={className}>
+              {inner}
+            </button>
+          );
+        })}
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
@@ -222,9 +249,21 @@ export default function Sidebar() {
 
           {/* Primary nav */}
           <nav className="flex flex-col gap-px px-2 pt-1">
-            <NavItem href="/inbox" icon={Inbox} label="Inbox" active={isActive("/inbox")} />
+            <NavItem
+              href="/inbox"
+              icon={Inbox}
+              label="Inbox"
+              active={isActive("/inbox")}
+              trailing={<SoonBadge />}
+            />
             <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
-            <NavItem href="/brain" icon={Brain} label="Brain" active={isActive("/brain")} />
+            <NavItem
+              href="/brain"
+              icon={Brain}
+              label="Brain"
+              active={isActive("/brain")}
+              trailing={<SoonBadge />}
+            />
             <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
           </nav>
 
