@@ -29,7 +29,7 @@ const initialState: OnboardingActionState = {
 
 const steps = [
   {
-    title: "Where did you hear about Open Company?",
+    title: "Where did you hear about opencompany?",
     subtitle: "This helps us understand where useful teams are finding us.",
   },
   {
@@ -83,7 +83,7 @@ function SubmitButton() {
       disabled={pending}
       className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
     >
-      <span>{pending ? "Saving" : "Start using Open Company"}</span>
+      <span>{pending ? "Saving" : "Start using opencompany"}</span>
       <ArrowRight size={12} strokeWidth={2} />
     </button>
   );
@@ -155,11 +155,11 @@ export default function OnboardingForm({ userEmail }: { userEmail: string }) {
 
   function validateCurrentStep() {
     if (step === 0 && !values.heardFrom) {
-      setError("Choose where you heard about Open Company.");
+      setError("Choose where you heard about opencompany.");
       return false;
     }
     if (step === 0 && values.heardFrom === "other" && !values.heardFromDetail.trim()) {
-      setError("Tell us where you heard about Open Company.");
+      setError("Tell us where you heard about opencompany.");
       return false;
     }
     if (step === 1) {
