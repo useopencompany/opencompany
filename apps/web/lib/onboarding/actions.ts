@@ -2,6 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
 import { getDb } from "@opencompany/db/client";
 import { onboardingResponses, workspaces } from "@opencompany/db/schema";
@@ -161,6 +162,16 @@ export async function completeOnboarding(
         updatedAt: now,
       },
     });
+
+  await captureServerEvent("onboarding_completed", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    heard_from: values.heardFrom,
+    team_size: values.teamSize,
+    agent_experience: values.agentExperience,
+    help_areas: helpAreas,
+    help_area_count: helpAreas.length,
+  });
 
   redirect("/");
 }

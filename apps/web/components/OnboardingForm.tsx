@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { captureEvent } from "@opencompany/analytics/client";
 import {
   agentExperienceOptions,
   heardFromOptions,
@@ -113,7 +114,15 @@ function ChoiceButton({
   );
 }
 
-export default function OnboardingForm({ userEmail }: { userEmail: string }) {
+export default function OnboardingForm({
+  userEmail,
+  userId,
+  workspaceId,
+}: {
+  userEmail: string;
+  userId: string;
+  workspaceId: string;
+}) {
   const [serverState, action] = useActionState(completeOnboarding, initialState);
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | undefined>();
@@ -122,6 +131,13 @@ export default function OnboardingForm({ userEmail }: { userEmail: string }) {
   const currentStep = steps[step];
   const isLastStep = step === steps.length - 1;
   const displayedError = error || firstErrorMessage(serverState.errors);
+
+  useEffect(() => {
+    captureEvent("onboarding_started", {
+      user_id: userId,
+      workspace_id: workspaceId,
+    });
+  }, [userId, workspaceId]);
 
   function updateValue<Key extends keyof typeof values>(
     key: Key,
