@@ -55,10 +55,7 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
   icon: TOOL_ICONS[tool.id],
 }));
 
-export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [
-  ...AGENT_MODELS,
-  ...AGENT_TOOLS,
-];
+export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [...AGENT_MODELS, ...AGENT_TOOLS];
 
 export function findMentionItem(id: string): AgentMentionItem | undefined {
   return (
@@ -69,8 +66,7 @@ export function findMentionItem(id: string): AgentMentionItem | undefined {
 
 export function findTool(id: string): AgentTool | undefined {
   return (
-    AGENT_TOOLS.find((item) => item.mentionId === id) ??
-    AGENT_TOOLS.find((item) => item.id === id)
+    AGENT_TOOLS.find((item) => item.mentionId === id) ?? AGENT_TOOLS.find((item) => item.id === id)
   );
 }
 

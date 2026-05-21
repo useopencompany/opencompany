@@ -14,10 +14,7 @@ export function AgentEditor({ initialBody, onChange }: Props) {
   const [selectionStart, setSelectionStart] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionListRef = useRef<MentionListHandle>(null);
-  const mention = useMemo(
-    () => currentMention(body, selectionStart),
-    [body, selectionStart],
-  );
+  const mention = useMemo(() => currentMention(body, selectionStart), [body, selectionStart]);
   const items = useMemo(() => {
     if (!mention) return [];
     const query = mention.query.toLowerCase();

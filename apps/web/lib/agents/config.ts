@@ -1,5 +1,5 @@
-import type { AgentConfig, AgentModelId, AgentToolId, TiptapDoc } from "./types";
 import { asRecord, sanitizeTiptapDoc, type TiptapNode } from "./tiptap";
+import type { AgentConfig, AgentModelId, AgentToolId, TiptapDoc } from "./types";
 
 type AgentToolDefinition = {
   id: AgentToolId;
@@ -54,10 +54,7 @@ export const SUPPORTED_AGENT_MODELS: AgentModelDefinition[] = [
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));
 const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, model]));
 
-export function extractAgentConfig(input: {
-  name: string;
-  content: TiptapDoc;
-}): AgentConfig {
+export function extractAgentConfig(input: { name: string; content: TiptapDoc }): AgentConfig {
   const content = sanitizeTiptapDoc(input.content);
   const model = collectMentionedModel(content);
 

@@ -16,11 +16,7 @@ import {
 import { hashAgentSource } from "@/lib/agents/hash";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
 import { getCurrentWorkspace } from "@/lib/auth";
-import {
-  endTimingTrace,
-  startTimingTrace,
-  timeAsync,
-} from "@/lib/observability/timing";
+import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
@@ -84,10 +80,7 @@ export async function createAgent() {
   redirect(`/agents/${result.path}`);
 }
 
-export async function updateAgent(
-  idOrPath: string,
-  patch: { name?: string; body?: string },
-) {
+export async function updateAgent(idOrPath: string, patch: { name?: string; body?: string }) {
   const trace = startTimingTrace("agents.update", {
     hasName: typeof patch.name === "string",
     hasBody: typeof patch.body === "string",
@@ -235,10 +228,7 @@ function agentSyncJobUpsert(
     });
 }
 
-function scheduleAgentSyncDispatch(input: {
-  id: string;
-  workspaceId: string;
-}) {
+function scheduleAgentSyncDispatch(input: { id: string; workspaceId: string }) {
   after(async () => {
     try {
       await dispatchAgentSyncRequested({
@@ -293,25 +283,28 @@ export async function materializeLegacyAgentFiles() {
       { path },
     );
 
-    await timeAsync(trace, "db.updateAgent", () =>
-      db
-        .update(agents)
-        .set({
-          path,
-          name: parsed.title,
-          body: parsed.body,
-          commitSha,
-          contentHash,
-          githubBlobSha: blobSha,
-          githubCommitSha: commitSha,
-          githubSyncedHash: contentHash,
-          githubSyncedAt: new Date(),
-          githubSyncStatus: "synced",
-          githubSyncError: null,
-          config: parsed.config,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+    await timeAsync(
+      trace,
+      "db.updateAgent",
+      () =>
+        db
+          .update(agents)
+          .set({
+            path,
+            name: parsed.title,
+            body: parsed.body,
+            commitSha,
+            contentHash,
+            githubBlobSha: blobSha,
+            githubCommitSha: commitSha,
+            githubSyncedHash: contentHash,
+            githubSyncedAt: new Date(),
+            githubSyncStatus: "synced",
+            githubSyncError: null,
+            config: parsed.config,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
       { path },
     );
   }

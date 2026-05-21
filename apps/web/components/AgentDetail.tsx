@@ -70,13 +70,7 @@ export default function AgentDetail({
             Agents
           </Link>
           <div className="flex items-center gap-2 tabular-nums text-ink-subtle">
-            <span>
-              {saveState === "saving"
-                ? "Saving…"
-                : saveState === "saved"
-                  ? "Saved"
-                  : ""}
-            </span>
+            <span>{saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}</span>
             <span title={githubSyncError ?? undefined}>
               {githubSyncStatus === "pending"
                 ? "Syncing to GitHub"

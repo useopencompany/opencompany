@@ -124,10 +124,8 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
         const active = index === selectedIndex;
         const kind = row.type === "category" ? row.kind : row.item.kind;
         const previous = rows[index - 1];
-        const previousKind =
-          previous?.type === "category" ? previous.kind : previous?.item.kind;
-        const showHeading =
-          normalizedQuery.length > 0 && (!previous || previousKind !== kind);
+        const previousKind = previous?.type === "category" ? previous.kind : previous?.item.kind;
+        const showHeading = normalizedQuery.length > 0 && (!previous || previousKind !== kind);
         return (
           <div key={row.type === "category" ? row.kind : row.item.mentionId}>
             {showHeading && (

@@ -6,11 +6,7 @@ import AgentDetail from "@/components/AgentDetail";
 import AppShell from "@/components/AppShell";
 import { getCurrentWorkspace } from "@/lib/auth";
 
-export default async function AgentPage({
-  params,
-}: {
-  params: Promise<{ path: string[] }>;
-}) {
+export default async function AgentPage({ params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const idOrPath = path.map(decodeURIComponent).join("/");
   const { workspace } = await getCurrentWorkspace();

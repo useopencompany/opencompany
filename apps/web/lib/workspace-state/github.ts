@@ -1,6 +1,6 @@
 import { createSign } from "node:crypto";
 import type { getDb } from "@opencompany/db/client";
-import { workspaceRepositories, type Workspace } from "@opencompany/db/schema";
+import { type Workspace, workspaceRepositories } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 
 type Db = ReturnType<typeof getDb>;
@@ -134,9 +134,7 @@ function putWorkspaceFileContent(input: {
 }) {
   return githubRequest<GitHubContentWrite>({
     token: input.token,
-    path: `/repos/${input.repository.fullName}/contents/${encodeURIComponentPath(
-      input.path,
-    )}`,
+    path: `/repos/${input.repository.fullName}/contents/${encodeURIComponentPath(input.path)}`,
     method: "PUT",
     body: {
       message: input.message,
@@ -147,9 +145,7 @@ function putWorkspaceFileContent(input: {
   });
 }
 
-export async function listWorkspaceAgentFiles(input: {
-  repository: WorkspaceRepositoryRecord;
-}) {
+export async function listWorkspaceAgentFiles(input: { repository: WorkspaceRepositoryRecord }) {
   const token = await getInstallationToken();
   const tree = await githubRequest<GitHubTree>({
     token,
@@ -252,10 +248,7 @@ type CachedInstallationToken = {
 let cachedInstallationToken: CachedInstallationToken | null = null;
 
 async function getInstallationToken() {
-  if (
-    cachedInstallationToken &&
-    cachedInstallationToken.expiresAt - Date.now() > 60_000
-  ) {
+  if (cachedInstallationToken && cachedInstallationToken.expiresAt - Date.now() > 60_000) {
     return cachedInstallationToken.token;
   }
 
@@ -330,12 +323,7 @@ async function githubRequest<T>(input: {
   return (await response.json()) as T;
 }
 
-function logGitHubTiming(
-  method: string,
-  path: string,
-  response: Response,
-  durationMs: number,
-) {
+function logGitHubTiming(method: string, path: string, response: Response, durationMs: number) {
   if (process.env.OPENCOMPANY_TIMING !== "1") return;
 
   console.info(
@@ -387,7 +375,10 @@ function managedRepoName(workspace: Workspace) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-  const suffix = workspace.id.replace(/[^a-zA-Z0-9]/g, "").slice(-10).toLowerCase();
+  const suffix = workspace.id
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-10)
+    .toLowerCase();
 
   return `opencompany-${name || "workspace"}-${suffix}`;
 }

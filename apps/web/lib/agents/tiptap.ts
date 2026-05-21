@@ -1,12 +1,6 @@
 import type { TiptapDoc } from "./types";
 
-type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 export type TiptapNode = {
   type?: string;
@@ -107,11 +101,7 @@ function sanitizeAttrs(value: unknown): Record<string, JsonValue> | undefined {
 
 function sanitizeJsonValue(value: unknown): JsonValue | undefined {
   if (value === null) return null;
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
 

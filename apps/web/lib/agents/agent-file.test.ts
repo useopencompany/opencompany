@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import {
   buildAgentFile,
   extractConfigFromMentions,
@@ -29,17 +29,19 @@ describe(".agent files", () => {
   });
 
   test("defaults invalid or missing model and tools", () => {
-    const parsed = parseAgentFile([
-      "---",
-      'title: "Ops"',
-      "model: nope",
-      "tools:",
-      "  - exa",
-      "  - nope",
-      "---",
-      "",
-      "Do the work.",
-    ].join("\n"));
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Ops"',
+        "model: nope",
+        "tools:",
+        "  - exa",
+        "  - nope",
+        "---",
+        "",
+        "Do the work.",
+      ].join("\n"),
+    );
 
     expect(parsed.config.model.name).toBe("openai/gpt-5.4-mini");
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa"]);
@@ -83,8 +85,6 @@ describe(".agent files", () => {
     });
 
     expect(hashAgentSource(source)).toBe(hashAgentSource(source));
-    expect(hashAgentSource(source)).not.toBe(
-      hashAgentSource(source.replace("@exa", "@deep")),
-    );
+    expect(hashAgentSource(source)).not.toBe(hashAgentSource(source.replace("@exa", "@deep")));
   });
 });

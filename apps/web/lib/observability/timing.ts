@@ -73,7 +73,5 @@ function logTiming(
 function cleanMetadata(metadata?: TimingMetadata) {
   if (!metadata) return {};
 
-  return Object.fromEntries(
-    Object.entries(metadata).filter(([, value]) => value !== undefined),
-  );
+  return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined));
 }

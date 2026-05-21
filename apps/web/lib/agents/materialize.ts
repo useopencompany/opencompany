@@ -3,15 +3,8 @@ import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
-import {
-  ensureWorkspaceRepository,
-  writeWorkspaceFile,
-} from "@/lib/workspace-state/github";
-import {
-  endTimingTrace,
-  startTimingTrace,
-  timeAsync,
-} from "@/lib/observability/timing";
+import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
+import { ensureWorkspaceRepository, writeWorkspaceFile } from "@/lib/workspace-state/github";
 
 type MaterializeMode = "scheduled" | "force";
 
@@ -75,10 +68,7 @@ export async function materializeAgentToGitHub(
       db
         .delete(agentSyncJobs)
         .where(
-          and(
-            eq(agentSyncJobs.agentId, row.agent.id),
-            eq(agentSyncJobs.desiredHash, contentHash),
-          ),
+          and(eq(agentSyncJobs.agentId, row.agent.id), eq(agentSyncJobs.desiredHash, contentHash)),
         ),
     );
     endTimingTrace(trace, { status: "unchanged", path: row.agent.path });
@@ -133,10 +123,7 @@ export async function materializeAgentToGitHub(
       db
         .delete(agentSyncJobs)
         .where(
-          and(
-            eq(agentSyncJobs.agentId, row.agent.id),
-            eq(agentSyncJobs.desiredHash, contentHash),
-          ),
+          and(eq(agentSyncJobs.agentId, row.agent.id), eq(agentSyncJobs.desiredHash, contentHash)),
         ),
     );
 

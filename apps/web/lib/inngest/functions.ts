@@ -1,6 +1,6 @@
-import { inngest } from "@/lib/inngest/client";
 import { materializeAgentToGitHub } from "@/lib/agents/materialize";
 import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
+import { inngest } from "@/lib/inngest/client";
 
 export const syncAgentToGitHub = inngest.createFunction(
   {

@@ -1,11 +1,5 @@
-import type {
-  AgentConfig,
-  AgentConfigTool,
-  AgentFile,
-  AgentModelId,
-  AgentToolId,
-} from "./types";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "./config";
+import type { AgentConfig, AgentConfigTool, AgentFile, AgentModelId, AgentToolId } from "./types";
 
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, model]));

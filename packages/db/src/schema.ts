@@ -1,13 +1,5 @@
 import { relations, sql } from "drizzle-orm";
-import {
-  index,
-  integer,
-  jsonb,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-} from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export type TiptapDoc = {
   type: "doc";
@@ -124,10 +116,7 @@ export const agents = pgTable(
   },
   (table) => ({
     workspaceIdx: index("agents_workspace_idx").on(table.workspaceId),
-    workspacePathIdx: uniqueIndex("agents_workspace_path_idx").on(
-      table.workspaceId,
-      table.path,
-    ),
+    workspacePathIdx: uniqueIndex("agents_workspace_path_idx").on(table.workspaceId, table.path),
   }),
 );
 
@@ -170,9 +159,7 @@ export const workspaceRepositories = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    fullNameIdx: uniqueIndex("workspace_repositories_full_name_idx").on(
-      table.fullName,
-    ),
+    fullNameIdx: uniqueIndex("workspace_repositories_full_name_idx").on(table.fullName),
   }),
 );
 
@@ -241,15 +228,12 @@ export const agentSyncJobsRelations = relations(agentSyncJobs, ({ one }) => ({
   }),
 }));
 
-export const workspaceRepositoriesRelations = relations(
-  workspaceRepositories,
-  ({ one }) => ({
-    workspace: one(workspaces, {
-      fields: [workspaceRepositories.workspaceId],
-      references: [workspaces.id],
-    }),
+export const workspaceRepositoriesRelations = relations(workspaceRepositories, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceRepositories.workspaceId],
+    references: [workspaces.id],
   }),
-);
+}));
 
 export const workspaceMembershipsRelations = relations(workspaceMemberships, ({ one }) => ({
   workspace: one(workspaces, {

@@ -4,8 +4,8 @@ import Link from "next/link";
 import {
   AGENT_MODELS,
   AGENT_TOOLS,
-  findMentionItem,
   type AgentMentionItem,
+  findMentionItem,
 } from "@/components/agent-editor/tools";
 import { createAgent } from "@/lib/agents/actions";
 
@@ -79,9 +79,7 @@ function AgentRow({ agent }: { agent: Agent }) {
         <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">{agent.name}</span>
         <span className="truncate text-[12px] text-ink-muted">
           {selectedModel
-            ? `${selectedModel.label} model, ${tools.length} tool${
-                tools.length === 1 ? "" : "s"
-              }`
+            ? `${selectedModel.label} model, ${tools.length} tool${tools.length === 1 ? "" : "s"}`
             : tools.length > 0
               ? `${tools.length} tool${tools.length === 1 ? "" : "s"} mentioned`
               : "Default model, no tools mentioned yet"}
@@ -116,9 +114,8 @@ export default function AgentsView({ agents }: { agents: Agent[] }) {
           <div>
             <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Agents</h1>
             <p className="mt-1 text-[13px] tracking-[-0.005em] text-ink-muted">
-              Each agent is a natural-language brief. @-mention a model or tool
-              to shape how it runs. {modelCount} models and {toolCount} tool
-              available.
+              Each agent is a natural-language brief. @-mention a model or tool to shape how it
+              runs. {modelCount} models and {toolCount} tool available.
             </p>
           </div>
           <NewAgentButton />

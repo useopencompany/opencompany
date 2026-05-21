@@ -4,14 +4,7 @@ import { env, exit } from "node:process";
 
 const port = env.PORT || "3000";
 const sdkUrl = env.INNGEST_SDK_URL || `http://localhost:${port}/api/inngest`;
-const args = [
-  "--yes",
-  "--ignore-scripts=false",
-  "inngest-cli@latest",
-  "dev",
-  "--sdk-url",
-  sdkUrl,
-];
+const args = ["--yes", "--ignore-scripts=false", "inngest-cli@latest", "dev", "--sdk-url", sdkUrl];
 
 const result = spawnSync("npx", args, {
   env: {
