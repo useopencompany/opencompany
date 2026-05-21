@@ -2,13 +2,22 @@ import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 import { MentionList, type MentionListHandle } from "./MentionList";
-import { AGENT_TOOLS, type AgentTool } from "./tools";
+import { AGENT_MENTION_ITEMS, type AgentMentionItem } from "./tools";
 
-export const mentionSuggestion: Omit<SuggestionOptions<AgentTool>, "editor"> = {
+export const mentionSuggestion: Omit<SuggestionOptions<AgentMentionItem>, "editor"> = {
   char: "@",
   items: ({ query }) => {
     const q = query.toLowerCase();
-    return AGENT_TOOLS.filter((t) => t.label.toLowerCase().includes(q));
+    return AGENT_MENTION_ITEMS.filter((item) => {
+      return (
+        item.kind.includes(q) ||
+        item.id.toLowerCase().includes(q) ||
+        item.mentionId.toLowerCase().includes(q) ||
+        item.label.toLowerCase().includes(q) ||
+        item.displayLabel.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q)
+      );
+    });
   },
   render: () => {
     let component: ReactRenderer<MentionListHandle> | null = null;

@@ -2,9 +2,13 @@
 
 We use [Neon](https://neon.tech) (serverless Postgres) with [Drizzle ORM](https://orm.drizzle.team).
 
-## Why per-branch databases
+## Default local database
 
-Each Git branch gets its own Neon branch. Schema migrations, seed data, and destructive experiments stay isolated. Switching Git branches means switching databases — no fear of breaking a teammate or your own other branch.
+Most local checkouts use the shared Development `DATABASE_URL` from Vercel. `bun run setup` and `bun run env:pull` keep that value in `.env.local`, then `bun run db:migrate` applies any pending migrations.
+
+## Optional per-branch databases
+
+The repo still has scripts for a per-branch Neon workflow. In that mode, each Git branch gets its own Neon branch. Schema migrations, seed data, and destructive experiments stay isolated. Switching Git branches means switching databases.
 
 Neon branches are copy-on-write, so creation is instant and cheap (a few MB until you start diverging).
 
@@ -63,8 +67,10 @@ Current tables (see `packages/db/src/schema.ts` for the source of truth):
 - `users` — one row per WorkOS user, keyed by `usr_<workos_id>`.
 - `workspaces` — tenant boundary; one default workspace per user on first sign-in.
 - `workspace_memberships` — many-to-many user↔workspace with a `role`.
-- `agents` — workspace-scoped agent documents.
-- `onboarding_responses` — one onboarding response per user, tied to a workspace.
+- `agents` — latest editable agent state: path, title/body, parsed config, content hash, version, and GitHub sync status.
+- `agent_sync_jobs` — desired GitHub materialization state for an agent edit. Repeated edits coalesce by updating the same row.
+- `workspace_repositories` — one managed private GitHub repo per workspace, including repo id, full name, default branch, and latest head SHA.
+- `onboarding_responses` — user's onboarding answers for a workspace.
 
 All app data should hang off `workspaces` so multi-tenant isolation is enforceable from day one.
 

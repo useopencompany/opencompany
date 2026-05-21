@@ -249,7 +249,7 @@ export default function ChatView() {
             <h3 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">Summary</h3>
             <ul className="space-y-1.5 pl-4 [&>li]:list-disc [&>li]:marker:text-ink-subtle">
               <li>
-                Added <Code>AGENTS.md</Code> with Cursor / Cloud development instructions covering
+                Added <Code>AGENTS.md</Code> with local and Cloud development instructions covering
                 services, key commands, and non-obvious caveats.
               </li>
               <li>

@@ -22,7 +22,7 @@ function Prompt() {
     <div className="rounded-xl border border-[#e4e4e0] bg-white px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]">
       <input
         type="text"
-        placeholder="Ask Cursor to build, fix bugs, explore"
+        placeholder="Ask Open Company to build, fix bugs, explore"
         className="w-full bg-transparent text-[14px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
       />
       <div className="mt-6 flex items-center gap-2">

@@ -23,7 +23,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
 
-const SIDEBAR_STORAGE_KEY = "cursor-sidebar-collapsed";
+const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 
 function getStoredSidebarCollapsed() {
   if (typeof window === "undefined") return false;
@@ -144,7 +144,7 @@ function AccountMenu({
   }> = [
     { icon: MessageSquarePlus, label: "Feedback", action: onFeedbackOpen },
     { icon: Settings, label: "Settings", href: "/settings" },
-    // { icon: Download, label: "Download Cursor macOS" },
+    // { icon: Download, label: "Download Open Company macOS" },
     // { icon: CircleEqual, label: "Appearance", detail: "System" },
     { icon: ScrollText, label: "Changelog", href: "/changelog" },
     { icon: CircleHelp, label: "Docs", href: "/docs" },

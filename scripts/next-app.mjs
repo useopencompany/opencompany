@@ -7,10 +7,20 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const appRoot = join(repoRoot, "apps", "web");
 const args = argv.slice(2);
+const env = { ...process.env };
+
+if (args[0] === "dev") {
+  env.INNGEST_DEV ??= "1";
+  env.PORT ??= "3000";
+  const hasPortArg = args.includes("-p") || args.includes("--port");
+  if (!hasPortArg) {
+    args.push("--port", env.PORT);
+  }
+}
 
 const result = spawnSync("bunx", ["next", ...args], {
   cwd: appRoot,
-  env: process.env,
+  env,
   stdio: "inherit",
 });
 

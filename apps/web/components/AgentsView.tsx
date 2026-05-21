@@ -1,44 +1,35 @@
-import type { Agent, TiptapDoc } from "@opencompany/db/schema";
+import type { Agent } from "@opencompany/db/schema";
 import { AtSign, Bot } from "lucide-react";
 import Link from "next/link";
-import { AGENT_TOOLS, type AgentTool, findTool } from "@/components/agent-editor/tools";
+import {
+  AGENT_MODELS,
+  AGENT_TOOLS,
+  type AgentMentionItem,
+  findMentionItem,
+} from "@/components/agent-editor/tools";
 import { createAgent } from "@/lib/agents/actions";
 
-type TiptapNode = {
-  type?: string;
-  attrs?: { id?: string } & Record<string, unknown>;
-  content?: TiptapNode[];
-};
+function collectMentions(agent: Agent): AgentMentionItem[] {
+  const model = findMentionItem(`model:${agent.config.model.name}`);
+  const tools = agent.config.tools.flatMap((tool) => {
+    const item = findMentionItem(`tool:${tool.id}`);
+    return item ? [item] : [];
+  });
 
-function collectMentions(doc: TiptapDoc): AgentTool[] {
-  const seen = new Set<string>();
-  const out: AgentTool[] = [];
-  const walk = (node: TiptapNode | undefined) => {
-    if (!node) return;
-    if (node.type === "mention" && node.attrs?.id) {
-      const tool = findTool(node.attrs.id);
-      if (tool && !seen.has(tool.id)) {
-        seen.add(tool.id);
-        out.push(tool);
-      }
-    }
-    node.content?.forEach(walk);
-  };
-  walk(doc as TiptapNode);
-  return out;
+  return model ? [model, ...tools] : tools;
 }
 
-function MentionPill({ tool }: { tool: AgentTool }) {
-  const Icon = tool.icon;
+function MentionPill({ item }: { item: AgentMentionItem }) {
+  const Icon = item.icon;
   return (
     <span className="inline-flex h-[18px] items-center gap-1 rounded-[5px] border border-[#e6e6e3] bg-[#fafaf8] px-1.5 text-[10.5px] font-medium text-ink/85">
       <Icon size={9.5} strokeWidth={1.9} className="text-ink-muted" />
-      <span className="truncate max-w-[88px]">{tool.label}</span>
+      <span className="truncate max-w-[88px]">{item.label}</span>
     </span>
   );
 }
 
-function MarkdownPreviewThumb({ mentions }: { mentions: AgentTool[] }) {
+function MarkdownPreviewThumb({ mentions }: { mentions: AgentMentionItem[] }) {
   const visible = mentions.slice(0, 4);
   const overflow = mentions.length - visible.length;
   return (
@@ -53,7 +44,7 @@ function MarkdownPreviewThumb({ mentions }: { mentions: AgentTool[] }) {
           {visible.length === 0 ? (
             <span className="text-[10px] text-ink-subtle/80">none yet</span>
           ) : (
-            visible.map((m) => <MentionPill key={m.id} tool={m} />)
+            visible.map((m) => <MentionPill key={m.mentionId} item={m} />)
           )}
           {overflow > 0 && (
             <span className="inline-flex h-[18px] items-center rounded-[5px] bg-[#f0f0ec] px-1.5 text-[10px] font-medium text-ink-muted">
@@ -67,20 +58,33 @@ function MarkdownPreviewThumb({ mentions }: { mentions: AgentTool[] }) {
 }
 
 function AgentRow({ agent }: { agent: Agent }) {
-  const mentions = collectMentions(agent.content);
+  const mentions = collectMentions(agent);
+  const models = mentions.filter((mention) => mention.kind === "model");
+  const tools = mentions.filter((mention) => mention.kind === "tool");
+  const selectedModel = models.at(-1);
+  const href = `/agents/${agent.path ?? agent.id}`;
+  const syncLabel =
+    agent.githubSyncStatus === "failed"
+      ? "GitHub sync failed"
+      : agent.githubSyncStatus === "pending" || agent.githubSyncStatus === "syncing"
+        ? "Syncing"
+        : "Synced";
   return (
     <Link
-      href={`/agents/${agent.id}`}
+      href={href}
       className="group relative flex w-full items-center gap-4 rounded-lg px-2 py-2 text-left transition-colors duration-150 hover:bg-[#ececea]/70 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/15"
     >
       <MarkdownPreviewThumb mentions={mentions} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">{agent.name}</span>
         <span className="truncate text-[12px] text-ink-muted">
-          {mentions.length > 0
-            ? `${mentions.length} tool${mentions.length === 1 ? "" : "s"} mentioned`
-            : "No tools mentioned yet"}
+          {selectedModel
+            ? `${selectedModel.label} model, ${tools.length} tool${tools.length === 1 ? "" : "s"}`
+            : tools.length > 0
+              ? `${tools.length} tool${tools.length === 1 ? "" : "s"} mentioned`
+              : "Default model, no tools mentioned yet"}
         </span>
+        <span className="text-[11px] text-ink-subtle">{syncLabel}</span>
       </div>
     </Link>
   );
@@ -102,6 +106,7 @@ function NewAgentButton({ label = "New Agent" }: { label?: string }) {
 
 export default function AgentsView({ agents }: { agents: Agent[] }) {
   const toolCount = AGENT_TOOLS.length;
+  const modelCount = AGENT_MODELS.length;
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[680px] px-6 pb-16 pt-10">
@@ -109,8 +114,8 @@ export default function AgentsView({ agents }: { agents: Agent[] }) {
           <div>
             <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Agents</h1>
             <p className="mt-1 text-[13px] tracking-[-0.005em] text-ink-muted">
-              Each agent is a natural-language brief. @-mention a tool to give it capabilities.{" "}
-              {toolCount} tool available.
+              Each agent is a natural-language brief. @-mention a model or tool to shape how it
+              runs. {modelCount} models and {toolCount} tool available.
             </p>
           </div>
           <NewAgentButton />

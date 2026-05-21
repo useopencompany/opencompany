@@ -1,0 +1,1 @@
+ALTER TABLE "agents" ADD COLUMN "config" jsonb DEFAULT '{"schemaVersion":"agent.v1","name":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[]}'::jsonb NOT NULL;

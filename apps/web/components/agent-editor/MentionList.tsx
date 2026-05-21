@@ -1,41 +1,87 @@
 "use client";
 
+import { ChevronLeft, ChevronRight, Cpu, Wrench } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import type { AgentTool } from "./tools";
+import type { AgentMentionItem } from "./tools";
 
 export type MentionListHandle = {
   onKeyDown: (event: KeyboardEvent) => boolean;
 };
 
 type Props = {
-  items: AgentTool[];
+  items: AgentMentionItem[];
+  query?: string;
   command: (item: { id: string; label: string }) => void;
 };
 
 export const MentionList = forwardRef<MentionListHandle, Props>(function MentionList(
-  { items, command },
+  { items, query = "", command },
   ref,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [activeKind, setActiveKind] = useState<AgentMentionItem["kind"] | null>(null);
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const categoryRows = [
+    {
+      type: "category" as const,
+      kind: "model" as const,
+      label: "Models",
+      description: `${items.filter((item) => item.kind === "model").length} available`,
+      icon: Cpu,
+    },
+    {
+      type: "category" as const,
+      kind: "tool" as const,
+      label: "Tools",
+      description: `${items.filter((item) => item.kind === "tool").length} available`,
+      icon: Wrench,
+    },
+  ].filter((row) => items.some((item) => item.kind === row.kind));
+
+  const visibleItems =
+    activeKind && normalizedQuery.length === 0
+      ? items.filter((item) => item.kind === activeKind)
+      : items;
+
+  const rows =
+    normalizedQuery.length === 0 && !activeKind
+      ? categoryRows
+      : visibleItems.map((item) => ({ type: "item" as const, item }));
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [items]);
+  }, [activeKind, items, query]);
+
+  useEffect(() => {
+    if (normalizedQuery.length > 0) setActiveKind(null);
+  }, [normalizedQuery]);
 
   const select = (index: number) => {
-    const item = items[index];
-    if (!item) return;
-    command({ id: item.id, label: item.label });
+    const row = rows[index];
+    if (!row) return;
+    if (row.type === "category") {
+      setActiveKind(row.kind);
+      setSelectedIndex(0);
+      return;
+    }
+    command({ id: row.item.mentionId, label: row.item.label });
   };
 
   useImperativeHandle(ref, () => ({
     onKeyDown: (event) => {
+      if (event.key === "ArrowLeft" && activeKind) {
+        setActiveKind(null);
+        setSelectedIndex(0);
+        return true;
+      }
+      if (rows.length === 0) return false;
       if (event.key === "ArrowUp") {
-        setSelectedIndex((selectedIndex + items.length - 1) % items.length);
+        setSelectedIndex((selectedIndex + rows.length - 1) % rows.length);
         return true;
       }
       if (event.key === "ArrowDown") {
-        setSelectedIndex((selectedIndex + 1) % items.length);
+        setSelectedIndex((selectedIndex + 1) % rows.length);
         return true;
       }
       if (event.key === "Enter") {
@@ -46,34 +92,82 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
     },
   }));
 
-  if (items.length === 0) {
+  if (rows.length === 0) {
     return (
-      <div className="rounded-md border border-[#e6e6e3] bg-white px-2 py-1.5 text-[12px] text-ink-muted shadow-[0_4px_12px_rgba(15,15,15,0.08)]">
+      <div className="w-[238px] rounded-md border border-black/[0.08] bg-[#fbfbfa] px-2.5 py-1.5 text-[12px] text-ink-muted shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]">
         No matches
       </div>
     );
   }
 
   return (
-    <div className="min-w-[160px] overflow-hidden rounded-md border border-[#e6e6e3] bg-white p-1 shadow-[0_4px_12px_rgba(15,15,15,0.08)]">
-      {items.map((item, index) => {
-        const Icon = item.icon;
+    <div
+      role="listbox"
+      className="w-[238px] overflow-hidden rounded-md border border-black/[0.08] bg-[#fbfbfa] p-1 shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]"
+    >
+      {activeKind && normalizedQuery.length === 0 && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            setActiveKind(null);
+            setSelectedIndex(0);
+          }}
+          className="mb-0.5 flex h-6 w-full items-center gap-1 rounded px-1.5 text-left text-[11.5px] font-medium text-ink-muted hover:bg-[#eeeeeb]/70"
+        >
+          <ChevronLeft size={12} strokeWidth={1.9} />
+          {activeKind === "model" ? "Models" : "Tools"}
+        </button>
+      )}
+      {rows.map((row, index) => {
+        const Icon = row.type === "category" ? row.icon : row.item.icon;
         const active = index === selectedIndex;
+        const kind = row.type === "category" ? row.kind : row.item.kind;
+        const previous = rows[index - 1];
+        const previousKind = previous?.type === "category" ? previous.kind : previous?.item.kind;
+        const showHeading = normalizedQuery.length > 0 && (!previous || previousKind !== kind);
         return (
-          <button
-            key={item.id}
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => select(index)}
-            onMouseEnter={() => setSelectedIndex(index)}
-            className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12.5px] ${
-              active ? "bg-[#f1f1ee] text-ink" : "text-ink/85 hover:bg-[#f5f5f1]"
-            }`}
-          >
-            <Icon size={11} strokeWidth={1.9} className="text-ink-muted" />
-            <span>{item.label}</span>
-            <span className="ml-auto text-[10.5px] text-ink-subtle">tool</span>
-          </button>
+          <div key={row.type === "category" ? row.kind : row.item.mentionId}>
+            {showHeading && (
+              <div className="px-1.5 pb-0.5 pt-1 text-[9.5px] font-medium uppercase text-ink-subtle">
+                {kind === "model" ? "Models" : "Tools"}
+              </div>
+            )}
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => select(index)}
+              onMouseEnter={() => setSelectedIndex(index)}
+              role="option"
+              aria-selected={active}
+              className={`flex min-h-[38px] w-full items-center gap-1.5 rounded px-1.5 py-1 text-left transition-colors duration-150 ${
+                active ? "bg-[#eeeeeb] text-ink" : "text-ink/90 hover:bg-[#eeeeeb]/70"
+              }`}
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-black/[0.07] bg-white/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]">
+                <Icon size={12.5} strokeWidth={1.85} className="text-ink-muted" />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-[12px] font-medium text-ink">
+                  {row.type === "category" ? row.label : row.item.displayLabel}
+                </span>
+                <span className="truncate text-[10.5px] leading-[1.25] text-ink-subtle">
+                  {row.type === "category" ? row.description : row.item.description}
+                </span>
+              </span>
+              {row.type === "category" ? (
+                <ChevronRight
+                  size={12}
+                  strokeWidth={1.9}
+                  className="ml-1 shrink-0 text-ink-subtle"
+                />
+              ) : (
+                <span className="ml-1 shrink-0 rounded-[4px] bg-[#ececea] px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
+                  {row.item.kind}
+                </span>
+              )}
+            </button>
+          </div>
         );
       })}
     </div>

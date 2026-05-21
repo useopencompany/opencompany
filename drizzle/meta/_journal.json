@@ -22,6 +22,27 @@
       "when": 1779357397125,
       "tag": "0002_lovely_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779368873108,
+      "tag": "0003_cool_black_crow",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779370423517,
+      "tag": "0004_nostalgic_silvermane",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779378592880,
+      "tag": "0005_many_pride",
+      "breakpoints": true
     }
   ]
 }
