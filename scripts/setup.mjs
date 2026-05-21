@@ -275,8 +275,10 @@ async function main() {
   await runMigrations();
 
   console.log(
-    "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m and open http://localhost:3000\n",
+    "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open http://localhost:3000\n",
   );
+
+  run("bun", ["run", "dev"]);
 }
 
 main().catch((err) => {
