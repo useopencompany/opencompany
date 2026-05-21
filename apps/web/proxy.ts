@@ -5,10 +5,10 @@ export default authkitProxy({
   redirectUri: getWorkOSRedirectUri(),
   middlewareAuth: {
     enabled: true,
-    unauthenticatedPaths: ["/", "/auth/callback", "/auth/sign-in"],
+    unauthenticatedPaths: ["/", "/auth/callback", "/auth/sign-in", "/docs", "/docs/:path*"],
   },
 });
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|docs(?:/.*)?).*)"],
 };
