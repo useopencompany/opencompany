@@ -163,14 +163,14 @@ function AgentCard({
   );
 }
 
-export default function MainPanel() {
+export default function MainPanel({ workspaceName }: { workspaceName: string }) {
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       {/* Centered column */}
       <div className="mx-auto w-full max-w-[680px] px-6 pt-10">
         {/* Repo / branch row */}
         <div className="mb-3 flex items-center gap-1">
-          <RepoChip label="acta-website" />
+          <RepoChip label={workspaceName} />
           <RepoChip label="main" />
         </div>
 

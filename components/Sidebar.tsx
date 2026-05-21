@@ -9,8 +9,8 @@ import {
   BookText,
   Building2,
   Inbox,
+  LogOut,
   MoreHorizontal,
-  ListFilter,
   MessageSquarePlus,
   Network,
   Users,
@@ -87,7 +87,15 @@ function HistoryItem({
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  userName,
+  userEmail,
+  workspaceName,
+}: {
+  userName: string;
+  userEmail: string;
+  workspaceName: string;
+}) {
   const pathname = usePathname();
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
@@ -161,18 +169,23 @@ export default function Sidebar() {
           }}
         />
         <div className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink">
-            Louis Morgner
+          <span title={userEmail} className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink">
+            {userName}
           </span>
-          <span className="truncate text-[11px] text-ink-subtle">Pro</span>
+          <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
         </div>
         <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
           <button className="rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20">
             <MoreHorizontal size={14} strokeWidth={1.75} />
           </button>
-          <button className="rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20">
-            <ListFilter size={14} strokeWidth={1.75} />
-          </button>
+          <Link
+            href="/auth/sign-out"
+            aria-label="Sign out"
+            title="Sign out"
+            className="rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <LogOut size={14} strokeWidth={1.75} />
+          </Link>
         </div>
       </div>
     </aside>

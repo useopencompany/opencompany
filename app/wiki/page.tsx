@@ -1,11 +1,10 @@
-import Sidebar from "@/components/Sidebar";
+import AppShell from "@/components/AppShell";
 import WikiView from "@/components/WikiView";
 
 export default function WikiPage() {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-      <Sidebar />
+    <AppShell>
       <WikiView />
-    </div>
+    </AppShell>
   );
 }
