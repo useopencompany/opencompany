@@ -3,6 +3,7 @@
 - [getting-started.md](./getting-started.md) — first-time setup, fastest path to a running dev environment.
 - [database.md](./database.md) — Neon branching workflow, schema changes, Drizzle.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
+- [../CONTRIBUTING.md](../CONTRIBUTING.md) — local checks, CI gates, conventions.
 
 ## Repo layout
 
@@ -10,6 +11,10 @@
 - `packages/db` — shared Drizzle schema and database client exports.
 - `scripts` — repo-wide setup, env, and database automation.
 - `drizzle` — checked-in database migrations.
+
+## Quality gates
+
+Every PR runs `format:check`, `lint`, `typecheck`, `build`, `test`, and `gitleaks` on GitHub Actions. End-to-end (Playwright) tests are local-only for now — see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Skills
 

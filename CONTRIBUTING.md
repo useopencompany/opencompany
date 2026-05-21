@@ -2,24 +2,44 @@
 
 This repo is optimized for small, reviewable PRs from humans and coding agents.
 
-Before opening a PR, run:
+## Local checks
+
+Before opening a PR, run the same gates that CI runs:
 
 ```bash
-bun run lint
-bun run typecheck
-bun run build
-bun run test
-bun run format:check
+bun run format:check   # biome
+bun run lint           # eslint (next config)
+bun run typecheck      # tsc --noEmit
+bun run build          # next build
+bun run test           # vitest, unit tests only
 ```
 
-Use these labels when they clarify review risk:
+If `gitleaks` is installed locally, also run `bun run secrets:check`. CI runs it on every PR regardless.
 
-- `schema` for Drizzle schema or migration changes.
-- `env` for environment variable or setup changes.
-- `auth` for WorkOS/session changes.
-- `ci` for workflow, test, or tooling changes.
-- `risk:high` for changes that affect production data, auth, billing, or broad user flows.
+End-to-end tests live in `apps/web/e2e` and run against a local dev server. They are **not** in CI yet — there's no Postgres service wired up — so they are opt-in:
 
-If you add an env var, update `.env.example` and the relevant docs. If you change `packages/db/src/schema.ts`, commit the generated migration under `drizzle/`.
+```bash
+bun run --filter @opencompany/web test:e2e
+```
 
-Enable GitHub secret scanning and push protection for the repository or organization. CI also runs Gitleaks, but push protection catches leaked credentials earlier.
+## Tooling notes
+
+- **Biome is the formatter; ESLint is the linter.** Biome handles formatting and import ordering only — its lint rules are off. ESLint stays on for Next-specific rules. Don't enable both without auditing rule overlap.
+- **CI placeholder envs.** The workflow injects placeholder values for `DATABASE_URL` / `WORKOS_*` so `next build` can run without a real database. Production builds still need real secrets via Vercel.
+- **Secret scanning.** Gitleaks runs on every PR with `.gitleaks.toml` allowing documented placeholders like `sk_test_...`. Enable GitHub's native push protection too — it catches leaks before they hit CI.
+
+## Labels
+
+Use these when they clarify review risk:
+
+- `schema` — Drizzle schema or migration changes
+- `env` — environment variable or setup changes
+- `auth` — WorkOS or session changes
+- `ci` — workflow, test, or tooling changes
+- `risk:high` — production data, auth, billing, or broad user flows
+
+## Conventions
+
+- Add a Drizzle migration for any change to `packages/db/src/schema.ts`.
+- Update `.env.example` and the relevant doc when adding an env var.
+- Prefer unit-testable pure modules (see `apps/web/lib/onboarding/validation.ts`) over deeply mocked server-action tests.
