@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   PanelRight,
   Search,
+  Sparkles,
   Star,
 } from "lucide-react";
 
@@ -74,7 +75,7 @@ const commits = [
     sha: "6d91bb0",
   },
   {
-    message: "Initial wiki import",
+    message: "Initial brain import",
     author: "Nora",
     age: "5d",
     sha: "2ac4ef8",
@@ -260,7 +261,7 @@ function MarkdownArticle() {
             <BookOpenText size={17} strokeWidth={1.8} />
           </span>
           <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
-            Project wiki
+            Project brain
           </span>
         </div>
         <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
@@ -279,7 +280,7 @@ function MarkdownArticle() {
           </h2>
           <p className="mt-3">
             This repository contains the public Next.js website, Payload CMS admin surface, shared
-            schema definitions, and the scripts used to keep local development predictable. The wiki
+            schema definitions, and the scripts used to keep local development predictable. The brain
             is versioned with the codebase so product notes and implementation details move through
             review with the changes they describe.
           </p>
@@ -348,7 +349,7 @@ bun run dev`}</code>
           </h2>
           <p className="mt-3">
             Pages and posts are edited in the Payload admin panel. Schema changes should include a
-            migration, fixture update, and a short note in this wiki when the editor workflow changes
+            migration, fixture update, and a short note in this brain when the editor workflow changes
             for content authors.
           </p>
           <blockquote className="mt-4 border-l-2 border-[#c9c9c2] pl-4 text-[13.5px] leading-6 text-ink-muted">
@@ -444,9 +445,30 @@ function TopBar() {
   );
 }
 
-export default function WikiView() {
+function ComingSoonOverlay() {
   return (
-    <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
+    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-canvas/70 backdrop-blur-[3px]">
+      <div className="pointer-events-auto mx-6 max-w-[380px] rounded-xl border border-[#e6e6e3] bg-white/95 px-6 py-5 text-center shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
+        <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-[#ececea] text-ink">
+          <Sparkles size={16} strokeWidth={1.8} />
+        </div>
+        <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
+          Coming soon
+        </div>
+        <h2 className="mt-1.5 text-[18px] font-semibold tracking-[-0.01em] text-ink">
+          Brain
+        </h2>
+        <p className="mt-2 text-[13px] leading-5 text-ink-muted">
+          A versioned knowledge base for your repo. Not part of the MVP — check back soon.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function BrainView() {
+  return (
+    <main className="relative flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
       <GitSidebar />
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
@@ -457,6 +479,7 @@ export default function WikiView() {
           <OutlinePanel />
         </div>
       </section>
+      <ComingSoonOverlay />
     </main>
   );
 }

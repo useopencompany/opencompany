@@ -11,13 +11,13 @@ Goal: catch the things humans forget right before merging — out-of-date docs, 
 
 Work against `origin/main`. Use `git diff --name-only origin/main...HEAD` to get the list of changed files, then run checks based on what's in that list. Skip checks whose triggers don't fire.
 
-Always run lint and the schema/migration check. Other checks are conditional.
+Always run lint, typecheck, and the schema/migration check. Other checks are conditional.
 
 ## Checks
 
-### 1. Lint (always)
+### 1. Lint + typecheck (always)
 
-Run `bun run lint` (which is `tsc --noEmit`). If it fails, report the errors.
+Run `bun run lint` (eslint) and `bun run typecheck` (`tsc --noEmit`). If either fails, report the errors.
 
 ### 2. Schema ↔ migration (always)
 

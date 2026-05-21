@@ -3,12 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "bun@1.3.2",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "vercel-build": "bun run db:migrate && next build",
     "start": "next start",
-    "lint": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
     "setup": "node scripts/setup.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -21,19 +26,24 @@
     "@workos-inc/authkit-nextjs": "^3.0.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.460.0",
-    "next": "^15.5.18",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "overrides": {
+    "postcss": "$postcss"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
-    "@types/react": "^19.2.15",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
     "autoprefixer": "^10.4.20",
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
     "neonctl": "^2.22.0",
-    "postcss": "^8.4.49",
+    "postcss": "8.5.15",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.3"
   }
