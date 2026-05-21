@@ -39,11 +39,10 @@ bun run build
 bun run test
 ```
 
-If `gitleaks` is installed, also run:
+If `trufflehog` is installed, also run:
 
 ```bash
 bun run secrets:check
-gitleaks git . --config .gitleaks.toml --verbose
 ```
 
 If any command fails, report the failing command and the relevant error. If Turbo reports cached results, that is acceptable for a quick pre-merge pass, but prefer direct package commands when debugging a failure.

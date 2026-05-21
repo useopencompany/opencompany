@@ -15,7 +15,7 @@
 
 ## Quality gates
 
-Every PR runs `format:check`, `lint`, `typecheck`, `build`, `test`, and `gitleaks` on GitHub Actions. End-to-end (Playwright) tests are local-only for now — see [CONTRIBUTING.md](../CONTRIBUTING.md).
+Every PR runs `format:check`, `lint`, `typecheck`, `build`, `test`, and TruffleHog secret scanning on GitHub Actions. End-to-end (Playwright) tests are local-only for now — see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Skills
 

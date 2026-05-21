@@ -14,7 +14,7 @@ bun run build          # next build
 bun run test           # vitest, unit tests only
 ```
 
-If `gitleaks` is installed locally, also run `bun run secrets:check`. CI runs it on every PR regardless.
+If `trufflehog` is installed locally (`brew install trufflehog`), also run `bun run secrets:check`. CI runs it on every PR regardless.
 
 End-to-end tests live in `apps/web/e2e` and run against a local dev server. They are **not** in CI yet — there's no Postgres service wired up — so they are opt-in:
 
@@ -26,7 +26,7 @@ bun run --filter @opencompany/web test:e2e
 
 - **Biome is the formatter; ESLint is the linter.** Biome handles formatting and import ordering only — its lint rules are off. ESLint stays on for Next-specific rules. Don't enable both without auditing rule overlap.
 - **CI placeholder envs.** The workflow injects placeholder values for `DATABASE_URL` / `WORKOS_*` so `next build` can run without a real database. Production builds still need real secrets via Vercel.
-- **Secret scanning.** Gitleaks runs on every PR with `.gitleaks.toml` allowing documented placeholders like `sk_test_...`. Enable GitHub's native push protection too — it catches leaks before they hit CI.
+- **Secret scanning.** TruffleHog runs on every PR (free, AGPL-3.0 — no license signup required, unlike gitleaks-action). It scans for verified and unknown secrets across the diff. Enable GitHub's native push protection too — it catches leaks before they hit CI.
 
 ## Labels
 

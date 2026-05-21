@@ -23,7 +23,7 @@ bun run dev
 
 ## Quality gates
 
-Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `test`, and `gitleaks`. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full list and the local commands.
+Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `test`, and TruffleHog secret scanning. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full list and the local commands.
 
 ## Docs
 
