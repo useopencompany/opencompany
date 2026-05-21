@@ -1,12 +1,7 @@
 "use client";
 
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useState,
-} from "react";
 import { ChevronLeft, ChevronRight, Cpu, Wrench } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
 export type MentionListHandle = {

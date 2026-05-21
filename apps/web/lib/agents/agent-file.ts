@@ -99,7 +99,7 @@ export function extractMentionIds(body: string) {
   for (let index = 0; index < body.length; index += 1) {
     if (body[index] !== "@") continue;
     let end = index + 1;
-    while (end < body.length && isMentionChar(body[end])) {
+    while (end < body.length && isMentionChar(body[end] ?? "")) {
       end += 1;
     }
     const id = body.slice(index + 1, end).replace(/[.,;:!?)}\]]+$/g, "");
@@ -186,11 +186,11 @@ function parseFrontmatter(yaml: string): Frontmatter {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    if (line === undefined || !line.trim() || line.trimStart().startsWith("#")) continue;
 
     const match = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
     if (!match) continue;
-    const [, key, rawValue] = match;
+    const [, key, rawValue = ""] = match;
 
     if (key === "title") {
       frontmatter.title = unquoteYamlString(rawValue);
@@ -216,7 +216,7 @@ function parseFrontmatter(yaml: string): Frontmatter {
       const tools: string[] = [];
       while (lines[index + 1]?.startsWith("  - ")) {
         index += 1;
-        tools.push(unquoteYamlString(lines[index].slice("  - ".length)));
+        tools.push(unquoteYamlString((lines[index] ?? "").slice("  - ".length)));
       }
       frontmatter.tools = tools;
     }

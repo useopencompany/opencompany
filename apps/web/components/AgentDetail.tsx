@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
-import { updateAgent } from "@/lib/agents/actions";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { updateAgent } from "@/lib/agents/actions";
 
 type Props = {
   id: string;
@@ -72,7 +72,7 @@ export default function AgentDetail({
           <div className="flex items-center gap-2 tabular-nums text-ink-subtle">
             <span>
               {saveState === "saving"
-                ? "Saving..."
+                ? "Saving…"
                 : saveState === "saved"
                   ? "Saved"
                   : ""}

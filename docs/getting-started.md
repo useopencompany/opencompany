@@ -69,7 +69,7 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
 
 ## Day-to-day
 
-- Schema change → edit `apps/web/lib/db/schema.ts`, then `bun run db:generate`, then `bun run db:migrate`.
+- Schema change → edit `packages/db/src/schema.ts`, then `bun run db:generate`, then `bun run db:migrate`.
 - New env var in Vercel → `bun run env:pull` to refresh `.env.local`.
 - Agent editing / GitHub / Inngest architecture → see [architecture.md](./architecture.md).
 

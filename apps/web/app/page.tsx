@@ -1,7 +1,7 @@
+import { redirect } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import MainPanel from "@/components/MainPanel";
 import { getOptionalCurrentWorkspace } from "@/lib/auth";
-import { redirect } from "next/navigation";
 
 export default async function Home() {
   const context = await getOptionalCurrentWorkspace();

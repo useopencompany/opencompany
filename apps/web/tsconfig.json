@@ -8,15 +8,15 @@
       }
     ],
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./*"],
+      "collections/*": ["./.source/*"]
     }
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
+    ".source/**/*.ts",
     ".next/types/**/*.d.ts",
     ".next/dev/types/**/*.d.ts"
   ],

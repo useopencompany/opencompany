@@ -1,8 +1,5 @@
-import { Bot, Brain, Search, type LucideIcon } from "lucide-react";
-import {
-  SUPPORTED_AGENT_MODELS,
-  SUPPORTED_AGENT_TOOLS,
-} from "@/lib/agents/config";
+import { Bot, Brain, type LucideIcon, Search } from "lucide-react";
+import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
 type AgentMentionKind = "model" | "tool";

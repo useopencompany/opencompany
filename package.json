@@ -19,11 +19,16 @@
     "start": "bun --filter @opencompany/web start",
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
+    "format": "biome check --write .",
+    "format:check": "biome check .",
     "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "test:watch": "turbo test -- --watch",
+    "secrets:check": "trufflehog filesystem . --results=verified,unknown --fail",
     "setup": "node scripts/setup.mjs",
     "env:pull": "node scripts/setup.mjs --pull-env",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:generate": "bun --filter @opencompany/db db:generate",
+    "db:migrate": "bun --filter @opencompany/db db:migrate",
     "db:seed": "node scripts/seed.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",
     "db:branch:delete": "node scripts/neon-branch.mjs delete"
@@ -37,10 +42,18 @@
     "postcss": "$postcss"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.15",
+    "@playwright/test": "^1.60.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^6.0.2",
     "drizzle-kit": "^0.31.10",
+    "jsdom": "^29.1.1",
     "neonctl": "^2.22.0",
     "postcss": "8.5.15",
     "turbo": "^2.9.14",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }

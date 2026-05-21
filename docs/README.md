@@ -4,14 +4,20 @@
 - [architecture.md](./architecture.md) — rough map of the app, agent editing, GitHub storage, and Inngest sync.
 - [database.md](./database.md) — Neon, schema changes, Drizzle, and optional branch databases.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
+- [analytics.md](./analytics.md) — PostHog analytics package, event registry, and privacy rules.
+- [../CONTRIBUTING.md](../CONTRIBUTING.md) — local checks, CI gates, conventions.
 
 ## Repo layout
 
 - `apps/web` — the Next.js application.
 - `apps/inngest-dev` — local Inngest dev-server wrapper used by `bun run dev`.
+- `packages/db` — shared Drizzle schema and database client exports.
 - `scripts` — repo-wide setup, env, and database automation.
 - `drizzle` — checked-in database migrations.
-- `packages` — reserved for shared packages once there is a concrete need.
+
+## Quality gates
+
+Every PR runs `format:check`, `lint`, `typecheck`, `build`, `test`, and TruffleHog secret scanning on GitHub Actions. End-to-end (Playwright) tests are local-only for now — see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Skills
 

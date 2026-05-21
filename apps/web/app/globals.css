@@ -9,8 +9,8 @@
   --color-ink-subtle: #9a9a96;
   --color-pill-green: #e9f5ec;
   --color-pill-green-text: #1f7a3a;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
-    "Helvetica", "Arial", sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica", "Arial", sans-serif;
 }
 
 html,

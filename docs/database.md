@@ -18,7 +18,7 @@ Neon branches are copy-on-write, so creation is instant and cheap (a few MB unti
 |---|---|
 | `bun run db:branch:create` | Creates a Neon branch matching the current Git branch, writes `DATABASE_URL` to `.env.local`. Idempotent. |
 | `bun run db:branch:delete` | Deletes the Neon branch matching the current Git branch. |
-| `bun run db:generate` | Generates a SQL migration from `apps/web/lib/db/schema.ts` changes into `drizzle/`. |
+| `bun run db:generate` | Generates a SQL migration from `packages/db/src/schema.ts` changes into `drizzle/`. |
 | `bun run db:migrate` | Applies pending migrations to whatever `DATABASE_URL` points at. |
 | `bun run db:seed` | Inserts a dev user + workspace (idempotent). |
 
@@ -34,11 +34,11 @@ The Neon branch name is your current Git branch, lower-cased and sanitized to `[
 
 ## Schema changes
 
-1. Edit `apps/web/lib/db/schema.ts`.
+1. Edit `packages/db/src/schema.ts`.
 2. `bun run db:generate` — produces a new SQL file in `drizzle/`.
 3. Review the generated SQL.
 4. `bun run db:migrate` — applies it to your branch DB.
-5. Commit both `schema.ts` and the generated SQL.
+5. Commit both `packages/db/src/schema.ts` and the generated SQL.
 
 When teammates pull your branch, their `db:migrate` will catch them up on their own Neon branch.
 
@@ -62,7 +62,7 @@ These let you override defaults in headless environments:
 
 ## Schema overview
 
-Current tables (see `apps/web/lib/db/schema.ts` for the source of truth):
+Current tables (see `packages/db/src/schema.ts` for the source of truth):
 
 - `users` — one row per WorkOS user, keyed by `usr_<workos_id>`.
 - `workspaces` — tenant boundary; one default workspace per user on first sign-in.
@@ -73,3 +73,10 @@ Current tables (see `apps/web/lib/db/schema.ts` for the source of truth):
 - `onboarding_responses` — user's onboarding answers for a workspace.
 
 All app data should hang off `workspaces` so multi-tenant isolation is enforceable from day one.
+
+## Shared package
+
+Database code lives in `@opencompany/db` so the web app and future workers/scripts can share the same schema without importing from `apps/web`.
+
+- `@opencompany/db/schema` exports Drizzle tables, relations, and inferred row types.
+- `@opencompany/db/client` exports `getDb()` for the default singleton client and `createDb(databaseUrl?)` for callers that need an explicit connection string.

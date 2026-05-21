@@ -9,12 +9,12 @@ export type TimingTrace = {
 };
 
 export function startTimingTrace(name: string, metadata?: TimingMetadata): TimingTrace {
-  const trace = {
+  const trace: TimingTrace = {
     id: crypto.randomUUID().slice(0, 8),
     name,
     startedAt: performance.now(),
     enabled: process.env.OPENCOMPANY_TIMING === "1",
-    metadata,
+    ...(metadata ? { metadata } : {}),
   };
 
   if (trace.enabled) {

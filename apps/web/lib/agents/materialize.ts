@@ -1,6 +1,6 @@
+import { getDb } from "@opencompany/db/client";
+import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
-import { getDb } from "@/lib/db";
-import { agentSyncJobs, agents, workspaces } from "@/lib/db/schema";
 import { serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
 import {

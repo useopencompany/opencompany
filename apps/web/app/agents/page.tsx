@@ -1,9 +1,9 @@
+import { getDb } from "@opencompany/db/client";
+import { agents } from "@opencompany/db/schema";
 import { desc, eq } from "drizzle-orm";
 import AgentsView from "@/components/AgentsView";
 import AppShell from "@/components/AppShell";
 import { getCurrentWorkspace } from "@/lib/auth";
-import { getDb } from "@/lib/db";
-import { agents } from "@/lib/db/schema";
 
 export default async function AgentsPage() {
   const { workspace } = await getCurrentWorkspace();

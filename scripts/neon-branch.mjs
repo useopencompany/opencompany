@@ -92,7 +92,9 @@ function resourceName(items, preferredName, label, envName) {
 
 function connectionDatabaseName(branchName) {
   if (databaseName) return databaseName;
-  const databases = JSON.parse(neon(["databases", "list", "--branch", branchName, "--output", "json"]));
+  const databases = JSON.parse(
+    neon(["databases", "list", "--branch", branchName, "--output", "json"]),
+  );
   return resourceName(databases, DEFAULT_DATABASE_NAME, "databases", "NEON_DATABASE_NAME");
 }
 

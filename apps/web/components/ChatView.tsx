@@ -1,11 +1,11 @@
 import {
-  ChevronDown,
-  CheckCircle2,
   ArrowUp,
-  Image as ImageIcon,
-  GitBranch,
-  Plus,
+  CheckCircle2,
+  ChevronDown,
   FileText,
+  GitBranch,
+  Image as ImageIcon,
+  Plus,
 } from "lucide-react";
 
 function HeaderBar() {
@@ -91,9 +91,7 @@ function CheckTable() {
     },
     {
       check: "Integration tests",
-      command: (
-        <Code>POSTGRES_URL=…payload_test bun run test:int</Code>
-      ),
+      command: <Code>POSTGRES_URL=…payload_test bun run test:int</Code>,
       result: "1/1 passed",
     },
     {
@@ -134,14 +132,8 @@ function CheckTable() {
 function TestRow({ children }: { children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-2">
-      <CheckCircle2
-        size={14}
-        strokeWidth={1.75}
-        className="mt-[2px] shrink-0 text-[#16a34a]"
-      />
-      <span className="text-[13px] leading-[1.55] tracking-[-0.005em] text-ink/90">
-        {children}
-      </span>
+      <CheckCircle2 size={14} strokeWidth={1.75} className="mt-[2px] shrink-0 text-[#16a34a]" />
+      <span className="text-[13px] leading-[1.55] tracking-[-0.005em] text-ink/90">{children}</span>
     </li>
   );
 }
@@ -176,9 +168,7 @@ function FilesChanged() {
             <FileText size={12} strokeWidth={1.75} className="text-ink-muted" />
             <span className="text-ink/90">{f.name}</span>
             <span className="ml-auto flex items-center gap-2 font-medium tabular-nums">
-              {f.removed > 0 && (
-                <span className="text-[#dc2626]">−{f.removed}</span>
-              )}
+              {f.removed > 0 && <span className="text-[#dc2626]">−{f.removed}</span>}
               <span className="text-[#16a34a]">+{f.added.toLocaleString()}</span>
             </span>
           </div>
@@ -263,8 +253,8 @@ export default function ChatView() {
                 services, key commands, and non-obvious caveats.
               </li>
               <li>
-                Update script set to <Code>bun install</Code> + <Code>bunx playwright install
-                chromium</Code> (minimal dependency refresh).
+                Update script set to <Code>bun install</Code> +{" "}
+                <Code>bunx playwright install chromium</Code> (minimal dependency refresh).
               </li>
             </ul>
           </section>
@@ -290,8 +280,7 @@ export default function ChatView() {
                 <Code>bun run test:e2e</Code> — 1 Playwright test passed (Chromium)
               </TestRow>
               <TestRow>
-                <Code>curl -I http://localhost:3000</Code> — 200 OK, X-Powered-By: Next.js,
-                Payload
+                <Code>curl -I http://localhost:3000</Code> — 200 OK, X-Powered-By: Next.js, Payload
               </TestRow>
               <TestRow>
                 Manual GUI testing — homepage, blog listing, admin login, post editing all

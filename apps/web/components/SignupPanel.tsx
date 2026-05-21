@@ -1,5 +1,8 @@
-import Link from "next/link";
+"use client";
+
+import { captureEvent } from "@opencompany/analytics/client";
 import { ArrowRight, Building2, LogIn } from "lucide-react";
+import Link from "next/link";
 
 export default function SignupPanel() {
   return (
@@ -8,14 +11,14 @@ export default function SignupPanel() {
         <div className="mb-3 flex items-center gap-1 text-[12.5px]">
           <span className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-ink/90">
             <Building2 size={13} strokeWidth={1.75} className="text-ink-muted" />
-            Open Company
+            opencompany
           </span>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)]">
           <div className="px-4 pb-4 pt-4">
             <h1 className="text-[16px] font-semibold leading-6 text-ink">
-              Sign up for Open Company
+              Sign up for opencompany
             </h1>
             <p className="mt-1.5 text-[12.5px] leading-5 text-ink-muted">
               Set up a focused place for your team context, agents, and sessions.
@@ -23,6 +26,7 @@ export default function SignupPanel() {
 
             <Link
               href="/auth/sign-up"
+              onClick={() => captureEvent("signup_started", { entrypoint: "signup_page" })}
               className="mt-5 flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
             >
               <span>Sign up</span>
@@ -31,9 +35,7 @@ export default function SignupPanel() {
           </div>
 
           <div className="flex items-center justify-between border-t border-[#eeeeea] px-4 py-3">
-            <span className="text-[11.5px] text-ink-subtle">
-              Already have an account?
-            </span>
+            <span className="text-[11.5px] text-ink-subtle">Already have an account?</span>
             <Link
               href="/auth/sign-in"
               className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink transition-colors duration-150 hover:bg-[#f3f3f0] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"

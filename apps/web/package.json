@@ -7,13 +7,17 @@
     "dev": "node ../../scripts/next-app.mjs dev",
     "build": "node ../../scripts/next-app.mjs build",
     "start": "node ../../scripts/next-app.mjs start",
-    "lint": "eslint .",
+    "docs:generate": "fumadocs-mdx",
+    "lint": "bun run docs:generate && eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun run docs:generate && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.1.0",
+    "@opencompany/analytics": "workspace:*",
+    "@opencompany/db": "workspace:*",
     "@tiptap/extension-mention": "^3.23.5",
     "@tiptap/pm": "^3.23.5",
     "@tiptap/react": "^3.23.5",
@@ -22,6 +26,8 @@
     "@workos-inc/authkit-nextjs": "^4.1.0",
     "@workos-inc/node": "^9.3.1",
     "drizzle-orm": "^0.45.2",
+    "fumadocs-core": "^16.9.0",
+    "fumadocs-mdx": "^15.0.7",
     "inngest": "^4.4.0",
     "lucide-react": "^1.16.0",
     "next": "16.2.6",
@@ -31,6 +37,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.0",
+    "@types/mdx": "^2.0.13",
     "@types/node": "^25.9.1",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",

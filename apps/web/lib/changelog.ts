@@ -1,10 +1,4 @@
-export type ChangeCategory =
-  | "Added"
-  | "Changed"
-  | "Deprecated"
-  | "Removed"
-  | "Fixed"
-  | "Security";
+export type ChangeCategory = "Added" | "Changed" | "Deprecated" | "Removed" | "Fixed" | "Security";
 
 export type ChangeSection = {
   category: ChangeCategory | string;
@@ -37,9 +31,7 @@ const KNOWN_CATEGORIES = new Set([
 
 function normalizeCategory(raw: string): string {
   const trimmed = raw.trim();
-  const match = [...KNOWN_CATEGORIES].find(
-    (c) => c.toLowerCase() === trimmed.toLowerCase(),
-  );
+  const match = [...KNOWN_CATEGORIES].find((c) => c.toLowerCase() === trimmed.toLowerCase());
   return match ?? trimmed;
 }
 
@@ -69,14 +61,14 @@ export function parseChangelog(source: string): Changelog {
     const line = rawLine.replace(/\s+$/g, "");
 
     const linkRef = line.match(/^\[([^\]]+)\]:\s*(\S+)/);
-    if (linkRef) {
+    if (linkRef?.[1] && linkRef[2]) {
       flushItem();
       linkRefs.set(linkRef[1].toLowerCase(), linkRef[2]);
       continue;
     }
 
     const h1 = line.match(/^#\s+(.+)$/);
-    if (h1) {
+    if (h1?.[1]) {
       flushItem();
       title = h1[1].trim();
       seenTitle = true;
@@ -86,29 +78,30 @@ export function parseChangelog(source: string): Changelog {
     }
 
     const h2 = line.match(/^##\s+(.+)$/);
-    if (h2) {
+    if (h2?.[1]) {
       flushItem();
       const heading = h2[1].trim();
       const versionMatch = heading.match(
         /^\[?([^\]\s]+)\]?(?:\s*-\s*(\d{4}-\d{2}-\d{2}))?(?:\s*\[?(YANKED)\]?)?/i,
       );
-      const version = versionMatch ? versionMatch[1] : heading;
+      const version = versionMatch?.[1] ?? heading;
       const date = versionMatch?.[2];
       const yanked = !!versionMatch?.[3];
-      current = {
+      const release: Release = {
         version,
-        date,
-        yanked,
         notes: [],
         sections: [],
       };
+      if (date) release.date = date;
+      if (yanked) release.yanked = yanked;
+      current = release;
       currentSection = null;
-      releases.push(current);
+      releases.push(release);
       continue;
     }
 
     const h3 = line.match(/^###\s+(.+)$/);
-    if (h3 && current) {
+    if (h3?.[1] && current) {
       flushItem();
       currentSection = {
         category: normalizeCategory(h3[1]),
@@ -119,14 +112,14 @@ export function parseChangelog(source: string): Changelog {
     }
 
     const bullet = line.match(/^[-*+]\s+(.*)$/);
-    if (bullet) {
+    if (bullet?.[1] !== undefined) {
       flushItem();
       pendingItem = [bullet[1]];
       continue;
     }
 
     const continuation = line.match(/^\s{2,}(\S.*)$/);
-    if (continuation && pendingItem) {
+    if (continuation?.[1] && pendingItem) {
       pendingItem.push(continuation[1]);
       continue;
     }
@@ -181,19 +174,19 @@ export function renderInline(text: string): InlineToken[] {
   }> = [
     {
       regex: /\[([^\]]+)\]\(([^)\s]+)\)/,
-      build: (m) => ({ kind: "link", text: m[1], href: m[2] }),
+      build: (m) => ({ kind: "link", text: m[1] ?? "", href: m[2] ?? "" }),
     },
     {
       regex: /`([^`]+)`/,
-      build: (m) => ({ kind: "code", text: m[1] }),
+      build: (m) => ({ kind: "code", text: m[1] ?? "" }),
     },
     {
       regex: /\*\*([^*]+)\*\*/,
-      build: (m) => ({ kind: "strong", text: m[1] }),
+      build: (m) => ({ kind: "strong", text: m[1] ?? "" }),
     },
     {
       regex: /\b(https?:\/\/[^\s)]+)/,
-      build: (m) => ({ kind: "link", text: m[1], href: m[1] }),
+      build: (m) => ({ kind: "link", text: m[1] ?? "", href: m[1] ?? "" }),
     },
   ];
 

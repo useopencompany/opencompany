@@ -6,7 +6,12 @@ out
 .neon
 *.log
 *.tsbuildinfo
+coverage
+playwright-report
+test-results
 .env*
 !.env.example
-.vercel
+.vercel/*
+!.vercel/project.json
 .env*.local
+.source

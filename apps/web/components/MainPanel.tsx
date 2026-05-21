@@ -1,10 +1,10 @@
 import {
   ChevronDown,
+  CircleCheck,
   Flag,
+  GitBranch,
   Image as ImageIcon,
   Mic,
-  GitBranch,
-  CircleCheck,
   Plus,
 } from "lucide-react";
 
@@ -141,9 +141,7 @@ function AgentCard({
       {thumb}
       <div className="flex min-w-0 flex-col gap-1.5">
         <div className="flex items-center gap-1.5">
-          <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">
-            {title}
-          </span>
+          <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">{title}</span>
           {dot && (
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#16a34a] shadow-[0_0_0_2px_rgba(22,163,74,0.12)]" />
           )}

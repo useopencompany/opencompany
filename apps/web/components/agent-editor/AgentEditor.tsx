@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { AGENT_MENTION_ITEMS } from "./tools";
 import { MentionList, type MentionListHandle } from "./MentionList";
+import { AGENT_MENTION_ITEMS } from "./tools";
 
 type Props = {
   initialBody: string;
@@ -14,10 +14,10 @@ export function AgentEditor({ initialBody, onChange }: Props) {
   const [selectionStart, setSelectionStart] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionListRef = useRef<MentionListHandle>(null);
-  const mention = useMemo(() => currentMention(body, selectionStart), [
-    body,
-    selectionStart,
-  ]);
+  const mention = useMemo(
+    () => currentMention(body, selectionStart),
+    [body, selectionStart],
+  );
   const items = useMemo(() => {
     if (!mention) return [];
     const query = mention.query.toLowerCase();
@@ -104,9 +104,10 @@ function currentMention(body: string, cursor: number) {
   const before = body.slice(0, cursor);
   const match = /(^|[\s([{])@([A-Za-z0-9_.\/-]*)$/.exec(before);
   if (!match) return null;
+  const query = match[2] ?? "";
 
   return {
-    start: cursor - match[2].length - 1,
-    query: match[2],
+    start: cursor - query.length - 1,
+    query,
   };
 }

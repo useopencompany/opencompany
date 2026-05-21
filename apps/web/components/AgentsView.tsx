@@ -1,13 +1,13 @@
-import Link from "next/link";
+import type { Agent } from "@opencompany/db/schema";
 import { AtSign, Bot } from "lucide-react";
-import { createAgent } from "@/lib/agents/actions";
-import type { Agent } from "@/lib/db/schema";
+import Link from "next/link";
 import {
   AGENT_MODELS,
   AGENT_TOOLS,
   findMentionItem,
   type AgentMentionItem,
 } from "@/components/agent-editor/tools";
+import { createAgent } from "@/lib/agents/actions";
 
 function collectMentions(agent: Agent): AgentMentionItem[] {
   const model = findMentionItem(`model:${agent.config.model.name}`);
@@ -76,9 +76,7 @@ function AgentRow({ agent }: { agent: Agent }) {
     >
       <MarkdownPreviewThumb mentions={mentions} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">
-          {agent.name}
-        </span>
+        <span className="text-[13.5px] font-medium tracking-[-0.005em] text-ink">{agent.name}</span>
         <span className="truncate text-[12px] text-ink-muted">
           {selectedModel
             ? `${selectedModel.label} model, ${tools.length} tool${
@@ -116,9 +114,7 @@ export default function AgentsView({ agents }: { agents: Agent[] }) {
       <div className="mx-auto w-full max-w-[680px] px-6 pb-16 pt-10">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-              Agents
-            </h1>
+            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Agents</h1>
             <p className="mt-1 text-[13px] tracking-[-0.005em] text-ink-muted">
               Each agent is a natural-language brief. @-mention a model or tool
               to shape how it runs. {modelCount} models and {toolCount} tool
@@ -131,9 +127,7 @@ export default function AgentsView({ agents }: { agents: Agent[] }) {
         {agents.length === 0 ? (
           <div className="mt-12 flex flex-col items-center justify-center rounded-lg border border-dashed border-[#e0e0db] bg-white/50 px-6 py-16 text-center">
             <Bot size={20} strokeWidth={1.7} className="text-ink-subtle" />
-            <p className="mt-3 text-[13.5px] font-medium text-ink">
-              No agents yet
-            </p>
+            <p className="mt-3 text-[13.5px] font-medium text-ink">No agents yet</p>
             <p className="mt-1 text-[12.5px] text-ink-muted">
               Create your first agent to describe how it should work.
             </p>

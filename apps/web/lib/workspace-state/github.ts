@@ -1,7 +1,7 @@
 import { createSign } from "node:crypto";
+import type { getDb } from "@opencompany/db/client";
+import { workspaceRepositories, type Workspace } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
-import type { getDb } from "@/lib/db";
-import { workspaceRepositories, type Workspace } from "@/lib/db/schema";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -60,6 +60,10 @@ export async function ensureWorkspaceRepository(input: {
     })
     .returning();
 
+  if (!record) {
+    throw new Error(`Failed to create workspace repository for ${input.workspace.id}`);
+  }
+
   return record;
 }
 
@@ -90,7 +94,7 @@ export async function writeWorkspaceFile(input: {
       path: input.path,
       content: input.content,
       message: input.message,
-      sha: currentSha,
+      ...(currentSha ? { sha: currentSha } : {}),
     });
   } catch (error) {
     if (!input.blobSha || !isGitHubContentConflict(error)) throw error;
@@ -106,7 +110,7 @@ export async function writeWorkspaceFile(input: {
       path: input.path,
       content: input.content,
       message: input.message,
-      sha: latest?.sha,
+      ...(latest?.sha ? { sha: latest.sha } : {}),
     });
   }
   const commitSha = result.commit?.sha ?? null;
@@ -312,7 +316,7 @@ async function githubRequest<T>(input: {
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
-    body: input.body ? JSON.stringify(input.body) : undefined,
+    ...(input.body ? { body: JSON.stringify(input.body) } : {}),
   });
   const durationMs = performance.now() - startedAt;
 

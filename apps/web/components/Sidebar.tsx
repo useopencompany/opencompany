@@ -1,26 +1,27 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  PanelLeft,
   Bot,
   Brain,
   ChevronRight,
-  CircleEqual,
+  // CircleEqual,
   CircleHelp,
-  Download,
+  // Download,
   Inbox,
-  LogOut,
-  MoreHorizontal,
   ListFilter,
+  LogOut,
   MessageSquarePlus,
+  MoreHorizontal,
+  PanelLeft,
   ScrollText,
   Settings,
-  Sparkles,
+  // Sparkles,
 } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import FeedbackDialog from "@/components/FeedbackDialog";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 
@@ -44,22 +45,17 @@ function NavItem({
   label,
   active,
   trailing,
+  disabled,
 }: {
   href: string;
   icon: LucideIcon;
   label: string;
   active?: boolean;
   trailing?: React.ReactNode;
+  disabled?: boolean;
 }) {
-  return (
-    <Link
-      href={href}
-      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active
-          ? "bg-[#e3e3df] text-ink"
-          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
-      }`}
-    >
+  const content = (
+    <>
       <Icon
         size={14}
         strokeWidth={1.75}
@@ -67,6 +63,27 @@ function NavItem({
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
       {trailing && <span className="ml-auto flex items-center gap-1.5">{trailing}</span>}
+    </>
+  );
+  const className = `group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+    disabled
+      ? "cursor-not-allowed text-ink/35"
+      : active
+        ? "bg-[#e3e3df] text-ink"
+        : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+  }`;
+
+  if (disabled) {
+    return (
+      <div aria-disabled="true" className={className}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Link href={href} className={className}>
+      {content}
     </Link>
   );
 }
@@ -88,9 +105,7 @@ function HistoryItem({
     <Link
       href={href}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active
-          ? "bg-[#e3e3df] text-ink"
-          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
       }`}
     >
       {dot ? (
@@ -113,22 +128,26 @@ function AccountMenu({
   userName,
   userEmail,
   onClose,
+  onFeedbackOpen,
 }: {
   userName: string;
   userEmail: string;
   onClose: () => void;
+  onFeedbackOpen: () => void;
 }) {
   const menuItems: Array<{
     icon: LucideIcon;
     label: string;
     detail?: string;
     href?: string;
+    action?: () => void;
   }> = [
+    { icon: MessageSquarePlus, label: "Feedback", action: onFeedbackOpen },
     { icon: Settings, label: "Settings", href: "/settings" },
-    { icon: Download, label: "Download Open Company macOS" },
-    { icon: CircleEqual, label: "Appearance", detail: "System" },
+    // { icon: Download, label: "Download Open Company macOS" },
+    // { icon: CircleEqual, label: "Appearance", detail: "System" },
     { icon: ScrollText, label: "Changelog", href: "/changelog" },
-    { icon: CircleHelp, label: "Help" },
+    { icon: CircleHelp, label: "Docs", href: "/docs" },
   ];
 
   return (
@@ -138,18 +157,18 @@ function AccountMenu({
           {userName}
         </div>
         <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
-        <button
+        {/* <button
           type="button"
           onClick={onClose}
           className="mt-3 flex h-7 w-full items-center justify-center gap-2 rounded-md border border-black/[0.09] bg-white/30 px-3 text-[13px] font-medium tracking-[-0.005em] text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)] transition-colors duration-150 hover:bg-white/70 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <Sparkles size={15} strokeWidth={1.85} className="text-ink/85" />
           Upgrade to Pro+
-        </button>
+        </button> */}
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        {menuItems.map(({ icon: Icon, label, detail, href }) => {
+        {menuItems.map(({ icon: Icon, label, detail, href, action }) => {
           const inner = (
             <>
               <Icon size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
@@ -171,7 +190,15 @@ function AccountMenu({
             );
           }
           return (
-            <button key={label} type="button" onClick={onClose} className={className}>
+            <button
+              key={label}
+              type="button"
+              onClick={() => {
+                action?.();
+                onClose();
+              }}
+              className={className}
+            >
               {inner}
             </button>
           );
@@ -203,6 +230,7 @@ export default function Sidebar({
 }) {
   const pathname = usePathname();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getStoredSidebarCollapsed);
   const footerRef = useRef<HTMLDivElement>(null);
   const isHome = pathname === "/";
@@ -265,22 +293,24 @@ export default function Sidebar({
 
           {/* Primary nav */}
           <nav className="flex flex-col gap-px px-2 pt-1">
+            <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
+            <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
             <NavItem
               href="/inbox"
               icon={Inbox}
               label="Inbox"
               active={isActive("/inbox")}
               trailing={<SoonBadge />}
+              disabled
             />
-            <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
             <NavItem
               href="/brain"
               icon={Brain}
               label="Brain"
               active={isActive("/brain")}
               trailing={<SoonBadge />}
+              disabled
             />
-            <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
           </nav>
 
           {/* History */}
@@ -316,6 +346,7 @@ export default function Sidebar({
                 userName={userName}
                 userEmail={userEmail}
                 onClose={() => setAccountMenuOpen(false)}
+                onFeedbackOpen={() => setFeedbackOpen(true)}
               />
             )}
             <div
@@ -324,12 +355,14 @@ export default function Sidebar({
               style={{
                 background:
                   "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
-                boxShadow:
-                  "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
               }}
             />
             <div className="flex min-w-0 flex-col leading-tight">
-              <span title={userEmail} className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink">
+              <span
+                title={userEmail}
+                className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
+              >
                 {userName}
               </span>
               <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
@@ -369,6 +402,8 @@ export default function Sidebar({
           <PanelLeft size={15} strokeWidth={1.75} />
         </button>
       )}
+
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </>
   );
 }

@@ -1,12 +1,12 @@
 "use server";
 
+import { captureServerEvent } from "@opencompany/analytics/server";
+import { getDb } from "@opencompany/db/client";
+import { agentSyncJobs, agents } from "@opencompany/db/schema";
 import { and, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import { getDb } from "@/lib/db";
-import { agentSyncJobs, agents } from "@/lib/db/schema";
-import { getCurrentWorkspace } from "@/lib/auth";
 import {
   agentPathForSlug,
   parseAgentFile,
@@ -15,17 +15,18 @@ import {
 } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
+import { getCurrentWorkspace } from "@/lib/auth";
+import {
+  endTimingTrace,
+  startTimingTrace,
+  timeAsync,
+} from "@/lib/observability/timing";
 import {
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
-import {
-  endTimingTrace,
-  startTimingTrace,
-  timeAsync,
-} from "@/lib/observability/timing";
 
 function newAgentId() {
   const raw = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
@@ -34,7 +35,7 @@ function newAgentId() {
 
 export async function createAgent() {
   const trace = startTimingTrace("agents.create");
-  const { workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const id = newAgentId();
   const title = "Untitled agent";
@@ -71,6 +72,12 @@ export async function createAgent() {
   );
   const result = { id, workspaceId: workspace.id, path };
 
+  await captureServerEvent("agent_created", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: id,
+  });
+
   revalidatePath("/agents");
   scheduleAgentSyncDispatch(result);
   endTimingTrace(trace, { path: result.path });
@@ -85,9 +92,13 @@ export async function updateAgent(
     hasName: typeof patch.name === "string",
     hasBody: typeof patch.body === "string",
   });
-  const { workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
+  const changedFields: Array<"name" | "body"> = [];
+  if (typeof patch.name === "string") changedFields.push("name");
+  if (typeof patch.body === "string") changedFields.push("body");
+
   const [agent] = await timeAsync(trace, "db.selectAgent", () =>
     db
       .select({
@@ -149,6 +160,16 @@ export async function updateAgent(
       }),
     ]),
   );
+
+  if (changedFields.length > 0) {
+    await captureServerEvent("agent_saved", user.id, {
+      user_id: user.id,
+      workspace_id: workspace.id,
+      agent_id: agent.id,
+      changed_fields: changedFields,
+    });
+  }
+
   const result = { id: agent.id, workspaceId: workspace.id, path };
 
   revalidatePath("/agents");

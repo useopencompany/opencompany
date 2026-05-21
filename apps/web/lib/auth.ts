@@ -1,15 +1,15 @@
-import { cache } from "react";
-import { redirect } from "next/navigation";
-import { withAuth } from "@workos-inc/authkit-nextjs";
-import { eq } from "drizzle-orm";
-import type { User as WorkOSUser } from "@workos-inc/node";
-import { getDb } from "@/lib/db";
+import { getDb } from "@opencompany/db/client";
 import {
   onboardingResponses,
   users,
-  workspaces,
   workspaceMemberships,
-} from "@/lib/db/schema";
+  workspaces,
+} from "@opencompany/db/schema";
+import { withAuth } from "@workos-inc/authkit-nextjs";
+import type { User as WorkOSUser } from "@workos-inc/node";
+import { eq } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { cache } from "react";
 
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;
@@ -18,6 +18,7 @@ export type CurrentWorkspaceContext = {
   authUser: WorkOSUser;
   user: AppUser;
   workspace: AppWorkspace;
+  isNewUser: boolean;
 };
 
 function appUserId(workosUserId: string) {
@@ -37,13 +38,17 @@ function defaultWorkspaceName(user: WorkOSUser) {
   return `${displayName(user)}'s Workspace`;
 }
 
-export async function syncUserAndWorkspace(
-  authUser: WorkOSUser,
-): Promise<CurrentWorkspaceContext> {
+export async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<CurrentWorkspaceContext> {
   const db = getDb();
   const now = new Date();
   const userId = appUserId(authUser.id);
   const workspaceId = defaultWorkspaceId(userId);
+  const [existingUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.workosUserId, authUser.id))
+    .limit(1);
+  const isNewUser = !existingUser;
 
   const [user] = await db
     .insert(users)
@@ -68,6 +73,10 @@ export async function syncUserAndWorkspace(
     })
     .returning();
 
+  if (!user) {
+    throw new Error("Unable to sync the current user.");
+  }
+
   const [workspace] = await db
     .insert(workspaces)
     .values({
@@ -91,13 +100,7 @@ export async function syncUserAndWorkspace(
 
   const currentWorkspace =
     workspace ??
-    (
-      await db
-        .select()
-        .from(workspaces)
-        .where(eq(workspaces.id, workspaceId))
-        .limit(1)
-    )[0];
+    (await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
 
   if (!currentWorkspace) {
     throw new Error("Unable to load the default workspace.");
@@ -107,6 +110,7 @@ export async function syncUserAndWorkspace(
     authUser,
     user,
     workspace: currentWorkspace,
+    isNewUser,
   };
 }
 
