@@ -8,4 +8,6 @@ out
 *.tsbuildinfo
 .env*
 !.env.example
-.vercel
+.vercel/*
+!.vercel/project.json
+.env*.local
