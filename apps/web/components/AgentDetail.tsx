@@ -2,34 +2,48 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { updateAgent } from "@/lib/agents/actions";
-import type { TiptapDoc } from "@/lib/db/schema";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 
 type Props = {
   id: string;
   initialName: string;
-  initialContent: TiptapDoc;
+  initialBody: string;
+  initialGitHubSyncStatus: string;
+  initialGitHubSyncError: string | null;
 };
 
 type SaveState = "idle" | "saving" | "saved";
 
-export default function AgentDetail({ id, initialName, initialContent }: Props) {
+export default function AgentDetail({
+  id,
+  initialName,
+  initialBody,
+  initialGitHubSyncStatus,
+  initialGitHubSyncError,
+}: Props) {
   const [name, setName] = useState(initialName);
+  const router = useRouter();
   const [, startTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
-  const pendingRef = useRef<{ name?: string; content?: TiptapDoc }>({});
+  const [githubSyncStatus, setGitHubSyncStatus] = useState(initialGitHubSyncStatus);
+  const [githubSyncError, setGitHubSyncError] = useState(initialGitHubSyncError);
+  const pendingRef = useRef<{ name?: string; body?: string }>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const flush = () => {
-    const patch = pendingRef.current;
-    if (!patch.name && !patch.content) return;
+    const patch = { ...pendingRef.current };
+    if (!patch.name && patch.body === undefined) return;
     pendingRef.current = {};
     setSaveState("saving");
+    setGitHubSyncStatus("pending");
+    setGitHubSyncError(null);
     startTransition(async () => {
       await updateAgent(id, patch);
       setSaveState("saved");
+      router.refresh();
     });
   };
 
@@ -55,13 +69,26 @@ export default function AgentDetail({ id, initialName, initialContent }: Props) 
             <ChevronLeft size={12} strokeWidth={1.9} />
             Agents
           </Link>
-          <span className="tabular-nums text-ink-subtle">
-            {saveState === "saving"
-              ? "Saving…"
-              : saveState === "saved"
-                ? "Saved"
-                : ""}
-          </span>
+          <div className="flex items-center gap-2 tabular-nums text-ink-subtle">
+            <span>
+              {saveState === "saving"
+                ? "Saving..."
+                : saveState === "saved"
+                  ? "Saved"
+                  : ""}
+            </span>
+            <span title={githubSyncError ?? undefined}>
+              {githubSyncStatus === "pending"
+                ? "Syncing to GitHub"
+                : githubSyncStatus === "syncing"
+                  ? "Syncing to GitHub"
+                  : githubSyncStatus === "failed"
+                    ? "GitHub sync failed"
+                    : githubSyncStatus === "synced"
+                      ? "Synced"
+                      : ""}
+            </span>
+          </div>
         </div>
 
         <input
@@ -82,9 +109,9 @@ export default function AgentDetail({ id, initialName, initialContent }: Props) 
 
         <div className="mt-6">
           <AgentEditor
-            initialContent={initialContent}
-            onChange={(doc) => {
-              pendingRef.current.content = doc;
+            initialBody={initialBody}
+            onChange={(body) => {
+              pendingRef.current.body = body;
               schedule();
             }}
           />

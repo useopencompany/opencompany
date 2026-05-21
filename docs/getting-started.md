@@ -44,6 +44,10 @@ Vercel is the source of truth for shared development env vars. Store the stable 
 - `WORKOS_API_KEY`
 - `WORKOS_COOKIE_PASSWORD`
 - `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
+- `OPENCOMPANY_GITHUB_ORG`
+- `GITHUB_APP_ID`
+- `GITHUB_APP_INSTALLATION_ID`
+- `GITHUB_APP_PRIVATE_KEY`
 
 Then pull them locally:
 
@@ -54,7 +58,9 @@ bun run env:pull
 
 `bun run env:pull` pulls Vercel Development env vars to a temporary file and merges only the shared setup keys above into `.env.local`.
 
-Mark `WORKOS_API_KEY` and `DATABASE_URL` as sensitive in Vercel.
+Mark `WORKOS_API_KEY`, `DATABASE_URL`, and `GITHUB_APP_PRIVATE_KEY` as sensitive in Vercel.
+
+The Inngest values in `.env.example` are for background jobs. Local `bun run dev` uses the Inngest dev helper; hosted environments should set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
 
 ## What's still manual
 
@@ -65,5 +71,6 @@ Mark `WORKOS_API_KEY` and `DATABASE_URL` as sensitive in Vercel.
 
 - Schema change → edit `apps/web/lib/db/schema.ts`, then `bun run db:generate`, then `bun run db:migrate`.
 - New env var in Vercel → `bun run env:pull` to refresh `.env.local`.
+- Agent editing / GitHub / Inngest architecture → see [architecture.md](./architecture.md).
 
 See [database.md](./database.md) for the optional per-branch workflow and [auth.md](./auth.md) for the auth flow.

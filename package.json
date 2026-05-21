@@ -1,5 +1,5 @@
 {
-  "name": "cursor-clone",
+  "name": "opencompany",
   "version": "0.1.0",
   "private": true,
   "packageManager": "bun@1.3.2",
@@ -11,7 +11,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo dev --filter=@opencompany/web",
+    "dev": "turbo dev --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev",
+    "dev:stream": "turbo dev --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev",
+    "dev:web": "turbo dev --ui=tui --filter=@opencompany/web",
     "build": "turbo build",
     "vercel-build": "bun run db:migrate && turbo build --filter=@opencompany/web",
     "start": "bun --filter @opencompany/web start",

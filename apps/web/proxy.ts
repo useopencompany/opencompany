@@ -13,6 +13,7 @@ export default authkitProxy({
       "/auth/callback",
       "/auth/sign-in",
       "/auth/sign-up",
+      "/api/inngest",
     ],
   },
 });

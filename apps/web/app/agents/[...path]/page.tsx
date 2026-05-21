@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import AgentDetail from "@/components/AgentDetail";
@@ -9,16 +9,22 @@ import { agents } from "@/lib/db/schema";
 export default async function AgentPage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ path: string[] }>;
 }) {
-  const { id } = await params;
+  const { path } = await params;
+  const idOrPath = path.map(decodeURIComponent).join("/");
   const { workspace } = await getCurrentWorkspace();
   const db = getDb();
 
   const [agent] = await db
     .select()
     .from(agents)
-    .where(and(eq(agents.id, id), eq(agents.workspaceId, workspace.id)))
+    .where(
+      and(
+        eq(agents.workspaceId, workspace.id),
+        or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
+      ),
+    )
     .limit(1);
 
   if (!agent) notFound();
@@ -26,9 +32,11 @@ export default async function AgentPage({
   return (
     <AppShell>
       <AgentDetail
-        id={agent.id}
+        id={agent.path ?? agent.id}
         initialName={agent.name}
-        initialContent={agent.content}
+        initialBody={agent.body || agent.config.instructions}
+        initialGitHubSyncStatus={agent.githubSyncStatus}
+        initialGitHubSyncError={agent.githubSyncError}
       />
     </AppShell>
   );
