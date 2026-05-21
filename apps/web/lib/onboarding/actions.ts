@@ -83,11 +83,11 @@ export async function completeOnboarding(
   const errors: FieldErrors = {};
 
   if (!isKnownValue(values.heardFrom, heardFromValues)) {
-    errors.heardFrom = "Choose where you heard about Open Company.";
+    errors.heardFrom = "Choose where you heard about opencompany.";
   }
 
   if (values.heardFrom === "other" && !values.heardFromDetail) {
-    errors.heardFromDetail = "Tell us where you heard about Open Company.";
+    errors.heardFromDetail = "Tell us where you heard about opencompany.";
   } else if (values.heardFromDetail.length > 160) {
     errors.heardFromDetail = "Keep the source under 160 characters.";
   }

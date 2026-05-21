@@ -8,14 +8,14 @@ export default function SignupPanel() {
         <div className="mb-3 flex items-center gap-1 text-[12.5px]">
           <span className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-ink/90">
             <Building2 size={13} strokeWidth={1.75} className="text-ink-muted" />
-            Open Company
+            opencompany
           </span>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)]">
           <div className="px-4 pb-4 pt-4">
             <h1 className="text-[16px] font-semibold leading-6 text-ink">
-              Sign up for Open Company
+              Sign up for opencompany
             </h1>
             <p className="mt-1.5 text-[12.5px] leading-5 text-ink-muted">
               Set up a focused place for your team context, agents, and sessions.
