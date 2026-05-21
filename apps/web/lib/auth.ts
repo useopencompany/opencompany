@@ -18,6 +18,7 @@ export type CurrentWorkspaceContext = {
   authUser: WorkOSUser;
   user: AppUser;
   workspace: AppWorkspace;
+  isNewUser: boolean;
 };
 
 function appUserId(workosUserId: string) {
@@ -42,6 +43,12 @@ export async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<Curren
   const now = new Date();
   const userId = appUserId(authUser.id);
   const workspaceId = defaultWorkspaceId(userId);
+  const [existingUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.workosUserId, authUser.id))
+    .limit(1);
+  const isNewUser = !existingUser;
 
   const [user] = await db
     .insert(users)
@@ -103,6 +110,7 @@ export async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<Curren
     authUser,
     user,
     workspace: currentWorkspace,
+    isNewUser,
   };
 }
 

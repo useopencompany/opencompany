@@ -3,6 +3,9 @@
   "globalDependencies": [".env", ".env.local", ".env.*.local"],
   "globalEnv": [
     "DATABASE_URL",
+    "NEXT_PUBLIC_ANALYTICS_DEBUG",
+    "NEXT_PUBLIC_POSTHOG_HOST",
+    "NEXT_PUBLIC_POSTHOG_TOKEN",
     "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
     "WORKOS_API_KEY",
     "WORKOS_CLIENT_ID",

@@ -16,6 +16,11 @@ const WORKOS_ENV_KEYS = [
   "WORKOS_COOKIE_PASSWORD",
   "NEXT_PUBLIC_WORKOS_REDIRECT_URI",
 ];
+const OPTIONAL_SHARED_DEV_ENV_KEYS = [
+  "NEXT_PUBLIC_POSTHOG_TOKEN",
+  "NEXT_PUBLIC_POSTHOG_HOST",
+  "NEXT_PUBLIC_ANALYTICS_DEBUG",
+];
 const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, "DATABASE_URL"];
 const VERCEL_ENV_PULL_PATH = ".env.vercel.local";
 
@@ -172,7 +177,13 @@ function pullSharedDevEnvFromVercel() {
 
   writeEnvValues(
     ".env.local",
-    Object.fromEntries(SHARED_DEV_ENV_KEYS.map((key) => [key, pulled[key]])),
+    Object.fromEntries([
+      ...SHARED_DEV_ENV_KEYS.map((key) => [key, pulled[key]]),
+      ...OPTIONAL_SHARED_DEV_ENV_KEYS.filter((key) => !isPlaceholder(pulled[key])).map((key) => [
+        key,
+        pulled[key],
+      ]),
+    ]),
   );
 }
 

@@ -16,6 +16,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@opencompany/analytics": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@tiptap/extension-mention": "^3.23.5",
     "@tiptap/pm": "^3.23.5",

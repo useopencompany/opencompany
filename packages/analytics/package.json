@@ -1,0 +1,29 @@
+{
+  "name": "@opencompany/analytics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./events": "./src/events.ts",
+    "./client": "./src/client.tsx",
+    "./server": "./src/server.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "posthog-js": "^1.299.1",
+    "posthog-node": "^5.9.1",
+    "react": "19.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "19.2.15",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "typescript": "^6.0.3"
+  }
+}
