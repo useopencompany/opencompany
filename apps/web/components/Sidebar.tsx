@@ -102,27 +102,9 @@ function NavItem({
   );
 }
 
-function statusLabel(status: string) {
-  if (status === "provisioning") return "Starting";
-  if (status === "ready") return "Ready";
-  if (status === "running") return "Running";
-  if (status === "completed") return "Done";
-  if (status === "aborting") return "Aborting";
-  if (status === "archiving") return "Archiving";
-  if (status === "archived") return "Archived";
-  if (status === "failed") return "Failed";
-  if (status === "created") return "Created";
-  return status;
-}
-
 function SessionHistoryItem({ session, active }: { session: SidebarSession; active?: boolean }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const showStatus =
-    session.status === "running" ||
-    session.status === "provisioning" ||
-    session.status === "aborting" ||
-    session.status === "archiving";
 
   return (
     <div
@@ -136,19 +118,6 @@ function SessionHistoryItem({ session, active }: { session: SidebarSession; acti
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
-        {showStatus && (
-          <span
-            className={`ml-auto shrink-0 rounded-[4px] px-1.5 py-px text-[10.5px] font-medium ${
-              session.lastError || session.status === "failed"
-                ? "bg-[#fce8e8] text-[#b91c1c]"
-                : session.status === "aborting" || session.status === "archiving"
-                  ? "bg-[#f8edda] text-[#9a5a0a]"
-                  : "bg-[#e8f4ea] text-[#1f7a3a]"
-            }`}
-          >
-            {statusLabel(session.status)}
-          </span>
-        )}
       </Link>
       <button
         type="button"
