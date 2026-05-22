@@ -26,9 +26,10 @@ Production releases are intentionally serialized:
 4. Trigger the Render runner deploy for the same commit.
 5. Smoke check web `/api/healthz` and runner `/healthz`.
 
-The workflow lives in `.github/workflows/release-production.yml` and is manually triggered from
-GitHub Actions. It is protected with `concurrency: production-release` so two production releases
-cannot overlap.
+The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
+`CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
+Actions. It is protected with `concurrency: production-release` so two production releases cannot
+overlap.
 
 Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
 runner deployment. Keep schema changes backwards compatible with the previous web and runner version
@@ -176,4 +177,4 @@ bun run release:smoke
 - Neon backups/PITR are enabled.
 - Render deploy hook works.
 - `bun run release:preflight -- --release` passes in GitHub Actions.
-- The first manual `Release Production` workflow finishes with smoke checks green.
+- The first `Release Production` workflow finishes with smoke checks green.

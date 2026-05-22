@@ -60,6 +60,7 @@ const groups = {
   release: {
     label: "GitHub Actions release automation",
     required: [
+      "PRODUCTION_DATABASE_URL",
       "VERCEL_TOKEN",
       "VERCEL_ORG_ID",
       "VERCEL_PROJECT_ID",

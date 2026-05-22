@@ -1,6 +1,10 @@
 name: Release Production
 
 on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       deploy_runner:
@@ -23,17 +27,21 @@ permissions:
 jobs:
   release:
     name: Migrate, deploy web, deploy runner
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: production
     env:
       INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || 'prod' }}
+      RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_SHA }}
 
       - name: Require main branch
-        if: ${{ github.ref != 'refs/heads/main' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
         run: |
           echo "Production releases must run from main. Current ref: $GITHUB_REF"
           exit 1
@@ -84,14 +92,14 @@ jobs:
           echo "Deployed web to $url"
 
       - name: Trigger runner deploy
-        if: ${{ inputs.deploy_runner }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_runner }}
         run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
 
       - name: Smoke check release
-        if: ${{ inputs.smoke }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.smoke }}
         env:
           PRODUCTION_WEB_URL: ${{ steps.deploy-web.outputs.url }}
-          EXPECTED_RELEASE: ${{ github.sha }}
+          EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
           SMOKE_ATTEMPTS: "60"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke

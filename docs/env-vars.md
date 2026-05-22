@@ -119,6 +119,8 @@ Infisical `prod` + `/release` secrets:
 | `VERCEL_ORG_ID` | Vercel team/org id. |
 | `VERCEL_PROJECT_ID` | Vercel project id. |
 | `RENDER_DEPLOY_HOOK_URL` | Render deploy hook for `opencompany-runner`. |
+| `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
+| `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
 GitHub environment variables:
 
