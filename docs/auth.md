@@ -27,7 +27,9 @@ In the WorkOS dashboard:
 - If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
 
-Vercel is the source of truth for shared Development env vars. Use `bun run env:pull` to merge the shared setup values into `.env.local`. Local setup then replaces `DATABASE_URL` with the current Neon branch connection string.
+Infisical is the source of truth for shared development env vars. Use `bun run env:pull` to merge
+the shared setup values into `.env.local`. Local setup then replaces `DATABASE_URL` with the current
+Neon branch connection string.
 
 ## Env vars
 

@@ -1,0 +1,179 @@
+# Deployment
+
+Production uses Infisical as the secret source of truth, Vercel as the release control plane, and
+Render for the long-lived agent runner.
+
+## Runtime split
+
+- Infisical stores and syncs runtime/release secrets.
+- Vercel hosts `apps/web`, serves the Next.js UI, WorkOS callback routes, server actions, and the
+  Inngest endpoint at `/api/inngest`.
+- Render hosts `apps/runner`, the Bun/Fastify service that owns live agent runs, E2B sandboxes,
+  model/tool streams, abort state, and browser SSE from `/sessions/:id/events`.
+- Neon Postgres is shared by web, Inngest functions, and the runner.
+- Inngest coordinates background functions, but it does not host live token streams.
+
+Keep this split for V1. Vercel Queues/Workflow/Fluid Compute are useful later, but the current
+runner is a dedicated live data plane rather than a short request handler.
+
+## Release contract
+
+Production releases are intentionally serialized:
+
+1. Run CI on `main`.
+2. Run Drizzle migrations against production Neon.
+3. Build and deploy the Vercel web app for the exact commit.
+4. Trigger the Render runner deploy for the same commit.
+5. Smoke check web `/api/healthz` and runner `/healthz`.
+
+The workflow lives in `.github/workflows/release-production.yml` and is manually triggered from
+GitHub Actions. It is protected with `concurrency: production-release` so two production releases
+cannot overlap.
+
+Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
+runner deployment. Keep schema changes backwards compatible with the previous web and runner version
+until the release has completed.
+
+## Platform setup
+
+### Vercel
+
+Create/import the web project from this repo.
+
+- Install command: `bun install --frozen-lockfile`
+- Build command: `bun run vercel-build`
+- Production branch: `main`
+- Enable "Automatically expose System Environment Variables".
+- Enable Skew Protection.
+- If available, enable Rolling Releases with manual approval stages.
+- Disable automatic production deploys from Git once the GitHub Actions release workflow is ready.
+  Preview deploys can stay enabled.
+
+Set these in Infisical `prod` + `/web` and sync them into Vercel:
+
+- `DATABASE_URL`
+- `WORKOS_CLIENT_ID`
+- `WORKOS_API_KEY`
+- `WORKOS_COOKIE_PASSWORD`
+- `NEXT_PUBLIC_WORKOS_REDIRECT_URI`
+- `OPENCOMPANY_GITHUB_ORG`
+- `GITHUB_APP_ID`
+- `GITHUB_APP_INSTALLATION_ID`
+- `GITHUB_APP_PRIVATE_KEY`
+- `INNGEST_EVENT_KEY`
+- `INNGEST_SIGNING_KEY`
+- `RUNNER_PUBLIC_URL`
+- `RUNNER_INTERNAL_TOKEN`
+- `RUNNER_STREAM_TOKEN_SECRET`
+- optional analytics, feedback, and observability env vars
+
+### Render
+
+Create the runner from `render.yaml`.
+
+- Service name: `opencompany-runner`
+- Runtime: Docker
+- Health check: `/healthz`
+- Auto deploy: off, so GitHub Actions controls release order
+- Deploy hook: create one and store it as `RENDER_DEPLOY_HOOK_URL` in Infisical `prod` + `/release`
+
+Set these in Infisical `prod` + `/runner` and sync them into Render:
+
+- `DATABASE_URL`
+- `RUNNER_INTERNAL_TOKEN`
+- `RUNNER_STREAM_TOKEN_SECRET`
+- `RUNNER_ALLOWED_ORIGINS`
+- `E2B_API_KEY`
+- `VERCEL_AI_GATEWAY_API_KEY`
+- `GITHUB_APP_ID`
+- `GITHUB_APP_INSTALLATION_ID`
+- `GITHUB_APP_PRIVATE_KEY`
+
+`RUNNER_ALLOWED_ORIGINS` must include the exact production web origin, for example
+`https://app.example.com`. Add preview origins only if you intentionally allow previews to connect
+to the production runner.
+
+### Neon
+
+Use a dedicated production branch/database and set the pooled connection string as `DATABASE_URL` in
+Infisical `prod` + `/web` and `/runner`, and as `PRODUCTION_DATABASE_URL` in Infisical `prod` +
+`/release`.
+
+Before first real deployment:
+
+- Enable backups/PITR.
+- Confirm the production branch is not used by local development.
+- Run `bun run db:migrate` once against production from the release workflow, not from a developer
+  laptop.
+
+### Inngest
+
+Create a production Inngest app and connect it to:
+
+```text
+https://<production-web-domain>/api/inngest
+```
+
+Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` in Vercel. Do not set `INNGEST_DEV=1` in hosted
+environments.
+
+### WorkOS
+
+Create or switch to the production WorkOS environment.
+
+- Add the production redirect URI:
+  `https://<production-web-domain>/auth/callback`
+- Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
+- Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
+
+### GitHub Actions
+
+Create a protected `production` environment in GitHub and add these environment variables:
+
+- `INFISICAL_PROJECT_SLUG`
+- `INFISICAL_MACHINE_IDENTITY_ID`
+- `INFISICAL_ENV_SLUG` (optional, defaults to `prod`)
+
+Store release secrets in Infisical `prod` + `/release`; see [secret-management.md](./secret-management.md).
+
+The release workflow checks these with:
+
+```bash
+bun run release:preflight -- --release
+```
+
+## Local/operator commands
+
+Check local env coverage:
+
+```bash
+bun run release:preflight
+```
+
+Check only web or runner env coverage:
+
+```bash
+bun run release:preflight -- --web
+bun run release:preflight -- --runner
+```
+
+Run smoke checks against deployed services:
+
+```bash
+PRODUCTION_WEB_URL=https://app.example.com \
+RUNNER_PUBLIC_URL=https://opencompany-runner.onrender.com \
+bun run release:smoke
+```
+
+## First release checklist
+
+- CI is green on `main`.
+- Infisical `prod` + `/web`, `/runner`, and `/release` are populated.
+- Infisical syncs to Vercel and Render are enabled.
+- GitHub Actions production vars for Infisical OIDC are set.
+- WorkOS production callback works.
+- Inngest production app can sync functions from `/api/inngest`.
+- Neon backups/PITR are enabled.
+- Render deploy hook works.
+- `bun run release:preflight -- --release` passes in GitHub Actions.
+- The first manual `Release Production` workflow finishes with smoke checks green.

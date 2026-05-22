@@ -29,7 +29,17 @@ export function createServer(env: RunnerEnv) {
     }
   });
 
-  app.get("/healthz", async () => ({ ok: true }));
+  app.get("/healthz", async () => ({
+    ok: true,
+    service: "opencompany-runner",
+    environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
+    release:
+      process.env.RENDER_GIT_COMMIT ??
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      process.env.OBSERVABILITY_RELEASE ??
+      null,
+    renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,
+  }));
 
   app.post("/internal/sessions/:id/start", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);

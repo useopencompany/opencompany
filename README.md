@@ -47,6 +47,9 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 - [Getting started](./docs/getting-started.md) — local dev setup in under five minutes
 - [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
 - [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
+- [Deployment](./docs/deployment.md) — production release flow, Vercel, Render, env, smoke checks
+- [Secret management](./docs/secret-management.md) — Infisical source of truth and sync setup
+- [Environment variables](./docs/env-vars.md) — where every runtime and release env var lives
 - [Auth](./docs/auth.md) — WorkOS AuthKit, env vars, identity model
 - [Observability](./docs/observability.md) — production error capture and launch debugging
 - [Contributing](./CONTRIBUTING.md)

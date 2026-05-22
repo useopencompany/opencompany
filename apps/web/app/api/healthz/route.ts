@@ -1,0 +1,11 @@
+export const dynamic = "force-dynamic";
+
+export function GET() {
+  return Response.json({
+    ok: true,
+    service: "opencompany-web",
+    environment: process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development",
+    release: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.OBSERVABILITY_RELEASE ?? null,
+    vercelGitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+  });
+}

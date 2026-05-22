@@ -119,6 +119,8 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 - `bun run dev:runner` runs only the runner.
 - `bun run db:generate` creates migrations from `packages/db/src/schema.ts`.
 - `bun run db:migrate` applies migrations to `DATABASE_URL`.
+- Production releases run migrations from the `Release Production` GitHub Actions workflow before
+  deploying Vercel web and Render runner.
 - GitHub workspace-state env vars are `OPENCOMPANY_GITHUB_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`.
 - Inngest uses `INNGEST_DEV` for local development; hosted environments should also set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
 - Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
