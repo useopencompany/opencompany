@@ -23,6 +23,10 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         modelMessage: message.modelMessage,
         toolName: message.toolName,
         toolCallId: message.toolCallId,
+        outputReasoningTokens: message.outputReasoningTokens,
+        createdAt: message.createdAt.toISOString(),
+        completedAt: message.completedAt?.toISOString() ?? null,
+        thinkingDurationSeconds: message.thinkingDurationSeconds,
       }))}
       initialEvents={data.events.map((event) => ({
         id: event.id,
@@ -31,6 +35,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         payload: event.payload,
       }))}
       initialUsage={data.usage}
+      initialToolUsage={data.toolUsage}
       runnerUrl={data.runnerUrl}
       streamToken={data.token}
     />

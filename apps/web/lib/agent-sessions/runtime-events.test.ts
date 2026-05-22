@@ -14,6 +14,7 @@ function initialState(): SessionRuntimeState {
     events: [],
     messages: [{ id: "msg_user", role: "user", content: "Hi", status: "completed" }],
     usage: emptyUsageSummary(),
+    toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
     currentStatus: "running",
     lastError: null,
   };
@@ -38,12 +39,61 @@ describe("applyRuntimeEventToState", () => {
       }),
     );
 
-    expect(state.messages).toContainEqual({
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
       id: "msg_assistant",
       role: "assistant",
       content: "Hello there",
       status: "completed",
     });
+  });
+
+  it("stores completed assistant model parts so live tool turns render final text", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "tool.completed", {
+        messageId: "msg_assistant",
+        toolCallId: "call_exa",
+        name: "exa_search",
+        output: { results: [] },
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(3, "message.completed", {
+        messageId: "msg_assistant",
+        content: "Here is the answer.",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_exa",
+              toolName: "exa_search",
+              input: { query: "test" },
+            },
+            { type: "text", text: "Here is the answer." },
+          ],
+        },
+      }),
+    );
+
+    const assistant = state.messages.find((message) => message.id === "msg_assistant");
+    expect(assistant?.modelMessage).toMatchObject({ role: "assistant" });
+    expect(buildAssistantTurnParts(assistant!, state.events, state.messages)).toEqual([
+      expect.objectContaining({
+        type: "tool-call",
+        toolCall: expect.objectContaining({ id: "call_exa", status: "completed" }),
+      }),
+      { type: "text", text: "Here is the answer." },
+    ]);
   });
 
   it("can still apply legacy message delta events", () => {
@@ -111,7 +161,14 @@ describe("applyRuntimeEventToState", () => {
     let state = initialState();
     state = applyRuntimeEventToState(
       state,
-      event(1, "session.usage", {
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.usage", {
         inputTokens: 100,
         inputNoCacheTokens: 60,
         inputCacheReadTokens: 30,
@@ -124,7 +181,8 @@ describe("applyRuntimeEventToState", () => {
     );
     state = applyRuntimeEventToState(
       state,
-      event(2, "session.usage", {
+      event(3, "session.usage", {
+        messageId: "msg_assistant",
         inputTokens: 40,
         inputNoCacheTokens: 35,
         inputCacheReadTokens: 5,
@@ -145,6 +203,36 @@ describe("applyRuntimeEventToState", () => {
       outputTextTokens: 28,
       outputReasoningTokens: 7,
       totalTokens: 175,
+    });
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
+      outputReasoningTokens: 2,
+    });
+  });
+
+  it("adds live hosted tool usage events to the cost summary", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "session.tool_usage", {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: 7000,
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.tool_usage", {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: 3000,
+      }),
+    );
+
+    expect(state.toolUsage).toEqual({
+      totalCostUsdMicros: 10000,
+      byProviderOperation: [
+        { provider: "exa", operation: "search", costUsdMicros: 10000, calls: 2 },
+      ],
     });
   });
 });
@@ -313,6 +401,93 @@ describe("buildAssistantTurnParts", () => {
       },
       { type: "text", text: "After" },
     ]);
+  });
+
+  it("prepends persisted reasoning summaries without mixing them into visible text", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: "Final answer",
+        },
+      },
+      [
+        event(1, "message.reasoning_summary", {
+          messageId: "msg_assistant",
+          summary: "Checked the relevant files first.",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      { type: "reasoning", text: "Checked the relevant files first.", durationSeconds: 1 },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("shows a reasoning marker with turn duration when usage has reasoning tokens but no summary", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        outputReasoningTokens: 74,
+        createdAt: "2026-05-22T13:00:00.000Z",
+        completedAt: "2026-05-22T13:00:03.400Z",
+        modelMessage: {
+          role: "assistant",
+          content: "Final answer",
+        },
+      },
+      [],
+    );
+
+    expect(parts).toEqual([
+      { type: "reasoning", durationSeconds: 3, text: undefined },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("adds live thinking duration when completion arrives after reasoning usage", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+
+    const createdAt = state.messages.find((message) => message.id === "msg_assistant")?.createdAt;
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.usage", {
+        messageId: "msg_assistant",
+        inputTokens: 100,
+        outputTokens: 25,
+        outputTextTokens: 20,
+        outputReasoningTokens: 5,
+        totalTokens: 125,
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(3, "message.completed", {
+        messageId: "msg_assistant",
+        content: "Done",
+      }),
+    );
+
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
+      createdAt,
+      completedAt: expect.any(String),
+      thinkingDurationSeconds: expect.any(Number),
+    });
   });
 
   it("falls back to runtime event order while the assistant message is streaming", () => {

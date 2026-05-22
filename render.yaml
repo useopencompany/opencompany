@@ -18,11 +18,29 @@ services:
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
+      - key: EXA_API_KEY
+        sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
+        sync: false
+      - key: RUNNER_E2B_IDLE_TIMEOUT_MS
+        sync: false
+      - key: RUNNER_INSTANCE_ID
         sync: false
       - key: GITHUB_APP_ID
         sync: false
       - key: GITHUB_APP_INSTALLATION_ID
         sync: false
       - key: GITHUB_APP_PRIVATE_KEY
+        sync: false
+      - key: BETTER_STACK_ERRORS_DSN
+        sync: false
+      - key: OBSERVABILITY_ENABLED
+        sync: false
+      - key: OBSERVABILITY_ENV
+        sync: false
+      - key: OBSERVABILITY_RELEASE
+        sync: false
+      - key: OBSERVABILITY_LOG_LEVEL
+        sync: false
+      - key: OBSERVABILITY_TIMING
         sync: false

@@ -302,6 +302,40 @@ export const agentSessionUsage = pgTable(
   }),
 );
 
+export const agentSessionToolUsage = pgTable(
+  "agent_session_tool_usage",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    runLeaseId: text("run_lease_id"),
+    toolCallId: text("tool_call_id").notNull(),
+    toolName: text("tool_name").notNull(),
+    provider: text("provider").notNull(),
+    operation: text("operation").notNull(),
+    providerRequestId: text("provider_request_id"),
+    costUsdMicros: integer("cost_usd_micros").notNull().default(0),
+    rawUsage: jsonb("raw_usage")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_tool_usage_session_idx").on(table.sessionId),
+    messageIdx: index("agent_session_tool_usage_message_idx").on(table.messageId),
+    sessionCreatedAtIdx: index("agent_session_tool_usage_session_created_at_idx").on(
+      table.sessionId,
+      table.createdAt,
+    ),
+    toolCallIdx: index("agent_session_tool_usage_tool_call_idx").on(table.toolCallId),
+  }),
+);
+
 export const workspaceCreditBalances = pgTable("workspace_credit_balances", {
   workspaceId: text("workspace_id")
     .primaryKey()
@@ -519,6 +553,7 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   messages: many(agentSessionMessages),
   events: many(agentSessionEvents),
   usage: many(agentSessionUsage),
+  toolUsage: many(agentSessionToolUsage),
 }));
 
 export const agentSessionMessagesRelations = relations(agentSessionMessages, ({ one, many }) => ({
@@ -528,6 +563,7 @@ export const agentSessionMessagesRelations = relations(agentSessionMessages, ({ 
   }),
   events: many(agentSessionEvents),
   usage: many(agentSessionUsage),
+  toolUsage: many(agentSessionToolUsage),
 }));
 
 export const agentSessionEventsRelations = relations(agentSessionEvents, ({ one }) => ({
@@ -548,6 +584,17 @@ export const agentSessionUsageRelations = relations(agentSessionUsage, ({ one })
   }),
   message: one(agentSessionMessages, {
     fields: [agentSessionUsage.messageId],
+    references: [agentSessionMessages.id],
+  }),
+}));
+
+export const agentSessionToolUsageRelations = relations(agentSessionToolUsage, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionToolUsage.sessionId],
+    references: [agentSessions.id],
+  }),
+  message: one(agentSessionMessages, {
+    fields: [agentSessionToolUsage.messageId],
     references: [agentSessionMessages.id],
   }),
 }));
@@ -662,6 +709,7 @@ export type AgentSession = typeof agentSessions.$inferSelect;
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
 export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
+export type AgentSessionToolUsage = typeof agentSessionToolUsage.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;

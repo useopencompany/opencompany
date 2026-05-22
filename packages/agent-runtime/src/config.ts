@@ -1,11 +1,15 @@
 import type { AgentConfig } from "@opencompany/db/schema";
-import { CORE_TOOL_DEFINITIONS, type RuntimeToolName } from "./tools";
+import { getAgentModelRuntimeOptions, type ModelProviderOptions } from "./models";
+import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 
 export type ResolvedAgentRuntimeConfig = {
   systemPrompt: string;
   model: {
     provider: "vercel-ai-gateway";
     name: string;
+    supportsReasoning: boolean;
+    providerOptions?: ModelProviderOptions;
+    exposeReasoningSummary: boolean;
   };
   tools: RuntimeToolName[];
 };
@@ -24,12 +28,17 @@ export function resolveAgentRuntimeConfig(input: {
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
   ].filter(Boolean);
 
+  const modelRuntime = getAgentModelRuntimeOptions(input.agent.model.name);
+
   return {
     systemPrompt: `${context.join("\n")}\n\nAgent instructions:\n${instructions}`,
     model: {
       provider: "vercel-ai-gateway",
       name: input.agent.model.name,
+      supportsReasoning: modelRuntime.supportsReasoning,
+      ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),
+      exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
     },
-    tools: CORE_TOOL_DEFINITIONS.map((tool) => tool.name),
+    tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
   };
 }
