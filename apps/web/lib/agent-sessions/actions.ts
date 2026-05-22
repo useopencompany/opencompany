@@ -139,7 +139,11 @@ export async function abortAgentSession(sessionId: string) {
 
   await db
     .update(agentSessions)
-    .set({ status: "aborting", abortRequestedAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "aborting",
+      abortRequestedAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(eq(agentSessions.id, sessionId));
 
   after(async () => {
@@ -304,6 +308,10 @@ async function archiveSessionLocally(sessionId: string, previousSandboxId: strin
         sandboxTerminatedAt: now,
         e2bSandboxId: null,
         runLeaseId: null,
+        runLeaseOwner: null,
+        runLeaseMessageId: null,
+        runLeaseExpiresAt: null,
+        runHeartbeatAt: null,
         lastError: null,
         updatedAt: now,
       })
@@ -382,6 +390,7 @@ async function insertUserMessage(sessionId: string, content: string) {
       role: "user",
       status: "completed",
       content,
+      modelMessage: { role: "user", content },
       completedAt: new Date(),
     }),
     db.insert(agentSessionEvents).values({

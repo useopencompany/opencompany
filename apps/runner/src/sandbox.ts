@@ -122,8 +122,12 @@ export async function runSandboxTool(input: {
       `cd ${shellQuote(input.workdir)} && ${command}`,
       {
         timeoutMs: 120_000,
-        onStdout: (data: string) => input.onOutput?.("stdout", data),
-        onStderr: (data: string) => input.onOutput?.("stderr", data),
+        onStdout: async (data: string) => {
+          await input.onOutput?.("stdout", data);
+        },
+        onStderr: async (data: string) => {
+          await input.onOutput?.("stderr", data);
+        },
       },
     );
     return truncate({

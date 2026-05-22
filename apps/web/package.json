@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node ../../scripts/next-app.mjs dev",
     "build": "node ../../scripts/next-app.mjs build",
+    "vercel-build": "bun --cwd ../.. run db:migrate && bun --cwd ../.. turbo build --filter=@opencompany/web",
     "start": "node ../../scripts/next-app.mjs start",
     "docs:generate": "fumadocs-mdx",
     "lint": "bun run docs:generate && eslint .",

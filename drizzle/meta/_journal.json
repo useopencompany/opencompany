@@ -64,6 +64,13 @@
       "when": 1779441668803,
       "tag": "0008_modern_vanisher",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779443638118,
+      "tag": "0009_supreme_boomer",
+      "breakpoints": true
     }
   ]
 }
