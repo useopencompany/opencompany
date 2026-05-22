@@ -14,6 +14,7 @@ import {
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
+import { captureException, createLogger } from "@opencompany/observability";
 import {
   createGateway,
   type FinishReason,
@@ -59,6 +60,7 @@ import {
 import { normalizeModelUsage } from "./usage";
 
 const activeRuns = new Map<string, { leaseId: string; controller: AbortController }>();
+const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 export async function startSession(sessionId: string, env: RunnerEnv) {
   const db = getDb();
@@ -133,6 +135,8 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
   let sandbox: SandboxHandle | null = null;
   let leaseAcquired = false;
   let lastHeartbeatAt = 0;
+  let modelProvider: string | undefined;
+  let modelName: string | undefined;
 
   try {
     const row = await loadSession(input.sessionId);
@@ -148,6 +152,8 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
     });
+    modelProvider = runtime.model.provider;
+    modelName = runtime.model.name;
 
     const lease = await acquireRunLease({
       sessionId: input.sessionId,
@@ -339,6 +345,15 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     }
 
     const message = error instanceof Error ? error.message : "Unknown runner error";
+    captureException(error, {
+      event: "opencompany.runner_message_failed",
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      assistant_message_id: assistantMessageId,
+      sandbox_id: sandbox?.sandboxId,
+      model_provider: modelProvider,
+      model_name: modelName,
+    });
     if (leaseAcquired) {
       await appendRuntimeEventForLease({
         sessionId: input.sessionId,
@@ -519,34 +534,47 @@ async function executeRuntimeTool(input: {
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
 }) {
-  const output = await withRunControlChecks(input.checkAbort, async () => {
-    throwIfAborted(input.signal);
+  let output: unknown;
+  try {
+    output = await withRunControlChecks(input.checkAbort, async () => {
+      throwIfAborted(input.signal);
 
-    return runSandboxTool({
-      sandbox: input.sandbox,
-      workdir: input.workdir,
-      name: input.name,
-      args: input.args,
-      onOutput: async (stream, delta) => {
-        await input.checkAbort();
-        await requireLeaseWrite(
-          appendRuntimeEventForLease({
-            sessionId: input.sessionId,
-            messageId: input.assistantMessageId,
-            leaseId: input.runLeaseId,
-            leaseOwner: input.runLeaseOwner,
-            type: "command.output",
-            payload: {
-              command: input.name,
-              toolCallId: input.toolCallId,
-              stream,
-              delta,
-            },
-          }),
-        );
-      },
+      return runSandboxTool({
+        sandbox: input.sandbox,
+        workdir: input.workdir,
+        name: input.name,
+        args: input.args,
+        onOutput: async (stream, delta) => {
+          await input.checkAbort();
+          await requireLeaseWrite(
+            appendRuntimeEventForLease({
+              sessionId: input.sessionId,
+              messageId: input.assistantMessageId,
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+              type: "command.output",
+              payload: {
+                command: input.name,
+                toolCallId: input.toolCallId,
+                stream,
+                delta,
+              },
+            }),
+          );
+        },
+      });
     });
-  });
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.runner_tool_failed",
+      session_id: input.sessionId,
+      message_id: input.assistantMessageId,
+      tool_call_id: input.toolCallId,
+      tool_name: input.name,
+      sandbox_id: input.sandbox.sandboxId,
+    });
+    throw error;
+  }
 
   const changedPath =
     isRecord(output) && Object.prototype.hasOwnProperty.call(output, "path")
@@ -862,16 +890,17 @@ class StaleRunLeaseError extends Error {
 }
 
 async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
-  const sandbox = await createOrConnectSandbox({
-    sandboxId: row.session.e2bSandboxId,
-    template: env.e2bTemplate,
-    envs: {
-      E2B_API_KEY: env.e2bApiKey,
-      VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
-    },
-    idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
-  });
+  let sandbox: SandboxHandle | null = null;
   try {
+    sandbox = await createOrConnectSandbox({
+      sandboxId: row.session.e2bSandboxId,
+      template: env.e2bTemplate,
+      envs: {
+        E2B_API_KEY: env.e2bApiKey,
+        VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
+      },
+      idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
+    });
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
@@ -879,21 +908,37 @@ async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       repositoryFullName: row.repository?.fullName,
       githubToken: await getGitHubInstallationToken(),
     });
+    return sandbox;
   } catch (error) {
-    await parkSandboxWhenIdle(sandbox, env);
+    captureException(error, {
+      event: "opencompany.runner_sandbox_failed",
+      workspace_id: row.workspace.id,
+      user_id: row.session.userId,
+      agent_id: row.agent.id,
+      session_id: row.session.id,
+      sandbox_id: sandbox?.sandboxId ?? row.session.e2bSandboxId,
+      existing_sandbox: Boolean(row.session.e2bSandboxId),
+    });
+    if (sandbox) {
+      await parkSandboxWhenIdle(sandbox, env);
+    }
     throw error;
   }
-  return sandbox;
 }
 
 async function parkSandboxWhenIdle(sandbox: SandboxHandle, env: RunnerEnv) {
   try {
     const armed = await armSandboxIdleTimeout(sandbox, env.e2bSandboxIdleTimeoutMs);
     if (!armed) {
-      console.warn(`E2B sandbox ${sandbox.sandboxId} was gone before idle timeout could be armed.`);
+      logger.warn("E2B sandbox was gone before idle timeout could be armed", {
+        sandbox_id: sandbox.sandboxId,
+      });
     }
   } catch (error) {
-    console.warn(`Failed to arm E2B sandbox ${sandbox.sandboxId} idle timeout.`, error);
+    logger.warn("Failed to arm E2B sandbox idle timeout", {
+      sandbox_id: sandbox.sandboxId,
+      error,
+    });
   }
 }
 

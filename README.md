@@ -16,7 +16,7 @@ The `.agent` file is the contract. Anything that touches an agent — the UI, th
 
 ## Stack
 
-Turborepo on Bun · Next.js (App Router) · Drizzle on Neon Postgres · WorkOS AuthKit · Inngest background jobs · Vercel AI Gateway · GitHub App for managed repos · deployed on Vercel.
+Turborepo on Bun · Next.js (App Router) · Drizzle on Neon Postgres · WorkOS AuthKit · Inngest background jobs · Vercel AI Gateway · GitHub App for managed repos · Better Stack-compatible error capture · deployed on Vercel.
 
 ## Quick start
 
@@ -48,4 +48,5 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 - [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
 - [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
 - [Auth](./docs/auth.md) — WorkOS AuthKit, env vars, identity model
+- [Observability](./docs/observability.md) — production error capture and launch debugging
 - [Contributing](./CONTRIBUTING.md)

@@ -1,0 +1,58 @@
+"use client";
+
+import { captureException } from "@opencompany/observability";
+import { useEffect } from "react";
+
+export default function GlobalError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    captureException(error, {
+      event: "opencompany.web_global_error",
+      digest: error.digest,
+    });
+  }, [error]);
+
+  return (
+    <html lang="en">
+      <body>
+        <main
+          style={{
+            alignItems: "center",
+            display: "flex",
+            fontFamily: "system-ui, sans-serif",
+            justifyContent: "center",
+            minHeight: "100vh",
+            padding: "24px",
+          }}
+        >
+          <div style={{ maxWidth: "360px", textAlign: "center" }}>
+            <h1 style={{ fontSize: "20px", margin: 0 }}>Something went wrong</h1>
+            <p style={{ color: "#666", fontSize: "14px", lineHeight: 1.5 }}>
+              Please try again. We have captured the error.
+            </p>
+            <button
+              type="button"
+              onClick={reset}
+              style={{
+                background: "#111",
+                border: 0,
+                borderRadius: "6px",
+                color: "#fff",
+                cursor: "pointer",
+                fontSize: "14px",
+                padding: "10px 14px",
+              }}
+            >
+              Try again
+            </button>
+          </div>
+        </main>
+      </body>
+    </html>
+  );
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { createLogger } from "@opencompany/observability";
 import posthog from "posthog-js";
 import { type ReactNode, useEffect } from "react";
 import type { AnalyticsEventName, AnalyticsEventProperties } from "./events";
@@ -18,6 +19,7 @@ type AnalyticsProviderProps = {
 };
 
 let initialized = false;
+const logger = createLogger({ service: "opencompany-analytics", runtime: "browser" });
 
 function isDebugEnabled() {
   return process.env.NEXT_PUBLIC_ANALYTICS_DEBUG === "true";
@@ -32,7 +34,10 @@ function getConfig() {
 
 function debugLog(message: string, payload?: unknown) {
   if (!isDebugEnabled()) return;
-  console.info(`[analytics] ${message}`, payload ?? "");
+  logger.info(`Analytics ${message}`, {
+    event: "opencompany.analytics_debug",
+    payload,
+  });
 }
 
 function displayName(identity: AnalyticsIdentity) {

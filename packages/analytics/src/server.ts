@@ -1,7 +1,9 @@
+import { createLogger } from "@opencompany/observability";
 import { PostHog } from "posthog-node";
 import type { AnalyticsEventName, AnalyticsEventProperties } from "./events";
 
 const SERVER_CAPTURE_TIMEOUT_MS = 1500;
+const logger = createLogger({ service: "opencompany-analytics", runtime: "server" });
 
 function isDebugEnabled() {
   return process.env.NEXT_PUBLIC_ANALYTICS_DEBUG === "true";
@@ -16,7 +18,10 @@ function getConfig() {
 
 function debugLog(message: string, payload?: unknown) {
   if (!isDebugEnabled()) return;
-  console.info(`[analytics] ${message}`, payload ?? "");
+  logger.info(`Analytics ${message}`, {
+    event: "opencompany.analytics_debug",
+    payload,
+  });
 }
 
 export async function captureServerEvent<EventName extends AnalyticsEventName>(
