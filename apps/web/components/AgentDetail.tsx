@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Brain,
   CheckCircle2,
   ChevronLeft,
   CircleAlert,
@@ -18,14 +19,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 import {
+  AGENT_MODELS,
   type AgentModel,
   type AgentTool,
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { updateAgent } from "@/lib/agents/actions";
-import { extractConfigFromMentions, extractMentionIds } from "@/lib/agents/agent-file";
+import { extractConfigFromMentions } from "@/lib/agents/agent-file";
 import type { AgentConfig, AgentModelId } from "@/lib/agents/types";
 
 type Props = {
@@ -52,6 +55,7 @@ type OptimisticGitHubSync = {
 };
 
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
+const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 
 function getStoredInspectorCollapsed() {
   if (typeof window === "undefined") return true;
@@ -72,6 +76,9 @@ export default function AgentDetail({
 }: Props) {
   const [name, setName] = useState(initialName);
   const [body, setBody] = useState(initialBody);
+  const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
+    findModel(initialConfig.model.name)?.id ?? DEFAULT_MODEL_ID,
+  );
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -79,9 +86,14 @@ export default function AgentDetail({
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
-  const pendingRef = useRef<{ name?: string; body?: string }>({});
+  const pendingRef = useRef<{ name?: string; body?: string; model?: AgentModelId }>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const configPreview = buildConfigPreview({ body, fallback: initialConfig });
+  const configPreview = buildConfigPreview({
+    body,
+    fallback: initialConfig,
+    selectedModelId,
+  });
+  const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
     initialGitHubSyncStatus === optimisticGitHubSync.baseStatus &&
@@ -97,6 +109,11 @@ export default function AgentDetail({
   const githubCommitSha = initialGitHubCommitSha;
   const githubSyncedAt = initialGitHubSyncedAt;
 
+  useEffect(() => {
+    if (pendingRef.current.model) return;
+    setSelectedModelId(findModel(initialConfig.model.name)?.id ?? DEFAULT_MODEL_ID);
+  }, [initialConfig.model.name]);
+
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
     window.localStorage.setItem(INSPECTOR_STORAGE_KEY, String(nextCollapsed));
@@ -104,7 +121,7 @@ export default function AgentDetail({
 
   const flush = () => {
     const patch = { ...pendingRef.current };
-    if (!patch.name && patch.body === undefined) return;
+    if (typeof patch.name !== "string" && patch.body === undefined && !patch.model) return;
     pendingRef.current = {};
     setSaveState("saving");
     setOptimisticGitHubSync({
@@ -116,8 +133,11 @@ export default function AgentDetail({
       baseSyncedAt: initialGitHubSyncedAt,
     });
     startTransition(async () => {
-      await updateAgent(id, patch);
+      const result = await updateAgent(id, patch);
       setSaveState("saved");
+      if (result?.pathChanged) {
+        router.replace(`/agents/${result.path}`);
+      }
       router.refresh();
     });
   };
@@ -152,9 +172,6 @@ export default function AgentDetail({
               Agents
             </Link>
             <div className="flex items-center gap-2 tabular-nums text-ink-subtle">
-              <span>
-                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
-              </span>
               <button
                 onClick={() => {
                   if (timerRef.current) clearTimeout(timerRef.current);
@@ -186,6 +203,33 @@ export default function AgentDetail({
             placeholder="Untitled agent"
             className="mt-6 w-full bg-transparent text-[24px] font-semibold tracking-[-0.01em] text-ink outline-none placeholder:text-ink-subtle/60"
           />
+
+          <div className="mt-2 flex items-center">
+            <Select
+              value={selectedModelId}
+              onValueChange={(value) => {
+                const next = findModel(value)?.id;
+                if (!next) return;
+                setSelectedModelId(next);
+                pendingRef.current.model = next;
+                schedule();
+              }}
+            >
+              <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-[#ececea]/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Brain size={12} strokeWidth={1.9} className="shrink-0" />
+                  <span className="truncate">{selectedModel.label}</span>
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                {AGENT_MODELS.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {model.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="mt-6">
             <AgentEditor
@@ -239,7 +283,7 @@ export default function AgentDetail({
         aria-label={inspectorCollapsed ? "Expand agent details" : "Collapse agent details"}
         aria-expanded={!inspectorCollapsed}
         onClick={() => updateInspectorCollapsed(!inspectorCollapsed)}
-        className="fixed right-2 top-3 z-50 rounded-md border border-[#e6e6e3] bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="fixed right-6 top-10 z-50 rounded-md border border-[#e6e6e3] bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <PanelRight size={15} strokeWidth={1.75} />
       </button>
@@ -506,12 +550,18 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
   );
 }
 
-function buildConfigPreview({ body, fallback }: { body: string; fallback: AgentConfig }) {
+function buildConfigPreview({
+  body,
+  fallback,
+  selectedModelId,
+}: {
+  body: string;
+  fallback: AgentConfig;
+  selectedModelId: AgentModelId;
+}) {
   const config = extractConfigFromMentions(body);
-  const mentionedModel = lastMentionedModel(body);
-  const modelId = mentionedModel ?? config.model;
   const model =
-    findModel(modelId) ?? findModel(fallback.model.name) ?? findModel("openai/gpt-5.4-mini");
+    findModel(selectedModelId) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
   const tools = config.tools.flatMap((toolId) => {
     const tool = findTool(toolId);
     return tool ? [tool] : [];
@@ -519,29 +569,9 @@ function buildConfigPreview({ body, fallback }: { body: string; fallback: AgentC
 
   return {
     model: model!,
-    modelIsExplicit: mentionedModel !== null,
+    modelIsExplicit: selectedModelId !== DEFAULT_MODEL_ID,
     tools,
   };
-}
-
-function lastMentionedModel(body: string): AgentModelId | null {
-  let model: AgentModelId | null = null;
-
-  for (const rawId of extractMentionIds(body)) {
-    const id = rawId.startsWith("model:") ? rawId.slice("model:".length) : rawId;
-    if (id === "default" || id === "fast") {
-      model = "openai/gpt-5.4-mini";
-      continue;
-    }
-    if (id === "deep") {
-      model = "openai/gpt-5.4";
-      continue;
-    }
-    const item = findModel(id);
-    if (item) model = item.id;
-  }
-
-  return model;
 }
 
 function syncMeta(status: string): {

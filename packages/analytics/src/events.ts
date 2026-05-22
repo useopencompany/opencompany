@@ -28,7 +28,7 @@ export type AnalyticsEventPropertiesByName = {
     user_id: string;
     workspace_id: string;
     agent_id: string;
-    changed_fields: Array<"name" | "body">;
+    changed_fields: Array<"name" | "body" | "model">;
   };
   sign_out: {
     user_id: string;

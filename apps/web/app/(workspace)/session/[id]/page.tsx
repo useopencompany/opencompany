@@ -20,6 +20,9 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         role: message.role,
         content: message.content,
         status: message.status,
+        modelMessage: message.modelMessage,
+        toolName: message.toolName,
+        toolCallId: message.toolCallId,
       }))}
       initialEvents={data.events.map((event) => ({
         id: event.id,

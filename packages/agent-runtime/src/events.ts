@@ -49,7 +49,12 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "command.output";
-      payload: { command: string; stream: "stdout" | "stderr"; delta: string };
+      payload: {
+        command: string;
+        toolCallId?: string;
+        stream: "stdout" | "stderr";
+        delta: string;
+      };
     }
   | {
       type: "session.error";

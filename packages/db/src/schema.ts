@@ -150,6 +150,8 @@ export const agentSyncJobs = pgTable(
     path: text("path").notNull(),
     desiredHash: text("desired_hash").notNull(),
     desiredVersion: integer("desired_version").notNull(),
+    previousPath: text("previous_path"),
+    previousBlobSha: text("previous_blob_sha"),
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),

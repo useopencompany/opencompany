@@ -78,6 +78,17 @@ describe(".agent files", () => {
     expect(source.endsWith("Find people with @exa and use @deep.")).toBe(true);
   });
 
+  test("serializes explicit model selection ahead of legacy model mentions", () => {
+    const source = serializeAgentFile({
+      title: "Research",
+      body: "Find people with @exa and use @deep.",
+      model: "anthropic/claude-sonnet-4.6",
+    });
+
+    expect(source).toContain("model: anthropic/claude-sonnet-4.6");
+    expect(parseAgentFile(source).config.model.name).toBe("anthropic/claude-sonnet-4.6");
+  });
+
   test("hashes serialized agent source deterministically", () => {
     const source = serializeAgentFile({
       title: "Research",

@@ -100,14 +100,21 @@ workspace-repo/
     └── sales-research.agent
 ```
 
-One agent per file. The slug must match the filename; the platform regenerates it from the title on every save, so renames in GitHub will desync until a re-save propagates the new slug.
+One agent per file. The slug must match the filename; the platform regenerates it from the title on every save.
+
+If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix (`agents/research.agent`, `agents/research-2.agent`).
+
+### Renames
+
+- **Editor-originated** (changing the title): the new slug is computed at save time, the file is written at the new path, and the old GitHub file is deleted as part of the same sync job (tracked via `previousPath` / `previousBlobSha` on `agent_sync_jobs`).
+- **GitHub-originated** (renaming the file directly in the repo): treated as a new agent on the next import, because the workspace sync keys off the file path. Renaming in GitHub will desync until a re-save in the editor reconciles the slug.
 
 ## Save behavior
 
 When the editor saves an agent:
 
 1. Postgres receives the title, body, parsed config, content hash, and version — synchronously. This is the "saved" state from the user's perspective.
-2. `agent_sync_jobs` is upserted with a `nextRunAt` ~10 seconds out, debouncing rapid edits.
+2. `agent_sync_jobs` is upserted with a `nextRunAt` ~10 seconds out, debouncing rapid edits. If the title change produced a new path, the previous path and blob SHA are recorded on the job so the worker can delete the old GitHub file.
 3. `agent.sync_requested` is dispatched to Inngest.
 4. Inngest writes the file to GitHub asynchronously.
 

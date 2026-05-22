@@ -28,6 +28,12 @@ type GitHubContentWrite = {
   };
 };
 
+type GitHubContentDelete = {
+  commit?: {
+    sha?: string;
+  };
+};
+
 type GitHubTree = {
   tree?: Array<{
     path?: string;
@@ -124,6 +130,67 @@ export async function writeWorkspaceFile(input: {
   return { commitSha, blobSha };
 }
 
+export async function deleteWorkspaceFile(input: {
+  db: Db;
+  repository: WorkspaceRepositoryRecord;
+  path: string;
+  message: string;
+  blobSha?: string | null;
+}) {
+  const token = await getInstallationToken();
+  const currentSha =
+    input.blobSha ??
+    (
+      await getFileSha({
+        token,
+        fullName: input.repository.fullName,
+        path: input.path,
+        branch: input.repository.defaultBranch,
+      })
+    )?.sha;
+
+  if (!currentSha) return { commitSha: null, deleted: false };
+
+  let result: GitHubContentDelete;
+  try {
+    result = await deleteWorkspaceFileContent({
+      token,
+      repository: input.repository,
+      path: input.path,
+      message: input.message,
+      sha: currentSha,
+    });
+  } catch (error) {
+    if (isGitHubNotFound(error)) return { commitSha: null, deleted: false };
+    if (!isGitHubContentConflict(error)) throw error;
+
+    const latest = await getFileSha({
+      token,
+      fullName: input.repository.fullName,
+      path: input.path,
+      branch: input.repository.defaultBranch,
+    });
+    if (!latest?.sha) return { commitSha: null, deleted: false };
+
+    result = await deleteWorkspaceFileContent({
+      token,
+      repository: input.repository,
+      path: input.path,
+      message: input.message,
+      sha: latest.sha,
+    });
+  }
+
+  const commitSha = result.commit?.sha ?? null;
+
+  await input.db
+    .update(workspaceRepositories)
+    .set({ latestHeadSha: commitSha, updatedAt: new Date() })
+    .where(eq(workspaceRepositories.workspaceId, input.repository.workspaceId));
+
+  return { commitSha, deleted: true };
+}
+
 function putWorkspaceFileContent(input: {
   token: string;
   repository: WorkspaceRepositoryRecord;
@@ -141,6 +208,25 @@ function putWorkspaceFileContent(input: {
       branch: input.repository.defaultBranch,
       content: Buffer.from(input.content, "utf8").toString("base64"),
       ...(input.sha ? { sha: input.sha } : {}),
+    },
+  });
+}
+
+function deleteWorkspaceFileContent(input: {
+  token: string;
+  repository: WorkspaceRepositoryRecord;
+  path: string;
+  message: string;
+  sha: string;
+}) {
+  return githubRequest<GitHubContentDelete>({
+    token: input.token,
+    path: `/repos/${input.repository.fullName}/contents/${encodeURIComponentPath(input.path)}`,
+    method: "DELETE",
+    body: {
+      message: input.message,
+      branch: input.repository.defaultBranch,
+      sha: input.sha,
     },
   });
 }
@@ -296,7 +382,7 @@ function createAppJwt() {
 async function githubRequest<T>(input: {
   token: string;
   path: string;
-  method: "GET" | "POST" | "PUT";
+  method: "DELETE" | "GET" | "POST" | "PUT";
   body?: Record<string, unknown>;
   authScheme?: "Bearer" | "token";
 }): Promise<T> {
