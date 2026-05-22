@@ -3,16 +3,19 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents } from "@opencompany/db/schema";
-import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { after } from "next/server";
 import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
+import {
+  agentSyncJobUpsert,
+  buildPendingAgent,
+  newAgentId,
+  nextAvailableAgentPath,
+  scheduleAgentSyncDispatch,
+} from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
-import { resolveAgentPath } from "@/lib/agents/paths";
-import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import type { AgentModelId } from "@/lib/agents/types";
 import { getCurrentWorkspace } from "@/lib/auth";
@@ -24,58 +27,30 @@ import {
   writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
 
-const logger = createLogger({ service: "opencompany-web", runtime: "server" });
-
-function newAgentId() {
-  const raw = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-  return `agt_${raw}`;
-}
-
 export async function createAgent() {
   const trace = startTimingTrace("agents.create");
   const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
-  const id = newAgentId();
   const title = randomAgentName();
-  const body = "";
   const path = await timeAsync(trace, "db.nextAvailableAgentPath", () =>
     nextAvailableAgentPath(db, workspace.id, title),
   );
-  const source = serializeAgentFile({ title, body });
-  const parsed = parseAgentFile(source);
-  const contentHash = hashAgentSource(source);
-  const version = 1;
+  const pending = buildPendingAgent({
+    workspaceId: workspace.id,
+    title,
+    body: "",
+    path,
+  });
 
   await timeAsync(trace, "db.createAgentAndSyncJob", () =>
-    db.batch([
-      db.insert(agents).values({
-        id,
-        workspaceId: workspace.id,
-        path,
-        name: parsed.title,
-        body: parsed.body,
-        contentHash,
-        version,
-        config: parsed.config,
-        githubSyncStatus: "pending",
-      }),
-      agentSyncJobUpsert(db, {
-        agentId: id,
-        workspaceId: workspace.id,
-        path,
-        desiredHash: contentHash,
-        desiredVersion: version,
-        previousPath: null,
-        previousBlobSha: null,
-      }),
-    ]),
+    db.batch([db.insert(agents).values(pending.agent), agentSyncJobUpsert(db, pending.syncJob)]),
   );
-  const result = { id, workspaceId: workspace.id, path };
+  const result = { id: pending.id, workspaceId: workspace.id, path };
 
   await captureServerEvent("agent_created", user.id, {
     user_id: user.id,
     workspace_id: workspace.id,
-    agent_id: id,
+    agent_id: pending.id,
   });
 
   revalidatePath("/agents");
@@ -205,86 +180,6 @@ export async function updateAgent(
   scheduleAgentSyncDispatch(result);
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
-}
-
-async function nextAvailableAgentPath(
-  db: ReturnType<typeof getDb>,
-  workspaceId: string,
-  title: string,
-  currentPath?: string | null,
-) {
-  const rows = await db
-    .select({ path: agents.path })
-    .from(agents)
-    .where(eq(agents.workspaceId, workspaceId));
-  return resolveAgentPath({
-    title,
-    currentPath,
-    existingPaths: rows.flatMap((row) => (row.path ? [row.path] : [])),
-  });
-}
-
-function agentSyncJobUpsert(
-  db: Pick<ReturnType<typeof getDb>, "insert">,
-  input: {
-    agentId: string;
-    workspaceId: string;
-    path: string;
-    desiredHash: string;
-    desiredVersion: number;
-    previousPath: string | null;
-    previousBlobSha: string | null;
-  },
-) {
-  const now = new Date();
-  return db
-    .insert(agentSyncJobs)
-    .values({
-      ...input,
-      status: "pending",
-      attempts: 0,
-      nextRunAt: new Date(now.getTime() + 10_000),
-      lastError: null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: agentSyncJobs.agentId,
-      set: {
-        path: input.path,
-        desiredHash: input.desiredHash,
-        desiredVersion: input.desiredVersion,
-        previousPath: input.previousPath,
-        previousBlobSha: input.previousBlobSha,
-        status: "pending",
-        attempts: 0,
-        nextRunAt: new Date(now.getTime() + 10_000),
-        lastError: null,
-        updatedAt: now,
-      },
-    });
-}
-
-function scheduleAgentSyncDispatch(input: { id: string; workspaceId: string }) {
-  after(async () => {
-    try {
-      await dispatchAgentSyncRequested({
-        agentId: input.id,
-        workspaceId: input.workspaceId,
-      });
-    } catch (error) {
-      captureException(error, {
-        event: "opencompany.agent_sync_dispatch_failed",
-        agent_id: input.id,
-        workspace_id: input.workspaceId,
-      });
-      logger.error("Failed to dispatch agent GitHub sync event", {
-        event: "opencompany.agent_sync_dispatch_failed",
-        agent_id: input.id,
-        workspace_id: input.workspaceId,
-        error,
-      });
-    }
-  });
 }
 
 export async function materializeLegacyAgentFiles() {
