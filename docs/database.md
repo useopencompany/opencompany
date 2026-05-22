@@ -65,8 +65,8 @@ These let you override defaults in headless environments:
 Current tables (see `packages/db/src/schema.ts` for the source of truth):
 
 - `users` — one row per WorkOS user, keyed by `usr_<workos_id>`.
-- `workspaces` — tenant boundary; one default workspace per user on first sign-in.
-- `workspace_memberships` — many-to-many user↔workspace with a `role`.
+- `workspaces` — internal tenant boundary; each new workspace maps to a WorkOS Organization through `workos_organization_id`.
+- `workspace_memberships` — local mirror of user↔workspace membership with a `role`; WorkOS is the source of truth.
 - `agents` — latest editable agent state: path, title/body, parsed config, content hash, version, and GitHub sync status.
 - `agent_sync_jobs` — desired GitHub materialization state for an agent edit. Repeated edits coalesce by updating the same row.
 - `workspace_repositories` — one managed private GitHub repo per workspace, including repo id, full name, default branch, and latest head SHA.

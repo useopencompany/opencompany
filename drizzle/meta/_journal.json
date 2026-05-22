@@ -57,6 +57,13 @@
       "when": 1779437756770,
       "tag": "0007_minor_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779441668803,
+      "tag": "0008_modern_vanisher",
+      "breakpoints": true
     }
   ]
 }

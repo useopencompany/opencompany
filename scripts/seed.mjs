@@ -11,6 +11,7 @@ const sql = neon(databaseUrl);
 const now = new Date();
 const userId = "usr_seed";
 const workspaceId = "wks_usr_seed";
+const workosOrganizationId = "org_seed";
 
 await sql`
   insert into users (
@@ -38,11 +39,13 @@ await sql`
 await sql`
   insert into workspaces (
     id,
+    workos_organization_id,
     name,
     created_by_user_id,
     updated_at
   ) values (
     ${workspaceId},
+    ${workosOrganizationId},
     'Dev Workspace',
     ${userId},
     ${now}
@@ -59,7 +62,7 @@ await sql`
   ) values (
     ${workspaceId},
     ${userId},
-    'owner',
+    'admin',
     ${now}
   )
   on conflict (workspace_id, user_id) do nothing
