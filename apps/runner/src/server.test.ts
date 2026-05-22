@@ -19,6 +19,7 @@ const env = {
   e2bSandboxIdleTimeoutMs: 30_000,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],
+  instanceId: "runner-test",
 };
 
 const servers: Array<ReturnType<typeof createServer>> = [];

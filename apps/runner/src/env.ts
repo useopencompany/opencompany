@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+
 export type RunnerEnv = {
   databaseUrl: string;
   internalToken: string;
@@ -8,6 +11,7 @@ export type RunnerEnv = {
   e2bSandboxIdleTimeoutMs: number;
   port: number;
   allowedOrigins: string[];
+  instanceId: string;
 };
 
 export function loadEnv(): RunnerEnv {
@@ -24,6 +28,7 @@ export function loadEnv(): RunnerEnv {
       .split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),
+    instanceId: optionalEnv("RUNNER_INSTANCE_ID") ?? defaultInstanceId(),
   };
 }
 
@@ -35,6 +40,11 @@ function requiredEnv(name: string) {
   return value;
 }
 
+function optionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
 function optionalPositiveIntegerEnv(name: string, fallback: number) {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
@@ -44,4 +54,8 @@ function optionalPositiveIntegerEnv(name: string, fallback: number) {
     throw new Error(`${name} must be a positive integer.`);
   }
   return value;
+}
+
+function defaultInstanceId() {
+  return `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
 }

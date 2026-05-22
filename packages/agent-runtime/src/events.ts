@@ -56,6 +56,27 @@ export type AgentRuntimeEvent =
       payload: { message: string };
     }
   | {
+      type: "session.usage";
+      payload: {
+        messageId: string;
+        runLeaseId: string;
+        stepIndex: number;
+        modelProvider: string;
+        modelName: string;
+        responseModelId?: string;
+        inputTokens: number;
+        inputNoCacheTokens: number;
+        inputCacheReadTokens: number;
+        inputCacheWriteTokens: number;
+        outputTokens: number;
+        outputTextTokens: number;
+        outputReasoningTokens: number;
+        totalTokens: number;
+        finishReason?: string;
+        rawFinishReason?: string;
+      };
+    }
+  | {
       type: "session.archived";
       payload: {
         sandboxId: string | null;

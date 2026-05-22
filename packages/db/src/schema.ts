@@ -183,6 +183,10 @@ export const agentSessions = pgTable(
     e2bSandboxId: text("e2b_sandbox_id"),
     workdir: text("workdir").notNull().default("/home/user/workspace"),
     runLeaseId: text("run_lease_id"),
+    runLeaseOwner: text("run_lease_owner"),
+    runLeaseMessageId: text("run_lease_message_id"),
+    runLeaseExpiresAt: timestamp("run_lease_expires_at", { withTimezone: true }),
+    runHeartbeatAt: timestamp("run_heartbeat_at", { withTimezone: true }),
     abortRequestedAt: timestamp("abort_requested_at", { withTimezone: true }),
     lastError: text("last_error"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -213,8 +217,10 @@ export const agentSessionMessages = pgTable(
     role: text("role").notNull(),
     status: text("status").notNull().default("created"),
     content: text("content").notNull().default(""),
+    modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
+    responseToMessageId: text("response_to_message_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
@@ -223,6 +229,9 @@ export const agentSessionMessages = pgTable(
     sessionCreatedAtIdx: index("agent_session_messages_session_created_at_idx").on(
       table.sessionId,
       table.createdAt,
+    ),
+    responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
+      table.responseToMessageId,
     ),
   }),
 );
@@ -244,6 +253,49 @@ export const agentSessionEvents = pgTable(
   (table) => ({
     sessionIdx: index("agent_session_events_session_idx").on(table.sessionId),
     sessionEventIdx: index("agent_session_events_session_event_idx").on(table.sessionId, table.id),
+  }),
+);
+
+export const agentSessionUsage = pgTable(
+  "agent_session_usage",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    runLeaseId: text("run_lease_id"),
+    stepIndex: integer("step_index").notNull(),
+    modelProvider: text("model_provider").notNull(),
+    modelName: text("model_name").notNull(),
+    responseId: text("response_id"),
+    responseModelId: text("response_model_id"),
+    finishReason: text("finish_reason"),
+    rawFinishReason: text("raw_finish_reason"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    inputNoCacheTokens: integer("input_no_cache_tokens").notNull().default(0),
+    inputCacheReadTokens: integer("input_cache_read_tokens").notNull().default(0),
+    inputCacheWriteTokens: integer("input_cache_write_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    outputTextTokens: integer("output_text_tokens").notNull().default(0),
+    outputReasoningTokens: integer("output_reasoning_tokens").notNull().default(0),
+    totalTokens: integer("total_tokens").notNull().default(0),
+    rawUsage: jsonb("raw_usage")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_usage_session_idx").on(table.sessionId),
+    messageIdx: index("agent_session_usage_message_idx").on(table.messageId),
+    sessionCreatedAtIdx: index("agent_session_usage_session_created_at_idx").on(
+      table.sessionId,
+      table.createdAt,
+    ),
   }),
 );
 
@@ -337,6 +389,7 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   }),
   messages: many(agentSessionMessages),
   events: many(agentSessionEvents),
+  usage: many(agentSessionUsage),
 }));
 
 export const agentSessionMessagesRelations = relations(agentSessionMessages, ({ one, many }) => ({
@@ -345,6 +398,7 @@ export const agentSessionMessagesRelations = relations(agentSessionMessages, ({ 
     references: [agentSessions.id],
   }),
   events: many(agentSessionEvents),
+  usage: many(agentSessionUsage),
 }));
 
 export const agentSessionEventsRelations = relations(agentSessionEvents, ({ one }) => ({
@@ -354,6 +408,17 @@ export const agentSessionEventsRelations = relations(agentSessionEvents, ({ one 
   }),
   message: one(agentSessionMessages, {
     fields: [agentSessionEvents.messageId],
+    references: [agentSessionMessages.id],
+  }),
+}));
+
+export const agentSessionUsageRelations = relations(agentSessionUsage, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionUsage.sessionId],
+    references: [agentSessions.id],
+  }),
+  message: one(agentSessionMessages, {
+    fields: [agentSessionUsage.messageId],
     references: [agentSessionMessages.id],
   }),
 }));
@@ -405,6 +470,7 @@ export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
 export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
+export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;

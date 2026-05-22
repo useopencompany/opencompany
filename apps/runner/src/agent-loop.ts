@@ -9,14 +9,17 @@ import {
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
+  agentSessionUsage,
   agents,
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
 import {
   createGateway,
+  type FinishReason,
   jsonSchema,
-  type ModelMessage,
+  type LanguageModelResponseMetadata,
+  type LanguageModelUsage,
   stepCountIs,
   streamText,
   type ToolSet,
@@ -27,6 +30,24 @@ import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
 import {
+  type AssistantReplayPart,
+  appendAssistantTextPart,
+  buildAssistantModelMessage,
+  buildModelMessages,
+  buildToolModelMessage,
+  serializeToolOutputForStorage,
+  toPersistedModelMessage,
+} from "./model-messages";
+import {
+  checkRunControl,
+  claimRunLease as claimDbRunLease,
+  finishRunLease as finishDbRunLease,
+  maybeHeartbeatRunLease,
+  RunAbortError,
+  RunLeaseLostError,
+  withRunControlChecks,
+} from "./run-control";
+import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   killSandbox,
@@ -34,8 +55,9 @@ import {
   runSandboxTool,
   type SandboxHandle,
 } from "./sandbox";
+import { normalizeModelUsage } from "./usage";
 
-const activeRuns = new Map<string, AbortController>();
+const activeRuns = new Map<string, { leaseId: string; controller: AbortController }>();
 
 export async function startSession(sessionId: string, env: RunnerEnv) {
   const db = getDb();
@@ -58,7 +80,13 @@ export async function startSession(sessionId: string, env: RunnerEnv) {
       lastError: null,
       updatedAt: new Date(),
     })
-    .where(and(eq(agentSessions.id, sessionId), isNull(agentSessions.archivedAt)))
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        isNull(agentSessions.archivedAt),
+        isNull(agentSessions.runLeaseId),
+      ),
+    )
     .returning({ id: agentSessions.id });
   if (!updated) {
     await killSandbox(sandbox.sandboxId);
@@ -75,14 +103,18 @@ export async function startSession(sessionId: string, env: RunnerEnv) {
 
 export async function abortSession(sessionId: string) {
   const db = getDb();
-  activeRuns.get(sessionId)?.abort();
   const [updated] = await db
     .update(agentSessions)
-    .set({ status: "aborting", abortRequestedAt: new Date(), updatedAt: new Date() })
+    .set({
+      status: "aborting",
+      abortRequestedAt: new Date(),
+      updatedAt: new Date(),
+    })
     .where(and(eq(agentSessions.id, sessionId), isNull(agentSessions.archivedAt)))
     .returning({ id: agentSessions.id });
   if (!updated) return;
 
+  activeRuns.get(sessionId)?.controller.abort();
   await appendRuntimeEvent(db, {
     sessionId,
     type: "session.status",
@@ -93,91 +125,109 @@ export async function abortSession(sessionId: string) {
 export async function runMessage(input: { sessionId: string; messageId: string; env: RunnerEnv }) {
   const db = getDb();
   const controller = new AbortController();
-  activeRuns.set(input.sessionId, controller);
   const leaseId = newRunLeaseId();
+  const leaseOwner = input.env.instanceId;
+  const runLease = { sessionId: input.sessionId, leaseId, leaseOwner };
   const assistantMessageId = newAgentSessionMessageId();
   let sandbox: SandboxHandle | null = null;
+  let leaseAcquired = false;
+  let lastHeartbeatAt = 0;
 
   try {
     const row = await loadSession(input.sessionId);
     if (row.session.archivedAt) return;
 
-    sandbox = await ensureSandbox(row, input.env);
-    if (await isSessionArchived(input.sessionId)) {
-      await killSandbox(sandbox.sandboxId);
-      return;
-    }
+    const userMessage = await loadUserMessage(input.sessionId, input.messageId);
+    if (!userMessage) return;
+
+    if (await loadAssistantResponseForMessage(input.sessionId, input.messageId)) return;
 
     const runtime = resolveAgentRuntimeConfig({
       agent: row.agent.config,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
     });
-    const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
 
-    const [updated] = await db
-      .update(agentSessions)
-      .set({
-        status: "running",
-        runLeaseId: leaseId,
-        e2bSandboxId: sandbox.sandboxId,
-        modelProvider: runtime.model.provider,
-        modelName: runtime.model.name,
-        abortRequestedAt: null,
-        lastError: null,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(agentSessions.id, input.sessionId), isNull(agentSessions.archivedAt)))
-      .returning({ id: agentSessions.id });
-    if (!updated) {
+    const lease = await acquireRunLease({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      leaseId,
+      leaseOwner,
+      modelProvider: runtime.model.provider,
+      modelName: runtime.model.name,
+    });
+    if (!lease) return;
+
+    leaseAcquired = true;
+    lastHeartbeatAt = Date.now();
+    activeRuns.set(input.sessionId, { leaseId, controller });
+
+    const checkAbort = async () => {
+      const heartbeat = await maybeHeartbeatRunLease({ ...runLease, lastHeartbeatAt });
+      lastHeartbeatAt = heartbeat.heartbeatAt;
+      if (!heartbeat.leaseActive) {
+        controller.abort();
+        throw new RunLeaseLostError();
+      }
+      await checkRunControl({ ...runLease, controller });
+    };
+
+    await checkAbort();
+
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId,
+        leaseOwner,
+        type: "session.status",
+        payload: { status: "running", message: "Agent is running" },
+      }),
+    );
+
+    sandbox = await ensureSandbox(row, input.env);
+    await checkAbort();
+    if (!(await updateSandboxForLease(input.sessionId, leaseId, leaseOwner, sandbox.sandboxId))) {
       await killSandbox(sandbox.sandboxId);
       return;
     }
 
-    await appendRuntimeEvent(db, {
-      sessionId: input.sessionId,
-      type: "session.status",
-      payload: { status: "running", message: "Agent is running" },
-    });
+    const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
 
-    if (await isSessionArchived(input.sessionId)) return;
-
-    await db.insert(agentSessionMessages).values({
+    const assistantCreated = await createAssistantMessageForLease({
       id: assistantMessageId,
       sessionId: input.sessionId,
-      role: "assistant",
-      status: "running",
+      responseToMessageId: input.messageId,
+      leaseId,
+      leaseOwner,
     });
-    await appendRuntimeEvent(db, {
-      sessionId: input.sessionId,
-      messageId: assistantMessageId,
-      type: "message.created",
-      payload: { messageId: assistantMessageId, role: "assistant" },
-    });
+    if (!assistantCreated) {
+      await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
+      return;
+    }
 
     const storedMessages = await db
       .select()
       .from(agentSessionMessages)
       .where(eq(agentSessionMessages.sessionId, input.sessionId))
       .orderBy(asc(agentSessionMessages.createdAt));
-    const messages: ModelMessage[] = storedMessages
-      .filter((message) => message.id !== assistantMessageId)
-      .map((message): ModelMessage | null => {
-        if (message.role === "user" || message.role === "assistant") {
-          return { role: message.role, content: message.content };
-        }
-        return null;
-      })
-      .filter((message): message is ModelMessage => Boolean(message));
+    const messages = buildModelMessages(
+      storedMessages.filter((message) => message.id !== assistantMessageId),
+    );
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
+      runLeaseId: leaseId,
+      runLeaseOwner: leaseOwner,
       sandbox,
       workdir: row.session.workdir,
       signal: controller.signal,
+      checkAbort,
     });
 
     let assistantContent = "";
+    const assistantReplayParts: AssistantReplayPart[] = [];
+    let stepIndex = 0;
     const result = streamText({
       model: gateway(runtime.model.name),
       system: runtime.systemPrompt,
@@ -188,58 +238,126 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     });
 
     for await (const part of result.fullStream) {
+      await checkAbort();
       throwIfAborted(controller.signal);
 
       if (part.type === "text-delta") {
         assistantContent += part.text;
-        await appendRuntimeEvent(db, {
+        appendAssistantTextPart(assistantReplayParts, part.text);
+        await requireLeaseWrite(
+          appendRuntimeEventForLease({
+            sessionId: input.sessionId,
+            messageId: assistantMessageId,
+            leaseId,
+            leaseOwner,
+            type: "message.delta",
+            payload: { messageId: assistantMessageId, delta: part.text },
+          }),
+        );
+      }
+
+      if (part.type === "finish-step") {
+        stepIndex += 1;
+        await recordStepUsage({
           sessionId: input.sessionId,
-          messageId: assistantMessageId,
-          type: "message.delta",
-          payload: { messageId: assistantMessageId, delta: part.text },
+          assistantMessageId,
+          runLeaseId: leaseId,
+          runLeaseOwner: leaseOwner,
+          stepIndex,
+          modelProvider: runtime.model.provider,
+          modelName: runtime.model.name,
+          response: part.response,
+          usage: part.usage,
+          finishReason: part.finishReason,
+          rawFinishReason: part.rawFinishReason,
+        });
+      }
+
+      if (part.type === "tool-call") {
+        assistantReplayParts.push({
+          type: "tool-call",
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          input: part.input,
         });
       }
     }
 
-    await db
-      .update(agentSessionMessages)
-      .set({ status: "completed", content: assistantContent, completedAt: new Date() })
-      .where(eq(agentSessionMessages.id, assistantMessageId));
-    await appendRuntimeEvent(db, {
-      sessionId: input.sessionId,
-      messageId: assistantMessageId,
-      type: "message.completed",
-      payload: { messageId: assistantMessageId, content: assistantContent },
+    await checkAbort();
+    const assistantModelMessage = buildAssistantModelMessage({
+      content: assistantContent,
+      parts: assistantReplayParts,
     });
-    if (await setStatus(input.sessionId, "completed")) {
-      await appendRuntimeEvent(db, {
+
+    await requireLeaseWrite(
+      completeAssistantMessageForLease({
         sessionId: input.sessionId,
+        assistantMessageId,
+        leaseId,
+        leaseOwner,
+        content: assistantContent,
+        modelMessage: toPersistedModelMessage(assistantModelMessage),
+      }),
+    );
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: assistantMessageId,
+        leaseId,
+        leaseOwner,
+        type: "message.completed",
+        payload: { messageId: assistantMessageId, content: assistantContent },
+      }),
+    );
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId,
+        leaseOwner,
         type: "session.status",
         payload: { status: "completed", message: "Agent completed" },
-      });
-    }
+      }),
+    );
+    await requireLeaseWrite(releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed"));
   } catch (error) {
+    if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
+      return;
+    }
+
+    if (controller.signal.aborted || error instanceof RunAbortError) {
+      if (leaseAcquired) {
+        await failRunLease(input.sessionId, leaseId, leaseOwner, "aborting", "Run aborted.");
+      }
+      return;
+    }
+
     const message = error instanceof Error ? error.message : "Unknown runner error";
-    const [updated] = await db
-      .update(agentSessions)
-      .set({
-        status: controller.signal.aborted ? "aborting" : "failed",
-        lastError: message,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(agentSessions.id, input.sessionId), isNull(agentSessions.archivedAt)))
-      .returning({ id: agentSessions.id });
-    if (updated) {
-      await appendRuntimeEvent(db, {
+    if (leaseAcquired) {
+      await appendRuntimeEventForLease({
         sessionId: input.sessionId,
+        messageId: null,
+        leaseId,
+        leaseOwner,
         type: "session.error",
         payload: { message },
       });
     }
+    const updated = leaseAcquired
+      ? await failRunLease(
+          input.sessionId,
+          leaseId,
+          leaseOwner,
+          controller.signal.aborted ? "aborting" : "failed",
+          message,
+        )
+      : false;
     if (!updated && (await isSessionArchived(input.sessionId))) return;
     throw error;
   } finally {
-    activeRuns.delete(input.sessionId);
+    if (activeRuns.get(input.sessionId)?.controller === controller) {
+      activeRuns.delete(input.sessionId);
+    }
     if (sandbox) {
       await parkSandboxWhenIdle(sandbox, input.env);
     }
@@ -248,7 +366,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
 
 export async function archiveSession(sessionId: string) {
   const db = getDb();
-  activeRuns.get(sessionId)?.abort();
+  activeRuns.get(sessionId)?.controller.abort();
 
   const [session] = await db
     .select({
@@ -278,6 +396,10 @@ export async function archiveSession(sessionId: string) {
         sandboxTerminatedAt: now,
         e2bSandboxId: null,
         runLeaseId: null,
+        runLeaseOwner: null,
+        runLeaseMessageId: null,
+        runLeaseExpiresAt: null,
+        runHeartbeatAt: null,
         lastError: null,
         updatedAt: now,
       })
@@ -302,9 +424,12 @@ export async function archiveSession(sessionId: string) {
 function createToolSet(input: {
   sessionId: string;
   assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
   sandbox: SandboxHandle;
   workdir: string;
   signal: AbortSignal;
+  checkAbort: () => Promise<void>;
 }) {
   const tools: ToolSet = {};
 
@@ -313,40 +438,53 @@ function createToolSet(input: {
       description: definition.description,
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
       onInputDelta: async ({ inputTextDelta, toolCallId }) => {
-        await appendRuntimeEvent(getDb(), {
-          sessionId: input.sessionId,
-          messageId: input.assistantMessageId,
-          type: "tool.delta",
-          payload: {
+        await input.checkAbort();
+        await requireLeaseWrite(
+          appendRuntimeEventForLease({
+            sessionId: input.sessionId,
             messageId: input.assistantMessageId,
-            toolCallId,
-            delta: inputTextDelta,
-          },
-        });
+            leaseId: input.runLeaseId,
+            leaseOwner: input.runLeaseOwner,
+            type: "tool.delta",
+            payload: {
+              messageId: input.assistantMessageId,
+              toolCallId,
+              delta: inputTextDelta,
+            },
+          }),
+        );
       },
       onInputAvailable: async ({ input: toolInput, toolCallId }) => {
-        await appendRuntimeEvent(getDb(), {
-          sessionId: input.sessionId,
-          messageId: input.assistantMessageId,
-          type: "tool.started",
-          payload: {
+        await input.checkAbort();
+        await requireLeaseWrite(
+          appendRuntimeEventForLease({
+            sessionId: input.sessionId,
             messageId: input.assistantMessageId,
-            toolCallId,
-            name: definition.name,
-            input: toolInput,
-          },
-        });
+            leaseId: input.runLeaseId,
+            leaseOwner: input.runLeaseOwner,
+            type: "tool.started",
+            payload: {
+              messageId: input.assistantMessageId,
+              toolCallId,
+              name: definition.name,
+              input: toolInput,
+            },
+          }),
+        );
       },
       execute: async (toolInput, options) =>
         executeRuntimeTool({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
           toolCallId: options.toolCallId,
           name: definition.name,
           args: toolInput,
           sandbox: input.sandbox,
           workdir: input.workdir,
           signal: input.signal,
+          checkAbort: input.checkAbort,
         }),
     });
   }
@@ -365,33 +503,42 @@ function pickRuntimeTools(tools: ToolSet, names: string[]) {
 async function executeRuntimeTool(input: {
   sessionId: string;
   assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
   toolCallId: string;
   name: string;
   args: unknown;
   sandbox: SandboxHandle;
   workdir: string;
   signal: AbortSignal;
+  checkAbort: () => Promise<void>;
 }) {
-  const db = getDb();
-  throwIfAborted(input.signal);
+  const output = await withRunControlChecks(input.checkAbort, async () => {
+    throwIfAborted(input.signal);
 
-  const output = await runSandboxTool({
-    sandbox: input.sandbox,
-    workdir: input.workdir,
-    name: input.name,
-    args: input.args,
-    onOutput: async (stream, delta) => {
-      await appendRuntimeEvent(db, {
-        sessionId: input.sessionId,
-        messageId: input.assistantMessageId,
-        type: "command.output",
-        payload: {
-          command: input.name,
-          stream,
-          delta,
-        },
-      });
-    },
+    return runSandboxTool({
+      sandbox: input.sandbox,
+      workdir: input.workdir,
+      name: input.name,
+      args: input.args,
+      onOutput: async (stream, delta) => {
+        await input.checkAbort();
+        await requireLeaseWrite(
+          appendRuntimeEventForLease({
+            sessionId: input.sessionId,
+            messageId: input.assistantMessageId,
+            leaseId: input.runLeaseId,
+            leaseOwner: input.runLeaseOwner,
+            type: "command.output",
+            payload: {
+              command: input.name,
+              stream,
+              delta,
+            },
+          }),
+        );
+      },
+    });
   });
 
   const changedPath =
@@ -399,37 +546,312 @@ async function executeRuntimeTool(input: {
       ? (output as { path: unknown }).path
       : null;
   if (input.name === "write_file" && typeof changedPath === "string") {
-    await appendRuntimeEvent(db, {
-      sessionId: input.sessionId,
-      type: "file.changed",
-      payload: { path: changedPath, operation: "write" },
-    });
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.runLeaseId,
+        leaseOwner: input.runLeaseOwner,
+        type: "file.changed",
+        payload: { path: changedPath, operation: "write" },
+      }),
+    );
   }
 
   const toolMessageId = newAgentSessionMessageId();
-  await db.insert(agentSessionMessages).values({
-    id: toolMessageId,
-    sessionId: input.sessionId,
-    role: "tool",
-    status: "completed",
-    content: JSON.stringify(output),
-    toolName: input.name,
-    toolCallId: input.toolCallId,
-    completedAt: new Date(),
-  });
-  await appendRuntimeEvent(db, {
-    sessionId: input.sessionId,
-    messageId: input.assistantMessageId,
-    type: "tool.completed",
-    payload: {
-      messageId: input.assistantMessageId,
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.name,
+          output,
+        }),
+      ),
+      toolName: input.name,
       toolCallId: input.toolCallId,
-      name: input.name,
-      output,
-    },
-  });
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.completed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: input.name,
+        output,
+      },
+    }),
+  );
 
   return output;
+}
+
+export async function recordStepUsage(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  stepIndex: number;
+  modelProvider: string;
+  modelName: string;
+  response: LanguageModelResponseMetadata;
+  usage: LanguageModelUsage;
+  finishReason: FinishReason;
+  rawFinishReason: string | undefined;
+}) {
+  const db = getDb();
+  await requireLeaseWrite(
+    isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+  );
+
+  const usage = normalizeModelUsage(input.usage);
+  const usagePayload = {
+    messageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    stepIndex: input.stepIndex,
+    modelProvider: input.modelProvider,
+    modelName: input.modelName,
+    responseModelId: input.response.modelId,
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
+    outputTextTokens: usage.outputTextTokens,
+    outputReasoningTokens: usage.outputReasoningTokens,
+    totalTokens: usage.totalTokens,
+    finishReason: input.finishReason,
+    ...(input.rawFinishReason ? { rawFinishReason: input.rawFinishReason } : {}),
+  };
+
+  await db.insert(agentSessionUsage).values({
+    sessionId: input.sessionId,
+    messageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    stepIndex: input.stepIndex,
+    modelProvider: input.modelProvider,
+    modelName: input.modelName,
+    responseId: input.response.id,
+    responseModelId: input.response.modelId,
+    finishReason: input.finishReason,
+    rawFinishReason: input.rawFinishReason ?? null,
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
+    outputTextTokens: usage.outputTextTokens,
+    outputReasoningTokens: usage.outputReasoningTokens,
+    totalTokens: usage.totalTokens,
+    rawUsage: usage.rawUsage,
+    providerCreatedAt: input.response.timestamp,
+  });
+
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "session.usage",
+      payload: usagePayload,
+    }),
+  );
+}
+
+export async function acquireRunLease(input: {
+  sessionId: string;
+  messageId: string;
+  leaseId: string;
+  leaseOwner: string;
+  modelProvider: string;
+  modelName: string;
+}) {
+  return claimDbRunLease(input);
+}
+
+export async function isRunLeaseCurrent(sessionId: string, leaseId: string, leaseOwner: string) {
+  const [session] = await getDb()
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.runLeaseId, leaseId),
+        eq(agentSessions.runLeaseOwner, leaseOwner),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(session);
+}
+
+async function updateSandboxForLease(
+  sessionId: string,
+  leaseId: string,
+  leaseOwner: string,
+  sandboxId: string,
+) {
+  const [updated] = await getDb()
+    .update(agentSessions)
+    .set({ e2bSandboxId: sandboxId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.runLeaseId, leaseId),
+        eq(agentSessions.runLeaseOwner, leaseOwner),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .returning({ id: agentSessions.id });
+
+  return Boolean(updated);
+}
+
+export async function createAssistantMessageForLease(input: {
+  id: string;
+  sessionId: string;
+  responseToMessageId: string;
+  leaseId: string;
+  leaseOwner: string;
+}) {
+  await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
+
+  const [message] = await getDb()
+    .insert(agentSessionMessages)
+    .values({
+      id: input.id,
+      sessionId: input.sessionId,
+      role: "assistant",
+      status: "running",
+      responseToMessageId: input.responseToMessageId,
+    })
+    .onConflictDoNothing({ target: agentSessionMessages.responseToMessageId })
+    .returning({ id: agentSessionMessages.id });
+
+  if (!message) return false;
+
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.id,
+      leaseId: input.leaseId,
+      leaseOwner: input.leaseOwner,
+      type: "message.created",
+      payload: { messageId: input.id, role: "assistant" },
+    }),
+  );
+  return true;
+}
+
+export async function completeAssistantMessageForLease(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  leaseId: string;
+  leaseOwner: string;
+  content: string;
+  modelMessage: Record<string, unknown>;
+}) {
+  await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
+
+  const [updated] = await getDb()
+    .update(agentSessionMessages)
+    .set({
+      status: "completed",
+      content: input.content,
+      modelMessage: input.modelMessage,
+      completedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionMessages.id, input.assistantMessageId),
+        eq(agentSessionMessages.sessionId, input.sessionId),
+      ),
+    )
+    .returning({ id: agentSessionMessages.id });
+
+  return Boolean(updated);
+}
+
+async function insertToolMessageForLease(input: {
+  id: string;
+  sessionId: string;
+  leaseId: string;
+  leaseOwner: string;
+  content: string;
+  modelMessage: Record<string, unknown>;
+  toolName: string;
+  toolCallId: string;
+}) {
+  await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
+
+  const [message] = await getDb()
+    .insert(agentSessionMessages)
+    .values({
+      id: input.id,
+      sessionId: input.sessionId,
+      role: "tool",
+      status: "completed",
+      content: input.content,
+      modelMessage: input.modelMessage,
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      completedAt: new Date(),
+    })
+    .returning({ id: agentSessionMessages.id });
+
+  return Boolean(message);
+}
+
+export async function appendRuntimeEventForLease(
+  input: Parameters<typeof appendRuntimeEvent>[1] & { leaseId: string; leaseOwner: string },
+) {
+  const { leaseId, leaseOwner, ...event } = input;
+  if (!(await isRunLeaseCurrent(input.sessionId, leaseId, leaseOwner))) return false;
+  await appendRuntimeEvent(getDb(), event);
+  return true;
+}
+
+async function releaseRunLease(
+  sessionId: string,
+  leaseId: string,
+  leaseOwner: string,
+  status: "completed",
+) {
+  return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: null });
+}
+
+async function failRunLease(
+  sessionId: string,
+  leaseId: string,
+  leaseOwner: string,
+  status: "aborting" | "failed",
+  message: string,
+) {
+  return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: message });
+}
+
+async function requireLeaseWrite(write: Promise<boolean> | boolean) {
+  if (!(await write)) {
+    throw new StaleRunLeaseError();
+  }
+}
+
+class StaleRunLeaseError extends Error {
+  constructor() {
+    super("Run lease is no longer current.");
+  }
 }
 
 async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
@@ -496,11 +918,48 @@ async function loadSession(sessionId: string) {
 
 type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
 
+async function loadUserMessage(sessionId: string, messageId: string) {
+  const [message] = await getDb()
+    .select({ id: agentSessionMessages.id })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.id, messageId),
+        eq(agentSessionMessages.sessionId, sessionId),
+        eq(agentSessionMessages.role, "user"),
+      ),
+    )
+    .limit(1);
+
+  return message ?? null;
+}
+
+async function loadAssistantResponseForMessage(sessionId: string, messageId: string) {
+  const [message] = await getDb()
+    .select({ id: agentSessionMessages.id })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.sessionId, sessionId),
+        eq(agentSessionMessages.responseToMessageId, messageId),
+      ),
+    )
+    .limit(1);
+
+  return message ?? null;
+}
+
 async function setStatus(sessionId: string, status: "provisioning" | "ready" | "completed") {
   const [updated] = await getDb()
     .update(agentSessions)
     .set({ status, updatedAt: new Date() })
-    .where(and(eq(agentSessions.id, sessionId), isNull(agentSessions.archivedAt)))
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        isNull(agentSessions.archivedAt),
+        isNull(agentSessions.runLeaseId),
+      ),
+    )
     .returning({ id: agentSessions.id });
 
   return Boolean(updated);
