@@ -29,6 +29,7 @@
     "test:watch": "turbo test -- --watch",
     "secrets:check": "trufflehog filesystem . --results=verified,unknown --fail",
     "setup": "node scripts/setup.mjs",
+    "setup:dev": "node scripts/setup.mjs --dev",
     "env:pull": "node scripts/setup.mjs --pull-env",
     "db:generate": "bun --filter @opencompany/db db:generate",
     "db:migrate": "bun --filter @opencompany/db db:migrate",
