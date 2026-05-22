@@ -1,5 +1,5 @@
 import type { Agent } from "@opencompany/db/schema";
-import { AtSign, Bot } from "lucide-react";
+import { AtSign, Bot, Plus } from "lucide-react";
 import Link from "next/link";
 import {
   AGENT_MODELS,
@@ -90,15 +90,15 @@ function AgentRow({ agent }: { agent: Agent }) {
   );
 }
 
-function NewAgentButton({ label = "New Agent" }: { label?: string }) {
+function NewAgentButton({ label = "New agent" }: { label?: string }) {
   return (
-    <form action={createAgent}>
+    <form action={createAgent} className="shrink-0">
       <button
         type="submit"
-        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-ink/10 bg-ink px-3 pr-3.5 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)] transition-colors duration-150 hover:bg-[#242424] focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15"
       >
-        <Bot size={13} strokeWidth={1.9} />
-        {label}
+        <Plus size={13.5} strokeWidth={2} />
+        <span>{label}</span>
       </button>
     </form>
   );

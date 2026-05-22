@@ -11,7 +11,12 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   return (
     <AppShell>
       <SessionView
-        session={data.session}
+        session={{
+          ...data.session,
+          abortRequestedAt: data.session.abortRequestedAt?.toISOString() ?? null,
+          createdAt: data.session.createdAt.toISOString(),
+          updatedAt: data.session.updatedAt.toISOString(),
+        }}
         initialMessages={data.messages.map((message) => ({
           id: message.id,
           role: message.role,

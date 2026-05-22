@@ -50,6 +50,13 @@
       "when": 1779384174903,
       "tag": "0006_common_fantastic_four",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779437756770,
+      "tag": "0007_minor_starbolt",
+      "breakpoints": true
     }
   ]
 }

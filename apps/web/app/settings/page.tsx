@@ -1,3 +1,6 @@
+import { getDb } from "@opencompany/db/client";
+import { workspaceRepositories } from "@opencompany/db/schema";
+import { eq } from "drizzle-orm";
 import AppShell from "@/components/AppShell";
 import SettingsView from "@/components/SettingsView";
 import { getCurrentWorkspace } from "@/lib/auth";
@@ -25,6 +28,14 @@ function formatDate(date: Date) {
 
 export default async function SettingsPage() {
   const { authUser, workspace } = await getCurrentWorkspace();
+  const db = getDb();
+  const [repository] = await db
+    .select({
+      updatedAt: workspaceRepositories.updatedAt,
+    })
+    .from(workspaceRepositories)
+    .where(eq(workspaceRepositories.workspaceId, workspace.id))
+    .limit(1);
   const displayName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
     authUser.email.split("@")[0] ||
@@ -42,6 +53,11 @@ export default async function SettingsPage() {
         workspace={{
           name: workspace.name,
           createdAt: formatDate(new Date(workspace.createdAt)),
+          repository: repository
+            ? {
+                updatedAt: formatDate(new Date(repository.updatedAt)),
+              }
+            : null,
         }}
       />
     </AppShell>

@@ -31,6 +31,10 @@ export default async function AgentPage({ params }: { params: Promise<{ path: st
         id={agent.path ?? agent.id}
         initialName={agent.name}
         initialBody={agent.body || agent.config.instructions}
+        initialConfig={agent.config}
+        initialPath={agent.path}
+        initialGitHubCommitSha={agent.githubCommitSha}
+        initialGitHubSyncedAt={agent.githubSyncedAt?.toISOString() ?? null}
         initialGitHubSyncStatus={agent.githubSyncStatus}
         initialGitHubSyncError={agent.githubSyncError}
       />

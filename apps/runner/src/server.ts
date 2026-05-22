@@ -3,19 +3,35 @@ import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import Fastify from "fastify";
-import { abortSession, runMessage, startSession } from "./agent-loop";
+import { abortSession, archiveSession, runMessage, startSession } from "./agent-loop";
 import type { RunnerEnv } from "./env";
-import { listSessionEvents } from "./events";
+import { listSessionEvents, type PersistedRuntimeEvent, subscribeSessionEvents } from "./events";
 
 export function createServer(env: RunnerEnv) {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: {
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: redactStreamToken(request.url) ?? "",
+            host: request.host,
+            remoteAddress: request.ip,
+          };
+        },
+      },
+    },
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     const origin = request.headers.origin;
     if (origin && env.allowedOrigins.includes(origin)) {
       reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Vary", "Origin");
       reply.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Last-Event-ID");
       reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    } else if (origin) {
+      request.log.warn({ origin }, "Denied runner CORS origin");
     }
     if (request.method === "OPTIONS") {
       return reply.status(204).send();
@@ -45,12 +61,26 @@ export function createServer(env: RunnerEnv) {
     reply.send({ ok: true });
   });
 
+  app.post("/internal/sessions/:id/archive", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id } = request.params as { id: string };
+    await archiveSession(id);
+    reply.send({ ok: true });
+  });
+
   app.get("/sessions/:id/events", async (request, reply) => {
     const { id } = request.params as { id: string };
     const query = request.query as { token?: string; after?: string };
     const token = query.token ?? "";
-    const payload = verifySessionStreamToken(token, env.streamTokenSecret);
+    const payload = verifyStreamToken(token, env.streamTokenSecret);
+    if (!payload.ok) {
+      request.log.warn({ sessionId: id, reason: payload.reason }, "Rejected session event stream");
+      reply.status(401).send({ error: payload.message });
+      return;
+    }
+
     if (payload.sessionId !== id) {
+      request.log.warn({ sessionId: id }, "Rejected session event stream token for another session");
       reply.status(403).send({ error: "Token does not match session." });
       return;
     }
@@ -61,18 +91,14 @@ export function createServer(env: RunnerEnv) {
       .where(eq(agentSessions.id, id))
       .limit(1);
     if (!session || session.userId !== payload.userId) {
+      request.log.warn({ sessionId: id }, "Rejected session event stream for missing session or user");
       reply.status(404).send({ error: "Session not found." });
       return;
     }
 
     const raw = reply.raw;
     reply.hijack();
-    raw.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    });
+    raw.writeHead(200, createSseHeaders(env, request.headers.origin));
 
     let lastId = readLastEventId(request.headers["last-event-id"], query.after);
     let closed = false;
@@ -80,24 +106,27 @@ export function createServer(env: RunnerEnv) {
       closed = true;
     });
 
+    const writeEvent = (event: PersistedRuntimeEvent) => {
+      if (closed || event.id <= lastId) return;
+      lastId = event.id;
+      raw.write(formatSseEvent(event));
+    };
+
     const flush = async () => {
       const events = await listSessionEvents({ sessionId: id, afterId: lastId, limit: 100 });
       for (const event of events) {
-        lastId = event.id;
-        raw.write(`id: ${event.id}\n`);
-        raw.write(
-          `data: ${JSON.stringify({ id: event.id, type: event.type, payload: event.payload, messageId: event.messageId })}\n\n`,
-        );
+        writeEvent(event);
       }
     };
 
     await flush();
+    const unsubscribe = subscribeSessionEvents(id, (event) => {
+      writeEvent(event);
+    });
     const timer = setInterval(() => {
       void flush().catch((error) => {
         app.log.error(error);
-        raw.write(
-          `event: session.error\ndata: ${JSON.stringify({ message: "Event stream failed." })}\n\n`,
-        );
+        raw.write(formatStreamError("Event stream failed."));
       });
     }, 300);
     const heartbeat = setInterval(() => {
@@ -109,6 +138,7 @@ export function createServer(env: RunnerEnv) {
     }
     clearInterval(timer);
     clearInterval(heartbeat);
+    unsubscribe();
   });
 
   return app;
@@ -124,4 +154,68 @@ function readLastEventId(header: string | string[] | undefined, after: string | 
   const value = Array.isArray(header) ? header[0] : header;
   const parsed = Number(value ?? after ?? "0");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export function formatSseEvent(event: PersistedRuntimeEvent) {
+  return `id: ${event.id}\ndata: ${JSON.stringify(toRuntimeEventPayload(event))}\n\n`;
+}
+
+export function formatStreamError(message: string) {
+  return `event: session.error\ndata: ${JSON.stringify({ message })}\n\n`;
+}
+
+export function createSseHeaders(env: RunnerEnv, origin: string | undefined) {
+  return {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+    ...(origin && env.allowedOrigins.includes(origin)
+      ? {
+          "Access-Control-Allow-Origin": origin,
+          Vary: "Origin",
+          "Access-Control-Allow-Headers": "Authorization, Content-Type, Last-Event-ID",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        }
+      : {}),
+  };
+}
+
+function toRuntimeEventPayload(event: PersistedRuntimeEvent) {
+  return {
+    id: event.id,
+    type: event.type,
+    payload: event.payload,
+    messageId: event.messageId,
+  };
+}
+
+function verifyStreamToken(token: string, secret: string) {
+  if (!token) {
+    return { ok: false as const, reason: "missing", message: "Missing stream token." };
+  }
+
+  try {
+    return { ok: true as const, ...verifySessionStreamToken(token, secret) };
+  } catch (error) {
+    return {
+      ok: false as const,
+      reason: error instanceof Error ? error.message : "invalid",
+      message: "Invalid stream token.",
+    };
+  }
+}
+
+export function redactStreamToken(url: string | undefined) {
+  if (!url || !url.includes("token=")) return url;
+
+  try {
+    const parsed = new URL(url, "http://runner.local");
+    if (parsed.searchParams.has("token")) {
+      parsed.searchParams.set("token", "[redacted]");
+    }
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url.replace(/([?&]token=)[^&]*/g, "$1[redacted]");
+  }
 }

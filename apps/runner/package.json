@@ -7,7 +7,7 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json",
-    "test": "tsc --noEmit --project tsconfig.json"
+    "test": "vitest run"
   },
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",
@@ -20,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
   }
 }
