@@ -7,6 +7,7 @@ import Fastify from "fastify";
 import { abortSession, archiveSession, runMessage, startSession } from "./agent-loop";
 import type { RunnerEnv } from "./env";
 import { listSessionEvents, type PersistedRuntimeEvent, subscribeSessionEvents } from "./events";
+import { generateSessionTitleForMessage } from "./session-title";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
@@ -48,6 +49,20 @@ export function createServer(env: RunnerEnv) {
     const { id, messageId } = request.params as { id: string; messageId: string };
     void runMessage({ sessionId: id, messageId, env }).catch((error) => {
       logger.error("Runner message failed", { session_id: id, message_id: messageId, error });
+    });
+    reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/sessions/:id/messages/:messageId/title", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id, messageId } = request.params as { id: string; messageId: string };
+    void generateSessionTitleForMessage({ sessionId: id, messageId, env }).catch((error) => {
+      captureException(error, {
+        event: "opencompany.runner_title_generation_failed",
+        session_id: id,
+        message_id: messageId,
+      });
+      logger.warn("Runner title generation failed", { session_id: id, message_id: messageId });
     });
     reply.status(202).send({ ok: true });
   });

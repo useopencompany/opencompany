@@ -76,6 +76,32 @@ export const runAgentSessionMessage = inngest.createFunction(
   },
 );
 
+export const generateAgentSessionTitle = inngest.createFunction(
+  {
+    id: "generate-agent-session-title",
+    name: "Generate agent session title",
+    retries: 1,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: AGENT_MESSAGE_SUBMITTED_EVENT },
+  },
+  async ({ event, step }) => {
+    return step.run("generate runner session title", async () => {
+      await callRunner(
+        `/internal/sessions/${event.data.sessionId}/messages/${event.data.messageId}/title`,
+        {
+          event: "opencompany.inngest_generate_title_failed",
+          session_id: event.data.sessionId,
+          message_id: event.data.messageId,
+        },
+      );
+      return { ok: true };
+    });
+  },
+);
+
 export const abortAgentSession = inngest.createFunction(
   {
     id: "abort-agent-session",
@@ -98,5 +124,6 @@ export const inngestFunctions = [
   syncAgentToGitHub,
   startAgentSession,
   runAgentSessionMessage,
+  generateAgentSessionTitle,
   abortAgentSession,
 ];
