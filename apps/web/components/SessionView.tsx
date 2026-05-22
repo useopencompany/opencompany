@@ -4,7 +4,6 @@ import {
   AlertCircle,
   ArrowUp,
   Bot,
-  CheckCircle2,
   ChevronRight,
   CircleStop,
   ExternalLink,
@@ -27,6 +26,7 @@ import {
   isInspectableRuntimeEvent,
   type RuntimeEvent,
   type RuntimeToolCall,
+  type SessionUsageSummary,
   readString,
   type SessionMessage,
 } from "@/lib/agent-sessions/runtime-events";
@@ -51,11 +51,11 @@ type Props = {
   };
   initialMessages: SessionMessage[];
   initialEvents: RuntimeEvent[];
+  initialUsage: SessionUsageSummary;
   runnerUrl: string | null;
   streamToken: string | null;
 };
 
-const SESSION_INSPECTOR_STORAGE_KEY = "opencompany-session-inspector-collapsed";
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ children, href }) => (
     <a
@@ -69,24 +69,20 @@ const MARKDOWN_COMPONENTS: Components = {
   ),
 };
 
-function getStoredInspectorCollapsed() {
-  if (typeof window === "undefined") return true;
-  const stored = window.localStorage.getItem(SESSION_INSPECTOR_STORAGE_KEY);
-  return stored === null ? true : stored === "true";
-}
-
 export default function SessionView({
   session,
   initialMessages,
   initialEvents,
+  initialUsage,
   runnerUrl,
   streamToken,
 }: Props) {
   const router = useRouter();
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [runtime, setRuntime] = useState({
     events: initialEvents,
     messages: initialMessages,
+    usage: initialUsage,
     currentStatus: session.status,
     lastError: session.lastError,
   });
@@ -127,7 +123,6 @@ export default function SessionView({
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
-    window.localStorage.setItem(SESSION_INSPECTOR_STORAGE_KEY, String(nextCollapsed));
   }
 
   const requestAbort = () => {
@@ -242,7 +237,7 @@ export default function SessionView({
           </div>
         </div>
 
-        <div className="border-t border-[#eaeae6] bg-canvas px-8 py-4">
+        <div className="bg-canvas px-8 py-4">
           <div className="mx-auto flex max-w-[760px] items-end gap-2 rounded-xl border border-[#e4e4e0] bg-white px-3 py-2">
             <textarea
               value={input}
@@ -296,6 +291,7 @@ export default function SessionView({
           streamErrorMessage={stream.errorMessage}
           runnerConfigured={Boolean(runnerUrl && streamToken)}
           eventCount={inspectorEvents.length}
+          usage={runtime.usage}
           recentEvents={inspectorEvents.slice(-16)}
           canAbort={canAbort}
           isPending={isPending}
@@ -354,43 +350,33 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const isCompleted = toolCall.status === "completed";
 
   return (
-    <div className="overflow-hidden rounded-lg border border-[#e2e2de] bg-white/70 text-[12px] leading-5 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+    <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
       <button
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
-        className={`flex w-full min-w-0 items-center gap-2 bg-[#f7f7f4] px-3 py-2 text-left transition-colors hover:bg-[#f1f1ee] ${
-          expanded ? "border-b border-[#ecece8]" : ""
-        }`}
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-[#efefeb]/65 hover:text-ink/75"
       >
         <ChevronRight
-          size={13}
+          size={11}
           strokeWidth={1.9}
           className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
         />
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[#ddddda] bg-white text-ink-muted">
-          <Wrench size={12} strokeWidth={1.8} />
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          <Wrench size={11} strokeWidth={1.75} />
         </span>
-        <span className="min-w-0 flex-1 truncate font-medium text-ink/85">
+        <span className="min-w-0 truncate font-medium text-ink/65">
           {formatToolName(toolCall.name)}
         </span>
-        <span
-          className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10.5px] font-medium ${
-            isCompleted
-              ? "border-[#d7e6d4] bg-[#f3faf1] text-[#3f7c35]"
-              : "border-[#eadfbe] bg-[#fffaf0] text-[#8a5a00]"
-          }`}
-        >
-          {isCompleted ? (
-            <CheckCircle2 size={10} strokeWidth={2} />
-          ) : (
-            <LoaderCircle size={10} strokeWidth={2} className="animate-spin" />
-          )}
-          {isCompleted ? "Done" : "Running"}
-        </span>
+        {!isCompleted ? (
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
+            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-[#9b8a64]" />
+            running
+          </span>
+        ) : null}
       </button>
       {expanded ? (
-        <>
+        <div className="ml-6 mt-1 border-l border-[#e3e3df] pl-3">
           {toolCall.inputPreview ? (
             <ToolCallPreview label="Input" value={toolCall.inputPreview} />
           ) : null}
@@ -401,9 +387,9 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
             <ToolCallPreview label="Output" value={toolCall.outputPreview} />
           ) : null}
           {!toolCall.activityPreview && !toolCall.outputPreview && !isCompleted ? (
-            <div className="px-3 py-2 text-[11.5px] text-ink-subtle">Waiting for result</div>
+            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
           ) : null}
-        </>
+        </div>
       ) : null}
     </div>
   );
@@ -411,9 +397,9 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
 
 function ToolCallPreview({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-t border-[#eeeeea] px-3 py-2 first:border-t-0">
-      <div className="mb-1 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>
-      <pre className="max-h-36 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-ink/75">
+    <div className="py-1 first:pt-0">
+      <div className="mb-0.5 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>
+      <pre className="max-h-36 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/60">
         {value}
       </pre>
     </div>
@@ -446,6 +432,7 @@ function SessionInspector({
   streamErrorMessage,
   runnerConfigured,
   eventCount,
+  usage,
   recentEvents,
   canAbort,
   isPending,
@@ -458,6 +445,7 @@ function SessionInspector({
   streamErrorMessage: string | null;
   runnerConfigured: boolean;
   eventCount: number;
+  usage: SessionUsageSummary;
   recentEvents: RuntimeEvent[];
   canAbort: boolean;
   isPending: boolean;
@@ -476,7 +464,7 @@ function SessionInspector({
           <InspectorLink label="Session page" href={`/session/${session.id}`} value={session.id} />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
           <InspectorField label="Title" value={session.title} />
-          <InspectorField label="Status" value={statusLabel(currentStatus)} />
+          <InspectorStatusField status={currentStatus} lastError={lastError} />
           <InspectorField label="Created" value={formatRuntimeDate(session.createdAt)} />
           <InspectorField label="Updated" value={formatRuntimeDate(session.updatedAt)} />
         </div>
@@ -520,6 +508,15 @@ function SessionInspector({
       </div>
 
       <div>
+        <InspectorHeader label="Token usage" countLabel={formatTokenCount(usage.totalTokens)} />
+        <div className="space-y-4">
+          <InspectorField label="Input tokens" value={formatTokenCount(usage.inputTokens)} />
+          <InspectorField label="Output tokens" value={formatTokenCount(usage.outputTokens)} />
+          <InspectorField label="Total tokens" value={formatTokenCount(usage.totalTokens)} />
+        </div>
+      </div>
+
+      <div>
         <InspectorHeader label="Controls" countLabel={canAbort ? "available" : "idle"} />
         <button
           type="button"
@@ -533,7 +530,7 @@ function SessionInspector({
       </div>
 
       <div>
-        <InspectorHeader label="Recent events" countLabel={`${eventCount} shown`} />
+        <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
         {recentEvents.length > 0 ? (
           <div className="space-y-1.5">
             {recentEvents.map((event) => (
@@ -599,6 +596,39 @@ function InspectorField({
   );
 }
 
+function InspectorStatusField({
+  status,
+  lastError,
+}: {
+  status: string;
+  lastError: string | null;
+}) {
+  const displayStatus = lastError || status === "failed" ? "failed" : status;
+
+  return (
+    <div>
+      <div className="text-[10.5px] font-medium uppercase text-ink-subtle">Status</div>
+      <div className="mt-1 flex items-center gap-2 text-[13px] text-ink">
+        <SessionStatusDot status={displayStatus} />
+        <span>{statusLabel(displayStatus)}</span>
+      </div>
+    </div>
+  );
+}
+
+function SessionStatusDot({ status }: { status: string }) {
+  const tone =
+    status === "failed"
+      ? "bg-[#dc2626] shadow-[0_0_0_2px_rgba(220,38,38,0.1)]"
+      : status === "running" || status === "provisioning"
+        ? "bg-[#16a34a] shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
+        : status === "aborting" || status === "archiving"
+          ? "bg-[#d97706] shadow-[0_0_0_2px_rgba(217,119,6,0.11)]"
+          : "bg-ink-subtle/45";
+
+  return <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} />;
+}
+
 function InspectorLink({ label, href, value }: { label: string; href: string; value: string }) {
   return (
     <div>
@@ -633,6 +663,10 @@ function streamStatusLabel(status: string) {
   if (status === "stale") return "stale";
   if (status === "error") return "error";
   return "idle";
+}
+
+function formatTokenCount(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
 function formatRuntimeDate(value: string) {

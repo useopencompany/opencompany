@@ -12,6 +12,7 @@ function initialState(): SessionRuntimeState {
   return {
     events: [],
     messages: [{ id: "msg_user", role: "user", content: "Hi", status: "completed" }],
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
     currentStatus: "running",
     lastError: null,
   };
@@ -103,6 +104,28 @@ describe("applyRuntimeEventToState", () => {
     state = applyRuntimeEventToState(state, event(2, "session.status", { status: "running" }));
     expect(state.currentStatus).toBe("running");
     expect(state.lastError).toBeNull();
+  });
+
+  it("adds live usage events to the session usage summary", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "session.usage", {
+        inputTokens: 100,
+        outputTokens: 25,
+        totalTokens: 125,
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.usage", {
+        inputTokens: 40,
+        outputTokens: 10,
+        totalTokens: 50,
+      }),
+    );
+
+    expect(state.usage).toEqual({ inputTokens: 140, outputTokens: 35, totalTokens: 175 });
   });
 });
 

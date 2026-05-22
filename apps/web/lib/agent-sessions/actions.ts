@@ -10,6 +10,7 @@ import {
   type Agent,
   agentSessionEvents,
   agentSessionMessages,
+  agentSessionUsage,
   agentSessions,
   agents,
 } from "@opencompany/db/schema";
@@ -74,7 +75,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
   const messageId = await insertUserMessage(sessionId, trimmed);
 
   after(async () => {
-    await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
+    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
 
   revalidatePath("/", "layout");
@@ -110,7 +111,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   const messageId = await insertUserMessage(sessionId, trimmed);
 
   after(async () => {
-    await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
+    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
 
   revalidatePath(`/session/${sessionId}`);
@@ -264,7 +265,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
 
   if (!session) return null;
 
-  const [messages, events] = await Promise.all([
+  const [messages, events, usageRows] = await Promise.all([
     db
       .select()
       .from(agentSessionMessages)
@@ -276,7 +277,23 @@ export async function loadAgentSessionForPage(sessionId: string) {
       .where(eq(agentSessionEvents.sessionId, sessionId))
       .orderBy(asc(agentSessionEvents.id))
       .limit(300),
+    db
+      .select({
+        inputTokens: agentSessionUsage.inputTokens,
+        outputTokens: agentSessionUsage.outputTokens,
+        totalTokens: agentSessionUsage.totalTokens,
+      })
+      .from(agentSessionUsage)
+      .where(eq(agentSessionUsage.sessionId, sessionId)),
   ]);
+  const usage = usageRows.reduce(
+    (totals, row) => ({
+      inputTokens: totals.inputTokens + row.inputTokens,
+      outputTokens: totals.outputTokens + row.outputTokens,
+      totalTokens: totals.totalTokens + row.totalTokens,
+    }),
+    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+  );
 
   const runnerUrl = getRunnerPublicUrl();
   const streamTokenSecret = getRunnerStreamTokenSecret();
@@ -292,7 +309,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
         )
       : null;
 
-  return { session, messages, events, runnerUrl, token };
+  return { session, messages, events, usage, runnerUrl, token };
 }
 
 async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {
@@ -402,6 +419,34 @@ async function insertUserMessage(sessionId: string, content: string) {
   ]);
 
   return messageId;
+}
+
+async function triggerAgentMessageRun(input: {
+  sessionId: string;
+  messageId: string;
+  workspaceId: string;
+}) {
+  if (!canCallRunnerDirectly()) {
+    await dispatchAgentMessageSubmitted(input);
+    return;
+  }
+
+  try {
+    await callRunner(`/internal/sessions/${input.sessionId}/messages/${input.messageId}/run`, {
+      event: "opencompany.direct_run_message_failed",
+      session_id: input.sessionId,
+      message_id: input.messageId,
+    });
+  } catch {
+    await dispatchAgentMessageSubmitted(input);
+  }
+}
+
+function canCallRunnerDirectly() {
+  return Boolean(
+    (process.env.RUNNER_INTERNAL_URL || process.env.RUNNER_PUBLIC_URL) &&
+      process.env.RUNNER_INTERNAL_TOKEN,
+  );
 }
 
 function titleFromPrompt(content: string) {

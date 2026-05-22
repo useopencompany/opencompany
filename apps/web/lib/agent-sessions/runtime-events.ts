@@ -15,9 +15,16 @@ export type RuntimeEvent = {
   payload: Record<string, unknown>;
 };
 
+export type SessionUsageSummary = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+};
+
 export type SessionRuntimeState = {
   events: RuntimeEvent[];
   messages: SessionMessage[];
+  usage: SessionUsageSummary;
   currentStatus: string;
   lastError: string | null;
 };
@@ -65,6 +72,17 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
+    };
+  }
+
+  if (event.type === "session.usage") {
+    next = {
+      ...next,
+      usage: {
+        inputTokens: next.usage.inputTokens + readNumber(event.payload.inputTokens),
+        outputTokens: next.usage.outputTokens + readNumber(event.payload.outputTokens),
+        totalTokens: next.usage.totalTokens + readNumber(event.payload.totalTokens),
+      },
     };
   }
 
@@ -371,6 +389,10 @@ export function readString(value: unknown) {
 
 export function optionalString(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function readAssistantModelParts(modelMessage: Record<string, unknown> | null | undefined) {

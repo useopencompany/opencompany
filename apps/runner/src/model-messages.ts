@@ -18,16 +18,46 @@ export type StoredSessionMessageForModelReplay = {
 };
 
 export type AssistantReplayPart = TextPart | ToolCallPart;
+type AssistantToolReplayMessage = Omit<AssistantModelMessage, "content"> & {
+  role: "assistant";
+  content: AssistantReplayPart[];
+};
 
 export function buildModelMessages(
   storedMessages: StoredSessionMessageForModelReplay[],
 ): ModelMessage[] {
   const messages: ModelMessage[] = [];
 
-  for (const message of storedMessages) {
-    const modelMessage = message.modelMessage
-      ? validateModelMessage(message.modelMessage, message.id)
-      : legacyModelMessage(message);
+  for (let index = 0; index < storedMessages.length; index += 1) {
+    const message = storedMessages[index];
+    if (!message) continue;
+    const modelMessage = readStoredModelMessage(message);
+
+    if (isAssistantMessageWithToolCalls(modelMessage)) {
+      const toolMessagesByCallId = new Map<string, ToolModelMessage>();
+      let lookahead = index + 1;
+
+      while (lookahead < storedMessages.length) {
+        const storedToolMessage = storedMessages[lookahead];
+        if (!storedToolMessage) break;
+        const toolMessage = readStoredModelMessage(storedToolMessage);
+        if (!isToolModelMessage(toolMessage)) break;
+
+        const toolCallIds = readToolResultCallIds(toolMessage);
+        if (toolCallIds.length === 0) break;
+        for (const toolCallId of toolCallIds) {
+          toolMessagesByCallId.set(toolCallId, toolMessage);
+        }
+        lookahead += 1;
+      }
+
+      const replayMessages = splitAssistantToolReplay(modelMessage, toolMessagesByCallId);
+      if (replayMessages) {
+        messages.push(...replayMessages);
+        index = lookahead - 1;
+        continue;
+      }
+    }
 
     if (modelMessage) messages.push(modelMessage);
   }
@@ -101,6 +131,116 @@ function legacyModelMessage(message: StoredSessionMessageForModelReplay): ModelM
     return validateModelMessage({ role: message.role, content: message.content }, message.id);
   }
   return null;
+}
+
+function readStoredModelMessage(message: StoredSessionMessageForModelReplay): ModelMessage | null {
+  return message.modelMessage
+    ? validateModelMessage(message.modelMessage, message.id)
+    : legacyModelMessage(message);
+}
+
+function isAssistantMessageWithToolCalls(
+  message: ModelMessage | null,
+): message is AssistantToolReplayMessage {
+  return (
+    message?.role === "assistant" &&
+    Array.isArray(message.content) &&
+    message.content.some((part) => isToolCallPart(part))
+  );
+}
+
+function splitAssistantToolReplay(
+  message: AssistantToolReplayMessage,
+  toolMessagesByCallId: Map<string, ToolModelMessage>,
+): ModelMessage[] | null {
+  const toolCallIds = message.content.filter(isToolCallPart).map((part) => part.toolCallId);
+  if (toolCallIds.some((toolCallId) => !toolMessagesByCallId.has(toolCallId))) return null;
+
+  const messages: ModelMessage[] = [];
+  let assistantParts: AssistantReplayPart[] = [];
+  let pendingToolCallIds: string[] = [];
+
+  const flushAssistantAndTools = () => {
+    if (assistantParts.length > 0) {
+      messages.push(buildAssistantReplayModelMessage(assistantParts));
+    }
+    if (pendingToolCallIds.length > 0) {
+      messages.push(buildCombinedToolModelMessage(pendingToolCallIds, toolMessagesByCallId));
+    }
+    assistantParts = [];
+    pendingToolCallIds = [];
+  };
+
+  for (const part of message.content) {
+    if (isToolCallPart(part)) {
+      assistantParts.push(part);
+      pendingToolCallIds.push(part.toolCallId);
+      continue;
+    }
+
+    if (pendingToolCallIds.length > 0) {
+      flushAssistantAndTools();
+    }
+
+    if (part.text) assistantParts.push(part);
+  }
+
+  if (assistantParts.length > 0 || pendingToolCallIds.length > 0) {
+    flushAssistantAndTools();
+  }
+
+  return messages;
+}
+
+function buildAssistantReplayModelMessage(parts: AssistantReplayPart[]): AssistantModelMessage {
+  const hasToolCall = parts.some(isToolCallPart);
+  const text = parts
+    .filter(isTextPart)
+    .map((part) => part.text)
+    .join("");
+
+  return validateModelMessage({
+    role: "assistant",
+    content: hasToolCall ? parts : text,
+  }) as AssistantModelMessage;
+}
+
+function buildCombinedToolModelMessage(
+  toolCallIds: string[],
+  toolMessagesByCallId: Map<string, ToolModelMessage>,
+): ToolModelMessage {
+  const content: ToolResultPart[] = [];
+  for (const toolCallId of toolCallIds) {
+    const toolMessage = toolMessagesByCallId.get(toolCallId);
+    if (!toolMessage) continue;
+    content.push(...toolMessage.content.filter(isToolResultPart));
+  }
+
+  return validateModelMessage({ role: "tool", content }) as ToolModelMessage;
+}
+
+function isToolModelMessage(message: ModelMessage | null): message is ToolModelMessage {
+  return message?.role === "tool" && Array.isArray(message.content);
+}
+
+function readToolResultCallIds(message: ToolModelMessage) {
+  return message.content.filter(isToolResultPart).map((part) => part.toolCallId);
+}
+
+function isTextPart(part: unknown): part is TextPart {
+  return isRecord(part) && part.type === "text" && typeof part.text === "string";
+}
+
+function isToolCallPart(part: unknown): part is ToolCallPart {
+  return isRecord(part) && part.type === "tool-call" && typeof part.toolCallId === "string";
+}
+
+function isToolResultPart(part: ToolModelMessage["content"][number]): part is ToolResultPart {
+  return part.type === "tool-result";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function toToolResultOutput(output: unknown): ToolResultPart["output"] {
