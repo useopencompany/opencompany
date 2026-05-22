@@ -602,13 +602,7 @@ function InspectorField({
   );
 }
 
-function InspectorStatusField({
-  status,
-  lastError,
-}: {
-  status: string;
-  lastError: string | null;
-}) {
+function InspectorStatusField({ status, lastError }: { status: string; lastError: string | null }) {
   const displayStatus = lastError || status === "failed" ? "failed" : status;
 
   return (
