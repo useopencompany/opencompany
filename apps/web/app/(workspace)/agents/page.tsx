@@ -2,11 +2,10 @@ import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
 import { desc, eq } from "drizzle-orm";
 import AgentsView from "@/components/AgentsView";
-import AppShell from "@/components/AppShell";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { requireCurrentWorkspace } from "@/lib/auth";
 
 export default async function AgentsPage() {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await requireCurrentWorkspace();
   const db = getDb();
 
   const rows = await db
@@ -15,9 +14,5 @@ export default async function AgentsPage() {
     .where(eq(agents.workspaceId, workspace.id))
     .orderBy(desc(agents.updatedAt));
 
-  return (
-    <AppShell>
-      <AgentsView agents={rows} />
-    </AppShell>
-  );
+  return <AgentsView agents={rows} />;
 }

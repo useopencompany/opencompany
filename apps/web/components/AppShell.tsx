@@ -4,10 +4,10 @@ import { agentSessions } from "@opencompany/db/schema";
 import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import Sidebar from "@/components/Sidebar";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { requireCurrentWorkspace } from "@/lib/auth";
 
 export default async function AppShell({ children }: { children: React.ReactNode }) {
-  const { authUser, user, workspace } = await getCurrentWorkspace();
+  const { authUser, user, workspace } = await requireCurrentWorkspace();
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
   const db = getDb();
