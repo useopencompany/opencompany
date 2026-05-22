@@ -1,5 +1,5 @@
 import { createSessionStreamToken } from "@opencompany/agent-runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PersistedRuntimeEvent } from "./events";
 import {
   createServer,
@@ -8,6 +8,11 @@ import {
   formatStreamError,
   redactStreamToken,
 } from "./server";
+import { generateSessionTitleForMessage } from "./session-title";
+
+vi.mock("./session-title", () => ({
+  generateSessionTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+}));
 
 const env = {
   databaseUrl: "postgres://example",
@@ -102,6 +107,27 @@ describe("session event stream auth", () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({ error: "Token does not match session." });
+  });
+});
+
+describe("internal session title endpoint", () => {
+  it("accepts authenticated title generation requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/messages/msg_123/title",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(generateSessionTitleForMessage).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      env,
+    });
   });
 });
 

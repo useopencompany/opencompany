@@ -61,6 +61,10 @@ export type AgentRuntimeEvent =
       payload: { message: string };
     }
   | {
+      type: "session.title_updated";
+      payload: { title: string };
+    }
+  | {
       type: "session.usage";
       payload: {
         messageId: string;

@@ -26,9 +26,9 @@ import {
   buildAssistantTurnParts,
   type RuntimeEvent,
   type RuntimeToolCall,
-  type SessionUsageSummary,
   readString,
   type SessionMessage,
+  type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 
 type Props = {
@@ -140,7 +140,13 @@ export default function SessionView({
   const applyRuntimeEvent = useCallback(
     (event: RuntimeEvent) => {
       setRuntime((current) => applyRuntimeEventToState(current, event));
-      if (event.type === "session.status" || event.type === "session.error") router.refresh();
+      if (
+        event.type === "session.status" ||
+        event.type === "session.error" ||
+        event.type === "session.title_updated"
+      ) {
+        router.refresh();
+      }
     },
     [router],
   );
