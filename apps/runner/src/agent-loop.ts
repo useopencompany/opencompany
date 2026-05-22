@@ -1,7 +1,9 @@
 import {
-  CORE_TOOL_DEFINITIONS,
   newAgentSessionMessageId,
   newRunLeaseId,
+  RUNTIME_TOOL_DEFINITIONS,
+  type RuntimeToolDefinition,
+  type RuntimeToolName,
   resolveAgentRuntimeConfig,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
@@ -9,6 +11,7 @@ import {
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
+  agentSessionToolUsage,
   agentSessionUsage,
   agents,
   workspaceRepositories,
@@ -38,6 +41,11 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
+import {
+  executeHostedTool,
+  type HostedToolUsage,
+  validateHostedToolEnvironment,
+} from "./hosted-tools";
 import {
   type AssistantReplayPart,
   appendAssistantTextPart,
@@ -215,6 +223,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     };
 
     await timeAsync(trace, "initial_run_control_check", checkAbort);
+    validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
       timeAsync(trace, "append_running_status", () =>
@@ -295,6 +304,8 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       runLeaseOwner: leaseOwner,
       getSandbox,
       workdir: row.session.workdir,
+      env: input.env,
+      enabledTools: runtime.tools,
       signal: controller.signal,
       checkAbort,
     });
@@ -368,6 +379,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       content: assistantContent,
       parts: assistantReplayParts,
     });
+    const persistedAssistantModelMessage = toPersistedModelMessage(assistantModelMessage);
 
     await requireLeaseWrite(
       completeAssistantMessageForLease({
@@ -376,7 +388,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         leaseId,
         leaseOwner,
         content: assistantContent,
-        modelMessage: toPersistedModelMessage(assistantModelMessage),
+        modelMessage: persistedAssistantModelMessage,
       }),
     );
     await requireLeaseWrite(
@@ -386,7 +398,11 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         leaseId,
         leaseOwner,
         type: "message.completed",
-        payload: { messageId: assistantMessageId, content: assistantContent },
+        payload: {
+          messageId: assistantMessageId,
+          content: assistantContent,
+          modelMessage: persistedAssistantModelMessage,
+        },
       }),
     );
     await requireLeaseWrite(
@@ -528,12 +544,14 @@ function createToolSet(input: {
   runLeaseOwner: string;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
+  env: RunnerEnv;
+  enabledTools: RuntimeToolName[];
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
 }) {
   const tools: ToolSet = {};
 
-  for (const definition of CORE_TOOL_DEFINITIONS) {
+  for (const definition of RUNTIME_TOOL_DEFINITIONS) {
     tools[definition.name] = tool({
       description: definition.description,
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
@@ -579,10 +597,12 @@ function createToolSet(input: {
           runLeaseId: input.runLeaseId,
           runLeaseOwner: input.runLeaseOwner,
           toolCallId: options.toolCallId,
-          name: definition.name,
+          definition,
           args: toolInput,
           getSandbox: input.getSandbox,
           workdir: input.workdir,
+          env: input.env,
+          enabledTools: input.enabledTools,
           signal: input.signal,
           checkAbort: input.checkAbort,
         }),
@@ -600,31 +620,46 @@ function pickRuntimeTools(tools: ToolSet, names: string[]) {
   return picked;
 }
 
-async function executeRuntimeTool(input: {
+export async function executeRuntimeTool(input: {
   sessionId: string;
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
   toolCallId: string;
-  name: string;
+  definition: RuntimeToolDefinition;
   args: unknown;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
+  env: RunnerEnv;
+  enabledTools: RuntimeToolName[];
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
 }) {
   let output: unknown;
-  let sandbox: SandboxHandle | null = null;
+  let usage: HostedToolUsage | undefined;
+  let sandboxIdForCapture: string | undefined;
   try {
-    const activeSandbox = await input.getSandbox();
-    sandbox = activeSandbox;
     output = await withRunControlChecks(input.checkAbort, async () => {
       throwIfAborted(input.signal);
 
+      if (input.definition.kind === "hosted") {
+        const result = await executeHostedTool({
+          name: input.definition.name,
+          args: input.args,
+          env: input.env,
+          enabledTools: input.enabledTools,
+          signal: input.signal,
+        });
+        usage = result.usage;
+        return result.output;
+      }
+
+      const activeSandbox = await input.getSandbox();
+      sandboxIdForCapture = activeSandbox.sandboxId;
       return runSandboxTool({
         sandbox: activeSandbox,
         workdir: input.workdir,
-        name: input.name,
+        name: input.definition.name,
         args: input.args,
         onOutput: async (stream, delta) => {
           await input.checkAbort();
@@ -636,7 +671,7 @@ async function executeRuntimeTool(input: {
               leaseOwner: input.runLeaseOwner,
               type: "command.output",
               payload: {
-                command: input.name,
+                command: input.definition.name,
                 toolCallId: input.toolCallId,
                 stream,
                 delta,
@@ -652,8 +687,8 @@ async function executeRuntimeTool(input: {
       session_id: input.sessionId,
       message_id: input.assistantMessageId,
       tool_call_id: input.toolCallId,
-      tool_name: input.name,
-      sandbox_id: sandbox?.sandboxId,
+      tool_name: input.definition.name,
+      sandbox_id: sandboxIdForCapture,
     });
     throw error;
   }
@@ -662,7 +697,7 @@ async function executeRuntimeTool(input: {
     isRecord(output) && Object.prototype.hasOwnProperty.call(output, "path")
       ? (output as { path: unknown }).path
       : null;
-  if (input.name === "write_file" && typeof changedPath === "string") {
+  if (input.definition.name === "write_file" && typeof changedPath === "string") {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
@@ -673,6 +708,18 @@ async function executeRuntimeTool(input: {
         payload: { path: changedPath, operation: "write" },
       }),
     );
+  }
+
+  if (usage) {
+    await recordToolUsage({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
+      toolCallId: input.toolCallId,
+      toolName: input.definition.name,
+      usage,
+    });
   }
 
   const toolMessageId = newAgentSessionMessageId();
@@ -686,11 +733,11 @@ async function executeRuntimeTool(input: {
       modelMessage: toPersistedModelMessage(
         buildToolModelMessage({
           toolCallId: input.toolCallId,
-          toolName: input.name,
+          toolName: input.definition.name,
           output,
         }),
       ),
-      toolName: input.name,
+      toolName: input.definition.name,
       toolCallId: input.toolCallId,
     }),
   );
@@ -704,7 +751,7 @@ async function executeRuntimeTool(input: {
       payload: {
         messageId: input.assistantMessageId,
         toolCallId: input.toolCallId,
-        name: input.name,
+        name: input.definition.name,
         output,
       },
     }),
@@ -781,6 +828,56 @@ export async function recordStepUsage(input: {
       leaseId: input.runLeaseId,
       leaseOwner: input.runLeaseOwner,
       type: "session.usage",
+      payload: usagePayload,
+    }),
+  );
+}
+
+export async function recordToolUsage(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  toolCallId: string;
+  toolName: string;
+  usage: HostedToolUsage;
+}) {
+  const db = getDb();
+  await requireLeaseWrite(
+    isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+  );
+
+  const usagePayload = {
+    messageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+    provider: input.usage.provider,
+    operation: input.usage.operation,
+    ...(input.usage.providerRequestId ? { providerRequestId: input.usage.providerRequestId } : {}),
+    costUsdMicros: input.usage.costUsdMicros,
+  };
+
+  await db.insert(agentSessionToolUsage).values({
+    sessionId: input.sessionId,
+    messageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    toolCallId: input.toolCallId,
+    toolName: input.toolName,
+    provider: input.usage.provider,
+    operation: input.usage.operation,
+    providerRequestId: input.usage.providerRequestId ?? null,
+    costUsdMicros: input.usage.costUsdMicros,
+    rawUsage: input.usage.rawUsage,
+  });
+
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "session.tool_usage",
       payload: usagePayload,
     }),
   );

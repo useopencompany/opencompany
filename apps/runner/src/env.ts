@@ -7,6 +7,7 @@ export type RunnerEnv = {
   streamTokenSecret: string;
   e2bApiKey: string;
   vercelAiGatewayApiKey: string;
+  exaApiKey: string | undefined;
   e2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
   port: number;
@@ -21,6 +22,7 @@ export function loadEnv(): RunnerEnv {
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
     e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
+    exaApiKey: optionalEnv("EXA_API_KEY"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     port: Number(process.env.PORT ?? "3040"),
