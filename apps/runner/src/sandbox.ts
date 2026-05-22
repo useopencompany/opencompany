@@ -14,12 +14,26 @@ export async function createOrConnectSandbox(input: {
   idleTimeoutMs: number;
 }) {
   if (input.sandboxId) {
-    return Sandbox.connect(input.sandboxId, {
-      timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
-      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
-    });
+    try {
+      return await Sandbox.connect(input.sandboxId, {
+        timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
+        requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (!isSandboxNotFound(error)) {
+        throw error;
+      }
+    }
   }
 
+  return createSandbox(input);
+}
+
+async function createSandbox(input: {
+  template?: string | undefined;
+  envs: Record<string, string>;
+  idleTimeoutMs: number;
+}) {
   const options = {
     envs: input.envs,
     timeoutMs: input.idleTimeoutMs,
