@@ -102,19 +102,6 @@ function NavItem({
   );
 }
 
-function SessionStatusDot({ status, lastError }: { status: string; lastError: string | null }) {
-  const tone =
-    lastError || status === "failed"
-      ? "bg-[#dc2626] shadow-[0_0_0_2px_rgba(220,38,38,0.1)]"
-      : status === "running" || status === "provisioning"
-        ? "bg-[#16a34a] shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
-        : status === "aborting" || status === "archiving"
-          ? "bg-[#d97706] shadow-[0_0_0_2px_rgba(217,119,6,0.11)]"
-          : "bg-ink-subtle/45";
-
-  return <span className={`ml-[2px] mr-[2px] inline-block h-1.5 w-1.5 rounded-full ${tone}`} />;
-}
-
 function statusLabel(status: string) {
   if (status === "provisioning") return "Starting";
   if (status === "ready") return "Ready";
@@ -135,9 +122,7 @@ function SessionHistoryItem({ session, active }: { session: SidebarSession; acti
     session.status === "running" ||
     session.status === "provisioning" ||
     session.status === "aborting" ||
-    session.status === "archiving" ||
-    session.status === "failed" ||
-    Boolean(session.lastError);
+    session.status === "archiving";
 
   return (
     <div
@@ -150,7 +135,6 @@ function SessionHistoryItem({ session, active }: { session: SidebarSession; acti
         title={session.lastError ?? session.title}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        <SessionStatusDot status={session.status} lastError={session.lastError} />
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
         {showStatus && (
           <span

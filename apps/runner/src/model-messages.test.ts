@@ -65,6 +65,72 @@ describe("buildModelMessages", () => {
     expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
   });
 
+  it("splits assistant text after tool calls so tool results replay immediately after tool use", () => {
+    const assistant = buildAssistantModelMessage({
+      content: "Done.",
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_123",
+          toolName: "write_file",
+          input: { path: "hello.txt", content: "Hello" },
+        },
+        { type: "text", text: "Done." },
+      ],
+    });
+    const tool = buildToolModelMessage({
+      toolCallId: "call_123",
+      toolName: "write_file",
+      output: { path: "hello.txt", bytes: 5 },
+    });
+
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_1",
+        role: "user",
+        content: "Write hello.",
+        modelMessage: { role: "user", content: "Write hello." },
+      },
+      {
+        id: "msg_assistant_1",
+        role: "assistant",
+        content: "Done.",
+        modelMessage: toPersistedModelMessage(assistant),
+      },
+      {
+        id: "msg_tool_1",
+        role: "tool",
+        content: JSON.stringify({ path: "hello.txt", bytes: 5 }),
+        modelMessage: toPersistedModelMessage(tool),
+      },
+      {
+        id: "msg_user_2",
+        role: "user",
+        content: "Nice.",
+        modelMessage: { role: "user", content: "Nice." },
+      },
+    ]);
+
+    expect(messages).toEqual([
+      { role: "user", content: "Write hello." },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "write_file",
+            input: { path: "hello.txt", content: "Hello" },
+          },
+        ],
+      },
+      tool,
+      { role: "assistant", content: "Done." },
+      { role: "user", content: "Nice." },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
   it("falls back to basic text history for legacy rows without model messages", () => {
     expect(
       buildModelMessages([
