@@ -24,6 +24,7 @@ function appOrigin() {
 
 const forwardTo = `${appOrigin()}/api/stripe/webhook`;
 const events = process.env.STRIPE_LISTEN_EVENTS?.trim() || "checkout.session.completed";
+const stripeCliProjectName = process.env.STRIPE_CLI_PROJECT_NAME?.trim();
 
 if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
   console.warn(
@@ -33,7 +34,16 @@ if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) {
 
 console.log(`Forwarding Stripe events (${events}) to ${forwardTo}`);
 
-const child = spawn("stripe", ["listen", "--events", events, "--forward-to", forwardTo], {
+const args = [
+  ...(stripeCliProjectName ? ["--project-name", stripeCliProjectName] : []),
+  "listen",
+  "--events",
+  events,
+  "--forward-to",
+  forwardTo,
+];
+
+const child = spawn("stripe", args, {
   stdio: "inherit",
   env: process.env,
 });

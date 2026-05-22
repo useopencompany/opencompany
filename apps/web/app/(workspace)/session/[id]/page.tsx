@@ -36,6 +36,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       }))}
       initialUsage={data.usage}
       initialToolUsage={data.toolUsage}
+      initialCost={data.cost}
       runnerUrl={data.runnerUrl}
       streamToken={data.token}
     />

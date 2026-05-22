@@ -205,6 +205,7 @@ describe("usage recording", () => {
     });
 
     expect(db.state.usage.map((row) => row.stepIndex)).toEqual([1, 2]);
+    expect(db.state.ledgerDebits).toBe(2);
     expect(appendRuntimeEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -251,6 +252,7 @@ describe("usage recording", () => {
         costUsdMicros: 7000,
       }),
     ]);
+    expect(db.state.ledgerDebits).toBe(1);
     expect(appendRuntimeEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -357,10 +359,12 @@ type MessageState = {
 };
 
 type UsageState = {
+  id: number;
   stepIndex: number;
 };
 
 type ToolUsageState = {
+  id: number;
   toolCallId: string;
   toolName: string;
   provider: string;
@@ -386,6 +390,7 @@ function createLeaseDb(input: {
     messages: [...(input.messages ?? [])],
     usage: [] as UsageState[],
     toolUsage: [] as ToolUsageState[],
+    ledgerDebits: 0,
   };
 
   return {
@@ -455,12 +460,22 @@ function createLeaseDb(input: {
       return {
         values(values: Record<string, unknown>) {
           if (table === agentSessionUsage) {
-            state.usage.push(values as UsageState);
-            return Promise.resolve(undefined);
+            const row = { id: state.usage.length + 1, ...values } as UsageState;
+            state.usage.push(row);
+            return {
+              async returning() {
+                return [{ id: row.id }];
+              },
+            };
           }
           if (table === agentSessionToolUsage) {
-            state.toolUsage.push(values as ToolUsageState);
-            return Promise.resolve(undefined);
+            const row = { id: state.toolUsage.length + 1, ...values } as ToolUsageState;
+            state.toolUsage.push(row);
+            return {
+              async returning() {
+                return [{ id: row.id }];
+              },
+            };
           }
 
           return {
@@ -487,6 +502,10 @@ function createLeaseDb(input: {
           };
         },
       };
+    },
+    async execute() {
+      state.ledgerDebits += 1;
+      return { rows: [{ ledgerId: state.ledgerDebits, balanceUsdMicros: 100_000 }] };
     },
   };
 }

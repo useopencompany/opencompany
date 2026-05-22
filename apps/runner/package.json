@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",
+    "@opencompany/billing": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@sentry/bun": "^10.53.1",

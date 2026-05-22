@@ -1,6 +1,15 @@
 "use client";
 
-import { Check, CreditCard, Gift, GitBranch, LogOut, WalletCards } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  CreditCard,
+  ExternalLink,
+  Gift,
+  GitBranch,
+  LogOut,
+  WalletCards,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -28,12 +37,30 @@ type Props = {
     } | null;
   };
   billing: {
-    balanceCents: number;
+    balanceUsdMicros: number;
+    spendLast7UsdMicros: number;
+    spendLast30UsdMicros: number;
+    recentSessionCharges: Array<{
+      sessionId: string;
+      title: string;
+      agentName: string;
+      totalUsdMicros: number;
+      modelCostUsdMicros: number;
+      toolCostUsdMicros: number;
+      providerCostUsdMicros: number;
+      platformFeeUsdMicros: number;
+      createdAt: string;
+    }>;
     ledger: Array<{
       id: number;
       amountCents: number;
+      amountUsdMicros: number;
       source: string;
+      sessionId: string | null;
+      providerCostUsdMicros: number;
+      platformFeeUsdMicros: number;
       createdAt: string;
+      costBasis: Record<string, unknown>;
       metadata: Record<string, unknown>;
     }>;
   };
@@ -89,6 +116,15 @@ function formatUsd(cents: number) {
   }).format(cents / 100);
 }
 
+function formatUsdMicros(micros: number) {
+  const roundedCents = Math.round(micros / 10_000);
+  const cents = roundedCents === 0 ? 0 : roundedCents;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+  }).format(cents / 100);
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
@@ -98,11 +134,90 @@ function formatDateTime(value: string) {
   }).format(new Date(value));
 }
 
+function shortSessionId(sessionId: string) {
+  if (sessionId.length <= 16) return sessionId;
+  return `${sessionId.slice(0, 8)}...${sessionId.slice(-5)}`;
+}
+
 function ledgerLabel(source: string) {
   if (source === "stripe_checkout") return "Credit top-up";
   if (source === "credit_code") return "Redeemed code";
+  if (source === "model_usage") return "Model usage";
+  if (source === "tool_usage") return "Tool usage";
   if (source === "usage") return "Usage";
   return "Credit event";
+}
+
+function CostLine({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-ink-muted">{label}</span>
+      <span className="font-medium text-ink">{formatUsdMicros(value)}</span>
+    </div>
+  );
+}
+
+function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCharges"][number] }) {
+  const otherCostUsdMicros = Math.max(
+    entry.totalUsdMicros - entry.modelCostUsdMicros - entry.toolCostUsdMicros,
+    0,
+  );
+
+  return (
+    <details className="group border-t border-[#ecece8] first:border-t-0">
+      <summary className="grid cursor-pointer list-none grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-white/70 [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          size={14}
+          strokeWidth={1.9}
+          className="text-ink-subtle transition-transform duration-150 group-open:rotate-90"
+          aria-hidden
+        />
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium text-ink">{entry.title}</div>
+          <div className="mt-0.5 truncate text-[11.5px] text-ink-subtle">
+            {entry.agentName} ·{" "}
+            <span title={entry.sessionId}>Session {shortSessionId(entry.sessionId)}</span> ·{" "}
+            {formatDateTime(entry.createdAt)}
+          </div>
+        </div>
+        <div className="shrink-0 text-[13px] font-medium text-ink">
+          {formatUsdMicros(entry.totalUsdMicros)}
+        </div>
+      </summary>
+      <div className="border-t border-[#ecece8] bg-white/35 px-8 py-3">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+              Usage
+            </div>
+            <div className="space-y-1 text-[12px]">
+              <CostLine label="Model usage" value={entry.modelCostUsdMicros} />
+              <CostLine label="Tool usage" value={entry.toolCostUsdMicros} />
+              {otherCostUsdMicros > 0 && (
+                <CostLine label="Other usage" value={otherCostUsdMicros} />
+              )}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+              Cost basis
+            </div>
+            <div className="space-y-1 text-[12px]">
+              <CostLine label="Provider cost" value={entry.providerCostUsdMicros} />
+              <CostLine label="Platform fee" value={entry.platformFeeUsdMicros} />
+            </div>
+          </div>
+        </div>
+        <Link
+          href={`/session/${entry.sessionId}`}
+          className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-ink hover:text-black"
+        >
+          Open session
+          <ExternalLink size={12} strokeWidth={1.9} />
+        </Link>
+      </div>
+    </details>
+  );
 }
 
 function parseUsdAmountCents(value: string) {
@@ -222,8 +337,27 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
                 Current balance
               </div>
               <div className="mt-1 text-[28px] font-semibold leading-none tracking-[-0.015em] text-ink">
-                {formatUsd(billing.balanceCents)}
+                {formatUsdMicros(billing.balanceUsdMicros)}
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[#ecece8] pt-4">
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+              7-day spend
+            </div>
+            <div className="mt-1 text-[14px] font-medium text-ink">
+              {formatUsdMicros(billing.spendLast7UsdMicros)}
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+              30-day spend
+            </div>
+            <div className="mt-1 text-[14px] font-medium text-ink">
+              {formatUsdMicros(billing.spendLast30UsdMicros)}
             </div>
           </div>
         </div>
@@ -298,6 +432,23 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
 
       <div>
         <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+          Recent session charges
+        </div>
+        {billing.recentSessionCharges.length === 0 ? (
+          <div className="rounded-md border border-dashed border-[#deded9] bg-white/35 px-3 py-3 text-[12px] leading-5 text-ink-muted">
+            Session charges will appear here after agents run.
+          </div>
+        ) : (
+          <div className="mb-4 overflow-hidden rounded-lg border border-[#e3e3df] bg-white/55">
+            {billing.recentSessionCharges.map((entry) => (
+              <SessionChargeRow key={entry.sessionId} entry={entry} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
           Recent activity
         </div>
         {billing.ledger.length === 0 ? (
@@ -321,11 +472,11 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
                 </div>
                 <div
                   className={`shrink-0 text-[13px] font-medium ${
-                    entry.amountCents >= 0 ? "text-[#1f7a3a]" : "text-ink"
+                    entry.amountUsdMicros >= 0 ? "text-[#1f7a3a]" : "text-ink"
                   }`}
                 >
-                  {entry.amountCents >= 0 ? "+" : ""}
-                  {formatUsd(entry.amountCents)}
+                  {entry.amountUsdMicros >= 0 ? "+" : ""}
+                  {formatUsdMicros(entry.amountUsdMicros)}
                 </div>
               </div>
             ))}
