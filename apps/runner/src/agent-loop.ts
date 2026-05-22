@@ -49,6 +49,7 @@ import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
 import {
   executeHostedTool,
+  getHostedToolFailureContext,
   type HostedToolUsage,
   validateHostedToolEnvironment,
 } from "./hosted-tools";
@@ -82,6 +83,14 @@ import { normalizeModelUsage } from "./usage";
 
 const activeRuns = new Map<string, { leaseId: string; controller: AbortController }>();
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
+
+type ToolObservabilityContext = {
+  workspaceId?: string;
+  userId?: string;
+  agentId?: string;
+  modelProvider?: string;
+  modelName?: string;
+};
 
 export async function startSession(sessionId: string, env: RunnerEnv) {
   const db = getDb();
@@ -162,6 +171,9 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
   let sandboxPromise: Promise<SandboxHandle> | null = null;
   let leaseAcquired = false;
   let lastHeartbeatAt = 0;
+  let workspaceId: string | undefined;
+  let userId: string | undefined;
+  let agentId: string | undefined;
   let modelProvider: string | undefined;
   let modelName: string | undefined;
   let sandboxId: string | undefined;
@@ -173,6 +185,9 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       outcome = "skipped_archived";
       return;
     }
+    workspaceId = row.workspace.id;
+    userId = row.session.userId;
+    agentId = row.agent.id;
     if (
       !(await timeAsync(trace, "check_workspace_credits", () =>
         hasPositiveWorkspaceBalance({ db, workspaceId: row.session.workspaceId }),
@@ -328,6 +343,13 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       enabledTools: runtime.tools,
       signal: controller.signal,
       checkAbort,
+      observabilityContext: {
+        workspaceId,
+        userId,
+        agentId,
+        modelProvider,
+        modelName,
+      },
     });
 
     let assistantContent = "";
@@ -473,6 +495,9 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     const message = error instanceof Error ? error.message : "Unknown runner error";
     captureException(error, {
       event: "opencompany.runner_message_failed",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
@@ -587,6 +612,7 @@ function createToolSet(input: {
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
+  observabilityContext?: ToolObservabilityContext | undefined;
 }) {
   const tools: ToolSet = {};
 
@@ -644,6 +670,7 @@ function createToolSet(input: {
           enabledTools: input.enabledTools,
           signal: input.signal,
           checkAbort: input.checkAbort,
+          observabilityContext: input.observabilityContext,
         }),
     });
   }
@@ -673,6 +700,7 @@ export async function executeRuntimeTool(input: {
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
+  observabilityContext?: ToolObservabilityContext | undefined;
 }) {
   let output: unknown;
   let usage: HostedToolUsage | undefined;
@@ -723,11 +751,24 @@ export async function executeRuntimeTool(input: {
   } catch (error) {
     captureException(error, {
       event: "opencompany.runner_tool_failed",
+      workspace_id: input.observabilityContext?.workspaceId,
+      user_id: input.observabilityContext?.userId,
+      agent_id: input.observabilityContext?.agentId,
       session_id: input.sessionId,
       message_id: input.assistantMessageId,
       tool_call_id: input.toolCallId,
       tool_name: input.definition.name,
+      tool_kind: input.definition.kind,
       sandbox_id: sandboxIdForCapture,
+      model_provider: input.observabilityContext?.modelProvider,
+      model_name: input.observabilityContext?.modelName,
+      ...(input.definition.kind === "hosted"
+        ? getHostedToolFailureContext({
+            name: input.definition.name,
+            args: input.args,
+            error,
+          })
+        : {}),
     });
     throw error;
   }

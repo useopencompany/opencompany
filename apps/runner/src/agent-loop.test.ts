@@ -28,9 +28,21 @@ const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
 }));
 
+const observabilityMocks = vi.hoisted(() => ({
+  captureException: vi.fn(),
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
 }));
+
+vi.mock("@opencompany/observability", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/observability")>();
+  return {
+    ...actual,
+    captureException: observabilityMocks.captureException,
+  };
+});
 
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
@@ -311,6 +323,73 @@ describe("usage recording", () => {
       toolName: "exa_search",
       toolCallId: "call_exa",
     });
+  });
+
+  it("captures hosted Exa validation failures with searchable monitoring context", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => {
+      throw new Error("sandbox should not hydrate");
+    });
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        toolCallId: "call_exa",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search") as RuntimeToolDefinition,
+        args: {
+          query: "OpenAI leadership",
+          category: "people",
+          excludeDomains: ["example.com"],
+          startPublishedDate: "2026-01-01",
+        },
+        getSandbox,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["tool_help", "exa_search"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+        observabilityContext: {
+          workspaceId: "wsp_123",
+          userId: "user_123",
+          agentId: "agt_123",
+          modelProvider: "vercel-ai-gateway",
+          modelName: "openai/gpt-5.4-mini",
+        },
+      }),
+    ).rejects.toThrow(
+      "Exa company and people category searches do not support excludeDomains or published date filters.",
+    );
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(observabilityMocks.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        event: "opencompany.runner_tool_failed",
+        workspace_id: "wsp_123",
+        user_id: "user_123",
+        agent_id: "agt_123",
+        session_id: "ses_123",
+        message_id: "msg_assistant",
+        tool_call_id: "call_exa",
+        tool_name: "exa_search",
+        tool_kind: "hosted",
+        model_provider: "vercel-ai-gateway",
+        model_name: "openai/gpt-5.4-mini",
+        hosted_provider: "exa",
+        hosted_operation: "search",
+        tool_error_stage: "request_validation",
+        tool_error_code: "exa_unsupported_category_filter_combination",
+        exa_category: "people",
+        exa_has_exclude_domains: true,
+        exa_has_published_date_filter: true,
+      }),
+    );
+    expect(db.state.toolUsage).toHaveLength(0);
+    expect(db.state.messages).toHaveLength(0);
   });
 });
 

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { executeHostedTool, validateHostedToolEnvironment } from "./hosted-tools";
+import {
+  executeHostedTool,
+  getHostedToolFailureContext,
+  validateHostedToolEnvironment,
+} from "./hosted-tools";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -137,6 +141,29 @@ describe("executeHostedTool", () => {
     ).rejects.toThrow("Exa search failed (401): invalid key");
   });
 
+  it("rejects Exa company and people searches with unsupported filters before calling Exa", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "exa_search",
+        args: {
+          query: "OpenAI leadership",
+          category: "people",
+          excludeDomains: ["example.com"],
+          startPublishedDate: "2026-01-01",
+        },
+        env: env(),
+        enabledTools: ["tool_help", "exa_search"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(
+      "Exa company and people category searches do not support excludeDomains or published date filters.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed Exa responses", async () => {
     vi.stubGlobal(
       "fetch",
@@ -249,6 +276,49 @@ describe("executeHostedTool", () => {
         tool: "exa_search",
         error: "Tool is not enabled for this session or does not exist.",
       },
+    });
+  });
+});
+
+describe("getHostedToolFailureContext", () => {
+  it("classifies unsupported Exa category/filter combinations for monitoring", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "exa_search",
+        args: {
+          query: "OpenAI leadership",
+          category: "people",
+          excludeDomains: ["example.com"],
+          startPublishedDate: "2026-01-01",
+        },
+        error: new Error(
+          "Exa company and people category searches do not support excludeDomains or published date filters.",
+        ),
+      }),
+    ).toMatchObject({
+      hosted_provider: "exa",
+      hosted_operation: "search",
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_unsupported_category_filter_combination",
+      exa_category: "people",
+      exa_has_exclude_domains: true,
+      exa_has_published_date_filter: true,
+    });
+  });
+
+  it("classifies Exa provider HTTP failures with status", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "exa_search",
+        args: { query: "test" },
+        error: new Error("Exa search failed (401): invalid key"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "exa",
+      hosted_operation: "search",
+      tool_error_stage: "provider_response",
+      tool_error_code: "exa_http_error",
+      provider_status: 401,
     });
   });
 });
