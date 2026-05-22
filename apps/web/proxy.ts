@@ -11,6 +11,7 @@ export default authkitProxy({
       "/signin",
       "/signup",
       "/auth/callback",
+      "/auth/organization",
       "/auth/sign-in",
       "/auth/sign-up",
       "/api/inngest",

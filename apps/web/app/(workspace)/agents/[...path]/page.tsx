@@ -3,13 +3,12 @@ import { agents } from "@opencompany/db/schema";
 import { and, eq, or } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import AgentDetail from "@/components/AgentDetail";
-import AppShell from "@/components/AppShell";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { requireCurrentWorkspace } from "@/lib/auth";
 
 export default async function AgentPage({ params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const idOrPath = path.map(decodeURIComponent).join("/");
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await requireCurrentWorkspace();
   const db = getDb();
 
   const [agent] = await db
@@ -26,18 +25,16 @@ export default async function AgentPage({ params }: { params: Promise<{ path: st
   if (!agent) notFound();
 
   return (
-    <AppShell>
-      <AgentDetail
-        id={agent.path ?? agent.id}
-        initialName={agent.name}
-        initialBody={agent.body || agent.config.instructions}
-        initialConfig={agent.config}
-        initialPath={agent.path}
-        initialGitHubCommitSha={agent.githubCommitSha}
-        initialGitHubSyncedAt={agent.githubSyncedAt?.toISOString() ?? null}
-        initialGitHubSyncStatus={agent.githubSyncStatus}
-        initialGitHubSyncError={agent.githubSyncError}
-      />
-    </AppShell>
+    <AgentDetail
+      id={agent.path ?? agent.id}
+      initialName={agent.name}
+      initialBody={agent.body || agent.config.instructions}
+      initialConfig={agent.config}
+      initialPath={agent.path}
+      initialGitHubCommitSha={agent.githubCommitSha}
+      initialGitHubSyncedAt={agent.githubSyncedAt?.toISOString() ?? null}
+      initialGitHubSyncStatus={agent.githubSyncStatus}
+      initialGitHubSyncError={agent.githubSyncError}
+    />
   );
 }

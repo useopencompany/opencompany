@@ -1,9 +1,8 @@
 import { getDb } from "@opencompany/db/client";
 import { workspaceRepositories } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
-import AppShell from "@/components/AppShell";
 import SettingsView from "@/components/SettingsView";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { requireCurrentWorkspace } from "@/lib/auth";
 
 function initialsFor(name: string, email: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -27,7 +26,7 @@ function formatDate(date: Date) {
 }
 
 export default async function SettingsPage() {
-  const { authUser, workspace } = await getCurrentWorkspace();
+  const { authUser, workspace } = await requireCurrentWorkspace();
   const db = getDb();
   const [repository] = await db
     .select({
@@ -42,24 +41,22 @@ export default async function SettingsPage() {
     authUser.email;
 
   return (
-    <AppShell>
-      <SettingsView
-        profile={{
-          name: displayName,
-          email: authUser.email,
-          avatarUrl: authUser.profilePictureUrl ?? null,
-          initials: initialsFor(displayName, authUser.email),
-        }}
-        workspace={{
-          name: workspace.name,
-          createdAt: formatDate(new Date(workspace.createdAt)),
-          repository: repository
-            ? {
-                updatedAt: formatDate(new Date(repository.updatedAt)),
-              }
-            : null,
-        }}
-      />
-    </AppShell>
+    <SettingsView
+      profile={{
+        name: displayName,
+        email: authUser.email,
+        avatarUrl: authUser.profilePictureUrl ?? null,
+        initials: initialsFor(displayName, authUser.email),
+      }}
+      workspace={{
+        name: workspace.name,
+        createdAt: formatDate(new Date(workspace.createdAt)),
+        repository: repository
+          ? {
+              updatedAt: formatDate(new Date(repository.updatedAt)),
+            }
+          : null,
+      }}
+    />
   );
 }

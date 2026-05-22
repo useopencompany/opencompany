@@ -9,7 +9,7 @@ test("public signup page loads", async ({ page }) => {
 test("docs page renders", async ({ page }) => {
   await page.goto("/docs");
 
-  await expect(page.getByRole("heading", { name: "Getting started" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Welcome to opencompany" })).toBeVisible();
 });
 
 test("protected routes redirect unauthenticated visitors", async ({ page }) => {

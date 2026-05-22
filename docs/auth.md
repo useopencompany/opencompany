@@ -7,8 +7,9 @@ We use [WorkOS AuthKit](https://www.authkit.com) for session management and [`@w
 1. `apps/web/proxy.ts` wraps the app with `authkitProxy`. Anything outside the public allowlist (`/`, `/signin`, `/signup`, auth routes, and docs) requires a session.
 2. Unauthenticated user hits a gated route → redirected to WorkOS hosted UI.
 3. After login, WorkOS redirects to `/auth/callback` → AuthKit sets the session cookie.
-4. The first request to any page calls `getCurrentWorkspace()` in `apps/web/lib/auth.ts`, which upserts the user, default workspace, and owner membership into our Postgres.
-5. Subsequent requests use the cached context via React `cache()`.
+4. The callback syncs the WorkOS user and Organization into Postgres. If WorkOS did not return an Organization, the app invisibly creates the user's default Organization and refreshes the session into it.
+5. The first request to any page calls `getCurrentWorkspace()` in `apps/web/lib/auth.ts`, which requires `session.organizationId` and resolves the app workspace by `workspaces.workos_organization_id`.
+6. Subsequent requests use the cached context via React `cache()`.
 
 ## Key helpers in `apps/web/lib/auth.ts`
 
@@ -26,7 +27,7 @@ In the WorkOS dashboard:
 - If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
 
-Vercel is the source of truth for shared Development env vars. Use `bun run env:pull` to merge the shared setup values into `.env.local`, including `DATABASE_URL`.
+Vercel is the source of truth for shared Development env vars. Use `bun run env:pull` to merge the shared setup values into `.env.local`. Local setup then replaces `DATABASE_URL` with the current Neon branch connection string.
 
 ## Env vars
 
@@ -39,12 +40,16 @@ Vercel is the source of truth for shared Development env vars. Use `bun run env:
 
 ## User and workspace identity
 
-We mint our own IDs rather than storing raw WorkOS IDs as primary keys:
+WorkOS Organizations are the source of truth for organization identity, membership, and future org-scoped auth features. App workspaces remain the internal tenant boundary:
 
 - `users.id` = `usr_<workos_id>`
-- `workspaces.id` for the default workspace = `wks_<users.id>`
+- `workspaces.id` = internal app id (`wks_<uuid>`)
+- `workspaces.workos_organization_id` = matching WorkOS `org_...` id
 
 `users.workos_user_id` has a unique index so we can dedupe on upsert.
+`workspaces.workos_organization_id` has a unique index so one WorkOS Organization maps to one app workspace.
+
+New sign-ups currently get one invisible default WorkOS Organization. Multi-workspace creation, organization switching, invitations, and member management are intentionally not exposed yet.
 
 ## Sign-out
 

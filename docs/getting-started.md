@@ -1,6 +1,6 @@
 # Getting started
 
-Goal: get a local dev environment running with auth and the shared dev database in under five minutes.
+Goal: get a local dev environment running with auth and an isolated Neon branch database in under five minutes.
 
 ## Prerequisites
 
@@ -16,16 +16,18 @@ bun run setup
 bun run dev
 ```
 
-`bun run setup` is interactive and idempotent. It will:
+`bun run setup` is idempotent. It will:
 
 1. Copy `.env.example` → `.env.local` if missing.
-2. If WorkOS keys or `DATABASE_URL` are placeholders, offer to pull shared Development env vars from Vercel into `.env.local`.
-3. Run migrations against `DATABASE_URL`.
-4. Optionally seed a dev user/workspace.
+2. If WorkOS keys or `NEON_PROJECT_ID` are placeholders, pull shared Development env vars from Vercel into `.env.local`.
+3. Create or reuse a Neon branch for the current Git branch and write its `DATABASE_URL` to `.env.local`.
+4. Run migrations against that branch database.
 
 Re-running it is safe.
 
-Per-branch Neon databases aren't part of the default setup right now — every checkout uses the `DATABASE_URL` from Vercel Development. The `db:branch:create` / `db:branch:delete` scripts are still around if you want to opt into branch isolation manually; see [database.md](./database.md).
+If you want setup to launch the dev server after migrations, run `bun run setup:dev`.
+
+The older shared database path is still available with `bun run setup -- --shared-db`, but the default is branch isolation because this repo is commonly used from multiple Git worktrees. See [database.md](./database.md).
 
 ## For agents
 
@@ -39,7 +41,7 @@ Emits a JSON state snapshot with a `nextSteps` array. Used by the `start-work` s
 
 Vercel is the source of truth for shared development env vars. Store the stable shared dev values in Vercel's **Development** environment:
 
-- `DATABASE_URL`
+- `NEON_PROJECT_ID`
 - `WORKOS_CLIENT_ID`
 - `WORKOS_API_KEY`
 - `WORKOS_COOKIE_PASSWORD`
@@ -49,6 +51,8 @@ Vercel is the source of truth for shared development env vars. Store the stable 
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
 
+`DATABASE_URL` can also exist in Vercel Development for the explicit `--shared-db` mode, but normal local setup overwrites `.env.local` with a Neon branch-specific URL.
+
 Then pull them locally:
 
 ```bash
@@ -56,7 +60,7 @@ bunx vercel link      # one-time per checkout, if .vercel/ is missing
 bun run env:pull
 ```
 
-`bun run env:pull` pulls Vercel Development env vars to a temporary file and merges only the shared setup keys above into `.env.local`.
+`bun run env:pull` pulls Vercel Development env vars to a temporary file and merges only the shared setup keys above into `.env.local`. In the default branch database mode, it does not overwrite `DATABASE_URL`.
 
 Mark `WORKOS_API_KEY`, `DATABASE_URL`, and `GITHUB_APP_PRIVATE_KEY` as sensitive in Vercel.
 
@@ -70,7 +74,8 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
 ## Day-to-day
 
 - Schema change → edit `packages/db/src/schema.ts`, then `bun run db:generate`, then `bun run db:migrate`.
+- Reset local database → `bun run db:branch:delete`, then `bun run setup`.
 - New env var in Vercel → `bun run env:pull` to refresh `.env.local`.
 - Agent editing / GitHub / Inngest architecture → see [architecture.md](./architecture.md).
 
-See [database.md](./database.md) for the optional per-branch workflow and [auth.md](./auth.md) for the auth flow.
+See [database.md](./database.md) for the database workflow and [auth.md](./auth.md) for the auth flow.

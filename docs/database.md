@@ -4,11 +4,13 @@ We use [Neon](https://neon.tech) (serverless Postgres) with [Drizzle ORM](https:
 
 ## Default local database
 
-Most local checkouts use the shared Development `DATABASE_URL` from Vercel. `bun run setup` and `bun run env:pull` keep that value in `.env.local`, then `bun run db:migrate` applies any pending migrations.
+Local checkouts use a Neon branch by default. `bun run setup` pulls shared non-database env vars from Vercel, creates or reuses a Neon branch for the current Git branch, writes that branch connection string to `.env.local`, then runs migrations. Later `bun run env:pull` runs preserve that branch-specific `DATABASE_URL`.
 
-## Optional per-branch databases
+The shared Vercel Development `DATABASE_URL` is still available as an escape hatch with `bun run setup -- --shared-db`, but it should not be the normal path for parallel worktrees. Automatic setup runs migrations, and migrations against a shared branch make unrelated local work interfere with each other.
 
-The repo still has scripts for a per-branch Neon workflow. In that mode, each Git branch gets its own Neon branch. Schema migrations, seed data, and destructive experiments stay isolated. Switching Git branches means switching databases.
+## Per-branch databases
+
+Each Git branch gets its own Neon branch. Schema migrations, seed data, and destructive experiments stay isolated. Switching Git branches means switching databases.
 
 Neon branches are copy-on-write, so creation is instant and cheap (a few MB until you start diverging).
 
@@ -31,6 +33,15 @@ For local development, set `NEON_PROJECT_ID` in Vercel Development and run `bun 
 When fetching a connection string, the script auto-selects `neondb` and `neondb_owner` if they exist. These are the right defaults for local migrations and app queries. Set `NEON_DATABASE_NAME` or `NEON_ROLE_NAME` only for nonstandard Neon projects.
 
 The Neon branch name is your current Git branch, lower-cased and sanitized to `[a-z0-9-]`, truncated to 63 chars.
+
+If two local worktrees intentionally use the same Git branch, set `NEON_BRANCH_NAME` in one or both `.env.local` files so they do not point at the same Neon branch.
+
+For a clean local reset, delete and recreate the branch:
+
+```bash
+bun run db:branch:delete
+bun run setup
+```
 
 ## Schema changes
 
@@ -57,6 +68,7 @@ Vercel preview deployments can be wired to spin up their own Neon branch via the
 These let you override defaults in headless environments:
 
 - `NEON_PARENT_BRANCH` — Neon branch to fork from (default: the project's default branch, usually `production`).
+- `NEON_BRANCH_NAME` — local override for the Neon branch name, useful when multiple worktrees share one Git branch.
 - `NEON_DATABASE_NAME` — non-default database name.
 - `NEON_ROLE_NAME` — non-default role to connect as.
 
@@ -65,8 +77,8 @@ These let you override defaults in headless environments:
 Current tables (see `packages/db/src/schema.ts` for the source of truth):
 
 - `users` — one row per WorkOS user, keyed by `usr_<workos_id>`.
-- `workspaces` — tenant boundary; one default workspace per user on first sign-in.
-- `workspace_memberships` — many-to-many user↔workspace with a `role`.
+- `workspaces` — internal tenant boundary; each new workspace maps to a WorkOS Organization through `workos_organization_id`.
+- `workspace_memberships` — local mirror of user↔workspace membership with a `role`; WorkOS is the source of truth.
 - `agents` — latest editable agent state: path, title/body, parsed config, content hash, version, and GitHub sync status.
 - `agent_sync_jobs` — desired GitHub materialization state for an agent edit. Repeated edits coalesce by updating the same row.
 - `workspace_repositories` — one managed private GitHub repo per workspace, including repo id, full name, default branch, and latest head SHA.

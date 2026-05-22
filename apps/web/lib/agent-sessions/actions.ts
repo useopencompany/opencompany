@@ -27,7 +27,7 @@ import {
   getRunnerPublicUrl,
   getRunnerStreamTokenSecret,
 } from "@/lib/agent-sessions/runner";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { getCurrentWorkspace, requireCurrentWorkspace } from "@/lib/auth";
 
 export async function createAgentSession(idOrPath: string) {
   const { user, workspace } = await getCurrentWorkspace();
@@ -48,6 +48,7 @@ export async function createAgentSession(idOrPath: string) {
     await dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id });
   });
 
+  revalidatePath("/", "layout");
   revalidatePath("/agents");
   redirect(`/session/${sessionId}`);
 }
@@ -76,6 +77,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
   });
 
+  revalidatePath("/", "layout");
   revalidatePath("/");
   redirect(`/session/${sessionId}`);
 }
@@ -173,6 +175,7 @@ export async function archiveAgentSession(sessionId: string) {
 
   if (!session.e2bSandboxId) {
     await archiveSessionLocally(sessionId, null);
+    revalidatePath("/", "layout");
     revalidatePath("/");
     revalidatePath(`/session/${sessionId}`);
     return { ok: true } as const;
@@ -216,13 +219,14 @@ export async function archiveAgentSession(sessionId: string) {
     return { ok: false, error: message } as const;
   }
 
+  revalidatePath("/", "layout");
   revalidatePath("/");
   revalidatePath(`/session/${sessionId}`);
   return { ok: true } as const;
 }
 
 export async function loadAgentSessionForPage(sessionId: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await requireCurrentWorkspace();
   const db = getDb();
   const [session] = await db
     .select({
