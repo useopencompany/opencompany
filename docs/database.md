@@ -71,6 +71,8 @@ These let you override defaults in headless environments:
 - `NEON_BRANCH_NAME` — local override for the Neon branch name, useful when multiple worktrees share one Git branch.
 - `NEON_DATABASE_NAME` — non-default database name.
 - `NEON_ROLE_NAME` — non-default role to connect as.
+- `NEON_API_KEY` — headless Neon CLI auth, only needed outside local browser OAuth.
+- `OPENCOMPANY_SHARED_DATABASE=1` — use the shared `DATABASE_URL` escape hatch during setup.
 
 ## Schema overview
 
