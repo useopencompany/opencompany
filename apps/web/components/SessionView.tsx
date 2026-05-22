@@ -4,6 +4,7 @@ import {
   AlertCircle,
   ArrowUp,
   Bot,
+  Brain,
   ChevronRight,
   CircleStop,
   ExternalLink,
@@ -347,11 +348,62 @@ function AssistantMessageContent({
       {parts.map((part, index) =>
         part.type === "text" ? (
           <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />
+        ) : part.type === "reasoning" ? (
+          <ReasoningSummaryCard
+            key={`${index}:reasoning`}
+            text={part.text}
+            durationSeconds={part.durationSeconds}
+          />
         ) : (
           <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
         ),
       )}
       {!hasParts ? message.status === "running" ? <ThinkingShimmer /> : "..." : null}
+    </div>
+  );
+}
+
+function ReasoningSummaryCard({
+  text,
+  durationSeconds,
+}: {
+  text: string | undefined;
+  durationSeconds: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasSummary = Boolean(text);
+
+  return (
+    <div className="text-[11.5px] leading-5 text-ink-muted">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => {
+          if (hasSummary) setExpanded((current) => !current);
+        }}
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-px text-left transition-colors hover:text-ink/75"
+      >
+        {hasSummary ? (
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+        ) : null}
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          <Brain size={11} strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 truncate font-medium text-ink/65">
+          {formatThinkingDuration(durationSeconds)}
+        </span>
+      </button>
+      {expanded && text ? (
+        <div className="mt-1 border-l border-[#e3e3df] pl-3">
+          <div className="py-1 text-[11.5px] leading-5 text-ink/65">
+            <AssistantMarkdown content={text} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -719,6 +771,11 @@ function formatTokenCount(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
+function formatThinkingDuration(seconds: number) {
+  const duration = Math.max(Math.round(seconds), 1);
+  return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
+}
+
 function formatUsdMicros(value: number) {
   return `$${(value / 1_000_000).toFixed(4)}`;
 }
@@ -741,6 +798,7 @@ function formatRuntimeDate(value: string) {
 }
 
 function summarizeEvent(event: RuntimeEvent) {
+  if (event.type === "message.reasoning_summary") return "Thinking summary";
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
   if (event.type === "session.tool_usage") {

@@ -12,6 +12,8 @@ export type AgentMentionItem = {
   displayLabel: string;
   description: string;
   icon: LucideIcon;
+  category?: "Fast" | "Deep";
+  supportsReasoning?: boolean;
 };
 
 export type AgentTool = AgentMentionItem & {
@@ -42,6 +44,8 @@ export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => 
   label: model.label,
   displayLabel: model.id,
   description: model.description,
+  category: model.category,
+  supportsReasoning: model.supportsReasoning,
   icon: MODEL_ICONS[model.id],
 }));
 

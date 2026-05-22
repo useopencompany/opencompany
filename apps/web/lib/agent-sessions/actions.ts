@@ -280,6 +280,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
       .limit(300),
     db
       .select({
+        messageId: agentSessionUsage.messageId,
         inputTokens: agentSessionUsage.inputTokens,
         inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
         inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
@@ -322,6 +323,18 @@ export async function loadAgentSessionForPage(sessionId: string) {
       totalTokens: 0,
     },
   );
+  const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
+  for (const row of usageRows) {
+    if (!row.messageId) continue;
+    const current = usageByMessageId.get(row.messageId) ?? { outputReasoningTokens: 0 };
+    current.outputReasoningTokens += row.outputReasoningTokens;
+    usageByMessageId.set(row.messageId, current);
+  }
+  const messagesWithUsage = messages.map((message) => ({
+    ...message,
+    outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
+    thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
+  }));
   const toolUsage = summarizeToolUsage(toolUsageRows);
 
   const runnerUrl = getRunnerPublicUrl();
@@ -338,7 +351,12 @@ export async function loadAgentSessionForPage(sessionId: string) {
         )
       : null;
 
-  return { session, messages, events, usage, toolUsage, runnerUrl, token };
+  return { session, messages: messagesWithUsage, events, usage, toolUsage, runnerUrl, token };
+}
+
+function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
+  if (!completedAt || completedAt < startedAt) return undefined;
+  return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
 }
 
 function summarizeToolUsage(

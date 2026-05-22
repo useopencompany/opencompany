@@ -6,6 +6,10 @@ export type SessionMessage = {
   modelMessage?: Record<string, unknown> | null;
   toolName?: string | null;
   toolCallId?: string | null;
+  outputReasoningTokens?: number | undefined;
+  createdAt?: string | undefined;
+  completedAt?: string | null | undefined;
+  thinkingDurationSeconds?: number | undefined;
 };
 
 export type RuntimeEvent = {
@@ -58,6 +62,7 @@ export type RuntimeToolCall = {
 
 export type AssistantTurnPart =
   | { type: "text"; text: string }
+  | { type: "reasoning"; text: string | undefined; durationSeconds: number }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -92,9 +97,22 @@ export function applyRuntimeEventToState(
   }
 
   if (event.type === "session.usage") {
+    const messageId = readString(event.payload.messageId);
+    const outputReasoningTokens = readNumber(event.payload.outputReasoningTokens);
     next = {
       ...next,
       usage: addUsageSummary(next.usage, event.payload),
+      messages: messageId
+        ? next.messages.map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  outputReasoningTokens:
+                    (message.outputReasoningTokens ?? 0) + outputReasoningTokens,
+                }
+              : message,
+          )
+        : next.messages,
     };
   }
 
@@ -138,7 +156,16 @@ export function applyRuntimeEventToState(
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
       next = {
         ...next,
-        messages: [...next.messages, { id: messageId, role, content: "", status: "running" }],
+        messages: [
+          ...next.messages,
+          {
+            id: messageId,
+            role,
+            content: "",
+            status: "running",
+            createdAt: new Date().toISOString(),
+          },
+        ],
       };
     }
   }
@@ -163,6 +190,7 @@ export function applyRuntimeEventToState(
     const content = optionalString(event.payload.content);
     const modelMessage = isRecord(event.payload.modelMessage) ? event.payload.modelMessage : null;
     if (messageId) {
+      const completedAt = new Date().toISOString();
       next = {
         ...next,
         messages: next.messages.map((message) =>
@@ -171,6 +199,11 @@ export function applyRuntimeEventToState(
                 ...message,
                 status: "completed",
                 content: content ?? message.content,
+                completedAt,
+                thinkingDurationSeconds: readThinkingDurationSeconds({
+                  ...message,
+                  completedAt,
+                }),
                 ...(modelMessage ? { modelMessage } : {}),
               }
             : message,
@@ -231,9 +264,23 @@ export function buildAssistantTurnParts(
   });
   const toolCallsById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   const modelParts = readAssistantModelParts(message.modelMessage);
+  const reasoningSummary = readReasoningSummary(events, message.id);
+  const reasoningTokenCount = message.outputReasoningTokens ?? 0;
+  const thinkingDurationSeconds =
+    message.thinkingDurationSeconds ?? readThinkingDurationSeconds(message);
+  const reasoningParts: AssistantTurnPart[] =
+    reasoningSummary || reasoningTokenCount > 0
+      ? [
+          {
+            type: "reasoning",
+            text: reasoningSummary || undefined,
+            durationSeconds: thinkingDurationSeconds,
+          },
+        ]
+      : [];
 
   if (modelParts) {
-    const turnParts: AssistantTurnPart[] = [];
+    const turnParts: AssistantTurnPart[] = [...reasoningParts];
 
     for (const part of modelParts) {
       if (part.type === "text") {
@@ -273,7 +320,11 @@ export function buildAssistantTurnParts(
   }
 
   const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById);
-  if (eventParts.length > 0) return eventParts;
+  if (eventParts.length > 0) return [...reasoningParts, ...eventParts];
+  if (reasoningParts.length > 0 && message.content) {
+    return [...reasoningParts, { type: "text", text: message.content }];
+  }
+  if (reasoningParts.length > 0) return reasoningParts;
   return message.content ? [{ type: "text", text: message.content }] : [];
 }
 
@@ -481,6 +532,29 @@ function readAssistantModelParts(modelMessage: Record<string, unknown> | null | 
   const content = modelMessage.content;
   if (!Array.isArray(content)) return null;
   return content.filter(isRecord);
+}
+
+function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_summary")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .map((event) => readString(event.payload.summary).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readThinkingDurationSeconds(message: SessionMessage) {
+  const startedAt = readTimestamp(message.createdAt);
+  const completedAt = readTimestamp(message.completedAt);
+  if (!startedAt || !completedAt || completedAt < startedAt) return 1;
+  const durationSeconds = Math.round((completedAt - startedAt) / 1000);
+  return Math.max(durationSeconds, 1);
+}
+
+function readTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

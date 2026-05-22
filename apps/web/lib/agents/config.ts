@@ -1,3 +1,4 @@
+import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
 import { asRecord, sanitizeTiptapDoc, type TiptapNode } from "./tiptap";
 import type { AgentConfig, AgentModelId, AgentToolId, TiptapDoc } from "./types";
 
@@ -13,6 +14,8 @@ type AgentModelDefinition = {
   type: "model";
   label: string;
   description: string;
+  category: "Fast" | "Deep";
+  supportsReasoning: boolean;
 };
 
 export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = [
@@ -24,32 +27,14 @@ export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = [
   },
 ];
 
-export const SUPPORTED_AGENT_MODELS: AgentModelDefinition[] = [
-  {
-    id: "openai/gpt-5.4-mini",
-    type: "model",
-    label: "openai/gpt-5.4-mini",
-    description: "Cost-efficient GPT model for agentic production work.",
-  },
-  {
-    id: "openai/gpt-5.4",
-    type: "model",
-    label: "openai/gpt-5.4",
-    description: "Highly capable GPT model for complex reasoning and workflows.",
-  },
-  {
-    id: "anthropic/claude-haiku-4.5",
-    type: "model",
-    label: "anthropic/claude-haiku-4.5",
-    description: "Cost-efficient Claude model for fast agent workloads.",
-  },
-  {
-    id: "anthropic/claude-sonnet-4.6",
-    type: "model",
-    label: "anthropic/claude-sonnet-4.6",
-    description: "Highly capable Claude model for coding and professional work.",
-  },
-];
+export const SUPPORTED_AGENT_MODELS: AgentModelDefinition[] = AGENT_MODEL_CATALOG.map((model) => ({
+  id: model.id,
+  type: model.type,
+  label: model.label,
+  description: model.description,
+  category: model.category,
+  supportsReasoning: model.supportsReasoning,
+}));
 
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));
 const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, model]));

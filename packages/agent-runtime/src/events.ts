@@ -23,6 +23,10 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; content?: string; modelMessage?: Record<string, unknown> };
     }
   | {
+      type: "message.reasoning_summary";
+      payload: { messageId: string; summary: string };
+    }
+  | {
       type: "tool.started";
       payload: { messageId: string; toolCallId: string; name: string; input?: unknown };
     }
