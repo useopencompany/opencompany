@@ -40,11 +40,20 @@ export type SessionToolUsageSummary = {
   }>;
 };
 
+export type SessionCostSummary = {
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  totalCostUsdMicros: number;
+  modelCostUsdMicros: number;
+  toolCostUsdMicros: number;
+};
+
 export type SessionRuntimeState = {
   events: RuntimeEvent[];
   messages: SessionMessage[];
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
+  cost: SessionCostSummary;
   currentStatus: string;
   lastError: string | null;
 };
@@ -102,6 +111,7 @@ export function applyRuntimeEventToState(
     next = {
       ...next,
       usage: addUsageSummary(next.usage, event.payload),
+      cost: addCostSummary(next.cost, event.payload, "model"),
       messages: messageId
         ? next.messages.map((message) =>
             message.id === messageId
@@ -138,6 +148,7 @@ export function applyRuntimeEventToState(
 
       next = {
         ...next,
+        cost: addCostSummary(next.cost, event.payload, "tool"),
         toolUsage: {
           totalCostUsdMicros: next.toolUsage.totalCostUsdMicros + costUsdMicros,
           byProviderOperation: byProviderOperation.sort((left, right) =>
@@ -228,6 +239,16 @@ export function emptyUsageSummary(): SessionUsageSummary {
   };
 }
 
+export function emptyCostSummary(): SessionCostSummary {
+  return {
+    providerCostUsdMicros: 0,
+    platformFeeUsdMicros: 0,
+    totalCostUsdMicros: 0,
+    modelCostUsdMicros: 0,
+    toolCostUsdMicros: 0,
+  };
+}
+
 function addUsageSummary(
   totals: SessionUsageSummary,
   usage: Partial<Record<keyof SessionUsageSummary, unknown>>,
@@ -241,6 +262,28 @@ function addUsageSummary(
     outputTextTokens: totals.outputTextTokens + readNumber(usage.outputTextTokens),
     outputReasoningTokens: totals.outputReasoningTokens + readNumber(usage.outputReasoningTokens),
     totalTokens: totals.totalTokens + readNumber(usage.totalTokens),
+  };
+}
+
+function addCostSummary(
+  totals: SessionCostSummary,
+  payload: Record<string, unknown>,
+  kind: "model" | "tool",
+): SessionCostSummary {
+  const providerCostUsdMicros = readNumber(
+    payload.providerCostUsdMicros ?? (kind === "tool" ? payload.costUsdMicros : 0),
+  );
+  const platformFeeUsdMicros = readNumber(payload.platformFeeUsdMicros);
+  const totalCostUsdMicros = readNumber(
+    payload.chargedCostUsdMicros ?? providerCostUsdMicros + platformFeeUsdMicros,
+  );
+
+  return {
+    providerCostUsdMicros: totals.providerCostUsdMicros + providerCostUsdMicros,
+    platformFeeUsdMicros: totals.platformFeeUsdMicros + platformFeeUsdMicros,
+    totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
+    modelCostUsdMicros: totals.modelCostUsdMicros + (kind === "model" ? totalCostUsdMicros : 0),
+    toolCostUsdMicros: totals.toolCostUsdMicros + (kind === "tool" ? totalCostUsdMicros : 0),
   };
 }
 

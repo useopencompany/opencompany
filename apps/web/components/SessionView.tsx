@@ -28,6 +28,7 @@ import {
   type RuntimeEvent,
   type RuntimeToolCall,
   readString,
+  type SessionCostSummary,
   type SessionMessage,
   type SessionToolUsageSummary,
   type SessionUsageSummary,
@@ -55,6 +56,7 @@ type Props = {
   initialEvents: RuntimeEvent[];
   initialUsage: SessionUsageSummary;
   initialToolUsage: SessionToolUsageSummary;
+  initialCost: SessionCostSummary;
   runnerUrl: string | null;
   streamToken: string | null;
 };
@@ -78,6 +80,7 @@ export default function SessionView({
   initialEvents,
   initialUsage,
   initialToolUsage,
+  initialCost,
   runnerUrl,
   streamToken,
 }: Props) {
@@ -88,6 +91,7 @@ export default function SessionView({
     messages: initialMessages,
     usage: initialUsage,
     toolUsage: initialToolUsage,
+    cost: initialCost,
     currentStatus: session.status,
     lastError: session.lastError,
   });
@@ -304,6 +308,7 @@ export default function SessionView({
           eventCount={inspectorEvents.length}
           usage={runtime.usage}
           toolUsage={runtime.toolUsage}
+          cost={runtime.cost}
           recentEvents={inspectorEvents.slice(-16)}
           canAbort={canAbort}
           isPending={isPending}
@@ -497,6 +502,7 @@ function SessionInspector({
   eventCount,
   usage,
   toolUsage,
+  cost,
   recentEvents,
   canAbort,
   isPending,
@@ -511,6 +517,7 @@ function SessionInspector({
   eventCount: number;
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
+  cost: SessionCostSummary;
   recentEvents: RuntimeEvent[];
   canAbort: boolean;
   isPending: boolean;
@@ -599,6 +606,19 @@ function SessionInspector({
             />
           </div>
           <InspectorField label="Total tokens" value={formatTokenCount(usage.totalTokens)} />
+        </div>
+      </div>
+
+      <div>
+        <InspectorHeader label="Cost" countLabel={formatUsdMicros(cost.totalCostUsdMicros)} />
+        <div className="space-y-4">
+          <InspectorField label="Model charges" value={formatUsdMicros(cost.modelCostUsdMicros)} />
+          <InspectorField label="Tool charges" value={formatUsdMicros(cost.toolCostUsdMicros)} />
+          <InspectorField
+            label="Provider cost"
+            value={formatUsdMicros(cost.providerCostUsdMicros)}
+          />
+          <InspectorField label="Platform fee" value={formatUsdMicros(cost.platformFeeUsdMicros)} />
         </div>
       </div>
 

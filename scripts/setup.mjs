@@ -6,6 +6,7 @@ import { argv, exit, versions } from "node:process";
 const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
+const STRIPE_MODE = argv.includes("--stripe");
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
 
@@ -42,6 +43,12 @@ const RUNNER_ENV_KEYS = [
   "RUNNER_E2B_IDLE_TIMEOUT_MS",
   "RUNNER_INSTANCE_ID",
 ];
+const STRIPE_ENV_KEYS = ["STRIPE_SECRET_KEY"];
+const STRIPE_OPTIONAL_ENV_KEYS = [
+  "STRIPE_LISTEN_DISABLED",
+  "STRIPE_LISTEN_EVENTS",
+  "STRIPE_CLI_PROJECT_NAME",
+];
 const OBSERVABILITY_ENV_KEYS = [
   "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
@@ -66,6 +73,8 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
   "NEXT_PUBLIC_ANALYTICS_DEBUG",
+  ...STRIPE_ENV_KEYS,
+  ...STRIPE_OPTIONAL_ENV_KEYS,
   ...LINEAR_ENV_KEYS,
   ...RUNNER_ENV_KEYS,
   ...OBSERVABILITY_ENV_KEYS,
@@ -132,6 +141,15 @@ function run(cmd, args, opts = {}) {
   }
 }
 
+function runCapture(cmd, args, opts = {}) {
+  return spawnSync(cmd, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 15_000,
+    ...opts,
+  });
+}
+
 function parseEnv(path) {
   if (!existsSync(path)) return {};
   const out = {};
@@ -195,7 +213,121 @@ function inspectState() {
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
     neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
     neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
+    stripeSecretKey: isPlaceholder(env.STRIPE_SECRET_KEY) ? "placeholder" : "set",
+    stripeWebhookSecret: isPlaceholder(env.STRIPE_WEBHOOK_SECRET) ? "placeholder" : "set",
   };
+}
+
+function unquoteStripeConfigValue(raw) {
+  const value = raw.trim();
+  if (
+    (value.startsWith("'") && value.endsWith("'")) ||
+    (value.startsWith('"') && value.endsWith('"'))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function parseStripeConfigList(output) {
+  let activeProjectName = "default";
+  let currentProjectName = "";
+  const projects = new Map();
+
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const section = line.match(/^\[(.+)\]$/);
+    if (section) {
+      currentProjectName = unquoteStripeConfigValue(section[1]);
+      if (!projects.has(currentProjectName)) {
+        projects.set(currentProjectName, {});
+      }
+      continue;
+    }
+
+    const entry = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.*)$/);
+    if (!entry) continue;
+
+    const [, key, rawValue] = entry;
+    const value = unquoteStripeConfigValue(rawValue);
+    if (currentProjectName) {
+      projects.get(currentProjectName)[key] = value;
+    } else if (key === "project-name" && value) {
+      activeProjectName = value;
+    }
+  }
+
+  return { activeProjectName, projects };
+}
+
+function stripeCliProjectName() {
+  return process.env.STRIPE_CLI_PROJECT_NAME?.trim();
+}
+
+function stripeCliArgs(args) {
+  const projectName = stripeCliProjectName();
+  return projectName ? ["--project-name", projectName, ...args] : args;
+}
+
+function readStripeSecretKeyFromCli() {
+  const result = runCapture("stripe", stripeCliArgs(["config", "--list"]));
+  if (result.error?.code === "ENOENT") {
+    return { ok: false, message: "Stripe CLI is not installed or not on PATH." };
+  }
+  if (result.error) {
+    return { ok: false, message: result.error.message };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      message:
+        result.stderr.trim() || "Stripe CLI could not read its config. Run `stripe login` first.",
+    };
+  }
+
+  const config = parseStripeConfigList(result.stdout);
+  const projectName = stripeCliProjectName() || config.activeProjectName;
+  const key = config.projects.get(projectName)?.test_mode_api_key?.trim();
+  if (!key || !/^(sk|rk)_test_/.test(key)) {
+    return {
+      ok: false,
+      message: `Stripe CLI profile "${projectName}" has no test API key. Run \`stripe login\` first.`,
+    };
+  }
+
+  return { ok: true, key, projectName };
+}
+
+function readStripeWebhookSecretFromCli() {
+  const result = runCapture("stripe", stripeCliArgs(["listen", "--print-secret"]), {
+    timeout: 20_000,
+  });
+  if (result.error?.code === "ENOENT") {
+    return { ok: false, message: "Stripe CLI is not installed or not on PATH." };
+  }
+  if (result.error) {
+    return { ok: false, message: result.error.message };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      message:
+        result.stderr.trim() ||
+        "Stripe CLI could not create a webhook signing secret. Run `stripe login` first.",
+    };
+  }
+
+  const secret = result.stdout.trim();
+  if (!/^whsec_/.test(secret)) {
+    return {
+      ok: false,
+      message: "Stripe CLI returned an unexpected webhook signing secret format.",
+    };
+  }
+
+  return { ok: true, secret };
 }
 
 async function ensureEnvFile(state) {
@@ -301,6 +433,46 @@ async function ensureSharedDatabaseUrl(state) {
   ok("DATABASE_URL configured");
 }
 
+async function ensureStripe(state) {
+  step("Stripe local credentials");
+
+  const updates = {};
+  if (state.stripeSecretKey === "set") {
+    ok("STRIPE_SECRET_KEY is set");
+  } else {
+    const result = readStripeSecretKeyFromCli();
+    if (result.ok) {
+      updates.STRIPE_SECRET_KEY = result.key;
+      ok(`Will write STRIPE_SECRET_KEY from Stripe CLI profile "${result.projectName}"`);
+    } else {
+      warn(
+        `STRIPE_SECRET_KEY is missing and could not be read from Stripe CLI: ${result.message} ` +
+          "Credit checkout will fail until it is set.",
+      );
+    }
+  }
+
+  if (state.stripeWebhookSecret === "set") {
+    ok("STRIPE_WEBHOOK_SECRET is set");
+  } else {
+    const result = readStripeWebhookSecretFromCli();
+    if (result.ok) {
+      updates.STRIPE_WEBHOOK_SECRET = result.secret;
+      ok("Will write STRIPE_WEBHOOK_SECRET from Stripe CLI");
+    } else {
+      warn(
+        `STRIPE_WEBHOOK_SECRET is missing and could not be read from Stripe CLI: ${result.message} ` +
+          "Forwarded Stripe webhooks will fail signature verification until it is set.",
+      );
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
+    writeEnvValues(".env.local", updates);
+    ok("Updated .env.local with local Stripe credentials");
+  }
+}
+
 async function ensureBranchDatabase() {
   step("Neon branch database");
   run("bun", ["run", "db:branch:create"]);
@@ -331,6 +503,13 @@ async function main() {
     return;
   }
 
+  if (STRIPE_MODE) {
+    console.log("\n\x1b[1mStripe local credentials\x1b[0m");
+    await ensureEnvFile(inspectState());
+    await ensureStripe(inspectState());
+    return;
+  }
+
   if (CHECK_MODE) {
     const state = inspectState();
     const nextSteps = [];
@@ -352,6 +531,16 @@ async function main() {
       nextSteps.push({
         command: "bun run env:pull",
         reason: `pull shared development env vars from Vercel into .env.local (${missingShared.join(", ")})`,
+      });
+    }
+    if (state.stripeSecretKey === "placeholder" || state.stripeWebhookSecret === "placeholder") {
+      const missingStripe = [
+        ...(state.stripeSecretKey === "placeholder" ? ["STRIPE_SECRET_KEY"] : []),
+        ...(state.stripeWebhookSecret === "placeholder" ? ["STRIPE_WEBHOOK_SECRET"] : []),
+      ];
+      nextSteps.push({
+        command: "bun run setup:stripe",
+        reason: `copy local Stripe CLI credentials into .env.local (${missingStripe.join(", ")})`,
       });
     }
     if (!SHARED_DATABASE_MODE && state.neonProject === "set") {
@@ -385,6 +574,7 @@ async function main() {
     await ensureNeonProject(inspectState());
     await ensureBranchDatabase();
   }
+  await ensureStripe(inspectState());
   await runMigrations();
 
   if (!START_DEV_MODE) {

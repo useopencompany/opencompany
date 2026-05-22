@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { centsToUsdMicros, USD_MICROS_PER_CENT, usdMicrosToCents } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentSessions,
+  agents,
   creditCodeRedemptions,
   creditCodes,
   stripeCheckoutSessions,
@@ -14,9 +17,26 @@ import { normalizeCreditCode } from "@/lib/billing/constants";
 export type BillingLedgerEntry = {
   id: number;
   amountCents: number;
+  amountUsdMicros: number;
   source: string;
+  sessionId: string | null;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
   createdAt: Date;
+  costBasis: Record<string, unknown>;
   metadata: Record<string, unknown>;
+};
+
+export type BillingSessionChargeSummary = {
+  sessionId: string;
+  title: string;
+  agentName: string;
+  totalUsdMicros: number;
+  modelCostUsdMicros: number;
+  toolCostUsdMicros: number;
+  providerCostUsdMicros: number;
+  platformFeeUsdMicros: number;
+  createdAt: Date;
 };
 
 type ExecuteResultRow = Record<string, unknown>;
@@ -30,15 +50,22 @@ function rowsFromExecute<T extends ExecuteResultRow>(result: unknown): T[] {
   return [];
 }
 
+function readTimestamp(value: Date | string) {
+  return value instanceof Date ? value : new Date(value);
+}
+
 export function newStripeCheckoutRecordId() {
   return `chk_${randomUUID()}`;
 }
 
 export async function loadBillingOverview(workspaceId: string) {
   const db = getDb();
-  const [balanceRow, ledgerRows] = await Promise.all([
+  const [balanceRow, ledgerRows, spendRows, sessionChargeRows] = await Promise.all([
     db
-      .select({ balanceCents: workspaceCreditBalances.balanceCents })
+      .select({
+        balanceCents: workspaceCreditBalances.balanceCents,
+        balanceUsdMicros: workspaceCreditBalances.balanceUsdMicros,
+      })
       .from(workspaceCreditBalances)
       .where(eq(workspaceCreditBalances.workspaceId, workspaceId))
       .limit(1),
@@ -46,19 +73,84 @@ export async function loadBillingOverview(workspaceId: string) {
       .select({
         id: workspaceCreditLedger.id,
         amountCents: workspaceCreditLedger.amountCents,
+        amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
         source: workspaceCreditLedger.source,
+        sessionId: workspaceCreditLedger.sessionId,
+        providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
+        platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
         createdAt: workspaceCreditLedger.createdAt,
+        costBasis: workspaceCreditLedger.costBasis,
         metadata: workspaceCreditLedger.metadata,
       })
       .from(workspaceCreditLedger)
       .where(eq(workspaceCreditLedger.workspaceId, workspaceId))
       .orderBy(desc(workspaceCreditLedger.createdAt))
-      .limit(10),
+      .limit(20),
+    db.execute(sql`
+      SELECT
+        COALESCE(SUM(-amount_usd_micros) FILTER (
+          WHERE amount_usd_micros < 0 AND created_at >= now() - interval '7 days'
+        ), 0) AS "spendLast7UsdMicros",
+        COALESCE(SUM(-amount_usd_micros) FILTER (
+          WHERE amount_usd_micros < 0 AND created_at >= now() - interval '30 days'
+        ), 0) AS "spendLast30UsdMicros"
+      FROM workspace_credit_ledger
+      WHERE workspace_id = ${workspaceId}
+    `),
+    db
+      .select({
+        sessionId: workspaceCreditLedger.sessionId,
+        title: agentSessions.title,
+        agentName: agents.name,
+        totalUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}), 0)`,
+        modelCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'model_usage'), 0)`,
+        toolCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'tool_usage'), 0)`,
+        providerCostUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.providerCostUsdMicros}), 0)`,
+        platformFeeUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.platformFeeUsdMicros}), 0)`,
+        createdAt: sql<Date>`MAX(${workspaceCreditLedger.createdAt})`,
+      })
+      .from(workspaceCreditLedger)
+      .innerJoin(agentSessions, eq(workspaceCreditLedger.sessionId, agentSessions.id))
+      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+      .where(
+        and(
+          eq(workspaceCreditLedger.workspaceId, workspaceId),
+          sql`${workspaceCreditLedger.amountUsdMicros} < 0`,
+        ),
+      )
+      .groupBy(workspaceCreditLedger.sessionId, agentSessions.title, agents.name)
+      .orderBy(sql`MAX(${workspaceCreditLedger.createdAt}) DESC`)
+      .limit(5),
   ]);
+  const balanceUsdMicros =
+    balanceRow[0]?.balanceUsdMicros ?? centsToUsdMicros(balanceRow[0]?.balanceCents ?? 0);
+  const spend = rowsFromExecute<{
+    spendLast7UsdMicros: number | string;
+    spendLast30UsdMicros: number | string;
+  }>(spendRows)[0];
 
   return {
-    balanceCents: balanceRow[0]?.balanceCents ?? 0,
-    ledger: ledgerRows satisfies BillingLedgerEntry[],
+    balanceUsdMicros,
+    balanceCents: usdMicrosToCents(balanceUsdMicros),
+    spendLast7UsdMicros: readMicros(spend?.spendLast7UsdMicros),
+    spendLast30UsdMicros: readMicros(spend?.spendLast30UsdMicros),
+    recentSessionCharges: sessionChargeRows
+      .filter((row): row is typeof row & { sessionId: string } => Boolean(row.sessionId))
+      .map((row) => ({
+        sessionId: row.sessionId,
+        title: row.title,
+        agentName: row.agentName,
+        totalUsdMicros: readMicros(row.totalUsdMicros),
+        modelCostUsdMicros: readMicros(row.modelCostUsdMicros),
+        toolCostUsdMicros: readMicros(row.toolCostUsdMicros),
+        providerCostUsdMicros: readMicros(row.providerCostUsdMicros),
+        platformFeeUsdMicros: readMicros(row.platformFeeUsdMicros),
+        createdAt: readTimestamp(row.createdAt),
+      })) satisfies BillingSessionChargeSummary[],
+    ledger: ledgerRows.map((row) => ({
+      ...row,
+      createdAt: readTimestamp(row.createdAt),
+    })) satisfies BillingLedgerEntry[],
   };
 }
 
@@ -149,11 +241,12 @@ export async function fulfillCheckoutSession(
       RETURNING id, workspace_id, user_id, amount_cents, stripe_checkout_session_id
     ),
     balance AS (
-      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, updated_at)
-      SELECT workspace_id, amount_cents, now()
+      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
+      SELECT workspace_id, amount_cents, amount_cents::bigint * ${USD_MICROS_PER_CENT}, now()
       FROM fulfilled_session
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_cents = workspace_credit_balances.balance_cents + excluded.balance_cents,
+          balance_usd_micros = workspace_credit_balances.balance_usd_micros + excluded.balance_usd_micros,
           updated_at = now()
       RETURNING workspace_id, balance_cents
     ),
@@ -162,6 +255,7 @@ export async function fulfillCheckoutSession(
         workspace_id,
         user_id,
         amount_cents,
+        amount_usd_micros,
         source,
         stripe_checkout_session_id,
         metadata
@@ -170,6 +264,7 @@ export async function fulfillCheckoutSession(
         workspace_id,
         user_id,
         amount_cents,
+        amount_cents::bigint * ${USD_MICROS_PER_CENT},
         'stripe_checkout',
         id,
         jsonb_build_object(
@@ -289,11 +384,12 @@ export async function redeemCreditCodeForWorkspace(input: {
       RETURNING id
     ),
     balance AS (
-      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, updated_at)
-      SELECT ${input.workspaceId}, amount_cents, now()
+      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
+      SELECT ${input.workspaceId}, amount_cents, amount_cents::bigint * ${USD_MICROS_PER_CENT}, now()
       FROM redemption
       ON CONFLICT (workspace_id) DO UPDATE
       SET balance_cents = workspace_credit_balances.balance_cents + excluded.balance_cents,
+          balance_usd_micros = workspace_credit_balances.balance_usd_micros + excluded.balance_usd_micros,
           updated_at = now()
       RETURNING workspace_id, balance_cents
     ),
@@ -302,6 +398,7 @@ export async function redeemCreditCodeForWorkspace(input: {
         workspace_id,
         user_id,
         amount_cents,
+        amount_usd_micros,
         source,
         credit_code_redemption_id,
         metadata
@@ -310,6 +407,7 @@ export async function redeemCreditCodeForWorkspace(input: {
         ${input.workspaceId},
         ${input.userId},
         redemption.amount_cents,
+        redemption.amount_cents::bigint * ${USD_MICROS_PER_CENT},
         'credit_code',
         redemption.id,
         jsonb_build_object(
@@ -344,4 +442,13 @@ export async function redeemCreditCodeForWorkspace(input: {
   }
 
   return { ok: true as const, ...rows[0] };
+}
+
+function readMicros(value: number | string | null | undefined) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
 }

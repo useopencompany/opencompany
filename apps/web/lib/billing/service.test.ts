@@ -1,6 +1,10 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fulfillCheckoutSession, redeemCreditCodeForWorkspace } from "./service";
+import {
+  fulfillCheckoutSession,
+  loadBillingOverview,
+  redeemCreditCodeForWorkspace,
+} from "./service";
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
@@ -14,18 +18,74 @@ function mockDb(input: { executeRows?: unknown[]; selectRows?: unknown[][] }) {
     execute: vi.fn().mockResolvedValue({ rows: input.executeRows ?? [] }),
     select: vi.fn(() => {
       const rows = selectRows.shift() ?? [];
-      return {
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({
-            limit: vi.fn().mockResolvedValue(rows),
-          })),
-        })),
+      const chain = {
+        from: vi.fn(() => chain),
+        innerJoin: vi.fn(() => chain),
+        where: vi.fn(() => chain),
+        groupBy: vi.fn(() => chain),
+        orderBy: vi.fn(() => chain),
+        limit: vi.fn().mockResolvedValue(rows),
       };
+      return chain;
     }),
   };
   getDbMock.mockReturnValue(db as never);
   return db;
 }
+
+describe("loadBillingOverview", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("normalizes timestamp strings from aggregate billing queries", async () => {
+    mockDb({
+      executeRows: [{ spendLast7UsdMicros: "1250000", spendLast30UsdMicros: "2500000" }],
+      selectRows: [
+        [{ balanceCents: 1000, balanceUsdMicros: 10_000_000 }],
+        [
+          {
+            id: 1,
+            amountCents: -1,
+            amountUsdMicros: -12_500,
+            source: "model_usage",
+            sessionId: "ses_123",
+            providerCostUsdMicros: 10_000,
+            platformFeeUsdMicros: 2_500,
+            createdAt: "2026-05-22T13:00:00.000Z",
+            costBasis: {},
+            metadata: {},
+          },
+        ],
+        [
+          {
+            sessionId: "ses_123",
+            title: "Billing test",
+            agentName: "Research agent",
+            totalUsdMicros: "12500",
+            modelCostUsdMicros: "10000",
+            toolCostUsdMicros: "2500",
+            providerCostUsdMicros: "10000",
+            platformFeeUsdMicros: "2500",
+            createdAt: "2026-05-22T13:00:00.000Z",
+          },
+        ],
+      ],
+    });
+
+    const result = await loadBillingOverview("wks_123");
+
+    expect(result.recentSessionCharges[0]?.createdAt).toBeInstanceOf(Date);
+    expect(result.recentSessionCharges[0]?.createdAt.toISOString()).toBe(
+      "2026-05-22T13:00:00.000Z",
+    );
+    expect(result.recentSessionCharges[0]?.agentName).toBe("Research agent");
+    expect(result.recentSessionCharges[0]?.modelCostUsdMicros).toBe(10_000);
+    expect(result.recentSessionCharges[0]?.toolCostUsdMicros).toBe(2_500);
+    expect(result.ledger[0]?.createdAt).toBeInstanceOf(Date);
+    expect(result.ledger[0]?.createdAt.toISOString()).toBe("2026-05-22T13:00:00.000Z");
+  });
+});
 
 describe("redeemCreditCodeForWorkspace", () => {
   beforeEach(() => {

@@ -1,9 +1,11 @@
+import { calculateModelUsageCost, recordWorkspaceUsageDebit } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
-import { agentSessionMessages, agentSessions } from "@opencompany/db/schema";
-import { createGateway, generateText } from "ai";
+import { agentSessionMessages, agentSessions, agentSessionUsage } from "@opencompany/db/schema";
+import { createGateway, generateText, type LanguageModelUsage } from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
+import { normalizeModelUsage } from "./usage";
 
 const TITLE_MODEL = "openai/gpt-5.4-mini";
 const MAX_TITLE_LENGTH = 60;
@@ -33,11 +35,12 @@ export async function generateSessionTitleForMessage(input: {
   }
 
   const fallbackTitle = titleFromPrompt(firstUserMessage.content);
-  const title = await generateSessionTitle({
+  const titleResult = await generateSessionTitleWithUsage({
     content: firstUserMessage.content,
     fallbackTitle,
     apiKey: input.env.vercelAiGatewayApiKey,
   });
+  const title = titleResult.title;
 
   const [updated] = await db
     .update(agentSessions)
@@ -46,6 +49,15 @@ export async function generateSessionTitleForMessage(input: {
     .returning({ id: agentSessions.id });
 
   if (!updated) return { ok: false, skipped: "session_not_found" };
+
+  if (titleResult.usage) {
+    await recordTitleUsage({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      usage: titleResult.usage,
+      response: titleResult.response,
+    });
+  }
 
   await appendRuntimeEvent(db, {
     sessionId: input.sessionId,
@@ -58,6 +70,15 @@ export async function generateSessionTitleForMessage(input: {
 }
 
 export async function generateSessionTitle(input: {
+  content: string;
+  fallbackTitle: string;
+  apiKey: string;
+}) {
+  const result = await generateSessionTitleWithUsage(input);
+  return result.title;
+}
+
+async function generateSessionTitleWithUsage(input: {
   content: string;
   fallbackTitle: string;
   apiKey: string;
@@ -75,7 +96,11 @@ export async function generateSessionTitle(input: {
     temperature: 0,
   });
 
-  return sanitizeSessionTitle(result.text, input.fallbackTitle);
+  return {
+    title: sanitizeSessionTitle(result.text, input.fallbackTitle),
+    usage: result.usage,
+    response: result.response,
+  };
 }
 
 export function sanitizeSessionTitle(title: string, fallbackTitle: string) {
@@ -118,4 +143,70 @@ async function loadFirstUserMessage(sessionId: string) {
     .limit(1);
 
   return message ?? null;
+}
+
+async function recordTitleUsage(input: {
+  sessionId: string;
+  messageId: string;
+  usage: LanguageModelUsage;
+  response?: { id?: string; modelId?: string; timestamp?: Date };
+}) {
+  const db = getDb();
+  const usage = normalizeModelUsage(input.usage);
+  const cost = calculateModelUsageCost({
+    modelName: TITLE_MODEL,
+    inputTokens: usage.inputTokens,
+    inputNoCacheTokens: usage.inputNoCacheTokens,
+    inputCacheReadTokens: usage.inputCacheReadTokens,
+    inputCacheWriteTokens: usage.inputCacheWriteTokens,
+    outputTokens: usage.outputTokens,
+  });
+  const responseModelId = input.response?.modelId ?? TITLE_MODEL;
+
+  const [usageRow] = await db
+    .insert(agentSessionUsage)
+    .values({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      runLeaseId: null,
+      stepIndex: 0,
+      modelProvider: "vercel-ai-gateway",
+      modelName: TITLE_MODEL,
+      responseId: input.response?.id ?? null,
+      responseModelId,
+      finishReason: "stop",
+      rawFinishReason: "title_generation",
+      inputTokens: usage.inputTokens,
+      inputNoCacheTokens: usage.inputNoCacheTokens,
+      inputCacheReadTokens: usage.inputCacheReadTokens,
+      inputCacheWriteTokens: usage.inputCacheWriteTokens,
+      outputTokens: usage.outputTokens,
+      outputTextTokens: usage.outputTextTokens,
+      outputReasoningTokens: usage.outputReasoningTokens,
+      totalTokens: usage.totalTokens,
+      rawUsage: usage.rawUsage,
+      providerCreatedAt: input.response?.timestamp ?? null,
+    })
+    .returning({ id: agentSessionUsage.id });
+
+  if (!usageRow || !cost.billable) return;
+
+  await recordWorkspaceUsageDebit({
+    db,
+    sessionId: input.sessionId,
+    messageId: input.messageId,
+    modelUsageId: usageRow.id,
+    source: "model_usage",
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    totalCostUsdMicros: cost.totalCostUsdMicros,
+    costBasis: {
+      ...cost.costBasis,
+      usageType: "title_generation",
+    },
+    metadata: {
+      usageType: "title_generation",
+      responseModelId,
+    },
+  });
 }

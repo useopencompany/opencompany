@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -341,6 +342,7 @@ export const workspaceCreditBalances = pgTable("workspace_credit_balances", {
     .primaryKey()
     .references(() => workspaces.id, { onDelete: "cascade" }),
   balanceCents: integer("balance_cents").notNull().default(0),
+  balanceUsdMicros: bigint("balance_usd_micros", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -423,6 +425,7 @@ export const workspaceCreditLedger = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
     amountCents: integer("amount_cents").notNull(),
+    amountUsdMicros: bigint("amount_usd_micros", { mode: "number" }).notNull().default(0),
     source: text("source").notNull(),
     stripeCheckoutSessionId: text("stripe_checkout_session_id").references(
       () => stripeCheckoutSessions.id,
@@ -432,6 +435,26 @@ export const workspaceCreditLedger = pgTable(
       () => creditCodeRedemptions.id,
       { onDelete: "set null" },
     ),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    modelUsageId: integer("model_usage_id").references(() => agentSessionUsage.id, {
+      onDelete: "set null",
+    }),
+    toolUsageId: integer("tool_usage_id").references(() => agentSessionToolUsage.id, {
+      onDelete: "set null",
+    }),
+    providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    platformFeeUsdMicros: bigint("platform_fee_usd_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    costBasis: jsonb("cost_basis")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     metadata: jsonb("metadata")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -449,6 +472,13 @@ export const workspaceCreditLedger = pgTable(
     creditCodeRedemptionIdx: index("workspace_credit_ledger_credit_code_redemption_idx").on(
       table.creditCodeRedemptionId,
     ),
+    sessionIdx: index("workspace_credit_ledger_session_idx").on(table.sessionId),
+    modelUsageIdx: uniqueIndex("workspace_credit_ledger_model_usage_idx")
+      .on(table.modelUsageId)
+      .where(sql`${table.modelUsageId} IS NOT NULL`),
+    toolUsageIdx: uniqueIndex("workspace_credit_ledger_tool_usage_idx")
+      .on(table.toolUsageId)
+      .where(sql`${table.toolUsageId} IS NOT NULL`),
   }),
 );
 
@@ -653,6 +683,22 @@ export const workspaceCreditLedgerRelations = relations(workspaceCreditLedger, (
   creditCodeRedemption: one(creditCodeRedemptions, {
     fields: [workspaceCreditLedger.creditCodeRedemptionId],
     references: [creditCodeRedemptions.id],
+  }),
+  session: one(agentSessions, {
+    fields: [workspaceCreditLedger.sessionId],
+    references: [agentSessions.id],
+  }),
+  message: one(agentSessionMessages, {
+    fields: [workspaceCreditLedger.messageId],
+    references: [agentSessionMessages.id],
+  }),
+  modelUsage: one(agentSessionUsage, {
+    fields: [workspaceCreditLedger.modelUsageId],
+    references: [agentSessionUsage.id],
+  }),
+  toolUsage: one(agentSessionToolUsage, {
+    fields: [workspaceCreditLedger.toolUsageId],
+    references: [agentSessionToolUsage.id],
   }),
 }));
 

@@ -34,6 +34,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@opencompany/agent-runtime": "workspace:*",
+        "@opencompany/billing": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/observability": "workspace:*",
         "@sentry/bun": "^10.53.1",
@@ -59,6 +60,7 @@
       "dependencies": {
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
+        "@opencompany/billing": "workspace:*",
         "@opencompany/db": "workspace:*",
         "@opencompany/observability": "workspace:*",
         "@radix-ui/react-select": "^2.2.6",
@@ -125,6 +127,19 @@
         "eslint": "9.39.4",
         "eslint-config-next": "16.2.6",
         "typescript": "^6.0.3",
+      },
+    },
+    "packages/billing": {
+      "name": "@opencompany/billing",
+      "version": "0.1.0",
+      "dependencies": {
+        "@opencompany/db": "workspace:*",
+        "drizzle-orm": "^0.45.2",
+      },
+      "devDependencies": {
+        "@types/node": "^25.9.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.7",
       },
     },
     "packages/db": {
@@ -505,6 +520,8 @@
     "@opencompany/agent-runtime": ["@opencompany/agent-runtime@workspace:packages/agent-runtime"],
 
     "@opencompany/analytics": ["@opencompany/analytics@workspace:packages/analytics"],
+
+    "@opencompany/billing": ["@opencompany/billing@workspace:packages/billing"],
 
     "@opencompany/db": ["@opencompany/db@workspace:packages/db"],
 

@@ -62,7 +62,13 @@ export default async function SettingsPage() {
           : null,
       }}
       billing={{
-        balanceCents: billing.balanceCents,
+        balanceUsdMicros: billing.balanceUsdMicros,
+        spendLast7UsdMicros: billing.spendLast7UsdMicros,
+        spendLast30UsdMicros: billing.spendLast30UsdMicros,
+        recentSessionCharges: billing.recentSessionCharges.map((entry) => ({
+          ...entry,
+          createdAt: entry.createdAt.toISOString(),
+        })),
         ledger: billing.ledger.map((entry) => ({
           ...entry,
           createdAt: entry.createdAt.toISOString(),
