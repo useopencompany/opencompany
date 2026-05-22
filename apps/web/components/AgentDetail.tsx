@@ -25,7 +25,15 @@ import {
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { updateAgent } from "@/lib/agents/actions";
 import { extractConfigFromMentions } from "@/lib/agents/agent-file";
@@ -218,15 +226,28 @@ export default function AgentDetail({
               <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-[#ececea]/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <Brain size={12} strokeWidth={1.9} className="shrink-0" />
-                  <span className="truncate">{selectedModel.label}</span>
+                  <span className="truncate">{selectedModel.displayLabel}</span>
                 </span>
               </SelectTrigger>
-              <SelectContent>
-                {AGENT_MODELS.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.label}
-                  </SelectItem>
-                ))}
+              <SelectContent className="min-w-[232px]">
+                {(["Thinking", "Non-thinking"] as const).map((group, index) => {
+                  const models = AGENT_MODELS.filter((model) =>
+                    group === "Thinking" ? model.supportsReasoning : !model.supportsReasoning,
+                  );
+                  if (models.length === 0) return null;
+
+                  return (
+                    <SelectGroup key={group}>
+                      <SelectLabel>{group}</SelectLabel>
+                      {models.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.displayLabel}
+                        </SelectItem>
+                      ))}
+                      {index === 0 ? <SelectSeparator /> : null}
+                    </SelectGroup>
+                  );
+                })}
               </SelectContent>
             </Select>
           </div>

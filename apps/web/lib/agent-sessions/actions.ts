@@ -279,8 +279,11 @@ export async function loadAgentSessionForPage(sessionId: string) {
       .limit(300),
     db
       .select({
+        messageId: agentSessionUsage.messageId,
         inputTokens: agentSessionUsage.inputTokens,
         outputTokens: agentSessionUsage.outputTokens,
+        outputTextTokens: agentSessionUsage.outputTextTokens,
+        outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
         totalTokens: agentSessionUsage.totalTokens,
       })
       .from(agentSessionUsage)
@@ -290,10 +293,30 @@ export async function loadAgentSessionForPage(sessionId: string) {
     (totals, row) => ({
       inputTokens: totals.inputTokens + row.inputTokens,
       outputTokens: totals.outputTokens + row.outputTokens,
+      outputTextTokens: totals.outputTextTokens + row.outputTextTokens,
+      outputReasoningTokens: totals.outputReasoningTokens + row.outputReasoningTokens,
       totalTokens: totals.totalTokens + row.totalTokens,
     }),
-    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    {
+      inputTokens: 0,
+      outputTokens: 0,
+      outputTextTokens: 0,
+      outputReasoningTokens: 0,
+      totalTokens: 0,
+    },
   );
+  const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
+  for (const row of usageRows) {
+    if (!row.messageId) continue;
+    const current = usageByMessageId.get(row.messageId) ?? { outputReasoningTokens: 0 };
+    current.outputReasoningTokens += row.outputReasoningTokens;
+    usageByMessageId.set(row.messageId, current);
+  }
+  const messagesWithUsage = messages.map((message) => ({
+    ...message,
+    outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
+    thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
+  }));
 
   const runnerUrl = getRunnerPublicUrl();
   const streamTokenSecret = getRunnerStreamTokenSecret();
@@ -309,7 +332,12 @@ export async function loadAgentSessionForPage(sessionId: string) {
         )
       : null;
 
-  return { session, messages, events, usage, runnerUrl, token };
+  return { session, messages: messagesWithUsage, events, usage, runnerUrl, token };
+}
+
+function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
+  if (!completedAt || completedAt < startedAt) return undefined;
+  return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
 }
 
 async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {

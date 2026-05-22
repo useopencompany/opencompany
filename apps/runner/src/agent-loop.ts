@@ -300,6 +300,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
 
     let assistantContent = "";
     const assistantReplayParts: AssistantReplayPart[] = [];
+    let reasoningSummary = "";
     let stepIndex = 0;
     const result = streamText({
       model: gateway(runtime.model.name),
@@ -308,6 +309,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       tools: pickRuntimeTools(tools, runtime.tools),
       stopWhen: stepCountIs(8),
       abortSignal: controller.signal,
+      ...(runtime.model.providerOptions ? { providerOptions: runtime.model.providerOptions } : {}),
     });
 
     await timeAsync(trace, "model_stream_total", async () => {
@@ -326,6 +328,10 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         if (part.type === "text-delta") {
           assistantContent += part.text;
           appendAssistantTextPart(assistantReplayParts, part.text);
+        }
+
+        if (runtime.model.exposeReasoningSummary) {
+          reasoningSummary += readReasoningTextDelta(part);
         }
 
         if (part.type === "finish-step") {
@@ -378,6 +384,19 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         modelMessage: toPersistedModelMessage(assistantModelMessage),
       }),
     );
+    const normalizedReasoningSummary = normalizeReasoningSummary(reasoningSummary);
+    if (normalizedReasoningSummary) {
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: assistantMessageId,
+          leaseId,
+          leaseOwner,
+          type: "message.reasoning_summary",
+          payload: { messageId: assistantMessageId, summary: normalizedReasoningSummary },
+        }),
+      );
+    }
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
@@ -1126,6 +1145,21 @@ export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
   if (part.type === "tool-error") {
     throw toStreamError(part.error, `Tool ${part.toolName} failed.`);
   }
+}
+
+export function readReasoningTextDelta(part: TextStreamPart<ToolSet> | Record<string, unknown>) {
+  if (part.type !== "reasoning" && part.type !== "reasoning-delta") return "";
+  if (typeof part.text === "string") return part.text;
+  if ("delta" in part && typeof part.delta === "string") return part.delta;
+  return "";
+}
+
+export function normalizeReasoningSummary(summary: string) {
+  const normalized = summary
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return normalized.length > 0 ? normalized : "";
 }
 
 function toStreamError(error: unknown, fallback: string) {

@@ -12,7 +12,13 @@ function initialState(): SessionRuntimeState {
   return {
     events: [],
     messages: [{ id: "msg_user", role: "user", content: "Hi", status: "completed" }],
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      outputTextTokens: 0,
+      outputReasoningTokens: 0,
+      totalTokens: 0,
+    },
     currentStatus: "running",
     lastError: null,
   };
@@ -37,7 +43,7 @@ describe("applyRuntimeEventToState", () => {
       }),
     );
 
-    expect(state.messages).toContainEqual({
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
       id: "msg_assistant",
       role: "assistant",
       content: "Hello there",
@@ -110,22 +116,44 @@ describe("applyRuntimeEventToState", () => {
     let state = initialState();
     state = applyRuntimeEventToState(
       state,
-      event(1, "session.usage", {
-        inputTokens: 100,
-        outputTokens: 25,
-        totalTokens: 125,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
       }),
     );
     state = applyRuntimeEventToState(
       state,
       event(2, "session.usage", {
+        messageId: "msg_assistant",
+        inputTokens: 100,
+        outputTokens: 25,
+        outputTextTokens: 20,
+        outputReasoningTokens: 5,
+        totalTokens: 125,
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(3, "session.usage", {
+        messageId: "msg_assistant",
         inputTokens: 40,
         outputTokens: 10,
+        outputTextTokens: 10,
+        outputReasoningTokens: 0,
         totalTokens: 50,
       }),
     );
 
-    expect(state.usage).toEqual({ inputTokens: 140, outputTokens: 35, totalTokens: 175 });
+    expect(state.usage).toEqual({
+      inputTokens: 140,
+      outputTokens: 35,
+      outputTextTokens: 30,
+      outputReasoningTokens: 5,
+      totalTokens: 175,
+    });
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
+      outputReasoningTokens: 5,
+    });
   });
 });
 
@@ -293,6 +321,93 @@ describe("buildAssistantTurnParts", () => {
       },
       { type: "text", text: "After" },
     ]);
+  });
+
+  it("prepends persisted reasoning summaries without mixing them into visible text", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: "Final answer",
+        },
+      },
+      [
+        event(1, "message.reasoning_summary", {
+          messageId: "msg_assistant",
+          summary: "Checked the relevant files first.",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      { type: "reasoning", text: "Checked the relevant files first.", durationSeconds: 1 },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("shows a reasoning marker with turn duration when usage has reasoning tokens but no summary", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        outputReasoningTokens: 74,
+        createdAt: "2026-05-22T13:00:00.000Z",
+        completedAt: "2026-05-22T13:00:03.400Z",
+        modelMessage: {
+          role: "assistant",
+          content: "Final answer",
+        },
+      },
+      [],
+    );
+
+    expect(parts).toEqual([
+      { type: "reasoning", durationSeconds: 3, text: undefined },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("adds live thinking duration when completion arrives after reasoning usage", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+
+    const createdAt = state.messages.find((message) => message.id === "msg_assistant")?.createdAt;
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.usage", {
+        messageId: "msg_assistant",
+        inputTokens: 100,
+        outputTokens: 25,
+        outputTextTokens: 20,
+        outputReasoningTokens: 5,
+        totalTokens: 125,
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(3, "message.completed", {
+        messageId: "msg_assistant",
+        content: "Done",
+      }),
+    );
+
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
+      createdAt,
+      completedAt: expect.any(String),
+      thinkingDurationSeconds: expect.any(Number),
+    });
   });
 
   it("falls back to runtime event order while the assistant message is streaming", () => {
