@@ -3,6 +3,7 @@ import {
   applyRuntimeEventToState,
   buildAssistantTurnParts,
   buildRuntimeToolCallsForMessage,
+  emptyUsageSummary,
   isInspectableRuntimeEvent,
   type RuntimeEvent,
   type SessionRuntimeState,
@@ -12,7 +13,7 @@ function initialState(): SessionRuntimeState {
   return {
     events: [],
     messages: [{ id: "msg_user", role: "user", content: "Hi", status: "completed" }],
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    usage: emptyUsageSummary(),
     toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
     currentStatus: "running",
     lastError: null,
@@ -162,7 +163,12 @@ describe("applyRuntimeEventToState", () => {
       state,
       event(1, "session.usage", {
         inputTokens: 100,
+        inputNoCacheTokens: 60,
+        inputCacheReadTokens: 30,
+        inputCacheWriteTokens: 10,
         outputTokens: 25,
+        outputTextTokens: 20,
+        outputReasoningTokens: 5,
         totalTokens: 125,
       }),
     );
@@ -170,12 +176,26 @@ describe("applyRuntimeEventToState", () => {
       state,
       event(2, "session.usage", {
         inputTokens: 40,
+        inputNoCacheTokens: 35,
+        inputCacheReadTokens: 5,
+        inputCacheWriteTokens: 0,
         outputTokens: 10,
+        outputTextTokens: 8,
+        outputReasoningTokens: 2,
         totalTokens: 50,
       }),
     );
 
-    expect(state.usage).toEqual({ inputTokens: 140, outputTokens: 35, totalTokens: 175 });
+    expect(state.usage).toEqual({
+      inputTokens: 140,
+      inputNoCacheTokens: 95,
+      inputCacheReadTokens: 35,
+      inputCacheWriteTokens: 10,
+      outputTokens: 35,
+      outputTextTokens: 28,
+      outputReasoningTokens: 7,
+      totalTokens: 175,
+    });
   });
 
   it("adds live hosted tool usage events to the cost summary", () => {

@@ -17,7 +17,12 @@ export type RuntimeEvent = {
 
 export type SessionUsageSummary = {
   inputTokens: number;
+  inputNoCacheTokens: number;
+  inputCacheReadTokens: number;
+  inputCacheWriteTokens: number;
   outputTokens: number;
+  outputTextTokens: number;
+  outputReasoningTokens: number;
   totalTokens: number;
 };
 
@@ -89,11 +94,7 @@ export function applyRuntimeEventToState(
   if (event.type === "session.usage") {
     next = {
       ...next,
-      usage: {
-        inputTokens: next.usage.inputTokens + readNumber(event.payload.inputTokens),
-        outputTokens: next.usage.outputTokens + readNumber(event.payload.outputTokens),
-        totalTokens: next.usage.totalTokens + readNumber(event.payload.totalTokens),
-      },
+      usage: addUsageSummary(next.usage, event.payload),
     };
   }
 
@@ -179,6 +180,35 @@ export function applyRuntimeEventToState(
   }
 
   return next;
+}
+
+export function emptyUsageSummary(): SessionUsageSummary {
+  return {
+    inputTokens: 0,
+    inputNoCacheTokens: 0,
+    inputCacheReadTokens: 0,
+    inputCacheWriteTokens: 0,
+    outputTokens: 0,
+    outputTextTokens: 0,
+    outputReasoningTokens: 0,
+    totalTokens: 0,
+  };
+}
+
+function addUsageSummary(
+  totals: SessionUsageSummary,
+  usage: Partial<Record<keyof SessionUsageSummary, unknown>>,
+): SessionUsageSummary {
+  return {
+    inputTokens: totals.inputTokens + readNumber(usage.inputTokens),
+    inputNoCacheTokens: totals.inputNoCacheTokens + readNumber(usage.inputNoCacheTokens),
+    inputCacheReadTokens: totals.inputCacheReadTokens + readNumber(usage.inputCacheReadTokens),
+    inputCacheWriteTokens: totals.inputCacheWriteTokens + readNumber(usage.inputCacheWriteTokens),
+    outputTokens: totals.outputTokens + readNumber(usage.outputTokens),
+    outputTextTokens: totals.outputTextTokens + readNumber(usage.outputTextTokens),
+    outputReasoningTokens: totals.outputReasoningTokens + readNumber(usage.outputReasoningTokens),
+    totalTokens: totals.totalTokens + readNumber(usage.totalTokens),
+  };
 }
 
 export function isInspectableRuntimeEvent(event: RuntimeEvent) {

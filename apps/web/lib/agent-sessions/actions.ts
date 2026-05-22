@@ -20,10 +20,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import {
-  dispatchAgentMessageSubmitted,
   dispatchAgentSessionAbortRequested,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
+import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
 import {
   callRunner,
   getRunnerPublicUrl,
@@ -281,7 +281,12 @@ export async function loadAgentSessionForPage(sessionId: string) {
     db
       .select({
         inputTokens: agentSessionUsage.inputTokens,
+        inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
+        inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
+        inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
         outputTokens: agentSessionUsage.outputTokens,
+        outputTextTokens: agentSessionUsage.outputTextTokens,
+        outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
         totalTokens: agentSessionUsage.totalTokens,
       })
       .from(agentSessionUsage)
@@ -298,10 +303,24 @@ export async function loadAgentSessionForPage(sessionId: string) {
   const usage = usageRows.reduce(
     (totals, row) => ({
       inputTokens: totals.inputTokens + row.inputTokens,
+      inputNoCacheTokens: totals.inputNoCacheTokens + row.inputNoCacheTokens,
+      inputCacheReadTokens: totals.inputCacheReadTokens + row.inputCacheReadTokens,
+      inputCacheWriteTokens: totals.inputCacheWriteTokens + row.inputCacheWriteTokens,
       outputTokens: totals.outputTokens + row.outputTokens,
+      outputTextTokens: totals.outputTextTokens + row.outputTextTokens,
+      outputReasoningTokens: totals.outputReasoningTokens + row.outputReasoningTokens,
       totalTokens: totals.totalTokens + row.totalTokens,
     }),
-    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    {
+      inputTokens: 0,
+      inputNoCacheTokens: 0,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 0,
+      outputTextTokens: 0,
+      outputReasoningTokens: 0,
+      totalTokens: 0,
+    },
   );
   const toolUsage = summarizeToolUsage(toolUsageRows);
 
@@ -458,34 +477,6 @@ async function insertUserMessage(sessionId: string, content: string) {
   ]);
 
   return messageId;
-}
-
-async function triggerAgentMessageRun(input: {
-  sessionId: string;
-  messageId: string;
-  workspaceId: string;
-}) {
-  if (!canCallRunnerDirectly()) {
-    await dispatchAgentMessageSubmitted(input);
-    return;
-  }
-
-  try {
-    await callRunner(`/internal/sessions/${input.sessionId}/messages/${input.messageId}/run`, {
-      event: "opencompany.direct_run_message_failed",
-      session_id: input.sessionId,
-      message_id: input.messageId,
-    });
-  } catch {
-    await dispatchAgentMessageSubmitted(input);
-  }
-}
-
-function canCallRunnerDirectly() {
-  return Boolean(
-    (process.env.RUNNER_INTERNAL_URL || process.env.RUNNER_PUBLIC_URL) &&
-      process.env.RUNNER_INTERNAL_TOKEN,
-  );
 }
 
 function titleFromPrompt(content: string) {
