@@ -515,9 +515,30 @@ function SessionInspector({
 
       <div>
         <InspectorHeader label="Token usage" countLabel={formatTokenCount(usage.totalTokens)} />
-        <div className="space-y-4">
-          <InspectorField label="Input tokens" value={formatTokenCount(usage.inputTokens)} />
-          <InspectorField label="Output tokens" value={formatTokenCount(usage.outputTokens)} />
+        <div className="space-y-5">
+          <div className="space-y-4">
+            <InspectorField label="Input total" value={formatTokenCount(usage.inputTokens)} />
+            <InspectorField
+              label="Input uncached"
+              value={formatTokenCount(usage.inputNoCacheTokens)}
+            />
+            <InspectorField
+              label="Input cache read"
+              value={formatTokenCount(usage.inputCacheReadTokens)}
+            />
+            <InspectorField
+              label="Input cache write"
+              value={formatTokenCount(usage.inputCacheWriteTokens)}
+            />
+          </div>
+          <div className="space-y-4 border-t border-[#e5e5e1] pt-4">
+            <InspectorField label="Output total" value={formatTokenCount(usage.outputTokens)} />
+            <InspectorField label="Output text" value={formatTokenCount(usage.outputTextTokens)} />
+            <InspectorField
+              label="Output reasoning"
+              value={formatTokenCount(usage.outputReasoningTokens)}
+            />
+          </div>
           <InspectorField label="Total tokens" value={formatTokenCount(usage.totalTokens)} />
         </div>
       </div>
@@ -602,13 +623,7 @@ function InspectorField({
   );
 }
 
-function InspectorStatusField({
-  status,
-  lastError,
-}: {
-  status: string;
-  lastError: string | null;
-}) {
+function InspectorStatusField({ status, lastError }: { status: string; lastError: string | null }) {
   const displayStatus = lastError || status === "failed" ? "failed" : status;
 
   return (

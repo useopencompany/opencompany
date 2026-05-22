@@ -10,8 +10,8 @@ import {
   type Agent,
   agentSessionEvents,
   agentSessionMessages,
-  agentSessionUsage,
   agentSessions,
+  agentSessionUsage,
   agents,
 } from "@opencompany/db/schema";
 import { and, asc, eq, isNull, or } from "drizzle-orm";
@@ -280,7 +280,12 @@ export async function loadAgentSessionForPage(sessionId: string) {
     db
       .select({
         inputTokens: agentSessionUsage.inputTokens,
+        inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
+        inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
+        inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
         outputTokens: agentSessionUsage.outputTokens,
+        outputTextTokens: agentSessionUsage.outputTextTokens,
+        outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
         totalTokens: agentSessionUsage.totalTokens,
       })
       .from(agentSessionUsage)
@@ -289,10 +294,24 @@ export async function loadAgentSessionForPage(sessionId: string) {
   const usage = usageRows.reduce(
     (totals, row) => ({
       inputTokens: totals.inputTokens + row.inputTokens,
+      inputNoCacheTokens: totals.inputNoCacheTokens + row.inputNoCacheTokens,
+      inputCacheReadTokens: totals.inputCacheReadTokens + row.inputCacheReadTokens,
+      inputCacheWriteTokens: totals.inputCacheWriteTokens + row.inputCacheWriteTokens,
       outputTokens: totals.outputTokens + row.outputTokens,
+      outputTextTokens: totals.outputTextTokens + row.outputTextTokens,
+      outputReasoningTokens: totals.outputReasoningTokens + row.outputReasoningTokens,
       totalTokens: totals.totalTokens + row.totalTokens,
     }),
-    { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    {
+      inputTokens: 0,
+      inputNoCacheTokens: 0,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 0,
+      outputTextTokens: 0,
+      outputReasoningTokens: 0,
+      totalTokens: 0,
+    },
   );
 
   const runnerUrl = getRunnerPublicUrl();
