@@ -326,16 +326,6 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         if (part.type === "text-delta") {
           assistantContent += part.text;
           appendAssistantTextPart(assistantReplayParts, part.text);
-          await requireLeaseWrite(
-            appendRuntimeEventForLease({
-              sessionId: input.sessionId,
-              messageId: assistantMessageId,
-              leaseId,
-              leaseOwner,
-              type: "message.delta",
-              payload: { messageId: assistantMessageId, delta: part.text },
-            }),
-          );
         }
 
         if (part.type === "finish-step") {

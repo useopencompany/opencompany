@@ -3,6 +3,7 @@ import {
   applyRuntimeEventToState,
   buildAssistantTurnParts,
   buildRuntimeToolCallsForMessage,
+  isInspectableRuntimeEvent,
   type RuntimeEvent,
   type SessionRuntimeState,
 } from "./runtime-events";
@@ -30,6 +31,31 @@ describe("applyRuntimeEventToState", () => {
     );
     state = applyRuntimeEventToState(
       state,
+      event(2, "message.completed", {
+        messageId: "msg_assistant",
+        content: "Hello there",
+      }),
+    );
+
+    expect(state.messages).toContainEqual({
+      id: "msg_assistant",
+      role: "assistant",
+      content: "Hello there",
+      status: "completed",
+    });
+  });
+
+  it("can still apply legacy message delta events", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
       event(2, "message.delta", {
         messageId: "msg_assistant",
         delta: "Hello",
@@ -42,19 +68,10 @@ describe("applyRuntimeEventToState", () => {
         delta: " there",
       }),
     );
-    state = applyRuntimeEventToState(
-      state,
-      event(4, "message.completed", {
-        messageId: "msg_assistant",
-      }),
-    );
 
-    expect(state.messages).toContainEqual({
-      id: "msg_assistant",
-      role: "assistant",
-      content: "Hello there",
-      status: "completed",
-    });
+    expect(state.messages.find((message) => message.id === "msg_assistant")?.content).toBe(
+      "Hello there",
+    );
   });
 
   it("does not apply duplicate event ids twice", () => {
@@ -109,6 +126,19 @@ describe("applyRuntimeEventToState", () => {
     );
 
     expect(state.usage).toEqual({ inputTokens: 140, outputTokens: 35, totalTokens: 175 });
+  });
+});
+
+describe("isInspectableRuntimeEvent", () => {
+  it("hides streamed message deltas from inspector activity", () => {
+    expect(
+      isInspectableRuntimeEvent(
+        event(1, "message.delta", { messageId: "msg_assistant", delta: "Hello" }),
+      ),
+    ).toBe(false);
+    expect(isInspectableRuntimeEvent(event(2, "tool.started", { toolCallId: "call_1" }))).toBe(
+      true,
+    );
   });
 });
 

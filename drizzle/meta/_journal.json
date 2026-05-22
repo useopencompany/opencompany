@@ -78,6 +78,13 @@
       "when": 1779446036263,
       "tag": "0010_purple_salo",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779451786719,
+      "tag": "0011_drop_message_delta_events",
+      "breakpoints": true
     }
   ]
 }

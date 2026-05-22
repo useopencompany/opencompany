@@ -55,8 +55,8 @@ The V1 loop is intentionally custom and narrow:
 7. Inngest calls the same runner message endpoint on fallback/retry paths.
 8. The runner claims a local abort controller, creates a running assistant message, resolves the
    `.agent` config, calls Vercel AI Gateway through AI SDK `streamText`, lazily connects/prepares
-   E2B only if a tool executes, writes deltas/events to Postgres, and completes or fails the
-   session.
+   E2B only if a tool executes, writes runtime events to Postgres, and completes or fails the
+   session. Assistant text chunks are accumulated in memory and persisted on message completion.
 
 ## Model and tool loop
 
@@ -104,7 +104,6 @@ Common event types:
 
 - `session.status`
 - `message.created`
-- `message.delta`
 - `message.completed`
 - `tool.started`
 - `tool.delta`
@@ -196,10 +195,11 @@ If web logs show `ECONNREFUSED` from `callRunner()`, the runner is not listening
 `RUNNER_INTERNAL_URL` or `RUNNER_INTERNAL_URL` points at the wrong port. Local development falls back
 to `RUNNER_PUBLIC_URL` when `RUNNER_INTERNAL_URL` is unset.
 
-If the model response only appears after reload, first check that SSE frames are arriving as default
-`message` events and that the web UI is applying `message.delta` events. Browser console or network
-errors on `/sessions/:id/events` usually mean `RUNNER_PUBLIC_URL`, `RUNNER_ALLOWED_ORIGINS`, or
-`RUNNER_STREAM_TOKEN_SECRET` does not match between the web app and runner.
+If the model response never appears after completion, first check that SSE frames are arriving as
+default `message` events and that the web UI is applying `message.completed` events. Browser console
+or network errors on `/sessions/:id/events` usually mean `RUNNER_PUBLIC_URL`,
+`RUNNER_ALLOWED_ORIGINS`, or `RUNNER_STREAM_TOKEN_SECRET` does not match between the web app and
+runner.
 
 If Vercel AI Gateway errors mention missing tool calls for function outputs, check the prompt
 history passed to the model. Tool-result messages need matching assistant tool-call messages in the

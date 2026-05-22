@@ -19,10 +19,6 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; role: "user" | "assistant" | "tool" };
     }
   | {
-      type: "message.delta";
-      payload: { messageId: string; delta: string };
-    }
-  | {
       type: "message.completed";
       payload: { messageId: string; content?: string };
     }
