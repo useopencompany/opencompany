@@ -6,6 +6,7 @@ import { onboardingResponses, workspaces } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
+import { ensureUserOnboardingScaffold } from "@/lib/onboarding/scaffold";
 import {
   type FieldErrors,
   type OnboardingValues,
@@ -81,6 +82,11 @@ export async function completeOnboarding(
         updatedAt: now,
       },
     });
+
+  await ensureUserOnboardingScaffold({
+    userId: user.id,
+    workspaceId: workspace.id,
+  });
 
   await captureServerEvent("onboarding_completed", user.id, {
     user_id: user.id,

@@ -27,6 +27,7 @@ import {
   jsonSchema,
   type LanguageModelResponseMetadata,
   type LanguageModelUsage,
+  type SystemModelMessage,
   stepCountIs,
   streamText,
   type TextStreamPart,
@@ -304,7 +305,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     let stepIndex = 0;
     const result = streamText({
       model: gateway(runtime.model.name),
-      system: runtime.systemPrompt,
+      system: buildCacheableSystemPrompt(runtime.systemPrompt, runtime.model.name),
       messages,
       tools: pickRuntimeTools(tools, runtime.tools),
       stopWhen: stepCountIs(8),
@@ -802,6 +803,21 @@ export async function recordStepUsage(input: {
       payload: usagePayload,
     }),
   );
+}
+
+function buildCacheableSystemPrompt(
+  systemPrompt: string,
+  modelName: string,
+): string | SystemModelMessage {
+  if (!modelName.startsWith("anthropic/")) return systemPrompt;
+
+  return {
+    role: "system",
+    content: systemPrompt,
+    providerOptions: {
+      anthropic: { cacheControl: { type: "ephemeral" } },
+    },
+  };
 }
 
 export async function acquireRunLease(input: {

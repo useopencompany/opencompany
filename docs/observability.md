@@ -13,7 +13,7 @@ Better Stack receives errors through its Sentry-compatible DSN. The repo-owned
 
 ## Configuration
 
-Remote error capture is disabled when `BETTER_STACK_ERRORS_DSN` is unset or
+Remote error capture is disabled when no Better Stack DSN is set or
 `OBSERVABILITY_ENABLED=false`.
 
 ```sh
@@ -25,15 +25,15 @@ OBSERVABILITY_TIMING=0
 BETTER_STACK_ERRORS_DSN=https://...
 ```
 
-For browser-side error capture, also set:
+For the web app, setting only the public DSN is enough when server and browser errors should use
+the same Better Stack application:
 
 ```sh
-NEXT_PUBLIC_OBSERVABILITY_ENABLED=true
-NEXT_PUBLIC_OBSERVABILITY_ENV=production
-NEXT_PUBLIC_OBSERVABILITY_RELEASE=<git-sha>
-NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL=info
 NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN=https://...
 ```
+
+`BETTER_STACK_ERRORS_DSN` remains available as a server-side override when the runner or web server
+should report to a different Better Stack application.
 
 Do not add Better Stack log source tokens or OTLP exporter credentials for this launch slice.
 
