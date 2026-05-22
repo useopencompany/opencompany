@@ -54,6 +54,10 @@ Vercel is the source of truth for shared development env vars. Store the stable 
 
 `DATABASE_URL` can also exist in Vercel Development for the explicit `--shared-db` mode, but normal local setup overwrites `.env.local` with a Neon branch-specific URL.
 
+Runner-only development secrets such as `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, and
+`EXA_API_KEY` are also pulled from Vercel Development into `.env.local` when present. This lets the
+local runner use the same shared provider credentials without copying them by hand.
+
 Then pull them locally:
 
 ```bash

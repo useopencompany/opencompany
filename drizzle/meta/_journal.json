@@ -85,6 +85,13 @@
       "when": 1779451786719,
       "tag": "0011_drop_message_delta_events",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779453786061,
+      "tag": "0012_shiny_beast",
+      "breakpoints": true
     }
   ]
 }

@@ -18,6 +18,8 @@ services:
         sync: false
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
+      - key: EXA_API_KEY
+        sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false
       - key: GITHUB_APP_ID

@@ -13,6 +13,7 @@ function initialState(): SessionRuntimeState {
     events: [],
     messages: [{ id: "msg_user", role: "user", content: "Hi", status: "completed" }],
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
     currentStatus: "running",
     lastError: null,
   };
@@ -43,6 +44,55 @@ describe("applyRuntimeEventToState", () => {
       content: "Hello there",
       status: "completed",
     });
+  });
+
+  it("stores completed assistant model parts so live tool turns render final text", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "tool.completed", {
+        messageId: "msg_assistant",
+        toolCallId: "call_exa",
+        name: "exa_search",
+        output: { results: [] },
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(3, "message.completed", {
+        messageId: "msg_assistant",
+        content: "Here is the answer.",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_exa",
+              toolName: "exa_search",
+              input: { query: "test" },
+            },
+            { type: "text", text: "Here is the answer." },
+          ],
+        },
+      }),
+    );
+
+    const assistant = state.messages.find((message) => message.id === "msg_assistant");
+    expect(assistant?.modelMessage).toMatchObject({ role: "assistant" });
+    expect(buildAssistantTurnParts(assistant!, state.events, state.messages)).toEqual([
+      expect.objectContaining({
+        type: "tool-call",
+        toolCall: expect.objectContaining({ id: "call_exa", status: "completed" }),
+      }),
+      { type: "text", text: "Here is the answer." },
+    ]);
   });
 
   it("can still apply legacy message delta events", () => {
@@ -126,6 +176,33 @@ describe("applyRuntimeEventToState", () => {
     );
 
     expect(state.usage).toEqual({ inputTokens: 140, outputTokens: 35, totalTokens: 175 });
+  });
+
+  it("adds live hosted tool usage events to the cost summary", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "session.tool_usage", {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: 7000,
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.tool_usage", {
+        provider: "exa",
+        operation: "search",
+        costUsdMicros: 3000,
+      }),
+    );
+
+    expect(state.toolUsage).toEqual({
+      totalCostUsdMicros: 10000,
+      byProviderOperation: [
+        { provider: "exa", operation: "search", costUsdMicros: 10000, calls: 2 },
+      ],
+    });
   });
 });
 

@@ -28,6 +28,7 @@ import {
   type RuntimeToolCall,
   readString,
   type SessionMessage,
+  type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 
@@ -52,6 +53,7 @@ type Props = {
   initialMessages: SessionMessage[];
   initialEvents: RuntimeEvent[];
   initialUsage: SessionUsageSummary;
+  initialToolUsage: SessionToolUsageSummary;
   runnerUrl: string | null;
   streamToken: string | null;
 };
@@ -74,6 +76,7 @@ export default function SessionView({
   initialMessages,
   initialEvents,
   initialUsage,
+  initialToolUsage,
   runnerUrl,
   streamToken,
 }: Props) {
@@ -83,6 +86,7 @@ export default function SessionView({
     events: initialEvents,
     messages: initialMessages,
     usage: initialUsage,
+    toolUsage: initialToolUsage,
     currentStatus: session.status,
     lastError: session.lastError,
   });
@@ -298,6 +302,7 @@ export default function SessionView({
           runnerConfigured={Boolean(runnerUrl && streamToken)}
           eventCount={inspectorEvents.length}
           usage={runtime.usage}
+          toolUsage={runtime.toolUsage}
           recentEvents={inspectorEvents.slice(-16)}
           canAbort={canAbort}
           isPending={isPending}
@@ -439,6 +444,7 @@ function SessionInspector({
   runnerConfigured,
   eventCount,
   usage,
+  toolUsage,
   recentEvents,
   canAbort,
   isPending,
@@ -452,6 +458,7 @@ function SessionInspector({
   runnerConfigured: boolean;
   eventCount: number;
   usage: SessionUsageSummary;
+  toolUsage: SessionToolUsageSummary;
   recentEvents: RuntimeEvent[];
   canAbort: boolean;
   isPending: boolean;
@@ -519,6 +526,28 @@ function SessionInspector({
           <InspectorField label="Input tokens" value={formatTokenCount(usage.inputTokens)} />
           <InspectorField label="Output tokens" value={formatTokenCount(usage.outputTokens)} />
           <InspectorField label="Total tokens" value={formatTokenCount(usage.totalTokens)} />
+        </div>
+      </div>
+
+      <div>
+        <InspectorHeader
+          label="Tool cost"
+          countLabel={formatUsdMicros(toolUsage.totalCostUsdMicros)}
+        />
+        <div className="space-y-4">
+          {toolUsage.byProviderOperation.length > 0 ? (
+            toolUsage.byProviderOperation.map((item) => (
+              <InspectorField
+                key={`${item.provider}:${item.operation}`}
+                label={`${formatProviderName(item.provider)} ${item.operation}`}
+                value={`${formatUsdMicros(item.costUsdMicros)} · ${item.calls} call${
+                  item.calls === 1 ? "" : "s"
+                }`}
+              />
+            ))
+          ) : (
+            <InspectorField label="Hosted tools" value="$0.0000" />
+          )}
         </div>
       </div>
 
@@ -602,13 +631,7 @@ function InspectorField({
   );
 }
 
-function InspectorStatusField({
-  status,
-  lastError,
-}: {
-  status: string;
-  lastError: string | null;
-}) {
+function InspectorStatusField({ status, lastError }: { status: string; lastError: string | null }) {
   const displayStatus = lastError || status === "failed" ? "failed" : status;
 
   return (
@@ -675,6 +698,15 @@ function formatTokenCount(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
+function formatUsdMicros(value: number) {
+  return `$${(value / 1_000_000).toFixed(4)}`;
+}
+
+function formatProviderName(value: string) {
+  if (!value) return "Provider";
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
 function formatRuntimeDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
@@ -690,6 +722,11 @@ function formatRuntimeDate(value: string) {
 function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
+  if (event.type === "session.tool_usage") {
+    return `${readString(event.payload.provider)} ${formatUsdMicros(
+      Number(event.payload.costUsdMicros ?? 0),
+    )}`;
+  }
   if (event.type === "file.changed") return readString(event.payload.path);
   if (event.type === "command.output") return readString(event.payload.delta).trim();
   return "";

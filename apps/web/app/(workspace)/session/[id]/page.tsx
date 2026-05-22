@@ -31,6 +31,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
         payload: event.payload,
       }))}
       initialUsage={data.usage}
+      initialToolUsage={data.toolUsage}
       runnerUrl={data.runnerUrl}
       streamToken={data.token}
     />

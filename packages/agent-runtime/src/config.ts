@@ -1,5 +1,5 @@
 import type { AgentConfig } from "@opencompany/db/schema";
-import { CORE_TOOL_DEFINITIONS, type RuntimeToolName } from "./tools";
+import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 
 export type ResolvedAgentRuntimeConfig = {
   systemPrompt: string;
@@ -30,6 +30,6 @@ export function resolveAgentRuntimeConfig(input: {
       provider: "vercel-ai-gateway",
       name: input.agent.model.name,
     },
-    tools: CORE_TOOL_DEFINITIONS.map((tool) => tool.name),
+    tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
   };
 }
