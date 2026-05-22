@@ -18,21 +18,33 @@ describe("applyRuntimeEventToState", () => {
   it("applies assistant message lifecycle events", () => {
     let state = initialState();
 
-    state = applyRuntimeEventToState(state, event(1, "message.created", {
-      messageId: "msg_assistant",
-      role: "assistant",
-    }));
-    state = applyRuntimeEventToState(state, event(2, "message.delta", {
-      messageId: "msg_assistant",
-      delta: "Hello",
-    }));
-    state = applyRuntimeEventToState(state, event(3, "message.delta", {
-      messageId: "msg_assistant",
-      delta: " there",
-    }));
-    state = applyRuntimeEventToState(state, event(4, "message.completed", {
-      messageId: "msg_assistant",
-    }));
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "message.delta", {
+        messageId: "msg_assistant",
+        delta: "Hello",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(3, "message.delta", {
+        messageId: "msg_assistant",
+        delta: " there",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(4, "message.completed", {
+        messageId: "msg_assistant",
+      }),
+    );
 
     expect(state.messages).toContainEqual({
       id: "msg_assistant",
@@ -44,10 +56,13 @@ describe("applyRuntimeEventToState", () => {
 
   it("does not apply duplicate event ids twice", () => {
     let state = initialState();
-    state = applyRuntimeEventToState(state, event(1, "message.created", {
-      messageId: "msg_assistant",
-      role: "assistant",
-    }));
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
 
     const delta = event(2, "message.delta", {
       messageId: "msg_assistant",

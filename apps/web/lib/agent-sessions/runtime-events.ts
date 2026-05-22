@@ -68,7 +68,9 @@ export function applyRuntimeEventToState(
       next = {
         ...next,
         messages: next.messages.map((message) =>
-          message.id === messageId ? { ...message, content: `${message.content}${delta}` } : message,
+          message.id === messageId
+            ? { ...message, content: `${message.content}${delta}` }
+            : message,
         ),
       };
     }

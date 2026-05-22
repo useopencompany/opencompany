@@ -80,7 +80,10 @@ export function createServer(env: RunnerEnv) {
     }
 
     if (payload.sessionId !== id) {
-      request.log.warn({ sessionId: id }, "Rejected session event stream token for another session");
+      request.log.warn(
+        { sessionId: id },
+        "Rejected session event stream token for another session",
+      );
       reply.status(403).send({ error: "Token does not match session." });
       return;
     }
@@ -91,7 +94,10 @@ export function createServer(env: RunnerEnv) {
       .where(eq(agentSessions.id, id))
       .limit(1);
     if (!session || session.userId !== payload.userId) {
-      request.log.warn({ sessionId: id }, "Rejected session event stream for missing session or user");
+      request.log.warn(
+        { sessionId: id },
+        "Rejected session event stream for missing session or user",
+      );
       reply.status(404).send({ error: "Session not found." });
       return;
     }
