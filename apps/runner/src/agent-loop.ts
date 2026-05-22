@@ -14,7 +14,13 @@ import {
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
-import { captureException, createLogger } from "@opencompany/observability";
+import {
+  captureException,
+  createLogger,
+  endTimingTrace,
+  startTimingTrace,
+  timeAsync,
+} from "@opencompany/observability";
 import {
   createGateway,
   type FinishReason,
@@ -127,25 +133,48 @@ export async function abortSession(sessionId: string) {
 
 export async function runMessage(input: { sessionId: string; messageId: string; env: RunnerEnv }) {
   const db = getDb();
+  const trace = startTimingTrace("runner.run_message", {
+    session_id: input.sessionId,
+    message_id: input.messageId,
+    runner_instance_id: input.env.instanceId,
+  });
   const controller = new AbortController();
   const leaseId = newRunLeaseId();
   const leaseOwner = input.env.instanceId;
   const runLease = { sessionId: input.sessionId, leaseId, leaseOwner };
   const assistantMessageId = newAgentSessionMessageId();
   let sandbox: SandboxHandle | null = null;
+  let sandboxPromise: Promise<SandboxHandle> | null = null;
   let leaseAcquired = false;
   let lastHeartbeatAt = 0;
   let modelProvider: string | undefined;
   let modelName: string | undefined;
+  let sandboxId: string | undefined;
+  let outcome = "unknown";
 
   try {
-    const row = await loadSession(input.sessionId);
-    if (row.session.archivedAt) return;
+    const row = await timeAsync(trace, "load_session", () => loadSession(input.sessionId));
+    if (row.session.archivedAt) {
+      outcome = "skipped_archived";
+      return;
+    }
 
-    const userMessage = await loadUserMessage(input.sessionId, input.messageId);
-    if (!userMessage) return;
+    const userMessage = await timeAsync(trace, "load_user_message", () =>
+      loadUserMessage(input.sessionId, input.messageId),
+    );
+    if (!userMessage) {
+      outcome = "skipped_missing_user_message";
+      return;
+    }
 
-    if (await loadAssistantResponseForMessage(input.sessionId, input.messageId)) return;
+    if (
+      await timeAsync(trace, "load_existing_assistant_response", () =>
+        loadAssistantResponseForMessage(input.sessionId, input.messageId),
+      )
+    ) {
+      outcome = "skipped_duplicate";
+      return;
+    }
 
     const runtime = resolveAgentRuntimeConfig({
       agent: row.agent.config,
@@ -155,15 +184,20 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
 
-    const lease = await acquireRunLease({
-      sessionId: input.sessionId,
-      messageId: input.messageId,
-      leaseId,
-      leaseOwner,
-      modelProvider: runtime.model.provider,
-      modelName: runtime.model.name,
-    });
-    if (!lease) return;
+    const lease = await timeAsync(trace, "acquire_run_lease", () =>
+      acquireRunLease({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        leaseId,
+        leaseOwner,
+        modelProvider: runtime.model.provider,
+        modelName: runtime.model.name,
+      }),
+    );
+    if (!lease) {
+      outcome = "skipped_lease_busy";
+      return;
+    }
 
     leaseAcquired = true;
     lastHeartbeatAt = Date.now();
@@ -179,54 +213,86 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       await checkRunControl({ ...runLease, controller });
     };
 
-    await checkAbort();
+    await timeAsync(trace, "initial_run_control_check", checkAbort);
 
     await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: null,
-        leaseId,
-        leaseOwner,
-        type: "session.status",
-        payload: { status: "running", message: "Agent is running" },
-      }),
+      timeAsync(trace, "append_running_status", () =>
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId,
+          leaseOwner,
+          type: "session.status",
+          payload: { status: "running", message: "Agent is running" },
+        }),
+      ),
     );
-
-    sandbox = await ensureSandbox(row, input.env);
-    await checkAbort();
-    if (!(await updateSandboxForLease(input.sessionId, leaseId, leaseOwner, sandbox.sandboxId))) {
-      await killSandbox(sandbox.sandboxId);
-      return;
-    }
 
     const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
 
-    const assistantCreated = await createAssistantMessageForLease({
-      id: assistantMessageId,
-      sessionId: input.sessionId,
-      responseToMessageId: input.messageId,
-      leaseId,
-      leaseOwner,
-    });
+    const assistantCreated = await timeAsync(trace, "create_assistant_message", () =>
+      createAssistantMessageForLease({
+        id: assistantMessageId,
+        sessionId: input.sessionId,
+        responseToMessageId: input.messageId,
+        leaseId,
+        leaseOwner,
+      }),
+    );
     if (!assistantCreated) {
+      outcome = "skipped_assistant_exists";
       await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
       return;
     }
 
-    const storedMessages = await db
-      .select()
-      .from(agentSessionMessages)
-      .where(eq(agentSessionMessages.sessionId, input.sessionId))
-      .orderBy(asc(agentSessionMessages.createdAt));
+    const storedMessages = await timeAsync(trace, "load_model_messages", () =>
+      db
+        .select()
+        .from(agentSessionMessages)
+        .where(eq(agentSessionMessages.sessionId, input.sessionId))
+        .orderBy(asc(agentSessionMessages.createdAt)),
+    );
     const messages = buildModelMessages(
       storedMessages.filter((message) => message.id !== assistantMessageId),
     );
+    const getSandbox = async () => {
+      if (sandbox) return sandbox;
+      if (sandboxPromise) return sandboxPromise;
+
+      sandboxPromise = (async () => {
+        const hydratedSandbox = await timeAsync(
+          trace,
+          "ensure_sandbox",
+          () => ensureSandbox(row, input.env),
+          {
+            existing_sandbox: Boolean(row.session.e2bSandboxId),
+          },
+        );
+        await checkAbort();
+        const updated = await timeAsync(trace, "update_sandbox_for_lease", () =>
+          updateSandboxForLease(input.sessionId, leaseId, leaseOwner, hydratedSandbox.sandboxId),
+        );
+        if (!updated) {
+          await killSandbox(hydratedSandbox.sandboxId);
+          throw new StaleRunLeaseError();
+        }
+
+        sandbox = hydratedSandbox;
+        sandboxId = hydratedSandbox.sandboxId;
+        return hydratedSandbox;
+      })().catch((error) => {
+        sandboxPromise = null;
+        throw error;
+      });
+
+      return sandboxPromise;
+    };
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
       runLeaseId: leaseId,
       runLeaseOwner: leaseOwner,
-      sandbox,
+      getSandbox,
       workdir: row.session.workdir,
       signal: controller.signal,
       checkAbort,
@@ -244,52 +310,63 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       abortSignal: controller.signal,
     });
 
-    for await (const part of result.fullStream) {
-      await checkAbort();
-      throwIfAborted(controller.signal);
-      throwIfStreamErrorPart(part);
+    await timeAsync(trace, "model_stream_total", async () => {
+      const iterator = result.fullStream[Symbol.asyncIterator]();
+      let next = await timeAsync(trace, "model_first_stream_part", () => iterator.next(), {
+        model_provider: runtime.model.provider,
+        model_name: runtime.model.name,
+      });
 
-      if (part.type === "text-delta") {
-        assistantContent += part.text;
-        appendAssistantTextPart(assistantReplayParts, part.text);
-        await requireLeaseWrite(
-          appendRuntimeEventForLease({
+      while (!next.done) {
+        const part = next.value;
+        await checkAbort();
+        throwIfAborted(controller.signal);
+        throwIfStreamErrorPart(part);
+
+        if (part.type === "text-delta") {
+          assistantContent += part.text;
+          appendAssistantTextPart(assistantReplayParts, part.text);
+          await requireLeaseWrite(
+            appendRuntimeEventForLease({
+              sessionId: input.sessionId,
+              messageId: assistantMessageId,
+              leaseId,
+              leaseOwner,
+              type: "message.delta",
+              payload: { messageId: assistantMessageId, delta: part.text },
+            }),
+          );
+        }
+
+        if (part.type === "finish-step") {
+          stepIndex += 1;
+          await recordStepUsage({
             sessionId: input.sessionId,
-            messageId: assistantMessageId,
-            leaseId,
-            leaseOwner,
-            type: "message.delta",
-            payload: { messageId: assistantMessageId, delta: part.text },
-          }),
-        );
-      }
+            assistantMessageId,
+            runLeaseId: leaseId,
+            runLeaseOwner: leaseOwner,
+            stepIndex,
+            modelProvider: runtime.model.provider,
+            modelName: runtime.model.name,
+            response: part.response,
+            usage: part.usage,
+            finishReason: part.finishReason,
+            rawFinishReason: part.rawFinishReason,
+          });
+        }
 
-      if (part.type === "finish-step") {
-        stepIndex += 1;
-        await recordStepUsage({
-          sessionId: input.sessionId,
-          assistantMessageId,
-          runLeaseId: leaseId,
-          runLeaseOwner: leaseOwner,
-          stepIndex,
-          modelProvider: runtime.model.provider,
-          modelName: runtime.model.name,
-          response: part.response,
-          usage: part.usage,
-          finishReason: part.finishReason,
-          rawFinishReason: part.rawFinishReason,
-        });
-      }
+        if (part.type === "tool-call") {
+          assistantReplayParts.push({
+            type: "tool-call",
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+          });
+        }
 
-      if (part.type === "tool-call") {
-        assistantReplayParts.push({
-          type: "tool-call",
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          input: part.input,
-        });
+        next = await iterator.next();
       }
-    }
+    });
 
     await checkAbort();
     if (!assistantContent && assistantReplayParts.length === 0) {
@@ -332,12 +409,15 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       }),
     );
     await requireLeaseWrite(releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed"));
+    outcome = "completed";
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
+      outcome = "stale_lease";
       return;
     }
 
     if (controller.signal.aborted || error instanceof RunAbortError) {
+      outcome = "aborted";
       if (leaseAcquired) {
         await failRunLease(input.sessionId, leaseId, leaseOwner, "aborting", "Run aborted.");
       }
@@ -350,7 +430,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandbox?.sandboxId,
+      sandbox_id: sandboxId,
       model_provider: modelProvider,
       model_name: modelName,
     });
@@ -374,13 +454,21 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         )
       : false;
     if (!updated && (await isSessionArchived(input.sessionId))) return;
+    outcome = "failed";
     throw error;
   } finally {
     if (activeRuns.get(input.sessionId)?.controller === controller) {
       activeRuns.delete(input.sessionId);
     }
-    if (sandbox) {
-      await parkSandboxWhenIdle(sandbox, input.env);
+    endTimingTrace(trace, {
+      outcome,
+      model_provider: modelProvider,
+      model_name: modelName,
+      sandbox_hydrated: Boolean(sandbox),
+    });
+    const sandboxToPark = sandbox;
+    if (sandboxToPark) {
+      await timeAsync(trace, "park_sandbox", () => parkSandboxWhenIdle(sandboxToPark, input.env));
     }
   }
 }
@@ -447,7 +535,7 @@ function createToolSet(input: {
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
-  sandbox: SandboxHandle;
+  getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
@@ -502,7 +590,7 @@ function createToolSet(input: {
           toolCallId: options.toolCallId,
           name: definition.name,
           args: toolInput,
-          sandbox: input.sandbox,
+          getSandbox: input.getSandbox,
           workdir: input.workdir,
           signal: input.signal,
           checkAbort: input.checkAbort,
@@ -529,18 +617,21 @@ async function executeRuntimeTool(input: {
   toolCallId: string;
   name: string;
   args: unknown;
-  sandbox: SandboxHandle;
+  getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
 }) {
   let output: unknown;
+  let sandbox: SandboxHandle | null = null;
   try {
+    const activeSandbox = await input.getSandbox();
+    sandbox = activeSandbox;
     output = await withRunControlChecks(input.checkAbort, async () => {
       throwIfAborted(input.signal);
 
       return runSandboxTool({
-        sandbox: input.sandbox,
+        sandbox: activeSandbox,
         workdir: input.workdir,
         name: input.name,
         args: input.args,
@@ -571,7 +662,7 @@ async function executeRuntimeTool(input: {
       message_id: input.assistantMessageId,
       tool_call_id: input.toolCallId,
       tool_name: input.name,
-      sandbox_id: input.sandbox.sandboxId,
+      sandbox_id: sandbox?.sandboxId,
     });
     throw error;
   }

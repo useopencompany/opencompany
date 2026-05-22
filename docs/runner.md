@@ -49,11 +49,14 @@ The V1 loop is intentionally custom and narrow:
 5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
    The token is a short-lived HMAC token minted by the web app.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
-   emits `agent.message_submitted`.
-7. Inngest calls `POST /internal/sessions/:id/messages/:messageId/run`.
+   directly nudges `POST /internal/sessions/:id/messages/:messageId/run` when runner env is
+   configured. If that direct nudge is unavailable or fails, it falls back to emitting
+   `agent.message_submitted` for the Inngest path.
+7. Inngest calls the same runner message endpoint on fallback/retry paths.
 8. The runner claims a local abort controller, creates a running assistant message, resolves the
-   `.agent` config, calls Vercel AI Gateway through AI SDK `streamText`, executes tools in E2B,
-   writes deltas/events to Postgres, and completes or fails the session.
+   `.agent` config, calls Vercel AI Gateway through AI SDK `streamText`, lazily connects/prepares
+   E2B only if a tool executes, writes deltas/events to Postgres, and completes or fails the
+   session.
 
 ## Model and tool loop
 
@@ -70,6 +73,8 @@ Important details:
 - Tool input streaming emits `tool.delta`; complete validated input emits `tool.started`.
 - Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`, and
   `tool.completed`.
+- Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
+  first tool execution, so text-only fast-model turns avoid that fixed pre-token latency.
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are
   replayed into later model requests. This avoids replaying orphan tool results without their
   matching assistant tool calls.

@@ -75,7 +75,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
   const messageId = await insertUserMessage(sessionId, trimmed);
 
   after(async () => {
-    await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
+    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
 
   revalidatePath("/", "layout");
@@ -111,7 +111,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   const messageId = await insertUserMessage(sessionId, trimmed);
 
   after(async () => {
-    await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
+    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
 
   revalidatePath(`/session/${sessionId}`);
@@ -419,6 +419,34 @@ async function insertUserMessage(sessionId: string, content: string) {
   ]);
 
   return messageId;
+}
+
+async function triggerAgentMessageRun(input: {
+  sessionId: string;
+  messageId: string;
+  workspaceId: string;
+}) {
+  if (!canCallRunnerDirectly()) {
+    await dispatchAgentMessageSubmitted(input);
+    return;
+  }
+
+  try {
+    await callRunner(`/internal/sessions/${input.sessionId}/messages/${input.messageId}/run`, {
+      event: "opencompany.direct_run_message_failed",
+      session_id: input.sessionId,
+      message_id: input.messageId,
+    });
+  } catch {
+    await dispatchAgentMessageSubmitted(input);
+  }
+}
+
+function canCallRunnerDirectly() {
+  return Boolean(
+    (process.env.RUNNER_INTERNAL_URL || process.env.RUNNER_PUBLIC_URL) &&
+      process.env.RUNNER_INTERNAL_TOKEN,
+  );
 }
 
 function titleFromPrompt(content: string) {
