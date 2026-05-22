@@ -15,6 +15,7 @@ export default authkitProxy({
       "/auth/sign-in",
       "/auth/sign-up",
       "/api/inngest",
+      "/api/stripe/webhook",
       "/docs",
       "/docs/:path*",
     ],

@@ -11,8 +11,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo dev --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner",
-    "dev:stream": "turbo dev --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner",
+    "dev": "turbo dev --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
+    "dev:stream": "turbo dev --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
     "dev:web": "turbo dev --ui=tui --filter=@opencompany/web",
     "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",
     "dev:kill-port": "node scripts/kill-port.mjs",
