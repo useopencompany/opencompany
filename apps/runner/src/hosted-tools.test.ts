@@ -154,6 +154,87 @@ describe("executeHostedTool", () => {
     ).rejects.toThrow("unexpected response shape");
   });
 
+  it("fetches a web page and returns readable text with absolute links", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(
+          `
+            <!doctype html>
+            <html>
+              <head>
+                <title>Example &amp; Docs</title>
+                <meta name="description" content="A useful page">
+                <style>.hidden { display: none; }</style>
+              </head>
+              <body>
+                <nav><a href="/ignored">Navigation</a></nav>
+                <main>
+                  <h1>Example Docs</h1>
+                  <p>This is the readable body.</p>
+                  <script>window.nope = true;</script>
+                  <a href="/next?x=1#section">Next page</a>
+                  <a href="mailto:test@example.com">Email</a>
+                </main>
+              </body>
+            </html>
+          `,
+          {
+            status: 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "web_fetch",
+      args: { url: "https://example.com/docs/start", maxCharacters: 5000 },
+      env: env(),
+      enabledTools: ["tool_help", "web_fetch"],
+      signal: new AbortController().signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.com/docs/start",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: expect.stringContaining("text/html"),
+        }),
+        redirect: "follow",
+      }),
+    );
+    expect(result.output).toMatchObject({
+      url: "https://example.com/docs/start",
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      title: "Example & Docs",
+      description: "A useful page",
+      text: expect.stringContaining("Example Docs\n\nThis is the readable body."),
+      truncated: false,
+      links: [
+        { text: "Navigation", url: "https://example.com/ignored" },
+        { text: "Next page", url: "https://example.com/next?x=1" },
+      ],
+    });
+    expect(result.usage).toMatchObject({
+      provider: "direct_http",
+      operation: "fetch",
+      costUsdMicros: 0,
+    });
+  });
+
+  it("validates web_fetch URLs", async () => {
+    await expect(
+      executeHostedTool({
+        name: "web_fetch",
+        args: { url: "file:///etc/passwd" },
+        env: env(),
+        enabledTools: ["tool_help", "web_fetch"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("only supports http and https");
+  });
+
   it("returns help only for enabled tools", async () => {
     await expect(
       executeHostedTool({

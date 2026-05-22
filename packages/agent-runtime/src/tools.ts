@@ -14,6 +14,7 @@ export type RuntimeToolName =
   | "list_files"
   | "git_diff"
   | "exa_search"
+  | "web_fetch"
   | "tool_help";
 
 export type RuntimeToolDefinition = {
@@ -162,6 +163,42 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Set fresh=true only for time-sensitive facts; it forces live crawling and can be slower.",
       "For company and people categories, avoid excludeDomains and published date filters because Exa does not support those combinations.",
       'Prefer includeDomains for official-source lookups, for example includeDomains: ["sec.gov", "company.com"].',
+      "After finding a promising result, use web_fetch on the result URL to read the actual page text and links.",
+    ].join("\n"),
+  },
+  {
+    name: "web_fetch",
+    kind: "hosted",
+    configToolId: "exa",
+    description:
+      "Fetch a single web page URL and return compact readable text plus absolute links found on the page.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "HTTP or HTTPS page URL to fetch.",
+        },
+        maxCharacters: {
+          type: "number",
+          description:
+            "Maximum readable text characters to return. Defaults to 12000. Maximum 20000.",
+          default: 12000,
+        },
+        includeLinks: {
+          type: "boolean",
+          description: "Whether to include normalized links from the page. Defaults to true.",
+          default: true,
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use web_fetch after exa_search finds a relevant URL, or when the user gives you a specific page to inspect.",
+      "It does not run a browser. It performs a direct HTTP fetch, extracts readable text from HTML, and returns absolute links so you can fetch a follow-up page.",
+      "Use it for articles, docs pages, company pages, and other mostly-readable pages. It may not work for JavaScript-rendered apps, PDFs, login-gated pages, or pages that block automated HTTP clients.",
+      "Keep maxCharacters modest unless you need more context. The default is designed to avoid flooding the model context.",
     ].join("\n"),
   },
   {
