@@ -3,7 +3,9 @@ import { isObservabilityEnabled, setExceptionReporter } from "@opencompany/obser
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  const dsn = process.env.BETTER_STACK_ERRORS_DSN?.trim();
+  const dsn =
+    process.env.BETTER_STACK_ERRORS_DSN?.trim() ||
+    process.env.NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN?.trim();
   if (!isObservabilityEnabled() || !dsn) return;
 
   const Sentry = await import("@sentry/nextjs");
