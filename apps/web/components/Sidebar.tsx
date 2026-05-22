@@ -2,6 +2,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import {
+  Archive,
   Bot,
   Brain,
   ChevronRight,
@@ -15,15 +16,28 @@ import {
   MoreHorizontal,
   PanelLeft,
   ScrollText,
+  Search,
   Settings,
+  X,
   // Sparkles,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
+import { archiveAgentSession } from "@/lib/agent-sessions/actions";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
+
+export type SidebarSession = {
+  id: string;
+  title: string;
+  status: string;
+  modelName: string;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 function getStoredSidebarCollapsed() {
   if (typeof window === "undefined") return false;
@@ -88,40 +102,142 @@ function NavItem({
   );
 }
 
-function HistoryItem({
-  href,
-  label,
-  dot,
-  diff,
-  active,
-}: {
-  href: string;
-  label: string;
-  dot?: boolean;
-  diff?: { added: number; removed: number };
-  active?: boolean;
-}) {
+function SessionStatusDot({ status, lastError }: { status: string; lastError: string | null }) {
+  const tone =
+    lastError || status === "failed"
+      ? "bg-[#dc2626] shadow-[0_0_0_2px_rgba(220,38,38,0.1)]"
+      : status === "running" || status === "provisioning"
+        ? "bg-[#16a34a] shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
+        : status === "aborting" || status === "archiving"
+          ? "bg-[#d97706] shadow-[0_0_0_2px_rgba(217,119,6,0.11)]"
+          : "bg-ink-subtle/45";
+
+  return <span className={`ml-[2px] mr-[2px] inline-block h-1.5 w-1.5 rounded-full ${tone}`} />;
+}
+
+function statusLabel(status: string) {
+  if (status === "provisioning") return "Starting";
+  if (status === "ready") return "Ready";
+  if (status === "running") return "Running";
+  if (status === "completed") return "Done";
+  if (status === "aborting") return "Aborting";
+  if (status === "archiving") return "Archiving";
+  if (status === "archived") return "Archived";
+  if (status === "failed") return "Failed";
+  if (status === "created") return "Created";
+  return status;
+}
+
+function SessionHistoryItem({ session, active }: { session: SidebarSession; active?: boolean }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const showStatus =
+    session.status === "running" ||
+    session.status === "provisioning" ||
+    session.status === "aborting" ||
+    session.status === "archiving" ||
+    session.status === "failed" ||
+    Boolean(session.lastError);
+
   return (
-    <Link
-      href={href}
-      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+    <div
+      className={`group flex w-full items-center rounded-md text-[13px] transition-colors duration-150 ${
         active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
-      }`}
+      } ${isPending ? "opacity-60" : ""}`}
     >
-      {dot ? (
-        <span className="ml-[2px] mr-[2px] inline-block h-1.5 w-1.5 rounded-full bg-[#16a34a] shadow-[0_0_0_2px_rgba(22,163,74,0.12)]" />
-      ) : (
-        <span className="ml-[2px] mr-[2px] inline-block h-1.5 w-1.5" />
-      )}
-      <span className="truncate tracking-[-0.005em]">{label}</span>
-      {diff && (
-        <span className="ml-auto flex items-center gap-1.5 text-[11.5px] font-medium tabular-nums">
-          <span className="text-[#16a34a]">+{diff.added.toLocaleString()}</span>
-          <span className="text-[#dc2626]">−{diff.removed}</span>
-        </span>
-      )}
-    </Link>
+      <Link
+        href={`/session/${session.id}`}
+        title={session.lastError ?? session.title}
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <SessionStatusDot status={session.status} lastError={session.lastError} />
+        <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
+        {showStatus && (
+          <span
+            className={`ml-auto shrink-0 rounded-[4px] px-1.5 py-px text-[10.5px] font-medium ${
+              session.lastError || session.status === "failed"
+                ? "bg-[#fce8e8] text-[#b91c1c]"
+                : session.status === "aborting" || session.status === "archiving"
+                  ? "bg-[#f8edda] text-[#9a5a0a]"
+                  : "bg-[#e8f4ea] text-[#1f7a3a]"
+            }`}
+          >
+            {statusLabel(session.status)}
+          </span>
+        )}
+      </Link>
+      <button
+        type="button"
+        title="Archive session"
+        aria-label={`Archive ${session.title}`}
+        disabled={isPending}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          startTransition(async () => {
+            const result = await archiveAgentSession(session.id);
+            if (!result.ok) {
+              router.refresh();
+              return;
+            }
+            if (active) {
+              router.replace("/");
+              return;
+            }
+            router.refresh();
+          });
+        }}
+        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-[#dededa] hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+          isPending
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        }`}
+      >
+        <Archive size={12.5} strokeWidth={1.8} />
+      </button>
+    </div>
   );
+}
+
+function filterSessions(sessions: SidebarSession[], query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return sessions;
+
+  return sessions.filter((session) =>
+    [session.title, session.status, session.modelName]
+      .filter(Boolean)
+      .some((value) => value.toLowerCase().includes(normalized)),
+  );
+}
+
+function groupSessions(sessions: SidebarSession[]) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const groups: Array<{ label: string; sessions: SidebarSession[] }> = [
+    { label: "Today", sessions: [] },
+    { label: "Yesterday", sessions: [] },
+    { label: "Last 7 days", sessions: [] },
+    { label: "Earlier", sessions: [] },
+  ];
+  const todayGroup = groups[0]!;
+  const yesterdayGroup = groups[1]!;
+  const lastWeekGroup = groups[2]!;
+  const earlierGroup = groups[3]!;
+
+  for (const session of sessions) {
+    const date = new Date(session.updatedAt);
+    const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const age = Math.floor((today - day) / dayMs);
+
+    if (age <= 0) todayGroup.sessions.push(session);
+    else if (age === 1) yesterdayGroup.sessions.push(session);
+    else if (age < 7) lastWeekGroup.sessions.push(session);
+    else earlierGroup.sessions.push(session);
+  }
+
+  return groups.filter((group) => group.sessions.length > 0);
 }
 
 function AccountMenu({
@@ -223,18 +339,27 @@ export default function Sidebar({
   userName,
   userEmail,
   workspaceName,
+  sessions,
 }: {
   userName: string;
   userEmail: string;
   workspaceName: string;
+  sessions: SidebarSession[];
 }) {
   const pathname = usePathname();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(getStoredSidebarCollapsed);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sessionQuery, setSessionQuery] = useState("");
   const footerRef = useRef<HTMLDivElement>(null);
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const filteredSessions = useMemo(
+    () => filterSessions(sessions, sessionQuery),
+    [sessions, sessionQuery],
+  );
+  const groupedSessions = useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
 
   function updateCollapsed(nextCollapsed: boolean) {
     setCollapsed(nextCollapsed);
@@ -315,25 +440,58 @@ export default function Sidebar({
 
           {/* History */}
           <div className="mt-5 flex flex-1 flex-col overflow-y-auto px-2">
-            <div className="px-2 pb-1 pt-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-              Yesterday
-            </div>
-            <HistoryItem
-              href="/session/dev-env-setup"
-              label="Development environme..."
-              dot
-              diff={{ added: 10451, removed: 1 }}
-              active={pathname === "/session/dev-env-setup"}
-            />
+            {filterOpen && (
+              <div className="relative mb-2 px-1">
+                <Search
+                  size={12}
+                  strokeWidth={1.8}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle"
+                />
+                <input
+                  value={sessionQuery}
+                  onChange={(event) => setSessionQuery(event.target.value)}
+                  placeholder="Filter sessions"
+                  className="h-7 w-full rounded-md border border-[#e4e4e0] bg-white/55 pl-7 pr-7 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-[#d4d4cf] focus:ring-2 focus:ring-ink/[0.04]"
+                />
+                {sessionQuery && (
+                  <button
+                    type="button"
+                    aria-label="Clear session filter"
+                    onClick={() => setSessionQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-subtle hover:bg-[#ececea] hover:text-ink"
+                  >
+                    <X size={11.5} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+            )}
 
-            <div className="px-2 pb-1 pt-4 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-              Last 7 days
-            </div>
-            <HistoryItem
-              href="/session/current-work-understanding"
-              label="Current work understanding"
-              active={pathname === "/session/current-work-understanding"}
-            />
+            {sessions.length === 0 ? (
+              <div className="mx-2 mt-2 rounded-md border border-dashed border-[#deded9] bg-white/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
+                Sessions you start from agents will appear here.
+              </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="mx-2 mt-2 rounded-md border border-dashed border-[#deded9] bg-white/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
+                No sessions match this filter.
+              </div>
+            ) : (
+              groupedSessions.map((group, index) => (
+                <div key={group.label} className={index === 0 ? "" : "pt-3"}>
+                  <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                    {group.label}
+                  </div>
+                  <div className="flex flex-col gap-px">
+                    {group.sessions.map((session) => (
+                      <SessionHistoryItem
+                        key={session.id}
+                        session={session}
+                        active={pathname === `/session/${session.id}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           {/* Footer profile */}
@@ -382,7 +540,11 @@ export default function Sidebar({
               <button
                 type="button"
                 aria-label="Filter sessions"
-                className="rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                aria-pressed={filterOpen}
+                className={`rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                  filterOpen ? "bg-[#e3e3df] text-ink" : ""
+                }`}
+                onClick={() => setFilterOpen((open) => !open)}
               >
                 <ListFilter size={14} strokeWidth={1.75} />
               </button>

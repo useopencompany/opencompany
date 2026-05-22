@@ -176,6 +176,8 @@ export const agentSessions = pgTable(
     runLeaseId: text("run_lease_id"),
     abortRequestedAt: timestamp("abort_requested_at", { withTimezone: true }),
     lastError: text("last_error"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    sandboxTerminatedAt: timestamp("sandbox_terminated_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -183,6 +185,12 @@ export const agentSessions = pgTable(
     workspaceIdx: index("agent_sessions_workspace_idx").on(table.workspaceId),
     agentIdx: index("agent_sessions_agent_idx").on(table.agentId),
     statusIdx: index("agent_sessions_status_idx").on(table.status),
+    visibleWorkspaceUserUpdatedIdx: index("agent_sessions_visible_workspace_user_updated_idx").on(
+      table.workspaceId,
+      table.userId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
   }),
 );
 

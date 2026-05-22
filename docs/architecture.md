@@ -120,5 +120,7 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 - `bun run db:migrate` applies migrations to `DATABASE_URL`.
 - GitHub workspace-state env vars are `OPENCOMPANY_GITHUB_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`.
 - Inngest uses `INNGEST_DEV` for local development; hosted environments should also set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
-- Runner env vars are `RUNNER_PUBLIC_URL`, `RUNNER_INTERNAL_TOKEN`, `RUNNER_ALLOWED_ORIGINS`,
-  `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, and optional `OPENCOMPANY_E2B_TEMPLATE`.
+- Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
+  `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`, `E2B_API_KEY`,
+  `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`, and optional
+  `RUNNER_E2B_IDLE_TIMEOUT_MS`.

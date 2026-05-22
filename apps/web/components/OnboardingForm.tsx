@@ -138,6 +138,10 @@ export default function OnboardingForm({
     setError("");
   }
 
+  function advanceStep() {
+    setStep((current) => Math.min(current + 1, steps.length - 1));
+  }
+
   function chooseHeardFrom(value: string) {
     setValues((current) => ({
       ...current,
@@ -145,6 +149,15 @@ export default function OnboardingForm({
       heardFromDetail: value === "other" ? current.heardFromDetail : "",
     }));
     setError("");
+
+    if (value !== "other") {
+      advanceStep();
+    }
+  }
+
+  function chooseAgentExperience(value: string) {
+    updateValue("agentExperience", value);
+    advanceStep();
   }
 
   function toggleHelpArea(value: string) {
@@ -317,7 +330,7 @@ export default function OnboardingForm({
                   <ChoiceButton
                     key={option.value}
                     selected={values.agentExperience === option.value}
-                    onClick={() => updateValue("agentExperience", option.value)}
+                    onClick={() => chooseAgentExperience(option.value)}
                   >
                     {option.label}
                   </ChoiceButton>

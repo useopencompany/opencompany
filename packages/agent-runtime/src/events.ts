@@ -4,6 +4,8 @@ export type AgentSessionStatus =
   | "ready"
   | "running"
   | "aborting"
+  | "archiving"
+  | "archived"
   | "completed"
   | "failed";
 
@@ -52,6 +54,14 @@ export type AgentRuntimeEvent =
   | {
       type: "session.error";
       payload: { message: string };
+    }
+  | {
+      type: "session.archived";
+      payload: {
+        sandboxId: string | null;
+        sandboxKilled: boolean;
+        sandboxAlreadyStopped: boolean;
+      };
     };
 
 export type AgentRuntimeEventType = AgentRuntimeEvent["type"];

@@ -1,7 +1,7 @@
-function runnerBaseUrl() {
-  const value = process.env.RUNNER_PUBLIC_URL;
+function runnerInternalBaseUrl() {
+  const value = process.env.RUNNER_INTERNAL_URL ?? process.env.RUNNER_PUBLIC_URL;
   if (!value) {
-    throw new Error("RUNNER_PUBLIC_URL is required to contact the runner.");
+    throw new Error("RUNNER_INTERNAL_URL or RUNNER_PUBLIC_URL is required to contact the runner.");
   }
   return value.replace(/\/+$/, "");
 }
@@ -15,7 +15,7 @@ function runnerToken() {
 }
 
 export async function callRunner(path: string) {
-  const response = await fetch(`${runnerBaseUrl()}${path}`, {
+  const response = await fetch(`${runnerInternalBaseUrl()}${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${runnerToken()}`,
@@ -30,4 +30,8 @@ export async function callRunner(path: string) {
 
 export function getRunnerPublicUrl() {
   return process.env.RUNNER_PUBLIC_URL?.replace(/\/+$/, "") ?? null;
+}
+
+export function getRunnerStreamTokenSecret() {
+  return process.env.RUNNER_STREAM_TOKEN_SECRET?.trim() || null;
 }

@@ -4,21 +4,67 @@ import { Sandbox } from "e2b";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
 
+const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
+const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
+
 export async function createOrConnectSandbox(input: {
   sandboxId?: string | null;
   template?: string | undefined;
   envs: Record<string, string>;
+  idleTimeoutMs: number;
 }) {
   if (input.sandboxId) {
-    return Sandbox.connect(input.sandboxId);
+    return Sandbox.connect(input.sandboxId, {
+      timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
+      requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+    });
   }
 
   const options = {
     envs: input.envs,
-    timeoutMs: 60 * 60 * 1000,
+    timeoutMs: input.idleTimeoutMs,
+    lifecycle: {
+      onTimeout: "pause" as const,
+      autoResume: true,
+    },
   };
 
-  return input.template ? Sandbox.create(input.template, options) : Sandbox.create(options);
+  const sandbox = input.template
+    ? await Sandbox.create(input.template, options)
+    : await Sandbox.create(options);
+  await sandbox.setTimeout(ACTIVE_SANDBOX_TIMEOUT_MS, {
+    requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+  });
+  return sandbox;
+}
+
+export async function armSandboxIdleTimeout(sandbox: SandboxHandle, idleTimeoutMs: number) {
+  try {
+    const info = await sandbox.getInfo({ requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+    if (info.lifecycle?.onTimeout !== "pause") {
+      await sandbox.pause({ requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+      return true;
+    }
+
+    await sandbox.setTimeout(idleTimeoutMs, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+    return true;
+  } catch (error) {
+    if (isSandboxNotFound(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export async function killSandbox(sandboxId: string) {
+  try {
+    return await Sandbox.kill(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
+  } catch (error) {
+    if (isSandboxNotFound(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export async function prepareWorkspace(input: {
@@ -144,6 +190,11 @@ function readOptionalNumber(record: Record<string, unknown>, key: string) {
 
 function relativePath(workdir: string, filePath: string) {
   return path.posix.relative(workdir, filePath);
+}
+
+function isSandboxNotFound(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.name === "SandboxNotFoundError" || /not found|404/i.test(error.message);
 }
 
 function githubCloneUrl(repositoryFullName: string) {

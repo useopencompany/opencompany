@@ -126,12 +126,19 @@ Required environment variables:
 
 - `DATABASE_URL`
 - `RUNNER_PUBLIC_URL` (`http://localhost:3040` locally)
+- `RUNNER_INTERNAL_URL` (`http://localhost:3040` locally; optional when it matches `RUNNER_PUBLIC_URL`)
 - `RUNNER_INTERNAL_TOKEN`
+- `RUNNER_STREAM_TOKEN_SECRET`
 - `RUNNER_ALLOWED_ORIGINS` (`http://localhost:3000` locally)
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
+- `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - optional GitHub App env vars for cloning the managed workspace repo into E2B:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
+
+New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
+the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
+`RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
 also merges the runner env vars from Vercel into `.env.local`.
@@ -157,7 +164,8 @@ The runner exposes:
 - `GET /sessions/:id/events`
 
 Internal mutation endpoints require `Authorization: Bearer $RUNNER_INTERNAL_TOKEN`. Browser SSE
-uses a short-lived signed token minted by the web app.
+uses a short-lived signed token minted by the web app with `RUNNER_STREAM_TOKEN_SECRET`; the same
+secret must be set on the runner.
 
 Useful checks:
 
@@ -176,10 +184,13 @@ When testing a live session locally, keep these pieces running:
 - runner on `localhost:3040`
 
 If web logs show `ECONNREFUSED` from `callRunner()`, the runner is not listening at
-`RUNNER_PUBLIC_URL` or `RUNNER_PUBLIC_URL` points at the wrong port.
+`RUNNER_INTERNAL_URL` or `RUNNER_INTERNAL_URL` points at the wrong port. Local development falls back
+to `RUNNER_PUBLIC_URL` when `RUNNER_INTERNAL_URL` is unset.
 
 If the model response only appears after reload, first check that SSE frames are arriving as default
-`message` events and that the web UI is applying `message.delta` events.
+`message` events and that the web UI is applying `message.delta` events. Browser console or network
+errors on `/sessions/:id/events` usually mean `RUNNER_PUBLIC_URL`, `RUNNER_ALLOWED_ORIGINS`, or
+`RUNNER_STREAM_TOKEN_SECRET` does not match between the web app and runner.
 
 If Vercel AI Gateway errors mention missing tool calls for function outputs, check the prompt
 history passed to the model. Tool-result messages need matching assistant tool-call messages in the
@@ -189,8 +200,8 @@ future requests.
 ## Hosting
 
 V1 is designed for Render Standard near the Neon database region. `render.yaml` defines the web
-service and required secrets. Keep the Next.js app on Vercel and point `RUNNER_PUBLIC_URL` at the
-Render service URL.
+service and required secrets. Keep the Next.js app on Vercel, point `RUNNER_PUBLIC_URL` at the
+browser-reachable Render service URL, and set `RUNNER_ALLOWED_ORIGINS` to the exact Vercel web origin.
 
 The mature migration path is the same runner container on ECS/Fargate behind an ALB when queue
 depth, connection volume, or private networking needs justify the operational overhead.

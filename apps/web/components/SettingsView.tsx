@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, LogOut } from "lucide-react";
+import { Check, GitBranch, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { updateWorkspaceName } from "@/lib/workspaces/actions";
@@ -15,6 +15,9 @@ type Props = {
   workspace: {
     name: string;
     createdAt: string;
+    repository: {
+      updatedAt: string;
+    } | null;
   };
 };
 
@@ -57,6 +60,29 @@ function ReadOnly({ value }: { value: string }) {
   return (
     <div className="rounded-md border border-[#e6e6e3] bg-white/60 px-2.5 py-1.5 text-[13px] text-ink/85">
       {value}
+    </div>
+  );
+}
+
+function WorkspaceState({ repository }: { repository: Props["workspace"]["repository"] }) {
+  return (
+    <div className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+          <GitBranch size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+            Managed by opencompany through Git
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+            Your workspace files are versioned automatically in a private Git-backed repository.
+          </p>
+          <div className="mt-3 text-[11.5px] text-ink-subtle">
+            {repository ? `Last updated ${repository.updatedAt}` : "Git storage is being set up"}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -173,6 +199,13 @@ export default function SettingsView({ profile, workspace }: Props) {
             <Field label="Created">
               <ReadOnly value={workspace.createdAt} />
             </Field>
+          </Section>
+
+          <Section
+            title="Workspace state"
+            description="How this workspace is stored and versioned."
+          >
+            <WorkspaceState repository={workspace.repository} />
           </Section>
 
           <Section title="Account" description="Sign out of all sessions for this device.">

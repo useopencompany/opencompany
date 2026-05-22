@@ -7,12 +7,13 @@ import {
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
+  type Agent,
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
   agents,
 } from "@opencompany/db/schema";
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
@@ -21,51 +22,61 @@ import {
   dispatchAgentSessionAbortRequested,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
-import { getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import {
+  callRunner,
+  getRunnerPublicUrl,
+  getRunnerStreamTokenSecret,
+} from "@/lib/agent-sessions/runner";
 import { getCurrentWorkspace } from "@/lib/auth";
 
 export async function createAgentSession(idOrPath: string) {
   const { user, workspace } = await getCurrentWorkspace();
-  const db = getDb();
-  const decodedPath = decodeURIComponent(idOrPath);
-  const [agent] = await db
-    .select()
-    .from(agents)
-    .where(
-      and(
-        eq(agents.workspaceId, workspace.id),
-        or(eq(agents.id, idOrPath), eq(agents.path, decodedPath)),
-      ),
-    )
-    .limit(1);
+  const agent = await loadAgentForSession(idOrPath, workspace.id);
 
   if (!agent) {
     throw new Error("Agent not found.");
   }
 
-  const sessionId = newAgentSessionId();
-  await db.batch([
-    db.insert(agentSessions).values({
-      id: sessionId,
-      workspaceId: workspace.id,
-      userId: user.id,
-      agentId: agent.id,
-      title: agent.name,
-      modelProvider: agent.config.model.provider,
-      modelName: agent.config.model.name,
-    }),
-    db.insert(agentSessionEvents).values({
-      sessionId,
-      type: "session.status",
-      payload: { status: "created", message: "Session created" },
-    }),
-  ]);
+  const sessionId = await insertAgentSession({
+    agent,
+    title: agent.name,
+    userId: user.id,
+    workspaceId: workspace.id,
+  });
 
   after(async () => {
     await dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id });
   });
 
   revalidatePath("/agents");
+  redirect(`/session/${sessionId}`);
+}
+
+export async function createAgentSessionFromPrompt(agentId: string, content: string) {
+  const { user, workspace } = await getCurrentWorkspace();
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return { ok: false, error: "Message is required." } as const;
+  }
+
+  const agent = await loadAgentForSession(agentId, workspace.id);
+  if (!agent) {
+    return { ok: false, error: "Agent not found." } as const;
+  }
+
+  const sessionId = await insertAgentSession({
+    agent,
+    title: titleFromPrompt(trimmed),
+    userId: user.id,
+    workspaceId: workspace.id,
+  });
+  const messageId = await insertUserMessage(sessionId, trimmed);
+
+  after(async () => {
+    await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
+  });
+
+  revalidatePath("/");
   redirect(`/session/${sessionId}`);
 }
 
@@ -85,6 +96,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
         eq(agentSessions.id, sessionId),
         eq(agentSessions.workspaceId, workspace.id),
         eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
       ),
     )
     .limit(1);
@@ -93,23 +105,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
     return { ok: false, error: "Session not found." } as const;
   }
 
-  const messageId = newAgentSessionMessageId();
-  await db.batch([
-    db.insert(agentSessionMessages).values({
-      id: messageId,
-      sessionId,
-      role: "user",
-      status: "completed",
-      content: trimmed,
-      completedAt: new Date(),
-    }),
-    db.insert(agentSessionEvents).values({
-      sessionId,
-      messageId,
-      type: "message.created",
-      payload: { messageId, role: "user" },
-    }),
-  ]);
+  const messageId = await insertUserMessage(sessionId, trimmed);
 
   after(async () => {
     await dispatchAgentMessageSubmitted({ sessionId, messageId, workspaceId: workspace.id });
@@ -130,6 +126,7 @@ export async function abortAgentSession(sessionId: string) {
         eq(agentSessions.id, sessionId),
         eq(agentSessions.workspaceId, workspace.id),
         eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
       ),
     )
     .limit(1);
@@ -150,16 +147,14 @@ export async function abortAgentSession(sessionId: string) {
   return { ok: true } as const;
 }
 
-export async function loadAgentSessionForPage(sessionId: string) {
+export async function archiveAgentSession(sessionId: string) {
   const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const [session] = await db
     .select({
       id: agentSessions.id,
-      title: agentSessions.title,
       status: agentSessions.status,
-      modelName: agentSessions.modelName,
-      lastError: agentSessions.lastError,
+      e2bSandboxId: agentSessions.e2bSandboxId,
     })
     .from(agentSessions)
     .where(
@@ -167,6 +162,94 @@ export async function loadAgentSessionForPage(sessionId: string) {
         eq(agentSessions.id, sessionId),
         eq(agentSessions.workspaceId, workspace.id),
         eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  if (!session.e2bSandboxId) {
+    await archiveSessionLocally(sessionId, null);
+    revalidatePath("/");
+    revalidatePath(`/session/${sessionId}`);
+    return { ok: true } as const;
+  }
+
+  if (!getRunnerPublicUrl() || !process.env.RUNNER_INTERNAL_TOKEN) {
+    return {
+      ok: false,
+      error:
+        "Runner is not configured, so the sandbox cannot be stopped safely. Set RUNNER_PUBLIC_URL and RUNNER_INTERNAL_TOKEN before archiving this session.",
+    } as const;
+  }
+
+  await db.batch([
+    db
+      .update(agentSessions)
+      .set({ status: "archiving", lastError: null, updatedAt: new Date() })
+      .where(eq(agentSessions.id, sessionId)),
+    db.insert(agentSessionEvents).values({
+      sessionId,
+      type: "session.status",
+      payload: { status: "archiving", message: "Archiving session" },
+    }),
+  ]);
+
+  try {
+    await callRunner(`/internal/sessions/${sessionId}/archive`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not archive session.";
+    await db.batch([
+      db
+        .update(agentSessions)
+        .set({ status: session.status, lastError: message, updatedAt: new Date() })
+        .where(eq(agentSessions.id, sessionId)),
+      db.insert(agentSessionEvents).values({
+        sessionId,
+        type: "session.error",
+        payload: { message },
+      }),
+    ]);
+    return { ok: false, error: message } as const;
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/session/${sessionId}`);
+  return { ok: true } as const;
+}
+
+export async function loadAgentSessionForPage(sessionId: string) {
+  const { user, workspace } = await getCurrentWorkspace();
+  const db = getDb();
+  const [session] = await db
+    .select({
+      id: agentSessions.id,
+      agentId: agents.id,
+      agentName: agents.name,
+      agentPath: agents.path,
+      title: agentSessions.title,
+      status: agentSessions.status,
+      modelProvider: agentSessions.modelProvider,
+      modelName: agentSessions.modelName,
+      e2bSandboxId: agentSessions.e2bSandboxId,
+      workdir: agentSessions.workdir,
+      runLeaseId: agentSessions.runLeaseId,
+      abortRequestedAt: agentSessions.abortRequestedAt,
+      lastError: agentSessions.lastError,
+      createdAt: agentSessions.createdAt,
+      updatedAt: agentSessions.updatedAt,
+    })
+    .from(agentSessions)
+    .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
       ),
     )
     .limit(1);
@@ -188,17 +271,131 @@ export async function loadAgentSessionForPage(sessionId: string) {
   ]);
 
   const runnerUrl = getRunnerPublicUrl();
+  const streamTokenSecret = getRunnerStreamTokenSecret();
   const token =
-    runnerUrl && process.env.RUNNER_INTERNAL_TOKEN
+    runnerUrl && streamTokenSecret
       ? createSessionStreamToken(
           {
             sessionId,
             userId: user.id,
             expiresAt: Date.now() + 60 * 60 * 1000,
           },
-          process.env.RUNNER_STREAM_TOKEN_SECRET ?? process.env.RUNNER_INTERNAL_TOKEN,
+          streamTokenSecret,
         )
       : null;
 
   return { session, messages, events, runnerUrl, token };
+}
+
+async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {
+  const db = getDb();
+  const now = new Date();
+
+  await db.batch([
+    db
+      .update(agentSessions)
+      .set({
+        status: "archived",
+        archivedAt: now,
+        sandboxTerminatedAt: now,
+        e2bSandboxId: null,
+        runLeaseId: null,
+        lastError: null,
+        updatedAt: now,
+      })
+      .where(eq(agentSessions.id, sessionId)),
+    db.insert(agentSessionEvents).values({
+      sessionId,
+      type: "session.status",
+      payload: { status: "archived", message: "Session archived" },
+    }),
+    db.insert(agentSessionEvents).values({
+      sessionId,
+      type: "session.archived",
+      payload: {
+        sandboxId: previousSandboxId,
+        sandboxKilled: false,
+        sandboxAlreadyStopped: previousSandboxId === null,
+      },
+    }),
+  ]);
+}
+
+async function loadAgentForSession(idOrPath: string, workspaceId: string) {
+  const db = getDb();
+  const decodedPath = decodeURIComponent(idOrPath);
+  const [agent] = await db
+    .select()
+    .from(agents)
+    .where(
+      and(
+        eq(agents.workspaceId, workspaceId),
+        or(eq(agents.id, idOrPath), eq(agents.path, decodedPath)),
+      ),
+    )
+    .limit(1);
+
+  return agent ?? null;
+}
+
+async function insertAgentSession(input: {
+  agent: Agent;
+  title: string;
+  userId: string;
+  workspaceId: string;
+}) {
+  const db = getDb();
+  const sessionId = newAgentSessionId();
+
+  await db.batch([
+    db.insert(agentSessions).values({
+      id: sessionId,
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      agentId: input.agent.id,
+      title: input.title,
+      modelProvider: input.agent.config.model.provider,
+      modelName: input.agent.config.model.name,
+    }),
+    db.insert(agentSessionEvents).values({
+      sessionId,
+      type: "session.status",
+      payload: { status: "created", message: "Session created" },
+    }),
+  ]);
+
+  return sessionId;
+}
+
+async function insertUserMessage(sessionId: string, content: string) {
+  const db = getDb();
+  const messageId = newAgentSessionMessageId();
+
+  await db.batch([
+    db.insert(agentSessionMessages).values({
+      id: messageId,
+      sessionId,
+      role: "user",
+      status: "completed",
+      content,
+      completedAt: new Date(),
+    }),
+    db.insert(agentSessionEvents).values({
+      sessionId,
+      messageId,
+      type: "message.created",
+      payload: { messageId, role: "user" },
+    }),
+  ]);
+
+  return messageId;
+}
+
+function titleFromPrompt(content: string) {
+  const firstLine = content
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  const title = firstLine ?? "Untitled session";
+  return title.length > 80 ? `${title.slice(0, 77)}...` : title;
 }
