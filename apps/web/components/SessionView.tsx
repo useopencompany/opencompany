@@ -26,6 +26,7 @@ import {
   buildAssistantTurnParts,
   type RuntimeEvent,
   type RuntimeToolCall,
+  type SessionUsageSummary,
   readString,
   type SessionMessage,
 } from "@/lib/agent-sessions/runtime-events";
@@ -50,6 +51,7 @@ type Props = {
   };
   initialMessages: SessionMessage[];
   initialEvents: RuntimeEvent[];
+  initialUsage: SessionUsageSummary;
   runnerUrl: string | null;
   streamToken: string | null;
 };
@@ -78,6 +80,7 @@ export default function SessionView({
   session,
   initialMessages,
   initialEvents,
+  initialUsage,
   runnerUrl,
   streamToken,
 }: Props) {
@@ -86,6 +89,7 @@ export default function SessionView({
   const [runtime, setRuntime] = useState({
     events: initialEvents,
     messages: initialMessages,
+    usage: initialUsage,
     currentStatus: session.status,
     lastError: session.lastError,
   });
@@ -291,6 +295,7 @@ export default function SessionView({
           streamErrorMessage={stream.errorMessage}
           runnerConfigured={Boolean(runnerUrl && streamToken)}
           eventCount={runtime.events.length}
+          usage={runtime.usage}
           recentEvents={runtime.events.slice(-16)}
           canAbort={canAbort}
           isPending={isPending}
@@ -441,6 +446,7 @@ function SessionInspector({
   streamErrorMessage,
   runnerConfigured,
   eventCount,
+  usage,
   recentEvents,
   canAbort,
   isPending,
@@ -453,6 +459,7 @@ function SessionInspector({
   streamErrorMessage: string | null;
   runnerConfigured: boolean;
   eventCount: number;
+  usage: SessionUsageSummary;
   recentEvents: RuntimeEvent[];
   canAbort: boolean;
   isPending: boolean;
@@ -512,6 +519,15 @@ function SessionInspector({
               : streamErrorMessage}
           </div>
         ) : null}
+      </div>
+
+      <div>
+        <InspectorHeader label="Token usage" countLabel={formatTokenCount(usage.totalTokens)} />
+        <div className="space-y-4">
+          <InspectorField label="Input tokens" value={formatTokenCount(usage.inputTokens)} />
+          <InspectorField label="Output tokens" value={formatTokenCount(usage.outputTokens)} />
+          <InspectorField label="Total tokens" value={formatTokenCount(usage.totalTokens)} />
+        </div>
       </div>
 
       <div>
@@ -628,6 +644,10 @@ function streamStatusLabel(status: string) {
   if (status === "stale") return "stale";
   if (status === "error") return "error";
   return "idle";
+}
+
+function formatTokenCount(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
 function formatRuntimeDate(value: string) {
