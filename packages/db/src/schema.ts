@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -335,6 +336,122 @@ export const agentSessionToolUsage = pgTable(
   }),
 );
 
+export const workspaceCreditBalances = pgTable("workspace_credit_balances", {
+  workspaceId: text("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  balanceCents: integer("balance_cents").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const stripeCheckoutSessions = pgTable(
+  "stripe_checkout_sessions",
+  {
+    id: text("id").primaryKey(),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    amountCents: integer("amount_cents").notNull(),
+    status: text("status").notNull().default("pending"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+  },
+  (table) => ({
+    stripeCheckoutSessionIdIdx: uniqueIndex(
+      "stripe_checkout_sessions_stripe_checkout_session_id_idx",
+    ).on(table.stripeCheckoutSessionId),
+    workspaceIdx: index("stripe_checkout_sessions_workspace_idx").on(table.workspaceId),
+  }),
+);
+
+export const creditCodes = pgTable(
+  "credit_codes",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    maxRedemptions: integer("max_redemptions"),
+    redeemedCount: integer("redeemed_count").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    codeIdx: uniqueIndex("credit_codes_code_idx").on(table.code),
+  }),
+);
+
+export const creditCodeRedemptions = pgTable(
+  "credit_code_redemptions",
+  {
+    id: serial("id").primaryKey(),
+    creditCodeId: text("credit_code_id")
+      .notNull()
+      .references(() => creditCodes.id, { onDelete: "restrict" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    amountCents: integer("amount_cents").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    creditCodeWorkspaceIdx: uniqueIndex("credit_code_redemptions_code_workspace_idx").on(
+      table.creditCodeId,
+      table.workspaceId,
+    ),
+    workspaceIdx: index("credit_code_redemptions_workspace_idx").on(table.workspaceId),
+  }),
+);
+
+export const workspaceCreditLedger = pgTable(
+  "workspace_credit_ledger",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    amountCents: integer("amount_cents").notNull(),
+    source: text("source").notNull(),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id").references(
+      () => stripeCheckoutSessions.id,
+      { onDelete: "set null" },
+    ),
+    creditCodeRedemptionId: integer("credit_code_redemption_id").references(
+      () => creditCodeRedemptions.id,
+      { onDelete: "set null" },
+    ),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceCreatedAtIdx: index("workspace_credit_ledger_workspace_created_at_idx").on(
+      table.workspaceId,
+      table.createdAt,
+    ),
+    stripeCheckoutSessionIdx: index("workspace_credit_ledger_stripe_checkout_session_idx").on(
+      table.stripeCheckoutSessionId,
+    ),
+    creditCodeRedemptionIdx: index("workspace_credit_ledger_credit_code_redemption_idx").on(
+      table.creditCodeRedemptionId,
+    ),
+  }),
+);
+
 export const workspaceRepositories = pgTable(
   "workspace_repositories",
   {
@@ -380,6 +497,9 @@ export const usersRelations = relations(users, ({ many }) => ({
   createdWorkspaces: many(workspaces),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
+  creditLedger: many(workspaceCreditLedger),
+  stripeCheckoutSessions: many(stripeCheckoutSessions),
+  creditCodeRedemptions: many(creditCodeRedemptions),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
@@ -392,6 +512,13 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   agentSyncJobs: many(agentSyncJobs),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
+  creditBalance: one(workspaceCreditBalances, {
+    fields: [workspaces.id],
+    references: [workspaceCreditBalances.workspaceId],
+  }),
+  creditLedger: many(workspaceCreditLedger),
+  stripeCheckoutSessions: many(stripeCheckoutSessions),
+  creditCodeRedemptions: many(creditCodeRedemptions),
   repository: one(workspaceRepositories, {
     fields: [workspaces.id],
     references: [workspaceRepositories.workspaceId],
@@ -472,6 +599,63 @@ export const agentSessionToolUsageRelations = relations(agentSessionToolUsage, (
   }),
 }));
 
+export const workspaceCreditBalancesRelations = relations(workspaceCreditBalances, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceCreditBalances.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const stripeCheckoutSessionsRelations = relations(stripeCheckoutSessions, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [stripeCheckoutSessions.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [stripeCheckoutSessions.userId],
+    references: [users.id],
+  }),
+}));
+
+export const creditCodesRelations = relations(creditCodes, ({ many }) => ({
+  redemptions: many(creditCodeRedemptions),
+}));
+
+export const creditCodeRedemptionsRelations = relations(creditCodeRedemptions, ({ one, many }) => ({
+  creditCode: one(creditCodes, {
+    fields: [creditCodeRedemptions.creditCodeId],
+    references: [creditCodes.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [creditCodeRedemptions.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [creditCodeRedemptions.userId],
+    references: [users.id],
+  }),
+  ledgerEntries: many(workspaceCreditLedger),
+}));
+
+export const workspaceCreditLedgerRelations = relations(workspaceCreditLedger, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceCreditLedger.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [workspaceCreditLedger.userId],
+    references: [users.id],
+  }),
+  stripeCheckoutSession: one(stripeCheckoutSessions, {
+    fields: [workspaceCreditLedger.stripeCheckoutSessionId],
+    references: [stripeCheckoutSessions.id],
+  }),
+  creditCodeRedemption: one(creditCodeRedemptions, {
+    fields: [workspaceCreditLedger.creditCodeRedemptionId],
+    references: [creditCodeRedemptions.id],
+  }),
+}));
+
 export const agentSyncJobsRelations = relations(agentSyncJobs, ({ one }) => ({
   agent: one(agents, {
     fields: [agentSyncJobs.agentId],
@@ -515,6 +699,11 @@ export const onboardingResponsesRelations = relations(onboardingResponses, ({ on
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
+export type WorkspaceCreditBalance = typeof workspaceCreditBalances.$inferSelect;
+export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSelect;
+export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
+export type CreditCode = typeof creditCodes.$inferSelect;
+export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
 export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;

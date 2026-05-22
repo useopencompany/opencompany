@@ -1,0 +1,347 @@
+import { randomUUID } from "node:crypto";
+import { getDb } from "@opencompany/db/client";
+import {
+  creditCodeRedemptions,
+  creditCodes,
+  stripeCheckoutSessions,
+  workspaceCreditBalances,
+  workspaceCreditLedger,
+} from "@opencompany/db/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
+import type Stripe from "stripe";
+import { normalizeCreditCode } from "@/lib/billing/constants";
+
+export type BillingLedgerEntry = {
+  id: number;
+  amountCents: number;
+  source: string;
+  createdAt: Date;
+  metadata: Record<string, unknown>;
+};
+
+type ExecuteResultRow = Record<string, unknown>;
+
+function rowsFromExecute<T extends ExecuteResultRow>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as T[];
+  }
+  return [];
+}
+
+export function newStripeCheckoutRecordId() {
+  return `chk_${randomUUID()}`;
+}
+
+export async function loadBillingOverview(workspaceId: string) {
+  const db = getDb();
+  const [balanceRow, ledgerRows] = await Promise.all([
+    db
+      .select({ balanceCents: workspaceCreditBalances.balanceCents })
+      .from(workspaceCreditBalances)
+      .where(eq(workspaceCreditBalances.workspaceId, workspaceId))
+      .limit(1),
+    db
+      .select({
+        id: workspaceCreditLedger.id,
+        amountCents: workspaceCreditLedger.amountCents,
+        source: workspaceCreditLedger.source,
+        createdAt: workspaceCreditLedger.createdAt,
+        metadata: workspaceCreditLedger.metadata,
+      })
+      .from(workspaceCreditLedger)
+      .where(eq(workspaceCreditLedger.workspaceId, workspaceId))
+      .orderBy(desc(workspaceCreditLedger.createdAt))
+      .limit(10),
+  ]);
+
+  return {
+    balanceCents: balanceRow[0]?.balanceCents ?? 0,
+    ledger: ledgerRows satisfies BillingLedgerEntry[],
+  };
+}
+
+export async function createPendingCheckoutRecord(input: {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  amountCents: number;
+}) {
+  const db = getDb();
+
+  await db.insert(stripeCheckoutSessions).values({
+    id: input.id,
+    workspaceId: input.workspaceId,
+    userId: input.userId,
+    amountCents: input.amountCents,
+    status: "pending",
+    metadata: {
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      amountCents: String(input.amountCents),
+      checkoutRecordId: input.id,
+    },
+  });
+}
+
+export async function markCheckoutRecordOpen(input: {
+  id: string;
+  stripeCheckoutSessionId: string;
+  metadata: Record<string, unknown>;
+}) {
+  const db = getDb();
+
+  await db
+    .update(stripeCheckoutSessions)
+    .set({
+      stripeCheckoutSessionId: input.stripeCheckoutSessionId,
+      status: "open",
+      metadata: input.metadata,
+      updatedAt: new Date(),
+    })
+    .where(eq(stripeCheckoutSessions.id, input.id));
+}
+
+export async function markCheckoutRecordFailed(input: { id: string; error: string }) {
+  const db = getDb();
+
+  await db
+    .update(stripeCheckoutSessions)
+    .set({
+      status: "failed",
+      metadata: { error: input.error },
+      updatedAt: new Date(),
+    })
+    .where(eq(stripeCheckoutSessions.id, input.id));
+}
+
+export async function fulfillCheckoutSession(
+  session: Stripe.Checkout.Session,
+  options: { eventId?: string } = {},
+) {
+  if (session.payment_status !== "paid") {
+    return { ok: false as const, reason: "not_paid" };
+  }
+
+  const checkoutRecordId = session.metadata?.checkoutRecordId;
+  const workspaceId = session.metadata?.workspaceId;
+  const userId = session.metadata?.userId;
+  const amountCents = Number(session.metadata?.amountCents);
+
+  if (!checkoutRecordId || !workspaceId || !userId || !Number.isSafeInteger(amountCents)) {
+    return { ok: false as const, reason: "missing_metadata" };
+  }
+
+  const db = getDb();
+  const result = await db.execute(sql`
+    WITH fulfilled_session AS (
+      UPDATE stripe_checkout_sessions
+      SET status = 'fulfilled',
+          fulfilled_at = now(),
+          updated_at = now()
+      WHERE id = ${checkoutRecordId}
+        AND stripe_checkout_session_id = ${session.id}
+        AND workspace_id = ${workspaceId}
+        AND user_id = ${userId}
+        AND amount_cents = ${amountCents}
+        AND fulfilled_at IS NULL
+      RETURNING id, workspace_id, user_id, amount_cents, stripe_checkout_session_id
+    ),
+    balance AS (
+      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, updated_at)
+      SELECT workspace_id, amount_cents, now()
+      FROM fulfilled_session
+      ON CONFLICT (workspace_id) DO UPDATE
+      SET balance_cents = workspace_credit_balances.balance_cents + excluded.balance_cents,
+          updated_at = now()
+      RETURNING workspace_id, balance_cents
+    ),
+    ledger AS (
+      INSERT INTO workspace_credit_ledger (
+        workspace_id,
+        user_id,
+        amount_cents,
+        source,
+        stripe_checkout_session_id,
+        metadata
+      )
+      SELECT
+        workspace_id,
+        user_id,
+        amount_cents,
+        'stripe_checkout',
+        id,
+        jsonb_build_object(
+          'stripeCheckoutSessionId', stripe_checkout_session_id,
+          'stripeEventId', ${options.eventId ?? null}::text
+        )
+      FROM fulfilled_session
+      RETURNING id
+    )
+    SELECT
+      fulfilled_session.id AS "checkoutRecordId",
+      fulfilled_session.amount_cents AS "amountCents",
+      balance.balance_cents AS "balanceCents",
+      ledger.id AS "ledgerId"
+    FROM fulfilled_session
+    JOIN balance ON balance.workspace_id = fulfilled_session.workspace_id
+    JOIN ledger ON true
+  `);
+
+  const rows = rowsFromExecute<{
+    checkoutRecordId: string;
+    amountCents: number;
+    balanceCents: number;
+    ledgerId: number;
+  }>(result);
+
+  if (!rows[0]) {
+    return { ok: false as const, reason: "already_fulfilled_or_mismatch" };
+  }
+
+  return { ok: true as const, ...rows[0] };
+}
+
+async function describeRedeemFailure(input: { code: string; workspaceId: string }) {
+  const db = getDb();
+  const [code] = await db
+    .select({
+      id: creditCodes.id,
+      active: creditCodes.active,
+      startsAt: creditCodes.startsAt,
+      expiresAt: creditCodes.expiresAt,
+      maxRedemptions: creditCodes.maxRedemptions,
+      redeemedCount: creditCodes.redeemedCount,
+    })
+    .from(creditCodes)
+    .where(eq(creditCodes.code, input.code))
+    .limit(1);
+
+  if (!code) return "Code not found.";
+
+  const [redemption] = await db
+    .select({ id: creditCodeRedemptions.id })
+    .from(creditCodeRedemptions)
+    .where(
+      and(
+        eq(creditCodeRedemptions.creditCodeId, code.id),
+        eq(creditCodeRedemptions.workspaceId, input.workspaceId),
+      ),
+    )
+    .limit(1);
+
+  if (redemption) return "Code has already been redeemed for this workspace.";
+  if (!code.active) return "Code is not active.";
+
+  const now = Date.now();
+  if (code.startsAt && code.startsAt.getTime() > now) return "Code is not active yet.";
+  if (code.expiresAt && code.expiresAt.getTime() <= now) return "Code has expired.";
+  if (code.maxRedemptions !== null && code.redeemedCount >= code.maxRedemptions) {
+    return "Code has already been fully redeemed.";
+  }
+
+  return "Code could not be redeemed.";
+}
+
+export async function redeemCreditCodeForWorkspace(input: {
+  code: string;
+  workspaceId: string;
+  userId: string;
+}) {
+  const normalizedCode = normalizeCreditCode(input.code);
+  if (!normalizedCode) {
+    return { ok: false as const, error: "Code is required." };
+  }
+
+  const db = getDb();
+  const result = await db.execute(sql`
+    WITH matched_code AS (
+      SELECT id, code, amount_cents
+      FROM credit_codes
+      WHERE code = ${normalizedCode}
+        AND active = true
+        AND (starts_at IS NULL OR starts_at <= now())
+        AND (expires_at IS NULL OR expires_at > now())
+      LIMIT 1
+    ),
+    claimed_code AS (
+      UPDATE credit_codes
+      SET redeemed_count = redeemed_count + 1,
+          updated_at = now()
+      WHERE id IN (SELECT id FROM matched_code)
+        AND (max_redemptions IS NULL OR redeemed_count < max_redemptions)
+      RETURNING id, code, amount_cents
+    ),
+    redemption AS (
+      INSERT INTO credit_code_redemptions (credit_code_id, workspace_id, user_id, amount_cents)
+      SELECT id, ${input.workspaceId}, ${input.userId}, amount_cents
+      FROM claimed_code
+      ON CONFLICT (credit_code_id, workspace_id) DO NOTHING
+      RETURNING id, credit_code_id, amount_cents
+    ),
+    undo_duplicate_claim AS (
+      UPDATE credit_codes
+      SET redeemed_count = GREATEST(redeemed_count - 1, 0),
+          updated_at = now()
+      WHERE id IN (SELECT id FROM claimed_code)
+        AND NOT EXISTS (SELECT 1 FROM redemption)
+      RETURNING id
+    ),
+    balance AS (
+      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, updated_at)
+      SELECT ${input.workspaceId}, amount_cents, now()
+      FROM redemption
+      ON CONFLICT (workspace_id) DO UPDATE
+      SET balance_cents = workspace_credit_balances.balance_cents + excluded.balance_cents,
+          updated_at = now()
+      RETURNING workspace_id, balance_cents
+    ),
+    ledger AS (
+      INSERT INTO workspace_credit_ledger (
+        workspace_id,
+        user_id,
+        amount_cents,
+        source,
+        credit_code_redemption_id,
+        metadata
+      )
+      SELECT
+        ${input.workspaceId},
+        ${input.userId},
+        redemption.amount_cents,
+        'credit_code',
+        redemption.id,
+        jsonb_build_object(
+          'creditCodeId', redemption.credit_code_id,
+          'code', ${normalizedCode}
+        )
+      FROM redemption
+      RETURNING id
+    )
+    SELECT
+      redemption.id AS "redemptionId",
+      redemption.amount_cents AS "amountCents",
+      balance.balance_cents AS "balanceCents",
+      ledger.id AS "ledgerId"
+    FROM redemption
+    JOIN balance ON balance.workspace_id = ${input.workspaceId}
+    JOIN ledger ON true
+  `);
+
+  const rows = rowsFromExecute<{
+    redemptionId: number;
+    amountCents: number;
+    balanceCents: number;
+    ledgerId: number;
+  }>(result);
+
+  if (!rows[0]) {
+    return {
+      ok: false as const,
+      error: await describeRedeemFailure({ code: normalizedCode, workspaceId: input.workspaceId }),
+    };
+  }
+
+  return { ok: true as const, ...rows[0] };
+}
