@@ -63,7 +63,14 @@ describe("resolveAgentRuntimeConfig", () => {
     const resolved = resolveAgentRuntimeConfig({ agent: config });
 
     expect(resolved.tools).toEqual(
-      expect.arrayContaining(["shell", "read_file", "git_diff", "tool_help", "exa_search"]),
+      expect.arrayContaining([
+        "shell",
+        "read_file",
+        "git_diff",
+        "tool_help",
+        "exa_search",
+        "web_fetch",
+      ]),
     );
   });
 
@@ -83,6 +90,7 @@ describe("resolveAgentRuntimeConfig", () => {
 
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
+    expect(resolved.tools).not.toContain("web_fetch");
   });
 
   it("does not add reasoning provider options for non-reasoning models", () => {
