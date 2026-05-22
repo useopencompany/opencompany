@@ -3,6 +3,7 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents } from "@opencompany/db/schema";
+import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -23,6 +24,8 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 function newAgentId() {
   const raw = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
@@ -236,7 +239,17 @@ function scheduleAgentSyncDispatch(input: { id: string; workspaceId: string }) {
         workspaceId: input.workspaceId,
       });
     } catch (error) {
-      console.error("Failed to dispatch agent GitHub sync event", error);
+      captureException(error, {
+        event: "opencompany.agent_sync_dispatch_failed",
+        agent_id: input.id,
+        workspace_id: input.workspaceId,
+      });
+      logger.error("Failed to dispatch agent GitHub sync event", {
+        event: "opencompany.agent_sync_dispatch_failed",
+        agent_id: input.id,
+        workspace_id: input.workspaceId,
+        error,
+      });
     }
   });
 }

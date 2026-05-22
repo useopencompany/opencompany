@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@opencompany/observability": "workspace:*",
     "posthog-js": "^1.299.1",
     "posthog-node": "^5.9.1",
     "react": "19.2.6"

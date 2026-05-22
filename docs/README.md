@@ -5,6 +5,7 @@
 - [database.md](./database.md) — Neon, schema changes, Drizzle, and optional branch databases.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
 - [analytics.md](./analytics.md) — PostHog analytics package, event registry, and privacy rules.
+- [observability.md](./observability.md) — production error capture and launch debugging.
 - [../CONTRIBUTING.md](../CONTRIBUTING.md) — local checks, CI gates, conventions.
 
 ## Repo layout

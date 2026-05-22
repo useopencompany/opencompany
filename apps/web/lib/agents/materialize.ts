@@ -1,5 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
+import { captureException } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
@@ -145,6 +146,13 @@ export async function materializeAgentToGitHub(
       : { status };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown GitHub sync error";
+    captureException(error, {
+      event: "opencompany.agent_github_sync_failed",
+      workspace_id: row.workspace.id,
+      agent_id: row.agent.id,
+      path: row.agent.path,
+      mode: options.mode,
+    });
     await timeAsync(trace, "db.markSyncFailed", () =>
       db
         .update(agents)

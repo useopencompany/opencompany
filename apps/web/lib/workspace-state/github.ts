@@ -1,9 +1,12 @@
 import { createSign } from "node:crypto";
 import type { getDb } from "@opencompany/db/client";
 import { type Workspace, workspaceRepositories } from "@opencompany/db/schema";
+import { createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 
 type Db = ReturnType<typeof getDb>;
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 type WorkspaceRepositoryRecord = typeof workspaceRepositories.$inferSelect;
 
@@ -324,22 +327,20 @@ async function githubRequest<T>(input: {
 }
 
 function logGitHubTiming(method: string, path: string, response: Response, durationMs: number) {
-  if (process.env.OPENCOMPANY_TIMING !== "1") return;
+  if (process.env.OPENCOMPANY_TIMING !== "1" && process.env.OBSERVABILITY_TIMING !== "1") return;
 
-  console.info(
-    JSON.stringify({
-      event: "opencompany.github",
-      method,
-      path: redactGitHubPath(path),
-      status: response.status,
-      durationMs: Math.round(durationMs),
-      rateLimitLimit: response.headers.get("x-ratelimit-limit"),
-      rateLimitRemaining: response.headers.get("x-ratelimit-remaining"),
-      rateLimitUsed: response.headers.get("x-ratelimit-used"),
-      rateLimitReset: response.headers.get("x-ratelimit-reset"),
-      rateLimitResource: response.headers.get("x-ratelimit-resource"),
-    }),
-  );
+  logger.info("GitHub API request", {
+    event: "opencompany.github",
+    method,
+    path: redactGitHubPath(path),
+    status: response.status,
+    durationMs: Math.round(durationMs),
+    rateLimitLimit: response.headers.get("x-ratelimit-limit"),
+    rateLimitRemaining: response.headers.get("x-ratelimit-remaining"),
+    rateLimitUsed: response.headers.get("x-ratelimit-used"),
+    rateLimitReset: response.headers.get("x-ratelimit-reset"),
+    rateLimitResource: response.headers.get("x-ratelimit-resource"),
+  });
 }
 
 function redactGitHubPath(path: string) {

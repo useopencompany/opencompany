@@ -50,6 +50,7 @@ Vercel is the source of truth for shared development env vars. Store the stable 
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- optional runner, analytics, and observability values from `.env.example`
 
 `DATABASE_URL` can also exist in Vercel Development for the explicit `--shared-db` mode, but normal local setup overwrites `.env.local` with a Neon branch-specific URL.
 
@@ -62,7 +63,8 @@ bun run env:pull
 
 `bun run env:pull` pulls Vercel Development env vars to a temporary file and merges only the shared setup keys above into `.env.local`. In the default branch database mode, it does not overwrite `DATABASE_URL`.
 
-Mark `WORKOS_API_KEY`, `DATABASE_URL`, and `GITHUB_APP_PRIVATE_KEY` as sensitive in Vercel.
+Mark `WORKOS_API_KEY`, `DATABASE_URL`, `GITHUB_APP_PRIVATE_KEY`, and `BETTER_STACK_ERRORS_DSN` as
+sensitive in Vercel.
 
 The Inngest values in `.env.example` are for background jobs. Local `bun run dev` uses the Inngest dev helper; hosted environments should set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
 

@@ -133,8 +133,10 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
+- `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars for cloning the managed workspace repo into E2B:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
+- optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to

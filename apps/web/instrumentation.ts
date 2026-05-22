@@ -1,19 +1,20 @@
-import { initClientAnalytics } from "@opencompany/analytics/client";
 import { isObservabilityEnabled, setExceptionReporter } from "@opencompany/observability";
-import * as Sentry from "@sentry/nextjs";
 
-initClientAnalytics();
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-const dsn = process.env.NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN?.trim();
+  const dsn = process.env.BETTER_STACK_ERRORS_DSN?.trim();
+  if (!isObservabilityEnabled() || !dsn) return;
 
-if (isObservabilityEnabled() && dsn) {
+  const Sentry = await import("@sentry/nextjs");
   Sentry.init({
     dsn,
-    environment: process.env.NEXT_PUBLIC_OBSERVABILITY_ENV ?? process.env.NODE_ENV,
-    release: process.env.NEXT_PUBLIC_OBSERVABILITY_RELEASE,
+    environment: process.env.OBSERVABILITY_ENV ?? process.env.VERCEL_ENV ?? process.env.NODE_ENV,
+    release:
+      process.env.OBSERVABILITY_RELEASE ??
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      process.env.RENDER_GIT_COMMIT,
     tracesSampleRate: 0,
-    replaysSessionSampleRate: 0,
-    replaysOnErrorSampleRate: 0,
   });
 
   setExceptionReporter({

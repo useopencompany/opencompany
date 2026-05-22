@@ -41,7 +41,10 @@ export const startAgentSession = inngest.createFunction(
   },
   async ({ event, step }) => {
     return step.run("start runner session", async () => {
-      await callRunner(`/internal/sessions/${event.data.sessionId}/start`);
+      await callRunner(`/internal/sessions/${event.data.sessionId}/start`, {
+        event: "opencompany.inngest_start_runner_failed",
+        session_id: event.data.sessionId,
+      });
       return { ok: true };
     });
   },
@@ -62,6 +65,11 @@ export const runAgentSessionMessage = inngest.createFunction(
     return step.run("run runner message", async () => {
       await callRunner(
         `/internal/sessions/${event.data.sessionId}/messages/${event.data.messageId}/run`,
+        {
+          event: "opencompany.inngest_run_message_failed",
+          session_id: event.data.sessionId,
+          message_id: event.data.messageId,
+        },
       );
       return { ok: true };
     });
@@ -77,7 +85,10 @@ export const abortAgentSession = inngest.createFunction(
   },
   async ({ event, step }) => {
     return step.run("abort runner session", async () => {
-      await callRunner(`/internal/sessions/${event.data.sessionId}/abort`);
+      await callRunner(`/internal/sessions/${event.data.sessionId}/abort`, {
+        event: "opencompany.inngest_abort_runner_failed",
+        session_id: event.data.sessionId,
+      });
       return { ok: true };
     });
   },
