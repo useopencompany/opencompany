@@ -4,19 +4,28 @@ import {
   AlertCircle,
   ArrowUp,
   Bot,
+  CheckCircle2,
+  ChevronRight,
   CircleStop,
   ExternalLink,
+  LoaderCircle,
   PanelRight,
   TerminalSquare,
+  Wrench,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState, useTransition } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
 import {
+  type AssistantTurnPart,
   applyRuntimeEventToState,
+  buildAssistantTurnParts,
   type RuntimeEvent,
+  type RuntimeToolCall,
   readString,
   type SessionMessage,
 } from "@/lib/agent-sessions/runtime-events";
@@ -46,6 +55,18 @@ type Props = {
 };
 
 const SESSION_INSPECTOR_STORAGE_KEY = "opencompany-session-inspector-collapsed";
+const MARKDOWN_COMPONENTS: Components = {
+  a: ({ children, href }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="font-medium text-ink underline decoration-[#c7c7c2] underline-offset-2 transition-colors hover:decoration-ink/70"
+    >
+      {children}
+    </a>
+  ),
+};
 
 function getStoredInspectorCollapsed() {
   if (typeof window === "undefined") return true;
@@ -77,6 +98,17 @@ export default function SessionView({
       runtime.messages.filter((message) => message.role === "user" || message.role === "assistant"),
     [runtime.messages],
   );
+  const assistantPartsByMessageId = useMemo(() => {
+    const partsByMessageId = new Map<string, AssistantTurnPart[]>();
+    for (const message of runtime.messages) {
+      if (message.role !== "assistant") continue;
+      partsByMessageId.set(
+        message.id,
+        buildAssistantTurnParts(message, runtime.events, runtime.messages),
+      );
+    }
+    return partsByMessageId;
+  }, [runtime.events, runtime.messages]);
   const lastVisibleMessage = visibleMessages.at(-1);
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running",
@@ -172,29 +204,30 @@ export default function SessionView({
               </div>
             ) : null}
 
-            {visibleMessages.map((message) => (
-              <div
-                key={message.id}
-                className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
-              >
+            {visibleMessages.map((message) => {
+              const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
+
+              return (
                 <div
-                  className={
-                    message.role === "user"
-                      ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
-                      : "max-w-[86%] whitespace-pre-wrap text-[13px] leading-6 text-ink/90"
-                  }
+                  key={message.id}
+                  className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
                 >
-                  {message.content ||
-                    (message.role === "assistant" && message.status === "running" ? (
-                      <ThinkingShimmer />
-                    ) : message.role === "assistant" ? (
-                      "..."
+                  <div
+                    className={
+                      message.role === "user"
+                        ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
+                        : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
+                    }
+                  >
+                    {message.role === "assistant" ? (
+                      <AssistantMessageContent message={message} parts={assistantParts} />
                     ) : (
-                      ""
-                    ))}
+                      message.content
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
@@ -276,6 +309,116 @@ export default function SessionView({
       </button>
     </main>
   );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  return (
+    <div className="session-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function AssistantMessageContent({
+  message,
+  parts,
+}: {
+  message: SessionMessage;
+  parts: AssistantTurnPart[];
+}) {
+  const hasParts = parts.length > 0;
+
+  return (
+    <div className="space-y-3">
+      {parts.map((part, index) =>
+        part.type === "text" ? (
+          <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />
+        ) : (
+          <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
+        ),
+      )}
+      {!hasParts ? message.status === "running" ? <ThinkingShimmer /> : "..." : null}
+    </div>
+  );
+}
+
+function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  const isCompleted = toolCall.status === "completed";
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-[#e2e2de] bg-white/70 text-[12px] leading-5 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        className={`flex w-full min-w-0 items-center gap-2 bg-[#f7f7f4] px-3 py-2 text-left transition-colors hover:bg-[#f1f1ee] ${
+          expanded ? "border-b border-[#ecece8]" : ""
+        }`}
+      >
+        <ChevronRight
+          size={13}
+          strokeWidth={1.9}
+          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-[#ddddda] bg-white text-ink-muted">
+          <Wrench size={12} strokeWidth={1.8} />
+        </span>
+        <span className="min-w-0 flex-1 truncate font-medium text-ink/85">
+          {formatToolName(toolCall.name)}
+        </span>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10.5px] font-medium ${
+            isCompleted
+              ? "border-[#d7e6d4] bg-[#f3faf1] text-[#3f7c35]"
+              : "border-[#eadfbe] bg-[#fffaf0] text-[#8a5a00]"
+          }`}
+        >
+          {isCompleted ? (
+            <CheckCircle2 size={10} strokeWidth={2} />
+          ) : (
+            <LoaderCircle size={10} strokeWidth={2} className="animate-spin" />
+          )}
+          {isCompleted ? "Done" : "Running"}
+        </span>
+      </button>
+      {expanded ? (
+        <>
+          {toolCall.inputPreview ? (
+            <ToolCallPreview label="Input" value={toolCall.inputPreview} />
+          ) : null}
+          {toolCall.activityPreview && !toolCall.outputPreview ? (
+            <ToolCallPreview label="Activity" value={toolCall.activityPreview} />
+          ) : null}
+          {toolCall.outputPreview ? (
+            <ToolCallPreview label="Output" value={toolCall.outputPreview} />
+          ) : null}
+          {!toolCall.activityPreview && !toolCall.outputPreview && !isCompleted ? (
+            <div className="px-3 py-2 text-[11.5px] text-ink-subtle">Waiting for result</div>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolCallPreview({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-t border-[#eeeeea] px-3 py-2 first:border-t-0">
+      <div className="mb-1 text-[10px] font-medium uppercase text-ink-subtle">{label}</div>
+      <pre className="max-h-36 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-ink/75">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
+function formatToolName(name: string) {
+  const normalized = name.replace(/[_-]+/g, " ").trim();
+  if (!normalized) return "Tool call";
+  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
 }
 
 function ThinkingShimmer() {

@@ -8,14 +8,13 @@ import { and, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import {
-  agentPathForSlug,
-  parseAgentFile,
-  serializeAgentFile,
-  slugifyAgentTitle,
-} from "@/lib/agents/agent-file";
+import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
+import { randomAgentName } from "@/lib/agents/names";
+import { resolveAgentPath } from "@/lib/agents/paths";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
+import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
+import type { AgentModelId } from "@/lib/agents/types";
 import { getCurrentWorkspace } from "@/lib/auth";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
@@ -37,7 +36,7 @@ export async function createAgent() {
   const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const id = newAgentId();
-  const title = "Untitled agent";
+  const title = randomAgentName();
   const body = "";
   const path = await timeAsync(trace, "db.nextAvailableAgentPath", () =>
     nextAvailableAgentPath(db, workspace.id, title),
@@ -66,6 +65,8 @@ export async function createAgent() {
         path,
         desiredHash: contentHash,
         desiredVersion: version,
+        previousPath: null,
+        previousBlobSha: null,
       }),
     ]),
   );
@@ -83,17 +84,22 @@ export async function createAgent() {
   redirect(`/agents/${result.path}`);
 }
 
-export async function updateAgent(idOrPath: string, patch: { name?: string; body?: string }) {
+export async function updateAgent(
+  idOrPath: string,
+  patch: { name?: string; body?: string; model?: AgentModelId },
+) {
   const trace = startTimingTrace("agents.update", {
     hasName: typeof patch.name === "string",
     hasBody: typeof patch.body === "string",
+    hasModel: typeof patch.model === "string",
   });
   const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
-  const changedFields: Array<"name" | "body"> = [];
+  const changedFields: Array<"name" | "body" | "model"> = [];
   if (typeof patch.name === "string") changedFields.push("name");
   if (typeof patch.body === "string") changedFields.push("body");
+  if (typeof patch.model === "string") changedFields.push("model");
 
   const [agent] = await timeAsync(trace, "db.selectAgent", () =>
     db
@@ -102,7 +108,9 @@ export async function updateAgent(idOrPath: string, patch: { name?: string; body
         path: agents.path,
         name: agents.name,
         body: agents.body,
+        config: agents.config,
         version: agents.version,
+        githubBlobSha: agents.githubBlobSha,
       })
       .from(agents)
       .where(
@@ -116,20 +124,40 @@ export async function updateAgent(idOrPath: string, patch: { name?: string; body
 
   if (!agent) {
     endTimingTrace(trace, { found: false });
-    return;
+    return null;
   }
 
-  const path =
-    agent.path ??
-    (await timeAsync(trace, "db.nextAvailableAgentPath", () =>
-      nextAvailableAgentPath(db, workspace.id, agent.name),
-    ));
   const title = patch.name ?? agent.name;
+  const path =
+    typeof patch.name === "string" || !agent.path
+      ? await timeAsync(trace, "db.nextAvailableAgentPath", () =>
+          nextAvailableAgentPath(db, workspace.id, title, agent.path),
+        )
+      : agent.path;
+  const previousPath = agent.path;
+  const pathChanged = Boolean(previousPath && path !== previousPath);
   const body = patch.body ?? agent.body;
-  const source = serializeAgentFile({ title, body });
+  const model = patch.model ?? agent.config.model.name;
+  const source = serializeAgentFile({ title, body, model });
   const parsed = parseAgentFile(source);
   const contentHash = hashAgentSource(source);
   const version = agent.version + 1;
+  const [existingSyncJob] = await timeAsync(trace, "db.selectExistingSyncJob", () =>
+    db
+      .select({
+        previousPath: agentSyncJobs.previousPath,
+        previousBlobSha: agentSyncJobs.previousBlobSha,
+      })
+      .from(agentSyncJobs)
+      .where(eq(agentSyncJobs.agentId, agent.id))
+      .limit(1),
+  );
+  const rename = resolveAgentSyncRename({
+    existingPreviousPath: existingSyncJob?.previousPath,
+    existingPreviousBlobSha: existingSyncJob?.previousBlobSha,
+    renamePreviousPath: pathChanged ? previousPath : null,
+    renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
+  });
 
   await timeAsync(trace, "db.updateAgentAndSyncJob", () =>
     db.batch([
@@ -153,6 +181,8 @@ export async function updateAgent(idOrPath: string, patch: { name?: string; body
         path,
         desiredHash: contentHash,
         desiredVersion: version,
+        previousPath: rename.previousPath,
+        previousBlobSha: rename.previousBlobSha,
       }),
     ]),
   );
@@ -166,33 +196,32 @@ export async function updateAgent(idOrPath: string, patch: { name?: string; body
     });
   }
 
-  const result = { id: agent.id, workspaceId: workspace.id, path };
+  const result = { id: agent.id, workspaceId: workspace.id, path, pathChanged };
 
   revalidatePath("/agents");
   revalidatePath(`/agents/${result.path}`);
+  if (previousPath) revalidatePath(`/agents/${previousPath}`);
   revalidatePath(`/agents/${result.id}`);
   scheduleAgentSyncDispatch(result);
-  endTimingTrace(trace, { found: true, path: result.path });
+  endTimingTrace(trace, { found: true, path: result.path, pathChanged });
+  return result;
 }
 
 async function nextAvailableAgentPath(
   db: ReturnType<typeof getDb>,
   workspaceId: string,
   title: string,
+  currentPath?: string | null,
 ) {
-  const slug = slugifyAgentTitle(title);
   const rows = await db
     .select({ path: agents.path })
     .from(agents)
     .where(eq(agents.workspaceId, workspaceId));
-  const existing = new Set(rows.flatMap((row) => (row.path ? [row.path] : [])));
-  let index = 0;
-
-  while (true) {
-    const candidate = agentPathForSlug(index === 0 ? slug : `${slug}-${index + 1}`);
-    if (!existing.has(candidate)) return candidate;
-    index += 1;
-  }
+  return resolveAgentPath({
+    title,
+    currentPath,
+    existingPaths: rows.flatMap((row) => (row.path ? [row.path] : [])),
+  });
 }
 
 function agentSyncJobUpsert(
@@ -203,6 +232,8 @@ function agentSyncJobUpsert(
     path: string;
     desiredHash: string;
     desiredVersion: number;
+    previousPath: string | null;
+    previousBlobSha: string | null;
   },
 ) {
   const now = new Date();
@@ -222,6 +253,8 @@ function agentSyncJobUpsert(
         path: input.path,
         desiredHash: input.desiredHash,
         desiredVersion: input.desiredVersion,
+        previousPath: input.previousPath,
+        previousBlobSha: input.previousBlobSha,
         status: "pending",
         attempts: 0,
         nextRunAt: new Date(now.getTime() + 10_000),
@@ -278,7 +311,11 @@ export async function materializeLegacyAgentFiles() {
     if (agent.path) continue;
 
     const body = agent.body || agent.config.instructions;
-    const source = serializeAgentFile({ title: agent.name, body });
+    const source = serializeAgentFile({
+      title: agent.name,
+      body,
+      model: agent.config.model.name,
+    });
     const parsed = parseAgentFile(source);
     const contentHash = hashAgentSource(source);
     const path = await nextAvailableAgentPath(db, workspace.id, agent.name);
@@ -350,7 +387,11 @@ export async function syncAgentsFromWorkspaceRepository() {
     );
     const parsed = parseAgentFile(content);
     const contentHash = hashAgentSource(
-      serializeAgentFile({ title: parsed.title, body: parsed.body }),
+      serializeAgentFile({
+        title: parsed.title,
+        body: parsed.body,
+        model: parsed.config.model.name,
+      }),
     );
     const [existing] = await timeAsync(
       trace,

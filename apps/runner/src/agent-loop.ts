@@ -23,6 +23,7 @@ import {
   type LanguageModelUsage,
   stepCountIs,
   streamText,
+  type TextStreamPart,
   type ToolSet,
   tool,
 } from "ai";
@@ -246,6 +247,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     for await (const part of result.fullStream) {
       await checkAbort();
       throwIfAborted(controller.signal);
+      throwIfStreamErrorPart(part);
 
       if (part.type === "text-delta") {
         assistantContent += part.text;
@@ -290,6 +292,10 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     }
 
     await checkAbort();
+    if (!assistantContent && assistantReplayParts.length === 0) {
+      throw new Error("Model stream completed without text or tool calls.");
+    }
+
     const assistantModelMessage = buildAssistantModelMessage({
       content: assistantContent,
       parts: assistantReplayParts,
@@ -549,6 +555,7 @@ async function executeRuntimeTool(input: {
               type: "command.output",
               payload: {
                 command: input.name,
+                toolCallId: input.toolCallId,
                 stream,
                 delta,
               },
@@ -1024,6 +1031,35 @@ function throwIfAborted(signal: AbortSignal) {
   if (signal.aborted) {
     throw new Error("Run aborted.");
   }
+}
+
+export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
+  if (part.type === "abort") {
+    throw new RunAbortError(part.reason || "Run aborted.");
+  }
+
+  if (part.type === "error") {
+    throw toStreamError(part.error, "Model stream failed.");
+  }
+
+  if (part.type === "tool-error") {
+    throw toStreamError(part.error, `Tool ${part.toolName} failed.`);
+  }
+}
+
+function toStreamError(error: unknown, fallback: string) {
+  if (error instanceof Error) return error;
+  if (typeof error === "string" && error.trim()) return new Error(error);
+  if (error === null || error === undefined) return new Error(fallback);
+
+  try {
+    const serialized = JSON.stringify(error);
+    if (serialized && serialized !== "{}") return new Error(serialized);
+  } catch {
+    // Fall through to the fallback message.
+  }
+
+  return new Error(fallback);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -6,6 +6,7 @@ import {
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
   recordStepUsage,
+  throwIfStreamErrorPart,
 } from "./agent-loop";
 import { appendRuntimeEvent } from "./events";
 
@@ -203,6 +204,26 @@ describe("usage recording", () => {
         payload: expect.objectContaining({ stepIndex: 2 }),
       }),
     );
+  });
+});
+
+describe("stream error handling", () => {
+  it("throws model stream errors instead of allowing blank completions", () => {
+    expect(() =>
+      throwIfStreamErrorPart({ type: "error", error: new Error("gateway failed") } as never),
+    ).toThrow("gateway failed");
+  });
+
+  it("throws tool stream errors with a fallback message", () => {
+    expect(() =>
+      throwIfStreamErrorPart({
+        type: "tool-error",
+        toolName: "list_files",
+        toolCallId: "tool_123",
+        input: {},
+        error: null,
+      } as never),
+    ).toThrow("Tool list_files failed.");
   });
 });
 

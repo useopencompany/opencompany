@@ -26,7 +26,7 @@ export default async function AgentPage({ params }: { params: Promise<{ path: st
 
   return (
     <AgentDetail
-      id={agent.path ?? agent.id}
+      id={agent.id}
       initialName={agent.name}
       initialBody={agent.body || agent.config.instructions}
       initialConfig={agent.config}

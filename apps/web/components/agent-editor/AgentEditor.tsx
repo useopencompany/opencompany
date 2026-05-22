@@ -84,7 +84,7 @@ export function AgentEditor({ initialBody, onChange }: Props) {
     <div className="relative">
       {isEmpty && (
         <div className="pointer-events-none absolute left-0 top-0 text-[13.5px] leading-7 text-ink-subtle/70">
-          Describe what this agent should do. Mention models or tools with @.
+          Describe what this agent should do. Mention tools with @.
         </div>
       )}
       <EditorContent editor={editor} />
