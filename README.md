@@ -26,7 +26,7 @@ bun run setup
 bun run dev
 ```
 
-`bun run setup` is interactive and idempotent — it copies `.env.example`, offers to pull shared dev env vars from Vercel, runs migrations, and optionally seeds. See [docs/getting-started.md](./docs/getting-started.md) for the full walkthrough.
+`bun run setup` is idempotent: it copies `.env.example`, pulls shared dev env vars from Vercel when needed, creates or reuses a Neon branch for the current Git branch, and runs migrations. See [docs/getting-started.md](./docs/getting-started.md) for the full walkthrough.
 
 ## Repo layout
 

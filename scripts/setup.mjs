@@ -5,6 +5,9 @@ import { argv, exit, versions } from "node:process";
 
 const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
+const START_DEV_MODE = argv.includes("--dev");
+const SHARED_DATABASE_MODE =
+  argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
 
 // .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
@@ -30,12 +33,17 @@ const RUNNER_ENV_KEYS = [
   "OPENCOMPANY_E2B_TEMPLATE",
 ];
 const OPTIONAL_SHARED_DEV_ENV_KEYS = [
+  "NEON_PARENT_BRANCH",
+  "NEON_DATABASE_NAME",
+  "NEON_ROLE_NAME",
+  "NEON_BRANCH_NAME",
   "NEXT_PUBLIC_POSTHOG_TOKEN",
   "NEXT_PUBLIC_POSTHOG_HOST",
   "NEXT_PUBLIC_ANALYTICS_DEBUG",
   ...RUNNER_ENV_KEYS,
 ];
-const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, ...GITHUB_ENV_KEYS, "DATABASE_URL"];
+const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, ...GITHUB_ENV_KEYS];
+const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const VERCEL_ENV_PULL_PATH = ".env.vercel.local";
 
 function assertNodeVersion() {
@@ -151,11 +159,14 @@ function inspectState() {
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
 
   return {
+    databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
     envFile: existsSync(".env.local") ? "exists" : "missing",
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
+    neonProject: isPlaceholder(env.NEON_PROJECT_ID) ? "placeholder" : "set",
+    neonBranch: isPlaceholder(env.NEON_BRANCH) ? "placeholder" : "set",
   };
 }
 
@@ -172,13 +183,21 @@ async function ensureEnvFile(state) {
   ok("Created .env.local from .env.example");
 }
 
-function pullSharedDevEnvFromVercel() {
+function pullSharedDevEnvFromVercel({
+  requireDatabaseUrl = false,
+  requireNeonProject = false,
+} = {}) {
   run("bunx", ["vercel", "env", "pull", VERCEL_ENV_PULL_PATH, "--yes"]);
 
   const pulled = parseEnv(VERCEL_ENV_PULL_PATH);
   rmSync(VERCEL_ENV_PULL_PATH, { force: true });
 
-  const missing = SHARED_DEV_ENV_KEYS.filter((key) => isPlaceholder(pulled[key]));
+  const requiredKeys = [
+    ...SHARED_DEV_ENV_KEYS,
+    ...(requireNeonProject ? NEON_ENV_KEYS : []),
+    ...(requireDatabaseUrl ? ["DATABASE_URL"] : []),
+  ];
+  const missing = requiredKeys.filter((key) => isPlaceholder(pulled[key]));
   if (missing.length > 0) {
     throw new Error(
       `Vercel Development env is missing shared setup values: ${missing.join(", ")}. ` +
@@ -189,7 +208,7 @@ function pullSharedDevEnvFromVercel() {
   writeEnvValues(
     ".env.local",
     Object.fromEntries([
-      ...SHARED_DEV_ENV_KEYS.map((key) => [key, pulled[key]]),
+      ...requiredKeys.map((key) => [key, pulled[key]]),
       ...OPTIONAL_SHARED_DEV_ENV_KEYS.filter((key) => !isPlaceholder(pulled[key])).map((key) => [
         key,
         pulled[key],
@@ -206,7 +225,7 @@ async function ensureWorkOS(state) {
   }
 
   warn("WorkOS env vars in .env.local are still placeholders. Pulling from Vercel.");
-  pullSharedDevEnvFromVercel();
+  pullSharedDevEnvFromVercel({ requireNeonProject: !SHARED_DATABASE_MODE });
 
   const after = inspectState();
   if (after.workos !== "ready") {
@@ -218,21 +237,53 @@ async function ensureWorkOS(state) {
   ok("WorkOS configured");
 }
 
-async function ensureDatabaseUrl(state) {
-  step("Database URL");
+async function ensureNeonProject(state) {
+  if (SHARED_DATABASE_MODE) return;
+
+  step("Neon project");
+  if (state.neonProject === "set") {
+    ok("NEON_PROJECT_ID is set");
+    return;
+  }
+
+  warn("NEON_PROJECT_ID is missing from .env.local. Pulling from Vercel.");
+  pullSharedDevEnvFromVercel({ requireNeonProject: true });
+
+  const after = inspectState();
+  if (after.neonProject !== "set") {
+    throw new Error("Vercel env pull finished but NEON_PROJECT_ID is still missing.");
+  }
+  ok("Neon project configured");
+}
+
+async function ensureSharedDatabaseUrl(state) {
+  step("Shared database URL");
   if (state.databaseUrl === "set") {
     ok("DATABASE_URL is set");
     return;
   }
 
   warn("DATABASE_URL is missing from .env.local. Pulling from Vercel.");
-  pullSharedDevEnvFromVercel();
+  pullSharedDevEnvFromVercel({ requireDatabaseUrl: true });
 
   const after = inspectState();
   if (after.databaseUrl !== "set") {
     throw new Error("Vercel env pull finished but DATABASE_URL is still missing.");
   }
   ok("DATABASE_URL configured");
+}
+
+async function ensureBranchDatabase() {
+  step("Neon branch database");
+  run("bun", ["run", "db:branch:create"]);
+
+  const after = inspectState();
+  if (after.databaseUrl !== "set" || after.neonBranch !== "set") {
+    throw new Error(
+      "Neon branch creation finished but DATABASE_URL or NEON_BRANCH is still missing.",
+    );
+  }
+  ok("DATABASE_URL points at the Neon branch for this worktree");
 }
 
 async function runMigrations() {
@@ -244,7 +295,10 @@ async function main() {
   if (PULL_ENV_MODE) {
     console.log("\n\x1b[1mPull shared dev env\x1b[0m");
     await ensureEnvFile(inspectState());
-    pullSharedDevEnvFromVercel();
+    pullSharedDevEnvFromVercel({
+      requireDatabaseUrl: SHARED_DATABASE_MODE,
+      requireNeonProject: !SHARED_DATABASE_MODE,
+    });
     ok("Updated .env.local with shared setup values from Vercel");
     return;
   }
@@ -255,17 +309,33 @@ async function main() {
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
     }
-    if (state.workos === "placeholder" || state.databaseUrl === "placeholder") {
+    if (
+      state.workos === "placeholder" ||
+      (!SHARED_DATABASE_MODE && state.neonProject === "placeholder") ||
+      (SHARED_DATABASE_MODE && state.databaseUrl === "placeholder")
+    ) {
       const missingShared = [
         ...state.workosMissingKeys,
-        ...(state.databaseUrl === "placeholder" ? ["DATABASE_URL"] : []),
+        ...(!SHARED_DATABASE_MODE && state.neonProject === "placeholder"
+          ? ["NEON_PROJECT_ID"]
+          : []),
+        ...(SHARED_DATABASE_MODE && state.databaseUrl === "placeholder" ? ["DATABASE_URL"] : []),
       ];
       nextSteps.push({
         command: "bun run env:pull",
         reason: `pull shared development env vars from Vercel into .env.local (${missingShared.join(", ")})`,
       });
     }
-    if (state.workos === "ready" && state.databaseUrl === "set") {
+    if (!SHARED_DATABASE_MODE && state.neonProject === "set") {
+      nextSteps.push({
+        command: "bun run db:branch:create",
+        reason: "create or refresh the Neon branch DATABASE_URL for this Git branch",
+      });
+    }
+    if (
+      state.workos === "ready" &&
+      (SHARED_DATABASE_MODE ? state.databaseUrl === "set" : state.neonProject === "set")
+    ) {
       nextSteps.push({
         command: "bun run db:migrate",
         reason: "apply migrations against the configured DATABASE_URL",
@@ -281,13 +351,22 @@ async function main() {
   const state = inspectState();
   await ensureEnvFile(state);
   await ensureWorkOS(inspectState());
-  await ensureDatabaseUrl(inspectState());
+  if (SHARED_DATABASE_MODE) {
+    await ensureSharedDatabaseUrl(inspectState());
+  } else {
+    await ensureNeonProject(inspectState());
+    await ensureBranchDatabase();
+  }
   await runMigrations();
+
+  if (!START_DEV_MODE) {
+    console.log("\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m when ready.\n");
+    return;
+  }
 
   console.log(
     "\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Starting \x1b[1mbun run dev\x1b[0m — open http://localhost:3000\n",
   );
-
   run("bun", ["run", "dev"]);
 }
 

@@ -15,6 +15,7 @@ function realEnv(name) {
 const action = process.argv[2];
 const projectId = realEnv("NEON_PROJECT_ID");
 const parentBranch = realEnv("NEON_PARENT_BRANCH");
+const branchNameOverride = realEnv("NEON_BRANCH_NAME");
 const databaseName = realEnv("NEON_DATABASE_NAME");
 const roleName = realEnv("NEON_ROLE_NAME");
 const apiKey = realEnv("NEON_API_KEY");
@@ -37,12 +38,23 @@ function currentGitBranch() {
   return branch;
 }
 
-function neonBranchName() {
-  return currentGitBranch()
+function sanitizeBranchName(name) {
+  const sanitized = name
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 63);
+
+  if (!sanitized) {
+    throw new Error(`Could not derive a valid Neon branch name from "${name}".`);
+  }
+
+  return sanitized;
+}
+
+function neonBranchName() {
+  if (branchNameOverride) return sanitizeBranchName(branchNameOverride);
+  return sanitizeBranchName(currentGitBranch());
 }
 
 function neon(args) {
