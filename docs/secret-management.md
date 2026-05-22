@@ -189,8 +189,8 @@ Normal changes:
 
 1. Edit values in Infisical.
 2. Let syncs update Vercel/Render.
-3. Run `bun run infisical:release:preflight` locally or let CI run `bun run release:preflight`.
-4. Deploy through `Release Production`.
+3. Run `bun run infisical:release:preflight` locally or let GitHub Actions run `bun run release:preflight`.
+4. Merge to `main` and let `Release Production` run after CI succeeds, or manually dispatch it from `main`.
 
 Break-glass changes:
 
