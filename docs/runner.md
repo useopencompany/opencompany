@@ -150,8 +150,8 @@ If the stored E2B sandbox id has already disappeared, the runner creates a fresh
 retrying the stale id.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
-also merges the runner env vars from Vercel Development into `.env.local`, including hosted-tool
-secrets like `EXA_API_KEY` when they are present.
+also merges the runner env vars from Infisical `dev` + `/runner` into `.env.local`, including
+hosted-tool secrets like `EXA_API_KEY` when they are present.
 
 Run the app, Inngest dev server, and runner together:
 
@@ -212,9 +212,13 @@ future requests.
 
 V1 is designed for Render Standard near the Neon database region. `render.yaml` defines the web
 service and required secrets. Keep the Next.js app on Vercel, point `RUNNER_PUBLIC_URL` at the
-browser-reachable Render service URL, and set `RUNNER_ALLOWED_ORIGINS` to the exact Vercel web origin.
-Render does not automatically inherit Vercel environment variables; keep `render.yaml` in sync with
-the runner env contract and set the secret values in Render for hosted deployments.
+browser-reachable Render service URL, and set `RUNNER_ALLOWED_ORIGINS` to the exact Vercel web
+origin. Render does not automatically inherit Vercel environment variables; keep `render.yaml` in
+sync with the runner env contract and set the secret values in Render for hosted deployments.
+
+Render auto-deploys are disabled in `render.yaml` so the GitHub Actions production release workflow
+can run database migrations, deploy web, trigger Render, and smoke check the full release in order.
+See [deployment.md](./deployment.md) for the release flow.
 
 The mature migration path is the same runner container on ECS/Fargate behind an ALB when queue
 depth, connection volume, or private networking needs justify the operational overhead.

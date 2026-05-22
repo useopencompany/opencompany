@@ -3,8 +3,10 @@ services:
     name: opencompany-runner
     runtime: docker
     plan: standard
+    autoDeployTrigger: off
     dockerfilePath: ./Dockerfile.runner
     healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 120
     envVars:
       - key: DATABASE_URL
         sync: false

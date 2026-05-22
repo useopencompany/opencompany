@@ -1,6 +1,6 @@
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
 
 const CHECK_MODE = argv.includes("--check");
@@ -72,7 +72,9 @@ const OPTIONAL_SHARED_DEV_ENV_KEYS = [
 ];
 const SHARED_DEV_ENV_KEYS = [...WORKOS_ENV_KEYS, ...GITHUB_ENV_KEYS];
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
-const VERCEL_ENV_PULL_PATH = ".env.vercel.local";
+const INFISICAL_DEV_ENV = "dev";
+const INFISICAL_DEV_PATHS = ["/web", "/runner"];
+const LOCAL_ONLY_ENV_KEYS = new Set(["DATABASE_URL", "NEON_BRANCH", "INNGEST_DEV"]);
 
 function assertNodeVersion() {
   const current = versions.node.split(".").map(Number);
@@ -211,14 +213,48 @@ async function ensureEnvFile(state) {
   ok("Created .env.local from .env.example");
 }
 
-function pullSharedDevEnvFromVercel({
+function canPullSharedDevEnvFromInfisical() {
+  if (!existsSync(".infisical.json")) return false;
+
+  const result = spawnSync("infisical", ["export", "--env", INFISICAL_DEV_ENV, "--path", "/web"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  return result.status === 0;
+}
+
+function pullSharedDevEnvFromInfisical({
   requireDatabaseUrl = false,
   requireNeonProject = false,
 } = {}) {
-  run("bunx", ["vercel", "env", "pull", VERCEL_ENV_PULL_PATH, "--yes"]);
+  const pulled = {};
 
-  const pulled = parseEnv(VERCEL_ENV_PULL_PATH);
-  rmSync(VERCEL_ENV_PULL_PATH, { force: true });
+  for (const path of INFISICAL_DEV_PATHS) {
+    const result = spawnSync(
+      "infisical",
+      ["export", "--env", INFISICAL_DEV_ENV, "--path", path, "--format", "json"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    if (result.status !== 0) {
+      throw new Error(result.stderr.trim() || `infisical export failed for ${path}`);
+    }
+
+    for (const secret of JSON.parse(result.stdout || "[]")) {
+      if (!secret?.key) continue;
+      if (
+        LOCAL_ONLY_ENV_KEYS.has(secret.key) &&
+        !(secret.key === "DATABASE_URL" && requireDatabaseUrl)
+      ) {
+        continue;
+      }
+      pulled[secret.key] = secret.value;
+    }
+  }
 
   const requiredKeys = [
     ...SHARED_DEV_ENV_KEYS,
@@ -228,8 +264,8 @@ function pullSharedDevEnvFromVercel({
   const missing = requiredKeys.filter((key) => isPlaceholder(pulled[key]));
   if (missing.length > 0) {
     throw new Error(
-      `Vercel Development env is missing shared setup values: ${missing.join(", ")}. ` +
-        "Add them in Vercel, then run `bun run env:pull` again.",
+      `Infisical ${INFISICAL_DEV_ENV} env is missing shared setup values: ${missing.join(", ")}. ` +
+        "Add them in Infisical, then run `bun run env:pull` again.",
     );
   }
 
@@ -245,6 +281,24 @@ function pullSharedDevEnvFromVercel({
   );
 }
 
+function pullSharedDevEnv(options = {}) {
+  if (canPullSharedDevEnvFromInfisical()) {
+    pullSharedDevEnvFromInfisical(options);
+    return "Infisical";
+  }
+
+  if (existsSync(".infisical.json")) {
+    throw new Error(
+      "Infisical is linked but shared dev env could not be pulled. " +
+        "Run `infisical login` and check the dev /web and /runner folders.",
+    );
+  }
+
+  throw new Error(
+    "Infisical is not linked. Run `infisical login` and `infisical init`, then re-run setup.",
+  );
+}
+
 async function ensureWorkOS(state) {
   step("WorkOS credentials");
   if (state.workos === "ready") {
@@ -252,17 +306,17 @@ async function ensureWorkOS(state) {
     return;
   }
 
-  warn("WorkOS env vars in .env.local are still placeholders. Pulling from Vercel.");
-  pullSharedDevEnvFromVercel({ requireNeonProject: !SHARED_DATABASE_MODE });
+  warn("WorkOS env vars in .env.local are still placeholders. Pulling from Infisical.");
+  const source = pullSharedDevEnv({ requireNeonProject: !SHARED_DATABASE_MODE });
 
   const after = inspectState();
   if (after.workos !== "ready") {
     throw new Error(
-      "Vercel env pull finished but .env.local still has placeholder WorkOS values. " +
+      `${source} env pull finished but .env.local still has placeholder WorkOS values. ` +
         "Inspect .env.local and re-run setup.",
     );
   }
-  ok("WorkOS configured");
+  ok(`WorkOS configured from ${source}`);
 }
 
 async function ensureNeonProject(state) {
@@ -274,14 +328,14 @@ async function ensureNeonProject(state) {
     return;
   }
 
-  warn("NEON_PROJECT_ID is missing from .env.local. Pulling from Vercel.");
-  pullSharedDevEnvFromVercel({ requireNeonProject: true });
+  warn("NEON_PROJECT_ID is missing from .env.local. Pulling from Infisical.");
+  const source = pullSharedDevEnv({ requireNeonProject: true });
 
   const after = inspectState();
   if (after.neonProject !== "set") {
-    throw new Error("Vercel env pull finished but NEON_PROJECT_ID is still missing.");
+    throw new Error(`${source} env pull finished but NEON_PROJECT_ID is still missing.`);
   }
-  ok("Neon project configured");
+  ok(`Neon project configured from ${source}`);
 }
 
 async function ensureSharedDatabaseUrl(state) {
@@ -291,14 +345,14 @@ async function ensureSharedDatabaseUrl(state) {
     return;
   }
 
-  warn("DATABASE_URL is missing from .env.local. Pulling from Vercel.");
-  pullSharedDevEnvFromVercel({ requireDatabaseUrl: true });
+  warn("DATABASE_URL is missing from .env.local. Pulling from Infisical.");
+  const source = pullSharedDevEnv({ requireDatabaseUrl: true });
 
   const after = inspectState();
   if (after.databaseUrl !== "set") {
-    throw new Error("Vercel env pull finished but DATABASE_URL is still missing.");
+    throw new Error(`${source} env pull finished but DATABASE_URL is still missing.`);
   }
-  ok("DATABASE_URL configured");
+  ok(`DATABASE_URL configured from ${source}`);
 }
 
 async function ensureBranchDatabase() {
@@ -323,11 +377,11 @@ async function main() {
   if (PULL_ENV_MODE) {
     console.log("\n\x1b[1mPull shared dev env\x1b[0m");
     await ensureEnvFile(inspectState());
-    pullSharedDevEnvFromVercel({
+    const source = pullSharedDevEnv({
       requireDatabaseUrl: SHARED_DATABASE_MODE,
       requireNeonProject: !SHARED_DATABASE_MODE,
     });
-    ok("Updated .env.local with shared setup values from Vercel");
+    ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
 
@@ -351,7 +405,7 @@ async function main() {
       ];
       nextSteps.push({
         command: "bun run env:pull",
-        reason: `pull shared development env vars from Vercel into .env.local (${missingShared.join(", ")})`,
+        reason: `pull shared development env vars into .env.local (${missingShared.join(", ")})`,
       });
     }
     if (!SHARED_DATABASE_MODE && state.neonProject === "set") {

@@ -4,9 +4,14 @@ We use [Neon](https://neon.tech) (serverless Postgres) with [Drizzle ORM](https:
 
 ## Default local database
 
-Local checkouts use a Neon branch by default. `bun run setup` pulls shared non-database env vars from Vercel, creates or reuses a Neon branch for the current Git branch, writes that branch connection string to `.env.local`, then runs migrations. Later `bun run env:pull` runs preserve that branch-specific `DATABASE_URL`.
+Local checkouts use a Neon branch by default. `bun run setup` pulls shared non-database env vars
+from Infisical, creates or reuses a Neon branch for the current Git branch, writes that branch
+connection string to `.env.local`, then runs migrations. Later `bun run env:pull` runs preserve that
+branch-specific `DATABASE_URL`.
 
-The shared Vercel Development `DATABASE_URL` is still available as an escape hatch with `bun run setup -- --shared-db`, but it should not be the normal path for parallel worktrees. Automatic setup runs migrations, and migrations against a shared branch make unrelated local work interfere with each other.
+A shared `DATABASE_URL` is still available as an escape hatch with `bun run setup -- --shared-db`,
+but it should not be the normal path for parallel worktrees. Automatic setup runs migrations, and
+migrations against a shared branch make unrelated local work interfere with each other.
 
 ## Per-branch databases
 
@@ -28,7 +33,10 @@ Neon branches are copy-on-write, so creation is instant and cheap (a few MB unti
 
 `scripts/neon-branch.mjs` shells out to `neonctl` and resolves the project from `NEON_PROJECT_ID` in `.env.local`.
 
-For local development, set `NEON_PROJECT_ID` in Vercel Development and run `bun run env:pull`. This works across new worktrees because the project id is copied into each `.env.local`. Avoid relying on `bunx neonctl set-context --project-id <id>` for this repo: it writes a local `.neon` context file, which is worktree-local and gitignored here.
+For local development, set `NEON_PROJECT_ID` in Infisical `dev` + `/web` and run
+`bun run env:pull`. This works across new worktrees because the project id is copied into each
+`.env.local`. Avoid relying on `bunx neonctl set-context --project-id <id>` for this repo: it writes
+a local `.neon` context file, which is worktree-local and gitignored here.
 
 When fetching a connection string, the script auto-selects `neondb` and `neondb_owner` if they exist. These are the right defaults for local migrations and app queries. Set `NEON_DATABASE_NAME` or `NEON_ROLE_NAME` only for nonstandard Neon projects.
 
@@ -53,13 +61,18 @@ bun run setup
 
 When teammates pull your branch, their `db:migrate` will catch them up on their own Neon branch.
 
-## Production / Vercel
+## Production
 
-`vercel-build` runs `db:migrate && next build`, so prod deploys auto-migrate against whatever `DATABASE_URL` Vercel has. Set the following in Vercel project env:
+Production migrations run from the `Release Production` GitHub Actions workflow before the web app
+and runner are deployed. Vercel builds do not run migrations. Set the following in Vercel project
+env:
 
 - `DATABASE_URL` — pooled connection string for your prod Neon branch (usually `production` or `main`).
 - `NEON_API_KEY` — only needed if you also want to run branch scripts from CI.
-- `NEON_PROJECT_ID` — shared project config. Also set this in Vercel Development for local worktree setup.
+- `NEON_PROJECT_ID` — shared project config. Also set this in Infisical `dev` + `/web` for local worktree setup.
+
+Set the same production database URL as `PRODUCTION_DATABASE_URL` in the protected GitHub Actions
+`production` environment so the release workflow can apply migrations.
 
 Vercel preview deployments can be wired to spin up their own Neon branch via the [Neon Vercel integration](https://neon.tech/docs/guides/vercel-overview) — out of scope for this doc.
 

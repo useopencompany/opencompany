@@ -80,7 +80,7 @@ function neon(args) {
   } catch (error) {
     if (!projectId && !apiKey) {
       console.error(
-        "\nHint: run `bun run env:pull` to copy NEON_PROJECT_ID from Vercel Development,\n" +
+        "\nHint: run `bun run env:pull` to copy NEON_PROJECT_ID from Infisical dev,\n" +
           "or set NEON_PROJECT_ID in .env.local manually.\n",
       );
     } else if (args[0] === "connection-string" && !roleName) {
