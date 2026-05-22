@@ -20,7 +20,7 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "message.completed";
-      payload: { messageId: string; content?: string };
+      payload: { messageId: string; content?: string; modelMessage?: Record<string, unknown> };
     }
   | {
       type: "message.reasoning_summary";
@@ -83,6 +83,19 @@ export type AgentRuntimeEvent =
         totalTokens: number;
         finishReason?: string;
         rawFinishReason?: string;
+      };
+    }
+  | {
+      type: "session.tool_usage";
+      payload: {
+        messageId: string;
+        runLeaseId: string;
+        toolCallId: string;
+        toolName: string;
+        provider: string;
+        operation: string;
+        providerRequestId?: string;
+        costUsdMicros: number;
       };
     }
   | {

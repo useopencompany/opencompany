@@ -1,6 +1,6 @@
 import type { AgentConfig } from "@opencompany/db/schema";
 import { getAgentModelRuntimeOptions, type ModelProviderOptions } from "./models";
-import { CORE_TOOL_DEFINITIONS, type RuntimeToolName } from "./tools";
+import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 
 export type ResolvedAgentRuntimeConfig = {
   systemPrompt: string;
@@ -39,6 +39,6 @@ export function resolveAgentRuntimeConfig(input: {
       ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),
       exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
     },
-    tools: CORE_TOOL_DEFINITIONS.map((tool) => tool.name),
+    tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
   };
 }

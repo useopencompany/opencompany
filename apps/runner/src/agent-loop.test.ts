@@ -1,15 +1,27 @@
-import { agentSessionMessages, agentSessions, agentSessionUsage } from "@opencompany/db/schema";
+import {
+  RUNTIME_TOOL_DEFINITION_BY_NAME,
+  type RuntimeToolDefinition,
+} from "@opencompany/agent-runtime";
+import {
+  agentSessionMessages,
+  agentSessions,
+  agentSessionToolUsage,
+  agentSessionUsage,
+} from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acquireRunLease,
   appendRuntimeEventForLease,
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
+  executeRuntimeTool,
   normalizeReasoningSummary,
   readReasoningTextDelta,
   recordStepUsage,
+  recordToolUsage,
   throwIfStreamErrorPart,
 } from "./agent-loop";
+import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 
 const dbMocks = vi.hoisted(() => ({
@@ -26,6 +38,7 @@ vi.mock("./events", () => ({
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
@@ -207,6 +220,96 @@ describe("usage recording", () => {
       }),
     );
   });
+
+  it("records hosted tool usage and emits usage events", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await recordToolUsage({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      toolCallId: "call_exa",
+      toolName: "exa_search",
+      usage: {
+        provider: "exa",
+        operation: "search",
+        providerRequestId: "exa_req_123",
+        costUsdMicros: 7000,
+        rawUsage: { costDollars: { total: 0.007 } },
+      },
+    });
+
+    expect(db.state.toolUsage).toEqual([
+      expect.objectContaining({
+        toolCallId: "call_exa",
+        toolName: "exa_search",
+        provider: "exa",
+        operation: "search",
+        providerRequestId: "exa_req_123",
+        costUsdMicros: 7000,
+      }),
+    ]);
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "session.tool_usage",
+        payload: expect.objectContaining({
+          toolCallId: "call_exa",
+          provider: "exa",
+          costUsdMicros: 7000,
+        }),
+      }),
+    );
+  });
+
+  it("executes hosted tools without hydrating the sandbox", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              requestId: "exa_req_123",
+              searchType: "auto",
+              costDollars: { total: 0.001 },
+              results: [],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+    const getSandbox = vi.fn(async () => {
+      throw new Error("sandbox should not hydrate");
+    });
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      toolCallId: "call_exa",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search") as RuntimeToolDefinition,
+      args: { query: "test" },
+      getSandbox,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["tool_help", "exa_search"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(db.state.toolUsage).toHaveLength(1);
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "exa_search",
+      toolCallId: "call_exa",
+    });
+  });
 });
 
 describe("stream error handling", () => {
@@ -257,6 +360,15 @@ type UsageState = {
   stepIndex: number;
 };
 
+type ToolUsageState = {
+  toolCallId: string;
+  toolName: string;
+  provider: string;
+  operation: string;
+  providerRequestId?: string | null;
+  costUsdMicros: number;
+};
+
 function createLeaseDb(input: {
   runLeaseId?: string | null;
   runLeaseExpiresAt?: Date | null;
@@ -273,6 +385,7 @@ function createLeaseDb(input: {
     },
     messages: [...(input.messages ?? [])],
     usage: [] as UsageState[],
+    toolUsage: [] as ToolUsageState[],
   };
 
   return {
@@ -345,6 +458,10 @@ function createLeaseDb(input: {
             state.usage.push(values as UsageState);
             return Promise.resolve(undefined);
           }
+          if (table === agentSessionToolUsage) {
+            state.toolUsage.push(values as ToolUsageState);
+            return Promise.resolve(undefined);
+          }
 
           return {
             onConflictDoNothing() {
@@ -371,6 +488,23 @@ function createLeaseDb(input: {
         },
       };
     },
+  };
+}
+
+function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
+  return {
+    databaseUrl: "postgres://test",
+    internalToken: "internal",
+    streamTokenSecret: "stream",
+    e2bApiKey: "e2b",
+    vercelAiGatewayApiKey: "vag",
+    exaApiKey: "exa_test",
+    e2bTemplate: undefined,
+    e2bSandboxIdleTimeoutMs: 30_000,
+    port: 3040,
+    allowedOrigins: ["http://localhost:3000"],
+    instanceId: "runner-test",
+    ...overrides,
   };
 }
 

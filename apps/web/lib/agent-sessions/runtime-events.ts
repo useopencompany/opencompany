@@ -30,10 +30,21 @@ export type SessionUsageSummary = {
   totalTokens: number;
 };
 
+export type SessionToolUsageSummary = {
+  totalCostUsdMicros: number;
+  byProviderOperation: Array<{
+    provider: string;
+    operation: string;
+    costUsdMicros: number;
+    calls: number;
+  }>;
+};
+
 export type SessionRuntimeState = {
   events: RuntimeEvent[];
   messages: SessionMessage[];
   usage: SessionUsageSummary;
+  toolUsage: SessionToolUsageSummary;
   currentStatus: string;
   lastError: string | null;
 };
@@ -105,6 +116,40 @@ export function applyRuntimeEventToState(
     };
   }
 
+  if (event.type === "session.tool_usage") {
+    const provider = readString(event.payload.provider);
+    const operation = readString(event.payload.operation);
+    const costUsdMicros = readNumber(event.payload.costUsdMicros);
+    if (provider && operation) {
+      const key = `${provider}:${operation}`;
+      let matched = false;
+      const byProviderOperation = next.toolUsage.byProviderOperation.map((item) => {
+        if (`${item.provider}:${item.operation}` !== key) return item;
+        matched = true;
+        return {
+          ...item,
+          costUsdMicros: item.costUsdMicros + costUsdMicros,
+          calls: item.calls + 1,
+        };
+      });
+      if (!matched) {
+        byProviderOperation.push({ provider, operation, costUsdMicros, calls: 1 });
+      }
+
+      next = {
+        ...next,
+        toolUsage: {
+          totalCostUsdMicros: next.toolUsage.totalCostUsdMicros + costUsdMicros,
+          byProviderOperation: byProviderOperation.sort((left, right) =>
+            `${left.provider}:${left.operation}`.localeCompare(
+              `${right.provider}:${right.operation}`,
+            ),
+          ),
+        },
+      };
+    }
+  }
+
   if (event.type === "message.created") {
     const messageId = readString(event.payload.messageId);
     const role = readString(event.payload.role);
@@ -143,6 +188,7 @@ export function applyRuntimeEventToState(
   if (event.type === "message.completed") {
     const messageId = readString(event.payload.messageId);
     const content = optionalString(event.payload.content);
+    const modelMessage = isRecord(event.payload.modelMessage) ? event.payload.modelMessage : null;
     if (messageId) {
       const completedAt = new Date().toISOString();
       next = {
@@ -158,6 +204,7 @@ export function applyRuntimeEventToState(
                   ...message,
                   completedAt,
                 }),
+                ...(modelMessage ? { modelMessage } : {}),
               }
             : message,
         ),

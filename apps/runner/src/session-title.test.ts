@@ -35,6 +35,7 @@ const env = {
   streamTokenSecret: "stream-secret",
   e2bApiKey: "e2b",
   vercelAiGatewayApiKey: "gateway",
+  exaApiKey: undefined,
   e2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
   port: 3040,

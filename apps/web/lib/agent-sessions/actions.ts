@@ -11,6 +11,7 @@ import {
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
+  agentSessionToolUsage,
   agentSessionUsage,
   agents,
 } from "@opencompany/db/schema";
@@ -265,7 +266,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
 
   if (!session) return null;
 
-  const [messages, events, usageRows] = await Promise.all([
+  const [messages, events, usageRows, toolUsageRows] = await Promise.all([
     db
       .select()
       .from(agentSessionMessages)
@@ -291,6 +292,14 @@ export async function loadAgentSessionForPage(sessionId: string) {
       })
       .from(agentSessionUsage)
       .where(eq(agentSessionUsage.sessionId, sessionId)),
+    db
+      .select({
+        provider: agentSessionToolUsage.provider,
+        operation: agentSessionToolUsage.operation,
+        costUsdMicros: agentSessionToolUsage.costUsdMicros,
+      })
+      .from(agentSessionToolUsage)
+      .where(eq(agentSessionToolUsage.sessionId, sessionId)),
   ]);
   const usage = usageRows.reduce(
     (totals, row) => ({
@@ -326,6 +335,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
     outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
     thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
   }));
+  const toolUsage = summarizeToolUsage(toolUsageRows);
 
   const runnerUrl = getRunnerPublicUrl();
   const streamTokenSecret = getRunnerStreamTokenSecret();
@@ -341,12 +351,41 @@ export async function loadAgentSessionForPage(sessionId: string) {
         )
       : null;
 
-  return { session, messages: messagesWithUsage, events, usage, runnerUrl, token };
+  return { session, messages: messagesWithUsage, events, usage, toolUsage, runnerUrl, token };
 }
 
 function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
   if (!completedAt || completedAt < startedAt) return undefined;
   return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
+}
+
+function summarizeToolUsage(
+  rows: Array<{ provider: string; operation: string; costUsdMicros: number }>,
+) {
+  const byProviderOperation = new Map<
+    string,
+    { provider: string; operation: string; costUsdMicros: number; calls: number }
+  >();
+
+  for (const row of rows) {
+    const key = `${row.provider}:${row.operation}`;
+    const current = byProviderOperation.get(key) ?? {
+      provider: row.provider,
+      operation: row.operation,
+      costUsdMicros: 0,
+      calls: 0,
+    };
+    current.costUsdMicros += row.costUsdMicros;
+    current.calls += 1;
+    byProviderOperation.set(key, current);
+  }
+
+  return {
+    totalCostUsdMicros: rows.reduce((total, row) => total + row.costUsdMicros, 0),
+    byProviderOperation: Array.from(byProviderOperation.values()).sort((left, right) =>
+      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
+    ),
+  };
 }
 
 async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {
