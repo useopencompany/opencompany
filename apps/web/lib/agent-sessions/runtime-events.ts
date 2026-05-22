@@ -112,6 +112,10 @@ export function applyRuntimeEventToState(
   return next;
 }
 
+export function isInspectableRuntimeEvent(event: RuntimeEvent) {
+  return event.type !== "message.delta";
+}
+
 export function buildAssistantTurnParts(
   message: SessionMessage,
   events: RuntimeEvent[],

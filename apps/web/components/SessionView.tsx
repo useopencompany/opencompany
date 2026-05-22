@@ -24,6 +24,7 @@ import {
   type AssistantTurnPart,
   applyRuntimeEventToState,
   buildAssistantTurnParts,
+  isInspectableRuntimeEvent,
   type RuntimeEvent,
   type RuntimeToolCall,
   readString,
@@ -93,6 +94,10 @@ export default function SessionView({
   const [isPending, startTransition] = useTransition();
   const lastEventId = useMemo(() => runtime.events.at(-1)?.id ?? 0, [runtime.events]);
   const knownEventIds = useMemo(() => runtime.events.map((event) => event.id), [runtime.events]);
+  const inspectorEvents = useMemo(
+    () => runtime.events.filter(isInspectableRuntimeEvent),
+    [runtime.events],
+  );
   const visibleMessages = useMemo(
     () =>
       runtime.messages.filter((message) => message.role === "user" || message.role === "assistant"),
@@ -290,8 +295,8 @@ export default function SessionView({
           streamStatus={stream.status}
           streamErrorMessage={stream.errorMessage}
           runnerConfigured={Boolean(runnerUrl && streamToken)}
-          eventCount={runtime.events.length}
-          recentEvents={runtime.events.slice(-16)}
+          eventCount={inspectorEvents.length}
+          recentEvents={inspectorEvents.slice(-16)}
           canAbort={canAbort}
           isPending={isPending}
           onAbort={requestAbort}
@@ -499,7 +504,7 @@ function SessionInspector({
               value={formatRuntimeDate(session.abortRequestedAt)}
             />
           ) : null}
-          <InspectorField label="Events" value={String(eventCount)} />
+          <InspectorField label="Activity events" value={String(eventCount)} />
         </div>
         {lastError ? (
           <div className="mt-4 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[11.5px] leading-4 text-[#9f1d1d]">
@@ -528,7 +533,7 @@ function SessionInspector({
       </div>
 
       <div>
-        <InspectorHeader label="Recent events" countLabel={`${eventCount} total`} />
+        <InspectorHeader label="Recent events" countLabel={`${eventCount} shown`} />
         {recentEvents.length > 0 ? (
           <div className="space-y-1.5">
             {recentEvents.map((event) => (

@@ -111,13 +111,13 @@ describe("SSE formatting", () => {
       id: 42,
       sessionId: "ses_123",
       messageId: "msg_123",
-      type: "message.delta",
-      payload: { messageId: "msg_123", delta: "hello" },
+      type: "message.completed",
+      payload: { messageId: "msg_123", content: "hello" },
       createdAt: new Date("2026-05-22T00:00:00.000Z"),
     };
 
     expect(formatSseEvent(event)).toBe(
-      'id: 42\ndata: {"id":42,"type":"message.delta","payload":{"messageId":"msg_123","delta":"hello"},"messageId":"msg_123"}\n\n',
+      'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123"}\n\n',
     );
   });
 

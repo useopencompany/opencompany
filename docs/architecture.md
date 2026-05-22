@@ -70,10 +70,11 @@ The session flow is:
 4. Browser opens the runner SSE endpoint with a short-lived signed token.
 5. Web action inserts a user message and emits `agent.message_submitted`.
 6. Inngest calls the runner message endpoint.
-7. Runner resolves the `.agent` config, streams model deltas through Vercel AI Gateway using AI SDK
-   Core, runs allowed tools in E2B, and appends typed events to Postgres.
-8. Browser receives `message.delta`, tool, command, file, completion, and error events. On refresh,
-   it replays from `agent_session_events` instead of relying on an in-memory stream.
+7. Runner resolves the `.agent` config, streams the model through Vercel AI Gateway using AI SDK
+   Core, runs allowed tools in E2B, and appends typed runtime events to Postgres. Assistant text
+   chunks are accumulated in memory and saved when the assistant message completes.
+8. Browser receives lifecycle, tool, command, file, completion, and error events. On refresh, it
+   replays from `agent_session_events` instead of relying on an in-memory stream.
 
 The runner endpoints are documented in [runner.md](./runner.md).
 
