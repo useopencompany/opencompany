@@ -14,6 +14,30 @@ export type HostedToolResult = {
   usage?: HostedToolUsage;
 };
 
+export function getHostedToolFailureContext(input: {
+  name: RuntimeToolName;
+  args: unknown;
+  error: unknown;
+}): Record<string, unknown> {
+  if (input.name === "exa_search") {
+    return getExaSearchFailureContext(input.args, input.error);
+  }
+
+  if (input.name === "web_fetch") {
+    return {
+      hosted_provider: "direct_http",
+      hosted_operation: "fetch",
+      tool_error_stage: "unknown",
+      tool_error_code: "hosted_tool_failed",
+    };
+  }
+
+  return {
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+  };
+}
+
 export async function executeHostedTool(input: {
   name: RuntimeToolName;
   args: unknown;
@@ -212,6 +236,76 @@ function buildExaSearchRequest(args: unknown) {
     endPublishedDate,
     contents,
   });
+}
+
+function getExaSearchFailureContext(args: unknown, error: unknown) {
+  const record = isRecord(args) ? args : {};
+  const category = readOptionalString(record, "category");
+  const excludeDomains = readOptionalStringArray(record, "excludeDomains");
+  const hasPublishedDateFilter =
+    Boolean(readOptionalString(record, "startPublishedDate")) ||
+    Boolean(readOptionalString(record, "endPublishedDate"));
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const context: Record<string, unknown> = {
+    hosted_provider: "exa",
+    hosted_operation: "search",
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+    ...(category ? { exa_category: category } : {}),
+    exa_has_exclude_domains: excludeDomains.length > 0,
+    exa_has_published_date_filter: hasPublishedDateFilter,
+  };
+
+  if (!readOptionalString(record, "query")?.trim()) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_invalid_query",
+    };
+  }
+
+  if (
+    (category === "company" || category === "people") &&
+    (excludeDomains.length > 0 || hasPublishedDateFilter)
+  ) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_unsupported_category_filter_combination",
+    };
+  }
+
+  if (message.startsWith("EXA_API_KEY") || message.includes("EXA_API_KEY is not configured")) {
+    return {
+      ...context,
+      tool_error_stage: "configuration",
+      tool_error_code: "exa_missing_api_key",
+    };
+  }
+
+  if (message.startsWith("Exa search failed (")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "exa_http_error",
+      ...readHttpStatusFromMessage(message),
+    };
+  }
+
+  if (message.includes("unexpected response shape") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "exa_malformed_response",
+    };
+  }
+
+  return context;
+}
+
+function readHttpStatusFromMessage(message: string) {
+  const match = message.match(/\((\d{3})\)/);
+  return match?.[1] ? { provider_status: Number(match[1]) } : {};
 }
 
 function buildWebFetchRequest(args: unknown) {

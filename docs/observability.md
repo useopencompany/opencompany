@@ -77,7 +77,10 @@ Prefer these correlation fields in all handled captures:
 - `opencompany.runner_start_failed`: runner failed while provisioning a session.
 - `opencompany.runner_message_failed`: model call, sandbox call, or runtime loop failed.
 - `opencompany.runner_sandbox_failed`: E2B create/connect/prepare failed.
-- `opencompany.runner_tool_failed`: a sandbox tool failed.
+- `opencompany.runner_tool_failed`: a runtime tool failed. Hosted tools include searchable fields
+  such as `hosted_provider`, `hosted_operation`, `tool_error_stage`, and `tool_error_code`.
+  For example, unsupported Exa company/people filters are tagged as
+  `tool_error_code=exa_unsupported_category_filter_combination`.
 - `opencompany.runner_request_failed`: web/Inngest could not call the runner.
 - `opencompany.agent_github_sync_failed`: managed GitHub repo/file sync failed.
 - `opencompany.auth_callback_failed`: WorkOS callback provisioning failed.
