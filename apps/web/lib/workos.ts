@@ -1,3 +1,9 @@
+import { getWorkOS } from "@workos-inc/authkit-nextjs";
+
+export function getWorkOSClient() {
+  return getWorkOS();
+}
+
 export function getWorkOSRedirectUri() {
   return (
     process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI ??

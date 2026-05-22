@@ -102,7 +102,7 @@ Inngest concurrency is limited to one active sync per `agentId`. There is no cro
 
 The high-level table groups are:
 
-- Identity and tenancy: `users`, `workspaces`, `workspace_memberships`.
+- Identity and tenancy: `users`, `workspaces`, `workspace_memberships`, with WorkOS Organizations mapped through `workspaces.workos_organization_id`.
 - Agent editing: `agents` stores the latest DB version and parsed config.
 - GitHub sync: `agent_sync_jobs` stores desired materialization state; `workspace_repositories` maps workspaces to managed GitHub repos.
 - Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store

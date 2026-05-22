@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   onboardingResponses,
@@ -5,14 +6,18 @@ import {
   workspaceMemberships,
   workspaces,
 } from "@opencompany/db/schema";
-import { withAuth } from "@workos-inc/authkit-nextjs";
+import { refreshSession, withAuth } from "@workos-inc/authkit-nextjs";
 import type { User as WorkOSUser } from "@workos-inc/node";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { getWorkOSClient } from "@/lib/workos";
 
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;
+
+const ADMIN_ROLE = "admin";
+const MEMBER_ROLE = "member";
 
 export type CurrentWorkspaceContext = {
   authUser: WorkOSUser;
@@ -25,8 +30,8 @@ function appUserId(workosUserId: string) {
   return `usr_${workosUserId}`;
 }
 
-function defaultWorkspaceId(userId: string) {
-  return `wks_${userId}`;
+function newWorkspaceId() {
+  return `wks_${randomUUID()}`;
 }
 
 function displayName(user: WorkOSUser) {
@@ -38,11 +43,14 @@ function defaultWorkspaceName(user: WorkOSUser) {
   return `${displayName(user)}'s Workspace`;
 }
 
-export async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<CurrentWorkspaceContext> {
+function normalizeMembershipRole(role?: string | null) {
+  return role === ADMIN_ROLE ? ADMIN_ROLE : MEMBER_ROLE;
+}
+
+async function syncUser(authUser: WorkOSUser) {
   const db = getDb();
   const now = new Date();
   const userId = appUserId(authUser.id);
-  const workspaceId = defaultWorkspaceId(userId);
   const [existingUser] = await db
     .select({ id: users.id })
     .from(users)
@@ -77,34 +85,159 @@ export async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<Curren
     throw new Error("Unable to sync the current user.");
   }
 
+  return { user, isNewUser };
+}
+
+async function syncLocalMembership(input: { workspaceId: string; userId: string; role: string }) {
+  const db = getDb();
+  const now = new Date();
+
+  await db
+    .insert(workspaceMemberships)
+    .values({
+      workspaceId: input.workspaceId,
+      userId: input.userId,
+      role: input.role,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [workspaceMemberships.workspaceId, workspaceMemberships.userId],
+      set: {
+        role: input.role,
+        updatedAt: now,
+      },
+    });
+}
+
+export async function syncUserAndWorkspace(
+  authUser: WorkOSUser,
+  organizationId: string,
+  role?: string | null,
+): Promise<CurrentWorkspaceContext> {
+  const db = getDb();
+  const now = new Date();
+  const { user, isNewUser } = await syncUser(authUser);
+
+  const [existingWorkspace] = await db
+    .select()
+    .from(workspaces)
+    .where(eq(workspaces.workosOrganizationId, organizationId))
+    .limit(1);
+
+  let workspace = existingWorkspace;
+
+  if (!workspace) {
+    const organization = await getWorkOSClient().organizations.getOrganization(organizationId);
+    const [createdWorkspace] = await db
+      .insert(workspaces)
+      .values({
+        id: newWorkspaceId(),
+        workosOrganizationId: organization.id,
+        name: organization.name || defaultWorkspaceName(authUser),
+        createdByUserId: user.id,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .returning();
+
+    workspace =
+      createdWorkspace ??
+      (
+        await db
+          .select()
+          .from(workspaces)
+          .where(eq(workspaces.workosOrganizationId, organizationId))
+          .limit(1)
+      )[0];
+  }
+
+  if (!workspace) {
+    throw new Error("Unable to load the current workspace.");
+  }
+
+  await syncLocalMembership({
+    workspaceId: workspace.id,
+    userId: user.id,
+    role: normalizeMembershipRole(role),
+  });
+
+  return {
+    authUser,
+    user,
+    workspace,
+    isNewUser,
+  };
+}
+
+export async function provisionDefaultOrganization(
+  authUser: WorkOSUser,
+): Promise<CurrentWorkspaceContext> {
+  const db = getDb();
+  const now = new Date();
+  const { user, isNewUser } = await syncUser(authUser);
+
+  const [existingWorkspace] = await db
+    .select()
+    .from(workspaces)
+    .where(and(eq(workspaces.createdByUserId, user.id), isNotNull(workspaces.workosOrganizationId)))
+    .limit(1);
+
+  if (existingWorkspace?.workosOrganizationId) {
+    await syncLocalMembership({
+      workspaceId: existingWorkspace.id,
+      userId: user.id,
+      role: ADMIN_ROLE,
+    });
+
+    return {
+      authUser,
+      user,
+      workspace: existingWorkspace,
+      isNewUser,
+    };
+  }
+
+  const organization = await getWorkOSClient().organizations.createOrganization({
+    name: defaultWorkspaceName(authUser),
+  });
+
+  await getWorkOSClient().userManagement.createOrganizationMembership({
+    organizationId: organization.id,
+    userId: authUser.id,
+    roleSlug: ADMIN_ROLE,
+  });
+
   const [workspace] = await db
     .insert(workspaces)
     .values({
-      id: workspaceId,
-      name: defaultWorkspaceName(authUser),
+      id: newWorkspaceId(),
+      workosOrganizationId: organization.id,
+      name: organization.name || defaultWorkspaceName(authUser),
       createdByUserId: user.id,
       updatedAt: now,
     })
     .onConflictDoNothing()
     .returning();
 
-  await db
-    .insert(workspaceMemberships)
-    .values({
-      workspaceId,
-      userId: user.id,
-      role: "owner",
-      updatedAt: now,
-    })
-    .onConflictDoNothing();
-
   const currentWorkspace =
     workspace ??
-    (await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1))[0];
+    (
+      await db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.workosOrganizationId, organization.id))
+        .limit(1)
+    )[0];
 
   if (!currentWorkspace) {
-    throw new Error("Unable to load the default workspace.");
+    throw new Error("Unable to create the default workspace.");
   }
+
+  await syncLocalMembership({
+    workspaceId: currentWorkspace.id,
+    userId: user.id,
+    role: ADMIN_ROLE,
+  });
 
   return {
     authUser,
@@ -112,6 +245,17 @@ export async function syncUserAndWorkspace(authUser: WorkOSUser): Promise<Curren
     workspace: currentWorkspace,
     isNewUser,
   };
+}
+
+export async function refreshIntoWorkspaceOrganization(workspace: AppWorkspace) {
+  if (!workspace.workosOrganizationId) {
+    throw new Error("Workspace is not linked to a WorkOS Organization.");
+  }
+
+  await refreshSession({
+    organizationId: workspace.workosOrganizationId,
+    ensureSignedIn: true,
+  });
 }
 
 export async function hasCompletedOnboarding(userId: string) {
@@ -128,16 +272,29 @@ export async function hasCompletedOnboarding(userId: string) {
 export const getOptionalCurrentWorkspaceWithoutOnboarding = cache(async () => {
   const session = await withAuth();
 
-  if (!session.user) {
+  if (!session.user || !session.organizationId) {
     return null;
   }
 
-  return syncUserAndWorkspace(session.user);
+  return syncUserAndWorkspace(
+    session.user,
+    session.organizationId,
+    session.role ?? session.roles?.[0],
+  );
 });
 
 export const getCurrentWorkspaceWithoutOnboarding = cache(async () => {
   const session = await withAuth({ ensureSignedIn: true });
-  return syncUserAndWorkspace(session.user);
+
+  if (!session.organizationId) {
+    redirect("/auth/organization");
+  }
+
+  return syncUserAndWorkspace(
+    session.user,
+    session.organizationId,
+    session.role ?? session.roles?.[0],
+  );
 });
 
 export const getOptionalCurrentWorkspace = cache(async () => {

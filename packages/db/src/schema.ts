@@ -58,17 +58,26 @@ export const users = pgTable(
   }),
 );
 
-export const workspaces = pgTable("workspaces", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  createdByUserId: text("created_by_user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" }),
-  teamSize: text("team_size"),
-  companyUrl: text("company_url"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const workspaces = pgTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    workosOrganizationId: text("workos_organization_id"),
+    name: text("name").notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    teamSize: text("team_size"),
+    companyUrl: text("company_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workosOrganizationIdIdx: uniqueIndex("workspaces_workos_organization_id_idx").on(
+      table.workosOrganizationId,
+    ),
+  }),
+);
 
 export const workspaceMemberships = pgTable(
   "workspace_memberships",
@@ -79,7 +88,7 @@ export const workspaceMemberships = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    role: text("role").notNull().default("owner"),
+    role: text("role").notNull().default("member"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
