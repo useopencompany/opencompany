@@ -4,7 +4,11 @@ import { and, eq } from "drizzle-orm";
 import { serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
-import { ensureWorkspaceRepository, writeWorkspaceFile } from "@/lib/workspace-state/github";
+import {
+  deleteWorkspaceFile,
+  ensureWorkspaceRepository,
+  writeWorkspaceFile,
+} from "@/lib/workspace-state/github";
 
 type MaterializeMode = "scheduled" | "force";
 
@@ -60,10 +64,18 @@ export async function materializeAgentToGitHub(
   const source = serializeAgentFile({
     title: row.agent.name,
     body: row.agent.body,
+    model: row.agent.config.model.name,
   });
   const contentHash = hashAgentSource(source);
+  const pendingRename =
+    row.job?.previousPath && row.job.previousPath !== row.agent.path
+      ? {
+          previousPath: row.job.previousPath,
+          previousBlobSha: row.job.previousBlobSha,
+        }
+      : null;
 
-  if (row.agent.githubSyncedHash === contentHash) {
+  if (row.agent.githubSyncedHash === contentHash && !pendingRename) {
     await timeAsync(trace, "db.deleteUnchangedSyncJob", () =>
       db
         .delete(agentSyncJobs)
@@ -99,19 +111,35 @@ export async function materializeAgentToGitHub(
           path: row.agent.path!,
           content: source,
           message: `Update ${row.agent.path}`,
-          blobSha: row.agent.githubBlobSha,
+          blobSha: pendingRename ? null : row.agent.githubBlobSha,
         }),
       { path: row.agent.path },
     );
+    const deleteResult = pendingRename
+      ? await timeAsync(
+          trace,
+          "github.deletePreviousWorkspaceFile",
+          () =>
+            deleteWorkspaceFile({
+              db,
+              repository,
+              path: pendingRename.previousPath,
+              message: `Delete ${pendingRename.previousPath}`,
+              blobSha: pendingRename.previousBlobSha,
+            }),
+          { path: pendingRename.previousPath },
+        )
+      : null;
+    const commitSha = deleteResult?.commitSha ?? result.commitSha;
 
     const now = new Date();
     await timeAsync(trace, "db.markSynced", () =>
       db
         .update(agents)
         .set({
-          commitSha: result.commitSha,
+          commitSha,
           githubBlobSha: result.blobSha,
-          githubCommitSha: result.commitSha,
+          githubCommitSha: commitSha,
           githubSyncedHash: contentHash,
           githubSyncedAt: now,
           githubSyncStatus: "synced",
@@ -139,7 +167,7 @@ export async function materializeAgentToGitHub(
     return status === "synced"
       ? {
           status,
-          commitSha: result.commitSha,
+          commitSha,
           blobSha: result.blobSha,
         }
       : { status };

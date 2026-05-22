@@ -71,6 +71,13 @@
       "when": 1779443638118,
       "tag": "0009_supreme_boomer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779446036263,
+      "tag": "0010_purple_salo",
+      "breakpoints": true
     }
   ]
 }
