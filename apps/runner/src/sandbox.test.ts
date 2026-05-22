@@ -56,6 +56,28 @@ describe("createOrConnectSandbox", () => {
       requestTimeoutMs: 30_000,
     });
   });
+
+  it("creates a replacement sandbox when the stored sandbox id is stale", async () => {
+    const sandbox = {
+      sandboxId: "sbx_replacement",
+      setTimeout: vi.fn().mockResolvedValue(undefined),
+    };
+    e2bMocks.connect.mockRejectedValue(new Error("sandbox not found"));
+    e2bMocks.create.mockResolvedValue(sandbox);
+
+    const result = await createOrConnectSandbox({
+      sandboxId: "sbx_missing",
+      envs: {},
+      idleTimeoutMs: 30_000,
+    });
+
+    expect(result).toBe(sandbox);
+    expect(e2bMocks.create).toHaveBeenCalledWith({
+      envs: {},
+      timeoutMs: 30_000,
+      lifecycle: { onTimeout: "pause", autoResume: true },
+    });
+  });
 });
 
 describe("armSandboxIdleTimeout", () => {

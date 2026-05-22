@@ -139,6 +139,8 @@ Required environment variables:
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
+If the stored E2B sandbox id has already disappeared, the runner creates a fresh sandbox instead of
+retrying the stale id.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
 also merges the runner env vars from Vercel into `.env.local`.
