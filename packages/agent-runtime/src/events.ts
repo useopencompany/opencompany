@@ -81,6 +81,9 @@ export type AgentRuntimeEvent =
         outputTextTokens: number;
         outputReasoningTokens: number;
         totalTokens: number;
+        providerCostUsdMicros?: number;
+        platformFeeUsdMicros?: number;
+        chargedCostUsdMicros?: number;
         finishReason?: string;
         rawFinishReason?: string;
       };
@@ -96,6 +99,9 @@ export type AgentRuntimeEvent =
         operation: string;
         providerRequestId?: string;
         costUsdMicros: number;
+        providerCostUsdMicros?: number;
+        platformFeeUsdMicros?: number;
+        chargedCostUsdMicros?: number;
       };
     }
   | {

@@ -5,6 +5,7 @@ import {
   newAgentSessionId,
   newAgentSessionMessageId,
 } from "@opencompany/agent-runtime";
+import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
   type Agent,
@@ -14,6 +15,7 @@ import {
   agentSessionToolUsage,
   agentSessionUsage,
   agents,
+  workspaceCreditLedger,
 } from "@opencompany/db/schema";
 import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -33,6 +35,9 @@ import { getCurrentWorkspace, requireCurrentWorkspace } from "@/lib/auth";
 
 export async function createAgentSession(idOrPath: string) {
   const { user, workspace } = await getCurrentWorkspace();
+  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+    redirect("/settings?billing=insufficient");
+  }
   const agent = await loadAgentForSession(idOrPath, workspace.id);
 
   if (!agent) {
@@ -60,6 +65,9 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
   const trimmed = content.trim();
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
+  }
+  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+    return { ok: false, error: "Add workspace credits to start a session." } as const;
   }
 
   const agent = await loadAgentForSession(agentId, workspace.id);
@@ -89,6 +97,9 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   const trimmed = content.trim();
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
+  }
+  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+    return { ok: false, error: "Add workspace credits to continue this session." } as const;
   }
 
   const db = getDb();
@@ -266,7 +277,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
 
   if (!session) return null;
 
-  const [messages, events, usageRows, toolUsageRows] = await Promise.all([
+  const [messages, events, usageRows, toolUsageRows, costRows] = await Promise.all([
     db
       .select()
       .from(agentSessionMessages)
@@ -300,6 +311,15 @@ export async function loadAgentSessionForPage(sessionId: string) {
       })
       .from(agentSessionToolUsage)
       .where(eq(agentSessionToolUsage.sessionId, sessionId)),
+    db
+      .select({
+        source: workspaceCreditLedger.source,
+        amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
+        providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
+        platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
+      })
+      .from(workspaceCreditLedger)
+      .where(eq(workspaceCreditLedger.sessionId, sessionId)),
   ]);
   const usage = usageRows.reduce(
     (totals, row) => ({
@@ -336,6 +356,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
     thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
   }));
   const toolUsage = summarizeToolUsage(toolUsageRows);
+  const cost = summarizeSessionCost(costRows);
 
   const runnerUrl = getRunnerPublicUrl();
   const streamTokenSecret = getRunnerStreamTokenSecret();
@@ -351,7 +372,7 @@ export async function loadAgentSessionForPage(sessionId: string) {
         )
       : null;
 
-  return { session, messages: messagesWithUsage, events, usage, toolUsage, runnerUrl, token };
+  return { session, messages: messagesWithUsage, events, usage, toolUsage, cost, runnerUrl, token };
 }
 
 function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
@@ -386,6 +407,37 @@ function summarizeToolUsage(
       `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
     ),
   };
+}
+
+function summarizeSessionCost(
+  rows: Array<{
+    source: string;
+    amountUsdMicros: number;
+    providerCostUsdMicros: number;
+    platformFeeUsdMicros: number;
+  }>,
+) {
+  return rows.reduce(
+    (totals, row) => {
+      const totalCostUsdMicros = Math.max(-row.amountUsdMicros, 0);
+      return {
+        providerCostUsdMicros: totals.providerCostUsdMicros + row.providerCostUsdMicros,
+        platformFeeUsdMicros: totals.platformFeeUsdMicros + row.platformFeeUsdMicros,
+        totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
+        modelCostUsdMicros:
+          totals.modelCostUsdMicros + (row.source === "model_usage" ? totalCostUsdMicros : 0),
+        toolCostUsdMicros:
+          totals.toolCostUsdMicros + (row.source === "tool_usage" ? totalCostUsdMicros : 0),
+      };
+    },
+    {
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+      totalCostUsdMicros: 0,
+      modelCostUsdMicros: 0,
+      toolCostUsdMicros: 0,
+    },
+  );
 }
 
 async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {

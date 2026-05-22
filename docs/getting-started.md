@@ -21,7 +21,8 @@ bun run dev
 1. Copy `.env.example` → `.env.local` if missing.
 2. If WorkOS keys or `NEON_PROJECT_ID` are placeholders, pull shared dev env vars from Infisical into `.env.local`.
 3. Create or reuse a Neon branch for the current Git branch and write its `DATABASE_URL` to `.env.local`.
-4. Run migrations against that branch database.
+4. Fill missing local Stripe credentials from the Stripe CLI when available.
+5. Run migrations against that branch database.
 
 Re-running it is safe.
 
@@ -51,6 +52,7 @@ in Infisical `dev` + `/web` and `/runner`:
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- `STRIPE_SECRET_KEY`
 - optional runner, Linear, analytics, and observability values from `.env.example`
 
 `DATABASE_URL` can exist in Infisical `dev` only for the explicit `--shared-db` mode, but normal
@@ -59,6 +61,14 @@ local setup writes `.env.local` with a Neon branch-specific URL.
 Runner-only development secrets such as `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, and
 `EXA_API_KEY` are also pulled from Infisical `dev` + `/runner` into `.env.local` when present. This lets the
 local runner use the same shared provider credentials without copying them by hand.
+
+Stripe setup has a local fallback: if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` are still
+placeholders, `bun run setup` reads the active Stripe CLI test key and runs
+`stripe listen --print-secret`, then writes both values into `.env.local` without printing them. Run
+`stripe login` once first. If you use a non-default Stripe CLI profile, set `STRIPE_CLI_PROJECT_NAME`
+before running setup.
+
+For an existing checkout where only Stripe is missing, run `bun run setup:stripe`.
 
 Then pull them locally:
 
@@ -76,6 +86,8 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
 - **Initial WorkOS bootstrap only:** if the shared WorkOS dev environment does not exist yet, create
   it in WorkOS, set `http://localhost:3000/auth/callback` as a redirect URI, and copy the resulting
   AuthKit env vars into Infisical `dev` + `/web`.
+- **Initial Stripe CLI bootstrap only:** run `stripe login` once. For shared development env vars,
+  prefer storing a restricted test key as `STRIPE_SECRET_KEY` in Infisical `dev` + `/web`.
 - **Production WorkOS:** create a production WorkOS environment in the dashboard and set the redirect
   URI to your prod callback URL. Keep production values in Infisical `prod`, separate from `dev`.
 
@@ -84,6 +96,7 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
 - Schema change → edit `packages/db/src/schema.ts`, then `bun run db:generate`, then `bun run db:migrate`.
 - Reset local database → `bun run db:branch:delete`, then `bun run setup`.
 - New env var in Infisical → `bun run env:pull` to refresh `.env.local`.
+- Missing local Stripe values → `bun run setup:stripe`.
 - Agent editing / GitHub / Inngest architecture → see [architecture.md](./architecture.md).
 
 See [database.md](./database.md) for the database workflow and [auth.md](./auth.md) for the auth flow.

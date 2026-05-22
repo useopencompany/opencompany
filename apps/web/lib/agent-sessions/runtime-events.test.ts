@@ -3,6 +3,7 @@ import {
   applyRuntimeEventToState,
   buildAssistantTurnParts,
   buildRuntimeToolCallsForMessage,
+  emptyCostSummary,
   emptyUsageSummary,
   isInspectableRuntimeEvent,
   type RuntimeEvent,
@@ -15,6 +16,7 @@ function initialState(): SessionRuntimeState {
     messages: [{ id: "msg_user", role: "user", content: "Hi", status: "completed" }],
     usage: emptyUsageSummary(),
     toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+    cost: emptyCostSummary(),
     currentStatus: "running",
     lastError: null,
   };

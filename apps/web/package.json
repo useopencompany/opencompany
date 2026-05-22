@@ -19,10 +19,11 @@
   "dependencies": {
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
+    "@opencompany/billing": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/observability": "workspace:*",
-    "@sentry/nextjs": "^10.53.1",
     "@radix-ui/react-select": "^2.2.6",
+    "@sentry/nextjs": "^10.53.1",
     "@tiptap/extension-mention": "^3.23.5",
     "@tiptap/pm": "^3.23.5",
     "@tiptap/react": "^3.23.5",
@@ -41,6 +42,7 @@
     "react-dom": "19.2.6",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "stripe": "^22.1.1",
     "tailwind-merge": "^3.6.0",
     "tippy.js": "^6.3.7"
   },

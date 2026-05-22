@@ -29,6 +29,10 @@ export async function executeHostedTool(input: {
     return executeExaSearch(input.args, input.env, input.signal);
   }
 
+  if (input.name === "web_fetch") {
+    return executeWebFetch(input.args, input.signal);
+  }
+
   throw new Error(`Unknown hosted tool: ${input.name}`);
 }
 
@@ -113,6 +117,58 @@ async function executeExaSearch(
   };
 }
 
+async function executeWebFetch(args: unknown, signal: AbortSignal): Promise<HostedToolResult> {
+  const request = buildWebFetchRequest(args);
+  const response = await fetch(request.url.toString(), {
+    headers: {
+      Accept: "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1",
+      "User-Agent": "OpenCompanyAgent/0.1 (+https://opencompany.ai)",
+    },
+    redirect: "follow",
+    signal,
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Web fetch failed (${response.status}): ${response.statusText}`);
+  }
+
+  const finalUrl = response.url || request.url.toString();
+  const isHtml = /\bhtml\b/i.test(contentType) || looksLikeHtml(body);
+  const isText = /^text\//i.test(contentType) || !contentType;
+  if (!isHtml && !isText) {
+    throw new Error(`Web fetch only supports HTML or text responses, got ${contentType}.`);
+  }
+
+  const page = isHtml ? extractHtmlPage(body, finalUrl) : extractTextPage(body);
+  const text = truncate(page.text, request.maxCharacters);
+
+  return {
+    output: omitUndefined({
+      url: request.url.toString(),
+      finalUrl,
+      status: response.status,
+      contentType,
+      title: page.title,
+      description: page.description,
+      text,
+      truncated: page.text.length > text.length,
+      links: request.includeLinks ? page.links.slice(0, 50) : [],
+    }),
+    usage: {
+      provider: "direct_http",
+      operation: "fetch",
+      costUsdMicros: 0,
+      rawUsage: {
+        status: response.status,
+        contentType,
+        bytesRead: new TextEncoder().encode(body).byteLength,
+      },
+    },
+  };
+}
+
 function buildExaSearchRequest(args: unknown) {
   const record = asRecord(args);
   const query = readString(record, "query").trim();
@@ -158,6 +214,31 @@ function buildExaSearchRequest(args: unknown) {
   });
 }
 
+function buildWebFetchRequest(args: unknown) {
+  const record = asRecord(args);
+  const rawUrl = readString(record, "url").trim();
+  if (!rawUrl) throw new Error("web_fetch url must not be empty.");
+
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("web_fetch url must be a valid absolute URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("web_fetch only supports http and https URLs.");
+  }
+
+  return {
+    url,
+    maxCharacters: Math.min(
+      Math.max(Math.floor(readOptionalNumber(record, "maxCharacters") ?? 12_000), 1000),
+      20_000,
+    ),
+    includeLinks: readOptionalBoolean(record, "includeLinks") ?? true,
+  };
+}
+
 async function readJsonResponse(response: Response) {
   const text = await response.text();
   if (!text) return {};
@@ -180,6 +261,152 @@ function normalizeExaResult(value: unknown) {
     ),
     summary: truncate(readOptionalString(record, "summary") ?? "", 1500) || undefined,
   });
+}
+
+function extractHtmlPage(html: string, baseUrl: string) {
+  const title = extractTagText(html, "title");
+  const description = extractMetaContent(html, ["description", "og:description"]);
+
+  return {
+    title: title ? truncate(title, 300) : undefined,
+    description: description ? truncate(description, 500) : undefined,
+    text: htmlToReadableText(html),
+    links: extractLinks(html, baseUrl),
+  };
+}
+
+function extractTextPage(text: string) {
+  return {
+    title: undefined,
+    description: undefined,
+    text: normalizeWhitespace(text),
+    links: [] as Array<{ text: string; url: string }>,
+  };
+}
+
+function looksLikeHtml(text: string) {
+  return /<(html|head|body|title|main|article|section|p|a)\b/i.test(text.slice(0, 5000));
+}
+
+function extractTagText(html: string, tagName: string) {
+  const escapedTagName = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = html.match(
+    new RegExp(`<${escapedTagName}\\b[^>]*>([\\s\\S]*?)</${escapedTagName}>`, "i"),
+  );
+  return match ? normalizeWhitespace(decodeHtmlEntities(stripTags(match[1] ?? ""))) : undefined;
+}
+
+function extractMetaContent(html: string, names: string[]) {
+  for (const match of html.matchAll(/<meta\b[^>]*>/gi)) {
+    const attrs = parseAttributes(match[0]);
+    const name = (attrs.name ?? attrs.property ?? "").toLowerCase();
+    const content = attrs.content;
+    if (content && names.includes(name)) {
+      return normalizeWhitespace(decodeHtmlEntities(content));
+    }
+  }
+  return undefined;
+}
+
+function extractLinks(html: string, baseUrl: string) {
+  const links: Array<{ text: string; url: string }> = [];
+  const seen = new Set<string>();
+
+  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const attrs = parseAttributes(match[1] ?? "");
+    if (!attrs.href) continue;
+
+    const url = toAbsoluteHttpUrl(attrs.href, baseUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+
+    const label = normalizeWhitespace(decodeHtmlEntities(stripTags(match[2] ?? "")));
+    links.push({
+      text: truncate(label || url, 200),
+      url,
+    });
+    if (links.length >= 100) break;
+  }
+
+  return links;
+}
+
+function toAbsoluteHttpUrl(rawHref: string, baseUrl: string) {
+  const href = decodeHtmlEntities(rawHref).trim();
+  if (!href || href.startsWith("#")) return undefined;
+
+  try {
+    const url = new URL(href, baseUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function htmlToReadableText(html: string) {
+  const body = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] ?? html;
+  const withoutHidden = body
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg|canvas|template)\b[\s\S]*?<\/\1>/gi, " ");
+  const withBreaks = withoutHidden
+    .replace(/<(br|hr)\b[^>]*>/gi, "\n")
+    .replace(
+      /<\/(p|div|li|tr|td|th|h[1-6]|section|article|header|footer|nav|main|aside|blockquote|pre)>/gi,
+      "\n",
+    );
+
+  return normalizeWhitespace(decodeHtmlEntities(stripTags(withBreaks)));
+}
+
+function stripTags(value: string) {
+  return value.replace(/<[^>]+>/g, " ");
+}
+
+function parseAttributes(tag: string) {
+  const attrs: Record<string, string> = {};
+  for (const match of tag.matchAll(/([^\s"'<>/=]+)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g)) {
+    const name = match[1]?.toLowerCase();
+    const value = match[3] ?? match[4] ?? match[5] ?? "";
+    if (name) attrs[name] = decodeHtmlEntities(value);
+  }
+  return attrs;
+}
+
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]+);/gi, (_entity, raw: string) => {
+      if (raw.startsWith("#x")) {
+        const codePoint = Number.parseInt(raw.slice(2), 16);
+        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : "";
+      }
+      if (raw.startsWith("#")) {
+        const codePoint = Number.parseInt(raw.slice(1), 10);
+        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : "";
+      }
+
+      return (
+        {
+          amp: "&",
+          apos: "'",
+          gt: ">",
+          lt: "<",
+          nbsp: " ",
+          quot: '"',
+        }[raw.toLowerCase()] ?? `&${raw};`
+      );
+    })
+    .replace(/\u00a0/g, " ");
+}
+
+function normalizeWhitespace(value: string) {
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function readCostDollars(value: unknown) {

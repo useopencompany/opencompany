@@ -3,6 +3,7 @@ import { workspaceRepositories } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { requireCurrentWorkspace } from "@/lib/auth";
+import { loadBillingOverview } from "@/lib/billing/service";
 
 function initialsFor(name: string, email: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -28,13 +29,16 @@ function formatDate(date: Date) {
 export default async function SettingsPage() {
   const { authUser, workspace } = await requireCurrentWorkspace();
   const db = getDb();
-  const [repository] = await db
-    .select({
-      updatedAt: workspaceRepositories.updatedAt,
-    })
-    .from(workspaceRepositories)
-    .where(eq(workspaceRepositories.workspaceId, workspace.id))
-    .limit(1);
+  const [[repository], billing] = await Promise.all([
+    db
+      .select({
+        updatedAt: workspaceRepositories.updatedAt,
+      })
+      .from(workspaceRepositories)
+      .where(eq(workspaceRepositories.workspaceId, workspace.id))
+      .limit(1),
+    loadBillingOverview(workspace.id),
+  ]);
   const displayName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
     authUser.email.split("@")[0] ||
@@ -56,6 +60,19 @@ export default async function SettingsPage() {
               updatedAt: formatDate(new Date(repository.updatedAt)),
             }
           : null,
+      }}
+      billing={{
+        balanceUsdMicros: billing.balanceUsdMicros,
+        spendLast7UsdMicros: billing.spendLast7UsdMicros,
+        spendLast30UsdMicros: billing.spendLast30UsdMicros,
+        recentSessionCharges: billing.recentSessionCharges.map((entry) => ({
+          ...entry,
+          createdAt: entry.createdAt.toISOString(),
+        })),
+        ledger: billing.ledger.map((entry) => ({
+          ...entry,
+          createdAt: entry.createdAt.toISOString(),
+        })),
       }}
     />
   );
