@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "workspace_credit_ledger_signup_bonus_idx" ON "workspace_credit_ledger" USING btree ("workspace_id") WHERE "workspace_credit_ledger"."source" = 'signup_bonus';

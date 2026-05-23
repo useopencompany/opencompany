@@ -11,6 +11,7 @@ import type { User as WorkOSUser } from "@workos-inc/node";
 import { and, eq, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { grantDefaultSignupCreditForWorkspace } from "@/lib/billing/service";
 import { getWorkOSClient } from "@/lib/workos";
 
 type AppUser = typeof users.$inferSelect;
@@ -125,6 +126,7 @@ export async function syncUserAndWorkspace(
     .limit(1);
 
   let workspace = existingWorkspace;
+  let createdWorkspaceForNewUser = false;
 
   if (!workspace) {
     const organization = await getWorkOSClient().organizations.getOrganization(organizationId);
@@ -149,10 +151,18 @@ export async function syncUserAndWorkspace(
           .where(eq(workspaces.workosOrganizationId, organizationId))
           .limit(1)
       )[0];
+    createdWorkspaceForNewUser = Boolean(createdWorkspace) && isNewUser;
   }
 
   if (!workspace) {
     throw new Error("Unable to load the current workspace.");
+  }
+
+  if (createdWorkspaceForNewUser) {
+    await grantDefaultSignupCreditForWorkspace({
+      workspaceId: workspace.id,
+      userId: user.id,
+    });
   }
 
   await syncLocalMembership({
@@ -231,6 +241,13 @@ export async function provisionDefaultOrganization(
 
   if (!currentWorkspace) {
     throw new Error("Unable to create the default workspace.");
+  }
+
+  if (workspace && isNewUser) {
+    await grantDefaultSignupCreditForWorkspace({
+      workspaceId: currentWorkspace.id,
+      userId: user.id,
+    });
   }
 
   await syncLocalMembership({
