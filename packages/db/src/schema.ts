@@ -479,6 +479,9 @@ export const workspaceCreditLedger = pgTable(
     toolUsageIdx: uniqueIndex("workspace_credit_ledger_tool_usage_idx")
       .on(table.toolUsageId)
       .where(sql`${table.toolUsageId} IS NOT NULL`),
+    signupBonusIdx: uniqueIndex("workspace_credit_ledger_signup_bonus_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.source} = 'signup_bonus'`),
   }),
 );
 

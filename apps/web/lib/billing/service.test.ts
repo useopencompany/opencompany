@@ -1,7 +1,9 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_SIGNUP_CREDIT_AMOUNT_CENTS,
   fulfillCheckoutSession,
+  grantDefaultSignupCreditForWorkspace,
   loadBillingOverview,
   redeemCreditCodeForWorkspace,
 } from "./service";
@@ -84,6 +86,42 @@ describe("loadBillingOverview", () => {
     expect(result.recentSessionCharges[0]?.toolCostUsdMicros).toBe(2_500);
     expect(result.ledger[0]?.createdAt).toBeInstanceOf(Date);
     expect(result.ledger[0]?.createdAt.toISOString()).toBe("2026-05-22T13:00:00.000Z");
+  });
+});
+
+describe("grantDefaultSignupCreditForWorkspace", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("credits the default signup amount once", async () => {
+    const db = mockDb({
+      executeRows: [{ ledgerId: 12, amountCents: 300, balanceCents: 300 }],
+    });
+
+    const result = await grantDefaultSignupCreditForWorkspace({
+      workspaceId: "wks_123",
+      userId: "usr_123",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      ledgerId: 12,
+      amountCents: DEFAULT_SIGNUP_CREDIT_AMOUNT_CENTS,
+      balanceCents: DEFAULT_SIGNUP_CREDIT_AMOUNT_CENTS,
+    });
+    expect(db.execute).toHaveBeenCalledOnce();
+  });
+
+  it("does not credit the signup amount more than once", async () => {
+    mockDb({ executeRows: [] });
+
+    const result = await grantDefaultSignupCreditForWorkspace({
+      workspaceId: "wks_123",
+      userId: "usr_123",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "already_granted" });
   });
 });
 

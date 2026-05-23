@@ -140,6 +140,7 @@ function shortSessionId(sessionId: string) {
 }
 
 function ledgerLabel(source: string) {
+  if (source === "signup_bonus") return "Signup credit";
   if (source === "stripe_checkout") return "Credit top-up";
   if (source === "credit_code") return "Redeemed code";
   if (source === "model_usage") return "Model usage";

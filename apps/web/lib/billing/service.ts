@@ -41,6 +41,8 @@ export type BillingSessionChargeSummary = {
 
 type ExecuteResultRow = Record<string, unknown>;
 
+export const DEFAULT_SIGNUP_CREDIT_AMOUNT_CENTS = 300;
+
 function rowsFromExecute<T extends ExecuteResultRow>(result: unknown): T[] {
   if (Array.isArray(result)) return result as T[];
   if (result && typeof result === "object" && "rows" in result) {
@@ -175,6 +177,65 @@ export async function createPendingCheckoutRecord(input: {
       checkoutRecordId: input.id,
     },
   });
+}
+
+export async function grantDefaultSignupCreditForWorkspace(input: {
+  workspaceId: string;
+  userId: string;
+}) {
+  const db = getDb();
+  const amountCents = DEFAULT_SIGNUP_CREDIT_AMOUNT_CENTS;
+
+  const result = await db.execute(sql`
+    WITH ledger AS (
+      INSERT INTO workspace_credit_ledger (
+        workspace_id,
+        user_id,
+        amount_cents,
+        amount_usd_micros,
+        source,
+        metadata
+      )
+      VALUES (
+        ${input.workspaceId},
+        ${input.userId},
+        ${amountCents},
+        ${amountCents}::bigint * ${USD_MICROS_PER_CENT},
+        'signup_bonus',
+        jsonb_build_object('reason', 'default_signup_credit')
+      )
+      ON CONFLICT (workspace_id) WHERE source = 'signup_bonus' DO NOTHING
+      RETURNING id, workspace_id, amount_cents, amount_usd_micros
+    ),
+    balance AS (
+      INSERT INTO workspace_credit_balances (workspace_id, balance_cents, balance_usd_micros, updated_at)
+      SELECT workspace_id, amount_cents, amount_usd_micros, now()
+      FROM ledger
+      ON CONFLICT (workspace_id) DO UPDATE
+      SET balance_cents = workspace_credit_balances.balance_cents + excluded.balance_cents,
+          balance_usd_micros = workspace_credit_balances.balance_usd_micros + excluded.balance_usd_micros,
+          updated_at = now()
+      RETURNING workspace_id, balance_cents
+    )
+    SELECT
+      ledger.id AS "ledgerId",
+      ledger.amount_cents AS "amountCents",
+      balance.balance_cents AS "balanceCents"
+    FROM ledger
+    JOIN balance ON balance.workspace_id = ledger.workspace_id
+  `);
+
+  const rows = rowsFromExecute<{
+    ledgerId: number;
+    amountCents: number;
+    balanceCents: number;
+  }>(result);
+
+  if (!rows[0]) {
+    return { ok: false as const, reason: "already_granted" as const };
+  }
+
+  return { ok: true as const, ...rows[0] };
 }
 
 export async function markCheckoutRecordOpen(input: {

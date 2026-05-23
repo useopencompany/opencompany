@@ -21,7 +21,8 @@ export default function SignupPanel() {
               Sign up for opencompany
             </h1>
             <p className="mt-1.5 text-[12.5px] leading-5 text-ink-muted">
-              Set up a focused place for your team context, agents, and sessions.
+              Set up a focused place for your team context, agents, and sessions. New accounts
+              include $3 in free credits.
             </p>
 
             <Link

@@ -66,6 +66,9 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturningResult
   const selectResults = [...input.selectResults];
   const insertReturningResults = [...input.insertReturningResults];
   const insertedValues: unknown[] = [];
+  const execute = vi
+    .fn()
+    .mockResolvedValue({ rows: [{ ledgerId: 1, amountCents: 300, balanceCents: 300 }] });
 
   const limit = vi.fn(async () => selectResults.shift() ?? []);
   const where = vi.fn(() => ({ limit }));
@@ -83,8 +86,9 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturningResult
   const insert = vi.fn(() => ({ values }));
 
   return {
-    db: { select, insert },
+    db: { select, insert, execute },
     insertedValues,
+    execute,
   };
 }
 
@@ -109,7 +113,7 @@ describe("workspace organization auth sync", () => {
   });
 
   it("loads an existing workspace by WorkOS organization id", async () => {
-    const { db, insertedValues } = createDbMock({
+    const { db, insertedValues, execute } = createDbMock({
       selectResults: [[{ id: appUser.id }], [workspace]],
       insertReturningResults: [[appUser]],
     });
@@ -119,6 +123,7 @@ describe("workspace organization auth sync", () => {
 
     expect(result.workspace).toEqual(workspace);
     expect(getWorkOSClientMock().organizations.getOrganization).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
     expect(insertedValues).toContainEqual(
       expect.objectContaining({
         workspaceId: "wks_123",
@@ -129,7 +134,7 @@ describe("workspace organization auth sync", () => {
   });
 
   it("creates a default WorkOS Organization and local workspace for first sign-in", async () => {
-    const { db, insertedValues } = createDbMock({
+    const { db, insertedValues, execute } = createDbMock({
       selectResults: [[], []],
       insertReturningResults: [[appUser], [workspace]],
     });
@@ -159,10 +164,11 @@ describe("workspace organization auth sync", () => {
         role: "admin",
       }),
     );
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("reuses an existing default workspace without creating another WorkOS Organization", async () => {
-    const { db, insertedValues } = createDbMock({
+    const { db, insertedValues, execute } = createDbMock({
       selectResults: [[{ id: appUser.id }], [workspace]],
       insertReturningResults: [[appUser]],
     });
@@ -182,5 +188,20 @@ describe("workspace organization auth sync", () => {
         role: "admin",
       }),
     );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("grants signup credit when a new user creates a workspace for an existing organization", async () => {
+    const { db, execute } = createDbMock({
+      selectResults: [[], []],
+      insertReturningResults: [[appUser], [workspace]],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    const result = await syncUserAndWorkspace(authUser as never, "org_123", "admin");
+
+    expect(result.workspace).toEqual(workspace);
+    expect(getWorkOSClientMock().organizations.getOrganization).toHaveBeenCalledWith("org_123");
+    expect(execute).toHaveBeenCalledOnce();
   });
 });
