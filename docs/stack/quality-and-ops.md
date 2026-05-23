@@ -26,7 +26,8 @@ org model, or we need a different compliance/security posture.
 
 **What it is:** CI/CD runner platform.
 
-**What it does for us:** Runs PR/main checks and serializes production releases after CI succeeds.
+**What it does for us:** Runs PR/main checks, cancels superseded CI work, and serializes production
+releases after CI succeeds.
 
 **Where it is used:**
 

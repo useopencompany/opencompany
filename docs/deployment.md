@@ -29,7 +29,14 @@ Production releases are intentionally serialized:
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
 `CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
 Actions. It is protected with `concurrency: production-release` so two production releases cannot
-overlap.
+overlap. GitHub Actions keeps only the newest queued production release in that concurrency group;
+older queued releases are cancelled automatically. A release that has already started is not killed
+mid-flight, but automatic releases re-check `origin/main` before setup, before production changes,
+and before deploy so stale commits skip the remaining expensive or mutating work.
+
+The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so a newer push to the
+same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
+bursts from spending Actions minutes on commits that can no longer release.
 
 The web smoke check uses `PRODUCTION_WEB_URL` from Infisical `prod` + `/release`, not the raw Vercel
 deployment URL, so Vercel deployment protection can remain enabled on generated preview-style URLs.
