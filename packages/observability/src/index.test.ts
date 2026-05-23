@@ -13,9 +13,19 @@ import {
 } from ".";
 
 const originalEnv = { ...process.env };
+const serverReleaseEnvKeys = [
+  "VERCEL_GIT_COMMIT_SHA",
+  "RENDER_GIT_COMMIT",
+  "RELEASE_SHA",
+  "GITHUB_SHA",
+  "OBSERVABILITY_RELEASE",
+] as const;
 
 beforeEach(() => {
   process.env = { ...originalEnv };
+  for (const key of serverReleaseEnvKeys) {
+    delete process.env[key];
+  }
   vi.spyOn(console, "debug").mockImplementation(() => {});
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
