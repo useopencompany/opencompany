@@ -1,27 +1,71 @@
-import { authkitProxy } from "@workos-inc/authkit-nextjs";
+import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
+import type { NextRequest } from "next/server";
 import { getWorkOSRedirectUri } from "@/lib/workos";
 
-export default authkitProxy({
-  redirectUri: getWorkOSRedirectUri(),
-  signUpPaths: ["/auth/sign-up"],
-  middlewareAuth: {
-    enabled: true,
-    unauthenticatedPaths: [
-      "/",
-      "/signin",
-      "/signup",
-      "/auth/callback",
-      "/auth/organization",
-      "/auth/sign-in",
-      "/auth/sign-up",
-      "/api/healthz",
-      "/api/inngest",
-      "/api/stripe/webhook",
-      "/docs",
-      "/docs/:path*",
-    ],
-  },
-});
+const SIGN_UP_PATHS = ["/auth/sign-up"];
+
+const UNAUTHENTICATED_PATHS = [
+  "/",
+  "/signin",
+  "/signup",
+  "/auth/callback",
+  "/auth/organization",
+  "/auth/sign-in",
+  "/auth/sign-up",
+  "/api/healthz",
+  "/api/inngest",
+  "/api/stripe/webhook",
+];
+
+function isInitialDocumentRequest(request: NextRequest) {
+  const accept = request.headers.get("accept") ?? "";
+  const isDocumentRequest = accept.includes("text/html");
+  const isRscRequest =
+    request.headers.has("RSC") || request.headers.has("Next-Router-State-Tree");
+  const isPrefetch =
+    request.headers.get("Purpose") === "prefetch" ||
+    request.headers.get("Sec-Purpose") === "prefetch" ||
+    request.headers.has("Next-Router-Prefetch");
+
+  return isDocumentRequest && !isRscRequest && !isPrefetch;
+}
+
+function isUnauthenticatedPath(pathname: string) {
+  return (
+    UNAUTHENTICATED_PATHS.includes(pathname) ||
+    pathname === "/docs" ||
+    pathname.startsWith("/docs/")
+  );
+}
+
+function screenHintFor(pathname: string) {
+  return SIGN_UP_PATHS.includes(pathname) ? "sign-up" : "sign-in";
+}
+
+export default async function proxy(request: NextRequest) {
+  let refreshFailed = false;
+  const { session, headers, authorizationUrl } = await authkit(request, {
+    redirectUri: getWorkOSRedirectUri(),
+    screenHint: screenHintFor(request.nextUrl.pathname),
+    onSessionRefreshError: () => {
+      refreshFailed = true;
+    },
+  });
+
+  if (isUnauthenticatedPath(request.nextUrl.pathname) || session.user) {
+    return handleAuthkitHeaders(request, headers);
+  }
+
+  if (!isInitialDocumentRequest(request)) {
+    if (refreshFailed) {
+      headers.delete("Set-Cookie");
+    }
+
+    return handleAuthkitHeaders(request, headers);
+  }
+
+  return handleAuthkitHeaders(request, headers, { redirect: authorizationUrl ?? "/auth/sign-in" });
+}
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|docs(?:/.*)?).*)"],
