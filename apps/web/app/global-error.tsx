@@ -14,6 +14,7 @@ export default function GlobalError({
     captureException(error, {
       event: "opencompany.web_global_error",
       digest: error.digest,
+      ...readBrowserErrorContext(),
     });
   }, [error]);
 
@@ -55,4 +56,15 @@ export default function GlobalError({
       </body>
     </html>
   );
+}
+
+function readBrowserErrorContext() {
+  if (typeof window === "undefined") return {};
+
+  return {
+    browser_url: window.location.href,
+    browser_pathname: window.location.pathname,
+    browser_online: navigator.onLine,
+    document_visibility_state: document.visibilityState,
+  };
 }

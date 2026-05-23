@@ -83,6 +83,9 @@ jobs:
         run: bun run release:preflight -- --web
 
       - name: Build web
+        env:
+          OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
+          NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
         run: bunx vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy web

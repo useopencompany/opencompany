@@ -1,3 +1,4 @@
+import { captureException } from "@opencompany/observability";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCurrentWorkspace } from "@/lib/auth";
 import {
@@ -17,6 +18,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -46,6 +51,7 @@ const createPendingCheckoutRecordMock = vi.mocked(createPendingCheckoutRecord);
 const markCheckoutRecordFailedMock = vi.mocked(markCheckoutRecordFailed);
 const markCheckoutRecordOpenMock = vi.mocked(markCheckoutRecordOpen);
 const newStripeCheckoutRecordIdMock = vi.mocked(newStripeCheckoutRecordId);
+const captureExceptionMock = vi.mocked(captureException);
 
 describe("createCreditCheckoutSession", () => {
   beforeEach(() => {
@@ -176,5 +182,54 @@ describe("createCreditCheckoutSession", () => {
       id: "chk_123",
       error: "Stripe did not return a Checkout URL.",
     });
+    expect(captureExceptionMock).not.toHaveBeenCalled();
+  });
+
+  it("captures checkout failures with workspace context", async () => {
+    const error = new Error("Stripe unavailable");
+    const create = vi.fn().mockRejectedValue(error);
+    getStripeMock.mockReturnValue({ checkout: { sessions: { create } } } as never);
+
+    const result = await createCreditCheckoutSession(1000);
+
+    expect(result).toEqual({ ok: false, error: "Stripe unavailable" });
+    expect(markCheckoutRecordFailedMock).toHaveBeenCalledWith({
+      id: "chk_123",
+      error: "Stripe unavailable",
+    });
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      event: "opencompany.billing_checkout_failed",
+      workspace_id: "wks_123",
+      user_id: "usr_123",
+      checkout_record_id: "chk_123",
+      amount_cents: 1000,
+      checkout_stage: "create_stripe_session",
+    });
+  });
+
+  it("captures checkout configuration failures before creating a record", async () => {
+    const error = new Error("STRIPE_SECRET_KEY is required for Stripe billing.");
+    getStripeMock.mockImplementation(() => {
+      throw error;
+    });
+
+    const result = await createCreditCheckoutSession(1000);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "STRIPE_SECRET_KEY is required for Stripe billing.",
+    });
+    expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
+    expect(markCheckoutRecordFailedMock).not.toHaveBeenCalled();
+    expect(captureExceptionMock).toHaveBeenCalledWith(
+      error,
+      expect.objectContaining({
+        event: "opencompany.billing_checkout_failed",
+        workspace_id: "wks_123",
+        user_id: "usr_123",
+        amount_cents: 1000,
+        checkout_stage: "initialize",
+      }),
+    );
   });
 });

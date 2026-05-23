@@ -34,6 +34,12 @@ overlap.
 The web smoke check uses `PRODUCTION_WEB_URL` from Infisical `prod` + `/release`, not the raw Vercel
 deployment URL, so Vercel deployment protection can remain enabled on generated preview-style URLs.
 
+Release attribution is not managed as an Infisical secret. Vercel and Render expose commit metadata
+to the server runtimes, and the production workflow injects `RELEASE_SHA` as
+`NEXT_PUBLIC_OBSERVABILITY_RELEASE` during `vercel build` so browser Better Stack events group under
+the same commit. Keep `OBSERVABILITY_RELEASE` unset in normal hosted deploys; reserve it for manual
+or non-Git deploys where platform commit metadata is unavailable.
+
 Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
 runner deployment. Keep schema changes backwards compatible with the previous web and runner version
 until the release has completed.

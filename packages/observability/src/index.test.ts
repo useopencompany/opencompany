@@ -7,6 +7,7 @@ import {
   flushObservability,
   sanitizeLogFields,
   setExceptionReporter,
+  setObservabilityContext,
   startTimingTrace,
   timeAsync,
 } from ".";
@@ -22,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setObservabilityContext(undefined);
   setExceptionReporter(undefined);
   process.env = originalEnv;
   vi.unstubAllGlobals();
@@ -75,6 +77,20 @@ describe("createLogger", () => {
       environment: "preview",
       release: "client-sha",
       runtime: "browser",
+    });
+  });
+
+  it("prefers platform release metadata over explicit server release overrides", () => {
+    process.env.OBSERVABILITY_RELEASE = "manual";
+    process.env.VERCEL_GIT_COMMIT_SHA = "vercel-sha";
+    const logger = createLogger({ service: "opencompany-test", runtime: "server" });
+
+    logger.info("Hello from server");
+
+    const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
+    expect(record).toMatchObject({
+      release: "vercel-sha",
+      runtime: "server",
     });
   });
 });
@@ -179,6 +195,47 @@ describe("captureException", () => {
       session_id: "ses_123",
       apiKey: "[redacted]",
     });
+  });
+
+  it("adds browser observability context to captures", () => {
+    vi.stubGlobal("window", {});
+    const reporter = {
+      captureException: vi.fn(),
+    };
+    setExceptionReporter(reporter);
+    setObservabilityContext({
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      apiKey: "secret",
+    });
+
+    captureException(new Error("boom"), { event: "opencompany.test" });
+
+    expect(reporter.captureException).toHaveBeenCalledWith(expect.any(Error), {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      apiKey: "[redacted]",
+      event: "opencompany.test",
+    });
+  });
+
+  it("lets explicit fields override browser observability context", () => {
+    vi.stubGlobal("window", {});
+    const reporter = {
+      captureException: vi.fn(),
+    };
+    setExceptionReporter(reporter);
+    setObservabilityContext({ user_id: "usr_123", workspace_id: "wks_123" });
+
+    captureException(new Error("boom"), { workspace_id: "wks_override" });
+
+    expect(reporter.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        user_id: "usr_123",
+        workspace_id: "wks_override",
+      }),
+    );
   });
 
   it("falls back to structured logging when disabled", () => {

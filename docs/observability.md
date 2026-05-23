@@ -19,11 +19,14 @@ Remote error capture is disabled when no Better Stack DSN is set or
 ```sh
 OBSERVABILITY_ENABLED=true
 OBSERVABILITY_ENV=production
-OBSERVABILITY_RELEASE=<git-sha>
 OBSERVABILITY_LOG_LEVEL=info
 OBSERVABILITY_TIMING=0
 BETTER_STACK_ERRORS_DSN=https://...
 ```
+
+Hosted releases get commit attribution automatically: Vercel/Render expose server commit metadata,
+and the production workflow injects the released SHA into the web build for browser captures. Use
+`OBSERVABILITY_RELEASE` only for manual or non-Git deploys where platform metadata is unavailable.
 
 For the web app, setting only the public DSN is enough when server and browser errors should use
 the same Better Stack application:
@@ -84,7 +87,14 @@ Prefer these correlation fields in all handled captures:
 - `opencompany.runner_request_failed`: web/Inngest could not call the runner.
 - `opencompany.agent_github_sync_failed`: managed GitHub repo/file sync failed.
 - `opencompany.auth_callback_failed`: WorkOS callback provisioning failed.
+- `opencompany.next_request_error`: Next.js caught a server render, route handler, or server
+  action failure. Check `next_route_path`, `next_route_type`, `next_render_source`, and
+  `request_path`.
+- `opencompany.billing_checkout_failed`: settings credit top-up failed before redirecting to
+  Stripe Checkout. Check `checkout_stage`, `checkout_record_id`, `workspace_id`, and `user_id`.
 - `opencompany.web_app_error` or `opencompany.web_global_error`: uncaught Next.js UI error.
+  Browser captures include `browser_url`, `browser_pathname`, online state, and the current
+  authenticated `workspace_id`/`user_id` when available.
 
 ## Deferred
 

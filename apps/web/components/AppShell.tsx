@@ -3,6 +3,7 @@ import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
 import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import { ObservabilityContext } from "@/components/ObservabilityContext";
 import Sidebar from "@/components/Sidebar";
 import { requireCurrentWorkspace } from "@/lib/auth";
 
@@ -43,6 +44,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
           lastName: authUser.lastName,
         }}
       >
+        <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
         <div className="flex h-screen w-screen overflow-hidden bg-canvas">
           <Sidebar
             userName={userName}
