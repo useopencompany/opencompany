@@ -4,6 +4,8 @@ const webUrl = normalizeBaseUrl(process.env.PRODUCTION_WEB_URL || process.env.WE
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
 const expectedRelease = process.env.EXPECTED_RELEASE;
 const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
+const webAttempts = Number(process.env.SMOKE_WEB_ATTEMPTS ?? attempts);
+const runnerAttempts = Number(process.env.SMOKE_RUNNER_ATTEMPTS ?? attempts);
 const delayMs = Number(process.env.SMOKE_DELAY_MS ?? "10000");
 
 if (!webUrl || !runnerUrl) {
@@ -11,13 +13,15 @@ if (!webUrl || !runnerUrl) {
   process.exit(1);
 }
 
-await checkUntilReady("web", `${webUrl}/api/healthz`, attempts, delayMs);
-await checkUntilReady("runner", `${runnerUrl}/healthz`, attempts, delayMs);
+await checkUntilReady("web", `${webUrl}/api/healthz`, webAttempts, delayMs);
+await checkUntilReady("runner", `${runnerUrl}/healthz`, runnerAttempts, delayMs);
 
 console.log("Release smoke checks passed.");
 
 async function checkUntilReady(name, url, maxAttempts, waitMs) {
   let lastError;
+
+  console.log(`${name} health check target: ${url}`);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
