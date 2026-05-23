@@ -275,14 +275,14 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        <Link
+        <a
           href="/auth/sign-out"
           onClick={onClose}
           className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-[#eeeeeb] focus:outline-none focus-visible:bg-[#eeeeeb]"
         >
           <LogOut size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
           <span>Log Out</span>
-        </Link>
+        </a>
       </div>
     </div>
   );
