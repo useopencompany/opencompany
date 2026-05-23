@@ -20,8 +20,7 @@ const UNAUTHENTICATED_PATHS = [
 function isInitialDocumentRequest(request: NextRequest) {
   const accept = request.headers.get("accept") ?? "";
   const isDocumentRequest = accept.includes("text/html");
-  const isRscRequest =
-    request.headers.has("RSC") || request.headers.has("Next-Router-State-Tree");
+  const isRscRequest = request.headers.has("RSC") || request.headers.has("Next-Router-State-Tree");
   const isPrefetch =
     request.headers.get("Purpose") === "prefetch" ||
     request.headers.get("Sec-Purpose") === "prefetch" ||

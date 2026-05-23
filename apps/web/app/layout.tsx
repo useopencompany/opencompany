@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
 import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
+import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
