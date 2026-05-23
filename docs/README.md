@@ -2,6 +2,7 @@
 
 - [getting-started.md](./getting-started.md) — first-time setup, fastest path to a running dev environment.
 - [architecture.md](./architecture.md) — rough map of the app, agent editing, GitHub storage, and Inngest sync.
+- [stack/README.md](./stack/README.md) — technology register: what we use, why, owners, and exit triggers.
 - [database.md](./database.md) — Neon, schema changes, Drizzle, and optional branch databases.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
 - [analytics.md](./analytics.md) — PostHog analytics package, event registry, and privacy rules.
