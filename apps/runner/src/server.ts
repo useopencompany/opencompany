@@ -44,6 +44,10 @@ export function createServer(env: RunnerEnv) {
   app.post("/internal/sessions/:id/start", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id } = request.params as { id: string };
+    logger.info("Runner session start accepted", {
+      event: "opencompany.runner_session_start_accepted",
+      session_id: id,
+    });
     void startSession(id, env).catch((error) => {
       captureException(error, {
         event: "opencompany.runner_start_failed",
@@ -57,8 +61,18 @@ export function createServer(env: RunnerEnv) {
   app.post("/internal/sessions/:id/messages/:messageId/run", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id, messageId } = request.params as { id: string; messageId: string };
+    logger.info("Runner message run accepted", {
+      event: "opencompany.runner_message_run_accepted",
+      session_id: id,
+      message_id: messageId,
+    });
     void runMessage({ sessionId: id, messageId, env }).catch((error) => {
-      logger.error("Runner message failed", { session_id: id, message_id: messageId, error });
+      logger.error("Runner message failed", {
+        event: "opencompany.runner_message_failed",
+        session_id: id,
+        message_id: messageId,
+        error,
+      });
     });
     reply.status(202).send({ ok: true });
   });
@@ -80,6 +94,10 @@ export function createServer(env: RunnerEnv) {
   app.post("/internal/sessions/:id/abort", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id } = request.params as { id: string };
+    logger.info("Runner session abort accepted", {
+      event: "opencompany.runner_session_abort_accepted",
+      session_id: id,
+    });
     await abortSession(id);
     reply.send({ ok: true });
   });
@@ -98,6 +116,7 @@ export function createServer(env: RunnerEnv) {
     const payload = verifyStreamToken(token, env.streamTokenSecret);
     if (!payload.ok) {
       logger.warn("Rejected session event stream", {
+        event: "opencompany.runner_sse_rejected",
         session_id: id,
         reason: payload.reason,
       });
@@ -106,7 +125,11 @@ export function createServer(env: RunnerEnv) {
     }
 
     if (payload.sessionId !== id) {
-      logger.warn("Rejected session event stream token for another session", { session_id: id });
+      logger.warn("Rejected session event stream token for another session", {
+        event: "opencompany.runner_sse_rejected",
+        session_id: id,
+        reason: "session_mismatch",
+      });
       reply.status(403).send({ error: "Token does not match session." });
       return;
     }
@@ -117,7 +140,12 @@ export function createServer(env: RunnerEnv) {
       .where(eq(agentSessions.id, id))
       .limit(1);
     if (!session || session.userId !== payload.userId) {
-      logger.warn("Rejected session event stream for missing session or user", { session_id: id });
+      logger.warn("Rejected session event stream for missing session or user", {
+        event: "opencompany.runner_sse_rejected",
+        session_id: id,
+        user_id: payload.userId,
+        reason: "session_not_found_or_user_mismatch",
+      });
       reply.status(404).send({ error: "Session not found." });
       return;
     }
@@ -127,31 +155,48 @@ export function createServer(env: RunnerEnv) {
     raw.writeHead(200, createSseHeaders(env, request.headers.origin));
 
     let lastId = readLastEventId(request.headers["last-event-id"], query.after);
+    const connectedAt = Date.now();
+    const requestedAfterId = lastId;
     let closed = false;
     request.raw.on("close", () => {
       closed = true;
     });
 
     const writeEvent = (event: PersistedRuntimeEvent) => {
-      if (closed || event.id <= lastId) return;
+      if (closed || event.id <= lastId) return false;
       lastId = event.id;
       raw.write(formatSseEvent(event));
+      return true;
     };
 
     const flush = async () => {
       const events = await listSessionEvents({ sessionId: id, afterId: lastId, limit: 100 });
+      let written = 0;
       for (const event of events) {
-        writeEvent(event);
+        if (writeEvent(event)) written += 1;
       }
+      return written;
     };
 
-    await flush();
+    const replayedEvents = await flush();
+    logger.info("Runner SSE connected", {
+      event: "opencompany.runner_sse_connected",
+      session_id: id,
+      user_id: payload.userId,
+      after_id: requestedAfterId,
+      latest_event_id: lastId,
+      replayed_events: replayedEvents,
+    });
     const unsubscribe = subscribeSessionEvents(id, (event) => {
       writeEvent(event);
     });
     const timer = setInterval(() => {
       void flush().catch((error) => {
-        logger.error("Event stream flush failed", { session_id: id, error });
+        logger.error("Event stream flush failed", {
+          event: "opencompany.runner_sse_flush_failed",
+          session_id: id,
+          error,
+        });
         raw.write(formatStreamError("Event stream failed."));
       });
     }, 300);
@@ -165,6 +210,13 @@ export function createServer(env: RunnerEnv) {
     clearInterval(timer);
     clearInterval(heartbeat);
     unsubscribe();
+    logger.info("Runner SSE closed", {
+      event: "opencompany.runner_sse_closed",
+      session_id: id,
+      user_id: payload.userId,
+      latest_event_id: lastId,
+      duration_ms: Date.now() - connectedAt,
+    });
   });
 
   return app;

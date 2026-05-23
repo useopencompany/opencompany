@@ -143,6 +143,10 @@ Required environment variables:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 
+Production runner logs are structured JSON on stdout and should be forwarded by Render to the
+Better Stack source `opencompany-runner-production`. Do not add browser/client log capture to debug
+runner issues; search server logs by `session_id` first.
+
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to
 `RUNNER_E2B_IDLE_TIMEOUT_MS` so unused sandboxes pause shortly after the runner stops touching them.
