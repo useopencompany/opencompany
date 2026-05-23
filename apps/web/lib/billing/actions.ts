@@ -3,7 +3,7 @@
 import { captureException } from "@opencompany/observability";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { AUTHENTICATION_REQUIRED_MESSAGE, getOptionalCurrentWorkspace } from "@/lib/auth";
 import {
   isValidTopUpAmountCents,
   MAX_TOP_UP_AMOUNT_CENTS,
@@ -30,7 +30,12 @@ export async function createCreditCheckoutSession(amountCents: number) {
     };
   }
 
-  const { authUser, user, workspace } = await getCurrentWorkspace();
+  const context = await getOptionalCurrentWorkspace();
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  const { authUser, user, workspace } = context;
   let checkoutRecordId: string | undefined;
   let pendingRecordCreated = false;
   let checkoutStage = "initialize";
@@ -131,7 +136,12 @@ export async function createCreditCheckoutSession(amountCents: number) {
 }
 
 export async function redeemCreditCode(code: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const context = await getOptionalCurrentWorkspace();
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  const { user, workspace } = context;
   const result = await redeemCreditCodeForWorkspace({
     code,
     workspaceId: workspace.id,

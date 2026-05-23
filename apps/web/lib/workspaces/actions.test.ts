@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { getOptionalCurrentWorkspace } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos";
 import { updateWorkspaceName } from "./actions";
 
@@ -9,7 +9,8 @@ vi.mock("@opencompany/db/client", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  getCurrentWorkspace: vi.fn(),
+  AUTHENTICATION_REQUIRED_MESSAGE: "Your session expired. Sign in again to continue.",
+  getOptionalCurrentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/workos", () => ({
@@ -21,7 +22,7 @@ vi.mock("next/cache", () => ({
 }));
 
 const getDbMock = vi.mocked(getDb);
-const getCurrentWorkspaceMock = vi.mocked(getCurrentWorkspace);
+const getOptionalCurrentWorkspaceMock = vi.mocked(getOptionalCurrentWorkspace);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 
 describe("updateWorkspaceName", () => {
@@ -46,7 +47,7 @@ describe("updateWorkspaceName", () => {
     getWorkOSClientMock.mockReturnValue({
       organizations: { updateOrganization },
     } as never);
-    getCurrentWorkspaceMock.mockResolvedValue({
+    getOptionalCurrentWorkspaceMock.mockResolvedValue({
       workspace: {
         id: "wks_123",
         workosOrganizationId: "org_123",
@@ -67,5 +68,18 @@ describe("updateWorkspaceName", () => {
       updatedAt: expect.any(Date),
     });
     expect(where).toHaveBeenCalledOnce();
+  });
+
+  it("returns an auth error without updating WorkOS when the session is missing", async () => {
+    getOptionalCurrentWorkspaceMock.mockResolvedValue(null);
+
+    const result = await updateWorkspaceName("New workspace");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Your session expired. Sign in again to continue.",
+    });
+    expect(getWorkOSClientMock).not.toHaveBeenCalled();
+    expect(getDbMock).not.toHaveBeenCalled();
   });
 });

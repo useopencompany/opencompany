@@ -47,15 +47,36 @@ jobs:
           echo "Production releases must run from main. Current ref: $GITHUB_REF"
           exit 1
 
+      - name: Check automatic release is still current
+        id: current-release
+        if: ${{ github.event_name == 'workflow_run' }}
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          latest_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$RELEASE_SHA" != "$latest_sha" ]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping release for $RELEASE_SHA because origin/main is now $latest_sha."
+            exit 0
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "Release $RELEASE_SHA is current."
+
+      - name: Skip stale automatic release
+        if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'false' }}
+        run: echo "This automatic release was superseded before setup, so no deployment work will run."
+
       - name: Setup Bun
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.2
 
       - name: Install dependencies
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         run: bun install --frozen-lockfile
 
       - name: Fetch release secrets from Infisical
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         uses: Infisical/secrets-action@v1.0.16
         with:
           method: oidc
@@ -66,30 +87,73 @@ jobs:
           secret-path: /release
 
       - name: Check release automation env
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.current-release.outputs.should_release == 'true' }}
         run: bun run release:preflight -- --release
 
+      - name: Re-check automatic release before production changes
+        id: production-release
+        if: ${{ github.event_name == 'workflow_run' && steps.current-release.outputs.should_release == 'true' }}
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          latest_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$RELEASE_SHA" != "$latest_sha" ]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping production changes for $RELEASE_SHA because origin/main is now $latest_sha."
+            exit 0
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "Release $RELEASE_SHA is still current before production changes."
+
+      - name: Skip stale production changes
+        if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
+        run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
+
       - name: Map production database URL
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: echo "DATABASE_URL=$PRODUCTION_DATABASE_URL" >> "$GITHUB_ENV"
 
       - name: Run production migrations
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: bun run db:migrate
 
       - name: Pull Vercel project config
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Check Vercel web env
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         env:
           OPENCOMPANY_LOAD_VERCEL_ENV: "1"
         run: bun run release:preflight -- --web
 
       - name: Build web
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         env:
           OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
           NEXT_PUBLIC_OBSERVABILITY_RELEASE: ${{ env.RELEASE_SHA }}
         run: bunx vercel build --prod --token="$VERCEL_TOKEN"
 
+      - name: Re-check automatic release before deploy
+        id: deploy-release
+        if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'true' }}
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          latest_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$RELEASE_SHA" != "$latest_sha" ]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy for $RELEASE_SHA because origin/main is now $latest_sha."
+            exit 0
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "Release $RELEASE_SHA is still current before deploy."
+
+      - name: Skip stale deploy
+        if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
+        run: echo "This automatic release was superseded after build, so web and runner deploys were skipped."
+
       - name: Deploy web
         id: deploy-web
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
         run: |
           output="$(bunx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")"
           echo "$output"
@@ -102,11 +166,11 @@ jobs:
           echo "Deployed web to $url"
 
       - name: Trigger runner deploy
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy_runner }}
+        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_runner) }}
         run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
 
       - name: Smoke check release
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.smoke }}
+        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
           EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
           SMOKE_WEB_ATTEMPTS: "12"
