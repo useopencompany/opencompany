@@ -14,6 +14,7 @@ export default authkitProxy({
       "/auth/organization",
       "/auth/sign-in",
       "/auth/sign-up",
+      "/api/healthz",
       "/api/inngest",
       "/api/stripe/webhook",
       "/docs",

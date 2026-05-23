@@ -136,7 +136,9 @@ Release-only script vars:
 | Var | Required | Purpose |
 |---|---:|---|
 | `EXPECTED_RELEASE` | No | Smoke check expects health endpoint release fields to start with this SHA. |
-| `SMOKE_ATTEMPTS` | No | Health retry count. Defaults to `30`; workflow uses `60`. |
+| `SMOKE_ATTEMPTS` | No | Default health retry count. Defaults to `30`. |
+| `SMOKE_WEB_ATTEMPTS` | No | Web health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
+| `SMOKE_RUNNER_ATTEMPTS` | No | Runner health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `60`. |
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
 
 ## Local Development

@@ -77,6 +77,11 @@ jobs:
       - name: Pull Vercel project config
         run: bunx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
+      - name: Check Vercel web env
+        env:
+          OPENCOMPANY_LOAD_VERCEL_ENV: "1"
+        run: bun run release:preflight -- --web
+
       - name: Build web
         run: bunx vercel build --prod --token="$VERCEL_TOKEN"
 
@@ -100,8 +105,8 @@ jobs:
       - name: Smoke check release
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.smoke }}
         env:
-          PRODUCTION_WEB_URL: ${{ steps.deploy-web.outputs.url }}
           EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
-          SMOKE_ATTEMPTS: "60"
+          SMOKE_WEB_ATTEMPTS: "12"
+          SMOKE_RUNNER_ATTEMPTS: "60"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke

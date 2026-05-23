@@ -24,12 +24,15 @@ Production releases are intentionally serialized:
 2. Run Drizzle migrations against production Neon.
 3. Build and deploy the Vercel web app for the exact commit.
 4. Trigger the Render runner deploy for the same commit.
-5. Smoke check web `/api/healthz` and runner `/healthz`.
+5. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
 `CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
 Actions. It is protected with `concurrency: production-release` so two production releases cannot
 overlap.
+
+The web smoke check uses `PRODUCTION_WEB_URL` from Infisical `prod` + `/release`, not the raw Vercel
+deployment URL, so Vercel deployment protection can remain enabled on generated preview-style URLs.
 
 Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
 runner deployment. Keep schema changes backwards compatible with the previous web and runner version
