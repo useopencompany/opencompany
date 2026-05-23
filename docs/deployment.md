@@ -84,6 +84,10 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `RUNNER_STREAM_TOKEN_SECRET`
 - optional analytics, feedback, and observability env vars
 
+Forward production web logs to the Better Stack source `opencompany-web-production` using the
+Vercel Better Stack integration or a Vercel Log Drain. Keep the source token in Vercel/Infisical,
+not in git.
+
 ### Render
 
 Create the runner from `render.yaml`.
@@ -105,6 +109,9 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+
+Forward runner logs to the Better Stack source `opencompany-runner-production` using a Render Log
+Stream. Keep the source token in Render/Infisical, not in git.
 
 `RUNNER_ALLOWED_ORIGINS` must include the exact production web origin, for example
 `https://app.example.com`. Add preview origins only if you intentionally allow previews to connect

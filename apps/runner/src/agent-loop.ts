@@ -131,6 +131,14 @@ export async function startSession(sessionId: string, env: RunnerEnv) {
     type: "session.status",
     payload: { status: "ready", message: "Sandbox ready" },
   });
+  logger.info("Runner session ready", {
+    event: "opencompany.runner_session_ready",
+    workspace_id: row.workspace.id,
+    user_id: row.session.userId,
+    agent_id: row.agent.id,
+    session_id: sessionId,
+    sandbox_id: sandbox.sandboxId,
+  });
   await parkSandboxWhenIdle(sandbox, env);
 }
 
@@ -152,6 +160,10 @@ export async function abortSession(sessionId: string) {
     sessionId,
     type: "session.status",
     payload: { status: "aborting", message: "Abort requested" },
+  });
+  logger.info("Runner session abort requested", {
+    event: "opencompany.runner_session_abort_requested",
+    session_id: sessionId,
   });
 }
 
@@ -272,6 +284,16 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         }),
       ),
     );
+    logger.info("Runner session running", {
+      event: "opencompany.runner_session_running",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      model_provider: modelProvider,
+      model_name: modelName,
+    });
 
     const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
 
@@ -478,6 +500,18 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     );
     await requireLeaseWrite(releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed"));
     outcome = "completed";
+    logger.info("Runner session completed", {
+      event: "opencompany.runner_session_completed",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      assistant_message_id: assistantMessageId,
+      sandbox_id: sandboxId,
+      model_provider: modelProvider,
+      model_name: modelName,
+    });
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
@@ -489,6 +523,18 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       if (leaseAcquired) {
         await failRunLease(input.sessionId, leaseId, leaseOwner, "aborting", "Run aborted.");
       }
+      logger.info("Runner session aborted", {
+        event: "opencompany.runner_session_aborted",
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        session_id: input.sessionId,
+        message_id: input.messageId,
+        assistant_message_id: assistantMessageId,
+        sandbox_id: sandboxId,
+        model_provider: modelProvider,
+        model_name: modelName,
+      });
       return;
     }
 
@@ -526,6 +572,19 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       : false;
     if (!updated && (await isSessionArchived(input.sessionId))) return;
     outcome = "failed";
+    logger.error("Runner session failed", {
+      event: "opencompany.runner_session_failed",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      assistant_message_id: assistantMessageId,
+      sandbox_id: sandboxId,
+      model_provider: modelProvider,
+      model_name: modelName,
+      error,
+    });
     throw error;
   } finally {
     if (activeRuns.get(input.sessionId)?.controller === controller) {

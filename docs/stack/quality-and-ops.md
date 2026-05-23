@@ -94,11 +94,12 @@ can enforce the same standards with less maintenance.
 
 ## Better Stack and Sentry SDKs
 
-**What it is:** Better Stack receives errors through Sentry-compatible DSNs; Sentry SDKs provide the
-client/server capture transport.
+**What it is:** Better Stack receives errors through Sentry-compatible DSNs and production server
+logs through Vercel/Render log forwarding. Sentry SDKs provide the client/server error capture
+transport.
 
-**What it does for us:** Captures production errors from the Next.js app and the Bun runner through
-the repo-owned `@opencompany/observability` facade.
+**What it does for us:** Captures production errors from the Next.js app and the Bun runner, and
+stores structured server logs emitted by the repo-owned `@opencompany/observability` facade.
 
 **Where it is used:**
 
@@ -110,12 +111,15 @@ the repo-owned `@opencompany/observability` facade.
   `OBSERVABILITY_*`, `NEXT_PUBLIC_OBSERVABILITY_*` in `.env.example`.
 - `docs/observability.md`.
 
-**Status:** Optional. Missing DSNs disable remote error capture safely.
+**Status:** Optional. Missing DSNs disable remote error capture safely. Missing platform log drains
+only affects centralized log search; local/platform stdout still works.
 
 **Why we use it:** We need production error visibility for web, auth, GitHub sync, runner, sandbox,
-and hosted-tool failures without committing to a full tracing/logging platform yet.
+hosted-tool failures, and searchable server-side timelines for agent sessions without committing to
+browser log capture, session replay, or full tracing yet.
 
 **Owner:** Platform.
 
 **Reconsider if:** We need first-class distributed traces, structured log ingestion, alerting,
-session replay, or AI-specific tracing that Better Stack/Sentry-compatible capture does not cover.
+session replay, browser logs, or AI-specific tracing that Better Stack/Sentry-compatible capture
+does not cover.
