@@ -168,6 +168,7 @@ In the GitHub repository `production` environment, add variables:
 | `INFISICAL_PROJECT_SLUG` | No | The Infisical project slug. |
 | `INFISICAL_MACHINE_IDENTITY_ID` | No | The machine identity id. |
 | `INFISICAL_ENV_SLUG` | No | Usually `prod`. Optional because workflow defaults to `prod`. |
+| `INFISICAL_DOMAIN` | No | Infisical API origin. Defaults to `https://eu.infisical.com`. |
 
 Put these keys in Infisical `prod` + `/release`:
 

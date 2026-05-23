@@ -134,6 +134,7 @@ Create a protected `production` environment in GitHub and add these environment 
 - `INFISICAL_PROJECT_SLUG`
 - `INFISICAL_MACHINE_IDENTITY_ID`
 - `INFISICAL_ENV_SLUG` (optional, defaults to `prod`)
+- `INFISICAL_DOMAIN` (optional, defaults to `https://eu.infisical.com`)
 
 Store release secrets in Infisical `prod` + `/release`; see [secret-management.md](./secret-management.md).
 
