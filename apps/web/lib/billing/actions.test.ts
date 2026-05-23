@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { getOptionalCurrentWorkspace } from "@/lib/auth";
 import {
   createPendingCheckoutRecord,
   markCheckoutRecordFailed,
@@ -20,7 +20,8 @@ vi.mock("next/cache", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  getCurrentWorkspace: vi.fn(),
+  AUTHENTICATION_REQUIRED_MESSAGE: "Your session expired. Sign in again to continue.",
+  getOptionalCurrentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/stripe", () => ({
@@ -39,7 +40,7 @@ vi.mock("@/lib/billing/service", async (importOriginal) => {
   };
 });
 
-const getCurrentWorkspaceMock = vi.mocked(getCurrentWorkspace);
+const getOptionalCurrentWorkspaceMock = vi.mocked(getOptionalCurrentWorkspace);
 const getStripeMock = vi.mocked(getStripe);
 const getAppUrlMock = vi.mocked(getAppUrl);
 const createPendingCheckoutRecordMock = vi.mocked(createPendingCheckoutRecord);
@@ -55,7 +56,7 @@ describe("createCreditCheckoutSession", () => {
     });
     newStripeCheckoutRecordIdMock.mockReturnValue("chk_123");
     getAppUrlMock.mockReturnValue("https://app.example.com");
-    getCurrentWorkspaceMock.mockResolvedValue({
+    getOptionalCurrentWorkspaceMock.mockResolvedValue({
       authUser: { email: "user@example.com" },
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
@@ -68,6 +69,19 @@ describe("createCreditCheckoutSession", () => {
     expect(result).toEqual({
       ok: false,
       error: "Top-up amount must be between 500 and 100000 cents.",
+    });
+    expect(getStripeMock).not.toHaveBeenCalled();
+    expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
+  });
+
+  it("returns an auth error without starting checkout when the session is missing", async () => {
+    getOptionalCurrentWorkspaceMock.mockResolvedValue(null);
+
+    const result = await createCreditCheckoutSession(2500);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Your session expired. Sign in again to continue.",
     });
     expect(getStripeMock).not.toHaveBeenCalled();
     expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();

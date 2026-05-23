@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { AUTHENTICATION_REQUIRED_MESSAGE, getOptionalCurrentWorkspace } from "@/lib/auth";
 import {
   isValidTopUpAmountCents,
   MAX_TOP_UP_AMOUNT_CENTS,
@@ -29,9 +29,14 @@ export async function createCreditCheckoutSession(amountCents: number) {
     };
   }
 
+  const context = await getOptionalCurrentWorkspace();
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
   const stripe = getStripe();
   const appUrl = getAppUrl();
-  const { authUser, user, workspace } = await getCurrentWorkspace();
+  const { authUser, user, workspace } = context;
   const checkoutRecordId = newStripeCheckoutRecordId();
   const metadata = {
     workspaceId: workspace.id,
@@ -95,7 +100,12 @@ export async function createCreditCheckoutSession(amountCents: number) {
 }
 
 export async function redeemCreditCode(code: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const context = await getOptionalCurrentWorkspace();
+  if (!context) {
+    return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
+  }
+
+  const { user, workspace } = context;
   const result = await redeemCreditCodeForWorkspace({
     code,
     workspaceId: workspace.id,

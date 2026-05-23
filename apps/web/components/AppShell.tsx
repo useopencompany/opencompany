@@ -1,7 +1,6 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
-import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import Sidebar from "@/components/Sidebar";
 import { requireCurrentWorkspace } from "@/lib/auth";
@@ -33,30 +32,28 @@ export default async function AppShell({ children }: { children: React.ReactNode
     .limit(50);
 
   return (
-    <AuthKitProvider>
-      <AnalyticsProvider
-        identity={{
-          userId: user.id,
-          workspaceId: workspace.id,
-          email: authUser.email,
-          firstName: authUser.firstName,
-          lastName: authUser.lastName,
-        }}
-      >
-        <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-          <Sidebar
-            userName={userName}
-            userEmail={authUser.email}
-            workspaceName={workspace.name}
-            sessions={sessions.map((session) => ({
-              ...session,
-              createdAt: session.createdAt.toISOString(),
-              updatedAt: session.updatedAt.toISOString(),
-            }))}
-          />
-          {children}
-        </div>
-      </AnalyticsProvider>
-    </AuthKitProvider>
+    <AnalyticsProvider
+      identity={{
+        userId: user.id,
+        workspaceId: workspace.id,
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+      }}
+    >
+      <div className="flex h-screen w-screen overflow-hidden bg-canvas">
+        <Sidebar
+          userName={userName}
+          userEmail={authUser.email}
+          workspaceName={workspace.name}
+          sessions={sessions.map((session) => ({
+            ...session,
+            createdAt: session.createdAt.toISOString(),
+            updatedAt: session.updatedAt.toISOString(),
+          }))}
+        />
+        {children}
+      </div>
+    </AnalyticsProvider>
   );
 }

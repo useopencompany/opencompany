@@ -27,6 +27,8 @@ export type CurrentWorkspaceContext = {
   isNewUser: boolean;
 };
 
+export const AUTHENTICATION_REQUIRED_MESSAGE = "Your session expired. Sign in again to continue.";
+
 function appUserId(workosUserId: string) {
   return `usr_${workosUserId}`;
 }
