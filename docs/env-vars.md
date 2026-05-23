@@ -129,6 +129,7 @@ GitHub environment variables:
 | `INFISICAL_PROJECT_SLUG` | Infisical project slug. Safe to store as a GitHub environment variable. |
 | `INFISICAL_MACHINE_IDENTITY_ID` | Infisical machine identity id. Safe to store as a GitHub environment variable. |
 | `INFISICAL_ENV_SLUG` | Optional. Defaults to `prod`. |
+| `INFISICAL_DOMAIN` | Optional. Defaults to `https://eu.infisical.com`. |
 
 Release-only script vars:
 
