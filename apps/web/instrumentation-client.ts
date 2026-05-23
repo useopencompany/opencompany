@@ -19,6 +19,9 @@ if (isObservabilityEnabled() && dsn) {
   setExceptionReporter({
     captureException(error, fields) {
       Sentry.withScope((scope) => {
+        if (typeof fields.user_id === "string" && fields.user_id) {
+          scope.setUser({ id: fields.user_id });
+        }
         scope.setContext("opencompany", fields);
         for (const [key, value] of Object.entries(fields)) {
           if (

@@ -1,4 +1,26 @@
-import { isObservabilityEnabled, setExceptionReporter } from "@opencompany/observability";
+import {
+  captureException,
+  isObservabilityEnabled,
+  setExceptionReporter,
+} from "@opencompany/observability";
+import type { Instrumentation } from "next";
+
+export const onRequestError: Instrumentation.onRequestError = (error, request, context) => {
+  const requestId =
+    readHeader(request.headers, "x-vercel-id") ?? readHeader(request.headers, "x-request-id");
+
+  captureException(error, {
+    event: "opencompany.next_request_error",
+    next_route_path: context.routePath,
+    next_route_type: context.routeType,
+    next_router_kind: context.routerKind,
+    next_render_source: context.renderSource,
+    next_revalidate_reason: context.revalidateReason,
+    request_path: request.path,
+    request_method: request.method,
+    request_id: requestId,
+  });
+};
 
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -13,15 +35,17 @@ export async function register() {
     dsn,
     environment: process.env.OBSERVABILITY_ENV ?? process.env.VERCEL_ENV ?? process.env.NODE_ENV,
     release:
-      process.env.OBSERVABILITY_RELEASE ??
       process.env.VERCEL_GIT_COMMIT_SHA ??
-      process.env.RENDER_GIT_COMMIT,
+      process.env.RELEASE_SHA ??
+      process.env.GITHUB_SHA ??
+      process.env.OBSERVABILITY_RELEASE,
     tracesSampleRate: 0,
   });
 
   setExceptionReporter({
     captureException(error, fields) {
       Sentry.withScope((scope) => {
+        setScopeUser(scope, fields);
         scope.setContext("opencompany", fields);
         for (const [key, value] of Object.entries(fields)) {
           if (
@@ -39,4 +63,19 @@ export async function register() {
       return Sentry.flush();
     },
   });
+}
+
+function setScopeUser(
+  scope: { setUser(user: { id: string } | null): void },
+  fields: Record<string, unknown>,
+) {
+  if (typeof fields.user_id === "string" && fields.user_id) {
+    scope.setUser({ id: fields.user_id });
+  }
+}
+
+function readHeader(headers: NodeJS.Dict<string | string[]>, name: string) {
+  const value = headers[name] ?? headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value[0];
+  return value;
 }

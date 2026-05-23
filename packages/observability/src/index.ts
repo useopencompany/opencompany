@@ -67,6 +67,7 @@ const defaultTimingLogger = createLogger({ service: "opencompany" });
 const observabilityLogger = createLogger({ service: "opencompany-observability" });
 
 let exceptionReporter: ExceptionReporter | undefined;
+let browserObservabilityContext: ObservabilityContext = {};
 
 export function createLogger(input: CreateLoggerInput): Logger {
   return {
@@ -89,8 +90,16 @@ export function setExceptionReporter(reporter: ExceptionReporter | undefined) {
   exceptionReporter = isObservabilityEnabled() ? reporter : undefined;
 }
 
+export function setObservabilityContext(context: ObservabilityContext | undefined) {
+  if (!isBrowser()) return;
+  browserObservabilityContext = sanitizeLogFields(context) as ObservabilityContext;
+}
+
 export function captureException(error: unknown, fields?: LogFields) {
-  const sanitizedFields = sanitizeLogFields(fields);
+  const sanitizedFields = sanitizeLogFields({
+    ...getCurrentObservabilityContext(),
+    ...fields,
+  });
   const errorFields = errorToLogFields(error);
 
   if (!isObservabilityEnabled() || !exceptionReporter) {
@@ -116,6 +125,10 @@ export function captureException(error: unknown, fields?: LogFields) {
       error: reporterError,
     });
   }
+}
+
+function getCurrentObservabilityContext() {
+  return isBrowser() ? browserObservabilityContext : {};
 }
 
 export async function flushObservability() {
@@ -240,9 +253,11 @@ function getRelease() {
     return getEnv("NEXT_PUBLIC_OBSERVABILITY_RELEASE") ?? "local";
   }
   return (
-    getEnv("OBSERVABILITY_RELEASE") ??
     getEnv("VERCEL_GIT_COMMIT_SHA") ??
     getEnv("RENDER_GIT_COMMIT") ??
+    getEnv("RELEASE_SHA") ??
+    getEnv("GITHUB_SHA") ??
+    getEnv("OBSERVABILITY_RELEASE") ??
     "local"
   );
 }

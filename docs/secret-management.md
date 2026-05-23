@@ -183,6 +183,9 @@ Put these keys in Infisical `prod` + `/release`:
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
 The workflow maps `PRODUCTION_DATABASE_URL` to `DATABASE_URL` before running Drizzle migrations.
+Do not store per-commit release values in Infisical. The release workflow derives them from GitHub
+and injects them into the Vercel build, while Vercel and Render expose their own git commit metadata
+to server runtimes.
 
 ## Operational Rule
 

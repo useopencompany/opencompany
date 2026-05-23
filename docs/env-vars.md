@@ -32,7 +32,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner cloning. |
 | `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Same installation target. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
-| `OBSERVABILITY_RELEASE` | Vercel, Render | Optional when platform git SHA vars are available, but useful for manual deploys. |
+| `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
 ## Vercel Web
 
@@ -66,14 +66,14 @@ Set these in Vercel Production.
 | `NEXT_PUBLIC_ANALYTICS_DEBUG` | No | Local/debug analytics logging. |
 | `OBSERVABILITY_ENABLED` | No | Server observability toggle. |
 | `OBSERVABILITY_ENV` | No | Server observability environment. |
-| `OBSERVABILITY_RELEASE` | No | Server release tag. Falls back to Vercel git SHA. |
+| `OBSERVABILITY_RELEASE` | No | Manual server release override. Vercel git SHA wins when available. |
 | `OBSERVABILITY_LOG_LEVEL` | No | Structured logger level. |
 | `OBSERVABILITY_TIMING` | No | Verbose timing logs. |
 | `OPENCOMPANY_TIMING` | No | Legacy timing alias. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENV` | No | Browser observability environment. |
-| `NEXT_PUBLIC_OBSERVABILITY_RELEASE` | No | Browser release tag. |
+| `NEXT_PUBLIC_OBSERVABILITY_RELEASE` | No | Browser release tag. Production release workflow sets this from the released commit during build. |
 | `NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL` | No | Browser log level. |
 | `NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN` | No | Browser and fallback server error DSN. |
 
@@ -99,7 +99,7 @@ Set these in the Render `opencompany-runner` service.
 | `BETTER_STACK_ERRORS_DSN` | No | Runner error capture DSN. |
 | `OBSERVABILITY_ENABLED` | No | Runner observability toggle. |
 | `OBSERVABILITY_ENV` | No | Runner observability environment. |
-| `OBSERVABILITY_RELEASE` | No | Runner release tag. Falls back to Render git SHA. |
+| `OBSERVABILITY_RELEASE` | No | Manual runner release override. Render git SHA wins when available. |
 | `OBSERVABILITY_LOG_LEVEL` | No | Runner log level. |
 | `OBSERVABILITY_TIMING` | No | Verbose timing logs. |
 

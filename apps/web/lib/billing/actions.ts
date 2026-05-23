@@ -1,5 +1,6 @@
 "use server";
 
+import { captureException } from "@opencompany/observability";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { AUTHENTICATION_REQUIRED_MESSAGE, getOptionalCurrentWorkspace } from "@/lib/auth";
@@ -34,26 +35,36 @@ export async function createCreditCheckoutSession(amountCents: number) {
     return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
   }
 
-  const stripe = getStripe();
-  const appUrl = getAppUrl();
   const { authUser, user, workspace } = context;
-  const checkoutRecordId = newStripeCheckoutRecordId();
-  const metadata = {
+  let checkoutRecordId: string | undefined;
+  let pendingRecordCreated = false;
+  let checkoutStage = "initialize";
+  let checkoutUrl = "";
+  const metadataBase = {
     workspaceId: workspace.id,
     userId: user.id,
     amountCents: String(amountCents),
-    checkoutRecordId,
   };
 
-  await createPendingCheckoutRecord({
-    id: checkoutRecordId,
-    workspaceId: workspace.id,
-    userId: user.id,
-    amountCents,
-  });
-
-  let checkoutUrl: string;
   try {
+    const stripe = getStripe();
+    const appUrl = getAppUrl();
+    checkoutRecordId = newStripeCheckoutRecordId();
+    const metadata = {
+      ...metadataBase,
+      checkoutRecordId,
+    };
+
+    checkoutStage = "create_pending_record";
+    await createPendingCheckoutRecord({
+      id: checkoutRecordId,
+      workspaceId: workspace.id,
+      userId: user.id,
+      amountCents,
+    });
+    pendingRecordCreated = true;
+
+    checkoutStage = "create_stripe_session";
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: authUser.email,
@@ -81,6 +92,7 @@ export async function createCreditCheckoutSession(amountCents: number) {
       return { ok: false as const, error: "Stripe did not return a Checkout URL." };
     }
 
+    checkoutStage = "mark_checkout_open";
     await markCheckoutRecordOpen({
       id: checkoutRecordId,
       stripeCheckoutSessionId: session.id,
@@ -89,10 +101,34 @@ export async function createCreditCheckoutSession(amountCents: number) {
         stripeCheckoutSessionId: session.id,
       },
     });
+
     checkoutUrl = session.url;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start checkout.";
-    await markCheckoutRecordFailed({ id: checkoutRecordId, error: message });
+
+    captureException(error, {
+      event: "opencompany.billing_checkout_failed",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      checkout_record_id: checkoutRecordId,
+      amount_cents: amountCents,
+      checkout_stage: checkoutStage,
+    });
+
+    if (checkoutRecordId && pendingRecordCreated) {
+      try {
+        await markCheckoutRecordFailed({ id: checkoutRecordId, error: message });
+      } catch (markError) {
+        captureException(markError, {
+          event: "opencompany.billing_checkout_mark_failed",
+          workspace_id: workspace.id,
+          user_id: user.id,
+          checkout_record_id: checkoutRecordId,
+          amount_cents: amountCents,
+        });
+      }
+    }
+
     return { ok: false as const, error: message };
   }
 
