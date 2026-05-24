@@ -1,5 +1,6 @@
 "use client";
 
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   CheckCircle2,
@@ -34,21 +35,23 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from "@/components/ui/select";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
+import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { updateAgent } from "@/lib/agents/actions";
 import { extractConfigFromMentions } from "@/lib/agents/agent-file";
+import {
+  AGENTS_QUERY_STALE_TIME_MS,
+  type AgentPayload,
+  agentQueryKeys,
+  fetchAgent,
+  fetchAgents,
+} from "@/lib/agents/payload";
 import type { AgentConfig, AgentModelId } from "@/lib/agents/types";
 
 type Props = {
-  id: string;
-  initialName: string;
-  initialBody: string;
-  initialConfig: AgentConfig;
-  initialPath: string | null;
-  initialGitHubCommitSha: string | null;
-  initialGitHubSyncedAt: string | null;
-  initialGitHubSyncStatus: string;
-  initialGitHubSyncError: string | null;
+  idOrPath: string;
+  initialAgent?: AgentPayload;
 };
 
 type SaveState = "idle" | "saving" | "saved";
@@ -71,21 +74,76 @@ function getStoredInspectorCollapsed() {
   return stored === null ? true : stored === "true";
 }
 
-export default function AgentDetail({
-  id,
-  initialName,
-  initialBody,
-  initialConfig,
-  initialPath,
-  initialGitHubCommitSha,
-  initialGitHubSyncedAt,
-  initialGitHubSyncStatus,
-  initialGitHubSyncError,
-}: Props) {
-  const [name, setName] = useState(initialName);
+function updateAgentQueries(
+  queryClient: QueryClient,
+  workspaceId: string,
+  agent: AgentPayload,
+  previousIdOrPath: string,
+) {
+  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, previousIdOrPath), agent);
+  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.id), agent);
+  if (agent.path) {
+    queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), agent);
+  }
+  queryClient.setQueryData<AgentPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
+    if (!agents) return [agent];
+
+    const next = agents.map((item) => (item.id === agent.id ? agent : item));
+    if (!next.some((item) => item.id === agent.id)) next.unshift(agent);
+    return next.toSorted(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    );
+  });
+}
+
+function findCachedAgent(
+  agents: AgentPayload[] | undefined,
+  idOrPath: string,
+): AgentPayload | undefined {
+  return agents?.find((agent) => agent.id === idOrPath || agent.path === idOrPath);
+}
+
+export default function AgentDetail({ initialAgent, idOrPath }: Props) {
+  const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
+  const cachedAgent =
+    initialAgent ??
+    findCachedAgent(queryClient.getQueryData(agentQueryKeys.list(workspaceId)), idOrPath);
+  const { data: agent } = useQuery({
+    queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
+    queryFn: () => fetchAgent(idOrPath),
+    initialData: cachedAgent,
+    staleTime: AGENTS_QUERY_STALE_TIME_MS,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.githubSyncStatus === "pending" || data?.githubSyncStatus === "syncing"
+        ? 2500
+        : false;
+    },
+  });
+
+  if (!agent) {
+    return <AgentDetailSkeleton />;
+  }
+
+  return <AgentDetailContent agent={agent} idOrPath={idOrPath} workspaceId={workspaceId} />;
+}
+
+function AgentDetailContent({
+  agent,
+  idOrPath,
+  workspaceId,
+}: {
+  agent: AgentPayload;
+  idOrPath: string;
+  workspaceId: string;
+}) {
+  const queryClient = useQueryClient();
+  const initialBody = agent.body || agent.config.instructions;
+  const [name, setName] = useState(agent.name);
   const [body, setBody] = useState(initialBody);
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
-    findModel(initialConfig.model.name)?.id ?? DEFAULT_MODEL_ID,
+    findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
   );
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -98,29 +156,37 @@ export default function AgentDetail({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const configPreview = buildConfigPreview({
     body,
-    fallback: initialConfig,
+    fallback: agent.config,
     selectedModelId,
   });
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
-    initialGitHubSyncStatus === optimisticGitHubSync.baseStatus &&
-    initialGitHubSyncError === optimisticGitHubSync.baseError &&
-    initialGitHubCommitSha === optimisticGitHubSync.baseCommitSha &&
-    initialGitHubSyncedAt === optimisticGitHubSync.baseSyncedAt;
+    agent.githubSyncStatus === optimisticGitHubSync.baseStatus &&
+    agent.githubSyncError === optimisticGitHubSync.baseError &&
+    agent.githubCommitSha === optimisticGitHubSync.baseCommitSha &&
+    agent.githubSyncedAt === optimisticGitHubSync.baseSyncedAt;
   const githubSyncStatus = showOptimisticGitHubSync
     ? optimisticGitHubSync.status
-    : initialGitHubSyncStatus;
+    : agent.githubSyncStatus;
   const githubSyncError = showOptimisticGitHubSync
     ? optimisticGitHubSync.error
-    : initialGitHubSyncError;
-  const githubCommitSha = initialGitHubCommitSha;
-  const githubSyncedAt = initialGitHubSyncedAt;
+    : agent.githubSyncError;
+  const githubCommitSha = agent.githubCommitSha;
+  const githubSyncedAt = agent.githubSyncedAt;
 
   useEffect(() => {
-    if (pendingRef.current.model) return;
-    setSelectedModelId(findModel(initialConfig.model.name)?.id ?? DEFAULT_MODEL_ID);
-  }, [initialConfig.model.name]);
+    if (
+      pendingRef.current.name !== undefined ||
+      pendingRef.current.body !== undefined ||
+      pendingRef.current.model !== undefined
+    ) {
+      return;
+    }
+    setName(agent.name);
+    setBody(agent.body || agent.config.instructions);
+    setSelectedModelId(findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID);
+  }, [agent.id, agent.name, agent.body, agent.config.instructions, agent.config.model.name]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -135,18 +201,20 @@ export default function AgentDetail({
     setOptimisticGitHubSync({
       status: "pending",
       error: null,
-      baseStatus: initialGitHubSyncStatus,
-      baseError: initialGitHubSyncError,
-      baseCommitSha: initialGitHubCommitSha,
-      baseSyncedAt: initialGitHubSyncedAt,
+      baseStatus: agent.githubSyncStatus,
+      baseError: agent.githubSyncError,
+      baseCommitSha: agent.githubCommitSha,
+      baseSyncedAt: agent.githubSyncedAt,
     });
     startTransition(async () => {
-      const result = await updateAgent(id, patch);
+      const result = await updateAgent(agent.id, patch);
       setSaveState("saved");
+      if (result?.agent) {
+        updateAgentQueries(queryClient, workspaceId, result.agent, idOrPath);
+      }
       if (result?.pathChanged) {
         router.replace(`/agents/${result.path}`);
       }
-      router.refresh();
     });
   };
 
@@ -161,12 +229,6 @@ export default function AgentDetail({
     };
   }, []);
 
-  useEffect(() => {
-    if (githubSyncStatus !== "pending" && githubSyncStatus !== "syncing") return;
-    const interval = setInterval(() => router.refresh(), 2500);
-    return () => clearInterval(interval);
-  }, [githubSyncStatus, router]);
-
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-y-auto">
@@ -174,6 +236,23 @@ export default function AgentDetail({
           <div className="flex items-center justify-between text-[12px] text-ink-muted">
             <Link
               href="/agents"
+              prefetch
+              onMouseEnter={() => {
+                router.prefetch("/agents");
+                void queryClient.prefetchQuery({
+                  queryKey: agentQueryKeys.list(workspaceId),
+                  queryFn: fetchAgents,
+                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
+                });
+              }}
+              onFocus={() => {
+                router.prefetch("/agents");
+                void queryClient.prefetchQuery({
+                  queryKey: agentQueryKeys.list(workspaceId),
+                  queryFn: fetchAgents,
+                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
+                });
+              }}
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-[#ececea]/70"
             >
               <ChevronLeft size={12} strokeWidth={1.9} />
@@ -185,7 +264,7 @@ export default function AgentDetail({
                   if (timerRef.current) clearTimeout(timerRef.current);
                   flush();
                   startTransition(async () => {
-                    await createAgentSession(id);
+                    await createAgentSession(agent.id);
                   });
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-[12px] text-ink/85 hover:bg-[#fafaf8]"
@@ -254,6 +333,7 @@ export default function AgentDetail({
 
           <div className="mt-6">
             <AgentEditor
+              key={agent.id}
               initialBody={initialBody}
               onChange={(body) => {
                 setBody(body);
@@ -287,7 +367,7 @@ export default function AgentDetail({
         </div>
         <AgentInspector
           name={name}
-          path={initialPath}
+          path={agent.path}
           model={configPreview.model}
           modelIsExplicit={configPreview.modelIsExplicit}
           tools={configPreview.tools}

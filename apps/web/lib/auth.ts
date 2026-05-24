@@ -112,6 +112,45 @@ async function syncLocalMembership(input: { workspaceId: string; userId: string;
     });
 }
 
+export async function loadCurrentWorkspaceContextReadOnly(
+  authUser: WorkOSUser,
+  organizationId: string,
+): Promise<CurrentWorkspaceContext | null> {
+  const db = getDb();
+  const [userRows, workspaceRows] = await Promise.all([
+    db.select().from(users).where(eq(users.workosUserId, authUser.id)).limit(1),
+    db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.workosOrganizationId, organizationId))
+      .limit(1),
+  ]);
+  const user = userRows[0];
+  const workspace = workspaceRows[0];
+
+  if (!user || !workspace) return null;
+
+  const [membership] = await db
+    .select({ userId: workspaceMemberships.userId })
+    .from(workspaceMemberships)
+    .where(
+      and(
+        eq(workspaceMemberships.workspaceId, workspace.id),
+        eq(workspaceMemberships.userId, user.id),
+      ),
+    )
+    .limit(1);
+
+  if (!membership) return null;
+
+  return {
+    authUser,
+    user,
+    workspace,
+    isNewUser: false,
+  };
+}
+
 export async function syncUserAndWorkspace(
   authUser: WorkOSUser,
   organizationId: string,
@@ -295,10 +334,13 @@ export const getOptionalCurrentWorkspaceWithoutOnboarding = cache(async () => {
     return null;
   }
 
-  return syncUserAndWorkspace(
-    session.user,
-    session.organizationId,
-    session.role ?? session.roles?.[0],
+  return (
+    (await loadCurrentWorkspaceContextReadOnly(session.user, session.organizationId)) ??
+    (await syncUserAndWorkspace(
+      session.user,
+      session.organizationId,
+      session.role ?? session.roles?.[0],
+    ))
   );
 });
 
@@ -309,10 +351,13 @@ export const getCurrentWorkspaceWithoutOnboarding = cache(async () => {
     redirect("/auth/organization");
   }
 
-  return syncUserAndWorkspace(
-    session.user,
-    session.organizationId,
-    session.role ?? session.roles?.[0],
+  return (
+    (await loadCurrentWorkspaceContextReadOnly(session.user, session.organizationId)) ??
+    (await syncUserAndWorkspace(
+      session.user,
+      session.organizationId,
+      session.role ?? session.roles?.[0],
+    ))
   );
 });
 
