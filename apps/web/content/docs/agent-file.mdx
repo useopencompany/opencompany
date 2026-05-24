@@ -13,9 +13,11 @@ title: "Fundraising copilot"
 model: openai/gpt-5.4
 tools:
   - exa
+brain:
+  - docs/README.md
 ---
 
-Research investors with @exa. Use @deep for thesis write-ups.
+Research investors with @exa. Use @deep for thesis write-ups. Read @brain/docs/README.md first.
 ```
 
 That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
@@ -64,6 +66,18 @@ tools:
 
 Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file.
 
+### `brain`
+
+A list of long-lived context files or folders the agent can access in a session.
+
+```yaml
+brain:
+  - docs/README.md
+  - product/
+```
+
+These paths live under `brain/` in the workspace repo. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
+
 ## The body
 
 The body is plain Markdown. Whatever you write here, the model reads as its instructions. Treat it like an SOP for a new hire: describe the outcome, the constraints, and the style.
@@ -78,17 +92,19 @@ There's no length limit, but shorter is usually better. If the instructions are 
 
 ## Mentions
 
-Inside the body you can write `@something` to attach a model or a tool. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
+Inside the body you can write `@something` to attach a model, tool, or Brain path. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
 
 ```text
 Find investors with @exa.        ← tool: exa
 Use @deep for the write-up.      ← model: openai/gpt-5.4
+Read @brain/product/ first.      ← Brain folder
 ```
 
 This is what mentions can be:
 
 - A tool ID, like `@exa`
 - A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
+- A Brain path, like `@brain/docs/README.md` or `@brain/product/`
 - A shortcut name (see below)
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
@@ -128,10 +144,13 @@ In your workspace's GitHub repo, agents live under `agents/`:
 
 ```text
 your-workspace-repo/
-└── agents/
-    ├── fundraising-copilot.agent
-    ├── ops-triage.agent
-    └── sales-research.agent
+├── agents/
+│   ├── fundraising-copilot.agent
+│   ├── ops-triage.agent
+│   └── sales-research.agent
+└── brain/
+    ├── docs/README.md
+    └── product/positioning.md
 ```
 
 The filename comes from the title — lowercased, with spaces turned into dashes. Rename the title, and the next save will use the new filename.

@@ -1,4 +1,5 @@
 export type {
+  AgentBrainReference,
   AgentConfig,
   AgentConfigTool,
   AgentModelId,

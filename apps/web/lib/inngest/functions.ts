@@ -6,6 +6,9 @@ import {
 import { callRunner } from "@/lib/agent-sessions/runner";
 import { materializeAgentToGitHub } from "@/lib/agents/materialize";
 import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
+import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
+import { materializeBrainFileToGitHub } from "@/lib/brain/materialize";
+import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import { inngest } from "@/lib/inngest/client";
 
 export const syncAgentToGitHub = inngest.createFunction(
@@ -24,6 +27,29 @@ export const syncAgentToGitHub = inngest.createFunction(
 
     return step.run("materialize latest agent file", async () => {
       return materializeAgentToGitHub(event.data.agentId, { mode: "scheduled" });
+    });
+  },
+);
+
+export const syncBrainToGitHub = inngest.createFunction(
+  {
+    id: "sync-brain-to-github",
+    name: "Sync brain to GitHub",
+    retries: 5,
+    concurrency: {
+      limit: 1,
+      key: "event.data.workspaceId + ':' + event.data.path",
+    },
+    triggers: { event: BRAIN_SYNC_REQUESTED_EVENT },
+  },
+  async ({ event, step }) => {
+    await step.sleep("coalesce brain edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
+
+    return step.run("materialize latest brain file", async () => {
+      return materializeBrainFileToGitHub({
+        workspaceId: event.data.workspaceId,
+        path: event.data.path,
+      });
     });
   },
 );
@@ -126,6 +152,7 @@ export const abortAgentSession = inngest.createFunction(
 
 export const inngestFunctions = [
   syncAgentToGitHub,
+  syncBrainToGitHub,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,

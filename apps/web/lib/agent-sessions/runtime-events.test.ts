@@ -321,6 +321,61 @@ describe("buildRuntimeToolCallsForMessage", () => {
       },
     ]);
   });
+
+  it("marks write_file calls that update brain paths", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          input: { path: "brain/foo.md", content: "Updated notes" },
+        }),
+        event(2, "file.changed", {
+          messageId: "msg_assistant",
+          path: "brain/foo.md",
+          operation: "write",
+        }),
+        event(3, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          output: { path: "brain/foo.md", bytes: 13 },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls).toMatchObject([
+      {
+        id: "call_1",
+        name: "write_file",
+        brainPath: "foo.md",
+      },
+    ]);
+  });
+
+  it("leaves normal write_file calls unmarked", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          input: { path: "src/foo.ts", content: "export {};" },
+        }),
+        event(2, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "write_file",
+          output: { path: "src/foo.ts", bytes: 10 },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls[0]?.brainPath).toBeUndefined();
+  });
 });
 
 describe("buildAssistantTurnParts", () => {
@@ -535,6 +590,40 @@ describe("buildAssistantTurnParts", () => {
         toolCall: {
           id: "call_1",
           outputPreview: '{\n  "content": "Docs"\n}',
+        },
+      },
+    ]);
+  });
+
+  it("marks persisted write_file model parts for brain paths", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "write_file",
+              input: { path: "brain/foo.md", content: "Updated notes" },
+            },
+          ],
+        },
+      },
+      [],
+    );
+
+    expect(parts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "call_1",
+          name: "write_file",
+          brainPath: "foo.md",
         },
       },
     ]);

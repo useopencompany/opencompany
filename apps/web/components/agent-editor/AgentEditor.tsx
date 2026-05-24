@@ -9,34 +9,15 @@ import {
   useEditor,
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useState } from "react";
-import { mentionSuggestion } from "./mentionSuggestion";
-import { findMentionItem } from "./tools";
+import { useMemo, useState } from "react";
+import { createMentionSuggestion } from "./mentionSuggestion";
+import { AGENT_TOOL_MENTION_ITEMS, type AgentMentionItem } from "./tools";
 
 type Props = {
   initialBody: string;
   onChange: (body: string) => void;
+  mentionItems?: AgentMentionItem[];
 };
-
-const mentionExtension = Mention.configure({
-  HTMLAttributes: {
-    class: "agent-mention",
-  },
-  suggestion: mentionSuggestion,
-  renderText({ node, suggestion }) {
-    return `${suggestion?.char ?? "@"}${node.attrs.label ?? node.attrs.id}`;
-  },
-  renderHTML({ options, node }) {
-    const id = typeof node.attrs.id === "string" ? node.attrs.id : "";
-    const kind = id.startsWith("model:") ? "model" : id.startsWith("tool:") ? "tool" : undefined;
-
-    return [
-      "span",
-      mergeAttributes(options.HTMLAttributes, kind ? { "data-kind": kind } : {}),
-      `${node.attrs.mentionSuggestionChar ?? "@"}${node.attrs.label ?? node.attrs.id}`,
-    ];
-  },
-});
 
 const plainTextKeysExtension = Extension.create({
   name: "plainTextKeys",
@@ -48,8 +29,41 @@ const plainTextKeysExtension = Extension.create({
   },
 });
 
-export function AgentEditor({ initialBody, onChange }: Props) {
+export function AgentEditor({
+  initialBody,
+  onChange,
+  mentionItems = AGENT_TOOL_MENTION_ITEMS,
+}: Props) {
   const [isEmpty, setIsEmpty] = useState(initialBody.trim().length === 0);
+  const mentionExtension = useMemo(
+    () =>
+      Mention.configure({
+        HTMLAttributes: {
+          class: "agent-mention",
+        },
+        suggestion: createMentionSuggestion(mentionItems),
+        renderText({ node, suggestion }) {
+          return `${suggestion?.char ?? "@"}${node.attrs.label ?? node.attrs.id}`;
+        },
+        renderHTML({ options, node }) {
+          const id = typeof node.attrs.id === "string" ? node.attrs.id : "";
+          const kind = id.startsWith("model:")
+            ? "model"
+            : id.startsWith("tool:")
+              ? "tool"
+              : id.startsWith("brain/")
+                ? "brain"
+                : undefined;
+
+          return [
+            "span",
+            mergeAttributes(options.HTMLAttributes, kind ? { "data-kind": kind } : {}),
+            `${node.attrs.mentionSuggestionChar ?? "@"}${node.attrs.label ?? node.attrs.id}`,
+          ];
+        },
+      }),
+    [mentionItems],
+  );
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
@@ -65,7 +79,7 @@ export function AgentEditor({ initialBody, onChange }: Props) {
       mentionExtension,
       plainTextKeysExtension,
     ],
-    content: bodyToTiptapDoc(initialBody),
+    content: bodyToTiptapDoc(initialBody, mentionItems),
     editorProps: {
       attributes: {
         class: "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
@@ -84,7 +98,7 @@ export function AgentEditor({ initialBody, onChange }: Props) {
     <div className="relative">
       {isEmpty && (
         <div className="pointer-events-none absolute left-0 top-0 text-[13.5px] leading-7 text-ink-subtle/70">
-          Describe what this agent should do. Mention tools with @.
+          Describe what this agent should do. Mention tools or brain files with @.
         </div>
       )}
       <EditorContent editor={editor} />
@@ -92,7 +106,7 @@ export function AgentEditor({ initialBody, onChange }: Props) {
   );
 }
 
-function bodyToTiptapDoc(body: string): JSONContent {
+function bodyToTiptapDoc(body: string, mentionItems: AgentMentionItem[]): JSONContent {
   const normalized = body.replace(/\r\n/g, "\n");
   if (normalized.trim().length === 0) {
     return { type: "doc", content: [{ type: "paragraph" }] };
@@ -102,24 +116,24 @@ function bodyToTiptapDoc(body: string): JSONContent {
     type: "doc",
     content: normalized.split(/\n{2,}/).map((block) => ({
       type: "paragraph",
-      content: parseInlineContent(block),
+      content: parseInlineContent(block, mentionItems),
     })),
   };
 }
 
-function parseInlineContent(text: string): JSONContent[] {
+function parseInlineContent(text: string, mentionItems: AgentMentionItem[]): JSONContent[] {
   const content: JSONContent[] = [];
   const lines = text.split("\n");
 
   lines.forEach((line, lineIndex) => {
     if (lineIndex > 0) content.push({ type: "hardBreak" });
-    content.push(...parseMentionText(line));
+    content.push(...parseMentionText(line, mentionItems));
   });
 
   return content;
 }
 
-function parseMentionText(text: string): JSONContent[] {
+function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONContent[] {
   const content: JSONContent[] = [];
   let cursor = 0;
 
@@ -133,7 +147,7 @@ function parseMentionText(text: string): JSONContent[] {
     const rawToken = text.slice(index + 1, end);
     const token = rawToken.replace(/[.,;:!?)}\]]+$/g, "");
     const trailing = rawToken.slice(token.length);
-    const item = findMentionItem(token);
+    const item = findMentionItem(token, mentionItems);
     if (!item) continue;
 
     pushText(content, text.slice(cursor, index));
@@ -152,6 +166,16 @@ function parseMentionText(text: string): JSONContent[] {
 
   pushText(content, text.slice(cursor));
   return content;
+}
+
+function findMentionItem(
+  id: string,
+  mentionItems: AgentMentionItem[],
+): AgentMentionItem | undefined {
+  return (
+    mentionItems.find((item) => item.mentionId === id) ??
+    mentionItems.find((item) => item.id === id)
+  );
 }
 
 function pushText(content: JSONContent[], text: string) {

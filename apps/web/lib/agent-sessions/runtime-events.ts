@@ -65,6 +65,7 @@ export type RuntimeToolCall = {
   inputPreview: string;
   activityPreview: string;
   outputPreview: string;
+  brainPath?: string | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
 };
@@ -336,25 +337,26 @@ export function buildAssistantTurnParts(
 
       const toolCallId = readString(part.toolCallId);
       if (!toolCallId) continue;
+      const matchingToolCall = toolCallsById.get(toolCallId);
+      const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
 
       turnParts.push({
         type: "tool-call",
         toolCall: {
           id: toolCallId,
           name: readString(part.toolName) || "Tool call",
-          status: toolCallsById.get(toolCallId)?.status ?? "completed",
+          status: matchingToolCall?.status ?? "completed",
           inputPreview:
             formatRuntimePreview(part.input) ||
             formatRuntimePreview(part.args) ||
-            toolCallsById.get(toolCallId)?.inputPreview ||
+            matchingToolCall?.inputPreview ||
             "",
-          activityPreview: toolCallsById.get(toolCallId)?.activityPreview ?? "",
+          activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
-            toolCallsById.get(toolCallId)?.outputPreview ||
-            toolResultsByCallId.get(toolCallId) ||
-            "",
-          startedEventId: toolCallsById.get(toolCallId)?.startedEventId ?? null,
-          completedEventId: toolCallsById.get(toolCallId)?.completedEventId ?? null,
+            matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
+          ...(brainPath ? { brainPath } : {}),
+          startedEventId: matchingToolCall?.startedEventId ?? null,
+          completedEventId: matchingToolCall?.completedEventId ?? null,
         },
       });
     }
@@ -411,6 +413,15 @@ export function buildRuntimeToolCallsForMessage(
       continue;
     }
 
+    if (event.type === "file.changed") {
+      const brainPath = normalizeBrainWorkspacePath(readString(event.payload.path));
+      const call = brainPath ? findLatestToolCall(calls, "write_file") : null;
+      if (brainPath && call) {
+        call.brainPath = brainPath;
+      }
+      continue;
+    }
+
     const toolCallId = readString(event.payload.toolCallId);
     if (!toolCallId) continue;
 
@@ -426,6 +437,10 @@ export function buildRuntimeToolCallsForMessage(
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
       call.inputPreview = formatRuntimePreview(event.payload.input) || call.inputPreview;
+      const brainPath = brainPathForToolPayload(call.name, event.payload.input);
+      if (brainPath) {
+        call.brainPath = brainPath;
+      }
       call.startedEventId = event.id;
     }
 
@@ -434,6 +449,10 @@ export function buildRuntimeToolCallsForMessage(
       call.name = readString(event.payload.name) || call.name;
       call.status = "completed";
       call.outputPreview = formatRuntimePreview(event.payload.output);
+      const brainPath = brainPathForToolPayload(call.name, event.payload.output);
+      if (brainPath) {
+        call.brainPath = brainPath;
+      }
       call.completedEventId = event.id;
     }
   }
@@ -537,6 +556,28 @@ function readToolResultPreview(modelMessage: Record<string, unknown> | null | un
   }
 
   return "";
+}
+
+function brainPathForToolCallPart(part: Record<string, unknown>) {
+  const name = readString(part.toolName);
+  return (
+    brainPathForToolPayload(name, part.input) ||
+    brainPathForToolPayload(name, part.args) ||
+    undefined
+  );
+}
+
+function brainPathForToolPayload(name: string, payload: unknown) {
+  if (name !== "write_file" || !isRecord(payload)) return undefined;
+  return normalizeBrainWorkspacePath(payload.path);
+}
+
+function normalizeBrainWorkspacePath(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  const path = value.trim().replace(/^\.?\//, "");
+  if (!path.startsWith("brain/")) return undefined;
+  const brainPath = path.slice("brain/".length);
+  return brainPath || undefined;
 }
 
 function readFirstToolResultPart(modelMessage: Record<string, unknown> | null | undefined) {

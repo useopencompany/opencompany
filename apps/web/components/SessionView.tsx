@@ -148,7 +148,8 @@ export default function SessionView({
       if (
         event.type === "session.status" ||
         event.type === "session.error" ||
-        event.type === "session.title_updated"
+        event.type === "session.title_updated" ||
+        event.type.startsWith("brain.")
       ) {
         router.refresh();
       }
@@ -436,6 +437,15 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         <span className="min-w-0 truncate font-medium text-ink/65">
           {formatToolName(toolCall.name)}
         </span>
+        {toolCall.brainPath ? (
+          <span
+            title={`Updated brain/${toolCall.brainPath}`}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d7e4cf] bg-[#f3f8ef] px-1.5 py-px text-[10.5px] font-medium text-[#4d6f35]"
+          >
+            <Brain size={9} strokeWidth={1.9} />
+            Brain updated
+          </span>
+        ) : null}
         {!isCompleted ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
             <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-[#9b8a64]" />
@@ -827,6 +837,8 @@ function summarizeEvent(event: RuntimeEvent) {
     )}`;
   }
   if (event.type === "file.changed") return readString(event.payload.path);
+  if (event.type === "brain.file_changed") return `brain/${readString(event.payload.path)}`;
+  if (event.type === "brain.conflict") return `Brain conflict: ${readString(event.payload.path)}`;
   if (event.type === "command.output") return readString(event.payload.delta).trim();
   return "";
 }
