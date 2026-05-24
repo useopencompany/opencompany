@@ -984,7 +984,7 @@ function BrainSidebar({
             type="button"
             aria-label="Create brain file"
             title="Create brain file"
-            onClick={onCreateFile}
+            onClick={() => onCreateFile()}
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <FilePlus2 size={15} strokeWidth={1.8} />
@@ -993,7 +993,7 @@ function BrainSidebar({
             type="button"
             aria-label="Create brain folder"
             title="Create brain folder"
-            onClick={onCreateFolder}
+            onClick={() => onCreateFolder()}
             className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <FolderPlus size={15} strokeWidth={1.8} />
