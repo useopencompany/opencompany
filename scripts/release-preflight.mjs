@@ -64,11 +64,12 @@ const groups = {
       "VERCEL_TOKEN",
       "VERCEL_ORG_ID",
       "VERCEL_PROJECT_ID",
-      "RENDER_DEPLOY_HOOK_URL",
+      "RENDER_SERVICE_ID",
+      "RENDER_API_KEY",
       "PRODUCTION_WEB_URL",
       "RUNNER_PUBLIC_URL",
     ],
-    optional: ["RENDER_SERVICE_ID", "RENDER_API_KEY"],
+    optional: [],
   },
 };
 
