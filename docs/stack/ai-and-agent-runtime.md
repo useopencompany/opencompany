@@ -79,7 +79,8 @@ agent sessions.
 - `apps/runner/src/sandbox.ts`.
 - `apps/runner/src/agent-loop.ts`.
 - `apps/runner/src/env.ts`.
-- `E2B_API_KEY`, `OPENCOMPANY_E2B_TEMPLATE`, `RUNNER_E2B_IDLE_TIMEOUT_MS` in `.env.example`.
+- `E2B_API_KEY`, `OPENCOMPANY_E2B_TEMPLATE`, `OPENCOMPANY_AMP_E2B_TEMPLATE`,
+  `RUNNER_E2B_IDLE_TIMEOUT_MS` in `.env.example`.
 - `docs/runner.md`.
 
 **Why we use it:** Agents need code/file execution in isolated environments. E2B gives us that
@@ -117,6 +118,10 @@ served by another search provider or by first-party browser/fetch infrastructure
 
 ## Runtime tools
 
+A runtime tool is a callable capability exposed to the model during a session. Integrations are the
+workspace-level external resources those tools may reference, and provider credentials are
+implementation details for powering provider-backed tools.
+
 Core tools are always available to runner sessions:
 
 - `shell`
@@ -130,6 +135,10 @@ Hosted tools are enabled by agent configuration:
 
 - `exa_search`
 - `web_fetch`
+
+Provider-backed coding tools are also enabled by agent configuration:
+
+- `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
 
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 

@@ -31,7 +31,7 @@ The body of an agent file is just Markdown — the same plain text you'd use to 
 
 ### Mentions
 
-Inside the instructions, you can write `@exa` to give the agent web research, or `@deep` to run it on a more capable model. These `@` mentions are the only way to wire up models and tools — the editor reads them out of the instructions automatically, so you never have to keep two places in sync.
+Inside the instructions, you can write mentions like `@exa`, `@amp`, `@deep`, or `@web-app` as readable references. The actual model, tools, integrations, and trigger drafts live in the YAML frontmatter, which the builder writes for you.
 
 ### Sync
 
@@ -46,7 +46,12 @@ Here's what an agent file looks like end to end:
 title: "Investor research"
 model: openai/gpt-5.4
 tools:
-  - exa
+  - id: exa
+    type: hosted_tool
+integrations:
+  github:
+    repositories: []
+triggers: []
 ---
 
 Find recent fund announcements with @exa. Write a one-paragraph brief for
@@ -54,11 +59,11 @@ each fund covering thesis, check size, and a recent investment. Use @deep
 when summarizing — accuracy matters more than speed.
 ```
 
-That's the whole thing. A header that says who this agent is and what it can use, and a body of instructions in plain English. To change the model, change `@deep`. To remove web research, remove `@exa`. The file always reflects exactly what the agent does.
+That's the whole thing. A header that says who this agent is and what it can use, and a body of instructions in plain English. The builder keeps the YAML current when you change models, tools, repositories, or trigger drafts.
 
 ## What you can do today
 
-- **Create agents** in the editor at `/agents`. Give them a title, write instructions, and add `@` mentions for the model and tools you want.
+- **Create agents** in the editor at `/agents`. Give them a title, write instructions, and configure models, tools, integrations, and trigger drafts in the inspector.
 - **Edit agents** any time. Saves are instant — the GitHub commit happens in the background a few seconds later.
 - **Read the file format** in detail on the next page if you want to understand every option, or if you're planning to author agents directly in your editor.
 

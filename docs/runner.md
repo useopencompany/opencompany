@@ -44,8 +44,8 @@ The V1 loop is intentionally custom and narrow:
 3. Inngest calls `POST /internal/sessions/:id/start` on the runner with
    `RUNNER_INTERNAL_TOKEN`.
 4. The runner marks the session `provisioning`, creates or reconnects the E2B sandbox, prepares
-   `/home/user/workspace`, optionally clones the managed GitHub workspace repo, and marks the
-   session `ready`.
+   `/home/user/workspace`, clones the selected connected GitHub repo for AMP agents or the managed
+   GitHub workspace repo otherwise, and marks the session `ready`.
 5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
    The token is a short-lived HMAC token minted by the web app.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
@@ -86,6 +86,7 @@ V1 tools:
 - `write_file`
 - `list_files`
 - `git_diff`
+- `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 
 All file-oriented tools must remain confined to the session workdir. Keep path validation in the
 runtime/sandbox layer rather than relying on model behavior.
@@ -137,10 +138,12 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
+- `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
+- `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
-- optional GitHub App env vars for cloning the managed workspace repo into E2B:
-  `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
+- optional GitHub integration app env vars for cloning configured work repositories into E2B:
+  `GITHUB_INTEGRATION_APP_ID` and `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps

@@ -66,6 +66,9 @@ export async function materializeAgentToGitHub(
     title: row.agent.name,
     body: row.agent.body,
     model: row.agent.config.model.name,
+    tools: row.agent.config.tools,
+    integrations: row.agent.config.integrations,
+    triggers: row.agent.config.triggers,
   });
   const contentHash = hashAgentSource(source);
   const pendingRename =

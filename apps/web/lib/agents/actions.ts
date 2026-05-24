@@ -2,11 +2,16 @@
 
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentSyncJobs, agents } from "@opencompany/db/schema";
+import {
+  agentSyncJobs,
+  agents,
+  workspaceGitHubIntegrationRepositories,
+} from "@opencompany/db/schema";
 import { and, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
+import { type AgentConfigPatch, parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
+import { deriveAgentConfigFromContent } from "@/lib/agents/config";
 import {
   agentSyncJobUpsert,
   buildPendingAgent,
@@ -17,7 +22,8 @@ import {
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
-import type { AgentModelId } from "@/lib/agents/types";
+import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
+import type { AgentModelId, TiptapDoc } from "@/lib/agents/types";
 import { getCurrentWorkspace } from "@/lib/auth";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
@@ -61,20 +67,29 @@ export async function createAgent() {
 
 export async function updateAgent(
   idOrPath: string,
-  patch: { name?: string; body?: string; model?: AgentModelId },
+  patch: {
+    name?: string;
+    body?: string;
+    content?: TiptapDoc;
+    model?: AgentModelId;
+    config?: AgentConfigPatch;
+  },
 ) {
   const trace = startTimingTrace("agents.update", {
     hasName: typeof patch.name === "string",
     hasBody: typeof patch.body === "string",
     hasModel: typeof patch.model === "string",
+    hasConfig: Boolean(patch.config),
   });
   const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
-  const changedFields: Array<"name" | "body" | "model"> = [];
+  const changedFields: Array<"name" | "body" | "model" | "config"> = [];
   if (typeof patch.name === "string") changedFields.push("name");
   if (typeof patch.body === "string") changedFields.push("body");
+  if (patch.content && !changedFields.includes("body")) changedFields.push("body");
   if (typeof patch.model === "string") changedFields.push("model");
+  if (patch.config) changedFields.push("config");
 
   const [agent] = await timeAsync(trace, "db.selectAgent", () =>
     db
@@ -83,6 +98,7 @@ export async function updateAgent(
         path: agents.path,
         name: agents.name,
         body: agents.body,
+        content: agents.content,
         config: agents.config,
         version: agents.version,
         githubBlobSha: agents.githubBlobSha,
@@ -111,9 +127,38 @@ export async function updateAgent(
       : agent.path;
   const previousPath = agent.path;
   const pathChanged = Boolean(previousPath && path !== previousPath);
-  const body = patch.body ?? agent.body;
-  const model = patch.model ?? agent.config.model.name;
-  const source = serializeAgentFile({ title, body, model });
+  const sanitizedContent = patch.content ? sanitizeTiptapDoc(patch.content) : null;
+  const derived = sanitizedContent
+    ? deriveAgentConfigFromContent({
+        title,
+        content: sanitizedContent,
+        model: patch.model ?? agent.config.model.name,
+        repositories: await timeAsync(trace, "db.selectGitHubIntegrationRepositories", () =>
+          db
+            .select({
+              fullName: workspaceGitHubIntegrationRepositories.fullName,
+              defaultBranch: workspaceGitHubIntegrationRepositories.defaultBranch,
+            })
+            .from(workspaceGitHubIntegrationRepositories)
+            .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspace.id)),
+        ),
+        triggers: agent.config.triggers,
+      })
+    : null;
+  const body = derived?.body ?? patch.body ?? agent.body;
+  const model = derived?.config.model.name ?? patch.model ?? agent.config.model.name;
+  const nextIntegrations =
+    derived?.config.integrations ?? patch.config?.integrations ?? agent.config.integrations;
+  const nextTools = derived?.config.tools ?? patch.config?.tools ?? agent.config.tools;
+  const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? agent.config.triggers;
+  const source = serializeAgentFile({
+    title,
+    body,
+    model,
+    tools: nextTools,
+    integrations: nextIntegrations,
+    triggers: nextTriggers,
+  });
   const parsed = parseAgentFile(source);
   const contentHash = hashAgentSource(source);
   const version = agent.version + 1;
@@ -142,6 +187,7 @@ export async function updateAgent(
           path,
           name: parsed.title,
           body: parsed.body,
+          ...(sanitizedContent ? { content: sanitizedContent } : {}),
           contentHash,
           version,
           config: parsed.config,
@@ -210,6 +256,9 @@ export async function materializeLegacyAgentFiles() {
       title: agent.name,
       body,
       model: agent.config.model.name,
+      tools: agent.config.tools,
+      integrations: agent.config.integrations,
+      triggers: agent.config.triggers,
     });
     const parsed = parseAgentFile(source);
     const contentHash = hashAgentSource(source);
@@ -286,6 +335,9 @@ export async function syncAgentsFromWorkspaceRepository() {
         title: parsed.title,
         body: parsed.body,
         model: parsed.config.model.name,
+        tools: parsed.config.tools,
+        integrations: parsed.config.integrations,
+        triggers: parsed.config.triggers,
       }),
     );
     const [existing] = await timeAsync(

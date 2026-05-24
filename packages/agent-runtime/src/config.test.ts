@@ -5,7 +5,7 @@ import { resolveAgentRuntimeConfig } from "./config";
 describe("resolveAgentRuntimeConfig", () => {
   it("builds the system prompt and keeps the configured Vercel AI Gateway model", () => {
     const config: AgentConfig = {
-      schemaVersion: "agent.v1",
+      version: 2,
       title: "Ops agent",
       instructions: "Check the workspace and summarize risk.",
       model: {
@@ -13,6 +13,8 @@ describe("resolveAgentRuntimeConfig", () => {
         name: "openai/gpt-5.4",
       },
       tools: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({
@@ -43,7 +45,7 @@ describe("resolveAgentRuntimeConfig", () => {
 
   it("enables hosted runtime tools from selected agent config tools", () => {
     const config: AgentConfig = {
-      schemaVersion: "agent.v1",
+      version: 2,
       title: "Research agent",
       instructions: "Research the web.",
       model: {
@@ -53,11 +55,13 @@ describe("resolveAgentRuntimeConfig", () => {
       tools: [
         {
           id: "exa",
-          type: "tool",
+          type: "hosted_tool",
           label: "exa",
           description: "Deep research on the web and people.",
         },
       ],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });
@@ -76,7 +80,7 @@ describe("resolveAgentRuntimeConfig", () => {
 
   it("ignores stale unknown config tools", () => {
     const config = {
-      schemaVersion: "agent.v1",
+      version: 2,
       title: "Legacy agent",
       instructions: "Use old tools.",
       model: {
@@ -84,6 +88,8 @@ describe("resolveAgentRuntimeConfig", () => {
         name: "openai/gpt-5.4-mini",
       },
       tools: [{ id: "unknown_tool", type: "tool", label: "old", description: "old" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     } as unknown as AgentConfig;
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });
@@ -95,7 +101,7 @@ describe("resolveAgentRuntimeConfig", () => {
 
   it("does not add reasoning provider options for non-reasoning models", () => {
     const config: AgentConfig = {
-      schemaVersion: "agent.v1",
+      version: 2,
       title: "Fast agent",
       instructions: "Summarize the thread.",
       model: {
@@ -103,6 +109,8 @@ describe("resolveAgentRuntimeConfig", () => {
         name: "anthropic/claude-haiku-4.5",
       },
       tools: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });
@@ -113,5 +121,71 @@ describe("resolveAgentRuntimeConfig", () => {
       supportsReasoning: false,
       exposeReasoningSummary: false,
     });
+  });
+
+  it("enables amp_coder only when AMP is configured", () => {
+    const config: AgentConfig = {
+      version: 2,
+      title: "Coding agent",
+      instructions: "Use Amp for implementation work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [
+        {
+          id: "amp",
+          type: "coding_agent",
+          provider: "amp",
+          label: "AMP",
+          description: "Delegate coding work to Amp inside an E2B sandbox.",
+          repository: "web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [{ id: "web", fullName: "opencompany/opencompany", defaultBranch: "main" }],
+        },
+      },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("amp_coder");
+    expect(resolved.systemPrompt).toContain(
+      "Connected GitHub repositories: web=opencompany/opencompany",
+    );
+  });
+
+  it("does not expose amp_coder without a repository binding", () => {
+    const config: AgentConfig = {
+      version: 2,
+      title: "Coding agent",
+      instructions: "Use Amp for implementation work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [
+        {
+          id: "amp",
+          type: "coding_agent",
+          provider: "amp",
+          label: "AMP",
+          description: "Delegate coding work to Amp inside an E2B sandbox.",
+          repository: null,
+          prCapable: true,
+        },
+      ],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).not.toContain("amp_coder");
+    expect(resolved.systemPrompt).not.toContain("Amp is available");
   });
 });

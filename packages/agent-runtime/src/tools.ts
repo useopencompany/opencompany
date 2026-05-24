@@ -13,6 +13,7 @@ export type RuntimeToolName =
   | "write_file"
   | "list_files"
   | "git_diff"
+  | "amp_coder"
   | "exa_search"
   | "web_fetch"
   | "tool_help";
@@ -89,6 +90,40 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       properties: {},
       additionalProperties: false,
     },
+  },
+  {
+    name: "amp_coder",
+    kind: "sandbox",
+    configToolId: "amp",
+    description:
+      "Delegate coding work to Amp in the connected GitHub repository. Use for multi-file implementation, debugging, refactors, and PR-ready code changes.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "Specific coding task for Amp to perform in the connected repository.",
+        },
+        createPullRequest: {
+          type: "boolean",
+          description:
+            "Whether to commit changes to a generated branch and open a draft pull request after Amp finishes.",
+          default: false,
+        },
+        pullRequestTitle: {
+          type: "string",
+          description: "Optional draft pull request title when createPullRequest is true.",
+        },
+      },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use amp_coder for substantial codebase work that benefits from Amp's coding-agent loop.",
+      "Give Amp a concrete task and any constraints from the user or agent instructions.",
+      "Set createPullRequest=true only when the instructions call for a reviewable PR.",
+      "The tool works on a generated branch and never pushes directly to the default branch.",
+    ].join("\n"),
   },
 ];
 
@@ -233,13 +268,33 @@ export function resolveRuntimeToolNamesForConfigTools(
   tools: ReadonlyArray<{ id?: unknown }> | undefined,
 ) {
   const names = new Set<RuntimeToolName>();
-  for (const tool of CORE_TOOL_DEFINITIONS) names.add(tool.name);
+  for (const tool of CORE_TOOL_DEFINITIONS) {
+    if (!tool.configToolId) names.add(tool.name);
+  }
   names.add("tool_help");
 
   const selectedToolIds = new Set(
     (tools ?? []).flatMap((tool) => (typeof tool.id === "string" ? [tool.id] : [])),
   );
   for (const definition of HOSTED_TOOL_DEFINITIONS) {
+    if (definition.configToolId && selectedToolIds.has(definition.configToolId)) {
+      names.add(definition.name);
+    }
+  }
+  for (const definition of CORE_TOOL_DEFINITIONS) {
+    if (definition.configToolId === "amp") {
+      const ampTool = tools?.find((tool) => tool?.id === "amp");
+      if (
+        ampTool &&
+        "repository" in ampTool &&
+        typeof ampTool.repository === "string" &&
+        ampTool.repository.trim().length > 0
+      ) {
+        names.add(definition.name);
+      }
+      continue;
+    }
+
     if (definition.configToolId && selectedToolIds.has(definition.configToolId)) {
       names.add(definition.name);
     }

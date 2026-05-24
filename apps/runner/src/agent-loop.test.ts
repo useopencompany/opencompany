@@ -305,6 +305,8 @@ describe("usage recording", () => {
       assistantMessageId: "msg_assistant",
       runLeaseId: "run_123",
       runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: agentConfig(),
       toolCallId: "call_exa",
       definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search") as RuntimeToolDefinition,
       args: { query: "test" },
@@ -338,6 +340,8 @@ describe("usage recording", () => {
         assistantMessageId: "msg_assistant",
         runLeaseId: "run_123",
         runLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        agentConfig: agentConfig(),
         toolCallId: "call_exa",
         definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search") as RuntimeToolDefinition,
         args: {
@@ -597,12 +601,29 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
+    ampApiKey: "amp_test",
     e2bTemplate: undefined,
+    ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],
     instanceId: "runner-test",
     ...overrides,
+  };
+}
+
+function agentConfig() {
+  return {
+    version: 2 as const,
+    title: "Test agent",
+    instructions: "Test.",
+    model: {
+      provider: "vercel-ai-gateway" as const,
+      name: "openai/gpt-5.4-mini" as const,
+    },
+    tools: [],
+    integrations: { github: { repositories: [] } },
+    triggers: [],
   };
 }
 

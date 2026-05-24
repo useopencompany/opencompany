@@ -86,25 +86,55 @@ export async function prepareWorkspace(input: {
   workdir: string;
   agentFile: string;
   repositoryFullName?: string | null | undefined;
+  repositoryDefaultBranch?: string | null | undefined;
   githubToken?: string | null | undefined;
 }) {
   if (input.repositoryFullName && input.githubToken) {
-    const cloneUrl = githubCloneUrl(input.repositoryFullName);
-    await input.sandbox.commands.run(
-      [
-        `if [ ! -d ${shellQuote(`${input.workdir}/.git`)} ]; then`,
-        `  rm -rf ${shellQuote(input.workdir)};`,
-        `  git clone --depth 1 "${cloneUrl}" ${shellQuote(input.workdir)};`,
-        "fi;",
-      ].join("\n"),
-      { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 120_000 },
-    );
+    await prepareGitHubRepository({
+      sandbox: input.sandbox,
+      workdir: input.workdir,
+      repositoryFullName: input.repositoryFullName,
+      defaultBranch: input.repositoryDefaultBranch ?? "main",
+      githubToken: input.githubToken,
+    });
   }
 
   await input.sandbox.commands.run(
     `mkdir -p ${shellQuote(input.workdir)} ${shellQuote(`${input.workdir}/.opencompany`)}`,
   );
   await input.sandbox.files.write(`${input.workdir}/.opencompany/agent.md`, input.agentFile);
+}
+
+async function prepareGitHubRepository(input: {
+  sandbox: SandboxHandle;
+  workdir: string;
+  repositoryFullName: string;
+  defaultBranch: string;
+  githubToken: string;
+}) {
+  const origin = await input.sandbox.commands.run(
+    [
+      `if [ -d ${shellQuote(`${input.workdir}/.git`)} ]; then`,
+      `  cd ${shellQuote(input.workdir)} && git remote get-url origin 2>/dev/null || true;`,
+      "else",
+      "  echo __opencompany_missing_git__;",
+      "fi;",
+    ].join("\n"),
+    { timeoutMs: 30_000 },
+  );
+  const currentOrigin = String(origin.stdout ?? "").trim();
+  if (githubRemoteMatches(currentOrigin, input.repositoryFullName)) return;
+
+  const cloneUrl = githubCloneUrl(input.repositoryFullName);
+  await input.sandbox.commands.run(
+    [
+      `rm -rf ${shellQuote(input.workdir)}`,
+      `git clone --depth 1 --branch ${shellQuote(input.defaultBranch)} "${cloneUrl}" ${shellQuote(
+        input.workdir,
+      )}`,
+    ].join(" && "),
+    { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 120_000 },
+  );
 }
 
 export async function runSandboxTool(input: {
@@ -221,6 +251,17 @@ function githubCloneUrl(repositoryFullName: string) {
   }
 
   return `https://x-access-token:$GITHUB_TOKEN@github.com/${repositoryFullName}.git`;
+}
+
+export function githubRemoteMatches(remote: string, repositoryFullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
+    throw new Error("Invalid GitHub repository name for workspace clone.");
+  }
+
+  const escaped = repositoryFullName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^(?:https://github\\.com/|https://x-access-token:[^@]+@github\\.com/|git@github\\.com:)${escaped}(?:\\.git)?$`,
+  ).test(remote.trim());
 }
 
 function truncate<T extends Record<string, unknown>>(value: T): T {

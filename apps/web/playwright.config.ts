@@ -26,6 +26,7 @@ export default defineConfig({
       WORKOS_API_KEY: "sk_test_placeholder",
       WORKOS_COOKIE_PASSWORD: "test-cookie-password-at-least-32-chars",
       NEXT_PUBLIC_WORKOS_REDIRECT_URI: `http://127.0.0.1:${port}/auth/callback`,
+      OPENCOMPANY_NGROK_DISABLED: "1",
     },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

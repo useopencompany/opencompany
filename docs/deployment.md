@@ -77,6 +77,11 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_INTEGRATION_APP_ID`
+- `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
+- `GITHUB_INTEGRATION_APP_SLUG`
+- `GITHUB_INTEGRATION_APP_CLIENT_ID`
+- `GITHUB_INTEGRATION_APP_CLIENT_SECRET`
 - `INNGEST_EVENT_KEY`
 - `INNGEST_SIGNING_KEY`
 - `RUNNER_PUBLIC_URL`
@@ -105,6 +110,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_INTEGRATION_APP_ID`
+- `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 
 `RUNNER_ALLOWED_ORIGINS` must include the exact production web origin, for example
 `https://app.example.com`. Add preview origins only if you intentionally allow previews to connect

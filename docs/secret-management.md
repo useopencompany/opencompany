@@ -104,7 +104,11 @@ For Infisical `dev`, `/web` should include:
 
 - `NEON_PROJECT_ID`
 - WorkOS vars
-- GitHub App vars
+- GitHub workspace app vars: `OPENCOMPANY_GITHUB_ORG`, `GITHUB_APP_ID`,
+  `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
+- GitHub integration app vars: `GITHUB_INTEGRATION_APP_ID`,
+  `GITHUB_INTEGRATION_APP_PRIVATE_KEY`, `GITHUB_INTEGRATION_APP_SLUG`,
+  `GITHUB_INTEGRATION_APP_CLIENT_ID`, and `GITHUB_INTEGRATION_APP_CLIENT_SECRET`
 - runner connection vars
 - optional Linear, analytics, and observability vars
 
@@ -114,7 +118,9 @@ For Infisical `dev`, `/runner` should include:
 - `RUNNER_ALLOWED_ORIGINS`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
-- GitHub App vars
+- GitHub workspace app vars
+- GitHub integration app vars: `GITHUB_INTEGRATION_APP_ID` and
+  `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 - optional hosted tool and observability vars
 
 Hosted Inngest keys belong in `staging`/`prod`, not local `dev`.

@@ -97,6 +97,11 @@ body {
   background: #eef7f0;
   color: #246238;
 }
+.agent-mention[data-kind="integration"] {
+  border-color: #ddd7c7;
+  background: #f8f2e4;
+  color: #6c5220;
+}
 
 .session-markdown > *:first-child {
   margin-top: 0;

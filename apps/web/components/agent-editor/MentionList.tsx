@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Cpu, Wrench } from "lucide-react";
+import { ChevronLeft, ChevronRight, Cpu, Plug, Wrench } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
@@ -12,10 +12,11 @@ type Props = {
   items: AgentMentionItem[];
   query?: string;
   command: (item: { id: string; label: string }) => void;
+  onSelect?: (item: AgentMentionItem) => void;
 };
 
 export const MentionList = forwardRef<MentionListHandle, Props>(function MentionList(
-  { items, query = "", command },
+  { items, query = "", command, onSelect },
   ref,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -36,6 +37,13 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       label: "Tools",
       description: `${items.filter((item) => item.kind === "tool").length} available`,
       icon: Wrench,
+    },
+    {
+      type: "category" as const,
+      kind: "integration" as const,
+      label: "Work integrations",
+      description: `${items.filter((item) => item.kind === "integration").length} available`,
+      icon: Plug,
     },
   ].filter((row) => items.some((item) => item.kind === row.kind));
 
@@ -65,6 +73,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       setSelectedIndex(0);
       return;
     }
+    onSelect?.(row.item);
     command({ id: row.item.mentionId, label: row.item.label });
   };
 
@@ -116,7 +125,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
           className="mb-0.5 flex h-6 w-full items-center gap-1 rounded px-1.5 text-left text-[11.5px] font-medium text-ink-muted hover:bg-[#eeeeeb]/70"
         >
           <ChevronLeft size={12} strokeWidth={1.9} />
-          {activeKind === "model" ? "Models" : "Tools"}
+          {kindLabel(activeKind)}
         </button>
       )}
       {rows.map((row, index) => {
@@ -130,7 +139,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
           <div key={row.type === "category" ? row.kind : row.item.mentionId}>
             {showHeading && (
               <div className="px-1.5 pb-0.5 pt-1 text-[9.5px] font-medium uppercase text-ink-subtle">
-                {kind === "model" ? "Models" : "Tools"}
+                {kindLabel(kind)}
               </div>
             )}
             <button
@@ -173,3 +182,9 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
     </div>
   );
 });
+
+function kindLabel(kind: AgentMentionItem["kind"]) {
+  if (kind === "model") return "Models";
+  if (kind === "tool") return "Tools";
+  return "Integrations";
+}
