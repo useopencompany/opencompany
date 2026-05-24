@@ -70,7 +70,7 @@ Important details:
 - AI SDK Core owns the multi-step tool loop via `stopWhen: stepCountIs(8)`.
 - Runtime tools are created from `CORE_TOOL_DEFINITIONS` and then filtered by the agent's allowed
   tool names.
-- Tool input streaming emits `tool.delta`; complete validated input emits `tool.started`.
+- Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
 - Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`, and
   `tool.completed`.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
@@ -106,7 +106,6 @@ Common event types:
 - `message.created`
 - `message.completed`
 - `tool.started`
-- `tool.delta`
 - `command.output`
 - `file.changed`
 - `tool.completed`
