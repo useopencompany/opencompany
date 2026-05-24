@@ -148,6 +148,15 @@ https://<production-web-domain>/api/inngest
 Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` in Vercel. Do not set `INNGEST_DEV=1` in hosted
 environments.
 
+The production release workflow syncs the deployed app with Inngest after the web smoke check:
+
+```bash
+bun run release:inngest:sync
+```
+
+This sends `PUT https://<production-web-domain>/api/inngest`, which refreshes the function
+definitions Inngest Cloud uses to invoke production jobs.
+
 ### WorkOS
 
 Create or switch to the production WorkOS environment.
