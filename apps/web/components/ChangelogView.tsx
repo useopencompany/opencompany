@@ -125,20 +125,9 @@ function InlineTokenView({ token }: { token: InlineToken }) {
 }
 
 function ReleasePill({ release }: { release: Release }) {
-  const isUnreleased = release.version.toLowerCase() === "unreleased";
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium tracking-[-0.005em] shadow-[0_1px_0_rgba(0,0,0,0.02)] ${
-        isUnreleased
-          ? "border-[#e4e4e0] bg-white text-ink-muted"
-          : "border-[#e6e6e3] bg-white text-ink"
-      }`}
-    >
-      <Tag
-        size={11}
-        strokeWidth={1.9}
-        className={isUnreleased ? "text-ink-subtle" : "text-ink-muted"}
-      />
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-2 py-1 text-[12px] font-medium tracking-[-0.005em] text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      <Tag size={11} strokeWidth={1.9} className="text-ink-muted" />
       <span className="font-mono text-[12px]">{release.version}</span>
     </span>
   );
@@ -304,10 +293,13 @@ function OutlinePanel({ releases }: { releases: Release[] }) {
 }
 
 export default function ChangelogView({ changelog }: { changelog: Changelog }) {
-  const latest = changelog.releases.find((r) => r.version.toLowerCase() !== "unreleased");
+  const visibleReleases = changelog.releases.filter(
+    (release) => release.version.toLowerCase() !== "unreleased",
+  );
+  const latest = visibleReleases[0];
 
   return (
-    <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
+    <main className="flex min-h-screen min-w-0 flex-1 overflow-hidden bg-canvas">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
         <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -346,27 +338,27 @@ export default function ChangelogView({ changelog }: { changelog: Changelog }) {
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1">
-                      {changelog.releases.length}{" "}
-                      {changelog.releases.length === 1 ? "entry" : "entries"} total
+                      {visibleReleases.length} {visibleReleases.length === 1 ? "entry" : "entries"}{" "}
+                      total
                     </span>
                   </div>
                 )}
               </header>
 
               <div className="mt-8 space-y-10">
-                {changelog.releases.length === 0 ? (
+                {visibleReleases.length === 0 ? (
                   <p className="text-[13.5px] text-ink-muted">
                     No releases have been recorded yet.
                   </p>
                 ) : (
-                  changelog.releases.map((release) => (
+                  visibleReleases.map((release) => (
                     <ReleaseCard key={release.version} release={release} />
                   ))
                 )}
               </div>
             </article>
           </div>
-          <OutlinePanel releases={changelog.releases} />
+          <OutlinePanel releases={visibleReleases} />
         </div>
       </section>
     </main>

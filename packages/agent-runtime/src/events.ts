@@ -31,15 +31,6 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; toolCallId: string; name: string; input?: unknown };
     }
   | {
-      type: "tool.delta";
-      payload: {
-        messageId: string;
-        toolCallId: string;
-        delta: string;
-        stream?: "stdout" | "stderr";
-      };
-    }
-  | {
       type: "tool.completed";
       payload: { messageId: string; toolCallId: string; name: string; output: unknown };
     }

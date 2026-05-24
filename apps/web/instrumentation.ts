@@ -1,9 +1,12 @@
 import {
   captureException,
+  createLogger,
   isObservabilityEnabled,
   setExceptionReporter,
 } from "@opencompany/observability";
 import type { Instrumentation } from "next";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export const onRequestError: Instrumentation.onRequestError = (error, request, context) => {
   const requestId =
@@ -23,12 +26,39 @@ export const onRequestError: Instrumentation.onRequestError = (error, request, c
 };
 
 export async function register() {
-  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const nextRuntime = process.env.NEXT_RUNTIME ?? "unknown";
+  const serverDsn = process.env.BETTER_STACK_ERRORS_DSN?.trim();
+  const publicDsn = process.env.NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN?.trim();
+  const hasServerDsn = Boolean(serverDsn);
+  const hasPublicDsn = Boolean(publicDsn);
 
-  const dsn =
-    process.env.BETTER_STACK_ERRORS_DSN?.trim() ||
-    process.env.NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN?.trim();
-  if (!isObservabilityEnabled() || !dsn) return;
+  if (process.env.NEXT_RUNTIME !== "nodejs") {
+    logReporterSkipped("non_node_runtime", {
+      next_runtime: nextRuntime,
+      has_server_dsn: hasServerDsn,
+      has_public_dsn: hasPublicDsn,
+    });
+    return;
+  }
+
+  if (!isObservabilityEnabled()) {
+    logReporterSkipped("observability_disabled", {
+      next_runtime: nextRuntime,
+      has_server_dsn: hasServerDsn,
+      has_public_dsn: hasPublicDsn,
+    });
+    return;
+  }
+
+  const dsn = serverDsn || publicDsn;
+  if (!dsn) {
+    logReporterSkipped("missing_dsn", {
+      next_runtime: nextRuntime,
+      has_server_dsn: hasServerDsn,
+      has_public_dsn: hasPublicDsn,
+    });
+    return;
+  }
 
   const Sentry = await import("@sentry/nextjs");
   Sentry.init({
@@ -62,6 +92,27 @@ export async function register() {
     flush() {
       return Sentry.flush();
     },
+  });
+  logger.info("Registered server observability reporter", {
+    event: "opencompany.observability_reporter_registered",
+    next_runtime: nextRuntime,
+    has_server_dsn: hasServerDsn,
+    has_public_dsn: hasPublicDsn,
+  });
+}
+
+function logReporterSkipped(
+  reason: "non_node_runtime" | "observability_disabled" | "missing_dsn",
+  fields: {
+    next_runtime: string;
+    has_server_dsn: boolean;
+    has_public_dsn: boolean;
+  },
+) {
+  logger.info("Skipped server observability reporter registration", {
+    event: "opencompany.observability_reporter_skipped",
+    reason,
+    ...fields,
   });
 }
 

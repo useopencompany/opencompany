@@ -6,7 +6,7 @@ import { getCurrentWorkspaceWithoutOnboarding, hasCompletedOnboarding } from "@/
 export default async function OnboardingPage() {
   const { authUser, user, workspace } = await getCurrentWorkspaceWithoutOnboarding();
 
-  if (await hasCompletedOnboarding(user.id)) {
+  if (await hasCompletedOnboarding(user)) {
     redirect("/");
   }
 

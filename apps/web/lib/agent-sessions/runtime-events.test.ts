@@ -292,37 +292,6 @@ describe("buildRuntimeToolCallsForMessage", () => {
     ]);
   });
 
-  it("keeps streamed tool input visible before the full input is available", () => {
-    const calls = buildRuntimeToolCallsForMessage(
-      [
-        {
-          ...event(10, "tool.delta", {
-            toolCallId: "call_1",
-            delta: '{"path"',
-          }),
-          messageId: "msg_assistant",
-        },
-        {
-          ...event(11, "tool.delta", {
-            toolCallId: "call_1",
-            delta: ':"README.md"}',
-          }),
-          messageId: "msg_assistant",
-        },
-      ],
-      "msg_assistant",
-    );
-
-    expect(calls).toMatchObject([
-      {
-        id: "call_1",
-        name: "Tool call",
-        status: "running",
-        inputPreview: '{"path":"README.md"}',
-      },
-    ]);
-  });
-
   it("attaches live command output to the matching running tool", () => {
     const calls = buildRuntimeToolCallsForMessage(
       [

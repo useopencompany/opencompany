@@ -16,6 +16,7 @@ import { getWorkOSClient } from "@/lib/workos";
 
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;
+type OnboardingUser = Pick<AppUser, "id" | "email">;
 
 const ADMIN_ROLE = "admin";
 const MEMBER_ROLE = "member";
@@ -48,6 +49,25 @@ function defaultWorkspaceName(user: WorkOSUser) {
 
 function normalizeMembershipRole(role?: string | null) {
   return role === ADMIN_ROLE ? ADMIN_ROLE : MEMBER_ROLE;
+}
+
+function isLocalDevelopmentRuntime() {
+  return (
+    process.env.NODE_ENV !== "production" && process.env.CI !== "true" && !process.env.VERCEL_ENV
+  );
+}
+
+function localOnboardingBypassEmails() {
+  return new Set(
+    (process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function shouldBypassOnboarding(user: OnboardingUser) {
+  return isLocalDevelopmentRuntime() && localOnboardingBypassEmails().has(user.email.toLowerCase());
 }
 
 async function syncUser(authUser: WorkOSUser) {
@@ -110,6 +130,45 @@ async function syncLocalMembership(input: { workspaceId: string; userId: string;
         updatedAt: now,
       },
     });
+}
+
+export async function loadCurrentWorkspaceContextReadOnly(
+  authUser: WorkOSUser,
+  organizationId: string,
+): Promise<CurrentWorkspaceContext | null> {
+  const db = getDb();
+  const [userRows, workspaceRows] = await Promise.all([
+    db.select().from(users).where(eq(users.workosUserId, authUser.id)).limit(1),
+    db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.workosOrganizationId, organizationId))
+      .limit(1),
+  ]);
+  const user = userRows[0];
+  const workspace = workspaceRows[0];
+
+  if (!user || !workspace) return null;
+
+  const [membership] = await db
+    .select({ userId: workspaceMemberships.userId })
+    .from(workspaceMemberships)
+    .where(
+      and(
+        eq(workspaceMemberships.workspaceId, workspace.id),
+        eq(workspaceMemberships.userId, user.id),
+      ),
+    )
+    .limit(1);
+
+  if (!membership) return null;
+
+  return {
+    authUser,
+    user,
+    workspace,
+    isNewUser: false,
+  };
 }
 
 export async function syncUserAndWorkspace(
@@ -277,7 +336,12 @@ export async function refreshIntoWorkspaceOrganization(workspace: AppWorkspace) 
   });
 }
 
-export async function hasCompletedOnboarding(userId: string) {
+export async function hasCompletedOnboarding(user: string | OnboardingUser) {
+  if (typeof user !== "string" && shouldBypassOnboarding(user)) {
+    return true;
+  }
+
+  const userId = typeof user === "string" ? user : user.id;
   const db = getDb();
   const [response] = await db
     .select({ userId: onboardingResponses.userId })
@@ -295,10 +359,13 @@ export const getOptionalCurrentWorkspaceWithoutOnboarding = cache(async () => {
     return null;
   }
 
-  return syncUserAndWorkspace(
-    session.user,
-    session.organizationId,
-    session.role ?? session.roles?.[0],
+  return (
+    (await loadCurrentWorkspaceContextReadOnly(session.user, session.organizationId)) ??
+    (await syncUserAndWorkspace(
+      session.user,
+      session.organizationId,
+      session.role ?? session.roles?.[0],
+    ))
   );
 });
 
@@ -309,10 +376,13 @@ export const getCurrentWorkspaceWithoutOnboarding = cache(async () => {
     redirect("/auth/organization");
   }
 
-  return syncUserAndWorkspace(
-    session.user,
-    session.organizationId,
-    session.role ?? session.roles?.[0],
+  return (
+    (await loadCurrentWorkspaceContextReadOnly(session.user, session.organizationId)) ??
+    (await syncUserAndWorkspace(
+      session.user,
+      session.organizationId,
+      session.role ?? session.roles?.[0],
+    ))
   );
 });
 
@@ -323,7 +393,7 @@ export const getOptionalCurrentWorkspace = cache(async () => {
     return null;
   }
 
-  if (!(await hasCompletedOnboarding(context.user.id))) {
+  if (!(await hasCompletedOnboarding(context.user))) {
     redirect("/onboarding");
   }
 
@@ -333,7 +403,7 @@ export const getOptionalCurrentWorkspace = cache(async () => {
 export const getCurrentWorkspace = cache(async () => {
   const context = await getCurrentWorkspaceWithoutOnboarding();
 
-  if (!(await hasCompletedOnboarding(context.user.id))) {
+  if (!(await hasCompletedOnboarding(context.user))) {
     redirect("/onboarding");
   }
 

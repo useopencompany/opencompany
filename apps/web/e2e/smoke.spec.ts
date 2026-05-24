@@ -19,6 +19,14 @@ test("docs page renders", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Welcome to opencompany" })).toBeVisible();
 });
 
+test("public changelog page renders released versions only", async ({ page }) => {
+  await page.goto("/changelog");
+
+  await expect(page.getByRole("heading", { name: "Changelog" })).toBeVisible();
+  await expect(page.getByText("0.2.0").first()).toBeVisible();
+  await expect(page.getByText("Unreleased")).toHaveCount(0);
+});
+
 test("protected routes redirect unauthenticated visitors", async ({ page }) => {
   await page.goto("/agents", { waitUntil: "domcontentloaded" });
 

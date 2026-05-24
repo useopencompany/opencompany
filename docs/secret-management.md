@@ -178,7 +178,8 @@ Put these keys in Infisical `prod` + `/release`:
 | `VERCEL_TOKEN` | Vercel deploy token. |
 | `VERCEL_ORG_ID` | Vercel org/team id. |
 | `VERCEL_PROJECT_ID` | Vercel project id. |
-| `RENDER_DEPLOY_HOOK_URL` | Render deploy hook for the runner. |
+| `RENDER_SERVICE_ID` | Render service id for the runner. |
+| `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
