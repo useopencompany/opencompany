@@ -170,6 +170,7 @@ Useful local-only vars:
 | `NEON_API_KEY` | Optional for headless Neon CLI usage. |
 | `NEON_PARENT_BRANCH` | Optional parent branch for local Neon branches. |
 | `NEON_BRANCH_NAME` | Optional override when multiple worktrees share a Git branch. |
+| `NEON_BRANCH_TTL_HOURS` | Optional local Neon branch lifetime in hours. Defaults to `24`; use `0` to disable expiration. |
 | `NEON_DATABASE_NAME` | Optional nonstandard Neon database name. |
 | `NEON_ROLE_NAME` | Optional nonstandard Neon role. |
 | `PORT` | Optional local web port override. |
