@@ -165,15 +165,16 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
-      - name: Trigger runner deploy
+      - name: Deploy runner
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_runner) }}
-        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
+        run: bun run release:render
 
       - name: Smoke check release
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}
         env:
           EXPECTED_RELEASE: ${{ env.RELEASE_SHA }}
+          SMOKE_RUNNER: ${{ github.event_name == 'workflow_run' || inputs.deploy_runner }}
           SMOKE_WEB_ATTEMPTS: "12"
-          SMOKE_RUNNER_ATTEMPTS: "5"
+          SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke

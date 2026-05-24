@@ -23,7 +23,7 @@ Production releases are intentionally serialized:
 1. Run CI on `main`.
 2. Run Drizzle migrations against production Neon.
 3. Build and deploy the Vercel web app for the exact commit.
-4. Trigger the Render runner deploy for the same commit.
+4. Trigger and wait for the Render runner deploy for the exact commit.
 5. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
@@ -96,7 +96,7 @@ Create the runner from `render.yaml`.
 - Runtime: Docker
 - Health check: `/healthz`
 - Auto deploy: off, so GitHub Actions controls release order
-- Deploy hook: create one and store it as `RENDER_DEPLOY_HOOK_URL` in Infisical `prod` + `/release`
+- API deploys: store `RENDER_SERVICE_ID` and `RENDER_API_KEY` in Infisical `prod` + `/release`
 
 Set these in Infisical `prod` + `/runner` and sync them into Render:
 
@@ -199,6 +199,6 @@ bun run release:smoke
 - WorkOS production callback works.
 - Inngest production app can sync functions from `/api/inngest`.
 - Neon backups/PITR are enabled.
-- Render deploy hook works.
+- Render API deploy works for the runner service.
 - `bun run release:preflight -- --release` passes in GitHub Actions.
 - The first `Release Production` workflow finishes with smoke checks green.

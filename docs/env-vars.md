@@ -118,7 +118,8 @@ Infisical `prod` + `/release` secrets:
 | `VERCEL_TOKEN` | Vercel CLI deploy token. |
 | `VERCEL_ORG_ID` | Vercel team/org id. |
 | `VERCEL_PROJECT_ID` | Vercel project id. |
-| `RENDER_DEPLOY_HOOK_URL` | Render deploy hook for `opencompany-runner`. |
+| `RENDER_SERVICE_ID` | Render service id for `opencompany-runner`. |
+| `RENDER_API_KEY` | Render API key used to trigger and poll runner deploys. |
 | `PRODUCTION_WEB_URL` | Canonical production web URL for smoke checks. |
 | `RUNNER_PUBLIC_URL` | Canonical production runner URL for smoke checks. |
 
@@ -136,9 +137,13 @@ Release-only script vars:
 | Var | Required | Purpose |
 |---|---:|---|
 | `EXPECTED_RELEASE` | No | Smoke check expects health endpoint release fields to start with this SHA. |
+| `RENDER_DEPLOY_TIMEOUT_MS` | No | Maximum time to wait for the Render deploy API before smoke checks. Defaults to `900000`. |
+| `RENDER_DEPLOY_POLL_MS` | No | Delay between Render deploy status polls. Defaults to `10000`. |
+| `SMOKE_WEB` | No | Set to `false`, `0`, or `no` to skip web health checks. Defaults to enabled. |
+| `SMOKE_RUNNER` | No | Set to `false`, `0`, or `no` to skip runner health checks. Defaults to enabled. |
 | `SMOKE_ATTEMPTS` | No | Default health retry count. Defaults to `30`. |
 | `SMOKE_WEB_ATTEMPTS` | No | Web health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
-| `SMOKE_RUNNER_ATTEMPTS` | No | Runner health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `5`. |
+| `SMOKE_RUNNER_ATTEMPTS` | No | Runner health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
 
 ## Local Development

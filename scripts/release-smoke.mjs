@@ -7,14 +7,26 @@ const attempts = Number(process.env.SMOKE_ATTEMPTS ?? "30");
 const webAttempts = Number(process.env.SMOKE_WEB_ATTEMPTS ?? attempts);
 const runnerAttempts = Number(process.env.SMOKE_RUNNER_ATTEMPTS ?? attempts);
 const delayMs = Number(process.env.SMOKE_DELAY_MS ?? "10000");
+const checkWeb = booleanEnv("SMOKE_WEB", true);
+const checkRunner = booleanEnv("SMOKE_RUNNER", true);
 
-if (!webUrl || !runnerUrl) {
-  console.error("PRODUCTION_WEB_URL/WEB_URL and RUNNER_PUBLIC_URL are required.");
+if (checkWeb && !webUrl) {
+  console.error("PRODUCTION_WEB_URL or WEB_URL is required.");
   process.exit(1);
 }
 
-await checkUntilReady("web", `${webUrl}/api/healthz`, webAttempts, delayMs);
-await checkUntilReady("runner", `${runnerUrl}/healthz`, runnerAttempts, delayMs);
+if (checkRunner && !runnerUrl) {
+  console.error("RUNNER_PUBLIC_URL is required.");
+  process.exit(1);
+}
+
+if (checkWeb) {
+  await checkUntilReady("web", `${webUrl}/api/healthz`, webAttempts, delayMs);
+}
+
+if (checkRunner) {
+  await checkUntilReady("runner", `${runnerUrl}/healthz`, runnerAttempts, delayMs);
+}
 
 console.log("Release smoke checks passed.");
 
@@ -90,4 +102,10 @@ function releaseFields(payload) {
     vercelGitCommitSha: payload.vercelGitCommitSha,
     renderGitCommit: payload.renderGitCommit,
   };
+}
+
+function booleanEnv(name, fallback) {
+  const value = process.env[name]?.trim().toLowerCase();
+  if (!value) return fallback;
+  return value !== "0" && value !== "false" && value !== "no";
 }
