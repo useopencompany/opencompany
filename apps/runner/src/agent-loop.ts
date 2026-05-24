@@ -679,23 +679,6 @@ function createToolSet(input: {
     tools[definition.name] = tool({
       description: definition.description,
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
-      onInputDelta: async ({ inputTextDelta, toolCallId }) => {
-        await input.checkAbort();
-        await requireLeaseWrite(
-          appendRuntimeEventForLease({
-            sessionId: input.sessionId,
-            messageId: input.assistantMessageId,
-            leaseId: input.runLeaseId,
-            leaseOwner: input.runLeaseOwner,
-            type: "tool.delta",
-            payload: {
-              messageId: input.assistantMessageId,
-              toolCallId,
-              delta: inputTextDelta,
-            },
-          }),
-        );
-      },
       onInputAvailable: async ({ input: toolInput, toolCallId }) => {
         await input.checkAbort();
         await requireLeaseWrite(
