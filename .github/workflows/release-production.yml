@@ -224,6 +224,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           DEPLOYMENT_ID: ${{ steps.github-deployment.outputs.deployment_id }}
+          DEPLOY_RELEASE_SHOULD_RELEASE: ${{ steps.deploy-release.outputs.should_release }}
           JOB_STATUS: ${{ job.status }}
         with:
           script: |
@@ -231,17 +232,29 @@ jobs:
             const shortSha = releaseSha.slice(0, 7);
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const succeeded = process.env.JOB_STATUS === "success";
+            const skippedBeforeDeploy =
+              process.env.GITHUB_EVENT_NAME === "workflow_run" &&
+              process.env.DEPLOY_RELEASE_SHOULD_RELEASE === "false";
+
+            const state = skippedBeforeDeploy
+              ? "inactive"
+              : succeeded
+                ? "success"
+                : "failure";
+            const description = skippedBeforeDeploy
+              ? `Production release ${shortSha} was superseded before deploy.`
+              : succeeded
+                ? `Production release ${shortSha} completed successfully.`
+                : `Production release ${shortSha} failed.`;
 
             const status = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               deployment_id: Number(process.env.DEPLOYMENT_ID),
-              state: succeeded ? "success" : "failure",
+              state,
               log_url: runUrl,
               environment: "production",
-              description: succeeded
-                ? `Production release ${shortSha} completed successfully.`
-                : `Production release ${shortSha} failed.`,
+              description,
             };
 
             if (process.env.PRODUCTION_WEB_URL) {
