@@ -219,6 +219,13 @@ jobs:
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
 
+      - name: Sync Inngest app
+        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || github.event_name == 'workflow_dispatch' }}
+        env:
+          INNGEST_SYNC_ATTEMPTS: "6"
+          INNGEST_SYNC_DELAY_MS: "10000"
+        run: bun run release:inngest:sync
+
       - name: Finalize GitHub deployment
         if: ${{ always() && steps.github-deployment.outputs.deployment_id != '' }}
         uses: actions/github-script@v7
