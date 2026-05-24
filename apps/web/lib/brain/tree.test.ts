@@ -45,10 +45,7 @@ describe("brain tree helpers", () => {
     const tree = buildBrainTree(files);
 
     expect(collectFolderPaths(tree)).toEqual(["docs", "docs/product", "notes"]);
-    expect(ancestorFolderPaths("docs/product/positioning.md")).toEqual([
-      "docs",
-      "docs/product",
-    ]);
+    expect(ancestorFolderPaths("docs/product/positioning.md")).toEqual(["docs", "docs/product"]);
     expect(parentFolderPath("docs/product/positioning.md")).toBe("docs/product");
   });
 
