@@ -18,7 +18,7 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@opencompany/observability", () => ({
   captureException: vi.fn(),
-  createLogger: vi.fn(() => ({ error: vi.fn() })),
+  createLogger: vi.fn(() => ({ error: vi.fn(), info: vi.fn() })),
 }));
 
 vi.mock("next/server", () => ({
@@ -62,6 +62,7 @@ function createDbMock(selectResults: unknown[][]) {
 describe("ensureUserOnboardingScaffold", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dispatchAgentSyncRequestedMock.mockResolvedValue({ ids: ["evt_123"] });
   });
 
   it("creates a pending leo agent and sync job", async () => {

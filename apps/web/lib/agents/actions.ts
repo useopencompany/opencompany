@@ -8,10 +8,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
 import {
-  agentSyncJobUpsert,
   buildPendingAgent,
+  logAgentSyncJobQueued,
   newAgentId,
   nextAvailableAgentPath,
+  prepareAgentSyncJobUpsert,
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
@@ -41,10 +42,12 @@ export async function createAgent() {
     body: "",
     path,
   });
+  const syncJob = prepareAgentSyncJobUpsert(db, pending.syncJob);
 
   await timeAsync(trace, "db.createAgentAndSyncJob", () =>
-    db.batch([db.insert(agents).values(pending.agent), agentSyncJobUpsert(db, pending.syncJob)]),
+    db.batch([db.insert(agents).values(pending.agent), syncJob.query]),
   );
+  logAgentSyncJobQueued(syncJob.metadata);
   const result = { id: pending.id, workspaceId: workspace.id, path };
 
   await captureServerEvent("agent_created", user.id, {
@@ -54,7 +57,11 @@ export async function createAgent() {
   });
 
   revalidatePath("/agents");
-  scheduleAgentSyncDispatch(result);
+  scheduleAgentSyncDispatch({
+    id: pending.id,
+    workspaceId: workspace.id,
+    path,
+  });
   endTimingTrace(trace, { path: result.path });
   redirect(`/agents/${result.path}`);
 }
@@ -133,6 +140,15 @@ export async function updateAgent(
     renamePreviousPath: pathChanged ? previousPath : null,
     renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
   });
+  const syncJob = prepareAgentSyncJobUpsert(db, {
+    agentId: agent.id,
+    workspaceId: workspace.id,
+    path,
+    desiredHash: contentHash,
+    desiredVersion: version,
+    previousPath: rename.previousPath,
+    previousBlobSha: rename.previousBlobSha,
+  });
 
   await timeAsync(trace, "db.updateAgentAndSyncJob", () =>
     db.batch([
@@ -150,17 +166,10 @@ export async function updateAgent(
           updatedAt: new Date(),
         })
         .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
-      agentSyncJobUpsert(db, {
-        agentId: agent.id,
-        workspaceId: workspace.id,
-        path,
-        desiredHash: contentHash,
-        desiredVersion: version,
-        previousPath: rename.previousPath,
-        previousBlobSha: rename.previousBlobSha,
-      }),
+      syncJob.query,
     ]),
   );
+  logAgentSyncJobQueued(syncJob.metadata);
 
   if (changedFields.length > 0) {
     await captureServerEvent("agent_saved", user.id, {
@@ -177,7 +186,11 @@ export async function updateAgent(
   revalidatePath(`/agents/${result.path}`);
   if (previousPath) revalidatePath(`/agents/${previousPath}`);
   revalidatePath(`/agents/${result.id}`);
-  scheduleAgentSyncDispatch(result);
+  scheduleAgentSyncDispatch({
+    id: agent.id,
+    workspaceId: workspace.id,
+    path,
+  });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
 }
