@@ -47,6 +47,11 @@ to the server runtimes, and the production workflow injects `RELEASE_SHA` as
 the same commit. Keep `OBSERVABILITY_RELEASE` unset in normal hosted deploys; reserve it for manual
 or non-Git deploys where platform commit metadata is unavailable.
 
+Production release history is recorded with GitHub Deployments, keyed by the released commit SHA. The
+workflow creates a `production` deployment before migrations and marks it successful only after the
+deploy and smoke checks complete. Use GitHub Deployments as the operational audit trail for what is
+or was in production; `CHANGELOG.md` remains a product-facing summary and does not drive deployment.
+
 Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
 runner deployment. Keep schema changes backwards compatible with the previous web and runner version
 until the release has completed.

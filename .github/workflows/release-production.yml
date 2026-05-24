@@ -22,6 +22,7 @@ concurrency:
 
 permissions:
   contents: read
+  deployments: write
   id-token: write
 
 jobs:
@@ -108,6 +109,45 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.production-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded before migrations/deploy, so production was not changed."
 
+      - name: Create GitHub deployment
+        id: github-deployment
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseSha = process.env.RELEASE_SHA;
+            const shortSha = releaseSha.slice(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const { data: deployment } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: releaseSha,
+              environment: "production",
+              auto_merge: false,
+              required_contexts: [],
+              transient_environment: false,
+              production_environment: true,
+              description: `Production release ${shortSha}`,
+            });
+
+            const status = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.id,
+              state: "in_progress",
+              log_url: runUrl,
+              environment: "production",
+              description: `Production release ${shortSha} is in progress.`,
+            };
+
+            if (process.env.PRODUCTION_WEB_URL) {
+              status.environment_url = process.env.PRODUCTION_WEB_URL;
+            }
+
+            await github.rest.repos.createDeploymentStatus(status);
+            core.setOutput("deployment_id", String(deployment.id));
+
       - name: Map production database URL
         if: ${{ github.event_name == 'workflow_dispatch' || steps.production-release.outputs.should_release == 'true' }}
         run: echo "DATABASE_URL=$PRODUCTION_DATABASE_URL" >> "$GITHUB_ENV"
@@ -178,3 +218,34 @@ jobs:
           SMOKE_RUNNER_ATTEMPTS: "12"
           SMOKE_DELAY_MS: "10000"
         run: bun run release:smoke
+
+      - name: Finalize GitHub deployment
+        if: ${{ always() && steps.github-deployment.outputs.deployment_id != '' }}
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.github-deployment.outputs.deployment_id }}
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const releaseSha = process.env.RELEASE_SHA;
+            const shortSha = releaseSha.slice(0, 7);
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const succeeded = process.env.JOB_STATUS === "success";
+
+            const status = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: succeeded ? "success" : "failure",
+              log_url: runUrl,
+              environment: "production",
+              description: succeeded
+                ? `Production release ${shortSha} completed successfully.`
+                : `Production release ${shortSha} failed.`,
+            };
+
+            if (process.env.PRODUCTION_WEB_URL) {
+              status.environment_url = process.env.PRODUCTION_WEB_URL;
+            }
+
+            await github.rest.repos.createDeploymentStatus(status);
