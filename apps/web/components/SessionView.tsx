@@ -118,10 +118,10 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
       usage: detail.usage,
       toolUsage: detail.toolUsage,
       cost: detail.cost,
-      currentStatus: session.status,
-      lastError: session.lastError,
+      currentStatus: detail.session.status,
+      lastError: detail.session.lastError,
     }),
-    [detail, session.lastError, session.status],
+    [detail],
   );
   const lastEventId = useMemo(() => runtime.events.at(-1)?.id ?? 0, [runtime.events]);
   const knownEventIds = useMemo(() => runtime.events.map((event) => event.id), [runtime.events]);
@@ -170,7 +170,6 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
       queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
         current ? updateSessionStatusInDetail(current, "aborting") : current,
       );
-      void queryClient.invalidateQueries({ queryKey: detailKey });
     });
   };
 
@@ -206,7 +205,6 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
             ? addUserMessageToSessionDetail(current, { messageId: result.messageId, content })
             : current,
         );
-        void queryClient.invalidateQueries({ queryKey: detailKey });
         return;
       }
       setFormError(result.error);

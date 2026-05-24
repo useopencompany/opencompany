@@ -44,7 +44,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     setError(null);
     startTransition(async () => {
       const result = await createAgentSessionFromPrompt(selectedAgentId, content);
-      if (result?.ok === false) {
+      if (!result.ok) {
         if ("redirectTo" in result) {
           router.push(result.redirectTo);
           return;
@@ -52,10 +52,8 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         setError(result.error);
         return;
       }
-      if (result?.ok) {
-        seedSessionQueries(queryClient, workspaceId, result.detail);
-        router.push(`/session/${result.session.id}`);
-      }
+      seedSessionQueries(queryClient, workspaceId, result.detail);
+      router.push(`/session/${result.session.id}`);
     });
   };
 

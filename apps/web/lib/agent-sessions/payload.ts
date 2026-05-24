@@ -266,9 +266,25 @@ export function seedSessionQueries(
   detail: AgentSessionDetailPayload,
 ) {
   queryClient.setQueryData(sessionQueryKeys.detail(workspaceId, detail.session.id), detail);
+  const projected = sidebarSessionFromDetail(detail);
   queryClient.setQueryData<SidebarSessionPayload[]>(
     sessionQueryKeys.list(workspaceId),
-    (sessions) => upsertSidebarSession(sessions, sidebarSessionFromDetail(detail)),
+    (sessions) => {
+      const existing = sessions?.find((session) => session.id === projected.id);
+      if (existing && sidebarSessionEquals(existing, projected)) return sessions;
+      return upsertSidebarSession(sessions, projected);
+    },
+  );
+}
+
+function sidebarSessionEquals(left: SidebarSessionPayload, right: SidebarSessionPayload) {
+  return (
+    left.title === right.title &&
+    left.status === right.status &&
+    left.modelName === right.modelName &&
+    left.lastError === right.lastError &&
+    left.updatedAt === right.updatedAt &&
+    left.createdAt === right.createdAt
   );
 }
 
@@ -330,6 +346,7 @@ function mergeMessage(current: SessionMessage, incoming: SessionMessage): Sessio
     incoming.status !== "completed" &&
     current.content.length > incoming.content.length;
   const keepCurrentCompletion = current.status === "completed" && incoming.status !== "completed";
+  const incomingIsAuthoritative = incoming.status === "completed";
 
   return {
     ...current,
@@ -337,10 +354,9 @@ function mergeMessage(current: SessionMessage, incoming: SessionMessage): Sessio
     content: keepCurrentContent ? current.content : incoming.content,
     status: keepCurrentCompletion ? current.status : incoming.status,
     completedAt: keepCurrentCompletion ? current.completedAt : incoming.completedAt,
-    outputReasoningTokens: Math.max(
-      current.outputReasoningTokens ?? 0,
-      incoming.outputReasoningTokens ?? 0,
-    ),
+    outputReasoningTokens: incomingIsAuthoritative
+      ? (incoming.outputReasoningTokens ?? current.outputReasoningTokens ?? 0)
+      : Math.max(current.outputReasoningTokens ?? 0, incoming.outputReasoningTokens ?? 0),
     thinkingDurationSeconds: incoming.thinkingDurationSeconds ?? current.thinkingDurationSeconds,
   };
 }

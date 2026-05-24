@@ -1,9 +1,13 @@
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
   type AgentSessionDetailPayload,
   applyRuntimeEventToSessionDetail,
   mergeAgentSessionDetail,
   removeSidebarSession,
+  type SidebarSessionPayload,
+  seedSessionQueries,
+  sessionQueryKeys,
   upsertSidebarSession,
 } from "@/lib/agent-sessions/payload";
 
@@ -191,6 +195,131 @@ describe("session payload cache helpers", () => {
     expect(merged.session.e2bSandboxId).toBe("sbx_123");
     expect(merged.session.runLeaseId).toBe("run_123");
     expect(merged.session.updatedAt).toBe("2026-05-24T10:02:00.000Z");
+  });
+
+  it("treats completed-message reasoning tokens from the server as authoritative", () => {
+    const current = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "answer",
+          status: "running",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          outputReasoningTokens: 42,
+        },
+      ],
+    });
+    const incoming = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "answer",
+          status: "completed",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          completedAt: "2026-05-24T10:00:30.000Z",
+          outputReasoningTokens: 12,
+        },
+      ],
+    });
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.messages[0]?.status).toBe("completed");
+    expect(merged.messages[0]?.outputReasoningTokens).toBe(12);
+  });
+
+  it("preserves the streamed reasoning-token max while the assistant message is still running", () => {
+    const current = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "answer",
+          status: "running",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          outputReasoningTokens: 42,
+        },
+      ],
+    });
+    const incoming = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "answer",
+          status: "running",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          outputReasoningTokens: 8,
+        },
+      ],
+    });
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.messages[0]?.outputReasoningTokens).toBe(42);
+  });
+
+  it("does not churn the sidebar cache on content-only runtime events", () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    const initialDetail = detail();
+    const sidebarSeed: SidebarSessionPayload[] = [
+      {
+        id: initialDetail.session.id,
+        title: initialDetail.session.title,
+        status: initialDetail.session.status,
+        modelName: initialDetail.session.modelName,
+        lastError: initialDetail.session.lastError,
+        createdAt: initialDetail.session.createdAt,
+        updatedAt: initialDetail.session.updatedAt,
+      },
+    ];
+    queryClient.setQueryData(sessionQueryKeys.list(workspaceId), sidebarSeed);
+
+    seedSessionQueries(queryClient, workspaceId, initialDetail);
+    const sidebarAfterSeed = queryClient.getQueryData(sessionQueryKeys.list(workspaceId));
+
+    const next = applyRuntimeEventToSessionDetail(initialDetail, {
+      id: 1,
+      type: "message.delta",
+      messageId: "msg_1",
+      payload: { messageId: "msg_1", delta: "hello" },
+    });
+    seedSessionQueries(queryClient, workspaceId, next);
+
+    expect(queryClient.getQueryData(sessionQueryKeys.list(workspaceId))).toBe(sidebarAfterSeed);
+    expect(
+      queryClient.getQueryData(sessionQueryKeys.detail(workspaceId, next.session.id)),
+    ).toStrictEqual(next);
+  });
+
+  it("refreshes the sidebar cache when session-level fields change", () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    const initialDetail = detail();
+    seedSessionQueries(queryClient, workspaceId, initialDetail);
+    const sidebarAfterSeed = queryClient.getQueryData(sessionQueryKeys.list(workspaceId));
+
+    const next = applyRuntimeEventToSessionDetail(
+      initialDetail,
+      {
+        id: 1,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "running" },
+      },
+      "2026-05-24T10:05:00.000Z",
+    );
+    seedSessionQueries(queryClient, workspaceId, next);
+
+    const sidebarAfterStatus = queryClient.getQueryData<SidebarSessionPayload[]>(
+      sessionQueryKeys.list(workspaceId),
+    );
+    expect(sidebarAfterStatus).not.toBe(sidebarAfterSeed);
+    expect(sidebarAfterStatus?.[0]?.status).toBe("running");
+    expect(sidebarAfterStatus?.[0]?.updatedAt).toBe("2026-05-24T10:05:00.000Z");
   });
 
   it("applies runtime status, error, and title updates to detail", () => {
