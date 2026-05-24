@@ -12,6 +12,7 @@ const UNAUTHENTICATED_PATHS = [
   "/auth/organization",
   "/auth/sign-in",
   "/auth/sign-up",
+  "/changelog",
   "/api/healthz",
   "/api/inngest",
   "/api/stripe/webhook",
