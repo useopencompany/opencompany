@@ -26,10 +26,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
+import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { archiveAgentSession } from "@/lib/agent-sessions/actions";
 import {
-  fetchAgentSession,
   fetchSidebarSessions,
   removeSidebarSession,
   SESSIONS_QUERY_STALE_TIME_MS,
@@ -39,8 +39,7 @@ import {
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
-// Each session detail fetch mints a fresh stream token + runs 5 DB queries. Debounce hover
-// prefetches so dragging across the history list doesn't fire one per item.
+// Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 
 export type SidebarSession = SidebarSessionPayload;
@@ -118,6 +117,7 @@ function SessionHistoryItem({
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -126,13 +126,8 @@ function SessionHistoryItem({
     prefetchTimerRef.current = setTimeout(() => {
       prefetchTimerRef.current = null;
       router.prefetch(`/session/${session.id}`);
-      void queryClient.prefetchQuery({
-        queryKey: sessionQueryKeys.detail(workspaceId, session.id),
-        queryFn: () => fetchAgentSession(session.id),
-        staleTime: SESSIONS_QUERY_STALE_TIME_MS,
-      });
     }, SESSION_PREFETCH_HOVER_DELAY_MS);
-  }, [queryClient, router, session.id, workspaceId]);
+  }, [router, session.id]);
 
   const cancelPrefetch = useCallback(() => {
     if (!prefetchTimerRef.current) return;
@@ -140,7 +135,11 @@ function SessionHistoryItem({
     prefetchTimerRef.current = null;
   }, []);
 
-  useEffect(() => cancelPrefetch, [cancelPrefetch]);
+  useEffect(() => {
+    return () => {
+      if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+    };
+  }, []);
 
   return (
     <div
@@ -172,7 +171,7 @@ function SessionHistoryItem({
           startTransition(async () => {
             const result = await archiveAgentSession(session.id);
             if (!result.ok) {
-              window.alert(result.error);
+              showError(result.error, "Could not archive session");
               return;
             }
             queryClient.setQueryData<SidebarSession[]>(

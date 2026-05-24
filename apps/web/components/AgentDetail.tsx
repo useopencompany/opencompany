@@ -29,6 +29,7 @@ import {
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { useToast } from "@/components/ToastProvider";
 import {
   Select,
   SelectContent,
@@ -143,6 +144,7 @@ function AgentDetailContent({
   workspaceId: string;
 }) {
   const queryClient = useQueryClient();
+  const { showError } = useToast();
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
   const [body, setBody] = useState(initialBody);
@@ -278,7 +280,7 @@ function AgentDetailContent({
                         router.push(result.redirectTo);
                         return;
                       }
-                      window.alert(result.error);
+                      showError(result.error, "Could not start session");
                       return;
                     }
                     seedSessionQueries(queryClient, workspaceId, result.detail);

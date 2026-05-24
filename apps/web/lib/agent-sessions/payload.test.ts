@@ -5,6 +5,9 @@ import {
   applyRuntimeEventToSessionDetail,
   invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
+  parseAgentSessionDetailResponse,
+  parseSessionStreamCredentialResponse,
+  parseSidebarSessionsResponse,
   removeSidebarSession,
   type SidebarSessionPayload,
   seedSessionQueries,
@@ -473,6 +476,35 @@ describe("session payload cache helpers", () => {
     expect(current.session.title).toBe("New title");
     expect(current.session.updatedAt).toBe("2026-05-24T10:03:00.000Z");
   });
+
+  it("parses session API payloads at the fetch boundary", () => {
+    const sessionDetail = detail({
+      events: [{ id: 1, type: "session.status", messageId: null, payload: { status: "running" } }],
+      messages: [{ id: "msg_1", role: "user", content: "Ship it", status: "completed" }],
+    });
+
+    expect(parseAgentSessionDetailResponse({ detail: sessionDetail })).toEqual({
+      detail: sessionDetail,
+    });
+    expect(parseSidebarSessionsResponse({ sessions: [sidebarSession("ses_1", "One")] })).toEqual({
+      sessions: [sidebarSession("ses_1", "One")],
+    });
+    expect(
+      parseSessionStreamCredentialResponse({
+        runnerUrl: "https://runner.example.com",
+        streamToken: "token",
+      }),
+    ).toEqual({
+      runnerUrl: "https://runner.example.com",
+      streamToken: "token",
+    });
+  });
+
+  it("rejects invalid session detail payloads", () => {
+    expect(() => parseAgentSessionDetailResponse({ detail: { session: null } })).toThrow(
+      "Invalid session.",
+    );
+  });
 });
 
 function sidebarSession(id: string, title: string) {
@@ -529,6 +561,5 @@ function detail(
       toolCostUsdMicros: 0,
     },
     runnerUrl: null,
-    streamToken: null,
   };
 }

@@ -1,14 +1,8 @@
-"use client";
-
-import { useParams } from "next/navigation";
 import SessionView from "@/components/SessionView";
-import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 
-export default function SessionPage() {
-  const params = useParams<{ id?: string }>();
-  const id = params.id;
-
-  if (!id) return <SessionPageSkeleton />;
+export default async function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+  // Auth is enforced by the parent workspace layout through AppShell.
+  const { id } = await params;
 
   return <SessionView sessionId={id} />;
 }

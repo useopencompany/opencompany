@@ -231,7 +231,7 @@ export async function archiveAgentSession(sessionId: string) {
 async function loadCreatedSessionResult(sessionId: string, userId: string, workspaceId: string) {
   const detail = await loadAgentSessionDetailForWorkspace(sessionId, userId, workspaceId);
   if (!detail) {
-    throw new Error("Created session could not be loaded.");
+    return { ok: false, error: "Session was created but could not be loaded." } as const;
   }
 
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;

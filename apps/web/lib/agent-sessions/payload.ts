@@ -42,6 +42,13 @@ export type AgentSessionPayload = {
   updatedAt: string;
 };
 
+const LIVE_SESSION_FIELDS = [
+  "title",
+  "status",
+  "abortRequestedAt",
+  "lastError",
+] as const satisfies ReadonlyArray<keyof AgentSessionPayload>;
+
 export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
   messages: SessionMessage[];
@@ -49,6 +56,10 @@ export type AgentSessionDetailPayload = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
+  runnerUrl: string | null;
+};
+
+export type SessionStreamCredentialPayload = {
   runnerUrl: string | null;
   streamToken: string | null;
 };
@@ -75,12 +86,13 @@ export type AgentSessionDetailSerializable = {
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
   runnerUrl: string | null;
-  token: string | null;
 };
 
 export const sessionQueryKeys = {
   list: (workspaceId: string) => ["sessions", workspaceId] as const,
   detail: (workspaceId: string, sessionId: string) => ["session", workspaceId, sessionId] as const,
+  streamCredential: (workspaceId: string, sessionId: string) =>
+    ["session-stream-credential", workspaceId, sessionId] as const,
 };
 
 export function serializeSidebarSession(
@@ -113,7 +125,6 @@ export function serializeAgentSessionDetail(
     toolUsage: detail.toolUsage,
     cost: detail.cost,
     runnerUrl: detail.runnerUrl,
-    streamToken: detail.token,
   };
 }
 
@@ -131,8 +142,8 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
 
 export async function fetchSidebarSessions(): Promise<SidebarSessionPayload[]> {
   const response = await fetch("/api/sessions", { credentials: "same-origin" });
-  const body = await readJson<{ sessions: SidebarSessionPayload[] }>(response);
-  return body.sessions;
+  const body = await readJson(response);
+  return parseSidebarSessionsResponse(body).sessions;
 }
 
 export async function fetchAgentSession(
@@ -142,8 +153,20 @@ export async function fetchAgentSession(
     credentials: "same-origin",
   });
   if (response.status === 404) return null;
-  const body = await readJson<{ detail: AgentSessionDetailPayload }>(response);
-  return body.detail;
+  const body = await readJson(response);
+  return parseAgentSessionDetailResponse(body).detail;
+}
+
+export async function fetchSessionStreamCredential(
+  sessionId: string,
+): Promise<SessionStreamCredentialPayload | null> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/stream-token`, {
+    method: "POST",
+    credentials: "same-origin",
+  });
+  if (response.status === 404) return null;
+  const body = await readJson(response);
+  return parseSessionStreamCredentialResponse(body);
 }
 
 export function upsertSidebarSession(
@@ -300,22 +323,31 @@ function sidebarSessionEquals(left: SidebarSessionPayload, right: SidebarSession
   );
 }
 
-// Server payload wins for every field except the client-driven ones below; while the local
-// copy is newer (an SSE event has bumped updatedAt past the server's), title/status/
-// abortRequestedAt/lastError survive. New fields default to "server is authority."
+// Server payload wins for every field except LIVE_SESSION_FIELDS while the local copy is newer.
+// New fields default to "server is authority."
 function mergeSession(current: AgentSessionPayload, incoming: AgentSessionPayload) {
   const currentUpdatedAt = Date.parse(current.updatedAt);
   const incomingUpdatedAt = Date.parse(incoming.updatedAt);
   if (Number.isFinite(currentUpdatedAt) && Number.isFinite(incomingUpdatedAt)) {
     if (currentUpdatedAt > incomingUpdatedAt) {
-      return {
-        ...incoming,
-        title: current.title,
-        status: current.status,
-        abortRequestedAt: current.abortRequestedAt ?? incoming.abortRequestedAt,
-        lastError: current.lastError,
-        updatedAt: current.updatedAt,
-      };
+      const next = { ...incoming, updatedAt: current.updatedAt };
+      for (const field of LIVE_SESSION_FIELDS) {
+        switch (field) {
+          case "title":
+            next.title = current.title;
+            break;
+          case "status":
+            next.status = current.status;
+            break;
+          case "abortRequestedAt":
+            next.abortRequestedAt = current.abortRequestedAt ?? incoming.abortRequestedAt;
+            break;
+          case "lastError":
+            next.lastError = current.lastError;
+            break;
+        }
+      }
+      return next;
     }
     return incoming;
   }
@@ -391,8 +423,216 @@ function toRuntimeState(detail: AgentSessionDetailPayload): SessionRuntimeState 
   };
 }
 
-async function readJson<T>(response: Response): Promise<T> {
-  if (response.ok) return response.json() as Promise<T>;
+export function parseSidebarSessionsResponse(value: unknown): {
+  sessions: SidebarSessionPayload[];
+} {
+  const record = assertRecord(value, "sessions response");
+  const sessions = assertArray(record.sessions, "sessions");
+  return { sessions: sessions.map(parseSidebarSessionPayload) };
+}
+
+export function parseAgentSessionDetailResponse(value: unknown): {
+  detail: AgentSessionDetailPayload;
+} {
+  const record = assertRecord(value, "session detail response");
+  return { detail: parseAgentSessionDetailPayload(record.detail) };
+}
+
+export function parseSessionStreamCredentialResponse(
+  value: unknown,
+): SessionStreamCredentialPayload {
+  const record = assertRecord(value, "session stream credential response");
+  return {
+    runnerUrl: readNullableStringField(record, "runnerUrl"),
+    streamToken: readNullableStringField(record, "streamToken"),
+  };
+}
+
+export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayload {
+  const record = assertRecord(value, "sidebar session");
+  return {
+    id: readStringField(record, "id"),
+    title: readStringField(record, "title"),
+    status: readStringField(record, "status"),
+    modelName: readStringField(record, "modelName"),
+    lastError: readNullableStringField(record, "lastError"),
+    createdAt: readStringField(record, "createdAt"),
+    updatedAt: readStringField(record, "updatedAt"),
+  };
+}
+
+export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDetailPayload {
+  const record = assertRecord(value, "session detail");
+  return {
+    session: parseAgentSessionPayload(record.session),
+    messages: assertArray(record.messages, "messages").map(parseSessionMessage),
+    events: assertArray(record.events, "events").map(parseRuntimeEventPayload),
+    usage: parseUsageSummary(record.usage),
+    toolUsage: parseToolUsageSummary(record.toolUsage),
+    cost: parseCostSummary(record.cost),
+    runnerUrl: readNullableStringField(record, "runnerUrl"),
+  };
+}
+
+function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
+  const record = assertRecord(value, "session");
+  return {
+    id: readStringField(record, "id"),
+    agentId: readStringField(record, "agentId"),
+    agentName: readStringField(record, "agentName"),
+    agentPath: readNullableStringField(record, "agentPath"),
+    title: readStringField(record, "title"),
+    status: readStringField(record, "status"),
+    modelProvider: readStringField(record, "modelProvider"),
+    modelName: readStringField(record, "modelName"),
+    e2bSandboxId: readNullableStringField(record, "e2bSandboxId"),
+    workdir: readStringField(record, "workdir"),
+    runLeaseId: readNullableStringField(record, "runLeaseId"),
+    abortRequestedAt: readNullableStringField(record, "abortRequestedAt"),
+    lastError: readNullableStringField(record, "lastError"),
+    createdAt: readStringField(record, "createdAt"),
+    updatedAt: readStringField(record, "updatedAt"),
+  };
+}
+
+function parseSessionMessage(value: unknown): SessionMessage {
+  const record = assertRecord(value, "message");
+  const message: SessionMessage = {
+    id: readStringField(record, "id"),
+    role: readStringField(record, "role"),
+    content: readStringField(record, "content"),
+    status: readStringField(record, "status"),
+  };
+
+  if ("modelMessage" in record) message.modelMessage = readNullableRecord(record.modelMessage);
+  if ("toolName" in record) message.toolName = readNullableStringField(record, "toolName");
+  if ("toolCallId" in record) message.toolCallId = readNullableStringField(record, "toolCallId");
+  if ("outputReasoningTokens" in record) {
+    message.outputReasoningTokens = readOptionalNumberField(record, "outputReasoningTokens");
+  }
+  if ("createdAt" in record) message.createdAt = readOptionalStringField(record, "createdAt");
+  if ("completedAt" in record) {
+    message.completedAt = readOptionalNullableStringField(record, "completedAt");
+  }
+  if ("thinkingDurationSeconds" in record) {
+    message.thinkingDurationSeconds = readOptionalNumberField(record, "thinkingDurationSeconds");
+  }
+
+  return message;
+}
+
+function parseRuntimeEventPayload(value: unknown): RuntimeEvent {
+  const record = assertRecord(value, "runtime event");
+  return {
+    id: readNumberField(record, "id"),
+    type: readStringField(record, "type"),
+    messageId: readNullableStringField(record, "messageId"),
+    payload: assertRecord(record.payload, "runtime event payload"),
+  };
+}
+
+function parseUsageSummary(value: unknown): SessionUsageSummary {
+  const record = assertRecord(value, "usage summary");
+  return {
+    inputTokens: readNumberField(record, "inputTokens"),
+    inputNoCacheTokens: readNumberField(record, "inputNoCacheTokens"),
+    inputCacheReadTokens: readNumberField(record, "inputCacheReadTokens"),
+    inputCacheWriteTokens: readNumberField(record, "inputCacheWriteTokens"),
+    outputTokens: readNumberField(record, "outputTokens"),
+    outputTextTokens: readNumberField(record, "outputTextTokens"),
+    outputReasoningTokens: readNumberField(record, "outputReasoningTokens"),
+    totalTokens: readNumberField(record, "totalTokens"),
+  };
+}
+
+function parseToolUsageSummary(value: unknown): SessionToolUsageSummary {
+  const record = assertRecord(value, "tool usage summary");
+  return {
+    totalCostUsdMicros: readNumberField(record, "totalCostUsdMicros"),
+    byProviderOperation: assertArray(record.byProviderOperation, "byProviderOperation").map(
+      (item) => {
+        const operation = assertRecord(item, "tool usage operation");
+        return {
+          provider: readStringField(operation, "provider"),
+          operation: readStringField(operation, "operation"),
+          costUsdMicros: readNumberField(operation, "costUsdMicros"),
+          calls: readNumberField(operation, "calls"),
+        };
+      },
+    ),
+  };
+}
+
+function parseCostSummary(value: unknown): SessionCostSummary {
+  const record = assertRecord(value, "cost summary");
+  return {
+    providerCostUsdMicros: readNumberField(record, "providerCostUsdMicros"),
+    platformFeeUsdMicros: readNumberField(record, "platformFeeUsdMicros"),
+    totalCostUsdMicros: readNumberField(record, "totalCostUsdMicros"),
+    modelCostUsdMicros: readNumberField(record, "modelCostUsdMicros"),
+    toolCostUsdMicros: readNumberField(record, "toolCostUsdMicros"),
+  };
+}
+
+function assertRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid ${label}.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function assertArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`Invalid ${label}.`);
+  return value;
+}
+
+function readStringField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (typeof value !== "string") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readOptionalStringField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readNullableStringField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === null) return null;
+  if (typeof value !== "string") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readOptionalNullableStringField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined || value === null) return value;
+  if (typeof value !== "string") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readNumberField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readOptionalNumberField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readNullableRecord(value: unknown) {
+  if (value === null || value === undefined) return null;
+  return assertRecord(value, "record field");
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  if (response.ok) return response.json() as Promise<unknown>;
 
   let message = `Request failed with ${response.status}`;
   try {

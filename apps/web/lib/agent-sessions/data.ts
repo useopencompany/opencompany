@@ -12,6 +12,7 @@ import {
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
+  type SessionStreamCredentialPayload,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
@@ -165,10 +166,43 @@ export async function loadAgentSessionDetailForWorkspace(
   }));
   const toolUsage = summarizeToolUsage(toolUsageRows);
   const cost = summarizeSessionCost(costRows);
+  const runnerUrl = getRunnerPublicUrl();
+
+  return serializeAgentSessionDetail({
+    session,
+    messages: messagesWithUsage,
+    events,
+    usage,
+    toolUsage,
+    cost,
+    runnerUrl,
+  });
+}
+
+export async function loadAgentSessionStreamCredentialForWorkspace(
+  sessionId: string,
+  userId: string,
+  workspaceId: string,
+): Promise<SessionStreamCredentialPayload | null> {
+  const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspaceId),
+        eq(agentSessions.userId, userId),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) return null;
 
   const runnerUrl = getRunnerPublicUrl();
   const streamTokenSecret = getRunnerStreamTokenSecret();
-  const token =
+  const streamToken =
     runnerUrl && streamTokenSecret
       ? createSessionStreamToken(
           {
@@ -180,16 +214,7 @@ export async function loadAgentSessionDetailForWorkspace(
         )
       : null;
 
-  return serializeAgentSessionDetail({
-    session,
-    messages: messagesWithUsage,
-    events,
-    usage,
-    toolUsage,
-    cost,
-    runnerUrl,
-    token,
-  });
+  return { runnerUrl, streamToken };
 }
 
 function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {

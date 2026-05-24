@@ -63,7 +63,6 @@ describe("session detail API route", () => {
         toolCostUsdMicros: 0,
       },
       runnerUrl: null,
-      streamToken: null,
     });
 
     const response = await GET(new Request("https://app.example.com/api/sessions/ses_123"), {

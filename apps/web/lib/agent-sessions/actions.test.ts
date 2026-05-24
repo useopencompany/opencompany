@@ -109,7 +109,6 @@ function fakeDetail(): AgentSessionDetailPayload {
       toolCostUsdMicros: 0,
     },
     runnerUrl: null,
-    streamToken: null,
   };
 }
 
@@ -184,6 +183,22 @@ describe("createAgentSession", () => {
       "usr_123",
       "wks_123",
     );
+    expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      workspaceId: "wks_123",
+    });
+  });
+
+  it("returns a typed error when the created session cannot be loaded", async () => {
+    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
+    loadAgentSessionDetailForWorkspaceMock.mockResolvedValue(null);
+
+    const result = await createAgentSession("agt_123");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Session was created but could not be loaded.",
+    });
     expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
       workspaceId: "wks_123",

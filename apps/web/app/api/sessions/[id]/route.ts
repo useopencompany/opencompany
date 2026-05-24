@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
+import { parseAgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { requireCurrentWorkspace } from "@/lib/auth";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -11,5 +12,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Session not found." }, { status: 404 });
   }
 
-  return NextResponse.json({ detail });
+  return NextResponse.json({ detail: parseAgentSessionDetailPayload(detail) });
 }

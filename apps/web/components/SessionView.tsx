@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
@@ -27,6 +28,7 @@ import {
   addUserMessageToSessionDetail,
   applyRuntimeEventToSessionDetail,
   fetchAgentSession,
+  fetchSessionStreamCredential,
   invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
   SESSIONS_QUERY_STALE_TIME_MS,
@@ -138,9 +140,17 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
+  const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
+  const { showError } = useToast();
   const session = detail.session;
-  const runnerUrl = detail.runnerUrl;
-  const streamToken = detail.streamToken;
+  const { data: streamCredential } = useQuery({
+    queryKey: streamCredentialKey,
+    queryFn: () => fetchSessionStreamCredential(session.id),
+    enabled: Boolean(detail.runnerUrl),
+    staleTime: 55 * 60 * 1000,
+  });
+  const runnerUrl = streamCredential?.runnerUrl ?? detail.runnerUrl;
+  const streamToken = streamCredential?.streamToken ?? null;
   const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -198,7 +208,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     startTransition(async () => {
       const result = await abortAgentSession(session.id);
       if (!result.ok) {
-        window.alert(result.error);
+        showError(result.error, "Could not abort session");
         return;
       }
       queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
@@ -227,18 +237,17 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     onEvent: applyRuntimeEvent,
   });
 
-  // Stale stream means the SSE connection is wedged — most often a transient drop, but
-  // the runner stream token also expires after 1h. Refetching detail gets a fresh token,
-  // which flips useSessionEventStream's deps and forces a reconnect. Rate-limit the refetch
-  // so a wedged runner can't drive a tight invalidate/reconnect loop.
+  // Stale stream means the SSE connection is wedged, most often from a transient drop or an
+  // expired runner token. Refresh just the stream credential so reconnects do not reload the
+  // full session detail payload.
   const lastStaleRefetchAtRef = useRef(0);
   useEffect(() => {
     if (stream.status !== "stale") return;
     const now = Date.now();
     if (now - lastStaleRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
     lastStaleRefetchAtRef.current = now;
-    void queryClient.invalidateQueries({ queryKey: detailKey });
-  }, [stream.status, queryClient, detailKey]);
+    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+  }, [stream.status, queryClient, streamCredentialKey]);
 
   const submit = () => {
     const content = input.trim();
