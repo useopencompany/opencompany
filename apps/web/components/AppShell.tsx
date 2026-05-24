@@ -5,7 +5,9 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
+import QueryProvider from "@/components/QueryProvider";
 import Sidebar from "@/components/Sidebar";
+import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { requireCurrentWorkspace } from "@/lib/auth";
 
 const SIDEBAR_COLLAPSED_COOKIE = "opencompany-sidebar-collapsed";
@@ -97,30 +99,34 @@ export default async function AppShell({ children }: { children: React.ReactNode
         lastName: authUser.lastName,
       }}
     >
-      <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-      <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-        <Suspense
-          fallback={
-            <Sidebar
-              userName={userName}
-              userEmail={authUser.email}
-              workspaceName={workspace.name}
-              initialCollapsed={initialSidebarCollapsed}
-              sessions={[]}
-              sessionsLoading
-            />
-          }
-        >
-          <SidebarWithSessions
-            userName={userName}
-            userEmail={authUser.email}
-            workspaceName={workspace.name}
-            initialCollapsed={initialSidebarCollapsed}
-            sessionsPromise={sessionsPromise}
-          />
-        </Suspense>
-        {children}
-      </div>
+      <QueryProvider>
+        <WorkspaceProvider workspaceId={workspace.id}>
+          <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
+          <div className="flex h-screen w-screen overflow-hidden bg-canvas">
+            <Suspense
+              fallback={
+                <Sidebar
+                  userName={userName}
+                  userEmail={authUser.email}
+                  workspaceName={workspace.name}
+                  initialCollapsed={initialSidebarCollapsed}
+                  sessions={[]}
+                  sessionsLoading
+                />
+              }
+            >
+              <SidebarWithSessions
+                userName={userName}
+                userEmail={authUser.email}
+                workspaceName={workspace.name}
+                initialCollapsed={initialSidebarCollapsed}
+                sessionsPromise={sessionsPromise}
+              />
+            </Suspense>
+            {children}
+          </div>
+        </WorkspaceProvider>
+      </QueryProvider>
     </AnalyticsProvider>
   );
 }

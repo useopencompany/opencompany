@@ -1,7 +1,12 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getWorkOSClient } from "@/lib/workos";
-import { hasCompletedOnboarding, provisionDefaultOrganization, syncUserAndWorkspace } from "./auth";
+import {
+  hasCompletedOnboarding,
+  loadCurrentWorkspaceContextReadOnly,
+  provisionDefaultOrganization,
+  syncUserAndWorkspace,
+} from "./auth";
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
@@ -133,6 +138,22 @@ describe("workspace organization auth sync", () => {
         role: "admin",
       }),
     );
+  });
+
+  it("loads an existing workspace read-only without upserting route auth state", async () => {
+    const { db, insertedValues, execute } = createDbMock({
+      selectResults: [[appUser], [workspace], [{ userId: appUser.id }]],
+      insertReturningResults: [],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    const result = await loadCurrentWorkspaceContextReadOnly(authUser as never, "org_123");
+
+    expect(result?.user).toEqual(appUser);
+    expect(result?.workspace).toEqual(workspace);
+    expect(result?.isNewUser).toBe(false);
+    expect(insertedValues).toEqual([]);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("creates a default WorkOS Organization and local workspace for first sign-in", async () => {

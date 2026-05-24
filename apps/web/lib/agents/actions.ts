@@ -17,6 +17,7 @@ import {
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
+import { serializeAgent } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import type { AgentModelId } from "@/lib/agents/types";
 import { getCurrentWorkspace } from "@/lib/auth";
@@ -170,6 +171,13 @@ export async function updateAgent(
     ]),
   );
   logAgentSyncJobQueued(syncJob.metadata);
+  const [updatedAgent] = await timeAsync(trace, "db.selectUpdatedAgent", () =>
+    db
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)))
+      .limit(1),
+  );
 
   if (changedFields.length > 0) {
     await captureServerEvent("agent_saved", user.id, {
@@ -180,7 +188,13 @@ export async function updateAgent(
     });
   }
 
-  const result = { id: agent.id, workspaceId: workspace.id, path, pathChanged };
+  const result = {
+    id: agent.id,
+    workspaceId: workspace.id,
+    path,
+    pathChanged,
+    agent: updatedAgent ? serializeAgent(updatedAgent) : null,
+  };
 
   revalidatePath("/agents");
   revalidatePath(`/agents/${result.path}`);
