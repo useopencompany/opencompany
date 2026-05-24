@@ -39,6 +39,7 @@ describe("sessions API route", () => {
     const response = await GET();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual({
       sessions: [
         expect.objectContaining({
@@ -48,5 +49,12 @@ describe("sessions API route", () => {
       ],
     });
     expect(loadSidebarSessionsForWorkspaceMock).toHaveBeenCalledWith("usr_123", "wks_123");
+  });
+
+  it("propagates auth redirects instead of returning session data", async () => {
+    requireCurrentWorkspaceMock.mockRejectedValue(new Error("NEXT_REDIRECT"));
+
+    await expect(GET()).rejects.toThrow("NEXT_REDIRECT");
+    expect(loadSidebarSessionsForWorkspaceMock).not.toHaveBeenCalled();
   });
 });

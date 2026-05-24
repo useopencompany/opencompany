@@ -41,6 +41,7 @@ describe("session stream token API route", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual({
       runnerUrl: "https://runner.example.com",
       streamToken: "token_123",
@@ -65,6 +66,23 @@ describe("session stream token API route", () => {
     );
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual({ error: "Session not found." });
+  });
+
+  it("propagates auth redirects instead of returning stream credentials", async () => {
+    requireCurrentWorkspaceMock.mockRejectedValue(new Error("NEXT_REDIRECT"));
+
+    await expect(
+      POST(
+        new Request("https://app.example.com/api/sessions/ses_123/stream-token", {
+          method: "POST",
+        }),
+        {
+          params: Promise.resolve({ id: "ses_123" }),
+        },
+      ),
+    ).rejects.toThrow("NEXT_REDIRECT");
+    expect(loadAgentSessionStreamCredentialForWorkspaceMock).not.toHaveBeenCalled();
   });
 });

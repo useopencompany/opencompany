@@ -7,6 +7,7 @@ import {
   mergeAgentSessionDetail,
   parseAgentSessionDetailResponse,
   parseSessionStreamCredentialResponse,
+  parseSidebarSessionPayload,
   parseSidebarSessionsResponse,
   removeSidebarSession,
   type SidebarSessionPayload,
@@ -504,6 +505,26 @@ describe("session payload cache helpers", () => {
     expect(() => parseAgentSessionDetailResponse({ detail: { session: null } })).toThrow(
       "Invalid session.",
     );
+  });
+
+  it("rejects sidebar sessions with blank display fields", () => {
+    expect(() =>
+      parseSidebarSessionPayload({
+        ...sidebarSession("ses_1", " "),
+      }),
+    ).toThrow("Invalid title.");
+    expect(() =>
+      parseSidebarSessionPayload({
+        ...sidebarSession("ses_1", "One"),
+        status: "",
+      }),
+    ).toThrow("Invalid status.");
+    expect(() =>
+      parseSidebarSessionPayload({
+        ...sidebarSession("ses_1", "One"),
+        modelName: "",
+      }),
+    ).toThrow("Invalid modelName.");
   });
 });
 

@@ -70,6 +70,7 @@ describe("session detail API route", () => {
     });
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual({
       detail: expect.objectContaining({
         session: expect.objectContaining({ id: "ses_123", agentName: "Leo" }),
@@ -90,6 +91,18 @@ describe("session detail API route", () => {
     });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual({ error: "Session not found." });
+  });
+
+  it("propagates auth redirects instead of returning session detail", async () => {
+    requireCurrentWorkspaceMock.mockRejectedValue(new Error("NEXT_REDIRECT"));
+
+    await expect(
+      GET(new Request("https://app.example.com/api/sessions/ses_123"), {
+        params: Promise.resolve({ id: "ses_123" }),
+      }),
+    ).rejects.toThrow("NEXT_REDIRECT");
+    expect(loadAgentSessionDetailForWorkspaceMock).not.toHaveBeenCalled();
   });
 });

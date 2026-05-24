@@ -141,7 +141,10 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
 }
 
 export async function fetchSidebarSessions(): Promise<SidebarSessionPayload[]> {
-  const response = await fetch("/api/sessions", { credentials: "same-origin" });
+  const response = await fetch("/api/sessions", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
   const body = await readJson(response);
   return parseSidebarSessionsResponse(body).sessions;
 }
@@ -150,6 +153,7 @@ export async function fetchAgentSession(
   sessionId: string,
 ): Promise<AgentSessionDetailPayload | null> {
   const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    cache: "no-store",
     credentials: "same-origin",
   });
   if (response.status === 404) return null;
@@ -161,6 +165,7 @@ export async function fetchSessionStreamCredential(
   sessionId: string,
 ): Promise<SessionStreamCredentialPayload | null> {
   const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/stream-token`, {
+    cache: "no-store",
     method: "POST",
     credentials: "same-origin",
   });
@@ -452,9 +457,9 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
   const record = assertRecord(value, "sidebar session");
   return {
     id: readStringField(record, "id"),
-    title: readStringField(record, "title"),
-    status: readStringField(record, "status"),
-    modelName: readStringField(record, "modelName"),
+    title: readNonEmptyStringField(record, "title"),
+    status: readNonEmptyStringField(record, "status"),
+    modelName: readNonEmptyStringField(record, "modelName"),
     lastError: readNullableStringField(record, "lastError"),
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
@@ -589,6 +594,12 @@ function assertArray(value: unknown, label: string): unknown[] {
 function readStringField(record: Record<string, unknown>, field: string) {
   const value = record[field];
   if (typeof value !== "string") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readNonEmptyStringField(record: Record<string, unknown>, field: string) {
+  const value = readStringField(record, field);
+  if (value.trim() === "") throw new Error(`Invalid ${field}.`);
   return value;
 }
 
