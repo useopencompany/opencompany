@@ -72,8 +72,9 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     queryKey: detailKey,
     queryFn: async () => {
       const incoming = await fetchAgentSession(sessionId);
+      if (incoming === null) return null;
       return mergeAgentSessionDetail(
-        queryClient.getQueryData<AgentSessionDetailPayload>(detailKey),
+        queryClient.getQueryData<AgentSessionDetailPayload>(detailKey) ?? undefined,
         incoming,
       );
     },

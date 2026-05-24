@@ -134,10 +134,13 @@ export async function fetchSidebarSessions(): Promise<SidebarSessionPayload[]> {
   return body.sessions;
 }
 
-export async function fetchAgentSession(sessionId: string): Promise<AgentSessionDetailPayload> {
+export async function fetchAgentSession(
+  sessionId: string,
+): Promise<AgentSessionDetailPayload | null> {
   const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
     credentials: "same-origin",
   });
+  if (response.status === 404) return null;
   const body = await readJson<{ detail: AgentSessionDetailPayload }>(response);
   return body.detail;
 }
