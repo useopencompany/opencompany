@@ -2,6 +2,7 @@ import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getWorkOSClient } from "@/lib/workos";
 import {
+  hasCompletedOnboarding,
   loadCurrentWorkspaceContextReadOnly,
   provisionDefaultOrganization,
   syncUserAndWorkspace,
@@ -28,6 +29,7 @@ vi.mock("@/lib/workos", () => ({
 
 const getDbMock = vi.mocked(getDb);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
+const originalEnv = { ...process.env };
 
 const authUser = {
   id: "user_123",
@@ -99,6 +101,7 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturningResult
 describe("workspace organization auth sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env = { ...originalEnv };
     getWorkOSClientMock.mockReturnValue({
       organizations: {
         createOrganization: vi.fn().mockResolvedValue({
@@ -223,5 +226,60 @@ describe("workspace organization auth sync", () => {
     expect(result.workspace).toEqual(workspace);
     expect(getWorkOSClientMock().organizations.getOrganization).toHaveBeenCalledWith("org_123");
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("treats configured local bypass emails as onboarded without querying onboarding responses", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.CI;
+    delete process.env.VERCEL_ENV;
+    process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS = "louis@acta.so";
+
+    await expect(
+      hasCompletedOnboarding({
+        id: "usr_louis",
+        email: "Louis@Acta.so",
+      }),
+    ).resolves.toBe(true);
+
+    expect(getDbMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores local onboarding bypass emails in production", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS = "louis@acta.so";
+    const { db } = createDbMock({
+      selectResults: [[]],
+      insertReturningResults: [],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(
+      hasCompletedOnboarding({
+        id: "usr_louis",
+        email: "louis@acta.so",
+      }),
+    ).resolves.toBe(false);
+
+    expect(getDbMock).toHaveBeenCalledOnce();
+  });
+
+  it("ignores local onboarding bypass emails in CI", async () => {
+    process.env.NODE_ENV = "test";
+    process.env.CI = "true";
+    process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS = "louis@acta.so";
+    const { db } = createDbMock({
+      selectResults: [[]],
+      insertReturningResults: [],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(
+      hasCompletedOnboarding({
+        id: "usr_louis",
+        email: "louis@acta.so",
+      }),
+    ).resolves.toBe(false);
+
+    expect(getDbMock).toHaveBeenCalledOnce();
   });
 });

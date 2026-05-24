@@ -6,7 +6,7 @@ export default async function SignUpPage() {
   const context = await getOptionalCurrentWorkspaceWithoutOnboarding();
 
   if (context) {
-    if (!(await hasCompletedOnboarding(context.user.id))) {
+    if (!(await hasCompletedOnboarding(context.user))) {
       redirect("/onboarding");
     }
 
