@@ -169,11 +169,13 @@ export function mergeAgentSessionDetail(
 ): AgentSessionDetailPayload {
   if (!current || current.session.id !== incoming.session.id) return incoming;
 
+  const replayed = replayMissingCurrentEvents(current, incoming);
+
   return {
-    ...incoming,
-    session: mergeSession(current.session, incoming.session),
-    messages: mergeMessages(current.messages, incoming.messages),
-    events: mergeEvents(current.events, incoming.events),
+    ...replayed,
+    session: mergeSession(current.session, replayed.session),
+    messages: mergeMessages(current.messages, replayed.messages),
+    events: mergeEvents(current.events, replayed.events),
   };
 }
 
@@ -284,6 +286,20 @@ function mergeSession(current: AgentSessionPayload, incoming: AgentSessionPayloa
     return incoming;
   }
   return incoming;
+}
+
+function replayMissingCurrentEvents(
+  current: AgentSessionDetailPayload,
+  incoming: AgentSessionDetailPayload,
+) {
+  const incomingEventIds = new Set(incoming.events.map((event) => event.id));
+  return current.events
+    .filter((event) => !incomingEventIds.has(event.id))
+    .toSorted((left, right) => left.id - right.id)
+    .reduce(
+      (detail, event) => applyRuntimeEventToSessionDetail(detail, event, current.session.updatedAt),
+      incoming,
+    );
 }
 
 function mergeEvents(current: RuntimeEvent[], incoming: RuntimeEvent[]) {

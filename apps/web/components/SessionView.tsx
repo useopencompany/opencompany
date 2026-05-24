@@ -70,11 +70,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
   const { data: detail, isPending } = useQuery({
     queryKey: detailKey,
-    queryFn: async () =>
-      mergeAgentSessionDetail(
+    queryFn: async () => {
+      const incoming = await fetchAgentSession(sessionId);
+      return mergeAgentSessionDetail(
         queryClient.getQueryData<AgentSessionDetailPayload>(detailKey),
-        await fetchAgentSession(sessionId),
-      ),
+        incoming,
+      );
+    },
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
   });
 

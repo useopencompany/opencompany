@@ -47,8 +47,18 @@ describe("session payload cache helpers", () => {
   it("merges refetched detail without discarding streamed events or content", () => {
     const current = detail({
       events: [
-        { id: 1, type: "message.created", messageId: "msg_1", payload: { messageId: "msg_1" } },
-        { id: 2, type: "message.delta", messageId: "msg_1", payload: { delta: "hello world" } },
+        {
+          id: 1,
+          type: "message.created",
+          messageId: "msg_1",
+          payload: { messageId: "msg_1", role: "assistant" },
+        },
+        {
+          id: 2,
+          type: "message.delta",
+          messageId: "msg_1",
+          payload: { messageId: "msg_1", delta: " world" },
+        },
       ],
       messages: [
         {
@@ -62,7 +72,12 @@ describe("session payload cache helpers", () => {
     });
     const incoming = detail({
       events: [
-        { id: 1, type: "message.created", messageId: "msg_1", payload: { messageId: "msg_1" } },
+        {
+          id: 1,
+          type: "message.created",
+          messageId: "msg_1",
+          payload: { messageId: "msg_1", role: "assistant" },
+        },
       ],
       messages: [
         {
@@ -79,6 +94,74 @@ describe("session payload cache helpers", () => {
 
     expect(merged.events.map((event) => event.id)).toEqual([1, 2]);
     expect(merged.messages[0]?.content).toBe("hello world");
+  });
+
+  it("merges refetched detail without discarding streamed usage and costs", () => {
+    const current = applyRuntimeEventToSessionDetail(
+      detail(),
+      {
+        id: 1,
+        type: "session.usage",
+        messageId: "msg_1",
+        payload: {
+          messageId: "msg_1",
+          inputTokens: 10,
+          inputNoCacheTokens: 8,
+          inputCacheReadTokens: 1,
+          inputCacheWriteTokens: 1,
+          outputTokens: 6,
+          outputTextTokens: 5,
+          outputReasoningTokens: 1,
+          totalTokens: 16,
+          providerCostUsdMicros: 40,
+          platformFeeUsdMicros: 10,
+          chargedCostUsdMicros: 50,
+        },
+      },
+      "2026-05-24T10:02:00.000Z",
+    );
+    const incoming = detail();
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.events.map((event) => event.id)).toEqual([1]);
+    expect(merged.usage.totalTokens).toBe(16);
+    expect(merged.usage.outputReasoningTokens).toBe(1);
+    expect(merged.cost.providerCostUsdMicros).toBe(40);
+    expect(merged.cost.platformFeeUsdMicros).toBe(10);
+    expect(merged.cost.totalCostUsdMicros).toBe(50);
+    expect(merged.cost.modelCostUsdMicros).toBe(50);
+  });
+
+  it("merges refetched detail without discarding streamed tool usage", () => {
+    const current = applyRuntimeEventToSessionDetail(
+      detail(),
+      {
+        id: 1,
+        type: "session.tool_usage",
+        messageId: "msg_1",
+        payload: {
+          provider: "e2b",
+          operation: "sandbox",
+          costUsdMicros: 25,
+          platformFeeUsdMicros: 5,
+          chargedCostUsdMicros: 30,
+        },
+      },
+      "2026-05-24T10:02:00.000Z",
+    );
+    const incoming = detail();
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.toolUsage.totalCostUsdMicros).toBe(25);
+    expect(merged.toolUsage.byProviderOperation).toEqual([
+      { provider: "e2b", operation: "sandbox", costUsdMicros: 25, calls: 1 },
+    ]);
+    expect(merged.cost.providerCostUsdMicros).toBe(25);
+    expect(merged.cost.platformFeeUsdMicros).toBe(5);
+    expect(merged.cost.totalCostUsdMicros).toBe(30);
+    expect(merged.cost.toolCostUsdMicros).toBe(30);
   });
 
   it("keeps live session state without discarding authoritative server fields", () => {
