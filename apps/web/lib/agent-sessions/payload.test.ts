@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type AgentSessionDetailPayload,
   applyRuntimeEventToSessionDetail,
+  invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
   removeSidebarSession,
   type SidebarSessionPayload,
@@ -10,6 +11,7 @@ import {
   sessionQueryKeys,
   upsertSidebarSession,
 } from "@/lib/agent-sessions/payload";
+import { agentQueryKeys } from "@/lib/agents/payload";
 
 describe("session payload cache helpers", () => {
   it("prepends and sorts sidebar sessions by update time", () => {
@@ -320,6 +322,47 @@ describe("session payload cache helpers", () => {
     expect(sidebarAfterStatus).not.toBe(sidebarAfterSeed);
     expect(sidebarAfterStatus?.[0]?.status).toBe("running");
     expect(sidebarAfterStatus?.[0]?.updatedAt).toBe("2026-05-24T10:05:00.000Z");
+  });
+
+  it("invalidates agent caches when a brain event arrives", () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    const agentId = "agt_123";
+    const invalidated: unknown[][] = [];
+    queryClient.invalidateQueries = (filters) => {
+      invalidated.push((filters as { queryKey: unknown[] }).queryKey);
+      return Promise.resolve();
+    };
+
+    invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, agentId, {
+      id: 1,
+      type: "brain.file_changed",
+      messageId: null,
+      payload: { path: "docs/x.md" },
+    });
+
+    expect(invalidated).toEqual([
+      agentQueryKeys.list(workspaceId),
+      agentQueryKeys.detail(workspaceId, agentId),
+    ]);
+  });
+
+  it("does not invalidate agent caches for non-brain events", () => {
+    const queryClient = new QueryClient();
+    let invalidations = 0;
+    queryClient.invalidateQueries = () => {
+      invalidations += 1;
+      return Promise.resolve();
+    };
+
+    invalidateRelatedCachesForSessionEvent(queryClient, "wks_123", "agt_123", {
+      id: 1,
+      type: "message.delta",
+      messageId: "msg_1",
+      payload: { messageId: "msg_1", delta: "hi" },
+    });
+
+    expect(invalidations).toBe(0);
   });
 
   it("applies runtime status, error, and title updates to detail", () => {

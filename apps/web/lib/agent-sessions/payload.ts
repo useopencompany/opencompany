@@ -9,6 +9,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { agentQueryKeys } from "@/lib/agents/payload";
 
 export const SESSIONS_QUERY_STALE_TIME_MS = 30_000;
 const SIDEBAR_SESSION_LIMIT = 50;
@@ -260,6 +261,17 @@ export function updateSessionStatusInDetail(
   };
 }
 
+export function invalidateRelatedCachesForSessionEvent(
+  queryClient: QueryClient,
+  workspaceId: string,
+  agentId: string,
+  event: RuntimeEvent,
+) {
+  if (!event.type.startsWith("brain.")) return;
+  void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
+  void queryClient.invalidateQueries({ queryKey: agentQueryKeys.detail(workspaceId, agentId) });
+}
+
 export function seedSessionQueries(
   queryClient: QueryClient,
   workspaceId: string,
@@ -288,6 +300,9 @@ function sidebarSessionEquals(left: SidebarSessionPayload, right: SidebarSession
   );
 }
 
+// Server payload wins for every field except the client-driven ones below; while the local
+// copy is newer (an SSE event has bumped updatedAt past the server's), title/status/
+// abortRequestedAt/lastError survive. New fields default to "server is authority."
 function mergeSession(current: AgentSessionPayload, incoming: AgentSessionPayload) {
   const currentUpdatedAt = Date.parse(current.updatedAt);
   const incomingUpdatedAt = Date.parse(incoming.updatedAt);

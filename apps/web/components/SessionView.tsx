@@ -15,7 +15,7 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
@@ -27,6 +27,7 @@ import {
   addUserMessageToSessionDetail,
   applyRuntimeEventToSessionDetail,
   fetchAgentSession,
+  invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
   SESSIONS_QUERY_STALE_TIME_MS,
   seedSessionQueries,
@@ -45,7 +46,6 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
-import { agentQueryKeys } from "@/lib/agents/payload";
 
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
@@ -180,12 +180,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
       if (!current) return;
       const next = applyRuntimeEventToSessionDetail(current, event);
       seedSessionQueries(queryClient, workspaceId, next);
-      if (event.type.startsWith("brain.")) {
-        void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
-        void queryClient.invalidateQueries({
-          queryKey: agentQueryKeys.detail(workspaceId, session.agentId),
-        });
-      }
+      invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event);
     },
     [detailKey, queryClient, workspaceId, session.agentId],
   );
@@ -198,6 +193,14 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     knownEventIds,
     onEvent: applyRuntimeEvent,
   });
+
+  // Stale stream means the SSE connection is wedged — most often a transient drop, but
+  // the runner stream token also expires after 1h. Refetching detail gets a fresh token,
+  // which flips useSessionEventStream's deps and forces a reconnect.
+  useEffect(() => {
+    if (stream.status !== "stale") return;
+    void queryClient.invalidateQueries({ queryKey: detailKey });
+  }, [stream.status, queryClient, detailKey]);
 
   const submit = () => {
     const content = input.trim();
