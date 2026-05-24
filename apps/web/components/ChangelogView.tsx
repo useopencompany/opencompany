@@ -2,7 +2,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   ArrowUpRight,
-  ChevronRight,
   CircleDashed,
   ExternalLink,
   History,
@@ -10,7 +9,6 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
-  ScrollText,
   ShieldAlert,
   Tag,
   Trash2,
@@ -234,8 +232,6 @@ function TopBar() {
   return (
     <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-[#eaeae6] bg-canvas/85 px-5 backdrop-blur-md">
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-muted">
-        <span className="truncate">acta-website</span>
-        <ChevronRight size={13} strokeWidth={1.75} className="shrink-0 text-ink-subtle" />
         <span className="truncate font-medium text-ink">CHANGELOG.md</span>
       </div>
       <div className="ml-auto flex items-center gap-1">
@@ -306,14 +302,6 @@ export default function ChangelogView({ changelog }: { changelog: Changelog }) {
           <div className="min-w-0 flex-1 overflow-y-auto">
             <article className="mx-auto w-full max-w-[760px] px-10 pb-16 pt-9">
               <header className="border-b border-[#ececea] pb-7">
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#ececea] text-ink">
-                    <ScrollText size={17} strokeWidth={1.8} />
-                  </span>
-                  <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
-                    Project changelog
-                  </span>
-                </div>
                 <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
                   {changelog.title}
                 </h1>
