@@ -16,7 +16,7 @@ export async function GET() {
   const context = await provisionDefaultOrganization(session.user);
   await refreshIntoWorkspaceOrganization(context.workspace);
 
-  if (await hasCompletedOnboarding(context.user.id)) {
+  if (await hasCompletedOnboarding(context.user)) {
     redirect("/");
   }
 
