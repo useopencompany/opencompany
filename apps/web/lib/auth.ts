@@ -16,6 +16,7 @@ import { getWorkOSClient } from "@/lib/workos";
 
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;
+type OnboardingUser = Pick<AppUser, "id" | "email">;
 
 const ADMIN_ROLE = "admin";
 const MEMBER_ROLE = "member";
@@ -48,6 +49,25 @@ function defaultWorkspaceName(user: WorkOSUser) {
 
 function normalizeMembershipRole(role?: string | null) {
   return role === ADMIN_ROLE ? ADMIN_ROLE : MEMBER_ROLE;
+}
+
+function isLocalDevelopmentRuntime() {
+  return (
+    process.env.NODE_ENV !== "production" && process.env.CI !== "true" && !process.env.VERCEL_ENV
+  );
+}
+
+function localOnboardingBypassEmails() {
+  return new Set(
+    (process.env.OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function shouldBypassOnboarding(user: OnboardingUser) {
+  return isLocalDevelopmentRuntime() && localOnboardingBypassEmails().has(user.email.toLowerCase());
 }
 
 async function syncUser(authUser: WorkOSUser) {
@@ -277,7 +297,12 @@ export async function refreshIntoWorkspaceOrganization(workspace: AppWorkspace) 
   });
 }
 
-export async function hasCompletedOnboarding(userId: string) {
+export async function hasCompletedOnboarding(user: string | OnboardingUser) {
+  if (typeof user !== "string" && shouldBypassOnboarding(user)) {
+    return true;
+  }
+
+  const userId = typeof user === "string" ? user : user.id;
   const db = getDb();
   const [response] = await db
     .select({ userId: onboardingResponses.userId })
@@ -323,7 +348,7 @@ export const getOptionalCurrentWorkspace = cache(async () => {
     return null;
   }
 
-  if (!(await hasCompletedOnboarding(context.user.id))) {
+  if (!(await hasCompletedOnboarding(context.user))) {
     redirect("/onboarding");
   }
 
@@ -333,7 +358,7 @@ export const getOptionalCurrentWorkspace = cache(async () => {
 export const getCurrentWorkspace = cache(async () => {
   const context = await getCurrentWorkspaceWithoutOnboarding();
 
-  if (!(await hasCompletedOnboarding(context.user.id))) {
+  if (!(await hasCompletedOnboarding(context.user))) {
     redirect("/onboarding");
   }
 

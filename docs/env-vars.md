@@ -165,6 +165,7 @@ Useful local-only vars:
 | Var | Purpose |
 |---|---|
 | `OPENCOMPANY_SHARED_DATABASE` | Escape hatch to use a shared `DATABASE_URL`. Prefer Neon branches. |
+| `OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS` | Comma-separated emails that skip onboarding locally. Ignored in production, CI, and hosted Vercel runtimes. Local setup/export scripts seed this value when missing. |
 | `NEON_PROJECT_ID` | Required for local Neon branch automation. |
 | `NEON_API_KEY` | Optional for headless Neon CLI usage. |
 | `NEON_PARENT_BRANCH` | Optional parent branch for local Neon branches. |
