@@ -271,7 +271,17 @@ function mergeSession(current: AgentSessionPayload, incoming: AgentSessionPayloa
   const currentUpdatedAt = Date.parse(current.updatedAt);
   const incomingUpdatedAt = Date.parse(incoming.updatedAt);
   if (Number.isFinite(currentUpdatedAt) && Number.isFinite(incomingUpdatedAt)) {
-    return currentUpdatedAt > incomingUpdatedAt ? current : incoming;
+    if (currentUpdatedAt > incomingUpdatedAt) {
+      return {
+        ...incoming,
+        title: current.title,
+        status: current.status,
+        abortRequestedAt: current.abortRequestedAt ?? incoming.abortRequestedAt,
+        lastError: current.lastError,
+        updatedAt: current.updatedAt,
+      };
+    }
+    return incoming;
   }
   return incoming;
 }

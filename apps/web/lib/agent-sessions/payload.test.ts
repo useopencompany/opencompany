@@ -81,6 +81,35 @@ describe("session payload cache helpers", () => {
     expect(merged.messages[0]?.content).toBe("hello world");
   });
 
+  it("keeps live session state without discarding authoritative server fields", () => {
+    const current = detail();
+    const incoming = detail();
+    current.session = {
+      ...current.session,
+      status: "running",
+      title: "Live title",
+      e2bSandboxId: null,
+      runLeaseId: null,
+      updatedAt: "2026-05-24T10:02:00.000Z",
+    };
+    incoming.session = {
+      ...incoming.session,
+      status: "ready",
+      title: "Original",
+      e2bSandboxId: "sbx_123",
+      runLeaseId: "run_123",
+      updatedAt: "2026-05-24T10:01:00.000Z",
+    };
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.session.status).toBe("running");
+    expect(merged.session.title).toBe("Live title");
+    expect(merged.session.e2bSandboxId).toBe("sbx_123");
+    expect(merged.session.runLeaseId).toBe("run_123");
+    expect(merged.session.updatedAt).toBe("2026-05-24T10:02:00.000Z");
+  });
+
   it("applies runtime status, error, and title updates to detail", () => {
     let current = detail();
 

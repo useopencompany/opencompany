@@ -68,10 +68,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
-  const {
-    data: detail,
-    isPending,
-  } = useQuery({
+  const { data: detail, isPending } = useQuery({
     queryKey: detailKey,
     queryFn: async () =>
       mergeAgentSessionDetail(
