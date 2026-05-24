@@ -170,6 +170,86 @@ describe("session payload cache helpers", () => {
     expect(merged.cost.toolCostUsdMicros).toBe(30);
   });
 
+  it("does not replay events the server already aggregated when the events list is capped", () => {
+    // Simulate: server has events 1..3 (cap reached at 3) with usage from all three already
+    // reflected in incoming.usage. Client local has those plus a stale earlier copy of event 2
+    // that pre-dates incoming. The naive set-difference replay would double-count event 2.
+    const incoming = detail();
+    incoming.events = [
+      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+      { id: 3, type: "session.status", messageId: null, payload: { status: "running" } },
+    ];
+    incoming.usage = {
+      inputTokens: 100,
+      inputNoCacheTokens: 100,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 50,
+      outputTextTokens: 50,
+      outputReasoningTokens: 0,
+      totalTokens: 150,
+    };
+
+    const current = detail();
+    current.events = [
+      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+      {
+        id: 2,
+        type: "session.usage",
+        messageId: "msg_1",
+        payload: {
+          inputTokens: 100,
+          inputNoCacheTokens: 100,
+          inputCacheReadTokens: 0,
+          inputCacheWriteTokens: 0,
+          outputTokens: 50,
+          outputTextTokens: 50,
+          outputReasoningTokens: 0,
+          totalTokens: 150,
+        },
+      },
+      { id: 3, type: "session.status", messageId: null, payload: { status: "running" } },
+    ];
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    // Without the guard, event 2's usage would be replayed on top of incoming.usage (already 150),
+    // producing 300. With the guard, only events with id > 3 are replayed → no double-count.
+    expect(merged.usage.totalTokens).toBe(150);
+  });
+
+  it("still replays truly newer local events past the highest incoming id", () => {
+    const incoming = detail();
+    incoming.events = [
+      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+    ];
+
+    const current = detail();
+    current.events = [
+      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+      {
+        id: 2,
+        type: "session.usage",
+        messageId: "msg_1",
+        payload: {
+          inputTokens: 10,
+          inputNoCacheTokens: 10,
+          inputCacheReadTokens: 0,
+          inputCacheWriteTokens: 0,
+          outputTokens: 5,
+          outputTextTokens: 5,
+          outputReasoningTokens: 0,
+          totalTokens: 15,
+        },
+      },
+    ];
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.events.map((event) => event.id)).toEqual([1, 2]);
+    expect(merged.usage.totalTokens).toBe(15);
+  });
+
   it("keeps live session state without discarding authoritative server fields", () => {
     const current = detail();
     const incoming = detail();

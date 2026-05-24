@@ -322,13 +322,16 @@ function mergeSession(current: AgentSessionPayload, incoming: AgentSessionPayloa
   return incoming;
 }
 
+// Server detail's usage/cost/toolUsage aggregates already include every event the server has
+// persisted, even those past the events-list cap. Only replay events strictly newer than the
+// highest id the server returned — those are the ones the server's aggregates haven't seen yet.
 function replayMissingCurrentEvents(
   current: AgentSessionDetailPayload,
   incoming: AgentSessionDetailPayload,
 ) {
-  const incomingEventIds = new Set(incoming.events.map((event) => event.id));
+  const maxIncomingEventId = incoming.events.reduce((max, event) => Math.max(max, event.id), 0);
   return current.events
-    .filter((event) => !incomingEventIds.has(event.id))
+    .filter((event) => event.id > maxIncomingEventId)
     .toSorted((left, right) => left.id - right.id)
     .reduce(
       (detail, event) => applyRuntimeEventToSessionDetail(detail, event, current.session.updatedAt),

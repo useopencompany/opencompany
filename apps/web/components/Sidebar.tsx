@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { archiveAgentSession } from "@/lib/agent-sessions/actions";
@@ -39,6 +39,9 @@ import {
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+// Each session detail fetch mints a fresh stream token + runs 5 DB queries. Debounce hover
+// prefetches so dragging across the history list doesn't fire one per item.
+const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 
 export type SidebarSession = SidebarSessionPayload;
 
@@ -116,15 +119,28 @@ function SessionHistoryItem({
   const router = useRouter();
   const queryClient = useQueryClient();
   const [isPending, startTransition] = useTransition();
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function prefetchSession() {
-    router.prefetch(`/session/${session.id}`);
-    void queryClient.prefetchQuery({
-      queryKey: sessionQueryKeys.detail(workspaceId, session.id),
-      queryFn: () => fetchAgentSession(session.id),
-      staleTime: SESSIONS_QUERY_STALE_TIME_MS,
-    });
-  }
+  const schedulePrefetch = useCallback(() => {
+    if (prefetchTimerRef.current) return;
+    prefetchTimerRef.current = setTimeout(() => {
+      prefetchTimerRef.current = null;
+      router.prefetch(`/session/${session.id}`);
+      void queryClient.prefetchQuery({
+        queryKey: sessionQueryKeys.detail(workspaceId, session.id),
+        queryFn: () => fetchAgentSession(session.id),
+        staleTime: SESSIONS_QUERY_STALE_TIME_MS,
+      });
+    }, SESSION_PREFETCH_HOVER_DELAY_MS);
+  }, [queryClient, router, session.id, workspaceId]);
+
+  const cancelPrefetch = useCallback(() => {
+    if (!prefetchTimerRef.current) return;
+    clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }, []);
+
+  useEffect(() => cancelPrefetch, [cancelPrefetch]);
 
   return (
     <div
@@ -135,9 +151,11 @@ function SessionHistoryItem({
       <Link
         href={`/session/${session.id}`}
         title={session.lastError ?? session.title}
-        onMouseEnter={prefetchSession}
-        onFocus={prefetchSession}
-        onTouchStart={prefetchSession}
+        onMouseEnter={schedulePrefetch}
+        onMouseLeave={cancelPrefetch}
+        onFocus={schedulePrefetch}
+        onBlur={cancelPrefetch}
+        onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>

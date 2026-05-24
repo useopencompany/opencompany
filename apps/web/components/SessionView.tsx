@@ -15,7 +15,7 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
@@ -69,7 +69,13 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
-  const { data: detail, isPending } = useQuery({
+  const {
+    data: detail,
+    isPending,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery({
     queryKey: detailKey,
     queryFn: async () => {
       const incoming = await fetchAgentSession(sessionId);
@@ -83,6 +89,33 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   });
 
   if (!detail && isPending) return <SessionPageSkeleton />;
+
+  if (!detail && error) {
+    return (
+      <main className="relative flex h-full flex-1 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center justify-center px-6">
+          <div className="max-w-sm rounded-lg border border-[#f0d2d2] bg-[#fff6f6] px-5 py-6 text-center">
+            <p className="text-[13.5px] font-medium text-[#9f1d1d]">Could not load session</p>
+            <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+              {error instanceof Error
+                ? error.message
+                : "Something went wrong loading this session."}
+            </p>
+            <button
+              type="button"
+              disabled={isRefetching}
+              onClick={() => {
+                void refetch();
+              }}
+              className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-[#e4e4e0] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#fafaf8] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRefetching ? "Retrying..." : "Try again"}
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (!detail) {
     return (
@@ -196,9 +229,14 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
   // Stale stream means the SSE connection is wedged — most often a transient drop, but
   // the runner stream token also expires after 1h. Refetching detail gets a fresh token,
-  // which flips useSessionEventStream's deps and forces a reconnect.
+  // which flips useSessionEventStream's deps and forces a reconnect. Rate-limit the refetch
+  // so a wedged runner can't drive a tight invalidate/reconnect loop.
+  const lastStaleRefetchAtRef = useRef(0);
   useEffect(() => {
     if (stream.status !== "stale") return;
+    const now = Date.now();
+    if (now - lastStaleRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
+    lastStaleRefetchAtRef.current = now;
     void queryClient.invalidateQueries({ queryKey: detailKey });
   }, [stream.status, queryClient, detailKey]);
 
