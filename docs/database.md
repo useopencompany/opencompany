@@ -19,6 +19,11 @@ Each Git branch gets its own Neon branch. Schema migrations, seed data, and dest
 
 Neon branches are copy-on-write, so creation is instant and cheap (a few MB until you start diverging).
 
+Local Neon branches expire automatically after 24 hours by default. Running `bun run setup` or
+`bun run db:branch:create` refreshes the expiration window. Set `NEON_BRANCH_TTL_HOURS=0` in
+`.env.local` before creating the branch if you need to keep one around indefinitely. The script does
+not set expiration on the configured parent branch or on branches Neon reports as protected/default.
+
 ## Commands
 
 | Command | What it does |
@@ -82,6 +87,7 @@ These let you override defaults in headless environments:
 
 - `NEON_PARENT_BRANCH` — Neon branch to fork from (default: the project's default branch, usually `production`).
 - `NEON_BRANCH_NAME` — local override for the Neon branch name, useful when multiple worktrees share one Git branch.
+- `NEON_BRANCH_TTL_HOURS` — local Neon branch lifetime in hours (default: `24`, max: `720`, `0` disables expiration).
 - `NEON_DATABASE_NAME` — non-default database name.
 - `NEON_ROLE_NAME` — non-default role to connect as.
 - `NEON_API_KEY` — headless Neon CLI auth, only needed outside local browser OAuth.
