@@ -71,7 +71,6 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   const {
     data: detail,
     isPending,
-    error,
   } = useQuery({
     queryKey: detailKey,
     queryFn: async () =>
@@ -84,7 +83,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
 
   if (!detail && isPending) return <SessionPageSkeleton />;
 
-  if (!detail || error) {
+  if (!detail) {
     return (
       <main className="relative flex h-full flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 items-center justify-center px-6">

@@ -357,12 +357,14 @@ export default function Sidebar({
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
   const footerRef = useRef<HTMLDivElement>(null);
-  const { data: sessions = initialSessions, isPending } = useQuery({
+  const { data: queriedSessions, isPending } = useQuery({
     queryKey: sessionQueryKeys.list(workspaceId),
     queryFn: fetchSidebarSessions,
-    initialData: initialSessions,
+    initialData: sessionsLoading ? undefined : initialSessions,
+    enabled: !sessionsLoading,
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
   });
+  const sessions = queriedSessions ?? initialSessions;
   const showSessionsLoading = sessionsLoading || (isPending && sessions.length === 0);
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
