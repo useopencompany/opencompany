@@ -4,8 +4,9 @@ import { agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { agentPathForSlug } from "@/lib/agents/agent-file";
 import {
-  agentSyncJobUpsert,
   buildPendingAgent,
+  logAgentSyncJobQueued,
+  prepareAgentSyncJobUpsert,
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
 
@@ -34,11 +35,10 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     body: "",
     path: DEFAULT_USER_AGENT_PATH,
   });
+  const syncJob = prepareAgentSyncJobUpsert(db, pending.syncJob);
 
-  await db.batch([
-    db.insert(agents).values(pending.agent),
-    agentSyncJobUpsert(db, pending.syncJob),
-  ]);
+  await db.batch([db.insert(agents).values(pending.agent), syncJob.query]);
+  logAgentSyncJobQueued(syncJob.metadata);
 
   await captureServerEvent("agent_created", input.userId, {
     user_id: input.userId,
@@ -46,7 +46,11 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     agent_id: pending.id,
   });
 
-  scheduleAgentSyncDispatch({ id: pending.id, workspaceId: input.workspaceId });
+  scheduleAgentSyncDispatch({
+    id: pending.id,
+    workspaceId: input.workspaceId,
+    path: DEFAULT_USER_AGENT_PATH,
+  });
 
   return {
     created: true as const,
