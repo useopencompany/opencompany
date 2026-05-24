@@ -28,6 +28,7 @@ import FeedbackDialog from "@/components/FeedbackDialog";
 import { archiveAgentSession } from "@/lib/agent-sessions/actions";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
+const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 export type SidebarSession = {
   id: string;
@@ -39,10 +40,9 @@ export type SidebarSession = {
   updatedAt: string;
 };
 
-function getStoredSidebarCollapsed() {
-  if (typeof window === "undefined") return false;
-
-  return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+function persistSidebarCollapsed(collapsed: boolean) {
+  window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
+  document.cookie = `${SIDEBAR_STORAGE_KEY}=${String(collapsed)}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
 }
 
 function SoonBadge() {
@@ -193,6 +193,23 @@ function groupSessions(sessions: SidebarSession[]) {
   return groups.filter((group) => group.sessions.length > 0);
 }
 
+function SessionHistorySkeleton() {
+  return (
+    <div className="space-y-4 px-2" role="status" aria-label="Loading sessions">
+      {[0, 1].map((group) => (
+        <div key={group}>
+          <div className="mb-2 h-3 w-16 rounded bg-[#e0e0dc]" />
+          <div className="space-y-1.5">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="h-6 rounded-md bg-[#e8e8e4]" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AccountMenu({
   userName,
   userEmail,
@@ -292,17 +309,21 @@ export default function Sidebar({
   userName,
   userEmail,
   workspaceName,
+  initialCollapsed,
   sessions,
+  sessionsLoading = false,
 }: {
   userName: string;
   userEmail: string;
   workspaceName: string;
+  initialCollapsed: boolean;
   sessions: SidebarSession[];
+  sessionsLoading?: boolean;
 }) {
   const pathname = usePathname();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(getStoredSidebarCollapsed);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
   const footerRef = useRef<HTMLDivElement>(null);
@@ -316,7 +337,7 @@ export default function Sidebar({
 
   function updateCollapsed(nextCollapsed: boolean) {
     setCollapsed(nextCollapsed);
-    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(nextCollapsed));
+    persistSidebarCollapsed(nextCollapsed);
 
     if (nextCollapsed) {
       setAccountMenuOpen(false);
@@ -419,7 +440,9 @@ export default function Sidebar({
               </div>
             )}
 
-            {sessions.length === 0 ? (
+            {sessionsLoading ? (
+              <SessionHistorySkeleton />
+            ) : sessions.length === 0 ? (
               <div className="mx-2 mt-2 rounded-md border border-dashed border-[#deded9] bg-white/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
                 Sessions you start from agents will appear here.
               </div>
