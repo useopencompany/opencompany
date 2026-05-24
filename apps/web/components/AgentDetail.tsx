@@ -29,6 +29,7 @@ import {
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { useToast } from "@/components/ToastProvider";
 import {
   Select,
   SelectContent,
@@ -41,6 +42,7 @@ import {
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
+import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { updateAgent } from "@/lib/agents/actions";
 import { extractConfigFromMentions } from "@/lib/agents/agent-file";
 import {
@@ -142,6 +144,7 @@ function AgentDetailContent({
   workspaceId: string;
 }) {
   const queryClient = useQueryClient();
+  const { showError } = useToast();
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
   const [body, setBody] = useState(initialBody);
@@ -271,7 +274,17 @@ function AgentDetailContent({
                   if (timerRef.current) clearTimeout(timerRef.current);
                   flush();
                   startTransition(async () => {
-                    await createAgentSession(agent.id);
+                    const result = await createAgentSession(agent.id);
+                    if (!result.ok) {
+                      if ("redirectTo" in result) {
+                        router.push(result.redirectTo);
+                        return;
+                      }
+                      showError(result.error, "Could not start session");
+                      return;
+                    }
+                    seedSessionQueries(queryClient, workspaceId, result.detail);
+                    router.push(`/session/${result.session.id}`);
                   });
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-[12px] text-ink/85 hover:bg-[#fafaf8]"

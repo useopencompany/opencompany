@@ -1,10 +1,6 @@
 "use server";
 
-import {
-  createSessionStreamToken,
-  newAgentSessionId,
-  newAgentSessionMessageId,
-} from "@opencompany/agent-runtime";
+import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -12,36 +8,33 @@ import {
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
-  agentSessionToolUsage,
-  agentSessionUsage,
   agents,
-  workspaceCreditLedger,
 } from "@opencompany/db/schema";
-import { and, asc, eq, isNull, or } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
+import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import {
   dispatchAgentSessionAbortRequested,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
-import {
-  callRunner,
-  getRunnerPublicUrl,
-  getRunnerStreamTokenSecret,
-} from "@/lib/agent-sessions/runner";
-import { getCurrentWorkspace, requireCurrentWorkspace } from "@/lib/auth";
+import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
+import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import { getCurrentWorkspace } from "@/lib/auth";
 
 export async function createAgentSession(idOrPath: string) {
   const { user, workspace } = await getCurrentWorkspace();
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
-    redirect("/settings?billing=insufficient");
+    return {
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/settings?billing=insufficient",
+    } as const;
   }
   const agent = await loadAgentForSession(idOrPath, workspace.id);
 
   if (!agent) {
-    throw new Error("Agent not found.");
+    return { ok: false, error: "Agent not found." } as const;
   }
 
   const sessionId = await insertAgentSession({
@@ -55,9 +48,7 @@ export async function createAgentSession(idOrPath: string) {
     await dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id });
   });
 
-  revalidatePath("/", "layout");
-  revalidatePath("/agents");
-  redirect(`/session/${sessionId}`);
+  return loadCreatedSessionResult(sessionId, user.id, workspace.id);
 }
 
 export async function createAgentSessionFromPrompt(agentId: string, content: string) {
@@ -67,7 +58,11 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     return { ok: false, error: "Message is required." } as const;
   }
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
-    return { ok: false, error: "Add workspace credits to start a session." } as const;
+    return {
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/settings?billing=insufficient",
+    } as const;
   }
 
   const agent = await loadAgentForSession(agentId, workspace.id);
@@ -87,9 +82,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
 
-  revalidatePath("/", "layout");
-  revalidatePath("/");
-  redirect(`/session/${sessionId}`);
+  return loadCreatedSessionResult(sessionId, user.id, workspace.id);
 }
 
 export async function submitAgentSessionMessage(sessionId: string, content: string) {
@@ -126,7 +119,6 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
     await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
 
-  revalidatePath(`/session/${sessionId}`);
   return { ok: true, messageId } as const;
 }
 
@@ -192,9 +184,6 @@ export async function archiveAgentSession(sessionId: string) {
 
   if (!session.e2bSandboxId) {
     await archiveSessionLocally(sessionId, null);
-    revalidatePath("/", "layout");
-    revalidatePath("/");
-    revalidatePath(`/session/${sessionId}`);
     return { ok: true } as const;
   }
 
@@ -236,208 +225,16 @@ export async function archiveAgentSession(sessionId: string) {
     return { ok: false, error: message } as const;
   }
 
-  revalidatePath("/", "layout");
-  revalidatePath("/");
-  revalidatePath(`/session/${sessionId}`);
   return { ok: true } as const;
 }
 
-export async function loadAgentSessionForPage(sessionId: string) {
-  const { user, workspace } = await requireCurrentWorkspace();
-  const db = getDb();
-  const [session] = await db
-    .select({
-      id: agentSessions.id,
-      agentId: agents.id,
-      agentName: agents.name,
-      agentPath: agents.path,
-      title: agentSessions.title,
-      status: agentSessions.status,
-      modelProvider: agentSessions.modelProvider,
-      modelName: agentSessions.modelName,
-      e2bSandboxId: agentSessions.e2bSandboxId,
-      workdir: agentSessions.workdir,
-      runLeaseId: agentSessions.runLeaseId,
-      abortRequestedAt: agentSessions.abortRequestedAt,
-      lastError: agentSessions.lastError,
-      createdAt: agentSessions.createdAt,
-      updatedAt: agentSessions.updatedAt,
-    })
-    .from(agentSessions)
-    .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-    .where(
-      and(
-        eq(agentSessions.id, sessionId),
-        eq(agentSessions.workspaceId, workspace.id),
-        eq(agentSessions.userId, user.id),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .limit(1);
-
-  if (!session) return null;
-
-  const [messages, events, usageRows, toolUsageRows, costRows] = await Promise.all([
-    db
-      .select()
-      .from(agentSessionMessages)
-      .where(eq(agentSessionMessages.sessionId, sessionId))
-      .orderBy(asc(agentSessionMessages.createdAt)),
-    db
-      .select()
-      .from(agentSessionEvents)
-      .where(eq(agentSessionEvents.sessionId, sessionId))
-      .orderBy(asc(agentSessionEvents.id))
-      .limit(300),
-    db
-      .select({
-        messageId: agentSessionUsage.messageId,
-        inputTokens: agentSessionUsage.inputTokens,
-        inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
-        inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
-        inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
-        outputTokens: agentSessionUsage.outputTokens,
-        outputTextTokens: agentSessionUsage.outputTextTokens,
-        outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
-        totalTokens: agentSessionUsage.totalTokens,
-      })
-      .from(agentSessionUsage)
-      .where(eq(agentSessionUsage.sessionId, sessionId)),
-    db
-      .select({
-        provider: agentSessionToolUsage.provider,
-        operation: agentSessionToolUsage.operation,
-        costUsdMicros: agentSessionToolUsage.costUsdMicros,
-      })
-      .from(agentSessionToolUsage)
-      .where(eq(agentSessionToolUsage.sessionId, sessionId)),
-    db
-      .select({
-        source: workspaceCreditLedger.source,
-        amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
-        providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
-        platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
-      })
-      .from(workspaceCreditLedger)
-      .where(eq(workspaceCreditLedger.sessionId, sessionId)),
-  ]);
-  const usage = usageRows.reduce(
-    (totals, row) => ({
-      inputTokens: totals.inputTokens + row.inputTokens,
-      inputNoCacheTokens: totals.inputNoCacheTokens + row.inputNoCacheTokens,
-      inputCacheReadTokens: totals.inputCacheReadTokens + row.inputCacheReadTokens,
-      inputCacheWriteTokens: totals.inputCacheWriteTokens + row.inputCacheWriteTokens,
-      outputTokens: totals.outputTokens + row.outputTokens,
-      outputTextTokens: totals.outputTextTokens + row.outputTextTokens,
-      outputReasoningTokens: totals.outputReasoningTokens + row.outputReasoningTokens,
-      totalTokens: totals.totalTokens + row.totalTokens,
-    }),
-    {
-      inputTokens: 0,
-      inputNoCacheTokens: 0,
-      inputCacheReadTokens: 0,
-      inputCacheWriteTokens: 0,
-      outputTokens: 0,
-      outputTextTokens: 0,
-      outputReasoningTokens: 0,
-      totalTokens: 0,
-    },
-  );
-  const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
-  for (const row of usageRows) {
-    if (!row.messageId) continue;
-    const current = usageByMessageId.get(row.messageId) ?? { outputReasoningTokens: 0 };
-    current.outputReasoningTokens += row.outputReasoningTokens;
-    usageByMessageId.set(row.messageId, current);
-  }
-  const messagesWithUsage = messages.map((message) => ({
-    ...message,
-    outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
-    thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
-  }));
-  const toolUsage = summarizeToolUsage(toolUsageRows);
-  const cost = summarizeSessionCost(costRows);
-
-  const runnerUrl = getRunnerPublicUrl();
-  const streamTokenSecret = getRunnerStreamTokenSecret();
-  const token =
-    runnerUrl && streamTokenSecret
-      ? createSessionStreamToken(
-          {
-            sessionId,
-            userId: user.id,
-            expiresAt: Date.now() + 60 * 60 * 1000,
-          },
-          streamTokenSecret,
-        )
-      : null;
-
-  return { session, messages: messagesWithUsage, events, usage, toolUsage, cost, runnerUrl, token };
-}
-
-function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
-  if (!completedAt || completedAt < startedAt) return undefined;
-  return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
-}
-
-function summarizeToolUsage(
-  rows: Array<{ provider: string; operation: string; costUsdMicros: number }>,
-) {
-  const byProviderOperation = new Map<
-    string,
-    { provider: string; operation: string; costUsdMicros: number; calls: number }
-  >();
-
-  for (const row of rows) {
-    const key = `${row.provider}:${row.operation}`;
-    const current = byProviderOperation.get(key) ?? {
-      provider: row.provider,
-      operation: row.operation,
-      costUsdMicros: 0,
-      calls: 0,
-    };
-    current.costUsdMicros += row.costUsdMicros;
-    current.calls += 1;
-    byProviderOperation.set(key, current);
+async function loadCreatedSessionResult(sessionId: string, userId: string, workspaceId: string) {
+  const detail = await loadAgentSessionDetailForWorkspace(sessionId, userId, workspaceId);
+  if (!detail) {
+    return { ok: false, error: "Session was created but could not be loaded." } as const;
   }
 
-  return {
-    totalCostUsdMicros: rows.reduce((total, row) => total + row.costUsdMicros, 0),
-    byProviderOperation: Array.from(byProviderOperation.values()).sort((left, right) =>
-      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
-    ),
-  };
-}
-
-function summarizeSessionCost(
-  rows: Array<{
-    source: string;
-    amountUsdMicros: number;
-    providerCostUsdMicros: number;
-    platformFeeUsdMicros: number;
-  }>,
-) {
-  return rows.reduce(
-    (totals, row) => {
-      const totalCostUsdMicros = Math.max(-row.amountUsdMicros, 0);
-      return {
-        providerCostUsdMicros: totals.providerCostUsdMicros + row.providerCostUsdMicros,
-        platformFeeUsdMicros: totals.platformFeeUsdMicros + row.platformFeeUsdMicros,
-        totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
-        modelCostUsdMicros:
-          totals.modelCostUsdMicros + (row.source === "model_usage" ? totalCostUsdMicros : 0),
-        toolCostUsdMicros:
-          totals.toolCostUsdMicros + (row.source === "tool_usage" ? totalCostUsdMicros : 0),
-      };
-    },
-    {
-      providerCostUsdMicros: 0,
-      platformFeeUsdMicros: 0,
-      totalCostUsdMicros: 0,
-      modelCostUsdMicros: 0,
-      toolCostUsdMicros: 0,
-    },
-  );
+  return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
 async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
@@ -23,22 +24,25 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
+import { useToast } from "@/components/ToastProvider";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { archiveAgentSession } from "@/lib/agent-sessions/actions";
+import {
+  fetchSidebarSessions,
+  removeSidebarSession,
+  SESSIONS_QUERY_STALE_TIME_MS,
+  type SidebarSessionPayload,
+  sessionQueryKeys,
+} from "@/lib/agent-sessions/payload";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+// Debounce route prefetches so dragging across the history list doesn't fire one per item.
+const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 
-export type SidebarSession = {
-  id: string;
-  title: string;
-  status: string;
-  modelName: string;
-  lastError: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
+export type SidebarSession = SidebarSessionPayload;
 
 function persistSidebarCollapsed(collapsed: boolean) {
   window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
@@ -102,9 +106,40 @@ function NavItem({
   );
 }
 
-function SessionHistoryItem({ session, active }: { session: SidebarSession; active?: boolean }) {
+function SessionHistoryItem({
+  session,
+  active,
+  workspaceId,
+}: {
+  session: SidebarSession;
+  active?: boolean;
+  workspaceId: string;
+}) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const schedulePrefetch = useCallback(() => {
+    if (prefetchTimerRef.current) return;
+    prefetchTimerRef.current = setTimeout(() => {
+      prefetchTimerRef.current = null;
+      router.prefetch(`/session/${session.id}`);
+    }, SESSION_PREFETCH_HOVER_DELAY_MS);
+  }, [router, session.id]);
+
+  const cancelPrefetch = useCallback(() => {
+    if (!prefetchTimerRef.current) return;
+    clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+    };
+  }, []);
 
   return (
     <div
@@ -115,6 +150,11 @@ function SessionHistoryItem({ session, active }: { session: SidebarSession; acti
       <Link
         href={`/session/${session.id}`}
         title={session.lastError ?? session.title}
+        onMouseEnter={schedulePrefetch}
+        onMouseLeave={cancelPrefetch}
+        onFocus={schedulePrefetch}
+        onBlur={cancelPrefetch}
+        onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
@@ -131,14 +171,20 @@ function SessionHistoryItem({ session, active }: { session: SidebarSession; acti
           startTransition(async () => {
             const result = await archiveAgentSession(session.id);
             if (!result.ok) {
-              router.refresh();
+              showError(result.error, "Could not archive session");
               return;
             }
+            queryClient.setQueryData<SidebarSession[]>(
+              sessionQueryKeys.list(workspaceId),
+              (sessions) => removeSidebarSession(sessions, session.id),
+            );
+            queryClient.removeQueries({
+              queryKey: sessionQueryKeys.detail(workspaceId, session.id),
+            });
+            void queryClient.invalidateQueries({ queryKey: sessionQueryKeys.list(workspaceId) });
             if (active) {
               router.replace("/");
-              return;
             }
-            router.refresh();
           });
         }}
         className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-[#dededa] hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
@@ -310,23 +356,33 @@ export default function Sidebar({
   userEmail,
   workspaceName,
   initialCollapsed,
-  sessions,
+  initialSessions,
   sessionsLoading = false,
 }: {
   userName: string;
   userEmail: string;
   workspaceName: string;
   initialCollapsed: boolean;
-  sessions: SidebarSession[];
+  initialSessions: SidebarSession[];
   sessionsLoading?: boolean;
 }) {
   const pathname = usePathname();
+  const { workspaceId } = useWorkspaceContext();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
   const footerRef = useRef<HTMLDivElement>(null);
+  const { data: queriedSessions, isPending } = useQuery({
+    queryKey: sessionQueryKeys.list(workspaceId),
+    queryFn: fetchSidebarSessions,
+    initialData: sessionsLoading ? undefined : initialSessions,
+    enabled: !sessionsLoading,
+    staleTime: SESSIONS_QUERY_STALE_TIME_MS,
+  });
+  const sessions = queriedSessions ?? initialSessions;
+  const showSessionsLoading = sessionsLoading || (isPending && sessions.length === 0);
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   const filteredSessions = useMemo(
@@ -433,7 +489,7 @@ export default function Sidebar({
               </div>
             )}
 
-            {sessionsLoading ? (
+            {showSessionsLoading ? (
               <SessionHistorySkeleton />
             ) : sessions.length === 0 ? (
               <div className="mx-2 mt-2 rounded-md border border-dashed border-[#deded9] bg-white/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
@@ -454,6 +510,7 @@ export default function Sidebar({
                       <SessionHistoryItem
                         key={session.id}
                         session={session}
+                        workspaceId={workspaceId}
                         active={pathname === `/session/${session.id}`}
                       />
                     ))}

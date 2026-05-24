@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowUp,
@@ -14,15 +15,29 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
+import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
 import {
+  type AgentSessionDetailPayload,
+  addUserMessageToSessionDetail,
+  applyRuntimeEventToSessionDetail,
+  fetchAgentSession,
+  fetchSessionStreamCredential,
+  invalidateRelatedCachesForSessionEvent,
+  mergeAgentSessionDetail,
+  SESSIONS_QUERY_STALE_TIME_MS,
+  seedSessionQueries,
+  sessionQueryKeys,
+  updateSessionStatusInDetail,
+} from "@/lib/agent-sessions/payload";
+import {
   type AssistantTurnPart,
-  applyRuntimeEventToState,
   buildAssistantTurnParts,
   isInspectableRuntimeEvent,
   type RuntimeEvent,
@@ -34,31 +49,9 @@ import {
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 
-type Props = {
-  session: {
-    id: string;
-    agentId: string;
-    agentName: string;
-    agentPath: string | null;
-    title: string;
-    status: string;
-    modelProvider: string;
-    modelName: string;
-    e2bSandboxId: string | null;
-    workdir: string;
-    runLeaseId: string | null;
-    abortRequestedAt: string | null;
-    lastError: string | null;
-    createdAt: string;
-    updatedAt: string;
-  };
-  initialMessages: SessionMessage[];
-  initialEvents: RuntimeEvent[];
-  initialUsage: SessionUsageSummary;
-  initialToolUsage: SessionToolUsageSummary;
-  initialCost: SessionCostSummary;
-  runnerUrl: string | null;
-  streamToken: string | null;
+type SessionViewContentProps = {
+  detail: AgentSessionDetailPayload;
+  workspaceId: string;
 };
 
 const MARKDOWN_COMPONENTS: Components = {
@@ -74,29 +67,106 @@ const MARKDOWN_COMPONENTS: Components = {
   ),
 };
 
-export default function SessionView({
-  session,
-  initialMessages,
-  initialEvents,
-  initialUsage,
-  initialToolUsage,
-  initialCost,
-  runnerUrl,
-  streamToken,
-}: Props) {
-  const router = useRouter();
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
-  const [runtime, setRuntime] = useState({
-    events: initialEvents,
-    messages: initialMessages,
-    usage: initialUsage,
-    toolUsage: initialToolUsage,
-    cost: initialCost,
-    currentStatus: session.status,
-    lastError: session.lastError,
+export default function SessionView({ sessionId }: { sessionId: string }) {
+  const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
+  const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
+  const {
+    data: detail,
+    isPending,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery({
+    queryKey: detailKey,
+    queryFn: async () => {
+      const incoming = await fetchAgentSession(sessionId);
+      if (incoming === null) return null;
+      return mergeAgentSessionDetail(
+        queryClient.getQueryData<AgentSessionDetailPayload>(detailKey) ?? undefined,
+        incoming,
+      );
+    },
+    staleTime: SESSIONS_QUERY_STALE_TIME_MS,
   });
+
+  if (!detail && isPending) return <SessionPageSkeleton />;
+
+  if (!detail && error) {
+    return (
+      <main className="relative flex h-full flex-1 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center justify-center px-6">
+          <div className="max-w-sm rounded-lg border border-[#f0d2d2] bg-[#fff6f6] px-5 py-6 text-center">
+            <p className="text-[13.5px] font-medium text-[#9f1d1d]">Could not load session</p>
+            <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+              {error instanceof Error
+                ? error.message
+                : "Something went wrong loading this session."}
+            </p>
+            <button
+              type="button"
+              disabled={isRefetching}
+              onClick={() => {
+                void refetch();
+              }}
+              className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-[#e4e4e0] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#fafaf8] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRefetching ? "Retrying..." : "Try again"}
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <main className="relative flex h-full flex-1 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center justify-center px-6">
+          <div className="max-w-sm rounded-lg border border-dashed border-[#deded9] bg-white/45 px-5 py-6 text-center">
+            <p className="text-[13.5px] font-medium text-ink">Session not found</p>
+            <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+              This session may have been archived or is no longer available.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
+}
+
+function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
+  const queryClient = useQueryClient();
+  const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
+  const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
+  const { showError } = useToast();
+  const session = detail.session;
+  const { data: streamCredential } = useQuery({
+    queryKey: streamCredentialKey,
+    queryFn: () => fetchSessionStreamCredential(session.id),
+    enabled: Boolean(detail.runnerUrl),
+    staleTime: 55 * 60 * 1000,
+  });
+  const runnerUrl = streamCredential?.runnerUrl ?? detail.runnerUrl;
+  const streamToken = streamCredential?.streamToken ?? null;
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [input, setInput] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const runtime = useMemo(
+    () => ({
+      events: detail.events,
+      messages: detail.messages,
+      usage: detail.usage,
+      toolUsage: detail.toolUsage,
+      cost: detail.cost,
+      currentStatus: detail.session.status,
+      lastError: detail.session.lastError,
+    }),
+    [detail],
+  );
   const lastEventId = useMemo(() => runtime.events.at(-1)?.id ?? 0, [runtime.events]);
   const knownEventIds = useMemo(() => runtime.events.map((event) => event.id), [runtime.events]);
   const inspectorEvents = useMemo(
@@ -136,25 +206,26 @@ export default function SessionView({
 
   const requestAbort = () => {
     startTransition(async () => {
-      await abortAgentSession(session.id);
-      setRuntime((current) => ({ ...current, currentStatus: "aborting" }));
-      router.refresh();
+      const result = await abortAgentSession(session.id);
+      if (!result.ok) {
+        showError(result.error, "Could not abort session");
+        return;
+      }
+      queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
+        current ? updateSessionStatusInDetail(current, "aborting") : current,
+      );
     });
   };
 
   const applyRuntimeEvent = useCallback(
     (event: RuntimeEvent) => {
-      setRuntime((current) => applyRuntimeEventToState(current, event));
-      if (
-        event.type === "session.status" ||
-        event.type === "session.error" ||
-        event.type === "session.title_updated" ||
-        event.type.startsWith("brain.")
-      ) {
-        router.refresh();
-      }
+      const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
+      if (!current) return;
+      const next = applyRuntimeEventToSessionDetail(current, event);
+      seedSessionQueries(queryClient, workspaceId, next);
+      invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event);
     },
-    [router],
+    [detailKey, queryClient, workspaceId, session.agentId],
   );
 
   const stream = useSessionEventStream({
@@ -166,24 +237,34 @@ export default function SessionView({
     onEvent: applyRuntimeEvent,
   });
 
+  // Stale stream means the SSE connection is wedged, most often from a transient drop or an
+  // expired runner token. Refresh just the stream credential so reconnects do not reload the
+  // full session detail payload.
+  const lastStaleRefetchAtRef = useRef(0);
+  useEffect(() => {
+    if (stream.status !== "stale") return;
+    const now = Date.now();
+    if (now - lastStaleRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
+    lastStaleRefetchAtRef.current = now;
+    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+  }, [stream.status, queryClient, streamCredentialKey]);
+
   const submit = () => {
     const content = input.trim();
     if (!content) return;
     setInput("");
+    setFormError(null);
     startTransition(async () => {
       const result = await submitAgentSessionMessage(session.id, content);
-      if (result.ok && result.messageId) {
-        setRuntime((current) => ({
-          ...current,
-          messages: current.messages.some((message) => message.id === result.messageId)
-            ? current.messages
-            : [
-                ...current.messages,
-                { id: result.messageId, role: "user", content, status: "completed" },
-              ],
-        }));
+      if (result.ok) {
+        queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
+          current
+            ? addUserMessageToSessionDetail(current, { messageId: result.messageId, content })
+            : current,
+        );
+        return;
       }
-      router.refresh();
+      setFormError(result.error);
     });
   };
 
@@ -254,27 +335,30 @@ export default function SessionView({
         </div>
 
         <div className="bg-canvas px-8 py-4">
-          <div className="mx-auto flex max-w-[760px] items-end gap-2 rounded-xl border border-[#e4e4e0] bg-white px-3 py-2">
-            <textarea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  submit();
-                }
-              }}
-              placeholder="Ask this agent to do something"
-              rows={2}
-              className="min-h-10 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-            />
-            <button
-              disabled={isPending || !input.trim()}
-              onClick={submit}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white disabled:opacity-40"
-            >
-              <ArrowUp size={14} strokeWidth={2.2} />
-            </button>
+          <div className="mx-auto max-w-[760px]">
+            {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
+            <div className="flex items-end gap-2 rounded-xl border border-[#e4e4e0] bg-white px-3 py-2">
+              <textarea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                placeholder="Ask this agent to do something"
+                rows={2}
+                className="min-h-10 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+              />
+              <button
+                disabled={isPending || !input.trim()}
+                onClick={submit}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white disabled:opacity-40"
+              >
+                <ArrowUp size={14} strokeWidth={2.2} />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -518,7 +602,7 @@ function SessionInspector({
   isPending,
   onAbort,
 }: {
-  session: Props["session"];
+  session: AgentSessionDetailPayload["session"];
   currentStatus: string;
   lastError: string | null;
   streamStatus: string;

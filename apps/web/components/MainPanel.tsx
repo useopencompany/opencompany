@@ -1,6 +1,8 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
   Select,
@@ -9,7 +11,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
+import { seedSessionQueries } from "@/lib/agent-sessions/payload";
+import {
+  AGENTS_QUERY_STALE_TIME_MS,
+  type AgentPayload,
+  agentQueryKeys,
+  fetchAgents,
+} from "@/lib/agents/payload";
 
 type AgentOption = {
   id: string;
@@ -17,10 +27,14 @@ type AgentOption = {
 };
 
 function Prompt({ agents }: { agents: AgentOption[] }) {
+  const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
+  const router = useRouter();
   const [input, setInput] = useState("");
-  const [selectedAgentId, setSelectedAgentId] = useState(agents.at(0)?.id ?? "");
+  const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
 
   const submit = () => {
@@ -30,7 +44,16 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     setError(null);
     startTransition(async () => {
       const result = await createAgentSessionFromPrompt(selectedAgentId, content);
-      if (result?.ok === false) setError(result.error);
+      if (!result.ok) {
+        if ("redirectTo" in result) {
+          router.push(result.redirectTo);
+          return;
+        }
+        setError(result.error);
+        return;
+      }
+      seedSessionQueries(queryClient, workspaceId, result.detail);
+      router.push(`/session/${result.session.id}`);
     });
   };
 
@@ -59,7 +82,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         <Select
           disabled={agents.length === 0}
           value={selectedAgentId}
-          onValueChange={setSelectedAgentId}
+          onValueChange={setSelectedAgentIdOverride}
         >
           <SelectTrigger
             aria-label="Agent"
@@ -89,11 +112,22 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   );
 }
 
-export default function MainPanel({ agents }: { agents: AgentOption[] }) {
+export default function MainPanel({ agents: initialAgents }: { agents: AgentOption[] }) {
+  const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
+  const cachedAgents = queryClient.getQueryData<AgentPayload[]>(agentQueryKeys.list(workspaceId));
+  const { data: agents = cachedAgents } = useQuery({
+    queryKey: agentQueryKeys.list(workspaceId),
+    queryFn: fetchAgents,
+    staleTime: AGENTS_QUERY_STALE_TIME_MS,
+  });
+  const agentOptions =
+    agents?.map((agent) => ({ id: agent.id, name: agent.name })) ?? initialAgents;
+
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[680px] px-6 pt-10">
-        <Prompt agents={agents} />
+        <Prompt agents={agentOptions} />
       </div>
     </main>
   );
