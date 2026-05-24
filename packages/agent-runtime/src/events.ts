@@ -48,6 +48,18 @@ export type AgentRuntimeEvent =
       payload: { path: string; operation: "write" };
     }
   | {
+      type: "brain.file_changed";
+      payload: { path: string; savedPath?: string; operation: "write" | "delete" };
+    }
+  | {
+      type: "brain.conflict";
+      payload: {
+        path: string;
+        savedPath?: string;
+        operation: "conflict_copy" | "delete_conflict";
+      };
+    }
+  | {
       type: "command.output";
       payload: {
         command: string;

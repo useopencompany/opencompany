@@ -1,5 +1,12 @@
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "./config";
-import type { AgentConfig, AgentConfigTool, AgentFile, AgentModelId, AgentToolId } from "./types";
+import type {
+  AgentBrainReference,
+  AgentConfig,
+  AgentConfigTool,
+  AgentFile,
+  AgentModelId,
+  AgentToolId,
+} from "./types";
 
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, model]));
@@ -9,6 +16,7 @@ type Frontmatter = {
   title?: string;
   model?: string;
   tools?: string[];
+  brain?: string[];
 };
 
 export function parseAgentFile(source: string): AgentFile {
@@ -16,11 +24,12 @@ export function parseAgentFile(source: string): AgentFile {
   const title = normalizeTitle(frontmatter.title ?? "Untitled agent");
   const model = normalizeModelId(frontmatter.model ?? DEFAULT_MODEL_ID);
   const tools = normalizeTools(frontmatter.tools ?? []);
+  const brain = normalizeBrainReferences(frontmatter.brain ?? []);
 
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools }),
+    config: buildAgentConfig({ title, body, model, tools, brain }),
   };
 }
 
@@ -29,12 +38,14 @@ export function serializeAgentFile(input: {
   body: string;
   model?: AgentModelId;
   tools?: AgentToolId[];
+  brain?: AgentBrainReference[];
 }) {
   const title = normalizeTitle(input.title);
   const body = normalizeBody(input.body);
   const fromMentions = extractConfigFromMentions(body);
   const model = input.model ?? fromMentions.model;
   const tools = input.tools ?? fromMentions.tools;
+  const brain = input.brain ?? fromMentions.brain;
 
   return [
     "---",
@@ -42,6 +53,8 @@ export function serializeAgentFile(input: {
     `model: ${model}`,
     "tools:",
     ...tools.map((tool) => `  - ${tool}`),
+    "brain:",
+    ...brain.map((reference) => `  - ${reference.path}`),
     "---",
     "",
     body,
@@ -61,6 +74,7 @@ export function buildAgentFile(input: { title: string; body: string }): AgentFil
       body,
       model: mentioned.model,
       tools: mentioned.tools,
+      brain: mentioned.brain,
     }),
   };
 }
@@ -68,11 +82,19 @@ export function buildAgentFile(input: { title: string; body: string }): AgentFil
 export function extractConfigFromMentions(body: string): {
   model: AgentModelId;
   tools: AgentToolId[];
+  brain: AgentBrainReference[];
 } {
   let model = DEFAULT_MODEL_ID;
   const tools = new Set<AgentToolId>();
+  const brain = new Map<string, AgentBrainReference>();
 
   for (const rawId of extractMentionIds(body)) {
+    const brainReference = mentionBrainReference(rawId);
+    if (brainReference) {
+      brain.set(brainReference.path, brainReference);
+      continue;
+    }
+
     const modelId = mentionModelId(rawId);
     if (modelId) {
       model = modelId;
@@ -84,7 +106,7 @@ export function extractConfigFromMentions(body: string): {
     }
   }
 
-  return { model, tools: Array.from(tools) };
+  return { model, tools: Array.from(tools), brain: Array.from(brain.values()) };
 }
 
 export function extractMentionIds(body: string) {
@@ -136,6 +158,7 @@ function buildAgentConfig(input: {
   body: string;
   model: AgentModelId;
   tools: AgentToolId[];
+  brain: AgentBrainReference[];
 }): AgentConfig {
   return {
     schemaVersion: "agent.v1",
@@ -149,6 +172,7 @@ function buildAgentConfig(input: {
       const tool = TOOL_BY_ID.get(id);
       return tool ? [{ ...tool }] : [];
     }),
+    brain: input.brain,
   };
 }
 
@@ -213,6 +237,26 @@ function parseFrontmatter(yaml: string): Frontmatter {
         tools.push(unquoteYamlString((lines[index] ?? "").slice("  - ".length)));
       }
       frontmatter.tools = tools;
+      continue;
+    }
+
+    if (key === "brain") {
+      const inline = rawValue.trim();
+      if (inline.startsWith("[") && inline.endsWith("]")) {
+        frontmatter.brain = inline
+          .slice(1, -1)
+          .split(",")
+          .map((item) => unquoteYamlString(item.trim()))
+          .filter(Boolean);
+        continue;
+      }
+
+      const brain: string[] = [];
+      while (lines[index + 1]?.startsWith("  - ")) {
+        index += 1;
+        brain.push(unquoteYamlString((lines[index] ?? "").slice("  - ".length)));
+      }
+      frontmatter.brain = brain;
     }
   }
 
@@ -240,12 +284,50 @@ function mentionModelId(id: string): AgentModelId | null {
   return MODEL_BY_ID.has(id as AgentModelId) ? (id as AgentModelId) : null;
 }
 
+function mentionBrainReference(id: string): AgentBrainReference | null {
+  if (!id.startsWith("brain/")) return null;
+  return normalizeBrainReference(id.slice("brain/".length));
+}
+
 function normalizeTools(ids: string[]) {
   const tools = new Set<AgentToolId>();
   for (const id of ids) {
     if (TOOL_BY_ID.has(id as AgentToolId)) tools.add(id as AgentToolId);
   }
   return Array.from(tools);
+}
+
+function normalizeBrainReferences(ids: string[]) {
+  const references = new Map<string, AgentBrainReference>();
+  for (const id of ids) {
+    const reference = normalizeBrainReference(id);
+    if (reference) references.set(reference.path, reference);
+  }
+  return Array.from(references.values());
+}
+
+function normalizeBrainReference(input: string): AgentBrainReference | null {
+  const folder = input.trim().endsWith("/");
+  const path = input
+    .trim()
+    .replace(/^brain\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\/{2,}/g, "/");
+  const normalized = folder ? `${path.replace(/\/+$/g, "")}/` : path.replace(/\/+$/g, "");
+
+  if (
+    !normalized ||
+    normalized === "/" ||
+    normalized.includes("..") ||
+    normalized.startsWith(".")
+  ) {
+    return null;
+  }
+
+  return {
+    path: normalized,
+    type: normalized.endsWith("/") ? "folder" : "file",
+  };
 }
 
 function isMentionChar(char: string) {

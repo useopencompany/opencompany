@@ -16,12 +16,15 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 import {
   AGENT_MODELS,
+  AGENT_TOOL_MENTION_ITEMS,
+  type AgentMentionItem,
   type AgentModel,
   type AgentTool,
+  buildBrainMentionItems,
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
@@ -49,6 +52,7 @@ type Props = {
   initialGitHubSyncedAt: string | null;
   initialGitHubSyncStatus: string;
   initialGitHubSyncError: string | null;
+  brainPaths: string[];
 };
 
 type SaveState = "idle" | "saving" | "saved";
@@ -81,6 +85,7 @@ export default function AgentDetail({
   initialGitHubSyncedAt,
   initialGitHubSyncStatus,
   initialGitHubSyncError,
+  brainPaths,
 }: Props) {
   const [name, setName] = useState(initialName);
   const [body, setBody] = useState(initialBody);
@@ -116,6 +121,10 @@ export default function AgentDetail({
     : initialGitHubSyncError;
   const githubCommitSha = initialGitHubCommitSha;
   const githubSyncedAt = initialGitHubSyncedAt;
+  const mentionItems: AgentMentionItem[] = useMemo(
+    () => [...AGENT_TOOL_MENTION_ITEMS, ...buildBrainMentionItems(brainPaths)],
+    [brainPaths],
+  );
 
   useEffect(() => {
     if (pendingRef.current.model) return;
@@ -255,6 +264,7 @@ export default function AgentDetail({
           <div className="mt-6">
             <AgentEditor
               initialBody={initialBody}
+              mentionItems={mentionItems}
               onChange={(body) => {
                 setBody(body);
                 pendingRef.current.body = body;
@@ -291,6 +301,7 @@ export default function AgentDetail({
           model={configPreview.model}
           modelIsExplicit={configPreview.modelIsExplicit}
           tools={configPreview.tools}
+          brain={configPreview.brain}
           saveState={saveState}
           githubStatus={githubSyncStatus}
           githubError={githubSyncError}
@@ -318,6 +329,7 @@ function AgentInspector({
   model,
   modelIsExplicit,
   tools,
+  brain,
   saveState,
   githubStatus,
   githubError,
@@ -329,6 +341,7 @@ function AgentInspector({
   model: AgentModel;
   modelIsExplicit: boolean;
   tools: AgentTool[];
+  brain: Array<{ path: string; type: "file" | "folder" }>;
   saveState: SaveState;
   githubStatus: string;
   githubError: string | null;
@@ -356,6 +369,30 @@ function AgentInspector({
           description={model.description}
           tone={modelIsExplicit ? "model" : "muted"}
         />
+      </div>
+
+      <div>
+        <InspectorHeader
+          label="Brain"
+          countLabel={`${brain.length} ${brain.length === 1 ? "path" : "paths"}`}
+        />
+        {brain.length > 0 ? (
+          <div className="space-y-2">
+            {brain.map((reference) => (
+              <ConfigItem
+                key={reference.path}
+                icon={Brain}
+                label={`brain/${reference.path}`}
+                description={reference.type === "folder" ? "Mounted folder" : "Mounted file"}
+                tone="tool"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+            No brain paths mounted
+          </div>
+        )}
       </div>
 
       <div>
@@ -592,6 +629,7 @@ function buildConfigPreview({
     model: model!,
     modelIsExplicit: selectedModelId !== DEFAULT_MODEL_ID,
     tools,
+    brain: config.brain,
   };
 }
 

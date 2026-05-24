@@ -52,6 +52,7 @@ export function extractAgentConfig(input: { name: string; content: TiptapDoc }):
       name: model.id,
     },
     tools: collectMentionedTools(content).map((tool) => ({ ...tool })),
+    brain: collectMentionedBrain(content),
   };
 }
 
@@ -88,6 +89,21 @@ function collectMentionedModel(doc: TiptapDoc) {
   return selected;
 }
 
+function collectMentionedBrain(doc: TiptapDoc) {
+  const references = new Map<string, { path: string; type: "file" | "folder" }>();
+
+  walk(doc as TiptapNode, (node) => {
+    const mention = parseMention(node);
+    if (mention?.type !== "brain") return;
+    references.set(mention.path, {
+      path: mention.path,
+      type: mention.path.endsWith("/") ? "folder" : "file",
+    });
+  });
+
+  return Array.from(references.values());
+}
+
 function parseMention(node: TiptapNode) {
   if (node.type !== "mention") return null;
   const attrs = asRecord(node.attrs);
@@ -100,6 +116,11 @@ function parseMention(node: TiptapNode) {
 
   if (rawId.startsWith("model:")) {
     return { type: "model" as const, id: normalizeModelId(rawId.slice("model:".length)) };
+  }
+
+  if (rawId.startsWith("brain/")) {
+    const path = rawId.slice("brain/".length);
+    if (path && !path.includes("..")) return { type: "brain" as const, path };
   }
 
   if (TOOL_BY_ID.has(rawId as AgentToolId)) {

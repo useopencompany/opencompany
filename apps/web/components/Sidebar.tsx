@@ -395,18 +395,16 @@ export default function Sidebar({
             <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
             <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
             <NavItem
-              href="/inbox"
-              icon={Inbox}
-              label="Inbox"
-              active={isActive("/inbox")}
-              trailing={<SoonBadge />}
-              disabled
-            />
-            <NavItem
               href="/brain"
               icon={Brain}
               label="Brain"
               active={isActive("/brain")}
+            />
+            <NavItem
+              href="/inbox"
+              icon={Inbox}
+              label="Inbox"
+              active={isActive("/inbox")}
               trailing={<SoonBadge />}
               disabled
             />

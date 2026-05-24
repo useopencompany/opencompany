@@ -49,11 +49,15 @@ describe(".agent files", () => {
 
   test("syncs config from markdown mentions", () => {
     const config = extractConfigFromMentions(
-      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa.",
+      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",
     );
 
     expect(config.model).toBe("openai/gpt-5.4");
     expect(config.tools).toEqual(["exa"]);
+    expect(config.brain).toEqual([
+      { path: "docs/README.md", type: "file" },
+      { path: "product/", type: "folder" },
+    ]);
   });
 
   test("falls back to default config when mentions are removed", () => {
@@ -64,6 +68,7 @@ describe(".agent files", () => {
 
     expect(agent.config.model.name).toBe("openai/gpt-5.4-mini");
     expect(agent.config.tools).toEqual([]);
+    expect(agent.config.brain).toEqual([]);
   });
 
   test("serializes body with rewritten frontmatter", () => {
@@ -75,7 +80,30 @@ describe(".agent files", () => {
     expect(source).toContain('title: "Research"');
     expect(source).toContain("model: openai/gpt-5.4");
     expect(source).toContain("  - exa");
+    expect(source).toContain("brain:");
     expect(source.endsWith("Find people with @exa and use @deep.")).toBe(true);
+  });
+
+  test("round-trips brain frontmatter", () => {
+    const source = [
+      "---",
+      'title: "Brainy"',
+      "model: openai/gpt-5.4-mini",
+      "tools:",
+      "brain:",
+      "  - docs/README.md",
+      "  - product/",
+      "---",
+      "",
+      "Use the mounted context.",
+    ].join("\n");
+
+    const parsed = parseAgentFile(source);
+
+    expect(parsed.config.brain).toEqual([
+      { path: "docs/README.md", type: "file" },
+      { path: "product/", type: "folder" },
+    ]);
   });
 
   test("serializes explicit model selection ahead of legacy model mentions", () => {

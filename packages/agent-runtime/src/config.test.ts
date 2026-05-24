@@ -13,6 +13,7 @@ describe("resolveAgentRuntimeConfig", () => {
         name: "openai/gpt-5.4",
       },
       tools: [],
+      brain: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({
@@ -58,6 +59,7 @@ describe("resolveAgentRuntimeConfig", () => {
           description: "Deep research on the web and people.",
         },
       ],
+      brain: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });
@@ -103,6 +105,7 @@ describe("resolveAgentRuntimeConfig", () => {
         name: "anthropic/claude-haiku-4.5",
       },
       tools: [],
+      brain: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });

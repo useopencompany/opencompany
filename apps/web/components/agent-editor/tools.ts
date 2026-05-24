@@ -1,11 +1,11 @@
-import { Bot, Brain, type LucideIcon, Search } from "lucide-react";
+import { Bot, Brain, FileText, type LucideIcon, Search } from "lucide-react";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
-type AgentMentionKind = "model" | "tool";
+type AgentMentionKind = "model" | "tool" | "brain";
 
 export type AgentMentionItem = {
-  id: AgentToolId | AgentModelId;
+  id: AgentToolId | AgentModelId | string;
   mentionId: string;
   kind: AgentMentionKind;
   label: string;
@@ -24,6 +24,12 @@ export type AgentTool = AgentMentionItem & {
 export type AgentModel = AgentMentionItem & {
   id: AgentModelId;
   kind: "model";
+};
+
+export type AgentBrainMention = AgentMentionItem & {
+  id: string;
+  kind: "brain";
+  path: string;
 };
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
@@ -61,6 +67,27 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
 
 export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [...AGENT_MODELS, ...AGENT_TOOLS];
 export const AGENT_TOOL_MENTION_ITEMS: AgentMentionItem[] = AGENT_TOOLS;
+
+export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
+  const folders = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let index = 1; index < parts.length; index += 1) {
+      folders.add(`${parts.slice(0, index).join("/")}/`);
+    }
+  }
+
+  return [...Array.from(folders), ...paths].sort().map((path) => ({
+    id: `brain/${path}`,
+    mentionId: `brain/${path}`,
+    kind: "brain" as const,
+    path,
+    label: `brain/${path}`,
+    displayLabel: `brain/${path}`,
+    description: path.endsWith("/") ? "Brain folder" : "Brain file",
+    icon: FileText,
+  }));
+}
 
 export function findMentionItem(id: string): AgentMentionItem | undefined {
   return (

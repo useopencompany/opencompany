@@ -20,6 +20,7 @@ import {
   agentSessionToolUsage,
   agentSessionUsage,
   agents,
+  type WorkspaceRepository,
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
@@ -44,9 +45,9 @@ import {
   tool,
 } from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { materializeBrainForSession, syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
-import { getGitHubInstallationToken } from "./github";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
@@ -363,6 +364,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       workdir: row.session.workdir,
       env: input.env,
       enabledTools: runtime.tools,
+      repository: row.repository,
       signal: controller.signal,
       checkAbort,
       observabilityContext: {
@@ -439,6 +441,19 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         next = await iterator.next();
       }
     });
+
+    if (sandbox) {
+      const activeSandbox = sandbox;
+      await timeAsync(trace, "sync_brain_after_message", () =>
+        syncBrainFromSandbox({
+          sandbox: activeSandbox,
+          sessionId: input.sessionId,
+          workspaceId: row.workspace.id,
+          workdir: row.session.workdir,
+          repository: row.repository,
+        }),
+      );
+    }
 
     await checkAbort();
     if (!assistantContent && assistantReplayParts.length === 0) {
@@ -669,6 +684,7 @@ function createToolSet(input: {
   workdir: string;
   env: RunnerEnv;
   enabledTools: RuntimeToolName[];
+  repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
@@ -727,6 +743,7 @@ function createToolSet(input: {
           workdir: input.workdir,
           env: input.env,
           enabledTools: input.enabledTools,
+          repository: input.repository,
           signal: input.signal,
           checkAbort: input.checkAbort,
           observabilityContext: input.observabilityContext,
@@ -757,6 +774,7 @@ export async function executeRuntimeTool(input: {
   workdir: string;
   env: RunnerEnv;
   enabledTools: RuntimeToolName[];
+  repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
@@ -847,6 +865,20 @@ export async function executeRuntimeTool(input: {
         payload: { path: changedPath, operation: "write" },
       }),
     );
+  }
+
+  if (
+    input.definition.kind === "sandbox" &&
+    (input.definition.name === "write_file" || input.definition.name === "shell")
+  ) {
+    const activeSandbox = await input.getSandbox();
+    await syncBrainFromSandbox({
+      sandbox: activeSandbox,
+      sessionId: input.sessionId,
+      workspaceId: input.observabilityContext?.workspaceId ?? "",
+      workdir: input.workdir,
+      repository: input.repository,
+    });
   }
 
   if (usage) {
@@ -1303,8 +1335,13 @@ async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       sandbox,
       workdir: row.session.workdir,
       agentFile: row.agent.body,
-      repositoryFullName: row.repository?.fullName,
-      githubToken: await getGitHubInstallationToken(),
+    });
+    await materializeBrainForSession({
+      sandbox,
+      sessionId: row.session.id,
+      workspaceId: row.workspace.id,
+      workdir: row.session.workdir,
+      references: row.agent.config.brain,
     });
     return sandbox;
   } catch (error) {
