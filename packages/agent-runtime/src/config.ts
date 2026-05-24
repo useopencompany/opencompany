@@ -24,6 +24,13 @@ export function resolveAgentRuntimeConfig(input: {
     "You are an OpenCompany agent running in an isolated cloud sandbox.",
     "Use tools when you need to inspect or change files, run commands, or verify work.",
     "Keep command output concise and explain material changes to the user.",
+    input.agent.brain?.length
+      ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
+          .map((reference) => reference.path)
+          .join(
+            ", ",
+          )}. Only edit files inside mounted brain paths when updating long-lived context.`
+      : null,
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
   ].filter(Boolean);

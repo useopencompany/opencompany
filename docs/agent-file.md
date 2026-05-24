@@ -12,15 +12,18 @@ title: "Fundraising copilot"
 model: openai/gpt-5.4
 tools:
   - exa
+brain:
+  - docs/README.md
+  - product/
 ---
 
-Research investors with @exa. Use @deep for fund-thesis write-ups.
+Research investors with @exa. Use @deep for fund-thesis write-ups. Keep context from @brain/docs/README.md close.
 ```
 
 A `.agent` file has two parts:
 
 1. **Frontmatter** — a YAML block fenced by `---` lines. Deterministic metadata the runtime needs to dispatch the agent.
-2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind models and tools.
+2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind models, tools, and Brain files/folders.
 
 Files live at `agents/<slug>.agent` in the workspace's GitHub repo, where `<slug>` is the lowercased, dash-joined title.
 
@@ -30,6 +33,7 @@ Frontmatter is **derived from the body**, not authored independently. When the e
 
 - The most recent supported `@model` mention wins → written to `model:`.
 - Unique supported `@tool` mentions → written to `tools:`.
+- Unique supported `@brain/<path>` mentions → written to `brain:`.
 - The title input → written to `title:`.
 
 Editing `@deep` into the body changes the model. Removing `@exa` removes the tool. One source of truth, zero drift between what the instructions reference and what the runtime is configured to do.
@@ -65,18 +69,31 @@ Each entry is a tool ID. Unknown IDs are silently dropped.
 | ----- | ------------------------------------ |
 | `exa` | Deep research on the web and people. |
 
+### `brain` — list of strings
+
+Each entry is a path inside `brain/` in the workspace repo. File paths mount one file. Folder paths must end in `/` and mount matching descendants.
+
+```yaml
+brain:
+  - docs/README.md
+  - product/
+```
+
+The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
+
 ## The body
 
 Markdown. The model sees it verbatim as system instructions. There is no preprocessing besides mention parsing.
 
 ### Mention syntax
 
-`@<id>` where `<id>` is a tool ID, a model ID, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
+`@<id>` where `<id>` is a tool ID, a model ID, a Brain path, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
 
 ```text
 Find investors with @exa.        ← @exa            (tool)
 Use @openai/gpt-5.4 for this.    ← @openai/gpt-5.4 (model)
 Run @deep on the summary.        ← @deep           (alias → openai/gpt-5.4)
+Read @brain/product/ first.      ← @brain/product/ (Brain folder)
 ```
 
 ### Aliases
@@ -192,6 +209,10 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
   },
   tools: [
     { id: "exa", type: "tool", label: "exa", description: "Deep research on the web and people." },
+  ],
+  brain: [
+    { path: "docs/README.md", type: "file" },
+    { path: "product/", type: "folder" },
   ],
 }
 ```

@@ -16,9 +16,10 @@ export type AgentPayload = {
   githubSyncError: string | null;
   createdAt: string;
   updatedAt: string;
+  brainPaths: string[];
 };
 
-export function serializeAgent(agent: Agent): AgentPayload {
+export function serializeAgent(agent: Agent, brainPaths: string[] = []): AgentPayload {
   return {
     id: agent.id,
     workspaceId: agent.workspaceId,
@@ -32,6 +33,7 @@ export function serializeAgent(agent: Agent): AgentPayload {
     githubSyncError: agent.githubSyncError,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
+    brainPaths,
   };
 }
 
