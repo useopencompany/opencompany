@@ -9,6 +9,10 @@ from Infisical, creates or reuses a Neon branch for the current Git branch, writ
 connection string to `.env.local`, then runs migrations. Later `bun run env:pull` runs preserve that
 branch-specific `DATABASE_URL`.
 
+Developers can use their own Neon project without changing shared Infisical values by creating
+`.env.override.local` with `bun run setup:personal` and setting `NEON_PROJECT_ID` there. The
+override file is gitignored and takes precedence over `.env.local`.
+
 A shared `DATABASE_URL` is still available as an escape hatch with `bun run setup -- --shared-db`,
 but it should not be the normal path for parallel worktrees. Automatic setup runs migrations, and
 migrations against a shared branch make unrelated local work interfere with each other.
@@ -36,7 +40,8 @@ not set expiration on the configured parent branch or on branches Neon reports a
 
 ## How branch resolution works
 
-`scripts/neon-branch.mjs` shells out to `neonctl` and resolves the project from `NEON_PROJECT_ID` in `.env.local`.
+`scripts/neon-branch.mjs` shells out to `neonctl` and resolves the project from `NEON_PROJECT_ID`
+in `.env.override.local` or `.env.local`.
 
 For local development, set `NEON_PROJECT_ID` in Infisical `dev` + `/web` and run
 `bun run env:pull`. This works across new worktrees because the project id is copied into each
