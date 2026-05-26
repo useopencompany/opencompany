@@ -30,6 +30,24 @@ export type AnalyticsEventPropertiesByName = {
     agent_id: string;
     changed_fields: Array<"name" | "body" | "model">;
   };
+  session_started: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string;
+    session_id: string;
+    model_provider: string;
+    model_name: string;
+    source: "agent" | "prompt";
+  };
+  session_message_sent: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string;
+    session_id: string;
+    message_id: string;
+    is_initial_message: boolean;
+    message_length: number;
+  };
   sign_out: {
     user_id: string;
     workspace_id: string;
@@ -86,6 +104,32 @@ export const analyticsEvents = {
     name: "agent_saved",
     description: "A user saved changes to an agent.",
     safeProperties: ["user_id", "workspace_id", "agent_id", "changed_fields"],
+  },
+  session_started: {
+    name: "session_started",
+    description: "A user started a new agent session.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "agent_id",
+      "session_id",
+      "model_provider",
+      "model_name",
+      "source",
+    ],
+  },
+  session_message_sent: {
+    name: "session_message_sent",
+    description: "A user sent a message in an agent session.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "agent_id",
+      "session_id",
+      "message_id",
+      "is_initial_message",
+      "message_length",
+    ],
   },
   sign_out: {
     name: "sign_out",
