@@ -206,7 +206,7 @@ describe("runSandboxTool", () => {
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       "pwd",
-      expect.objectContaining({ cwd: sandboxLayout("/home/user/workspace").workRoot }),
+      expect.objectContaining({ cwd: sandboxLayout("/home/user/workspace").workspaceRoot }),
     );
   });
 

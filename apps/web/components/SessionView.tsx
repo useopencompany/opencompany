@@ -501,6 +501,7 @@ function ReasoningSummaryCard({
 function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const isCompleted = toolCall.status === "completed";
+  const isFailed = toolCall.status === "failed";
 
   return (
     <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
@@ -530,7 +531,13 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
             Brain updated
           </span>
         ) : null}
-        {!isCompleted ? (
+        {isFailed ? (
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-[#a33a2d]">
+            <AlertCircle size={9} strokeWidth={1.9} />
+            failed
+          </span>
+        ) : null}
+        {!isCompleted && !isFailed ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
             <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-[#9b8a64]" />
             running
@@ -548,7 +555,7 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
           {toolCall.outputPreview ? (
             <ToolCallPreview label="Output" value={toolCall.outputPreview} />
           ) : null}
-          {!toolCall.activityPreview && !toolCall.outputPreview && !isCompleted ? (
+          {!toolCall.activityPreview && !toolCall.outputPreview && !isCompleted && !isFailed ? (
             <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
           ) : null}
         </div>

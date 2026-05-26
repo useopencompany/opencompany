@@ -138,7 +138,7 @@ export async function runSandboxTool(input: {
     const command = readString(args, "command");
     const layout = sandboxLayout(input.workdir);
     const result = await input.sandbox.commands.run(command, {
-      cwd: layout.workRoot,
+      cwd: layout.workspaceRoot,
       timeoutMs: 120_000,
       onStdout: async (data: string) => {
         await input.onOutput?.("stdout", data);

@@ -70,8 +70,8 @@ Important details:
 - Runtime tools are created from `CORE_TOOL_DEFINITIONS` and then filtered by the agent's allowed
   tool names.
 - Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
-- Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`, and
-  `tool.completed`.
+- Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`,
+  `tool.completed`, and recoverable `tool.failed` results.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
   first tool execution, so text-only fast-model turns avoid that fixed pre-token latency.
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are
@@ -81,6 +81,7 @@ Important details:
   Brain files under `/home/user/workspace/brain` plus a session-local
   `/home/user/workspace/work` directory. `work/` is initialized as an empty git repository so
   `git_diff` can report session-local scratch changes without exposing the managed workspace repo.
+- Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest.
 
@@ -93,8 +94,8 @@ V1 tools:
 - `git_diff`
 
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
-`/home/user/workspace/brain` paths. Shell commands run from `work/` by default. Keep path validation
-in the runtime/sandbox layer rather than relying on model behavior.
+`/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
+Keep path validation in the runtime/sandbox layer rather than relying on model behavior.
 
 ## Event model
 
@@ -115,6 +116,7 @@ Common event types:
 - `command.output`
 - `file.changed`
 - `tool.completed`
+- `tool.failed`
 - `session.error`
 
 ## Database tables
