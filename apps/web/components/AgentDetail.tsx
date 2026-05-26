@@ -43,7 +43,8 @@ import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { updateAgent } from "@/lib/agents/actions";
-import { extractConfigFromMentions } from "@/lib/agents/agent-file";
+import { serializeAgentFrontmatter } from "@/lib/agents/agent-file";
+import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
   type AgentPayload,
@@ -146,7 +147,8 @@ function AgentDetailContent({
   const { showError } = useToast();
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
-  const [body, setBody] = useState(initialBody);
+  const [content, setContent] = useState<TiptapDoc>(agent.content);
+  const [hasEditorDraft, setHasEditorDraft] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
   );
@@ -163,12 +165,28 @@ function AgentDetailContent({
     content?: TiptapDoc;
     model?: AgentModelId;
   }>({});
+  const submittedPatchRef = useRef<typeof pendingRef.current | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const configPreview = buildConfigPreview({
-    body,
-    fallback: agent.config,
-    selectedModelId,
-  });
+  const configPreview = useMemo(
+    () =>
+      buildConfigPreview({
+        title: name,
+        content,
+        fallback: agent.config,
+        selectedModelId,
+        repositories: agent.githubIntegrationRepositories,
+        triggers: agent.config.triggers,
+        useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
+      }),
+    [
+      agent.config,
+      agent.githubIntegrationRepositories,
+      content,
+      hasEditorDraft,
+      name,
+      selectedModelId,
+    ],
+  );
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
@@ -194,14 +212,23 @@ function AgentDetailContent({
       pendingRef.current.name !== undefined ||
       pendingRef.current.body !== undefined ||
       pendingRef.current.content !== undefined ||
-      pendingRef.current.model !== undefined
+      pendingRef.current.model !== undefined ||
+      submittedPatchRef.current
     ) {
       return;
     }
     setName(agent.name);
-    setBody(agent.body || agent.config.instructions);
+    setContent(agent.content);
+    setHasEditorDraft(false);
     setSelectedModelId(findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID);
-  }, [agent.id, agent.name, agent.body, agent.config.instructions, agent.config.model.name]);
+  }, [
+    agent.id,
+    agent.name,
+    agent.body,
+    agent.content,
+    agent.config.instructions,
+    agent.config.model.name,
+  ]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -219,6 +246,7 @@ function AgentDetailContent({
       return;
     }
     pendingRef.current = {};
+    submittedPatchRef.current = patch;
     setSaveState("saving");
     setOptimisticGitHubSync({
       status: "pending",
@@ -229,13 +257,34 @@ function AgentDetailContent({
       baseSyncedAt: agent.githubSyncedAt,
     });
     startTransition(async () => {
-      const result = await updateAgent(agent.id, patch);
-      setSaveState("saved");
-      if (result?.agent) {
+      try {
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: agentQueryKeys.list(workspaceId) }),
+          queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, idOrPath) }),
+          queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, agent.id) }),
+          agent.path
+            ? queryClient.cancelQueries({
+                queryKey: agentQueryKeys.detail(workspaceId, agent.path),
+              })
+            : Promise.resolve(),
+        ]);
+
+        const result = await updateAgent(agent.id, patch);
+        if (!result?.agent) {
+          throw new Error("Agent save did not return an updated agent.");
+        }
+
+        setSaveState("saved");
         updateAgentQueries(queryClient, workspaceId, result.agent, idOrPath);
-      }
-      if (result?.pathChanged) {
-        router.replace(`/agents/${result.path}`);
+        submittedPatchRef.current = null;
+        if (result.pathChanged) {
+          router.replace(`/agents/${result.path}`);
+        }
+      } catch (error) {
+        submittedPatchRef.current = null;
+        setSaveState("idle");
+        setOptimisticGitHubSync(null);
+        showError(error instanceof Error ? error.message : "Could not save agent.");
       }
     });
   };
@@ -367,11 +416,14 @@ function AgentDetailContent({
             <AgentEditor
               key={agent.id}
               initialBody={initialBody}
+              initialContent={agent.content}
               mentionItems={mentionItems}
               onChange={(body, content) => {
-                setBody(body);
+                const nextContent = content as TiptapDoc;
+                setContent(nextContent);
+                setHasEditorDraft(true);
                 pendingRef.current.body = body;
-                pendingRef.current.content = content as TiptapDoc;
+                pendingRef.current.content = nextContent;
                 schedule();
               }}
             />
@@ -411,6 +463,7 @@ function AgentDetailContent({
           githubError={githubSyncError}
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
+          fullConfig={configPreview.fullConfig}
         />
       </aside>
 
@@ -427,6 +480,31 @@ function AgentDetailContent({
   );
 }
 
+type TiptapPreviewNode = {
+  type?: string;
+  text?: string;
+  attrs?: unknown;
+  content?: TiptapPreviewNode[];
+};
+
+function hasUsableMentionNodes(doc: TiptapDoc) {
+  let hasMention = false;
+  walkPreviewDocument(doc as TiptapPreviewNode, (node) => {
+    if (node.type !== "mention") return;
+    const attrs = node.attrs;
+    if (!attrs || typeof attrs !== "object" || Array.isArray(attrs)) return;
+    const id = "id" in attrs && typeof attrs.id === "string" ? attrs.id.trim() : "";
+    const label = "label" in attrs && typeof attrs.label === "string" ? attrs.label.trim() : "";
+    if (id.length > 0 || label.length > 0) hasMention = true;
+  });
+  return hasMention;
+}
+
+function walkPreviewDocument(node: TiptapPreviewNode, visit: (node: TiptapPreviewNode) => void) {
+  visit(node);
+  node.content?.forEach((child) => walkPreviewDocument(child, visit));
+}
+
 function AgentInspector({
   name,
   path,
@@ -439,6 +517,7 @@ function AgentInspector({
   githubError,
   githubCommitSha,
   githubSyncedAt,
+  fullConfig,
 }: {
   name: string;
   path: string | null;
@@ -451,6 +530,7 @@ function AgentInspector({
   githubError: string | null;
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
+  fullConfig: string;
 }) {
   return (
     <div className="space-y-8">
@@ -530,6 +610,8 @@ function AgentInspector({
         commitSha={githubCommitSha}
         syncedAt={githubSyncedAt}
       />
+
+      <FullConfigPanel value={fullConfig} />
     </div>
   );
 }
@@ -656,6 +738,17 @@ function GitHubSyncPanel({
   );
 }
 
+function FullConfigPanel({ value }: { value: string }) {
+  return (
+    <div>
+      <div className="mb-3 text-[12px] font-medium text-ink">Full config</div>
+      <pre className="max-h-[360px] overflow-auto rounded-lg border border-[#e2e2de] bg-white/60 p-3 text-[11px] leading-5 text-ink-muted">
+        <code>{value}</code>
+      </pre>
+    </div>
+  );
+}
+
 function SyncTrack({ saveState, status }: { saveState: SaveState; status: string }) {
   const steps = [
     { id: "local", label: "Saved locally", state: saveState === "saving" ? "active" : "done" },
@@ -713,28 +806,65 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
 }
 
 function buildConfigPreview({
-  body,
+  title,
+  content,
   fallback,
   selectedModelId,
+  repositories,
+  triggers,
+  useDerivedConfig,
 }: {
-  body: string;
+  title: string;
+  content: TiptapDoc;
   fallback: AgentConfig;
   selectedModelId: AgentModelId;
+  repositories: AgentPayload["githubIntegrationRepositories"];
+  triggers: AgentConfig["triggers"];
+  useDerivedConfig: boolean;
 }) {
-  const config = extractConfigFromMentions(body);
+  const config = useDerivedConfig
+    ? derivePreviewConfigFromTiptapDoc({
+        title,
+        content,
+        model: selectedModelId,
+        repositories,
+        triggers,
+      }).config
+    : {
+        ...fallback,
+        title: normalizePreviewTitle(title),
+        model: {
+          ...fallback.model,
+          name: selectedModelId,
+        },
+      };
   const model =
-    findModel(selectedModelId) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
-  const tools = config.tools.flatMap((toolId) => {
-    const tool = findTool(toolId);
+    findModel(config.model.name) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
+  const tools = config.tools.flatMap((toolConfig) => {
+    const tool = findTool(toolConfig.id);
     return tool ? [tool] : [];
   });
 
   return {
     model: model!,
-    modelIsExplicit: selectedModelId !== DEFAULT_MODEL_ID,
+    modelIsExplicit: config.model.name !== DEFAULT_MODEL_ID,
     tools,
     brain: config.brain,
+    config,
+    fullConfig: serializeAgentFrontmatter({
+      title: config.title,
+      model: config.model.name,
+      tools: config.tools,
+      brain: config.brain,
+      integrations: config.integrations,
+      triggers: config.triggers,
+    }),
   };
+}
+
+function normalizePreviewTitle(title: string) {
+  const trimmed = title.trim();
+  return trimmed.length > 0 ? trimmed : "Untitled agent";
 }
 
 function syncMeta(status: string): {

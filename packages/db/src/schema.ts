@@ -679,8 +679,8 @@ export const workspaceGitHubIntegrationRepositories = pgTable(
   }),
 );
 
-export const agentSessionAmpArtifacts = pgTable(
-  "agent_session_amp_artifacts",
+export const agentSessionArtifacts = pgTable(
+  "agent_session_artifacts",
   {
     id: serial("id").primaryKey(),
     sessionId: text("session_id")
@@ -690,18 +690,21 @@ export const agentSessionAmpArtifacts = pgTable(
       onDelete: "set null",
     }),
     toolCallId: text("tool_call_id").notNull(),
-    ampThreadId: text("amp_thread_id"),
-    continuedFromAmpThreadId: text("continued_from_amp_thread_id"),
-    repositoryFullName: text("repository_full_name").notNull(),
+    toolName: text("tool_name").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title"),
+    url: text("url"),
+    externalId: text("external_id"),
+    repositoryFullName: text("repository_full_name"),
     branchName: text("branch_name"),
-    pullRequestUrl: text("pull_request_url"),
     diffStat: text("diff_stat"),
     diffPreview: text("diff_preview"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    sessionIdx: index("agent_session_amp_artifacts_session_idx").on(table.sessionId),
-    toolCallIdx: index("agent_session_amp_artifacts_tool_call_idx").on(table.toolCallId),
+    sessionIdx: index("agent_session_artifacts_session_idx").on(table.sessionId),
+    toolCallIdx: index("agent_session_artifacts_tool_call_idx").on(table.toolCallId),
   }),
 );
 
@@ -811,7 +814,7 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   usage: many(agentSessionUsage),
   toolUsage: many(agentSessionToolUsage),
   brainMounts: many(agentSessionBrainMounts),
-  ampArtifacts: many(agentSessionAmpArtifacts),
+  artifacts: many(agentSessionArtifacts),
 }));
 
 export const agentSessionBrainMountsRelations = relations(agentSessionBrainMounts, ({ one }) => ({
@@ -980,13 +983,13 @@ export const workspaceGitHubIntegrationRepositoriesRelations = relations(
   }),
 );
 
-export const agentSessionAmpArtifactsRelations = relations(agentSessionAmpArtifacts, ({ one }) => ({
+export const agentSessionArtifactsRelations = relations(agentSessionArtifacts, ({ one }) => ({
   session: one(agentSessions, {
-    fields: [agentSessionAmpArtifacts.sessionId],
+    fields: [agentSessionArtifacts.sessionId],
     references: [agentSessions.id],
   }),
   message: one(agentSessionMessages, {
-    fields: [agentSessionAmpArtifacts.messageId],
+    fields: [agentSessionArtifacts.messageId],
     references: [agentSessionMessages.id],
   }),
 }));
@@ -1033,7 +1036,7 @@ export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
 export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
-export type AgentSessionAmpArtifact = typeof agentSessionAmpArtifacts.$inferSelect;
+export type AgentSessionArtifact = typeof agentSessionArtifacts.$inferSelect;
 export type AgentSessionToolUsage = typeof agentSessionToolUsage.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;

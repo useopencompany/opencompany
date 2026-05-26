@@ -16,7 +16,7 @@ import {
 import { getDb } from "@opencompany/db/client";
 import {
   type AgentConfig,
-  agentSessionAmpArtifacts,
+  agentSessionArtifacts,
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
@@ -1198,6 +1198,7 @@ async function runAmpCoderTool(input: {
     );
   }
   const ampStream = createAmpStreamAccumulator();
+  const ampActivity = createAmpActivityFormatter();
   const result = await input.sandbox.commands.run(
     `cd ${shellQuote(input.workdir)} && ${buildAmpCommand({
       task,
@@ -1208,13 +1209,16 @@ async function runAmpCoderTool(input: {
       timeoutMs: 600_000,
       onStdout: async (data: string) => {
         ampStream.push(data);
-        await input.onOutput?.(formatAmpOutput(data));
+        const activity = ampActivity.push(data);
+        if (activity) await input.onOutput?.(activity);
       },
       onStderr: async (data: string) => {
         await input.onOutput?.(data);
       },
     },
   );
+  const remainingActivity = ampActivity.finish();
+  if (remainingActivity) await input.onOutput?.(remainingActivity);
   ampStream.finish();
   const ampSummary = ampStream.summary();
 
@@ -1270,18 +1274,29 @@ async function runAmpCoderTool(input: {
   }
 
   await getDb()
-    .insert(agentSessionAmpArtifacts)
+    .insert(agentSessionArtifacts)
     .values({
       sessionId: input.sessionId,
       messageId: input.messageId,
       toolCallId: input.toolCallId,
-      ampThreadId: ampSummary.threadId,
-      continuedFromAmpThreadId: requestedAmpThreadId,
+      toolName: "amp_coder",
+      kind: "amp_run",
+      title: task,
+      url: pullRequestUrl,
+      externalId: ampSummary.threadId,
       repositoryFullName: repository.fullName,
       branchName,
-      pullRequestUrl,
       diffStat: truncateText(String(diffStat.stdout ?? ""), 4000),
       diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
+      metadata: {
+        continuedFromAmpThreadId: requestedAmpThreadId,
+        ampStatus: ampSummary.status,
+        ampError: ampSummary.error,
+        ampDurationMs: ampSummary.durationMs,
+        ampNumTurns: ampSummary.numTurns,
+        ampPermissionDenials: ampSummary.permissionDenials,
+        exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+      },
     });
 
   return {
@@ -1435,6 +1450,83 @@ export function createAmpStreamAccumulator() {
   };
 }
 
+export function createAmpActivityFormatter() {
+  let buffer = "";
+  let lastEmitted = "";
+
+  function consumeLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return "";
+
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      return truncateText(`${trimmed}\n`, 1000);
+    }
+    if (!isRecord(event)) return "";
+
+    const summary = summarizeAmpEvent(event);
+    if (!summary || summary === lastEmitted) return "";
+    lastEmitted = summary;
+    return `${summary}\n`;
+  }
+
+  return {
+    push(data: string) {
+      buffer += data;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      return lines.map(consumeLine).join("");
+    },
+    finish() {
+      const output = buffer.trim() ? consumeLine(buffer) : "";
+      buffer = "";
+      return output;
+    },
+  };
+}
+
+function summarizeAmpEvent(event: Record<string, unknown>) {
+  const type = readOptionalText(event.type);
+
+  if (type === "system") {
+    const subtype = readOptionalText(event.subtype);
+    const threadId = readOptionalText(event.session_id);
+    if (subtype === "init") {
+      return threadId ? `Amp session ${threadId} started.` : "Amp session started.";
+    }
+    return "";
+  }
+
+  if (type === "assistant") {
+    const message = isRecord(event.message) ? event.message : {};
+    return readAmpAssistantActivity(message);
+  }
+
+  if (type === "result") {
+    const durationMs = readOptionalFiniteNumber(event.duration_ms);
+    const numTurns = readOptionalFiniteNumber(event.num_turns);
+    if (event.is_error === true || event.subtype !== "success") {
+      const error = readOptionalText(event.error);
+      return error ? `Amp failed: ${error}` : "Amp failed.";
+    }
+    return `Amp completed${formatAmpDurationSuffix(durationMs, numTurns)}.`;
+  }
+
+  if (type === "tool_use" || type === "tool-call") {
+    const name = readOptionalText(event.name) ?? readOptionalText(event.tool_name) ?? "tool";
+    return `Amp is using ${formatAmpLabel(name)}${formatAmpInputSuffix(event.input)}.`;
+  }
+
+  if (type === "tool_result" || type === "tool-result") {
+    const name = readOptionalText(event.name) ?? readOptionalText(event.tool_name);
+    return name ? `Amp received ${formatAmpLabel(name)} result.` : "Amp received a tool result.";
+  }
+
+  return "";
+}
+
 function readAmpAssistantText(message: Record<string, unknown>) {
   const content = Array.isArray(message.content) ? message.content : [];
   return content
@@ -1445,20 +1537,67 @@ function readAmpAssistantText(message: Record<string, unknown>) {
     .trim();
 }
 
-function formatAmpOutput(data: string) {
-  const lines = data.split("\n").filter(Boolean);
-  const formatted = lines
-    .map((line) => {
-      try {
-        const event = JSON.parse(line) as { type?: unknown };
-        if (typeof event.type === "string") return `[amp:${event.type}] ${line}\n`;
-      } catch {
-        // Keep raw output when Amp emits non-JSON text.
-      }
-      return `${line}\n`;
-    })
-    .join("");
-  return truncateText(formatted || data, 8000);
+function readAmpAssistantActivity(message: Record<string, unknown>) {
+  const content = Array.isArray(message.content) ? message.content : [];
+  const summaries: string[] = [];
+
+  for (const part of content) {
+    if (!isRecord(part)) continue;
+
+    if (part.type === "text") {
+      const text = readOptionalText(part.text);
+      if (text) summaries.push(`Amp: ${compactWhitespace(text)}`);
+      continue;
+    }
+
+    if (part.type === "tool_use" || part.type === "tool-call") {
+      const name = readOptionalText(part.name) ?? readOptionalText(part.toolName) ?? "tool";
+      summaries.push(`Amp is using ${formatAmpLabel(name)}${formatAmpInputSuffix(part.input)}.`);
+    }
+  }
+
+  return summaries.length > 0 ? truncateText(summaries.join("\n"), 1000) : "";
+}
+
+function formatAmpInputSuffix(value: unknown) {
+  const preview = compactWhitespace(formatCompactValue(value));
+  return preview ? `: ${truncateText(preview, 180)}` : "";
+}
+
+function formatCompactValue(value: unknown) {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatAmpDurationSuffix(durationMs: number | null | undefined, numTurns: number | null) {
+  const parts: string[] = [];
+  if (durationMs !== null && durationMs !== undefined) parts.push(formatDurationMs(durationMs));
+  if (numTurns !== null && numTurns !== undefined) {
+    parts.push(`${numTurns} ${numTurns === 1 ? "turn" : "turns"}`);
+  }
+  return parts.length > 0 ? ` in ${parts.join(", ")}` : "";
+}
+
+function formatDurationMs(durationMs: number) {
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
+  const seconds = durationMs / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.round(seconds % 60);
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+function formatAmpLabel(value: string) {
+  return value.replace(/[_-]+/g, " ").trim() || "tool";
+}
+
+function compactWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function normalizeCommitMessage(value: string) {

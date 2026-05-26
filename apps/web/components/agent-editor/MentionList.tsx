@@ -193,5 +193,6 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
+  if (kind === "integration") return "Work integrations";
   return "Brain";
 }

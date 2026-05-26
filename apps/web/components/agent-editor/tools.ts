@@ -1,6 +1,6 @@
 import { Bot, Brain, Code2, FileText, GitBranch, type LucideIcon, Search } from "lucide-react";
-import { repositoryIdForFullName } from "@/lib/agents/agent-file";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
+import { repositoryIdForFullName } from "@/lib/agents/mentions";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
 type AgentMentionKind = "model" | "tool" | "integration" | "brain";
@@ -74,8 +74,8 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
   id: tool.id,
   mentionId: `tool:${tool.id}`,
   kind: "tool",
-  label: tool.label,
-  displayLabel: tool.label,
+  label: tool.id,
+  displayLabel: tool.id,
   description: tool.description,
   icon: TOOL_ICONS[tool.id],
 }));

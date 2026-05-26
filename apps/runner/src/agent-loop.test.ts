@@ -14,6 +14,7 @@ import {
   appendRuntimeEventForLease,
   buildAmpCommand,
   completeAssistantMessageForLease,
+  createAmpActivityFormatter,
   createAmpStreamAccumulator,
   createAssistantMessageForLease,
   executeRuntimeTool,
@@ -562,6 +563,55 @@ describe("Amp stream parsing", () => {
       numTurns: 1,
       permissionDenials: ["Bash rm -rf"],
     });
+  });
+
+  it("formats Amp stream activity without leaking partial JSON chunks", () => {
+    const formatter = createAmpActivityFormatter();
+    const assistantEvent = JSON.stringify({
+      type: "assistant",
+      message: {
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            name: "Bash",
+            input: { command: "bun test apps/runner/src/agent-loop.test.ts" },
+          },
+        ],
+      },
+      session_id: "T-123",
+    });
+
+    expect(formatter.push(`${assistantEvent.slice(0, 40)}`)).toBe("");
+    expect(formatter.push(`${assistantEvent.slice(40)}\n`)).toBe(
+      'Amp is using Bash: {"command":"bun test apps/runner/src/agent-loop.test.ts"}.\n',
+    );
+  });
+
+  it("summarizes Amp session lifecycle and final result events", () => {
+    const formatter = createAmpActivityFormatter();
+
+    const output = formatter.push(
+      [
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "T-123",
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          duration_ms: 1250,
+          num_turns: 2,
+          is_error: false,
+          result: "Done",
+          session_id: "T-123",
+        }),
+      ].join("\n") + "\n",
+    );
+
+    expect(output).toBe("Amp session T-123 started.\nAmp completed in 1.3s, 2 turns.\n");
   });
 });
 

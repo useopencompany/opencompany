@@ -5,13 +5,14 @@ import { getDb } from "@opencompany/db/client";
 import {
   agentSyncJobs,
   agents,
+  brainFiles,
   workspaceGitHubIntegrationRepositories,
 } from "@opencompany/db/schema";
-import { and, eq, or } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { type AgentConfigPatch, parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
-import { deriveAgentConfigFromContent } from "@/lib/agents/config";
+import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   buildPendingAgent,
   logAgentSyncJobQueued,
@@ -21,6 +22,11 @@ import {
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
+import {
+  collectBodyRepositoryMentions,
+  deriveAgentConfigFromBody,
+  normalizeAgentBody,
+} from "@/lib/agents/mentions";
 import { randomAgentName } from "@/lib/agents/names";
 import { serializeAgent } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
@@ -136,24 +142,47 @@ export async function updateAgent(
   const previousPath = agent.path;
   const pathChanged = Boolean(previousPath && path !== previousPath);
   const sanitizedContent = patch.content ? sanitizeTiptapDoc(patch.content) : null;
-  const derived = sanitizedContent
-    ? deriveAgentConfigFromContent({
+  const githubIntegrationRepositories = await timeAsync(
+    trace,
+    "db.selectGitHubIntegrationRepositories",
+    () =>
+      db
+        .select({
+          fullName: workspaceGitHubIntegrationRepositories.fullName,
+          defaultBranch: workspaceGitHubIntegrationRepositories.defaultBranch,
+        })
+        .from(workspaceGitHubIntegrationRepositories)
+        .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspace.id))
+        .orderBy(asc(workspaceGitHubIntegrationRepositories.fullName)),
+  );
+  const derivedFromTiptap = sanitizedContent
+    ? derivePreviewConfigFromTiptapDoc({
         title,
         content: sanitizedContent,
         model: patch.model ?? agent.config.model.name,
-        repositories: await timeAsync(trace, "db.selectGitHubIntegrationRepositories", () =>
-          db
-            .select({
-              fullName: workspaceGitHubIntegrationRepositories.fullName,
-              defaultBranch: workspaceGitHubIntegrationRepositories.defaultBranch,
-            })
-            .from(workspaceGitHubIntegrationRepositories)
-            .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspace.id)),
-        ),
+        repositories: githubIntegrationRepositories,
         triggers: agent.config.triggers,
       })
     : null;
-  const body = derived?.body ?? patch.body ?? agent.body;
+  // The .agent body is the product contract and the source for runtime config.
+  // Tiptap JSON is an editor presentation cache; it can lag behind or lose
+  // mention attrs, so it must not override body mentions during persisted saves.
+  const derived =
+    typeof patch.body === "string"
+      ? deriveAgentConfigFromBody({
+          title,
+          body: patch.body,
+          model: patch.model ?? agent.config.model.name,
+          repositories: githubIntegrationRepositories,
+          triggers: agent.config.triggers,
+        })
+      : derivedFromTiptap;
+  warnOnBodyTiptapMismatch({
+    agentId: agent.id,
+    ...(typeof patch.body === "string" ? { body: patch.body } : {}),
+    ...(typeof derivedFromTiptap?.body === "string" ? { tiptapBody: derivedFromTiptap.body } : {}),
+  });
+  const body = typeof patch.body === "string" ? patch.body : (derived?.body ?? agent.body);
   const model = derived?.config.model.name ?? patch.model ?? agent.config.model.name;
   const nextIntegrations =
     derived?.config.integrations ?? patch.config?.integrations ?? agent.config.integrations;
@@ -219,13 +248,23 @@ export async function updateAgent(
     ]),
   );
   logAgentSyncJobQueued(syncJob.metadata);
-  const [updatedAgent] = await timeAsync(trace, "db.selectUpdatedAgent", () =>
-    db
-      .select()
-      .from(agents)
-      .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)))
-      .limit(1),
-  );
+  const [[updatedAgent], brainPathRows] = await Promise.all([
+    timeAsync(trace, "db.selectUpdatedAgent", () =>
+      db
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)))
+        .limit(1),
+    ),
+    timeAsync(trace, "db.selectBrainPaths", () =>
+      db
+        .select({ path: brainFiles.path })
+        .from(brainFiles)
+        .where(eq(brainFiles.workspaceId, workspace.id))
+        .orderBy(asc(brainFiles.path)),
+    ),
+  ]);
+  const brainPaths = brainPathRows.map((row) => row.path);
 
   if (changedFields.length > 0) {
     await captureServerEvent("agent_saved", user.id, {
@@ -241,7 +280,9 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
     pathChanged,
-    agent: updatedAgent ? serializeAgent(updatedAgent) : null,
+    agent: updatedAgent
+      ? serializeAgent(updatedAgent, brainPaths, githubIntegrationRepositories)
+      : null,
   };
 
   revalidatePath("/agents");
@@ -255,6 +296,26 @@ export async function updateAgent(
   });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
+}
+
+function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tiptapBody?: string }) {
+  if (process.env.NODE_ENV === "production") return;
+  if (typeof input.body !== "string" || typeof input.tiptapBody !== "string") return;
+
+  const body = normalizeAgentBody(input.body);
+  const tiptapBody = normalizeAgentBody(input.tiptapBody);
+  if (body === tiptapBody) return;
+
+  console.warn(
+    "[agent-save-body-tiptap-mismatch]",
+    JSON.stringify({
+      agentId: input.agentId,
+      bodyLength: body.length,
+      tiptapBodyLength: tiptapBody.length,
+      bodyRepositories: collectBodyRepositoryMentions(body),
+      tiptapRepositories: collectBodyRepositoryMentions(tiptapBody),
+    }),
+  );
 }
 
 export async function materializeLegacyAgentFiles() {
