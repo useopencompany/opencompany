@@ -14,6 +14,7 @@ const githubEnvNames = [
   "GITHUB_INTEGRATION_APP_SLUG",
   "GITHUB_INTEGRATION_APP_CLIENT_ID",
   "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
+  "GITHUB_INTEGRATION_STATE_SECRET",
 ] as const;
 const originalGithubEnv = Object.fromEntries(
   githubEnvNames.map((name) => [name, process.env[name]]),
@@ -21,6 +22,7 @@ const originalGithubEnv = Object.fromEntries(
 
 beforeEach(() => {
   process.env.GITHUB_INTEGRATION_APP_CLIENT_SECRET = "test-secret";
+  process.env.GITHUB_INTEGRATION_STATE_SECRET = "test-state-secret";
 });
 
 afterEach(() => {
@@ -93,6 +95,7 @@ describe("GitHub integration state", () => {
     process.env.GITHUB_INTEGRATION_APP_SLUG = "opencompany-test";
     process.env.GITHUB_INTEGRATION_APP_CLIENT_ID = "Iv1.test";
     process.env.GITHUB_INTEGRATION_APP_CLIENT_SECRET = "test-secret";
+    process.env.GITHUB_INTEGRATION_STATE_SECRET = "test-state-secret";
 
     expect(isGitHubWorkIntegrationConfigured()).toBe(true);
   });

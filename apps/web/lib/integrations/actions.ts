@@ -5,9 +5,9 @@ import {
   workspaceGitHubIntegrationInstallations,
   workspaceGitHubIntegrationRepositories,
 } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { getCurrentWorkspace, requireCurrentWorkspace } from "@/lib/auth";
+import { requireCurrentWorkspace, requireCurrentWorkspaceAdmin } from "@/lib/auth";
 import {
   deleteGitHubWorkInstallation,
   GitHubInstallationNotFoundError,
@@ -69,7 +69,7 @@ export async function loadWorkspaceIntegrationState() {
 }
 
 export async function refreshGitHubRepositories() {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await requireCurrentWorkspaceAdmin();
   if (!isGitHubWorkIntegrationConfigured()) return;
 
   const db = getDb();
@@ -98,7 +98,7 @@ export async function refreshGitHubRepositories() {
 }
 
 export async function markGitHubRepositorySelected(fullName: string) {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await requireCurrentWorkspaceAdmin();
   await getDb()
     .update(workspaceGitHubIntegrationRepositories)
     .set({ selectedAt: new Date(), updatedAt: new Date() })
@@ -119,7 +119,7 @@ export type DisconnectGitHubIntegrationResult = {
 };
 
 export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGitHubIntegrationResult> {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await requireCurrentWorkspaceAdmin();
   const db = getDb();
   const [existingInstallation] = await db
     .select()
@@ -146,16 +146,32 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
     };
   }
 
-  try {
-    await deleteGitHubWorkInstallation({ installationId: existingInstallation.installationId });
-  } catch (error) {
-    if (!(error instanceof GitHubInstallationNotFoundError)) {
-      return {
-        ok: false,
-        status: "error",
-        message:
-          error instanceof Error ? error.message : "GitHub could not be disconnected. Try again.",
-      };
+  const [sharedInstallation] = await db
+    .select({ workspaceId: workspaceGitHubIntegrationInstallations.workspaceId })
+    .from(workspaceGitHubIntegrationInstallations)
+    .where(
+      and(
+        eq(
+          workspaceGitHubIntegrationInstallations.installationId,
+          existingInstallation.installationId,
+        ),
+        ne(workspaceGitHubIntegrationInstallations.workspaceId, workspace.id),
+      ),
+    )
+    .limit(1);
+
+  if (!sharedInstallation) {
+    try {
+      await deleteGitHubWorkInstallation({ installationId: existingInstallation.installationId });
+    } catch (error) {
+      if (!(error instanceof GitHubInstallationNotFoundError)) {
+        return {
+          ok: false,
+          status: "error",
+          message:
+            error instanceof Error ? error.message : "GitHub could not be disconnected. Try again.",
+        };
+      }
     }
   }
 
@@ -165,7 +181,9 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
   return {
     ok: true,
     status: "disconnected",
-    message: "GitHub was disconnected from this workspace.",
+    message: sharedInstallation
+      ? "GitHub was disconnected from this workspace. The GitHub App remains installed because another workspace still uses it."
+      : "GitHub was disconnected from this workspace.",
   };
 }
 

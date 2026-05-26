@@ -3,6 +3,7 @@ import type { RunnerEnv } from "./env";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
+  MissingEnvError,
   validateHostedToolEnvironment,
 } from "./hosted-tools";
 
@@ -336,7 +337,7 @@ describe("validateHostedToolEnvironment", () => {
         enabledTools: ["tool_help", "exa_search"],
         env: env({ exaApiKey: undefined }),
       }),
-    ).toThrow("EXA_API_KEY");
+    ).toThrow(MissingEnvError);
   });
 });
 

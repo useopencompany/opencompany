@@ -156,10 +156,10 @@ async function prepareGitHubRepository(input: {
     { timeoutMs: 30_000 },
   );
   const currentOrigin = String(origin.stdout ?? "").trim();
-  const cloneUrl = githubCloneUrl(input.repositoryFullName);
+  const cloneUrl = githubRemoteUrl(input.repositoryFullName);
   if (githubRemoteMatches(currentOrigin, input.repositoryFullName)) {
     await input.sandbox.commands.run(
-      `cd ${shellQuote(input.workdir)} && git remote set-url origin "${cloneUrl}"`,
+      `cd ${shellQuote(input.workdir)} && git remote set-url origin ${shellQuote(cloneUrl)}`,
       { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 30_000 },
     );
     return;
@@ -168,9 +168,9 @@ async function prepareGitHubRepository(input: {
   await input.sandbox.commands.run(
     [
       `rm -rf ${shellQuote(input.workdir)}`,
-      `git clone --depth 1 --branch ${shellQuote(input.defaultBranch)} "${cloneUrl}" ${shellQuote(
-        input.workdir,
-      )}`,
+      `git ${gitAuthExtraHeaderArg()} clone --depth 1 --branch ${shellQuote(
+        input.defaultBranch,
+      )} ${shellQuote(cloneUrl)} ${shellQuote(input.workdir)}`,
     ].join(" && "),
     { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 120_000 },
   );
@@ -311,12 +311,16 @@ function isSandboxNotFound(error: unknown) {
   return error.name === "SandboxNotFoundError" || /not found|404/i.test(error.message);
 }
 
-function githubCloneUrl(repositoryFullName: string) {
+function githubRemoteUrl(repositoryFullName: string) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
     throw new Error("Invalid GitHub repository name for workspace clone.");
   }
 
-  return `https://x-access-token:$GITHUB_TOKEN@github.com/${repositoryFullName}.git`;
+  return `https://github.com/${repositoryFullName}.git`;
+}
+
+function gitAuthExtraHeaderArg() {
+  return '-c http.extraheader="Authorization: Bearer $GITHUB_TOKEN"';
 }
 
 export function githubRemoteMatches(remote: string, repositoryFullName: string) {

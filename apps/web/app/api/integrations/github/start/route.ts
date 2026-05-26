@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { requireCurrentWorkspaceAdmin } from "@/lib/auth";
 import {
   appendIntegrationStatus,
   buildGitHubInstallUrl,
@@ -8,7 +8,7 @@ import {
 } from "@/lib/integrations/github";
 
 export async function GET(request: Request) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await requireCurrentWorkspaceAdmin();
   const url = new URL(request.url);
   const intent = url.searchParams.get("intent") === "agent" ? "agent" : "settings";
   const returnTo = url.searchParams.get("returnTo") ?? "/settings/integrations";

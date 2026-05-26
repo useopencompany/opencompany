@@ -22,8 +22,35 @@ describe("GitHub installation tokens", () => {
       }),
     );
 
-    await expect(getGitHubWorkInstallationToken("135242330")).rejects.toThrow(
+    await expect(getGitHubWorkInstallationToken({ installationId: "135242330" })).rejects.toThrow(
       "GitHub work repository integration installation 135242330 is not accessible to the configured GitHub App.",
     );
+  });
+
+  it("scopes work repository tokens to the requested repository", async () => {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    vi.stubEnv("GITHUB_INTEGRATION_APP_ID", "12345");
+    vi.stubEnv(
+      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+    );
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({ token: "ghs_test", expires_at: "2099-01-01T00:00:00Z" }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getGitHubWorkInstallationToken({
+        installationId: "135242330",
+        repositoryFullName: "opencompany/app",
+      }),
+    ).resolves.toBe("ghs_test");
+
+    const requestInit = (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>)[0]?.[1];
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      repositories: ["app"],
+    });
   });
 });

@@ -14,6 +14,16 @@ export type HostedToolResult = {
   usage?: HostedToolUsage;
 };
 
+export class MissingEnvError extends Error {
+  constructor(
+    readonly envName: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "MissingEnvError";
+  }
+}
+
 export function getHostedToolFailureContext(input: {
   name: RuntimeToolName;
   args: unknown;
@@ -65,7 +75,10 @@ export function validateHostedToolEnvironment(input: {
   env: RunnerEnv;
 }) {
   if (input.enabledTools.includes("exa_search") && !input.env.exaApiKey) {
-    throw new Error("The exa_search tool is enabled, but EXA_API_KEY is not configured.");
+    throw new MissingEnvError(
+      "EXA_API_KEY",
+      "The exa_search tool is enabled, but EXA_API_KEY is not configured.",
+    );
   }
 }
 
@@ -91,7 +104,7 @@ async function executeExaSearch(
   signal: AbortSignal,
 ): Promise<HostedToolResult> {
   if (!env.exaApiKey) {
-    throw new Error("EXA_API_KEY is required for exa_search.");
+    throw new MissingEnvError("EXA_API_KEY", "EXA_API_KEY is required for exa_search.");
   }
 
   const request = buildExaSearchRequest(args);

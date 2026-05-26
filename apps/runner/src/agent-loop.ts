@@ -58,6 +58,7 @@ import {
   executeHostedTool,
   getHostedToolFailureContext,
   type HostedToolUsage,
+  MissingEnvError,
   validateHostedToolEnvironment,
 } from "./hosted-tools";
 import {
@@ -828,6 +829,8 @@ export async function executeRuntimeTool(input: {
           toolCallId: input.toolCallId,
           agentConfig: input.agentConfig,
           env: input.env,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
           onOutput: async (delta) => {
             await input.checkAbort();
             await requireLeaseWrite(
@@ -848,7 +851,11 @@ export async function executeRuntimeTool(input: {
           },
         });
       }
-      return runSandboxTool({
+      const brainSnapshotBefore =
+        input.definition.name === "shell"
+          ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
+          : null;
+      const sandboxOutput = await runSandboxTool({
         sandbox: activeSandbox,
         workdir: input.workdir,
         name: input.definition.name,
@@ -872,6 +879,14 @@ export async function executeRuntimeTool(input: {
           );
         },
       });
+      if (
+        input.definition.name === "shell" &&
+        brainSnapshotBefore !== null &&
+        brainSnapshotBefore !== (await readSandboxBrainSnapshot(activeSandbox, input.workdir))
+      ) {
+        return { output: sandboxOutput, brainChanged: true };
+      }
+      return sandboxOutput;
     });
   } catch (error) {
     if (isFatalToolError(error, input.definition.kind, sandboxIdForCapture, input.signal)) {
@@ -920,10 +935,19 @@ export async function executeRuntimeTool(input: {
     );
   }
 
+  const shellOutput = isRecord(output) && "brainChanged" in output ? output.output : output;
+  const shellChangedBrain = isRecord(output) && output.brainChanged === true;
+  if (isRecord(output) && "brainChanged" in output) {
+    output = shellOutput;
+  }
+  const writeChangedBrain =
+    input.definition.name === "write_file" &&
+    typeof changedPath === "string" &&
+    changedPath.replace(/^\/+/, "").startsWith("brain/");
   if (
     !failedOutput &&
     input.definition.kind === "sandbox" &&
-    (input.definition.name === "write_file" || input.definition.name === "shell")
+    (writeChangedBrain || shellChangedBrain)
   ) {
     const activeSandbox = await input.getSandbox();
     await syncBrainFromSandbox({
@@ -1202,6 +1226,8 @@ async function runAmpCoderTool(input: {
   toolCallId: string;
   agentConfig: AgentConfig;
   env: RunnerEnv;
+  runLeaseId: string;
+  runLeaseOwner: string;
   onOutput?: (delta: string) => Promise<void> | void;
 }) {
   const args = isRecord(input.args) ? input.args : {};
@@ -1289,7 +1315,13 @@ async function runAmpCoderTool(input: {
       input.workspaceId,
       repository.fullName,
     );
-    const token = await getGitHubWorkInstallationToken(integrationRepository.installationId);
+    await requireLeaseWrite(
+      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+    );
+    const token = await getGitHubWorkInstallationToken({
+      installationId: integrationRepository.installationId,
+      repositoryFullName: repository.fullName,
+    });
     if (!token) {
       throw new Error("GitHub App credentials are required to push AMP changes.");
     }
@@ -1305,10 +1337,21 @@ async function runAmpCoderTool(input: {
         `git checkout -b ${shellQuote(branchName)}`,
         "git add -A",
         `git commit -m ${shellQuote(commitMessage)}`,
-        `git remote set-url origin "${githubAuthenticatedRemoteUrl(repository.fullName)}"`,
-        `git push origin ${shellQuote(branchName)}`,
+        `git remote set-url origin ${shellQuote(githubRemoteUrl(repository.fullName))}`,
       ].join(" && "),
+      { timeoutMs: 120_000 },
+    );
+    await requireLeaseWrite(
+      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+    );
+    await input.sandbox.commands.run(
+      `cd ${shellQuote(layout.workRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
+        branchName,
+      )}`,
       { envs: { GITHUB_TOKEN: token }, timeoutMs: 180_000 },
+    );
+    await requireLeaseWrite(
+      isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
     );
     const pr = await createDraftPullRequest({
       installationId: integrationRepository.installationId,
@@ -1321,6 +1364,9 @@ async function runAmpCoderTool(input: {
     pullRequestUrl = pr.html_url ?? null;
   }
 
+  await requireLeaseWrite(
+    isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
+  );
   await getDb()
     .insert(agentSessionArtifacts)
     .values({
@@ -1657,12 +1703,24 @@ function normalizeCommitMessage(value: string) {
   return title.length > 72 ? `${title.slice(0, 69)}...` : title;
 }
 
-function githubAuthenticatedRemoteUrl(repositoryFullName: string) {
+function githubRemoteUrl(repositoryFullName: string) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
     throw new Error("Invalid GitHub repository name for AMP push.");
   }
 
-  return `https://x-access-token:$GITHUB_TOKEN@github.com/${repositoryFullName}.git`;
+  return `https://github.com/${repositoryFullName}.git`;
+}
+
+function gitAuthExtraHeaderArg() {
+  return '-c http.extraheader="Authorization: Bearer $GITHUB_TOKEN"';
+}
+
+async function readSandboxBrainSnapshot(sandbox: SandboxHandle, workdir: string) {
+  const result = await sandbox.commands.run(
+    `cd ${shellQuote(workdir)} && if [ -d brain ]; then find brain -type f -printf '%P\t%s\t%T@\\n' | sort; fi`,
+    { timeoutMs: 30_000 },
+  );
+  return String(result.stdout ?? "");
 }
 
 function formatAmpDiffStat(stat: unknown, status: unknown) {
@@ -1975,7 +2033,10 @@ async function resolveGitHubToken(
     row.workspace.id,
     sessionRepository.fullName,
   );
-  return getGitHubWorkInstallationToken(integrationRepository.installationId);
+  return getGitHubWorkInstallationToken({
+    installationId: integrationRepository.installationId,
+    repositoryFullName: sessionRepository.fullName,
+  });
 }
 
 async function parkSandboxWhenIdle(sandbox: SandboxHandle, env: RunnerEnv) {
@@ -2001,15 +2062,10 @@ async function loadSession(sessionId: string) {
       session: agentSessions,
       agent: agents,
       workspace: workspaces,
-      repository: workspaceRepositories,
     })
     .from(agentSessions)
     .innerJoin(agents, eq(agentSessions.agentId, agents.id))
     .innerJoin(workspaces, eq(agentSessions.workspaceId, workspaces.id))
-    .leftJoin(
-      workspaceRepositories,
-      eq(agentSessions.workspaceId, workspaceRepositories.workspaceId),
-    )
     .where(eq(agentSessions.id, sessionId))
     .limit(1);
 
@@ -2017,7 +2073,13 @@ async function loadSession(sessionId: string) {
     throw new Error(`Session not found: ${sessionId}`);
   }
 
-  return row;
+  const [repository] = await db
+    .select()
+    .from(workspaceRepositories)
+    .where(eq(workspaceRepositories.workspaceId, row.workspace.id))
+    .limit(1);
+
+  return { ...row, repository: repository ?? null };
 }
 
 type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
@@ -2129,7 +2191,7 @@ function isFatalToolError(
     return true;
   }
 
-  if (isMissingRequiredEnvToolError(error)) return true;
+  if (error instanceof MissingEnvError) return true;
   if (error instanceof RecoverableToolError) return false;
   return toolKind === "sandbox" && !sandboxIdForCapture;
 }
@@ -2143,13 +2205,6 @@ function buildFailedToolOutput(error: unknown): FailedToolOutput {
       recoverable: true,
     },
   };
-}
-
-function isMissingRequiredEnvToolError(error: unknown) {
-  return (
-    error instanceof Error &&
-    /\b[A-Z][A-Z0-9_]*\b.*\b(required|configured|missing)\b/i.test(error.message)
-  );
 }
 
 export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {

@@ -183,9 +183,18 @@ describe("prepareWorkspace", () => {
       },
     );
     expect(sandbox.commands.run).toHaveBeenCalledWith(
-      expect.stringContaining("git clone --depth 1 --branch 'main'"),
+      expect.stringContaining("clone --depth 1 --branch 'main'"),
       { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
     );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("-c http.extraheader"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+    );
+    expect(
+      sandbox.commands.run.mock.calls.some(([command]) =>
+        String(command).includes("x-access-token"),
+      ),
+    ).toBe(false);
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("'/home/user/workspace/work'"),
       { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
@@ -233,7 +242,7 @@ describe("prepareWorkspace", () => {
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
-      expect.stringContaining("git clone --depth 1 --branch 'develop'"),
+      expect.stringContaining("clone --depth 1 --branch 'develop'"),
       { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
     );
   });

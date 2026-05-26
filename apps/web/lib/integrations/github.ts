@@ -30,6 +30,7 @@ const GITHUB_WORK_INTEGRATION_ENVS = [
   "GITHUB_INTEGRATION_APP_SLUG",
   "GITHUB_INTEGRATION_APP_CLIENT_ID",
   "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
+  "GITHUB_INTEGRATION_STATE_SECRET",
 ] as const;
 const GITHUB_WORK_INSTALLATION_MANAGEMENT_ENVS = [
   "GITHUB_INTEGRATION_APP_ID",
@@ -334,10 +335,7 @@ function safeEqual(left: string, right: string) {
 }
 
 function stateSecret() {
-  return (
-    process.env.GITHUB_INTEGRATION_APP_CLIENT_SECRET?.trim() ||
-    requiredEnv("WORKOS_COOKIE_PASSWORD")
-  );
+  return requiredEnv("GITHUB_INTEGRATION_STATE_SECRET");
 }
 
 function createAppJwt() {

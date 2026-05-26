@@ -20,11 +20,13 @@ type OnboardingUser = Pick<AppUser, "id" | "email">;
 
 const ADMIN_ROLE = "admin";
 const MEMBER_ROLE = "member";
+type WorkspaceRole = typeof ADMIN_ROLE | typeof MEMBER_ROLE;
 
 export type CurrentWorkspaceContext = {
   authUser: WorkOSUser;
   user: AppUser;
   workspace: AppWorkspace;
+  role: WorkspaceRole;
   isNewUser: boolean;
 };
 
@@ -47,7 +49,7 @@ function defaultWorkspaceName(user: WorkOSUser) {
   return `${displayName(user)}'s Workspace`;
 }
 
-function normalizeMembershipRole(role?: string | null) {
+function normalizeMembershipRole(role?: string | null): WorkspaceRole {
   return role === ADMIN_ROLE ? ADMIN_ROLE : MEMBER_ROLE;
 }
 
@@ -151,7 +153,7 @@ export async function loadCurrentWorkspaceContextReadOnly(
   if (!user || !workspace) return null;
 
   const [membership] = await db
-    .select({ userId: workspaceMemberships.userId })
+    .select({ userId: workspaceMemberships.userId, role: workspaceMemberships.role })
     .from(workspaceMemberships)
     .where(
       and(
@@ -167,6 +169,7 @@ export async function loadCurrentWorkspaceContextReadOnly(
     authUser,
     user,
     workspace,
+    role: normalizeMembershipRole(membership.role),
     isNewUser: false,
   };
 }
@@ -236,6 +239,7 @@ export async function syncUserAndWorkspace(
     authUser,
     user,
     workspace,
+    role: normalizeMembershipRole(role),
     isNewUser,
   };
 }
@@ -264,6 +268,7 @@ export async function provisionDefaultOrganization(
       authUser,
       user,
       workspace: existingWorkspace,
+      role: ADMIN_ROLE,
       isNewUser,
     };
   }
@@ -321,6 +326,7 @@ export async function provisionDefaultOrganization(
     authUser,
     user,
     workspace: currentWorkspace,
+    role: ADMIN_ROLE,
     isNewUser,
   };
 }
@@ -417,5 +423,13 @@ export async function requireCurrentWorkspace() {
     redirect("/signup");
   }
 
+  return context;
+}
+
+export async function requireCurrentWorkspaceAdmin() {
+  const context = await requireCurrentWorkspace();
+  if (context.role !== ADMIN_ROLE) {
+    throw new Error("Only workspace admins can manage workspace integrations.");
+  }
   return context;
 }

@@ -25,28 +25,33 @@ export async function getGitHubInstallationToken(
   });
 }
 
-export async function getGitHubWorkInstallationToken(installationId: string) {
+export async function getGitHubWorkInstallationToken(input: {
+  installationId: string;
+  repositoryFullName?: string;
+}) {
   if (!hasGitHubIntegrationAppEnv()) return null;
 
   return getInstallationToken({
-    installationId,
+    installationId: input.installationId,
     appId: requiredEnv("GITHUB_INTEGRATION_APP_ID"),
     privateKey: requiredEnv("GITHUB_INTEGRATION_APP_PRIVATE_KEY"),
     cachePrefix: "integration",
     purpose: "work repository integration",
     envNames: ["GITHUB_INTEGRATION_APP_ID", "GITHUB_INTEGRATION_APP_PRIVATE_KEY"],
+    ...(input.repositoryFullName ? { repositoryFullName: input.repositoryFullName } : {}),
   });
 }
 
 async function getInstallationToken(input: {
   installationId: string;
+  repositoryFullName?: string;
   appId: string;
   privateKey: string;
   cachePrefix: string;
   purpose: string;
   envNames: [string, string];
 }) {
-  const cacheKey = `${input.cachePrefix}:${input.installationId}`;
+  const cacheKey = `${input.cachePrefix}:${input.installationId}:${input.repositoryFullName ?? "*"}`;
   const cachedToken = cachedTokens.get(cacheKey);
   if (cachedToken && cachedToken.expiresAt - Date.now() > 60_000) {
     return cachedToken.token;
@@ -65,6 +70,13 @@ async function getInstallationToken(input: {
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
       },
+      ...(input.repositoryFullName
+        ? {
+            body: JSON.stringify({
+              repositories: [githubRepositoryName(input.repositoryFullName)],
+            }),
+          }
+        : {}),
     },
   );
 
@@ -109,7 +121,10 @@ export async function createDraftPullRequest(input: {
   body: string;
 }) {
   const token = input.installationId
-    ? await getGitHubWorkInstallationToken(input.installationId)
+    ? await getGitHubWorkInstallationToken({
+        installationId: input.installationId,
+        repositoryFullName: input.repositoryFullName,
+      })
     : await getGitHubInstallationToken();
   if (!token) {
     throw new Error("GitHub App credentials are required to create pull requests.");
@@ -161,6 +176,13 @@ function hasGitHubIntegrationAppEnv() {
   return Boolean(
     process.env.GITHUB_INTEGRATION_APP_ID && process.env.GITHUB_INTEGRATION_APP_PRIVATE_KEY,
   );
+}
+
+function githubRepositoryName(repositoryFullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
+    throw new Error("Invalid GitHub repository name for installation token scope.");
+  }
+  return repositoryFullName.split("/")[1];
 }
 
 function createAppJwt(credentials: { appId: string; privateKey: string }) {
