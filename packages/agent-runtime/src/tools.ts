@@ -47,7 +47,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path inside the workspace." },
+        path: { type: "string", description: "Relative path inside work/ or brain/." },
       },
       required: ["path"],
       additionalProperties: false,
@@ -60,7 +60,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path inside the workspace." },
+        path: { type: "string", description: "Relative path inside work/ or brain/." },
         content: { type: "string", description: "Full file content." },
       },
       required: ["path", "content"],
@@ -74,7 +74,11 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path inside the workspace.", default: "." },
+        path: {
+          type: "string",
+          description: "Relative path inside work/ or brain/.",
+          default: "work",
+        },
         depth: { type: "number", description: "Maximum traversal depth.", default: 2 },
       },
       additionalProperties: false,
@@ -83,7 +87,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "git_diff",
     kind: "sandbox",
-    description: "Return the current git diff for the workspace.",
+    description: "Return the current git diff for the session work directory.",
     parameters: {
       type: "object",
       properties: {},

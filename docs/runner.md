@@ -79,7 +79,8 @@ Important details:
   matching assistant tool calls.
 - The runner does not clone the full workspace repo into E2B. It materializes only configured
   Brain files under `/home/user/workspace/brain` plus a session-local
-  `/home/user/workspace/work` directory.
+  `/home/user/workspace/work` directory. `work/` is initialized as an empty git repository so
+  `git_diff` can report session-local scratch changes without exposing the managed workspace repo.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest.
 

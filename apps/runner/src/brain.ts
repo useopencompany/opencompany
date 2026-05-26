@@ -30,11 +30,12 @@ export async function materializeBrainForSession(input: {
   const folderReferences = references.filter((reference) => reference.type === "folder");
   const db = getDb();
   const layout = sandboxLayout(input.workdir);
-  const brainManifest = shellQuote(layout.brainManifest);
+  const brainManifestQuoted = shellQuote(layout.brainManifest);
 
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(layout.brainRoot)} && mkdir -p ${shellQuote(layout.brainRoot)}`,
   );
+  // prepareWorkspace normally creates this first; keep this idempotent for resumed sessions/tests.
   await input.sandbox.commands.run(
     [
       `mkdir -p ${shellQuote(layout.metadataRoot)}`,
@@ -92,6 +93,7 @@ export async function materializeBrainForSession(input: {
       });
   }
 
+  // The manifest is OpenCompany metadata. The agent sees Brain refs in agent.agent instead.
   await input.sandbox.files.write(
     layout.brainManifest,
     JSON.stringify(
@@ -115,7 +117,7 @@ export async function materializeBrainForSession(input: {
     { user: "root" },
   );
   await input.sandbox.commands.run(
-    `chown root:root ${brainManifest} && chmod 600 ${brainManifest}`,
+    `chown root:root ${brainManifestQuoted} && chmod 600 ${brainManifestQuoted}`,
     { user: "root" },
   );
   await input.sandbox.commands.run(`chown -R user:user ${shellQuote(layout.brainRoot)}`, {
@@ -331,11 +333,12 @@ async function writeBrainFileToGitHub(
   if (!repository) return { commitSha: null, blobSha: null };
   const token = await getGitHubInstallationToken();
   if (!token) return { commitSha: null, blobSha: null };
+  const repositoryPath = githubRepositoryPath(repository.fullName);
   const current = await getGitHubFile(token, repository, `brain/${path}`);
   const result = await githubRequest<{ content?: { sha?: string }; commit?: { sha?: string } }>({
     token,
     repository,
-    path: `/repos/${repository.fullName}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
+    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
     method: "PUT",
     body: {
       message: `Update brain/${path}`,
@@ -355,6 +358,7 @@ async function deleteBrainFileFromGitHub(
   if (!repository) return;
   const token = await getGitHubInstallationToken();
   if (!token) return;
+  const repositoryPath = githubRepositoryPath(repository.fullName);
   const current = blobSha
     ? { sha: blobSha }
     : await getGitHubFile(token, repository, `brain/${path}`);
@@ -362,7 +366,7 @@ async function deleteBrainFileFromGitHub(
   await githubRequest({
     token,
     repository,
-    path: `/repos/${repository.fullName}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
+    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
     method: "DELETE",
     body: {
       message: `Delete brain/${path}`,
@@ -374,10 +378,11 @@ async function deleteBrainFileFromGitHub(
 
 async function getGitHubFile(token: string, repository: WorkspaceRepository, path: string) {
   try {
+    const repositoryPath = githubRepositoryPath(repository.fullName);
     return await githubRequest<{ sha?: string }>({
       token,
       repository,
-      path: `/repos/${repository.fullName}/contents/${encodeURIComponentPath(path)}?ref=${encodeURIComponent(repository.defaultBranch)}`,
+      path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}?ref=${encodeURIComponent(repository.defaultBranch)}`,
       method: "GET",
     });
   } catch (error) {
@@ -436,4 +441,11 @@ function conflictPath(path: string) {
 
 function encodeURIComponentPath(path: string) {
   return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function githubRepositoryPath(fullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) {
+    throw new Error("Invalid GitHub repository full name.");
+  }
+  return fullName;
 }

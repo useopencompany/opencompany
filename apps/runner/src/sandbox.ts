@@ -111,6 +111,10 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
+  await input.sandbox.commands.run(`git -C ${shellQuote(layout.workRoot)} init -q`, {
+    user: SANDBOX_USER,
+    timeoutMs: 30_000,
+  });
   await input.sandbox.files.write(layout.agentFile, input.agentFile, {
     user: SANDBOX_ROOT_USER,
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
@@ -161,6 +165,9 @@ export async function runSandboxTool(input: {
   if (input.name === "write_file") {
     const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
     const content = readString(args, "content");
+    await input.sandbox.commands.run(`mkdir -p ${shellQuote(path.posix.dirname(filePath))}`, {
+      timeoutMs: 30_000,
+    });
     await input.sandbox.files.write(filePath, content);
     return {
       path: relativePath(input.workdir, filePath),
@@ -169,17 +176,15 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "list_files") {
-    const dirPath = resolveSandboxToolPath(
-      input.workdir,
-      readOptionalString(args, "path") ?? "work",
-    );
+    const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"));
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
+    const toolRelativePath = relativePath(input.workdir, dirPath);
     const result = await input.sandbox.commands.run(
-      `cd ${shellQuote(input.workdir)} && find ${shellQuote(relativePath(input.workdir, dirPath) || ".")} -maxdepth ${depth} -print | sort | head -200`,
-      { timeoutMs: 30_000 },
+      `find ${shellQuote(toolRelativePath)} -maxdepth ${depth} -print | sort | head -200`,
+      { cwd: input.workdir, timeoutMs: 30_000 },
     );
     return truncate({
-      path: relativePath(input.workdir, dirPath) || ".",
+      path: toolRelativePath,
       entries: String(result.stdout ?? "")
         .split("\n")
         .filter(Boolean),
@@ -187,8 +192,12 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "git_diff") {
+    const layout = sandboxLayout(input.workdir);
     const result = await input.sandbox.commands.run(
-      `cd ${shellQuote(input.workdir)} && git diff --`,
+      [
+        `git -C ${shellQuote(layout.workRoot)} diff --`,
+        `git -C ${shellQuote(layout.workRoot)} ls-files --others --exclude-standard | while IFS= read -r file; do git -C ${shellQuote(layout.workRoot)} diff --no-index -- /dev/null "$file" || true; done`,
+      ].join(" && "),
       {
         timeoutMs: 60_000,
       },
