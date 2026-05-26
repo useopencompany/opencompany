@@ -55,6 +55,49 @@ describe("materializeBrainForSession", () => {
       sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git init")),
     ).toBe(false);
   });
+
+  it("mounts all Brain files for the root Brain folder reference", async () => {
+    const db = createBrainDb([
+      {
+        path: "docs/context.md",
+        content: "Known facts",
+        contentHash: "hash_123",
+        sizeBytes: 11,
+      },
+      {
+        path: "README.md",
+        content: "Root facts",
+        contentHash: "hash_456",
+        sizeBytes: 10,
+      },
+    ]);
+    dbMocks.getDb.mockReturnValue(db);
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await materializeBrainForSession({
+      sandbox: sandbox as never,
+      sessionId: "ses_123",
+      workspaceId: "wsp_123",
+      workdir: "/home/user/workspace",
+      references: [{ path: "/", type: "folder" }],
+    });
+
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/brain/README.md",
+      "Root facts",
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/brain/docs/context.md",
+      "Known facts",
+    );
+  });
 });
 
 function createBrainDb(rows: Array<Record<string, unknown>>) {

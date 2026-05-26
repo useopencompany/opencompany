@@ -75,11 +75,12 @@ Each entry is a path inside `brain/` in the workspace repo. File paths mount one
 
 ```yaml
 brain:
+  - /
   - docs/README.md
   - product/
 ```
 
-The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
+Use `/` to mount the whole Brain root. The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
 
 ## The body
 
@@ -94,6 +95,7 @@ Find investors with @exa.        ← @exa            (tool)
 Use @openai/gpt-5.4 for this.    ← @openai/gpt-5.4 (model)
 Run @deep on the summary.        ← @deep           (alias → openai/gpt-5.4)
 Read @brain/product/ first.      ← @brain/product/ (Brain folder)
+Read @brain/ first.              ← @brain/         (Brain root folder)
 ```
 
 ### Aliases
@@ -106,6 +108,16 @@ Aliases are only recognized inside body mentions — not as raw `model:` values.
 | `@deep`              | `openai/gpt-5.4`      |
 
 Unknown `@text` that doesn't match a model, tool, or alias stays in the body as plain text — no error, no contribution to frontmatter.
+
+### After-session memory hook
+
+Add `#after-session` inside the body to enable a background pass after a session has been idle for 3 minutes. The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. The marker remains part of the normal instructions, but the runtime also uses the parsed prompt for an internal after-session run.
+
+```text
+Help the user during the session. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+```
+
+The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should update only mounted Brain files when there is useful long-lived context to preserve.
 
 ## Storage layout
 
@@ -211,9 +223,15 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     { id: "exa", type: "tool", label: "exa", description: "Deep research on the web and people." },
   ],
   brain: [
+    { path: "/", type: "folder" },
     { path: "docs/README.md", type: "file" },
     { path: "product/", type: "folder" },
   ],
+  afterSession: {
+    enabled: true,
+    prompt: "Update @brain/memory.md with durable preferences and decisions from the transcript.",
+    idleDelaySeconds: 180,
+  },
 }
 ```
 

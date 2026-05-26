@@ -15,12 +15,14 @@ import {
 } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentSessionAfterSessionRuns,
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
   agentSessionToolUsage,
   agentSessionUsage,
   agents,
+  users,
   type WorkspaceRepository,
   workspaceRepositories,
   workspaces,
@@ -38,6 +40,7 @@ import {
   jsonSchema,
   type LanguageModelResponseMetadata,
   type LanguageModelUsage,
+  type ModelMessage,
   type SystemModelMessage,
   stepCountIs,
   streamText,
@@ -45,7 +48,7 @@ import {
   type ToolSet,
   tool,
 } from "ai";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { materializeBrainForSession, syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
@@ -248,6 +251,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       agent: row.agent.config,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
+      ...optionalUserName(row.user),
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -332,7 +336,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         .orderBy(asc(agentSessionMessages.createdAt)),
     );
     const messages = buildModelMessages(
-      storedMessages.filter((message) => message.id !== assistantMessageId),
+      storedMessages.filter((message) => message.id !== assistantMessageId && !message.internal),
     );
     const getSandbox = async () => {
       if (sandbox) return sandbox;
@@ -629,6 +633,511 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
   }
 }
 
+export async function runAfterSession(input: {
+  sessionId: string;
+  messageId: string;
+  env: RunnerEnv;
+}) {
+  const db = getDb();
+  const trace = startTimingTrace("runner.run_after_session", {
+    session_id: input.sessionId,
+    message_id: input.messageId,
+    runner_instance_id: input.env.instanceId,
+  });
+  const controller = new AbortController();
+  const leaseId = newRunLeaseId();
+  const leaseOwner = input.env.instanceId;
+  const runLease = { sessionId: input.sessionId, leaseId, leaseOwner };
+  const assistantMessageId = newAgentSessionMessageId();
+  let sandbox: SandboxHandle | null = null;
+  let sandboxPromise: Promise<SandboxHandle> | null = null;
+  let leaseAcquired = false;
+  let lastHeartbeatAt = 0;
+  let afterSessionRunId: number | undefined;
+  let workspaceId: string | undefined;
+  let userId: string | undefined;
+  let agentId: string | undefined;
+  let modelProvider: string | undefined;
+  let modelName: string | undefined;
+  let sandboxId: string | undefined;
+  let outcome = "unknown";
+
+  try {
+    const row = await timeAsync(trace, "load_session", () => loadSession(input.sessionId));
+    workspaceId = row.workspace.id;
+    userId = row.session.userId;
+    agentId = row.agent.id;
+
+    const afterSession = row.agent.config.afterSession;
+    if (row.session.archivedAt) {
+      outcome = "skipped_archived";
+      return;
+    }
+    if (!afterSession?.enabled || !afterSession.prompt.trim()) {
+      outcome = "skipped_disabled";
+      return;
+    }
+
+    const latestUserMessage = await timeAsync(trace, "load_latest_user_message", () =>
+      loadLatestUserMessage(input.sessionId),
+    );
+    if (!latestUserMessage || latestUserMessage.id !== input.messageId) {
+      outcome = "skipped_newer_message";
+      return;
+    }
+
+    if (row.session.runLeaseId) {
+      outcome = "skipped_active_run";
+      await appendAfterSessionSkipped({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        reason: "active_run",
+      });
+      return;
+    }
+    if (row.session.status !== "completed") {
+      outcome = "skipped_session_not_completed";
+      return;
+    }
+
+    const afterRun = await createAfterSessionRun({
+      sessionId: input.sessionId,
+      workspaceId: row.workspace.id,
+      agentId: row.agent.id,
+      lastUserMessageId: input.messageId,
+      agentVersion: row.agent.version,
+      runLeaseId: leaseId,
+    });
+    if (!afterRun) {
+      outcome = "skipped_duplicate";
+      return;
+    }
+    afterSessionRunId = afterRun.id;
+
+    if (
+      !(await timeAsync(trace, "check_workspace_credits", () =>
+        hasPositiveWorkspaceBalance({ db, workspaceId: row.session.workspaceId }),
+      ))
+    ) {
+      outcome = "skipped_no_credits";
+      await completeAfterSessionRun(afterSessionRunId, {
+        status: "skipped",
+        skippedReason: "no_credits",
+      });
+      await appendAfterSessionSkipped({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        reason: "no_credits",
+      });
+      return;
+    }
+
+    const runtime = resolveAgentRuntimeConfig({
+      agent: row.agent.config,
+      workspaceName: row.workspace.name,
+      sessionTitle: row.session.title,
+      ...optionalUserName(row.user),
+    });
+    modelProvider = runtime.model.provider;
+    modelName = runtime.model.name;
+
+    const lease = await timeAsync(trace, "acquire_run_lease", () =>
+      acquireRunLease({
+        sessionId: input.sessionId,
+        messageId: `after-session:${input.messageId}`,
+        leaseId,
+        leaseOwner,
+        modelProvider: runtime.model.provider,
+        modelName: runtime.model.name,
+      }),
+    );
+    if (!lease) {
+      outcome = "skipped_lease_busy";
+      await completeAfterSessionRun(afterSessionRunId, {
+        status: "skipped",
+        skippedReason: "active_run",
+      });
+      await appendAfterSessionSkipped({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        reason: "active_run",
+      });
+      return;
+    }
+
+    leaseAcquired = true;
+    lastHeartbeatAt = Date.now();
+    activeRuns.set(input.sessionId, { leaseId, controller });
+
+    const checkAbort = async () => {
+      const heartbeat = await maybeHeartbeatRunLease({ ...runLease, lastHeartbeatAt });
+      lastHeartbeatAt = heartbeat.heartbeatAt;
+      if (!heartbeat.leaseActive) {
+        controller.abort();
+        throw new RunLeaseLostError();
+      }
+      await checkRunControl({ ...runLease, controller });
+    };
+
+    await timeAsync(trace, "initial_run_control_check", checkAbort);
+    validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
+
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId,
+        leaseOwner,
+        type: "after_session.started",
+        payload: {
+          runId: afterSessionRunId!,
+          messageId: input.messageId,
+          idleDelaySeconds: afterSession.idleDelaySeconds,
+        },
+      }),
+    );
+    logger.info("Runner after-session started", {
+      event: "opencompany.runner_after_session_started",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      model_provider: modelProvider,
+      model_name: modelName,
+    });
+
+    const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
+    const assistantCreated = await timeAsync(trace, "create_internal_assistant_message", () =>
+      createAssistantMessageForLease({
+        id: assistantMessageId,
+        sessionId: input.sessionId,
+        leaseId,
+        leaseOwner,
+        internal: true,
+      }),
+    );
+    if (!assistantCreated) {
+      outcome = "skipped_assistant_exists";
+      await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
+      return;
+    }
+
+    const storedMessages = await timeAsync(trace, "load_model_messages", () =>
+      db
+        .select()
+        .from(agentSessionMessages)
+        .where(eq(agentSessionMessages.sessionId, input.sessionId))
+        .orderBy(asc(agentSessionMessages.createdAt)),
+    );
+    const visibleStoredMessages = storedMessages.filter(
+      (message) => message.id !== assistantMessageId && !message.internal,
+    );
+    const messages: ModelMessage[] = buildModelMessages(visibleStoredMessages);
+    messages.push({
+      role: "user",
+      content: buildAfterSessionPrompt({
+        prompt: afterSession.prompt,
+      }),
+    });
+
+    const getSandbox = async () => {
+      if (sandbox) return sandbox;
+      if (sandboxPromise) return sandboxPromise;
+
+      sandboxPromise = (async () => {
+        const hydratedSandbox = await timeAsync(
+          trace,
+          "ensure_sandbox",
+          () => ensureSandbox(row, input.env),
+          {
+            existing_sandbox: Boolean(row.session.e2bSandboxId),
+          },
+        );
+        await checkAbort();
+        const updated = await timeAsync(trace, "update_sandbox_for_lease", () =>
+          updateSandboxForLease(input.sessionId, leaseId, leaseOwner, hydratedSandbox.sandboxId),
+        );
+        if (!updated) {
+          await killSandbox(hydratedSandbox.sandboxId);
+          throw new StaleRunLeaseError();
+        }
+
+        sandbox = hydratedSandbox;
+        sandboxId = hydratedSandbox.sandboxId;
+        return hydratedSandbox;
+      })().catch((error) => {
+        sandboxPromise = null;
+        throw error;
+      });
+
+      return sandboxPromise;
+    };
+    const tools = createToolSet({
+      sessionId: input.sessionId,
+      assistantMessageId,
+      runLeaseId: leaseId,
+      runLeaseOwner: leaseOwner,
+      internalMessages: true,
+      getSandbox,
+      workdir: row.session.workdir,
+      env: input.env,
+      enabledTools: runtime.tools,
+      repository: row.repository,
+      signal: controller.signal,
+      checkAbort,
+      observabilityContext: {
+        workspaceId,
+        userId,
+        agentId,
+        modelProvider,
+        modelName,
+      },
+    });
+
+    let assistantContent = "";
+    const assistantReplayParts: AssistantReplayPart[] = [];
+    let reasoningSummary = "";
+    let stepIndex = 0;
+    const result = streamText({
+      model: gateway(runtime.model.name),
+      system: buildCacheableSystemPrompt(
+        `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+        runtime.model.name,
+      ),
+      messages,
+      tools: pickRuntimeTools(tools, runtime.tools),
+      stopWhen: stepCountIs(8),
+      abortSignal: controller.signal,
+      ...(runtime.model.providerOptions ? { providerOptions: runtime.model.providerOptions } : {}),
+    });
+
+    await timeAsync(trace, "model_stream_total", async () => {
+      const iterator = result.fullStream[Symbol.asyncIterator]();
+      let next = await timeAsync(trace, "model_first_stream_part", () => iterator.next(), {
+        model_provider: runtime.model.provider,
+        model_name: runtime.model.name,
+      });
+
+      while (!next.done) {
+        const part = next.value;
+        await checkAbort();
+        throwIfAborted(controller.signal);
+        throwIfStreamErrorPart(part);
+
+        if (part.type === "text-delta") {
+          assistantContent += part.text;
+          appendAssistantTextPart(assistantReplayParts, part.text);
+        }
+
+        if (runtime.model.exposeReasoningSummary) {
+          reasoningSummary += readReasoningTextDelta(part);
+        }
+
+        if (part.type === "finish-step") {
+          stepIndex += 1;
+          await recordStepUsage({
+            sessionId: input.sessionId,
+            assistantMessageId,
+            runLeaseId: leaseId,
+            runLeaseOwner: leaseOwner,
+            stepIndex,
+            modelProvider: runtime.model.provider,
+            modelName: runtime.model.name,
+            response: part.response,
+            usage: part.usage,
+            finishReason: part.finishReason,
+            rawFinishReason: part.rawFinishReason,
+          });
+        }
+
+        if (part.type === "tool-call") {
+          assistantReplayParts.push({
+            type: "tool-call",
+            toolCallId: part.toolCallId,
+            toolName: part.toolName,
+            input: part.input,
+          });
+        }
+
+        next = await iterator.next();
+      }
+    });
+
+    if (sandbox) {
+      const activeSandbox = sandbox;
+      await timeAsync(trace, "sync_brain_after_session", () =>
+        syncBrainFromSandbox({
+          sandbox: activeSandbox,
+          sessionId: input.sessionId,
+          workspaceId: row.workspace.id,
+          workdir: row.session.workdir,
+          repository: row.repository,
+        }),
+      );
+    }
+
+    await checkAbort();
+    if (!assistantContent && assistantReplayParts.length === 0) {
+      assistantContent = "After-session run completed without changes.";
+      appendAssistantTextPart(assistantReplayParts, assistantContent);
+    }
+
+    const persistedAssistantModelMessage = toPersistedModelMessage(
+      buildAssistantModelMessage({
+        content: assistantContent,
+        parts: assistantReplayParts,
+      }),
+    );
+    await requireLeaseWrite(
+      completeAssistantMessageForLease({
+        sessionId: input.sessionId,
+        assistantMessageId,
+        leaseId,
+        leaseOwner,
+        content: assistantContent,
+        modelMessage: persistedAssistantModelMessage,
+      }),
+    );
+
+    const normalizedReasoningSummary = normalizeReasoningSummary(reasoningSummary);
+    if (normalizedReasoningSummary) {
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: assistantMessageId,
+          leaseId,
+          leaseOwner,
+          type: "message.reasoning_summary",
+          payload: { messageId: assistantMessageId, summary: normalizedReasoningSummary },
+        }),
+      );
+    }
+
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: assistantMessageId,
+        leaseId,
+        leaseOwner,
+        type: "message.completed",
+        payload: {
+          messageId: assistantMessageId,
+          content: assistantContent,
+          modelMessage: persistedAssistantModelMessage,
+          internal: true,
+        },
+      }),
+    );
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId,
+        leaseOwner,
+        type: "after_session.completed",
+        payload: { runId: afterSessionRunId!, messageId: input.messageId },
+      }),
+    );
+    await completeAfterSessionRun(afterSessionRunId!, { status: "completed" });
+    await requireLeaseWrite(releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed"));
+    outcome = "completed";
+    logger.info("Runner after-session completed", {
+      event: "opencompany.runner_after_session_completed",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      assistant_message_id: assistantMessageId,
+      sandbox_id: sandboxId,
+      model_provider: modelProvider,
+      model_name: modelName,
+    });
+  } catch (error) {
+    if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
+      outcome = "stale_lease";
+      return;
+    }
+
+    const message =
+      controller.signal.aborted || error instanceof RunAbortError
+        ? "After-session run aborted."
+        : error instanceof Error
+          ? error.message
+          : "Unknown after-session error";
+    captureException(error, {
+      event: "opencompany.runner_after_session_failed",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      assistant_message_id: assistantMessageId,
+      sandbox_id: sandboxId,
+      model_provider: modelProvider,
+      model_name: modelName,
+    });
+    if (leaseAcquired) {
+      await appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId,
+        leaseOwner,
+        type: "after_session.failed",
+        payload: {
+          ...(afterSessionRunId ? { runId: afterSessionRunId } : {}),
+          messageId: input.messageId,
+          message,
+        },
+      });
+      await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
+    } else {
+      await appendRuntimeEvent(db, {
+        sessionId: input.sessionId,
+        type: "after_session.failed",
+        payload: {
+          ...(afterSessionRunId ? { runId: afterSessionRunId } : {}),
+          messageId: input.messageId,
+          message,
+        },
+      });
+    }
+    if (afterSessionRunId) {
+      await completeAfterSessionRun(afterSessionRunId, { status: "failed", lastError: message });
+    }
+    outcome = "failed";
+    logger.error("Runner after-session failed", {
+      event: "opencompany.runner_after_session_failed",
+      workspace_id: workspaceId,
+      user_id: userId,
+      agent_id: agentId,
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      assistant_message_id: assistantMessageId,
+      sandbox_id: sandboxId,
+      model_provider: modelProvider,
+      model_name: modelName,
+      error,
+    });
+    throw error;
+  } finally {
+    if (activeRuns.get(input.sessionId)?.controller === controller) {
+      activeRuns.delete(input.sessionId);
+    }
+    endTimingTrace(trace, {
+      outcome,
+      model_provider: modelProvider,
+      model_name: modelName,
+      sandbox_hydrated: Boolean(sandbox),
+    });
+    const sandboxToPark = sandbox;
+    if (sandboxToPark) {
+      await timeAsync(trace, "park_sandbox", () => parkSandboxWhenIdle(sandboxToPark, input.env));
+    }
+  }
+}
+
 export async function archiveSession(sessionId: string) {
   const db = getDb();
   activeRuns.get(sessionId)?.controller.abort();
@@ -691,6 +1200,7 @@ function createToolSet(input: {
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
+  internalMessages?: boolean;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -730,6 +1240,7 @@ function createToolSet(input: {
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
           runLeaseOwner: input.runLeaseOwner,
+          ...(input.internalMessages ? { internalMessages: true } : {}),
           toolCallId: options.toolCallId,
           definition,
           args: toolInput,
@@ -761,6 +1272,7 @@ export async function executeRuntimeTool(input: {
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
+  internalMessages?: boolean;
   toolCallId: string;
   definition: RuntimeToolDefinition;
   args: unknown;
@@ -916,6 +1428,7 @@ export async function executeRuntimeTool(input: {
       ),
       toolName: input.definition.name,
       toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
     }),
   );
   if (failedOutput) {
@@ -1212,23 +1725,31 @@ async function updateSandboxForLease(
 export async function createAssistantMessageForLease(input: {
   id: string;
   sessionId: string;
-  responseToMessageId: string;
+  responseToMessageId?: string;
   leaseId: string;
   leaseOwner: string;
+  internal?: boolean;
 }) {
   await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
 
-  const [message] = await getDb()
+  const insert = getDb()
     .insert(agentSessionMessages)
     .values({
       id: input.id,
       sessionId: input.sessionId,
       role: "assistant",
       status: "running",
-      responseToMessageId: input.responseToMessageId,
-    })
-    .onConflictDoNothing({ target: agentSessionMessages.responseToMessageId })
-    .returning({ id: agentSessionMessages.id });
+      internal: input.internal ?? false,
+      responseToMessageId: input.responseToMessageId ?? null,
+    });
+  // Regular assistant responses are idempotent by responseToMessageId. Internal
+  // after-session messages do not respond to a user message, so their duplicate
+  // guard lives at the after-session run/lease layer instead.
+  const [message] = await (input.responseToMessageId
+    ? insert
+        .onConflictDoNothing({ target: agentSessionMessages.responseToMessageId })
+        .returning({ id: agentSessionMessages.id })
+    : insert.returning({ id: agentSessionMessages.id }));
 
   if (!message) return false;
 
@@ -1239,7 +1760,7 @@ export async function createAssistantMessageForLease(input: {
       leaseId: input.leaseId,
       leaseOwner: input.leaseOwner,
       type: "message.created",
-      payload: { messageId: input.id, role: "assistant" },
+      payload: { messageId: input.id, role: "assistant", internal: input.internal ?? false },
     }),
   );
   return true;
@@ -1283,6 +1804,7 @@ async function insertToolMessageForLease(input: {
   modelMessage: Record<string, unknown>;
   toolName: string;
   toolCallId: string;
+  internal?: boolean;
 }) {
   await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
 
@@ -1293,6 +1815,7 @@ async function insertToolMessageForLease(input: {
       sessionId: input.sessionId,
       role: "tool",
       status: "completed",
+      internal: input.internal ?? false,
       content: input.content,
       modelMessage: input.modelMessage,
       toolName: input.toolName,
@@ -1419,11 +1942,13 @@ async function loadSession(sessionId: string) {
       session: agentSessions,
       agent: agents,
       workspace: workspaces,
+      user: users,
       repository: workspaceRepositories,
     })
     .from(agentSessions)
     .innerJoin(agents, eq(agentSessions.agentId, agents.id))
     .innerJoin(workspaces, eq(agentSessions.workspaceId, workspaces.id))
+    .innerJoin(users, eq(agentSessions.userId, users.id))
     .leftJoin(
       workspaceRepositories,
       eq(agentSessions.workspaceId, workspaceRepositories.workspaceId),
@@ -1436,6 +1961,11 @@ async function loadSession(sessionId: string) {
   }
 
   return row;
+}
+
+function optionalUserName(user: Pick<typeof users.$inferSelect, "firstName" | "lastName">) {
+  const userName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  return userName ? { userName } : {};
 }
 
 type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
@@ -1469,6 +1999,88 @@ async function loadAssistantResponseForMessage(sessionId: string, messageId: str
     .limit(1);
 
   return message ?? null;
+}
+
+async function loadLatestUserMessage(sessionId: string) {
+  const [message] = await getDb()
+    .select({ id: agentSessionMessages.id })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.sessionId, sessionId),
+        eq(agentSessionMessages.role, "user"),
+        eq(agentSessionMessages.internal, false),
+      ),
+    )
+    .orderBy(desc(agentSessionMessages.createdAt))
+    .limit(1);
+
+  return message ?? null;
+}
+
+async function createAfterSessionRun(input: {
+  sessionId: string;
+  workspaceId: string;
+  agentId: string;
+  lastUserMessageId: string;
+  agentVersion: number;
+  runLeaseId: string;
+}) {
+  const [run] = await getDb()
+    .insert(agentSessionAfterSessionRuns)
+    .values({
+      sessionId: input.sessionId,
+      workspaceId: input.workspaceId,
+      agentId: input.agentId,
+      lastUserMessageId: input.lastUserMessageId,
+      agentVersion: input.agentVersion,
+      status: "running",
+      runLeaseId: input.runLeaseId,
+      startedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [
+        agentSessionAfterSessionRuns.sessionId,
+        agentSessionAfterSessionRuns.lastUserMessageId,
+        agentSessionAfterSessionRuns.agentVersion,
+      ],
+    })
+    .returning({ id: agentSessionAfterSessionRuns.id });
+
+  return run ?? null;
+}
+
+async function completeAfterSessionRun(
+  id: number,
+  input: { status: "completed" | "skipped" | "failed"; skippedReason?: string; lastError?: string },
+) {
+  await getDb()
+    .update(agentSessionAfterSessionRuns)
+    .set({
+      status: input.status,
+      skippedReason: input.skippedReason ?? null,
+      lastError: input.lastError ?? null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessionAfterSessionRuns.id, id));
+}
+
+async function appendAfterSessionSkipped(input: {
+  sessionId: string;
+  messageId: string;
+  reason: string;
+}) {
+  await appendRuntimeEvent(getDb(), {
+    sessionId: input.sessionId,
+    type: "after_session.skipped",
+    payload: { messageId: input.messageId, reason: input.reason },
+  });
+}
+
+function buildAfterSessionPrompt(input: { prompt: string }) {
+  return `After-session instructions:\n${input.prompt}`;
 }
 
 async function setStatus(sessionId: string, status: "provisioning" | "ready" | "completed") {

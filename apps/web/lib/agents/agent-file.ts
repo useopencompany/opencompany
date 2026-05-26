@@ -1,3 +1,4 @@
+import { extractAfterSessionConfig } from "./after-session";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "./config";
 import type {
   AgentBrainReference,
@@ -83,6 +84,7 @@ export function extractConfigFromMentions(body: string): {
   model: AgentModelId;
   tools: AgentToolId[];
   brain: AgentBrainReference[];
+  afterSession?: AgentConfig["afterSession"];
 } {
   let model = DEFAULT_MODEL_ID;
   const tools = new Set<AgentToolId>();
@@ -106,7 +108,14 @@ export function extractConfigFromMentions(body: string): {
     }
   }
 
-  return { model, tools: Array.from(tools), brain: Array.from(brain.values()) };
+  const afterSession = extractAfterSessionConfig(body);
+
+  return {
+    model,
+    tools: Array.from(tools),
+    brain: Array.from(brain.values()),
+    ...(afterSession ? { afterSession } : {}),
+  };
 }
 
 export function extractMentionIds(body: string) {
@@ -160,6 +169,8 @@ function buildAgentConfig(input: {
   tools: AgentToolId[];
   brain: AgentBrainReference[];
 }): AgentConfig {
+  const afterSession = extractAfterSessionConfig(input.body);
+
   return {
     schemaVersion: "agent.v1",
     title: input.title,
@@ -173,6 +184,7 @@ function buildAgentConfig(input: {
       return tool ? [{ ...tool }] : [];
     }),
     brain: input.brain,
+    ...(afterSession ? { afterSession } : {}),
   };
 }
 
@@ -285,6 +297,9 @@ function mentionModelId(id: string): AgentModelId | null {
 }
 
 function mentionBrainReference(id: string): AgentBrainReference | null {
+  if (id === "brain/") {
+    return { path: "/", type: "folder" };
+  }
   if (!id.startsWith("brain/")) return null;
   return normalizeBrainReference(id.slice("brain/".length));
 }
@@ -307,9 +322,13 @@ function normalizeBrainReferences(ids: string[]) {
 }
 
 function normalizeBrainReference(input: string): AgentBrainReference | null {
-  const folder = input.trim().endsWith("/");
-  const path = input
-    .trim()
+  const trimmed = input.trim();
+  if (trimmed === "/" || trimmed === "brain/") {
+    return { path: "/", type: "folder" };
+  }
+
+  const folder = trimmed.endsWith("/");
+  const path = trimmed
     .replace(/^brain\//, "")
     .replace(/^\/+/, "")
     .replace(/\/{2,}/g, "/");

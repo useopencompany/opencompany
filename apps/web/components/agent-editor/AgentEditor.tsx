@@ -11,7 +11,11 @@ import {
 import StarterKit from "@tiptap/starter-kit";
 import { useMemo, useState } from "react";
 import { createMentionSuggestion } from "./mentionSuggestion";
-import { AGENT_TOOL_MENTION_ITEMS, type AgentMentionItem } from "./tools";
+import {
+  AGENT_AFTER_SESSION_MENTION_ITEMS,
+  AGENT_TOOL_MENTION_ITEMS,
+  type AgentMentionItem,
+} from "./tools";
 
 type Props = {
   initialBody: string;
@@ -41,24 +45,28 @@ export function AgentEditor({
         HTMLAttributes: {
           class: "agent-mention",
         },
-        suggestion: createMentionSuggestion(mentionItems),
+        suggestions: [
+          createMentionSuggestion(mentionItems),
+          createMentionSuggestion(AGENT_AFTER_SESSION_MENTION_ITEMS, {
+            char: "#",
+            showCategories: false,
+          }),
+        ],
         renderText({ node, suggestion }) {
-          return `${suggestion?.char ?? "@"}${node.attrs.label ?? node.attrs.id}`;
+          return `${node.attrs.mentionSuggestionChar ?? suggestion?.char ?? "@"}${node.attrs.label ?? node.attrs.id}`;
         },
         renderHTML({ options, node }) {
           const id = typeof node.attrs.id === "string" ? node.attrs.id : "";
-          const kind = id.startsWith("model:")
-            ? "model"
-            : id.startsWith("tool:")
-              ? "tool"
-              : id.startsWith("brain/")
-                ? "brain"
-                : undefined;
+          const char =
+            typeof node.attrs.mentionSuggestionChar === "string"
+              ? node.attrs.mentionSuggestionChar
+              : "@";
+          const kind = char === "#" ? "hook" : mentionKindFromId(id);
 
           return [
             "span",
             mergeAttributes(options.HTMLAttributes, kind ? { "data-kind": kind } : {}),
-            `${node.attrs.mentionSuggestionChar ?? "@"}${node.attrs.label ?? node.attrs.id}`,
+            `${char}${node.attrs.label ?? node.attrs.id}`,
           ];
         },
       }),
@@ -138,7 +146,8 @@ function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONC
   let cursor = 0;
 
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] !== "@") continue;
+    const trigger = text[index];
+    if (trigger !== "@" && trigger !== "#") continue;
     if (index > 0 && !/[\s([{]/.test(text[index - 1] ?? "")) continue;
 
     let end = index + 1;
@@ -147,7 +156,10 @@ function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONC
     const rawToken = text.slice(index + 1, end);
     const token = rawToken.replace(/[.,;:!?)}\]]+$/g, "");
     const trailing = rawToken.slice(token.length);
-    const item = findMentionItem(token, mentionItems);
+    const item =
+      trigger === "@"
+        ? findMentionItem(token, mentionItems)
+        : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
     if (!item) continue;
 
     pushText(content, text.slice(cursor, index));
@@ -156,7 +168,7 @@ function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONC
       attrs: {
         id: item.mentionId,
         label: item.label,
-        mentionSuggestionChar: "@",
+        mentionSuggestionChar: trigger,
       },
     });
     pushText(content, trailing);
@@ -196,10 +208,21 @@ function nodeText(node: JSONContent): string {
   if (node.type === "mention") {
     const label = typeof node.attrs?.label === "string" ? node.attrs.label : null;
     const id = typeof node.attrs?.id === "string" ? node.attrs.id : "";
-    return `@${label ?? id}`;
+    const char =
+      typeof node.attrs?.mentionSuggestionChar === "string"
+        ? node.attrs.mentionSuggestionChar
+        : "@";
+    return `${char}${label ?? id}`;
   }
 
   return (node.content ?? []).map((child) => nodeText(child)).join("");
+}
+
+function mentionKindFromId(id: string) {
+  if (id.startsWith("model:")) return "model";
+  if (id.startsWith("tool:")) return "tool";
+  if (id.startsWith("brain/")) return "brain";
+  return undefined;
 }
 
 function isMentionChar(char: string) {

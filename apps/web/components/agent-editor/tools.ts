@@ -1,8 +1,9 @@
-import { Bot, Brain, FileText, type LucideIcon, Search } from "lucide-react";
+import { Bot, Brain, Clock3, FileText, Folder, type LucideIcon, Search } from "lucide-react";
+import { AFTER_SESSION_TAG } from "@/lib/agents/after-session";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
-type AgentMentionKind = "model" | "tool" | "brain";
+type AgentMentionKind = "model" | "tool" | "brain" | "hook";
 
 export type AgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -30,6 +31,11 @@ export type AgentBrainMention = AgentMentionItem & {
   id: string;
   kind: "brain";
   path: string;
+};
+
+export type AgentHookMention = AgentMentionItem & {
+  id: string;
+  kind: "hook";
 };
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
@@ -67,6 +73,17 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
 
 export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [...AGENT_MODELS, ...AGENT_TOOLS];
 export const AGENT_TOOL_MENTION_ITEMS: AgentMentionItem[] = AGENT_TOOLS;
+export const AGENT_AFTER_SESSION_MENTION_ITEMS: AgentHookMention[] = [
+  {
+    id: AFTER_SESSION_TAG.slice(1),
+    mentionId: AFTER_SESSION_TAG.slice(1),
+    kind: "hook",
+    label: AFTER_SESSION_TAG.slice(1),
+    displayLabel: AFTER_SESSION_TAG,
+    description: "Run the prompt after the session goes idle",
+    icon: Clock3,
+  },
+];
 
 export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
   const folders = new Set<string>();
@@ -77,7 +94,18 @@ export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
     }
   }
 
-  return [...Array.from(folders), ...paths].sort().map((path) => ({
+  const root: AgentBrainMention = {
+    id: "brain/",
+    mentionId: "brain/",
+    kind: "brain",
+    path: "/",
+    label: "brain/",
+    displayLabel: "brain/",
+    description: "Brain root folder",
+    icon: Folder,
+  };
+
+  const children = [...Array.from(folders), ...paths].sort().map((path) => ({
     id: `brain/${path}`,
     mentionId: `brain/${path}`,
     kind: "brain" as const,
@@ -85,8 +113,10 @@ export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
     label: `brain/${path}`,
     displayLabel: `brain/${path}`,
     description: path.endsWith("/") ? "Brain folder" : "Brain file",
-    icon: FileText,
+    icon: path.endsWith("/") ? Folder : FileText,
   }));
+
+  return [root, ...children];
 }
 
 export function findMentionItem(id: string): AgentMentionItem | undefined {

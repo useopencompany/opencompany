@@ -60,6 +60,12 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("syncs the root Brain folder from markdown mentions", () => {
+    const config = extractConfigFromMentions("Use all shared context in @brain/.");
+
+    expect(config.brain).toEqual([{ path: "/", type: "folder" }]);
+  });
+
   test("falls back to default config when mentions are removed", () => {
     const agent = buildAgentFile({
       title: "Clean room",
@@ -69,6 +75,51 @@ describe(".agent files", () => {
     expect(agent.config.model.name).toBe("openai/gpt-5.4-mini");
     expect(agent.config.tools).toEqual([]);
     expect(agent.config.brain).toEqual([]);
+    expect(agent.config.afterSession).toBeUndefined();
+  });
+
+  test("extracts inline after-session prompt from the current paragraph", () => {
+    const agent = buildAgentFile({
+      title: "Memory",
+      body: [
+        "Help with onboarding. #after-session Update @brain/memory.md with durable customer preferences.",
+        "Keep this line in the same after-session paragraph.",
+        "",
+        "This paragraph is normal instructions.",
+      ].join("\n"),
+    });
+
+    expect(agent.config.afterSession).toEqual({
+      enabled: true,
+      prompt:
+        "Update @brain/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
+      idleDelaySeconds: 180,
+    });
+  });
+
+  test("leaves empty after-session markers disabled", () => {
+    const agent = buildAgentFile({
+      title: "Memory",
+      body: "Help with onboarding.\n\n#after-session\n\nNo hook guidance.",
+    });
+
+    expect(agent.config.afterSession).toBeUndefined();
+  });
+
+  test("ignores after-session-like text inside words", () => {
+    expect(
+      buildAgentFile({
+        title: "Memory",
+        body: "Help with onboarding. #after-sessionsmoothly update memory.",
+      }).config.afterSession,
+    ).toBeUndefined();
+
+    expect(
+      buildAgentFile({
+        title: "Memory",
+        body: "Help with onboarding. pre#after-session update memory.",
+      }).config.afterSession,
+    ).toBeUndefined();
   });
 
   test("serializes body with rewritten frontmatter", () => {
@@ -84,6 +135,19 @@ describe(".agent files", () => {
     expect(source.endsWith("Find people with @exa and use @deep.")).toBe(true);
   });
 
+  test("round-trips after-session tags through serialization", () => {
+    const source = serializeAgentFile({
+      title: "Memory",
+      body: "Help users. #after-session Save durable facts in @brain/memory.md.",
+    });
+
+    expect(parseAgentFile(source).config.afterSession).toEqual({
+      enabled: true,
+      prompt: "Save durable facts in @brain/memory.md.",
+      idleDelaySeconds: 180,
+    });
+  });
+
   test("round-trips brain frontmatter", () => {
     const source = [
       "---",
@@ -91,6 +155,7 @@ describe(".agent files", () => {
       "model: openai/gpt-5.4-mini",
       "tools:",
       "brain:",
+      "  - /",
       "  - docs/README.md",
       "  - product/",
       "---",
@@ -101,6 +166,7 @@ describe(".agent files", () => {
     const parsed = parseAgentFile(source);
 
     expect(parsed.config.brain).toEqual([
+      { path: "/", type: "folder" },
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
     ]);

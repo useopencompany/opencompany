@@ -20,6 +20,7 @@ describe("resolveAgentRuntimeConfig", () => {
       agent: config,
       workspaceName: "Acme",
       sessionTitle: "Risk review",
+      userName: "Ada Lovelace",
     });
 
     expect(resolved.model).toEqual({
@@ -35,6 +36,7 @@ describe("resolveAgentRuntimeConfig", () => {
       exposeReasoningSummary: true,
     });
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
+    expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
     expect(resolved.tools).toContain("shell");
     expect(resolved.tools).toContain("git_diff");
@@ -74,6 +76,26 @@ describe("resolveAgentRuntimeConfig", () => {
         "web_fetch",
       ]),
     );
+  });
+
+  it("formats the root Brain mount clearly in the system prompt", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Research agent",
+      instructions: "Use shared context.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [{ path: "/", type: "folder" }],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.systemPrompt).toContain("Brain files are mounted under ./brain");
+    expect(resolved.systemPrompt).toContain("brain/");
+    expect(resolved.systemPrompt).not.toContain(": /.");
   });
 
   it("ignores stale unknown config tools", () => {

@@ -1,5 +1,6 @@
 import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { runAfterSession } from "./agent-loop";
 import type { PersistedRuntimeEvent } from "./events";
 import {
   createServer,
@@ -9,6 +10,14 @@ import {
   redactStreamToken,
 } from "./server";
 import { generateSessionTitleForMessage } from "./session-title";
+
+vi.mock("./agent-loop", () => ({
+  abortSession: vi.fn(async () => undefined),
+  archiveSession: vi.fn(async () => undefined),
+  runAfterSession: vi.fn(async () => undefined),
+  runMessage: vi.fn(async () => undefined),
+  startSession: vi.fn(async () => undefined),
+}));
 
 vi.mock("./session-title", () => ({
   generateSessionTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
@@ -33,6 +42,7 @@ const servers: Array<ReturnType<typeof createServer>> = [];
 afterEach(async () => {
   await Promise.all(servers.map((server) => server.close()));
   servers.length = 0;
+  vi.clearAllMocks();
 });
 
 describe("runner server CORS", () => {
@@ -129,6 +139,41 @@ describe("internal session title endpoint", () => {
       messageId: "msg_123",
       env,
     });
+  });
+});
+
+describe("internal after-session endpoint", () => {
+  it("accepts authenticated after-session requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/after-session?messageId=msg_123",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(runAfterSession).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      env,
+    });
+  });
+
+  it("rejects missing after-session message ids", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/after-session",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "messageId is required." });
   });
 });
 

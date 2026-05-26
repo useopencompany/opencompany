@@ -1,4 +1,5 @@
 import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
+import { extractAfterSessionConfig } from "./after-session";
 import { asRecord, sanitizeTiptapDoc, type TiptapNode } from "./tiptap";
 import type { AgentConfig, AgentModelId, AgentToolId, TiptapDoc } from "./types";
 
@@ -42,17 +43,20 @@ const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, mod
 export function extractAgentConfig(input: { name: string; content: TiptapDoc }): AgentConfig {
   const content = sanitizeTiptapDoc(input.content);
   const model = collectMentionedModel(content);
+  const instructions = extractPlainText(content);
+  const afterSession = extractAfterSessionConfig(instructions);
 
   return {
     schemaVersion: "agent.v1",
     title: normalizeName(input.name),
-    instructions: extractPlainText(content),
+    instructions,
     model: {
       provider: "vercel-ai-gateway",
       name: model.id,
     },
     tools: collectMentionedTools(content).map((tool) => ({ ...tool })),
     brain: collectMentionedBrain(content),
+    ...(afterSession ? { afterSession } : {}),
   };
 }
 
@@ -120,6 +124,7 @@ function parseMention(node: TiptapNode) {
 
   if (rawId.startsWith("brain/")) {
     const path = rawId.slice("brain/".length);
+    if (path === "") return { type: "brain" as const, path: "/" };
     if (path && !path.includes("..")) return { type: "brain" as const, path };
   }
 

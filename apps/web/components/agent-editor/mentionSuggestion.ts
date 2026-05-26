@@ -6,9 +6,12 @@ import { AGENT_TOOL_MENTION_ITEMS, type AgentMentionItem } from "./tools";
 
 export function createMentionSuggestion(
   items: AgentMentionItem[] = AGENT_TOOL_MENTION_ITEMS,
+  options: { char?: string; showCategories?: boolean } = {},
 ): Omit<SuggestionOptions<AgentMentionItem>, "editor"> {
+  const char = options.char ?? "@";
+
   return {
-    char: "@",
+    char,
     items: ({ query }) => {
       const q = query.toLowerCase();
       return items.filter((item) => {
@@ -29,7 +32,7 @@ export function createMentionSuggestion(
       return {
         onStart: (props) => {
           component = new ReactRenderer(MentionList, {
-            props,
+            props: { ...props, showCategories: options.showCategories ?? true },
             editor: props.editor,
           });
 
@@ -47,7 +50,7 @@ export function createMentionSuggestion(
           });
         },
         onUpdate: (props) => {
-          component?.updateProps(props);
+          component?.updateProps({ ...props, showCategories: options.showCategories ?? true });
           if (!props.clientRect || !popup) return;
           popup.setProps({
             getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),

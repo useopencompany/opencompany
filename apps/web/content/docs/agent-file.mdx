@@ -14,17 +14,18 @@ model: openai/gpt-5.4
 tools:
   - exa
 brain:
+  - /
   - docs/README.md
 ---
 
-Research investors with @exa. Use @deep for thesis write-ups. Read @brain/docs/README.md first.
+Research investors with @exa. Use @deep for thesis write-ups. Read @brain/ first.
 ```
 
 That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
 
 ## The header
 
-The header is YAML — a simple `key: value` format. It has three fields.
+The header is YAML — a simple `key: value` format. It has four fields.
 
 ### `title`
 
@@ -72,11 +73,12 @@ A list of long-lived context files or folders the agent can access in a session.
 
 ```yaml
 brain:
+  - /
   - docs/README.md
   - product/
 ```
 
-These paths live under `brain/` in the workspace repo. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
+These paths live under `brain/` in the workspace repo. Use `/` to mount the whole Brain root. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
 
 ## The body
 
@@ -98,16 +100,27 @@ Inside the body you can write `@something` to attach a model, tool, or Brain pat
 Find investors with @exa.        ← tool: exa
 Use @deep for the write-up.      ← model: openai/gpt-5.4
 Read @brain/product/ first.      ← Brain folder
+Read @brain/ first.              ← Brain root folder
 ```
 
 This is what mentions can be:
 
 - A tool ID, like `@exa`
 - A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
-- A Brain path, like `@brain/docs/README.md` or `@brain/product/`
+- A Brain path, like `@brain/`, `@brain/docs/README.md`, or `@brain/product/`
 - A shortcut name (see below)
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
+
+### After-session memory
+
+Add `#after-session` to run a background memory pass after a session has been idle for 3 minutes:
+
+```text
+Help with customer calls. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+```
+
+The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update mounted Brain files when there is useful long-lived context to save.
 
 ### Shortcuts
 

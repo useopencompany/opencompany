@@ -11,11 +11,12 @@ export type MentionListHandle = {
 type Props = {
   items: AgentMentionItem[];
   query?: string;
+  showCategories?: boolean;
   command: (item: { id: string; label: string }) => void;
 };
 
 export const MentionList = forwardRef<MentionListHandle, Props>(function MentionList(
-  { items, query = "", command },
+  { items, query = "", showCategories = true, command },
   ref,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -52,7 +53,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       : items;
 
   const rows =
-    normalizedQuery.length === 0 && !activeKind
+    showCategories && normalizedQuery.length === 0 && !activeKind
       ? categoryRows
       : visibleItems.map((item) => ({ type: "item" as const, item }));
 
@@ -184,5 +185,6 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
+  if (kind === "hook") return "Hooks";
   return "Brain";
 }

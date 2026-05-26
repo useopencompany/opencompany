@@ -510,6 +510,10 @@ function parseSessionMessage(value: unknown): SessionMessage {
   };
 
   if ("modelMessage" in record) message.modelMessage = readNullableRecord(record.modelMessage);
+  if ("internal" in record) {
+    const internal = readOptionalBooleanField(record, "internal");
+    if (internal !== undefined) message.internal = internal;
+  }
   if ("toolName" in record) message.toolName = readNullableStringField(record, "toolName");
   if ("toolCallId" in record) message.toolCallId = readNullableStringField(record, "toolCallId");
   if ("outputReasoningTokens" in record) {
@@ -621,6 +625,13 @@ function readOptionalNullableStringField(record: Record<string, unknown>, field:
   const value = record[field];
   if (value === undefined || value === null) return value;
   if (typeof value !== "string") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readOptionalBooleanField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error(`Invalid ${field}.`);
   return value;
 }
 
