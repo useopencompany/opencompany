@@ -208,7 +208,6 @@ async function createLinearIssue({
         description,
         priority: 3,
         labelIds,
-        createAsUser: "opencompany feedback",
         ...(process.env.LINEAR_FEEDBACK_PROJECT_ID
           ? { projectId: process.env.LINEAR_FEEDBACK_PROJECT_ID }
           : {}),
