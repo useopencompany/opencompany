@@ -16,9 +16,15 @@ tools:
 brain:
   - /
   - docs/README.md
+integrations:
+  github:
+    repositories:
+      - id: opencompany-web
+        fullName: opencompany/web
+        defaultBranch: main
 ---
 
-Research investors with @exa. Use @deep for thesis write-ups. Read @brain/ first.
+Research investors with @exa. Use @deep for thesis write-ups. Read @brain/ first. Work in @opencompany/web with @amp.
 ```
 
 That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
@@ -54,18 +60,26 @@ All models are accessed through Vercel AI Gateway, so you never deal with provid
 
 ### `tools`
 
-A list of capabilities the agent can use beyond text generation.
+A list of capabilities the agent can use beyond text generation. A simple tool
+can be written as a string. A tool with persisted configuration is written as an
+object.
 
 ```yaml
 tools:
   - exa
+  - id: amp
+    type: coding_agent
+    provider: amp
+    repository: opencompany-web
+    prCapable: true
 ```
 
 | ID | What it does |
 | --- | --- |
 | `exa` | Web and people research. The agent can search the live internet. |
+| `amp` | Coding work delegated into a sandboxed runtime. |
 
-Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file.
+Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file. Tool labels, descriptions, and runtime function names come from the platform catalog, not from this file.
 
 ### `brain`
 
@@ -79,6 +93,21 @@ brain:
 ```
 
 These paths live under `brain/` in the workspace repo. Use `/` to mount the whole Brain root. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
+
+### `integrations.github.repositories`
+
+A list of workspace-authorized GitHub repositories referenced by the body.
+
+```yaml
+integrations:
+  github:
+    repositories:
+      - id: opencompany-web
+        fullName: opencompany/web
+        defaultBranch: main
+```
+
+Unknown or unauthorized repository mentions stay in the body as text, but they do not contribute to the saved config.
 
 ## The body
 
@@ -94,12 +123,13 @@ There's no length limit, but shorter is usually better. If the instructions are 
 
 ## Mentions
 
-Inside the body you can write `@something` to attach a model, tool, or Brain path. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
+Inside the body you can write `@something` to attach a model, tool, Brain path, or GitHub repository. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
 
 ```text
 Find investors with @exa.        ← tool: exa
 Use @deep for the write-up.      ← model: openai/gpt-5.4
 Read @brain/product/ first.      ← Brain folder
+Work in @opencompany/web.        ← GitHub repository
 Read @brain/ first.              ← Brain root folder
 ```
 
@@ -108,9 +138,20 @@ This is what mentions can be:
 - A tool ID, like `@exa`
 - A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
 - A Brain path, like `@brain/`, `@brain/docs/README.md`, or `@brain/product/`
+- A GitHub `owner/repo`, like `@opencompany/web`
 - A shortcut name (see below)
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
+
+### After-session memory
+
+Add `#after-session` to run a background memory pass after a session has been idle for 3 minutes:
+
+```text
+Help with customer calls. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+```
+
+The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update mounted Brain files when there is useful long-lived context to save.
 
 ### Shortcuts
 
@@ -130,6 +171,12 @@ The agent runs on `openai/gpt-5.4-mini`. That's the default.
 ### What happens if the body mentions two different models
 
 The last one wins. If you write "Start with `@fast`, then switch to `@deep`," the agent will run on `@deep`. (The model itself can't actually switch mid-run — the mention controls the configuration, not the runtime behavior.)
+
+### Tiptap content is not the contract
+
+The web editor stores Tiptap JSON so mentions can render as chips when you reopen an agent. That JSON is only a presentation cache. The `.agent` body text is the contract, and saved runtime config is derived from the body text that will be written to GitHub.
+
+If body text and Tiptap JSON ever disagree, the body wins. This keeps stale editor state from removing repository bindings or tool config during a save.
 
 ## Saving and syncing
 
@@ -208,6 +255,29 @@ Find investors with @exa. Run a deep pass with @deep before writing.
 ```
 
 After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The `@deep` mention set the model.
+
+### A coding agent for a repo
+
+```yaml
+---
+title: "Web code reviewer"
+model: openai/gpt-5.4-mini
+tools:
+  - id: amp
+    type: coding_agent
+    provider: amp
+    repository: opencompany-web
+    prCapable: true
+integrations:
+  github:
+    repositories:
+      - id: opencompany-web
+        fullName: opencompany/web
+        defaultBranch: main
+---
+
+Review pull request context in @opencompany/web and use @amp for implementation work.
+```
 
 ## How forgiving the format is
 

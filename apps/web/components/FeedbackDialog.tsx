@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Send, X } from "lucide-react";
+import { Send, X } from "lucide-react";
 import { useActionState, useEffect, useRef } from "react";
 import { type FeedbackActionState, submitFeedback } from "@/lib/feedback/actions";
 
@@ -105,19 +105,8 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
         )}
 
         {state?.ok && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-[#badbcc] bg-[#f0fdf4] px-3 py-2 text-[12.5px] text-[#1f7a3a]">
+          <div className="rounded-md border border-[#badbcc] bg-[#f0fdf4] px-3 py-2 text-[12.5px] text-[#1f7a3a]">
             <span>Thanks, we are on it.</span>
-            {state.issueUrl && (
-              <a
-                href={state.issueUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex shrink-0 items-center gap-1 font-medium text-[#176b31] hover:underline"
-              >
-                Open
-                <ExternalLink size={12.5} strokeWidth={1.9} />
-              </a>
-            )}
           </div>
         )}
       </div>

@@ -28,7 +28,7 @@ bun run setup
 bun run dev
 ```
 
-`bun run setup` is idempotent: it copies `.env.example`, pulls shared dev env vars from Infisical when linked, creates or reuses a Neon branch for the current Git branch, and runs migrations. See [docs/getting-started.md](./docs/getting-started.md) for the new engineer checklist and full walkthrough.
+`bun run setup` is idempotent: it copies `.env.example`, pulls shared dev env vars from Infisical when linked, creates or reuses a Neon branch for the current Git branch, and runs migrations. `bun run dev` attempts to start ngrok first when the local ngrok CLI is authenticated, giving GitHub and other callback/webhook integrations a stable public URL for local testing. See [docs/getting-started.md](./docs/getting-started.md) for the new engineer checklist and full walkthrough.
 
 ## Repo layout
 

@@ -40,6 +40,7 @@ import {
 import {
   type AssistantTurnPart,
   buildAssistantTurnParts,
+  buildBackgroundActivityParts,
   isInspectableRuntimeEvent,
   type RuntimeEvent,
   type RuntimeToolCall,
@@ -174,9 +175,15 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
   );
+  const backgroundParts = useMemo(
+    () => buildBackgroundActivityParts(runtime.events, runtime.messages).slice(-8),
+    [runtime.events, runtime.messages],
+  );
   const visibleMessages = useMemo(
     () =>
-      runtime.messages.filter((message) => message.role === "user" || message.role === "assistant"),
+      runtime.messages.filter(
+        (message) => !message.internal && (message.role === "user" || message.role === "assistant"),
+      ),
     [runtime.messages],
   );
   const assistantPartsByMessageId = useMemo(() => {
@@ -333,6 +340,20 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
                 <ThinkingShimmer />
+              </div>
+            ) : null}
+
+            {backgroundParts.length > 0 ? (
+              <div className="space-y-1.5">
+                {backgroundParts.map((part) =>
+                  part.type === "tool-call" ? (
+                    <div key={part.toolCall.id} className="flex justify-start">
+                      <div className="max-w-[86%] break-words text-[13px] leading-6 text-ink/90">
+                        <ToolCallCard toolCall={part.toolCall} />
+                      </div>
+                    </div>
+                  ) : null,
+                )}
               </div>
             ) : null}
           </div>
@@ -505,6 +526,7 @@ function ReasoningSummaryCard({
 function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const isCompleted = toolCall.status === "completed";
+  const activityLine = latestActivityLine(toolCall.activityPreview);
   const isFailed = toolCall.status === "failed";
 
   return (
@@ -548,6 +570,14 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
           </span>
         ) : null}
       </button>
+      {activityLine && !expanded && !toolCall.outputPreview ? (
+        <div
+          title={activityLine}
+          className="ml-6 mt-0.5 max-w-[min(520px,calc(100vw-112px))] truncate text-[11px] leading-4 text-ink-subtle"
+        >
+          {activityLine}
+        </div>
+      ) : null}
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-[#e3e3df] pl-3">
           {toolCall.inputPreview ? (
@@ -565,6 +595,16 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function latestActivityLine(value: string) {
+  return (
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? ""
   );
 }
 
@@ -910,6 +950,14 @@ function formatRuntimeDate(value: string) {
 }
 
 function summarizeEvent(event: RuntimeEvent) {
+  if (event.type === "after_session.started") return "After-session started";
+  if (event.type === "after_session.completed") return "After-session completed";
+  if (event.type === "after_session.skipped") {
+    return `After-session skipped: ${readString(event.payload.reason)}`;
+  }
+  if (event.type === "after_session.failed") {
+    return `After-session failed: ${readString(event.payload.message)}`;
+  }
   if (event.type === "message.reasoning_summary") return "Thinking summary";
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;

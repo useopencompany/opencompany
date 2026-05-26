@@ -11,8 +11,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo dev --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
-    "dev:stream": "turbo dev --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
+    "dev": "node scripts/dev.mjs --ui=tui --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
+    "dev:stream": "node scripts/dev.mjs --ui=stream --filter=@opencompany/web --filter=@opencompany/inngest-dev --filter=@opencompany/runner --filter=@opencompany/stripe-webhooks",
     "dev:web": "turbo dev --ui=tui --filter=@opencompany/web",
     "dev:runner": "turbo dev --ui=stream --filter=@opencompany/runner",
     "dev:kill-port": "node scripts/kill-port.mjs",
@@ -42,6 +42,7 @@
     "setup:personal": "node scripts/setup.mjs --personal-env",
     "setup:stripe": "node scripts/setup.mjs --stripe",
     "env:pull": "node scripts/setup.mjs --pull-env",
+    "github:tunnel": "node scripts/github-tunnel.mjs",
     "db:generate": "bun --filter @opencompany/db db:generate",
     "db:migrate": "bun --filter @opencompany/db db:migrate",
     "db:seed": "node scripts/seed.mjs",

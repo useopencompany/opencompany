@@ -48,6 +48,10 @@ function sanitizeNode(value: unknown): TiptapNode | null {
   const type = typeof node?.type === "string" ? node.type : null;
   if (!node || !type) return null;
 
+  if (type === "mention" && !hasRenderableMentionAttrs(node.attrs)) {
+    return null;
+  }
+
   const out: TiptapNode = { type };
 
   if (typeof node.text === "string") {
@@ -70,6 +74,17 @@ function sanitizeNode(value: unknown): TiptapNode | null {
   }
 
   return out;
+}
+
+function hasRenderableMentionAttrs(value: unknown) {
+  const attrs = asRecord(value);
+  if (!attrs) return false;
+
+  return hasNonEmptyString(attrs.id) || hasNonEmptyString(attrs.label);
+}
+
+function hasNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function sanitizeMarks(value: unknown): TiptapMark[] {

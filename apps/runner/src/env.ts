@@ -8,7 +8,9 @@ export type RunnerEnv = {
   e2bApiKey: string;
   vercelAiGatewayApiKey: string;
   exaApiKey: string | undefined;
+  ampApiKey: string | undefined;
   e2bTemplate: string | undefined;
+  ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
   port: number;
   allowedOrigins: string[];
@@ -23,7 +25,9 @@ export function loadEnv(): RunnerEnv {
     e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     exaApiKey: optionalEnv("EXA_API_KEY"),
+    ampApiKey: optionalEnv("AMP_API_KEY"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
+    ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     port: Number(process.env.PORT ?? "3040"),
     allowedOrigins: (process.env.RUNNER_ALLOWED_ORIGINS ?? "http://localhost:3000")

@@ -18,27 +18,61 @@ export type TiptapDoc = {
   content?: any[];
 };
 
-export type AgentToolId = "exa";
+export type AgentToolId = "exa" | "amp";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
   | "anthropic/claude-haiku-4.5"
   | "anthropic/claude-sonnet-4.6";
 
-export type AgentConfigTool = {
-  id: AgentToolId;
-  type: "tool";
+export type AgentHostedToolConfig = {
+  id: "exa";
+  type: "tool" | "hosted_tool";
   label: string;
   description: string;
 };
+
+export type AgentCodingToolConfig = {
+  id: "amp";
+  type: "coding_agent";
+  provider: "amp";
+  label: string;
+  description: string;
+  repository: string | null;
+  prCapable: boolean;
+};
+
+export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig;
 
 export type AgentBrainReference = {
   path: string;
   type: "file" | "folder";
 };
 
+export type AgentAfterSessionConfig = {
+  enabled: boolean;
+  prompt: string;
+  idleDelaySeconds: number;
+};
+
+export type AgentGitHubRepositoryConfig = {
+  id: string;
+  fullName: string;
+  defaultBranch: string;
+};
+
+export type AgentTriggerConfig = {
+  id: string;
+  type: "github.pull_request";
+  repository: string;
+  events: Array<"opened" | "reopened" | "synchronize" | "ready_for_review">;
+  branches: string[];
+  enabled: boolean;
+};
+
 export type AgentConfig = {
   schemaVersion: "agent.v1";
+  version?: 2;
   title: string;
   instructions: string;
   model: {
@@ -47,6 +81,13 @@ export type AgentConfig = {
   };
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  afterSession?: AgentAfterSessionConfig;
+  integrations: {
+    github: {
+      repositories: AgentGitHubRepositoryConfig[];
+    };
+  };
+  triggers: AgentTriggerConfig[];
 };
 
 export const users = pgTable(
@@ -135,7 +176,7 @@ export const agents = pgTable(
       .$type<AgentConfig>()
       .notNull()
       .default(
-        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[]}'::jsonb`,
+        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
       ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -314,6 +355,7 @@ export const agentSessionMessages = pgTable(
     role: text("role").notNull(),
     status: text("status").notNull().default("created"),
     content: text("content").notNull().default(""),
+    internal: boolean("internal").notNull().default(false),
     modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
@@ -329,6 +371,43 @@ export const agentSessionMessages = pgTable(
     ),
     responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
       table.responseToMessageId,
+    ),
+  }),
+);
+
+export const agentSessionAfterSessionRuns = pgTable(
+  "agent_session_after_session_runs",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    lastUserMessageId: text("last_user_message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    agentVersion: integer("agent_version").notNull(),
+    status: text("status").notNull().default("queued"),
+    runLeaseId: text("run_lease_id"),
+    skippedReason: text("skipped_reason"),
+    lastError: text("last_error"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_after_session_runs_session_idx").on(table.sessionId),
+    workspaceIdx: index("agent_session_after_session_runs_workspace_idx").on(table.workspaceId),
+    idempotencyIdx: uniqueIndex("agent_session_after_session_runs_idempotency_idx").on(
+      table.sessionId,
+      table.lastUserMessageId,
+      table.agentVersion,
     ),
   }),
 );
@@ -596,6 +675,103 @@ export const workspaceRepositories = pgTable(
   }),
 );
 
+export const workspaceIntegrations = pgTable(
+  "workspace_integrations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    externalId: text("external_id").notNull(),
+    accountName: text("account_name"),
+    accountType: text("account_type"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderIdx: index("workspace_integrations_workspace_provider_idx").on(
+      table.workspaceId,
+      table.provider,
+    ),
+    workspaceProviderExternalIdx: uniqueIndex(
+      "workspace_integrations_workspace_provider_external_idx",
+    ).on(table.workspaceId, table.provider, table.externalId),
+  }),
+);
+
+export const workspaceIntegrationResources = pgTable(
+  "workspace_integration_resources",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => workspaceIntegrations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    resourceType: text("resource_type").notNull(),
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    displayName: text("display_name"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    selectedAt: timestamp("selected_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderTypeIdx: index(
+      "workspace_integration_resources_workspace_provider_type_idx",
+    ).on(table.workspaceId, table.provider, table.resourceType),
+    integrationIdx: index("workspace_integration_resources_integration_idx").on(
+      table.integrationId,
+    ),
+    workspaceProviderTypeNameIdx: uniqueIndex(
+      "workspace_integration_resources_workspace_provider_type_name_idx",
+    ).on(table.workspaceId, table.provider, table.resourceType, table.name),
+    workspaceProviderTypeExternalIdx: uniqueIndex(
+      "workspace_integration_resources_workspace_provider_type_external_idx",
+    ).on(table.workspaceId, table.provider, table.resourceType, table.externalId),
+  }),
+);
+
+export const agentSessionArtifacts = pgTable(
+  "agent_session_artifacts",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    toolCallId: text("tool_call_id").notNull(),
+    toolName: text("tool_name").notNull(),
+    kind: text("kind").notNull(),
+    title: text("title"),
+    url: text("url"),
+    externalId: text("external_id"),
+    repositoryFullName: text("repository_full_name"),
+    branchName: text("branch_name"),
+    diffStat: text("diff_stat"),
+    diffPreview: text("diff_preview"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_artifacts_session_idx").on(table.sessionId),
+    toolCallIdx: index("agent_session_artifacts_tool_call_idx").on(table.toolCallId),
+  }),
+);
+
 export const onboardingResponses = pgTable(
   "onboarding_responses",
   {
@@ -651,6 +827,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     fields: [workspaces.id],
     references: [workspaceRepositories.workspaceId],
   }),
+  integrations: many(workspaceIntegrations),
+  integrationResources: many(workspaceIntegrationResources),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
@@ -697,6 +875,7 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   usage: many(agentSessionUsage),
   toolUsage: many(agentSessionToolUsage),
   brainMounts: many(agentSessionBrainMounts),
+  artifacts: many(agentSessionArtifacts),
 }));
 
 export const agentSessionBrainMountsRelations = relations(agentSessionBrainMounts, ({ one }) => ({
@@ -844,6 +1023,39 @@ export const workspaceRepositoriesRelations = relations(workspaceRepositories, (
   }),
 }));
 
+export const workspaceIntegrationsRelations = relations(workspaceIntegrations, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceIntegrations.workspaceId],
+    references: [workspaces.id],
+  }),
+  resources: many(workspaceIntegrationResources),
+}));
+
+export const workspaceIntegrationResourcesRelations = relations(
+  workspaceIntegrationResources,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceIntegrationResources.workspaceId],
+      references: [workspaces.id],
+    }),
+    integration: one(workspaceIntegrations, {
+      fields: [workspaceIntegrationResources.integrationId],
+      references: [workspaceIntegrations.id],
+    }),
+  }),
+);
+
+export const agentSessionArtifactsRelations = relations(agentSessionArtifacts, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionArtifacts.sessionId],
+    references: [agentSessions.id],
+  }),
+  message: one(agentSessionMessages, {
+    fields: [agentSessionArtifacts.messageId],
+    references: [agentSessionMessages.id],
+  }),
+}));
+
 export const workspaceMembershipsRelations = relations(workspaceMemberships, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [workspaceMemberships.workspaceId],
@@ -869,6 +1081,8 @@ export const onboardingResponsesRelations = relations(onboardingResponses, ({ on
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
+export type WorkspaceIntegration = typeof workspaceIntegrations.$inferSelect;
+export type WorkspaceIntegrationResource = typeof workspaceIntegrationResources.$inferSelect;
 export type WorkspaceCreditBalance = typeof workspaceCreditBalances.$inferSelect;
 export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSelect;
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
@@ -882,6 +1096,7 @@ export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
 export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
+export type AgentSessionArtifact = typeof agentSessionArtifacts.$inferSelect;
 export type AgentSessionToolUsage = typeof agentSessionToolUsage.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;

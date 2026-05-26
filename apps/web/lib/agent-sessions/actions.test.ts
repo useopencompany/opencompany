@@ -4,7 +4,10 @@ import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
-import { dispatchAgentSessionStarted } from "@/lib/agent-sessions/events";
+import {
+  dispatchAgentAfterSessionCheck,
+  dispatchAgentSessionStarted,
+} from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { getCurrentWorkspace } from "@/lib/auth";
@@ -46,6 +49,7 @@ vi.mock("@/lib/agent-sessions/data", () => ({
 }));
 
 vi.mock("@/lib/agent-sessions/events", () => ({
+  dispatchAgentAfterSessionCheck: vi.fn().mockResolvedValue(undefined),
   dispatchAgentSessionStarted: vi.fn().mockResolvedValue(undefined),
   dispatchAgentSessionAbortRequested: vi.fn().mockResolvedValue(undefined),
 }));
@@ -65,6 +69,7 @@ const getDbMock = vi.mocked(getDb);
 const newAgentSessionIdMock = vi.mocked(newAgentSessionId);
 const newAgentSessionMessageIdMock = vi.mocked(newAgentSessionMessageId);
 const loadAgentSessionDetailForWorkspaceMock = vi.mocked(loadAgentSessionDetailForWorkspace);
+const dispatchAgentAfterSessionCheckMock = vi.mocked(dispatchAgentAfterSessionCheck);
 const dispatchAgentSessionStartedMock = vi.mocked(dispatchAgentSessionStarted);
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
 const captureServerEventMock = vi.mocked(captureServerEvent);
@@ -283,6 +288,11 @@ describe("createAgentSessionFromPrompt", () => {
       messageId: "msg_123",
       workspaceId: "wks_123",
     });
+    expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      workspaceId: "wks_123",
+    });
     expect(captureServerEventMock).toHaveBeenCalledWith("session_started", "usr_123", {
       user_id: "usr_123",
       workspace_id: "wks_123",
@@ -329,6 +339,11 @@ describe("submitAgentSessionMessage", () => {
 
     expect(result).toEqual({ ok: true, messageId: "msg_456" });
     expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_456",
+      workspaceId: "wks_123",
+    });
+    expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
       messageId: "msg_456",
       workspaceId: "wks_123",

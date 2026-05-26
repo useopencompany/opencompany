@@ -15,6 +15,7 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import {
+  dispatchAgentAfterSessionCheck,
   dispatchAgentSessionAbortRequested,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
@@ -110,6 +111,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
 
   after(async () => {
     await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
+    await dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id });
   });
 
   return loadCreatedSessionResult(sessionId, user.id, workspace.id);
@@ -157,6 +159,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
 
   after(async () => {
     await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
+    await dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id });
   });
 
   return { ok: true, messageId } as const;

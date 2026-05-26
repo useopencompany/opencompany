@@ -1,0 +1,35 @@
+export const AFTER_SESSION_TAG = "#after-session";
+export const DEFAULT_AFTER_SESSION_IDLE_DELAY_SECONDS = 180;
+
+export type AgentAfterSessionConfig = {
+  enabled: boolean;
+  prompt: string;
+  idleDelaySeconds: number;
+};
+
+export function extractAfterSessionConfig(body: string): AgentAfterSessionConfig | undefined {
+  const prompt = extractAfterSessionPrompt(body);
+  if (!prompt) return undefined;
+
+  return {
+    enabled: true,
+    prompt,
+    idleDelaySeconds: DEFAULT_AFTER_SESSION_IDLE_DELAY_SECONDS,
+  };
+}
+
+export function extractAfterSessionPrompt(body: string) {
+  const normalized = body.replace(/\r\n/g, "\n");
+  const match = /(^|[^\w])#after-session(?=$|[^\w])/.exec(normalized);
+  if (!match) return "";
+
+  const tagPrefix = match[1] ?? "";
+  const index = match.index + tagPrefix.length;
+  const paragraphEnd = normalized.indexOf("\n\n", index);
+  const rawPrompt = normalized.slice(
+    index + AFTER_SESSION_TAG.length,
+    paragraphEnd === -1 ? normalized.length : paragraphEnd,
+  );
+
+  return rawPrompt.replace(/^[\s:,-]+/, "").trim();
+}

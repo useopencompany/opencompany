@@ -3,6 +3,7 @@ import type { RunnerEnv } from "./env";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
+  MissingEnvError,
   validateHostedToolEnvironment,
 } from "./hosted-tools";
 
@@ -336,7 +337,7 @@ describe("validateHostedToolEnvironment", () => {
         enabledTools: ["tool_help", "exa_search"],
         env: env({ exaApiKey: undefined }),
       }),
-    ).toThrow("EXA_API_KEY");
+    ).toThrow(MissingEnvError);
   });
 });
 
@@ -348,7 +349,9 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
+    ampApiKey: undefined,
     e2bTemplate: undefined,
+    ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

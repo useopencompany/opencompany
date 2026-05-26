@@ -102,6 +102,11 @@ body {
   background: #f4f0fb;
   color: #5a3b78;
 }
+.agent-mention[data-kind="hook"] {
+  border-color: #eadcb6;
+  background: #fff8e7;
+  color: #795b19;
+}
 
 .tiptap-brain > *:first-child {
   margin-top: 0;

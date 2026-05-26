@@ -44,7 +44,8 @@ The V1 loop is intentionally custom and narrow:
 3. Inngest calls `POST /internal/sessions/:id/start` on the runner with
    `RUNNER_INTERNAL_TOKEN`.
 4. The runner marks the session `provisioning`, creates or reconnects the E2B sandbox, prepares
-   the capability-scoped workspace layout, and marks the session `ready`.
+   the capability-scoped workspace layout, clones the selected connected GitHub repo into `work/`
+   for AMP agents, and marks the session `ready`.
 5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
    The token is a short-lived HMAC token minted by the web app.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
@@ -79,8 +80,10 @@ Important details:
   matching assistant tool calls.
 - The runner does not clone the full workspace repo into E2B. It materializes only configured
   Brain files under `/home/user/workspace/brain` plus a session-local
-  `/home/user/workspace/work` directory. `work/` is initialized as an empty git repository so
-  `git_diff` can report session-local scratch changes without exposing the managed workspace repo.
+  `/home/user/workspace/work` directory. For regular sessions, `work/` is initialized as an empty
+  git repository so `git_diff` can report session-local scratch changes without exposing the
+  managed workspace repo. For AMP sessions, `work/` contains the selected connected GitHub
+  repository.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest.
@@ -92,6 +95,10 @@ V1 tools:
 - `write_file`
 - `list_files`
 - `git_diff`
+- `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
+
+`amp_coder` returns an `ampThreadId`. Later follow-up tasks can pass that id back as
+`ampThreadId` so the runner invokes `amp threads continue` instead of starting a fresh Amp thread.
 
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
 `/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
@@ -144,10 +151,15 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
+- `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
+- `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
+- optional GitHub integration app env vars for cloning configured work repositories into E2B and
+  creating AMP pull requests: `GITHUB_INTEGRATION_APP_ID` and
+  `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 
 Production runner logs are structured JSON on stdout and should be forwarded by Render to the

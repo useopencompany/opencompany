@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenText, ChevronLeft, ChevronRight, Cpu, Wrench } from "lucide-react";
+import { BookOpenText, ChevronLeft, ChevronRight, Clock3, Cpu, Plug, Wrench } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
@@ -11,11 +11,13 @@ export type MentionListHandle = {
 type Props = {
   items: AgentMentionItem[];
   query?: string;
+  showCategories?: boolean;
   command: (item: { id: string; label: string }) => void;
+  onSelect?: (item: AgentMentionItem) => void;
 };
 
 export const MentionList = forwardRef<MentionListHandle, Props>(function MentionList(
-  { items, query = "", command },
+  { items, query = "", showCategories = true, command, onSelect },
   ref,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -39,6 +41,20 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
     },
     {
       type: "category" as const,
+      kind: "integration" as const,
+      label: "Work integrations",
+      description: `${items.filter((item) => item.kind === "integration").length} available`,
+      icon: Plug,
+    },
+    {
+      type: "category" as const,
+      kind: "hook" as const,
+      label: "Hooks",
+      description: `${items.filter((item) => item.kind === "hook").length} available`,
+      icon: Clock3,
+    },
+    {
+      type: "category" as const,
       kind: "brain" as const,
       label: "Brain",
       description: `${items.filter((item) => item.kind === "brain").length} available`,
@@ -52,7 +68,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       : items;
 
   const rows =
-    normalizedQuery.length === 0 && !activeKind
+    showCategories && normalizedQuery.length === 0 && !activeKind
       ? categoryRows
       : visibleItems.map((item) => ({ type: "item" as const, item }));
 
@@ -73,6 +89,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       return;
     }
     command({ id: row.item.mentionId, label: row.item.label });
+    onSelect?.(row.item);
   };
 
   useImperativeHandle(ref, () => ({
@@ -184,5 +201,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
+  if (kind === "integration") return "Work integrations";
+  if (kind === "hook") return "Hooks";
   return "Brain";
 }

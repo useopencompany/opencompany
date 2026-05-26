@@ -13,6 +13,7 @@ vi.mock("e2b", () => ({
 import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
+  githubRemoteMatches,
   prepareWorkspace,
   resolveSandboxToolPath,
   runSandboxTool,
@@ -162,6 +163,102 @@ describe("prepareWorkspace", () => {
       },
     );
   });
+
+  it("clones the configured repository into work when no git checkout exists", async () => {
+    const sandbox = createWorkspaceSandbox(["__opencompany_missing_git__\n"]);
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      repositoryFullName: "opencompany/app",
+      repositoryDefaultBranch: "main",
+      githubToken: "ghs_token",
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("git remote get-url origin"),
+      {
+        timeoutMs: 30_000,
+      },
+    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("clone --depth 1 --branch 'main'"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("-c http.extraheader"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+    );
+    expect(
+      sandbox.commands.run.mock.calls.some(([command]) =>
+        String(command).includes("x-access-token"),
+      ),
+    ).toBe(false);
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("'/home/user/workspace/work'"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+    );
+    expect(
+      sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git -C")),
+    ).toBe(false);
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/.opencompany/agent.agent",
+      '---\ntitle: "Agent"\n---\n\nInstructions',
+      { user: "root", requestTimeoutMs: 30_000 },
+    );
+  });
+
+  it("keeps an existing checkout when origin matches the configured repository", async () => {
+    const sandbox = createWorkspaceSandbox(["https://github.com/opencompany/app.git\n"]);
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      repositoryFullName: "opencompany/app",
+      repositoryDefaultBranch: "main",
+      githubToken: "ghs_token",
+    });
+
+    const commands = sandbox.commands.run.mock.calls.map((call) => String((call as unknown[])[0]));
+    expect(commands.some((command) => command.includes("git clone"))).toBe(false);
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("git remote set-url origin"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 30_000 },
+    );
+  });
+
+  it("reclones when the existing checkout points at another repository", async () => {
+    const sandbox = createWorkspaceSandbox(["https://github.com/opencompany/other.git\n"]);
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      repositoryFullName: "opencompany/app",
+      repositoryDefaultBranch: "develop",
+      githubToken: "ghs_token",
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("clone --depth 1 --branch 'develop'"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+    );
+  });
+
+  it("matches tokenized GitHub remotes without exposing the token", () => {
+    expect(
+      githubRemoteMatches(
+        "https://x-access-token:ghs_secret@github.com/opencompany/app.git",
+        "opencompany/app",
+      ),
+    ).toBe(true);
+    expect(githubRemoteMatches("git@github.com:opencompany/app.git", "opencompany/app")).toBe(true);
+    expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
+      false,
+    );
+  });
 });
 
 describe("resolveSandboxToolPath", () => {
@@ -282,3 +379,18 @@ describe("runSandboxTool", () => {
     expect(result).toEqual({ diff: "diff --git a/a.txt b/a.txt\n", stderr: "" });
   });
 });
+
+function createWorkspaceSandbox(stdout: string[]) {
+  return {
+    commands: {
+      run: vi.fn(async (command: string) => ({
+        stdout: command.includes("git remote get-url origin") ? (stdout.shift() ?? "") : "",
+        stderr: "",
+        exitCode: 0,
+      })),
+    },
+    files: {
+      write: vi.fn(async () => undefined),
+    },
+  };
+}

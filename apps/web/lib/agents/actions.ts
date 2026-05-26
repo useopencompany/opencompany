@@ -2,11 +2,17 @@
 
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentSyncJobs, agents } from "@opencompany/db/schema";
-import { and, eq, or } from "drizzle-orm";
+import {
+  agentSyncJobs,
+  agents,
+  brainFiles,
+  workspaceIntegrationResources,
+} from "@opencompany/db/schema";
+import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
+import { type AgentConfigPatch, parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
+import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   buildPendingAgent,
   logAgentSyncJobQueued,
@@ -16,11 +22,21 @@ import {
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
+import {
+  collectBodyRepositoryMentions,
+  deriveAgentConfigFromBody,
+  normalizeAgentBody,
+} from "@/lib/agents/mentions";
 import { randomAgentName } from "@/lib/agents/names";
 import { serializeAgent } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
-import type { AgentModelId } from "@/lib/agents/types";
+import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
+import type { AgentModelId, TiptapDoc } from "@/lib/agents/types";
 import { getCurrentWorkspace } from "@/lib/auth";
+import {
+  GITHUB_INTEGRATION_PROVIDER,
+  GITHUB_REPOSITORY_RESOURCE_TYPE,
+} from "@/lib/integrations/service";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
   ensureWorkspaceRepository,
@@ -69,20 +85,29 @@ export async function createAgent() {
 
 export async function updateAgent(
   idOrPath: string,
-  patch: { name?: string; body?: string; model?: AgentModelId },
+  patch: {
+    name?: string;
+    body?: string;
+    content?: TiptapDoc;
+    model?: AgentModelId;
+    config?: AgentConfigPatch;
+  },
 ) {
   const trace = startTimingTrace("agents.update", {
     hasName: typeof patch.name === "string",
     hasBody: typeof patch.body === "string",
     hasModel: typeof patch.model === "string",
+    hasConfig: Boolean(patch.config),
   });
   const { user, workspace } = await getCurrentWorkspace();
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
-  const changedFields: Array<"name" | "body" | "model"> = [];
+  const changedFields: Array<"name" | "body" | "model" | "config"> = [];
   if (typeof patch.name === "string") changedFields.push("name");
   if (typeof patch.body === "string") changedFields.push("body");
+  if (patch.content && !changedFields.includes("body")) changedFields.push("body");
   if (typeof patch.model === "string") changedFields.push("model");
+  if (patch.config) changedFields.push("config");
 
   const [agent] = await timeAsync(trace, "db.selectAgent", () =>
     db
@@ -91,6 +116,7 @@ export async function updateAgent(
         path: agents.path,
         name: agents.name,
         body: agents.body,
+        content: agents.content,
         config: agents.config,
         version: agents.version,
         githubBlobSha: agents.githubBlobSha,
@@ -119,9 +145,73 @@ export async function updateAgent(
       : agent.path;
   const previousPath = agent.path;
   const pathChanged = Boolean(previousPath && path !== previousPath);
-  const body = patch.body ?? agent.body;
-  const model = patch.model ?? agent.config.model.name;
-  const source = serializeAgentFile({ title, body, model });
+  const sanitizedContent = patch.content ? sanitizeTiptapDoc(patch.content) : null;
+  const githubIntegrationRepositories = await timeAsync(
+    trace,
+    "db.selectGitHubIntegrationRepositories",
+    () =>
+      db
+        .select({
+          fullName: workspaceIntegrationResources.name,
+          metadata: workspaceIntegrationResources.metadata,
+        })
+        .from(workspaceIntegrationResources)
+        .where(
+          and(
+            eq(workspaceIntegrationResources.workspaceId, workspace.id),
+            eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+            eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+          ),
+        )
+        .orderBy(asc(workspaceIntegrationResources.name)),
+  );
+  const githubRepositories = githubIntegrationRepositories.map((repository) => ({
+    fullName: repository.fullName,
+    defaultBranch: readGitHubRepositoryDefaultBranch(repository.metadata),
+  }));
+  const derivedFromTiptap = sanitizedContent
+    ? derivePreviewConfigFromTiptapDoc({
+        title,
+        content: sanitizedContent,
+        model: patch.model ?? agent.config.model.name,
+        repositories: githubRepositories,
+        triggers: agent.config.triggers,
+      })
+    : null;
+  // The .agent body is the product contract and the source for runtime config.
+  // Tiptap JSON is an editor presentation cache; it can lag behind or lose
+  // mention attrs, so it must not override body mentions during persisted saves.
+  const derived =
+    typeof patch.body === "string"
+      ? deriveAgentConfigFromBody({
+          title,
+          body: patch.body,
+          model: patch.model ?? agent.config.model.name,
+          repositories: githubRepositories,
+          triggers: agent.config.triggers,
+        })
+      : derivedFromTiptap;
+  warnOnBodyTiptapMismatch({
+    agentId: agent.id,
+    ...(typeof patch.body === "string" ? { body: patch.body } : {}),
+    ...(typeof derivedFromTiptap?.body === "string" ? { tiptapBody: derivedFromTiptap.body } : {}),
+  });
+  const body = typeof patch.body === "string" ? patch.body : (derived?.body ?? agent.body);
+  const model = derived?.config.model.name ?? patch.model ?? agent.config.model.name;
+  const nextIntegrations =
+    derived?.config.integrations ?? patch.config?.integrations ?? agent.config.integrations;
+  const nextTools = derived?.config.tools ?? patch.config?.tools ?? agent.config.tools;
+  const nextBrain = derived?.config.brain ?? patch.config?.brain ?? agent.config.brain;
+  const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? agent.config.triggers;
+  const source = serializeAgentFile({
+    title,
+    body,
+    model,
+    tools: nextTools,
+    brain: nextBrain,
+    integrations: nextIntegrations,
+    triggers: nextTriggers,
+  });
   const parsed = parseAgentFile(source);
   const contentHash = hashAgentSource(source);
   const version = agent.version + 1;
@@ -159,6 +249,7 @@ export async function updateAgent(
           path,
           name: parsed.title,
           body: parsed.body,
+          ...(sanitizedContent ? { content: sanitizedContent } : {}),
           contentHash,
           version,
           config: parsed.config,
@@ -171,13 +262,23 @@ export async function updateAgent(
     ]),
   );
   logAgentSyncJobQueued(syncJob.metadata);
-  const [updatedAgent] = await timeAsync(trace, "db.selectUpdatedAgent", () =>
-    db
-      .select()
-      .from(agents)
-      .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)))
-      .limit(1),
-  );
+  const [[updatedAgent], brainPathRows] = await Promise.all([
+    timeAsync(trace, "db.selectUpdatedAgent", () =>
+      db
+        .select()
+        .from(agents)
+        .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)))
+        .limit(1),
+    ),
+    timeAsync(trace, "db.selectBrainPaths", () =>
+      db
+        .select({ path: brainFiles.path })
+        .from(brainFiles)
+        .where(eq(brainFiles.workspaceId, workspace.id))
+        .orderBy(asc(brainFiles.path)),
+    ),
+  ]);
+  const brainPaths = brainPathRows.map((row) => row.path);
 
   if (changedFields.length > 0) {
     await captureServerEvent("agent_saved", user.id, {
@@ -193,7 +294,7 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
     pathChanged,
-    agent: updatedAgent ? serializeAgent(updatedAgent) : null,
+    agent: updatedAgent ? serializeAgent(updatedAgent, brainPaths, githubRepositories) : null,
   };
 
   revalidatePath("/agents");
@@ -207,6 +308,26 @@ export async function updateAgent(
   });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
+}
+
+function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tiptapBody?: string }) {
+  if (process.env.NODE_ENV === "production") return;
+  if (typeof input.body !== "string" || typeof input.tiptapBody !== "string") return;
+
+  const body = normalizeAgentBody(input.body);
+  const tiptapBody = normalizeAgentBody(input.tiptapBody);
+  if (body === tiptapBody) return;
+
+  console.warn(
+    "[agent-save-body-tiptap-mismatch]",
+    JSON.stringify({
+      agentId: input.agentId,
+      bodyLength: body.length,
+      tiptapBodyLength: tiptapBody.length,
+      bodyRepositories: collectBodyRepositoryMentions(body),
+      tiptapRepositories: collectBodyRepositoryMentions(tiptapBody),
+    }),
+  );
 }
 
 export async function materializeLegacyAgentFiles() {
@@ -237,6 +358,10 @@ export async function materializeLegacyAgentFiles() {
       title: agent.name,
       body,
       model: agent.config.model.name,
+      tools: agent.config.tools,
+      brain: agent.config.brain,
+      integrations: agent.config.integrations,
+      triggers: agent.config.triggers,
     });
     const parsed = parseAgentFile(source);
     const contentHash = hashAgentSource(source);
@@ -313,6 +438,10 @@ export async function syncAgentsFromWorkspaceRepository() {
         title: parsed.title,
         body: parsed.body,
         model: parsed.config.model.name,
+        tools: parsed.config.tools,
+        brain: parsed.config.brain,
+        integrations: parsed.config.integrations,
+        triggers: parsed.config.triggers,
       }),
     );
     const [existing] = await timeAsync(
@@ -378,4 +507,10 @@ export async function syncAgentsFromWorkspaceRepository() {
 
   revalidatePath("/agents");
   endTimingTrace(trace, { count: files.length });
+}
+
+function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {
+  return typeof metadata.defaultBranch === "string" && metadata.defaultBranch.trim()
+    ? metadata.defaultBranch.trim()
+    : "main";
 }
