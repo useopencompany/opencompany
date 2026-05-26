@@ -82,6 +82,28 @@ describe("resolveAgentRuntimeConfig", () => {
     );
   });
 
+  it("formats the root Brain mount clearly in the system prompt", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Research agent",
+      instructions: "Use shared context.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [{ path: "/", type: "folder" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.systemPrompt).toContain("Brain files are mounted under ./brain");
+    expect(resolved.systemPrompt).toContain("brain/");
+    expect(resolved.systemPrompt).not.toContain(": /.");
+  });
+
   it("ignores stale unknown config tools", () => {
     const config = {
       schemaVersion: "agent.v1",

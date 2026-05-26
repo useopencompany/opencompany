@@ -253,6 +253,7 @@ function bodyToolsToConfig(toolIds: AgentToolId[], repositoryId: string | null) 
 }
 
 function brainReferenceFromMention(id: string): AgentBrainReference | null {
+  if (id === "brain/") return { path: "/", type: "folder" };
   if (!id.startsWith("brain/")) return null;
   const folder = id.endsWith("/");
   const path = id

@@ -84,11 +84,12 @@ Each entry is a path inside `brain/` in the workspace repo. File paths mount one
 
 ```yaml
 brain:
+  - /
   - docs/README.md
   - product/
 ```
 
-The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
+Use `/` to mount the whole Brain root. The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
 
 ### `integrations.github.repositories` — list of repository objects
 
@@ -136,6 +137,7 @@ Use @openai/gpt-5.4 for this.    ← @openai/gpt-5.4 (model)
 Run @deep on the summary.        ← @deep           (alias → openai/gpt-5.4)
 Read @brain/product/ first.      ← @brain/product/ (Brain folder)
 Work in @opencompany/web.        ← @opencompany/web (GitHub repository)
+Read @brain/ first.              ← @brain/         (Brain root folder)
 ```
 
 ### Aliases
@@ -253,6 +255,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     { id: "exa", type: "tool", label: "exa", description: "Deep research on the web and people." },
   ],
   brain: [
+    { path: "/", type: "folder" },
     { path: "docs/README.md", type: "file" },
     { path: "product/", type: "folder" },
   ],

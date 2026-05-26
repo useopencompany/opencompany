@@ -311,9 +311,13 @@ function normalizeBrainReferences(value: unknown) {
 }
 
 function normalizeBrainReference(input: string): AgentBrainReference | null {
-  const folder = input.trim().endsWith("/");
-  const path = input
-    .trim()
+  const trimmed = input.trim();
+  if (trimmed === "/" || trimmed === "brain/") {
+    return { path: "/", type: "folder" };
+  }
+
+  const folder = trimmed.endsWith("/");
+  const path = trimmed
     .replace(/^brain\//, "")
     .replace(/^\/+/, "")
     .replace(/\/{2,}/g, "/");
