@@ -214,6 +214,10 @@ describe("prepareWorkspace", () => {
 
     const commands = sandbox.commands.run.mock.calls.map((call) => String((call as unknown[])[0]));
     expect(commands.some((command) => command.includes("git clone"))).toBe(false);
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      expect.stringContaining("git remote set-url origin"),
+      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 30_000 },
+    );
   });
 
   it("reclones when the existing checkout points at another repository", async () => {

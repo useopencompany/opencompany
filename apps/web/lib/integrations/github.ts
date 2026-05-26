@@ -154,14 +154,14 @@ export async function verifyGitHubUserInstallation(input: {
   userToken: string;
   installationId: string;
 }) {
-  const result = await githubRequest<GitHubUserInstallations>({
+  const installations = await githubPaginatedRequest<GitHubUserInstallations, GitHubInstallation>({
     token: input.userToken,
     authScheme: "Bearer",
-    path: "/user/installations?per_page=100",
-    method: "GET",
+    path: "/user/installations",
+    pickItems: (page: GitHubUserInstallations) => page.installations ?? [],
   });
 
-  const installation = (result.installations ?? []).find(
+  const installation = installations.find(
     (candidate) => String(candidate.id) === input.installationId,
   );
   if (!installation) {
@@ -182,13 +182,13 @@ export async function getGitHubWorkInstallation(input: { installationId: string 
 
 export async function listGitHubWorkInstallationRepositories(input: { installationId: string }) {
   const token = await getGitHubWorkInstallationToken(input.installationId);
-  const result = await githubRequest<GitHubInstallationRepositories>({
+  const repositories = await githubPaginatedRequest<GitHubInstallationRepositories, GitHubRepo>({
     token,
-    path: "/installation/repositories?per_page=100",
-    method: "GET",
+    path: "/installation/repositories",
+    pickItems: (page: GitHubInstallationRepositories) => page.repositories ?? [],
   });
 
-  return toWorkRepositories(result.repositories ?? []);
+  return toWorkRepositories(repositories);
 }
 
 export async function deleteGitHubWorkInstallation(input: { installationId: string }) {
@@ -278,6 +278,30 @@ async function githubRequest<T>(input: {
   }
 
   return (await response.json()) as T;
+}
+
+async function githubPaginatedRequest<TPage, TItem>(input: {
+  token: string;
+  path: string;
+  authScheme?: "Bearer" | "token";
+  pickItems: (page: TPage) => TItem[];
+}) {
+  const items: TItem[] = [];
+  let page = 1;
+
+  while (true) {
+    const separator = input.path.includes("?") ? "&" : "?";
+    const result = await githubRequest<TPage>({
+      token: input.token,
+      path: `${input.path}${separator}per_page=100&page=${page}`,
+      method: "GET",
+      ...(input.authScheme ? { authScheme: input.authScheme } : {}),
+    });
+    const pageItems = input.pickItems(result);
+    items.push(...pageItems);
+    if (pageItems.length < 100) return items;
+    page += 1;
+  }
 }
 
 function isGitHubIntegrationStatePayload(value: unknown): value is GitHubIntegrationStatePayload {

@@ -156,9 +156,15 @@ async function prepareGitHubRepository(input: {
     { timeoutMs: 30_000 },
   );
   const currentOrigin = String(origin.stdout ?? "").trim();
-  if (githubRemoteMatches(currentOrigin, input.repositoryFullName)) return;
-
   const cloneUrl = githubCloneUrl(input.repositoryFullName);
+  if (githubRemoteMatches(currentOrigin, input.repositoryFullName)) {
+    await input.sandbox.commands.run(
+      `cd ${shellQuote(input.workdir)} && git remote set-url origin "${cloneUrl}"`,
+      { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 30_000 },
+    );
+    return;
+  }
+
   await input.sandbox.commands.run(
     [
       `rm -rf ${shellQuote(input.workdir)}`,

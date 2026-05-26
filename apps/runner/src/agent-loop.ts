@@ -1262,6 +1262,13 @@ async function runAmpCoderTool(input: {
   ampStream.finish();
   const ampSummary = ampStream.summary();
 
+  await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
+    timeoutMs: 60_000,
+  });
+  const diffStatus = await input.sandbox.commands.run(
+    `cd ${shellQuote(layout.workRoot)} && git status --short`,
+    { timeoutMs: 60_000 },
+  );
   const diffStat = await input.sandbox.commands.run(
     `cd ${shellQuote(layout.workRoot)} && git diff HEAD --stat`,
     { timeoutMs: 60_000 },
@@ -1270,7 +1277,7 @@ async function runAmpCoderTool(input: {
     `cd ${shellQuote(layout.workRoot)} && git diff HEAD -- | head -400`,
     { timeoutMs: 60_000 },
   );
-  const hasDiff = String(diffStat.stdout ?? "").trim().length > 0;
+  const hasDiff = String(diffStatus.stdout ?? "").trim().length > 0;
   let branchName: string | null = null;
   let pullRequestUrl: string | null = null;
 
@@ -1298,6 +1305,7 @@ async function runAmpCoderTool(input: {
         `git checkout -b ${shellQuote(branchName)}`,
         "git add -A",
         `git commit -m ${shellQuote(commitMessage)}`,
+        `git remote set-url origin "${githubAuthenticatedRemoteUrl(repository.fullName)}"`,
         `git push origin ${shellQuote(branchName)}`,
       ].join(" && "),
       { envs: { GITHUB_TOKEN: token }, timeoutMs: 180_000 },
@@ -1326,7 +1334,7 @@ async function runAmpCoderTool(input: {
       externalId: ampSummary.threadId,
       repositoryFullName: repository.fullName,
       branchName,
-      diffStat: truncateText(String(diffStat.stdout ?? ""), 4000),
+      diffStat: truncateText(formatAmpDiffStat(diffStat.stdout, diffStatus.stdout), 4000),
       diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
       metadata: {
         continuedFromAmpThreadId: requestedAmpThreadId,
@@ -1350,7 +1358,7 @@ async function runAmpCoderTool(input: {
     ampNumTurns: ampSummary.numTurns,
     ampPermissionDenials: ampSummary.permissionDenials,
     exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-    diffStat: truncateText(String(diffStat.stdout ?? ""), 4000),
+    diffStat: truncateText(formatAmpDiffStat(diffStat.stdout, diffStatus.stdout), 4000),
     diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
     branchName,
     pullRequestUrl,
@@ -1647,6 +1655,22 @@ function normalizeCommitMessage(value: string) {
     .find(Boolean);
   const title = firstLine || "Apply AMP changes";
   return title.length > 72 ? `${title.slice(0, 69)}...` : title;
+}
+
+function githubAuthenticatedRemoteUrl(repositoryFullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
+    throw new Error("Invalid GitHub repository name for AMP push.");
+  }
+
+  return `https://x-access-token:$GITHUB_TOKEN@github.com/${repositoryFullName}.git`;
+}
+
+function formatAmpDiffStat(stat: unknown, status: unknown) {
+  const statText = String(stat ?? "").trim();
+  const statusText = String(status ?? "").trim();
+  if (!statusText) return statText;
+  if (!statText) return statusText;
+  return `${statText}\n\n${statusText}`;
 }
 
 function truncateText(value: string, maxLength: number) {
