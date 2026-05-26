@@ -183,6 +183,8 @@ Useful local-only vars:
 | `PORT` | Optional local web port override. |
 | `INNGEST_SDK_URL` | Optional local Inngest SDK URL override. |
 | `OPENCOMPANY_NGROK_URL` | Optional stable ngrok origin for local integration callback testing. |
+| `NGROK_AUTHTOKEN` | Optional ngrok auth token for local dev. Prefer the local ngrok config unless sharing through Infisical. |
+| `OPENCOMPANY_NGROK_REQUIRED` | Set to `1` to fail `bun run dev` when ngrok cannot start. Fixed ngrok URLs are treated as required. |
 | `OPENCOMPANY_NGROK_DISABLED` | Set to `1` to skip automatic ngrok startup in `bun run dev`. |
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 

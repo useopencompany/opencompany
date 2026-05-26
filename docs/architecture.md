@@ -151,5 +151,6 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 - Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
   `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`, `E2B_API_KEY`,
   `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`,
-  `AMP_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, and optional `RUNNER_E2B_IDLE_TIMEOUT_MS`
-  / `RUNNER_INSTANCE_ID`.
+  `AMP_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, optional `GITHUB_INTEGRATION_APP_ID`
+  / `GITHUB_INTEGRATION_APP_PRIVATE_KEY` for AMP work-repository cloning and PRs, and optional
+  `RUNNER_E2B_IDLE_TIMEOUT_MS` / `RUNNER_INSTANCE_ID`.

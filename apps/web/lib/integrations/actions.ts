@@ -9,11 +9,17 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getCurrentWorkspace, requireCurrentWorkspace } from "@/lib/auth";
 import {
+  deleteGitHubWorkInstallation,
+  GitHubInstallationNotFoundError,
   getGitHubWorkInstallation,
+  isGitHubWorkInstallationManagementConfigured,
   isGitHubWorkIntegrationConfigured,
   listGitHubWorkInstallationRepositories,
 } from "@/lib/integrations/github";
-import { syncGitHubIntegrationRepositories } from "@/lib/integrations/service";
+import {
+  disconnectGitHubIntegration,
+  syncGitHubIntegrationRepositories,
+} from "@/lib/integrations/service";
 
 export type WorkspaceIntegrationStatus =
   | "not_connected"
@@ -104,6 +110,63 @@ export async function markGitHubRepositorySelected(fullName: string) {
     );
 
   revalidateIntegrationPaths();
+}
+
+export type DisconnectGitHubIntegrationResult = {
+  ok: boolean;
+  status: "disconnected" | "not_connected" | "error";
+  message: string;
+};
+
+export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGitHubIntegrationResult> {
+  const { workspace } = await getCurrentWorkspace();
+  const db = getDb();
+  const [existingInstallation] = await db
+    .select()
+    .from(workspaceGitHubIntegrationInstallations)
+    .where(eq(workspaceGitHubIntegrationInstallations.workspaceId, workspace.id))
+    .limit(1);
+
+  if (!existingInstallation) {
+    return {
+      ok: true,
+      status: "not_connected",
+      message: "GitHub was already disconnected.",
+    };
+  }
+
+  if (!isGitHubWorkInstallationManagementConfigured()) {
+    await disconnectGitHubIntegration({ workspaceId: workspace.id });
+    revalidateIntegrationPaths();
+    return {
+      ok: true,
+      status: "disconnected",
+      message:
+        "Removed the local GitHub connection. GitHub App credentials are not configured for uninstall.",
+    };
+  }
+
+  try {
+    await deleteGitHubWorkInstallation({ installationId: existingInstallation.installationId });
+  } catch (error) {
+    if (!(error instanceof GitHubInstallationNotFoundError)) {
+      return {
+        ok: false,
+        status: "error",
+        message:
+          error instanceof Error ? error.message : "GitHub could not be disconnected. Try again.",
+      };
+    }
+  }
+
+  await disconnectGitHubIntegration({ workspaceId: workspace.id });
+  revalidateIntegrationPaths();
+
+  return {
+    ok: true,
+    status: "disconnected",
+    message: "GitHub was disconnected from this workspace.",
+  };
 }
 
 function githubStatus(input: {

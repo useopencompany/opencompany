@@ -87,7 +87,7 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
       mentionExtension,
       plainTextKeysExtension,
     ],
-    content: hasUsableDocumentContent(initialContent)
+    content: hasUsableDocumentContent(initialContent, initialBody)
       ? initialContent
       : bodyToTiptapDoc(initialBody, mentionItems),
     editorProps: {
@@ -134,13 +134,30 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
   );
 });
 
-function hasUsableDocumentContent(content: JSONContent | null | undefined): content is JSONContent {
+function hasUsableDocumentContent(
+  content: JSONContent | null | undefined,
+  body: string,
+): content is JSONContent {
   return (
     content?.type === "doc" &&
     Array.isArray(content.content) &&
     content.content.length > 0 &&
-    mentionsHaveDisplayText(content)
+    mentionsHaveDisplayText(content) &&
+    bodyMatchesContent(body, content)
   );
+}
+
+function bodyMatchesContent(body: string, content: JSONContent) {
+  return normalizeBodyForComparison(tiptapDocToBody(content)) === normalizeBodyForComparison(body);
+}
+
+function normalizeBodyForComparison(body: string) {
+  return body
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function mentionsHaveDisplayText(node: JSONContent): boolean {

@@ -1,6 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGitHubIntegrationState,
+  deleteGitHubWorkInstallation,
+  GitHubInstallationNotFoundError,
   isGitHubWorkIntegrationConfigured,
   verifyGitHubIntegrationState,
 } from "@/lib/integrations/github";
@@ -21,6 +24,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const name of githubEnvNames) {
     const original = originalGithubEnv[name];
     if (original === undefined) {
@@ -93,3 +97,40 @@ describe("GitHub integration state", () => {
     expect(isGitHubWorkIntegrationConfigured()).toBe(true);
   });
 });
+
+describe("GitHub installation management", () => {
+  it("deletes installations with the integration app JWT", async () => {
+    setIntegrationAppCredentials();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      deleteGitHubWorkInstallation({ installationId: "12345" }),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.github.com/app/installations/12345",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("maps inaccessible installations to a typed not found error", async () => {
+    setIntegrationAppCredentials();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })),
+    );
+
+    await expect(
+      deleteGitHubWorkInstallation({ installationId: "missing" }),
+    ).rejects.toBeInstanceOf(GitHubInstallationNotFoundError);
+  });
+});
+
+function setIntegrationAppCredentials() {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  process.env.GITHUB_INTEGRATION_APP_ID = "123456";
+  process.env.GITHUB_INTEGRATION_APP_PRIVATE_KEY = privateKey
+    .export({ type: "pkcs1", format: "pem" })
+    .toString();
+}

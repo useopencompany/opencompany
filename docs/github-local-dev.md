@@ -66,8 +66,10 @@ bun run dev
 ```
 
 `bun run dev` starts ngrok first when the local ngrok CLI is authenticated, writes the public origin
-to `.env.local`, then starts the normal Turbo dev stack. If ngrok is not installed or not
-authenticated, dev continues without a tunnel and prints the setup command.
+to `.env.local`, then starts the normal Turbo dev stack with that same origin in the child process
+environment. If `OPENCOMPANY_NGROK_URL` / `NGROK_URL` is unset, the helper also accepts a fixed
+`url`, `hostname`, or `domain` from the local ngrok config. When a fixed URL is configured, ngrok is
+treated as required and `bun run dev` exits instead of silently starting without a tunnel.
 
 To run only the tunnel:
 

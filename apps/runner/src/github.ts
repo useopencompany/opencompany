@@ -7,7 +7,9 @@ type InstallationToken = {
 
 const cachedTokens = new Map<string, InstallationToken>();
 
-export async function getGitHubInstallationToken(installationId = process.env.GITHUB_APP_INSTALLATION_ID) {
+export async function getGitHubInstallationToken(
+  installationId = process.env.GITHUB_APP_INSTALLATION_ID,
+) {
   if (!hasGitHubWorkspaceAppEnv()) return null;
   if (!installationId) {
     throw new Error("GITHUB_APP_INSTALLATION_ID is required for managed GitHub workspace cloning.");
@@ -18,6 +20,8 @@ export async function getGitHubInstallationToken(installationId = process.env.GI
     appId: requiredEnv("GITHUB_APP_ID"),
     privateKey: requiredEnv("GITHUB_APP_PRIVATE_KEY"),
     cachePrefix: "workspace",
+    purpose: "managed workspace",
+    envNames: ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"],
   });
 }
 
@@ -29,6 +33,8 @@ export async function getGitHubWorkInstallationToken(installationId: string) {
     appId: requiredEnv("GITHUB_INTEGRATION_APP_ID"),
     privateKey: requiredEnv("GITHUB_INTEGRATION_APP_PRIVATE_KEY"),
     cachePrefix: "integration",
+    purpose: "work repository integration",
+    envNames: ["GITHUB_INTEGRATION_APP_ID", "GITHUB_INTEGRATION_APP_PRIVATE_KEY"],
   });
 }
 
@@ -37,6 +43,8 @@ async function getInstallationToken(input: {
   appId: string;
   privateKey: string;
   cachePrefix: string;
+  purpose: string;
+  envNames: [string, string];
 }) {
   const cacheKey = `${input.cachePrefix}:${input.installationId}`;
   const cachedToken = cachedTokens.get(cacheKey);
@@ -61,9 +69,20 @@ async function getInstallationToken(input: {
   );
 
   if (!response.ok) {
-    throw new Error(
-      `GitHub installation token request failed with ${response.status}: ${await response.text()}`,
-    );
+    const details = await response.text();
+    if (response.status === 404) {
+      throw new Error(
+        [
+          `GitHub ${input.purpose} installation ${input.installationId} is not accessible to the configured GitHub App.`,
+          `Reconnect the GitHub integration or verify the runner and web app use the same ${input.envNames.join(
+            "/",
+          )} credentials.`,
+          `GitHub response: ${details}`,
+        ].join(" "),
+      );
+    }
+
+    throw new Error(`GitHub installation token request failed with ${response.status}: ${details}`);
   }
 
   const result = (await response.json()) as { token?: string; expires_at?: string };

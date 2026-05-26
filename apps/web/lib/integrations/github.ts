@@ -31,6 +31,10 @@ const GITHUB_WORK_INTEGRATION_ENVS = [
   "GITHUB_INTEGRATION_APP_CLIENT_ID",
   "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
 ] as const;
+const GITHUB_WORK_INSTALLATION_MANAGEMENT_ENVS = [
+  "GITHUB_INTEGRATION_APP_ID",
+  "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+] as const;
 
 export type GitHubWorkRepository = {
   githubRepoId: string;
@@ -92,6 +96,12 @@ export function isGitHubWorkIntegrationConfigured() {
   return GITHUB_WORK_INTEGRATION_ENVS.every((name) => Boolean(process.env[name]?.trim()));
 }
 
+export function isGitHubWorkInstallationManagementConfigured() {
+  return GITHUB_WORK_INSTALLATION_MANAGEMENT_ENVS.every((name) =>
+    Boolean(process.env[name]?.trim()),
+  );
+}
+
 export function buildGitHubInstallUrl(state: string) {
   const slug = requiredEnv("GITHUB_INTEGRATION_APP_SLUG");
   const url = new URL(`https://github.com/apps/${slug}/installations/new`);
@@ -132,7 +142,9 @@ export async function exchangeGitHubUserCode(code: string) {
     error_description?: string;
   };
   if (!result.access_token) {
-    throw new Error(result.error_description ?? result.error ?? "GitHub did not return a user token.");
+    throw new Error(
+      result.error_description ?? result.error ?? "GitHub did not return a user token.",
+    );
   }
 
   return result.access_token;
@@ -179,6 +191,28 @@ export async function listGitHubWorkInstallationRepositories(input: { installati
   return toWorkRepositories(result.repositories ?? []);
 }
 
+export async function deleteGitHubWorkInstallation(input: { installationId: string }) {
+  const response = await fetch(`https://api.github.com/app/installations/${input.installationId}`, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${createAppJwt()}`,
+      "Content-Type": "application/json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (response.status === 404) {
+    throw new GitHubInstallationNotFoundError(input.installationId, await response.text());
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `GitHub installation delete failed with ${response.status}: ${await response.text()}`,
+    );
+  }
+}
+
 export async function getGitHubWorkInstallationToken(installationId: string) {
   const result = await githubRequest<{ token?: string }>({
     token: createAppJwt(),
@@ -203,6 +237,15 @@ export function appendIntegrationStatus(returnTo: string, status: "connected" | 
 
 function githubCallbackUrl() {
   return `${getAppUrl()}/api/integrations/github/callback`;
+}
+
+export class GitHubInstallationNotFoundError extends Error {
+  constructor(
+    readonly installationId: string,
+    readonly details: string,
+  ) {
+    super(`GitHub installation ${installationId} was not found for the configured GitHub App.`);
+  }
 }
 
 function toWorkRepositories(repositories: GitHubRepo[]): GitHubWorkRepository[] {

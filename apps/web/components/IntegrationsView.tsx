@@ -4,13 +4,18 @@ import {
   CheckCircle2,
   ExternalLink,
   GitBranch,
+  type LucideIcon,
   RefreshCw,
   Search,
   ShieldAlert,
-  type LucideIcon,
+  Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { refreshGitHubRepositories } from "@/lib/integrations/actions";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
+import {
+  disconnectGitHubIntegrationAction,
+  refreshGitHubRepositories,
+} from "@/lib/integrations/actions";
 
 type IntegrationStatus = "not_connected" | "connected" | "needs_repository_access" | "error";
 
@@ -84,12 +89,10 @@ export default function IntegrationsView({
       <div className="mx-auto w-full max-w-[880px] px-8 pb-24 pt-10">
         <div className="flex items-start justify-between gap-6">
           <div>
-            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-              Integrations
-            </h1>
+            <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">Integrations</h1>
             <p className="mt-1 max-w-[560px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
-              Connect external resources agents can access. Platform-supported tools such as AMP
-              are enabled from agent configuration instead of user-supplied credentials.
+              Connect external resources agents can access. Platform-supported tools such as AMP are
+              enabled from agent configuration instead of user-supplied credentials.
             </p>
           </div>
         </div>
@@ -199,8 +202,32 @@ function IntegrationCard({
 }
 
 function GitHubControls({ integrations }: { integrations: WorkspaceIntegrationState }) {
+  const router = useRouter();
+  const [isDisconnecting, startDisconnectTransition] = useTransition();
+  const [disconnectMessage, setDisconnectMessage] = useState<string | null>(null);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const connected = Boolean(integrations.github.installation);
   const configured = integrations.github.status !== "error";
+
+  function disconnectGitHub() {
+    const confirmed = window.confirm(
+      "Uninstall the GitHub App for this account and remove its repositories from this workspace?",
+    );
+    if (!confirmed) return;
+
+    setDisconnectMessage(null);
+    setDisconnectError(null);
+    startDisconnectTransition(async () => {
+      const result = await disconnectGitHubIntegrationAction();
+      if (result.ok) {
+        setDisconnectMessage(result.message);
+        router.refresh();
+        return;
+      }
+      setDisconnectError(result.message);
+    });
+  }
+
   return (
     <div>
       <div className="grid gap-3 sm:grid-cols-3">
@@ -250,7 +277,24 @@ function GitHubControls({ integrations }: { integrations: WorkspaceIntegrationSt
             </button>
           </form>
         ) : null}
+        {connected ? (
+          <button
+            type="button"
+            onClick={disconnectGitHub}
+            disabled={isDisconnecting}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#efd0ca] bg-white px-3 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff7f5] disabled:cursor-not-allowed disabled:opacity-65"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            {isDisconnecting ? "Uninstalling" : "Uninstall"}
+          </button>
+        ) : null}
       </div>
+      {disconnectMessage ? (
+        <p className="mt-2 text-[12px] leading-5 text-[#216b35]">{disconnectMessage}</p>
+      ) : null}
+      {disconnectError ? (
+        <p className="mt-2 text-[12px] leading-5 text-[#9f2f24]">{disconnectError}</p>
+      ) : null}
       {integrations.github.repositories.length > 0 ? (
         <div className="mt-4 max-h-[180px] overflow-y-auto rounded-md border border-[#e6e6e3] bg-white/55">
           {integrations.github.repositories.map((repository) => (

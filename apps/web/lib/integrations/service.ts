@@ -80,3 +80,14 @@ export async function syncGitHubIntegrationRepositories(input: {
       .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, input.workspaceId));
   }
 }
+
+export async function disconnectGitHubIntegration(input: { workspaceId: string }) {
+  const db = getDb();
+
+  await db
+    .delete(workspaceGitHubIntegrationRepositories)
+    .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, input.workspaceId));
+  await db
+    .delete(workspaceGitHubIntegrationInstallations)
+    .where(eq(workspaceGitHubIntegrationInstallations.workspaceId, input.workspaceId));
+}

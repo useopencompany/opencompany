@@ -22,7 +22,7 @@ export function ngrokConfigState() {
   for (const path of ngrokConfigPaths()) {
     if (!existsSync(path)) continue;
     const config = readFileSync(path, "utf8");
-    if (/^authtoken:\s*\S+/m.test(config)) {
+    if (/^\s*authtoken:\s*\S+/m.test(config)) {
       return { available: true, authenticated: true, reason: "config_authtoken" };
     }
   }
@@ -32,7 +32,10 @@ export function ngrokConfigState() {
 
 export function requestedNgrokUrl(args = []) {
   return normalizeUrl(
-    valueFor(args, "--url") ?? process.env.OPENCOMPANY_NGROK_URL ?? process.env.NGROK_URL,
+    valueFor(args, "--url") ??
+      process.env.OPENCOMPANY_NGROK_URL ??
+      process.env.NGROK_URL ??
+      configuredNgrokUrl(),
   );
 }
 
@@ -40,6 +43,9 @@ export function startNgrok({ port, url, stdio = ["ignore", "ignore", "pipe"] }) 
   const args = ["http", port];
   if (url) {
     args.push("--url", url);
+  }
+  if (process.env.NGROK_AUTHTOKEN?.trim()) {
+    args.push("--authtoken", process.env.NGROK_AUTHTOKEN.trim());
   }
   return spawn("ngrok", args, { stdio });
 }
@@ -61,11 +67,14 @@ export function updateLocalEnvForTunnel(publicUrl, path = ".env.local") {
 
   const current = parseEnv(path);
   const allowedOrigins = appendCsvValue(current.RUNNER_ALLOWED_ORIGINS, publicUrl);
-  writeEnvValues(path, {
+  const values = {
     NEXT_PUBLIC_APP_URL: publicUrl,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${publicUrl}/auth/callback`,
     RUNNER_ALLOWED_ORIGINS: allowedOrigins,
-  });
+  };
+  writeEnvValues(path, values);
+
+  return values;
 }
 
 export function valueFor(args, name) {
@@ -79,6 +88,17 @@ function ngrokConfigPaths() {
     join(homedir(), "Library", "Application Support", "ngrok", "ngrok.yml"),
     join(homedir(), ".config", "ngrok", "ngrok.yml"),
   ];
+}
+
+function configuredNgrokUrl() {
+  for (const path of ngrokConfigPaths()) {
+    if (!existsSync(path)) continue;
+    const config = readFileSync(path, "utf8");
+    const match = config.match(/^\s*(?:url|hostname|domain):\s*"?([^"\s]+)"?\s*$/m);
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
 }
 
 function normalizeUrl(value) {
@@ -97,7 +117,10 @@ async function readNgrokUrl(targetPort) {
     const matching = tunnels.find((tunnel) => {
       const publicUrl = typeof tunnel.public_url === "string" ? tunnel.public_url : "";
       const addr = typeof tunnel.config?.addr === "string" ? tunnel.config.addr : "";
-      return publicUrl.startsWith("https://") && addr.includes(`:${targetPort}`);
+      return (
+        publicUrl.startsWith("https://") &&
+        (addr === String(targetPort) || addr.endsWith(`:${targetPort}`))
+      );
     });
     return normalizeUrl(matching?.public_url);
   } catch {

@@ -27,6 +27,31 @@ describe("AgentEditor", () => {
     expect(screen.queryByText("@null")).not.toBeInTheDocument();
   });
 
+  it("rebuilds from the saved body when persisted content is stale", async () => {
+    render(
+      <AgentEditor
+        initialBody="Use @AMP for code changes."
+        initialContent={{
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [
+                { type: "text", text: "Use " },
+                { type: "text", text: "@" },
+              ],
+            },
+          ],
+        }}
+        mentionItems={buildAgentMentionItems()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("@AMP")).toBeInTheDocument();
+    expect(screen.queryByText(/^@$/)).not.toBeInTheDocument();
+  });
+
   it("strips broken empty mentions from saved content and body", async () => {
     // Reproduces the DB-observed shape: a mention persisted without attrs
     // would otherwise survive editor edits and re-pollute the next save.
