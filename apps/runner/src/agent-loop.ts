@@ -21,6 +21,7 @@ import {
   agentSessionToolUsage,
   agentSessionUsage,
   agents,
+  users,
   type WorkspaceRepository,
   workspaceRepositories,
   workspaces,
@@ -248,6 +249,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       agent: row.agent.config,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
+      ...optionalUserName(row.user),
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -1419,11 +1421,13 @@ async function loadSession(sessionId: string) {
       session: agentSessions,
       agent: agents,
       workspace: workspaces,
+      user: users,
       repository: workspaceRepositories,
     })
     .from(agentSessions)
     .innerJoin(agents, eq(agentSessions.agentId, agents.id))
     .innerJoin(workspaces, eq(agentSessions.workspaceId, workspaces.id))
+    .innerJoin(users, eq(agentSessions.userId, users.id))
     .leftJoin(
       workspaceRepositories,
       eq(agentSessions.workspaceId, workspaceRepositories.workspaceId),
@@ -1436,6 +1440,11 @@ async function loadSession(sessionId: string) {
   }
 
   return row;
+}
+
+function optionalUserName(user: Pick<typeof users.$inferSelect, "firstName" | "lastName">) {
+  const userName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  return userName ? { userName } : {};
 }
 
 type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
