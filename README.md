@@ -28,7 +28,7 @@ bun run setup
 bun run dev
 ```
 
-`bun run setup` is idempotent: it copies `.env.example`, pulls shared dev env vars from Infisical when linked, creates or reuses a Neon branch for the current Git branch, and runs migrations. See [docs/getting-started.md](./docs/getting-started.md) for the full walkthrough.
+`bun run setup` is idempotent: it copies `.env.example`, pulls shared dev env vars from Infisical when linked, creates or reuses a Neon branch for the current Git branch, and runs migrations. See [docs/getting-started.md](./docs/getting-started.md) for the new engineer checklist and full walkthrough.
 
 ## Repo layout
 
@@ -46,7 +46,7 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 ## Docs
 
 - [The `.agent` file format](./docs/agent-file.md) — deep dive into the file that defines every agent
-- [Getting started](./docs/getting-started.md) — local dev setup in under five minutes
+- [Getting started](./docs/getting-started.md) — new engineer checklist and local dev setup in under five minutes
 - [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
 - [Technology stack](./docs/stack/README.md) — technology register, owners, and replacement triggers
 - [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
