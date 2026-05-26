@@ -264,6 +264,7 @@ async function expandBrainFiles(workspaceId: string, references: AgentBrainRefer
 }
 
 function matchesReference(path: string, reference: AgentBrainReference) {
+  if (reference.type === "folder" && reference.path === "/") return true;
   return reference.type === "folder" ? path.startsWith(reference.path) : path === reference.path;
 }
 
@@ -278,7 +279,7 @@ function isAllowed(
 ) {
   return (
     fileMounts.some((mount) => mount.path === path) ||
-    folderMounts.some((mount) => path.startsWith(mount.path))
+    folderMounts.some((mount) => mount.path === "/" || path.startsWith(mount.path))
   );
 }
 

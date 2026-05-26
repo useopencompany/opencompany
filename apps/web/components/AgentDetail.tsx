@@ -473,7 +473,7 @@ function AgentInspector({
               <ConfigItem
                 key={reference.path}
                 icon={Brain}
-                label={`brain/${reference.path}`}
+                label={brainReferenceLabel(reference.path)}
                 description={reference.type === "folder" ? "Mounted folder" : "Mounted file"}
                 tone="tool"
               />
@@ -722,6 +722,10 @@ function buildConfigPreview({
     tools,
     brain: config.brain,
   };
+}
+
+function brainReferenceLabel(path: string) {
+  return path === "/" ? "brain/" : `brain/${path}`;
 }
 
 function syncMeta(status: string): {

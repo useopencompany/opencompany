@@ -120,6 +120,7 @@ function parseMention(node: TiptapNode) {
 
   if (rawId.startsWith("brain/")) {
     const path = rawId.slice("brain/".length);
+    if (path === "") return { type: "brain" as const, path: "/" };
     if (path && !path.includes("..")) return { type: "brain" as const, path };
   }
 
