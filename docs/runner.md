@@ -44,8 +44,8 @@ The V1 loop is intentionally custom and narrow:
 3. Inngest calls `POST /internal/sessions/:id/start` on the runner with
    `RUNNER_INTERNAL_TOKEN`.
 4. The runner marks the session `provisioning`, creates or reconnects the E2B sandbox, prepares
-   `/home/user/workspace`, clones the selected connected GitHub repo for AMP agents or the managed
-   GitHub workspace repo otherwise, and marks the session `ready`.
+   the capability-scoped workspace layout, clones the selected connected GitHub repo into `work/`
+   for AMP agents, and marks the session `ready`.
 5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
    The token is a short-lived HMAC token minted by the web app.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
@@ -71,13 +71,22 @@ Important details:
 - Runtime tools are created from `CORE_TOOL_DEFINITIONS` and then filtered by the agent's allowed
   tool names.
 - Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
-- Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`, and
-  `tool.completed`.
+- Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`,
+  `tool.completed`, and recoverable `tool.failed` results.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
   first tool execution, so text-only fast-model turns avoid that fixed pre-token latency.
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are
   replayed into later model requests. This avoids replaying orphan tool results without their
   matching assistant tool calls.
+- The runner does not clone the full workspace repo into E2B. It materializes only configured
+  Brain files under `/home/user/workspace/brain` plus a session-local
+  `/home/user/workspace/work` directory. For regular sessions, `work/` is initialized as an empty
+  git repository so `git_diff` can report session-local scratch changes without exposing the
+  managed workspace repo. For AMP sessions, `work/` contains the selected connected GitHub
+  repository.
+- Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
+- OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
+  the full serialized `.agent` source and Brain manifest.
 
 V1 tools:
 
@@ -91,8 +100,9 @@ V1 tools:
 `amp_coder` returns an `ampThreadId`. Later follow-up tasks can pass that id back as
 `ampThreadId` so the runner invokes `amp threads continue` instead of starting a fresh Amp thread.
 
-All file-oriented tools must remain confined to the session workdir. Keep path validation in the
-runtime/sandbox layer rather than relying on model behavior.
+File-oriented tools must remain confined to `/home/user/workspace/work` or configured
+`/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
+Keep path validation in the runtime/sandbox layer rather than relying on model behavior.
 
 ## Event model
 
@@ -113,6 +123,7 @@ Common event types:
 - `command.output`
 - `file.changed`
 - `tool.completed`
+- `tool.failed`
 - `session.error`
 
 ## Database tables
@@ -144,8 +155,11 @@ Required environment variables:
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
-- optional GitHub integration app env vars for cloning configured work repositories into E2B:
-  `GITHUB_INTEGRATION_APP_ID` and `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
+- optional GitHub App env vars used for Brain sync back to the managed workspace repo:
+  `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
+- optional GitHub integration app env vars for cloning configured work repositories into E2B and
+  creating AMP pull requests: `GITHUB_INTEGRATION_APP_ID` and
+  `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 
 Production runner logs are structured JSON on stdout and should be forwarded by Render to the
@@ -244,5 +258,5 @@ without fighting request-duration limits.
   cancellation inside long sandbox commands is still minimal.
 - The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. This is intentional for V1
   because durable replay from Postgres is the product-critical stream contract.
-- E2B workspace hydration is basic. Empty sessions work, and GitHub clone support exists when the
-  GitHub App env vars are present.
+- E2B workspace hydration is capability-scoped. Full workspace repo cloning is intentionally not
+  part of V1; add explicit file mounts later if agents need broader project access.

@@ -24,7 +24,7 @@ Use secret paths by deployment surface:
 | Path | Used by | Purpose |
 |---|---|---|
 | `/web` | Vercel web, local web | Next.js app, WorkOS, Inngest, GitHub App, analytics, feedback, runner client config. |
-| `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App clone support. |
+| `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App Brain sync. |
 | `/release` | GitHub Actions release workflow | Production migration/deploy orchestration. |
 
 For local `dev`, keep Infisical focused on shared non-database secrets. The existing setup script
@@ -53,6 +53,16 @@ Run local setup first so `.env.local` gets shared Infisical dev values and a bra
 ```bash
 bun run setup
 ```
+
+If a developer should use their own Neon project instead of a shared team Neon project, create a
+personal override file before running setup:
+
+```bash
+bun run setup:personal
+```
+
+Then set `NEON_PROJECT_ID` in `.env.override.local`. That file is gitignored, survives
+`bun run env:pull`, and takes precedence over `.env.local`.
 
 When `.infisical.json` exists, setup pulls shared dev values from Infisical `dev` + `/web` and
 `/runner`. There is no Vercel env-pull fallback.

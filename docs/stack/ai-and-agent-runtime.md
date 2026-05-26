@@ -131,6 +131,9 @@ Core tools are always available to runner sessions:
 - `git_diff`
 - `tool_help`
 
+Sandbox sessions do not clone the managed workspace repository. `work/` is an empty git repository
+for session-local scratch changes, and configured Brain files are mounted separately under `brain/`.
+
 Hosted tools are enabled by agent configuration:
 
 - `exa_search`

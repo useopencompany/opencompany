@@ -1,6 +1,6 @@
 # Docs
 
-- [getting-started.md](./getting-started.md) — first-time setup, fastest path to a running dev environment.
+- [getting-started.md](./getting-started.md) — new engineer checklist and fastest path to a running dev environment.
 - [architecture.md](./architecture.md) — rough map of the app, agent editing, GitHub storage, and Inngest sync.
 - [stack/README.md](./stack/README.md) — technology register: what we use, why, owners, and exit triggers.
 - [database.md](./database.md) — Neon, schema changes, Drizzle, and optional branch databases.

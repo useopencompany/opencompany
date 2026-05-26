@@ -7,8 +7,23 @@ const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
 const STRIPE_MODE = argv.includes("--stripe");
+const PERSONAL_ENV_MODE = argv.includes("--personal-env");
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
+const PERSONAL_ENV_PATH = ".env.override.local";
+const PERSONAL_ENV_TEMPLATE = `# Personal local overrides.
+# This file is gitignored and has higher precedence than .env.local.
+# Use it for developer-owned resources that should survive \`bun run env:pull\`.
+#
+# Personal Neon project for isolated local databases:
+# NEON_PROJECT_ID=""
+# NEON_API_KEY=""
+# NEON_PARENT_BRANCH=""
+# NEON_BRANCH_TTL_HOURS="24"
+#
+# Optional: point local workspace repos at a personal/dev GitHub org.
+# OPENCOMPANY_GITHUB_ORG=""
+`;
 
 // .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
@@ -191,6 +206,13 @@ function parseEnv(path) {
   return out;
 }
 
+function readEffectiveLocalEnv() {
+  return {
+    ...parseEnv(".env.local"),
+    ...parseEnv(PERSONAL_ENV_PATH),
+  };
+}
+
 function formatEnvValue(value) {
   if (/^[A-Za-z0-9_./:@-]+$/.test(value)) return value;
   return JSON.stringify(value);
@@ -227,12 +249,13 @@ function isPlaceholder(value) {
 }
 
 function inspectState() {
-  const env = parseEnv(".env.local");
+  const env = readEffectiveLocalEnv();
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
 
   return {
     databaseMode: SHARED_DATABASE_MODE ? "shared" : "branch",
     envFile: existsSync(".env.local") ? "exists" : "missing",
+    personalEnvFile: existsSync(PERSONAL_ENV_PATH) ? "exists" : "missing",
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
@@ -381,6 +404,17 @@ async function ensureLocalDevDefaults() {
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
 }
 
+async function ensurePersonalEnvFile() {
+  step("Personal env override file");
+  if (existsSync(PERSONAL_ENV_PATH)) {
+    ok(`${PERSONAL_ENV_PATH} already exists`);
+    return;
+  }
+
+  writeFileSync(PERSONAL_ENV_PATH, PERSONAL_ENV_TEMPLATE);
+  ok(`Created ${PERSONAL_ENV_PATH}`);
+}
+
 function canPullSharedDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return false;
 
@@ -475,13 +509,15 @@ async function ensureWorkOS(state) {
   }
 
   warn("WorkOS env vars in .env.local are still placeholders. Pulling from Infisical.");
-  const source = pullSharedDevEnv({ requireNeonProject: !SHARED_DATABASE_MODE });
+  const source = pullSharedDevEnv({
+    requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
+  });
 
   const after = inspectState();
   if (after.workos !== "ready") {
     throw new Error(
-      `${source} env pull finished but .env.local still has placeholder WorkOS values. ` +
-        "Inspect .env.local and re-run setup.",
+      `${source} env pull finished but WorkOS values are still placeholders. ` +
+        `Inspect .env.local and ${PERSONAL_ENV_PATH}, then re-run setup.`,
     );
   }
   ok(`WorkOS configured from ${source}`);
@@ -496,7 +532,9 @@ async function ensureNeonProject(state) {
     return;
   }
 
-  warn("NEON_PROJECT_ID is missing from .env.local. Pulling from Infisical.");
+  warn(
+    `NEON_PROJECT_ID is missing from .env.local and ${PERSONAL_ENV_PATH}. Pulling from Infisical.`,
+  );
   const source = pullSharedDevEnv({ requireNeonProject: true });
 
   const after = inspectState();
@@ -513,7 +551,7 @@ async function ensureSharedDatabaseUrl(state) {
     return;
   }
 
-  warn("DATABASE_URL is missing from .env.local. Pulling from Infisical.");
+  warn(`DATABASE_URL is missing from .env.local and ${PERSONAL_ENV_PATH}. Pulling from Infisical.`);
   const source = pullSharedDevEnv({ requireDatabaseUrl: true });
 
   const after = inspectState();
@@ -582,12 +620,22 @@ async function runMigrations() {
 }
 
 async function main() {
+  if (PERSONAL_ENV_MODE) {
+    console.log("\n\x1b[1mPersonal env override\x1b[0m");
+    await ensurePersonalEnvFile();
+    console.log(
+      `\nAdd personal values to \x1b[1m${PERSONAL_ENV_PATH}\x1b[0m, then run \x1b[1mbun run setup\x1b[0m.\n`,
+    );
+    return;
+  }
+
   if (PULL_ENV_MODE) {
     console.log("\n\x1b[1mPull shared dev env\x1b[0m");
     await ensureEnvFile(inspectState());
+    const state = inspectState();
     const source = pullSharedDevEnv({
       requireDatabaseUrl: SHARED_DATABASE_MODE,
-      requireNeonProject: !SHARED_DATABASE_MODE,
+      requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
     await ensureLocalDevDefaults();
     ok(`Updated .env.local with shared setup values from ${source}`);

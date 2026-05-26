@@ -31,7 +31,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "shell",
     kind: "sandbox",
-    description: "Run a shell command in the session workspace.",
+    description:
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible.",
     parameters: {
       type: "object",
       properties: {
@@ -44,11 +45,12 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "read_file",
     kind: "sandbox",
-    description: "Read a UTF-8 text file from the session workspace.",
+    description:
+      "Read a UTF-8 text file from ./work or ./brain. The path must start with work/ or brain/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path inside the workspace." },
+        path: { type: "string", description: "Relative path starting with work/ or brain/." },
       },
       required: ["path"],
       additionalProperties: false,
@@ -57,11 +59,12 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "write_file",
     kind: "sandbox",
-    description: "Write a UTF-8 text file inside the session workspace.",
+    description:
+      "Write a UTF-8 text file inside ./work or ./brain. The path must start with work/ or brain/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path inside the workspace." },
+        path: { type: "string", description: "Relative path starting with work/ or brain/." },
         content: { type: "string", description: "Full file content." },
       },
       required: ["path", "content"],
@@ -71,11 +74,16 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "list_files",
     kind: "sandbox",
-    description: "List files and directories below a workspace path.",
+    description:
+      "List files and directories below ./work or ./brain. The path must start with work/ or brain/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path inside the workspace.", default: "." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/ or brain/.",
+          default: "work",
+        },
         depth: { type: "number", description: "Maximum traversal depth.", default: 2 },
       },
       additionalProperties: false,
@@ -84,7 +92,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "git_diff",
     kind: "sandbox",
-    description: "Return the current git diff for the workspace.",
+    description: "Return the current git diff for the session work directory.",
     parameters: {
       type: "object",
       properties: {},

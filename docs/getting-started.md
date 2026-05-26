@@ -8,6 +8,59 @@ Goal: get a local dev environment running with auth and an isolated Neon branch 
 - Access to this project's Infisical project for shared development environment variables.
 - (optional) A WorkOS account — https://dashboard.workos.com. Most local development should use the shared WorkOS staging/local environment from Infisical.
 
+## New engineer setup
+
+Grant these before the first setup call:
+
+- GitHub repo access, with permission to push branches and open PRs.
+- Infisical access to the `opencompany` project, `dev` environment only, paths `/web` and
+  `/runner`.
+- A personal Neon account and project for local development.
+
+Optional, depending on what they will touch:
+
+- Stripe test access or a Stripe CLI login for billing and webhook work.
+- Linear access for issue triage and feedback intake.
+- Vercel, Render, Better Stack, PostHog, and Inngest Cloud access for hosted debugging.
+
+Do not grant production Neon, Infisical `prod`, or Infisical `/release` for normal onboarding.
+
+First run:
+
+```bash
+git clone <repo-url>
+cd lisbon-v4
+nvm install
+nvm use
+bun install
+
+infisical login
+infisical init
+
+bun run setup:personal
+```
+
+Set the engineer's personal Neon project in `.env.override.local`:
+
+```dotenv
+NEON_PROJECT_ID="your-personal-neon-project-id"
+```
+
+For local terminals, prefer Neon browser auth:
+
+```bash
+bunx neonctl auth
+```
+
+Then run:
+
+```bash
+bun run setup
+bun run dev
+```
+
+Open `http://localhost:3000`.
+
 ## The short version
 
 ```bash
@@ -26,6 +79,27 @@ bun run dev
 
 Re-running it is safe.
 
+## Personal overrides
+
+Use a personal override file for developer-owned resources that should not be pulled from
+Infisical or overwritten by `bun run env:pull`:
+
+```bash
+bun run setup:personal
+```
+
+This creates `.env.override.local`, which is gitignored and has higher precedence than `.env.local`.
+The main use case is personal Neon projects for local development:
+
+```dotenv
+NEON_PROJECT_ID="your-personal-neon-project-id"
+# Optional for headless Neon CLI usage. Prefer `bunx neonctl auth` locally.
+NEON_API_KEY=""
+```
+
+After adding personal overrides, run `bun run setup`. Shared dev secrets still come from Infisical
+`dev` + `/web` and `/runner`, but the local override wins for keys like `NEON_PROJECT_ID`.
+
 If you want setup to launch the dev server after migrations, run `bun run setup:dev`.
 
 `bun run dev` also attempts to start ngrok before the app when the local ngrok CLI is authenticated.
@@ -41,6 +115,8 @@ bun run setup -- --check
 ```
 
 Emits a JSON state snapshot with a `nextSteps` array. Used by the `start-work` skill so agents know exactly which steps they can run vs which need a human at the terminal.
+
+Use the same command if setup fails and you want a machine-readable status.
 
 ## Env vars
 
@@ -107,5 +183,14 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
 - New env var in Infisical → `bun run env:pull` to refresh `.env.local`.
 - Missing local Stripe values → `bun run setup:stripe`.
 - Agent editing / GitHub / Inngest architecture → see [architecture.md](./architecture.md).
+
+## Common fixes
+
+- Infisical export fails: confirm the engineer has `dev` access to `/web` and `/runner`, then run
+  `infisical login` again.
+- Neon branch creation fails: confirm `NEON_PROJECT_ID` is in `.env.override.local` and run
+  `bunx neonctl auth`.
+- WorkOS redirect fails: local redirect URI must include `http://localhost:3000/auth/callback`.
+- Stripe setup warns: run `stripe login`, or skip it unless the task touches billing.
 
 See [database.md](./database.md) for the database workflow and [auth.md](./auth.md) for the auth flow.

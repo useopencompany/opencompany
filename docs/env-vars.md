@@ -9,6 +9,7 @@ view.
 
 | Place | Purpose | Managed in |
 |---|---|---|
+| Local `.env.override.local` | Developer-owned local overrides | `bun run setup:personal`; never committed |
 | Local `.env.local` | Developer machine and agent worktrees | `bun run setup`, backed by Infisical dev shared values |
 | Vercel Development | Optional Vercel dev/preview runtime target | Infisical `dev` + `/web` sync |
 | Vercel Preview | Preview web deployments | Infisical `staging` + `/web` sync |
@@ -29,8 +30,8 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `RUNNER_STREAM_TOKEN_SECRET` | Vercel, Render | Web signs browser SSE tokens; runner verifies them. |
 | `RUNNER_PUBLIC_URL` | Vercel, GitHub Actions | Browser-reachable Render URL. |
 | `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin. |
-| `GITHUB_APP_ID` | Vercel, Render | GitHub App for managed workspace repos. |
-| `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Managed workspace-state installation target only. |
+| `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner Brain sync. |
+| `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Managed workspace-state installation target used for workspace repo writes and runner Brain sync. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
 | `GITHUB_INTEGRATION_APP_ID` | Vercel, Render | Separate GitHub App for user-facing repository integrations. |
 | `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Vercel, Render | Integration app private key, with newlines preserved or escaped as `\n`. |
@@ -105,11 +106,11 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
-| `GITHUB_APP_ID` | Yes | Enables runner workspace cloning. |
-| `GITHUB_APP_INSTALLATION_ID` | Yes | Enables managed workspace-state cloning. Work repository sessions use the workspace integration installation stored in Postgres. |
-| `GITHUB_APP_PRIVATE_KEY` | Yes | Enables runner workspace cloning. |
-| `GITHUB_INTEGRATION_APP_ID` | Yes | Enables runner cloning and PR creation for connected work repositories. |
-| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Yes | Enables runner installation tokens for connected work repositories. |
+| `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |
+| `GITHUB_APP_INSTALLATION_ID` | Yes | Enables runner Brain sync to GitHub. |
+| `GITHUB_APP_PRIVATE_KEY` | Yes | Enables runner Brain sync to GitHub. |
+| `GITHUB_INTEGRATION_APP_ID` | Yes for AMP | Enables runner cloning and PR creation for connected work repositories. |
+| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Yes for AMP | Enables runner installation tokens for connected work repositories. |
 | `BETTER_STACK_ERRORS_DSN` | No | Runner error capture DSN. |
 | `OBSERVABILITY_ENABLED` | No | Runner observability toggle. |
 | `OBSERVABILITY_ENV` | No | Runner observability environment. |
@@ -161,6 +162,16 @@ Release-only script vars:
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
 
 ## Local Development
+
+Personal overrides can be created with:
+
+```bash
+bun run setup:personal
+```
+
+`.env.override.local` is gitignored and has higher precedence than `.env.local`. Use it for
+developer-owned resources such as a personal Neon project id or a local-only GitHub org override.
+Do not put shared team secrets there; keep shared dev values in Infisical.
 
 Local `.env.local` is created by:
 

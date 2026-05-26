@@ -5,6 +5,7 @@ import {
   type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
+  serializeRuntimeAgentFile,
   shellQuote,
 } from "@opencompany/agent-runtime";
 import {
@@ -52,11 +53,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { materializeBrainForSession, syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
-import {
-  createDraftPullRequest,
-  getGitHubInstallationToken,
-  getGitHubWorkInstallationToken,
-} from "./github";
+import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
@@ -86,8 +83,10 @@ import {
   createOrConnectSandbox,
   killSandbox,
   prepareWorkspace,
+  resolveSandboxToolPath,
   runSandboxTool,
   type SandboxHandle,
+  sandboxLayout,
 } from "./sandbox";
 import { normalizeModelUsage } from "./usage";
 
@@ -100,6 +99,15 @@ type ToolObservabilityContext = {
   agentId?: string;
   modelProvider?: string;
   modelName?: string;
+};
+
+type FailedToolOutput = {
+  ok: false;
+  error: {
+    message: string;
+    code: string;
+    recoverable: true;
+  };
 };
 
 export async function startSession(sessionId: string, env: RunnerEnv) {
@@ -780,6 +788,7 @@ export async function executeRuntimeTool(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
 }) {
   let output: unknown;
+  let failedOutput: FailedToolOutput | null = null;
   let usage: HostedToolUsage | undefined;
   let sandboxIdForCapture: string | undefined;
   try {
@@ -798,6 +807,11 @@ export async function executeRuntimeTool(input: {
         return result.output;
       }
 
+      preflightSandboxToolArgs({
+        name: input.definition.name,
+        args: input.args,
+        workdir: input.workdir,
+      });
       const activeSandbox = await input.getSandbox();
       sandboxIdForCapture = activeSandbox.sandboxId;
       if (input.definition.name === "amp_coder") {
@@ -860,6 +874,10 @@ export async function executeRuntimeTool(input: {
       });
     });
   } catch (error) {
+    if (isFatalToolError(error, input.definition.kind, sandboxIdForCapture, input.signal)) {
+      throw error;
+    }
+
     captureException(error, {
       event: "opencompany.runner_tool_failed",
       workspace_id: input.observabilityContext?.workspaceId,
@@ -881,11 +899,12 @@ export async function executeRuntimeTool(input: {
           })
         : {}),
     });
-    throw error;
+    failedOutput = buildFailedToolOutput(error);
+    output = failedOutput;
   }
 
   const changedPath =
-    isRecord(output) && Object.prototype.hasOwnProperty.call(output, "path")
+    !failedOutput && isRecord(output) && Object.prototype.hasOwnProperty.call(output, "path")
       ? (output as { path: unknown }).path
       : null;
   if (input.definition.name === "write_file" && typeof changedPath === "string") {
@@ -902,6 +921,7 @@ export async function executeRuntimeTool(input: {
   }
 
   if (
+    !failedOutput &&
     input.definition.kind === "sandbox" &&
     (input.definition.name === "write_file" || input.definition.name === "shell")
   ) {
@@ -946,21 +966,40 @@ export async function executeRuntimeTool(input: {
       toolCallId: input.toolCallId,
     }),
   );
-  await requireLeaseWrite(
-    appendRuntimeEventForLease({
-      sessionId: input.sessionId,
-      messageId: input.assistantMessageId,
-      leaseId: input.runLeaseId,
-      leaseOwner: input.runLeaseOwner,
-      type: "tool.completed",
-      payload: {
+  if (failedOutput) {
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
         messageId: input.assistantMessageId,
-        toolCallId: input.toolCallId,
-        name: input.definition.name,
-        output,
-      },
-    }),
-  );
+        leaseId: input.runLeaseId,
+        leaseOwner: input.runLeaseOwner,
+        type: "tool.failed",
+        payload: {
+          messageId: input.assistantMessageId,
+          toolCallId: input.toolCallId,
+          name: input.definition.name,
+          error: failedOutput.error,
+          output,
+        },
+      }),
+    );
+  } else {
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.runLeaseId,
+        leaseOwner: input.runLeaseOwner,
+        type: "tool.completed",
+        payload: {
+          messageId: input.assistantMessageId,
+          toolCallId: input.toolCallId,
+          name: input.definition.name,
+          output,
+        },
+      }),
+    );
+  }
 
   return output;
 }
@@ -1185,11 +1224,12 @@ async function runAmpCoderTool(input: {
   }
 
   const ampApiKey = loadPlatformAmpApiKey(input.env);
+  const layout = sandboxLayout(input.workdir);
   await input.sandbox.commands.run(
-    `git config --global --add safe.directory ${shellQuote(input.workdir)}`,
+    `git config --global --add safe.directory ${shellQuote(layout.workRoot)}`,
   );
   const gitCheck = await input.sandbox.commands.run(
-    `cd ${shellQuote(input.workdir)} && git rev-parse --is-inside-work-tree`,
+    `cd ${shellQuote(layout.workRoot)} && git rev-parse --is-inside-work-tree`,
     { timeoutMs: 30_000 },
   );
   if (String(gitCheck.stdout ?? "").trim() !== "true") {
@@ -1200,7 +1240,7 @@ async function runAmpCoderTool(input: {
   const ampStream = createAmpStreamAccumulator();
   const ampActivity = createAmpActivityFormatter();
   const result = await input.sandbox.commands.run(
-    `cd ${shellQuote(input.workdir)} && ${buildAmpCommand({
+    `cd ${shellQuote(layout.workRoot)} && ${buildAmpCommand({
       task,
       ampThreadId: requestedAmpThreadId,
     })}`,
@@ -1223,11 +1263,11 @@ async function runAmpCoderTool(input: {
   const ampSummary = ampStream.summary();
 
   const diffStat = await input.sandbox.commands.run(
-    `cd ${shellQuote(input.workdir)} && git diff HEAD --stat`,
+    `cd ${shellQuote(layout.workRoot)} && git diff HEAD --stat`,
     { timeoutMs: 60_000 },
   );
   const diffPreview = await input.sandbox.commands.run(
-    `cd ${shellQuote(input.workdir)} && git diff HEAD -- | head -400`,
+    `cd ${shellQuote(layout.workRoot)} && git diff HEAD -- | head -400`,
     { timeoutMs: 60_000 },
   );
   const hasDiff = String(diffStat.stdout ?? "").trim().length > 0;
@@ -1252,7 +1292,7 @@ async function runAmpCoderTool(input: {
     );
     await input.sandbox.commands.run(
       [
-        `cd ${shellQuote(input.workdir)}`,
+        `cd ${shellQuote(layout.workRoot)}`,
         `git config user.name ${shellQuote("OpenCompany Agent")}`,
         `git config user.email ${shellQuote("agents@opencompany.ai")}`,
         `git checkout -b ${shellQuote(branchName)}`,
@@ -1826,6 +1866,16 @@ class StaleRunLeaseError extends Error {
   }
 }
 
+class RecoverableToolError extends Error {
+  code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "RecoverableToolError";
+    this.code = code;
+  }
+}
+
 async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
   try {
@@ -1843,9 +1893,9 @@ async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
-      agentFile: row.agent.body,
-      repositoryFullName: sessionRepository?.fullName ?? row.repository?.fullName,
-      repositoryDefaultBranch: sessionRepository?.defaultBranch ?? row.repository?.defaultBranch,
+      agentFile: serializeRuntimeAgentFile(row.agent.config),
+      repositoryFullName: sessionRepository?.fullName,
+      repositoryDefaultBranch: sessionRepository?.defaultBranch,
       githubToken,
     });
     await materializeBrainForSession({
@@ -1895,7 +1945,7 @@ async function resolveGitHubToken(
   row: LoadedSession,
   sessionRepository: ReturnType<typeof resolveSessionRepository>,
 ) {
-  if (!sessionRepository) return getGitHubInstallationToken();
+  if (!sessionRepository) return null;
 
   const integrationRepository = await loadGitHubWorkRepository(
     row.workspace.id,
@@ -2009,6 +2059,73 @@ function throwIfAborted(signal: AbortSignal) {
   if (signal.aborted) {
     throw new Error("Run aborted.");
   }
+}
+
+function preflightSandboxToolArgs(input: {
+  name: RuntimeToolName;
+  args: unknown;
+  workdir: string;
+}) {
+  if (input.name !== "read_file" && input.name !== "write_file" && input.name !== "list_files") {
+    return;
+  }
+
+  const args = isRecord(input.args) ? input.args : {};
+  const pathValue = args.path;
+  if (input.name !== "list_files" && typeof pathValue !== "string") {
+    throw new RecoverableToolError("Tool argument path must be a string.", "invalid_tool_input");
+  }
+  if (input.name === "list_files" && pathValue !== undefined && typeof pathValue !== "string") {
+    throw new RecoverableToolError("Tool argument path must be a string.", "invalid_tool_input");
+  }
+
+  try {
+    resolveSandboxToolPath(input.workdir, typeof pathValue === "string" ? pathValue : undefined);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Invalid sandbox path.";
+    throw new RecoverableToolError(
+      `${message} Use paths prefixed with work/ for scratch files or brain/ for mounted Brain files.`,
+      "invalid_sandbox_path",
+    );
+  }
+}
+
+function isFatalToolError(
+  error: unknown,
+  toolKind: RuntimeToolDefinition["kind"],
+  sandboxIdForCapture: string | undefined,
+  signal: AbortSignal,
+) {
+  if (
+    signal.aborted ||
+    error instanceof RunAbortError ||
+    error instanceof RunLeaseLostError ||
+    error instanceof StaleRunLeaseError
+  ) {
+    return true;
+  }
+
+  if (isMissingRequiredEnvToolError(error)) return true;
+  if (error instanceof RecoverableToolError) return false;
+  return toolKind === "sandbox" && !sandboxIdForCapture;
+}
+
+function buildFailedToolOutput(error: unknown): FailedToolOutput {
+  return {
+    ok: false,
+    error: {
+      message: error instanceof Error ? error.message : "Tool failed.",
+      code: error instanceof RecoverableToolError ? error.code : "tool_execution_failed",
+      recoverable: true,
+    },
+  };
+}
+
+function isMissingRequiredEnvToolError(error: unknown) {
+  return (
+    error instanceof Error &&
+    /\b[A-Z][A-Z0-9_]*\b.*\b(required|configured|missing)\b/i.test(error.message)
+  );
 }
 
 export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {

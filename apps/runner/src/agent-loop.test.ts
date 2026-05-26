@@ -330,6 +330,192 @@ describe("usage recording", () => {
     });
   });
 
+  it("returns recoverable sandbox path failures as tool results without hydrating E2B", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => {
+      throw new Error("sandbox should not hydrate");
+    });
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        toolCallId: "call_read",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file") as RuntimeToolDefinition,
+        args: { path: "README.md" },
+        getSandbox,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["read_file"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+        observabilityContext: {
+          workspaceId: "wsp_123",
+          userId: "user_123",
+          agentId: "agt_123",
+          modelProvider: "vercel-ai-gateway",
+          modelName: "openai/gpt-5.4-mini",
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: "invalid_sandbox_path",
+        recoverable: true,
+      }),
+    });
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "read_file",
+      toolCallId: "call_read",
+    });
+    expect(db.state.messages.at(-1)?.content).toContain("invalid_sandbox_path");
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          toolCallId: "call_read",
+          name: "read_file",
+          error: expect.objectContaining({ code: "invalid_sandbox_path" }),
+        }),
+      }),
+    );
+    expect(observabilityMocks.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        event: "opencompany.runner_tool_failed",
+        session_id: "ses_123",
+        tool_call_id: "call_read",
+        tool_name: "read_file",
+        tool_kind: "sandbox",
+      }),
+    );
+  });
+
+  it("returns recoverable sandbox execution failures as tool results after hydration", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => ({
+      sandboxId: "sbx_123",
+      files: {
+        read: vi.fn(async () => {
+          throw new Error("File not found");
+        }),
+      },
+    }));
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        toolCallId: "call_read",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file") as RuntimeToolDefinition,
+        args: { path: "work/missing.txt" },
+        getSandbox: getSandbox as never,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["read_file"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        message: "File not found",
+        code: "tool_execution_failed",
+        recoverable: true,
+      },
+    });
+
+    expect(getSandbox).toHaveBeenCalledTimes(1);
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "read_file",
+      toolCallId: "call_read",
+    });
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          toolCallId: "call_read",
+          error: expect.objectContaining({ code: "tool_execution_failed" }),
+        }),
+      }),
+    );
+  });
+
+  it("keeps sandbox hydration failures fatal", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => {
+      throw new Error("E2B unavailable");
+    });
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        toolCallId: "call_read",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file") as RuntimeToolDefinition,
+        args: { path: "work/file.txt" },
+        getSandbox,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["read_file"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).rejects.toThrow("E2B unavailable");
+
+    expect(db.state.messages).toHaveLength(0);
+    expect(appendRuntimeEvent).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: "tool.failed" }),
+    );
+  });
+
+  it("keeps aborted tool executions fatal", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const controller = new AbortController();
+    controller.abort();
+    const getSandbox = vi.fn(async () => ({
+      sandboxId: "sbx_123",
+    }));
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        toolCallId: "call_read",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file") as RuntimeToolDefinition,
+        args: { path: "work/file.txt" },
+        getSandbox: getSandbox as never,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["read_file"],
+        signal: controller.signal,
+        checkAbort: async () => {},
+      }),
+    ).rejects.toThrow("Run aborted.");
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(db.state.messages).toHaveLength(0);
+  });
+
   it("captures hosted Exa validation failures with searchable monitoring context", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);
@@ -367,9 +553,13 @@ describe("usage recording", () => {
           modelName: "openai/gpt-5.4-mini",
         },
       }),
-    ).rejects.toThrow(
-      "Exa company and people category searches do not support excludeDomains or published date filters.",
-    );
+    ).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: "tool_execution_failed",
+        recoverable: true,
+      }),
+    });
 
     expect(getSandbox).not.toHaveBeenCalled();
     expect(observabilityMocks.captureException).toHaveBeenCalledWith(
@@ -396,7 +586,12 @@ describe("usage recording", () => {
       }),
     );
     expect(db.state.toolUsage).toHaveLength(0);
-    expect(db.state.messages).toHaveLength(0);
+    expect(db.state.messages).toHaveLength(1);
+    expect(db.state.messages[0]).toMatchObject({
+      role: "tool",
+      toolName: "exa_search",
+      toolCallId: "call_exa",
+    });
   });
 });
 
@@ -635,8 +830,12 @@ describe("reasoning stream helpers", () => {
 type MessageState = {
   id: string;
   sessionId: string;
+  role?: string;
+  content?: string;
   status?: string;
   responseToMessageId?: string | null;
+  toolName?: string | null;
+  toolCallId?: string | null;
 };
 
 type UsageState = {
