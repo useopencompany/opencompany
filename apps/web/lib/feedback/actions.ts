@@ -7,7 +7,6 @@ type FeedbackKind = "bug" | "feedback" | "idea";
 export type FeedbackActionState =
   | {
       ok: true;
-      issueUrl: string | null;
     }
   | {
       ok: false;
@@ -20,7 +19,6 @@ type LinearIssueResponse = {
     issue?: {
       id: string;
       identifier: string;
-      url: string;
     } | null;
   } | null;
 };
@@ -196,7 +194,6 @@ async function createLinearIssue({
           issue {
             id
             identifier
-            url
           }
         }
       }
@@ -312,13 +309,13 @@ export async function submitFeedback(
   });
 
   try {
-    const issue = await createLinearIssue({
+    await createLinearIssue({
       title,
       description,
       kind,
     });
 
-    return { ok: true, issueUrl: issue.url };
+    return { ok: true };
   } catch (error) {
     return {
       ok: false,
