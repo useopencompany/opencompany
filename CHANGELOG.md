@@ -7,28 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `/changelog` route that automatically renders `CHANGELOG.md` in the same style as the rest of the app.
+No unreleased changes yet.
 
-## [0.2.0] - 2026-05-20
+## [0.2.0] - 2026-05-26
 
 ### Added
-- Sidebar with primary nav and recent session history.
-- Project wiki view with file explorer, recent commits, and outline panel.
-- Session view scaffold with chat surface and main panel.
+- Git-backed agent editing, including file-backed `.agent` sync, rename propagation, and visible GitHub sync state.
+- Hosted agent sessions with root-route session start, run controls, archive lifecycle, automatic sandbox pausing, and first-message session titles.
+- Agent tools for hosted Exa search and lightweight web fetching.
+- WorkOS organization workspace support, signup onboarding, default workspace credits, and personal environment setup.
+- Brain context files for agents, plus a more complete workspace file experience.
+- Session usage, billing, analytics, and cached-token tracking so teams can understand credit spend.
+- Public docs, public changelog, and in-app feedback intake.
 
 ### Changed
-- Refined typography scale and ink color tokens for tighter visual rhythm.
+- Workspace sessions now load from cache first and route transitions respond faster.
+- Session UI now better explains reasoning model choice, token usage, tool replay, and follow-up state.
+- Workspace loading and agent navigation states are more predictable.
+- Release automation now coalesces CI, syncs Inngest production functions, records GitHub deployments, and runs on Blacksmith.
+- Observability now covers agent sync, launch events, runner logs, and Better Stack error context.
 
 ### Fixed
-- Sidebar active state now persists correctly across nested routes.
+- AuthKit sign-in and sign-up redirects now use full document navigation when required.
+- Runner sandboxes recover more reliably from E2B lifecycle and tool failures.
+- Brain new file and new folder actions no longer throw on click.
+- Direct session title generation and tool replay behave consistently.
+- Production release smoke checks and Render release waiting are more reliable.
 
-## [0.1.0] - 2026-05-01
+### Removed
+- Persisted tool delta events and the sidebar running badge to reduce noisy state.
+
+## [0.1.0] - 2026-05-20
 
 ### Added
-- Initial scaffold of the Toronto v2 prototype.
-- Tailwind configuration with canvas, sidebar, and ink color tokens.
-
-[Unreleased]: https://example.com/compare/v0.2.0...HEAD
-[0.2.0]: https://example.com/compare/v0.1.0...v0.2.0
-[0.1.0]: https://example.com/releases/tag/v0.1.0
+- Initial Next.js app prototype with sidebar navigation, Agents, Brain, Inbox, Settings, and session surfaces.
+- Early WorkOS authentication, branchable Neon database setup, and persistent agents.
+- Turborepo workspace structure with Bun, shared database package, CI, formatting, tests, and secret scanning.

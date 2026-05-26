@@ -146,7 +146,7 @@ async function executeWebFetch(args: unknown, signal: AbortSignal): Promise<Host
   const response = await fetch(request.url.toString(), {
     headers: {
       Accept: "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1",
-      "User-Agent": "OpenCompanyAgent/0.1 (+https://opencompany.ai)",
+      "User-Agent": "OpenCompanyAgent/0.2.0 (+https://opencompany.ai)",
     },
     redirect: "follow",
     signal,
