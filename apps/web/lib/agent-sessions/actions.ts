@@ -1,6 +1,7 @@
 "use server";
 
 import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -44,6 +45,16 @@ export async function createAgentSession(idOrPath: string) {
     workspaceId: workspace.id,
   });
 
+  await captureServerEvent("session_started", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+    session_id: sessionId,
+    model_provider: agent.config.model.provider,
+    model_name: agent.config.model.name,
+    source: "agent",
+  });
+
   after(async () => {
     await dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id });
   });
@@ -78,6 +89,25 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
   });
   const messageId = await insertUserMessage(sessionId, trimmed);
 
+  await captureServerEvent("session_started", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+    session_id: sessionId,
+    model_provider: agent.config.model.provider,
+    model_name: agent.config.model.name,
+    source: "prompt",
+  });
+  await captureServerEvent("session_message_sent", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+    session_id: sessionId,
+    message_id: messageId,
+    is_initial_message: true,
+    message_length: trimmed.length,
+  });
+
   after(async () => {
     await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
   });
@@ -97,7 +127,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
 
   const db = getDb();
   const [session] = await db
-    .select({ id: agentSessions.id })
+    .select({ id: agentSessions.id, agentId: agentSessions.agentId })
     .from(agentSessions)
     .where(
       and(
@@ -114,6 +144,16 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   }
 
   const messageId = await insertUserMessage(sessionId, trimmed);
+
+  await captureServerEvent("session_message_sent", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: session.agentId,
+    session_id: sessionId,
+    message_id: messageId,
+    is_initial_message: false,
+    message_length: trimmed.length,
+  });
 
   after(async () => {
     await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });

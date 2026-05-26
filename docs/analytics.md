@@ -45,4 +45,4 @@ With debug enabled, confirm `[analytics]` logs appear with only safe properties.
 
 With real PostHog env vars, confirm at least one client event and one server event appears in PostHog.
 
-Reverse proxy, session replay, error tracking, feature flags, and `session_started` are intentionally deferred.
+Reverse proxy, session replay, error tracking, feature flags, and automatic pageview tracking are intentionally deferred.

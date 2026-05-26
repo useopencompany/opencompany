@@ -1,4 +1,5 @@
 import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +8,11 @@ import { dispatchAgentSessionStarted } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { getCurrentWorkspace } from "@/lib/auth";
-import { createAgentSession, createAgentSessionFromPrompt } from "./actions";
+import {
+  createAgentSession,
+  createAgentSessionFromPrompt,
+  submitAgentSessionMessage,
+} from "./actions";
 
 vi.mock("@opencompany/agent-runtime", () => ({
   newAgentSessionId: vi.fn(),
@@ -16,6 +21,10 @@ vi.mock("@opencompany/agent-runtime", () => ({
 
 vi.mock("@opencompany/billing", () => ({
   hasPositiveWorkspaceBalance: vi.fn(),
+}));
+
+vi.mock("@opencompany/analytics/server", () => ({
+  captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
@@ -58,6 +67,7 @@ const newAgentSessionMessageIdMock = vi.mocked(newAgentSessionMessageId);
 const loadAgentSessionDetailForWorkspaceMock = vi.mocked(loadAgentSessionDetailForWorkspace);
 const dispatchAgentSessionStartedMock = vi.mocked(dispatchAgentSessionStarted);
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
+const captureServerEventMock = vi.mocked(captureServerEvent);
 
 function fakeAgent() {
   return {
@@ -187,6 +197,15 @@ describe("createAgentSession", () => {
       sessionId: "ses_123",
       workspaceId: "wks_123",
     });
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_started", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
+      source: "agent",
+    });
   });
 
   it("returns a typed error when the created session cannot be loaded", async () => {
@@ -263,6 +282,65 @@ describe("createAgentSessionFromPrompt", () => {
       sessionId: "ses_123",
       messageId: "msg_123",
       workspaceId: "wks_123",
+    });
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_started", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
+      source: "prompt",
+    });
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_message_sent", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      message_id: "msg_123",
+      is_initial_message: true,
+      message_length: "Ship it".length,
+    });
+  });
+});
+
+describe("submitAgentSessionMessage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getCurrentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    newAgentSessionMessageIdMock.mockReturnValue("msg_456");
+  });
+
+  it("captures a message-sent event when a user submits a follow-up message", async () => {
+    const limit = vi.fn().mockResolvedValue([{ id: "ses_123", agentId: "agt_123" }]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const values = vi.fn().mockResolvedValue(undefined);
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi.fn().mockResolvedValue(undefined);
+    getDbMock.mockReturnValue({ select, insert, batch } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", " Follow up ");
+
+    expect(result).toEqual({ ok: true, messageId: "msg_456" });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_456",
+      workspaceId: "wks_123",
+    });
+    expect(captureServerEventMock).toHaveBeenCalledWith("session_message_sent", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      agent_id: "agt_123",
+      session_id: "ses_123",
+      message_id: "msg_456",
+      is_initial_message: false,
+      message_length: "Follow up".length,
     });
   });
 });
