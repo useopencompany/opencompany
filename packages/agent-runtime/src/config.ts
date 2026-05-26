@@ -28,7 +28,7 @@ export function resolveAgentRuntimeConfig(input: {
     "File tools require paths prefixed with work/ or brain/. Bare paths like README.md are invalid; use work/README.md or brain/README.md.",
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
-          .map((reference) => reference.path)
+          .map((reference) => formatBrainReferencePath(reference.path))
           .join(
             ", ",
           )}. Only edit files inside mounted brain paths when updating long-lived context.`
@@ -50,4 +50,8 @@ export function resolveAgentRuntimeConfig(input: {
     },
     tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
   };
+}
+
+function formatBrainReferencePath(path: string) {
+  return path === "/" ? "brain/" : path;
 }

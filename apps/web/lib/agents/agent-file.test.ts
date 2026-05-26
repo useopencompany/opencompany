@@ -60,6 +60,12 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("syncs the root Brain folder from markdown mentions", () => {
+    const config = extractConfigFromMentions("Use all shared context in @brain/.");
+
+    expect(config.brain).toEqual([{ path: "/", type: "folder" }]);
+  });
+
   test("falls back to default config when mentions are removed", () => {
     const agent = buildAgentFile({
       title: "Clean room",
@@ -91,6 +97,7 @@ describe(".agent files", () => {
       "model: openai/gpt-5.4-mini",
       "tools:",
       "brain:",
+      "  - /",
       "  - docs/README.md",
       "  - product/",
       "---",
@@ -101,6 +108,7 @@ describe(".agent files", () => {
     const parsed = parseAgentFile(source);
 
     expect(parsed.config.brain).toEqual([
+      { path: "/", type: "folder" },
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
     ]);

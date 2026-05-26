@@ -1,4 +1,4 @@
-import { Bot, Brain, FileText, type LucideIcon, Search } from "lucide-react";
+import { Bot, Brain, FileText, Folder, type LucideIcon, Search } from "lucide-react";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
@@ -77,7 +77,18 @@ export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
     }
   }
 
-  return [...Array.from(folders), ...paths].sort().map((path) => ({
+  const root: AgentBrainMention = {
+    id: "brain/",
+    mentionId: "brain/",
+    kind: "brain",
+    path: "/",
+    label: "brain/",
+    displayLabel: "brain/",
+    description: "Brain root folder",
+    icon: Folder,
+  };
+
+  const children = [...Array.from(folders), ...paths].sort().map((path) => ({
     id: `brain/${path}`,
     mentionId: `brain/${path}`,
     kind: "brain" as const,
@@ -85,8 +96,10 @@ export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
     label: `brain/${path}`,
     displayLabel: `brain/${path}`,
     description: path.endsWith("/") ? "Brain folder" : "Brain file",
-    icon: FileText,
+    icon: path.endsWith("/") ? Folder : FileText,
   }));
+
+  return [root, ...children];
 }
 
 export function findMentionItem(id: string): AgentMentionItem | undefined {

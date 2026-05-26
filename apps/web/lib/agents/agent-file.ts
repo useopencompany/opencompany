@@ -285,6 +285,9 @@ function mentionModelId(id: string): AgentModelId | null {
 }
 
 function mentionBrainReference(id: string): AgentBrainReference | null {
+  if (id === "brain/") {
+    return { path: "/", type: "folder" };
+  }
   if (!id.startsWith("brain/")) return null;
   return normalizeBrainReference(id.slice("brain/".length));
 }
@@ -307,9 +310,13 @@ function normalizeBrainReferences(ids: string[]) {
 }
 
 function normalizeBrainReference(input: string): AgentBrainReference | null {
-  const folder = input.trim().endsWith("/");
-  const path = input
-    .trim()
+  const trimmed = input.trim();
+  if (trimmed === "/" || trimmed === "brain/") {
+    return { path: "/", type: "folder" };
+  }
+
+  const folder = trimmed.endsWith("/");
+  const path = trimmed
     .replace(/^brain\//, "")
     .replace(/^\/+/, "")
     .replace(/\/{2,}/g, "/");
