@@ -18,6 +18,7 @@ export function resolveAgentRuntimeConfig(input: {
   agent: AgentConfig;
   workspaceName?: string;
   sessionTitle?: string;
+  userName?: string;
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const context = [
@@ -35,6 +36,7 @@ export function resolveAgentRuntimeConfig(input: {
       : null,
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
+    input.userName ? `User: ${input.userName}` : null,
   ].filter(Boolean);
 
   const modelRuntime = getAgentModelRuntimeOptions(input.agent.model.name);
