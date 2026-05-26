@@ -39,6 +39,7 @@
     "release:smoke": "node scripts/release-smoke.mjs",
     "setup": "node scripts/setup.mjs",
     "setup:dev": "node scripts/setup.mjs --dev",
+    "setup:personal": "node scripts/setup.mjs --personal-env",
     "setup:stripe": "node scripts/setup.mjs --stripe",
     "env:pull": "node scripts/setup.mjs --pull-env",
     "db:generate": "bun --filter @opencompany/db db:generate",

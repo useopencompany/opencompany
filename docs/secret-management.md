@@ -54,6 +54,16 @@ Run local setup first so `.env.local` gets shared Infisical dev values and a bra
 bun run setup
 ```
 
+If a developer should use their own Neon project instead of a shared team Neon project, create a
+personal override file before running setup:
+
+```bash
+bun run setup:personal
+```
+
+Then set `NEON_PROJECT_ID` in `.env.override.local`. That file is gitignored, survives
+`bun run env:pull`, and takes precedence over `.env.local`.
+
 When `.infisical.json` exists, setup pulls shared dev values from Infisical `dev` + `/web` and
 `/runner`. There is no Vercel env-pull fallback.
 

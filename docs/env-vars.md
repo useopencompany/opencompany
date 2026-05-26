@@ -9,6 +9,7 @@ view.
 
 | Place | Purpose | Managed in |
 |---|---|---|
+| Local `.env.override.local` | Developer-owned local overrides | `bun run setup:personal`; never committed |
 | Local `.env.local` | Developer machine and agent worktrees | `bun run setup`, backed by Infisical dev shared values |
 | Vercel Development | Optional Vercel dev/preview runtime target | Infisical `dev` + `/web` sync |
 | Vercel Preview | Preview web deployments | Infisical `staging` + `/web` sync |
@@ -147,6 +148,16 @@ Release-only script vars:
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
 
 ## Local Development
+
+Personal overrides can be created with:
+
+```bash
+bun run setup:personal
+```
+
+`.env.override.local` is gitignored and has higher precedence than `.env.local`. Use it for
+developer-owned resources such as a personal Neon project id or a local-only GitHub org override.
+Do not put shared team secrets there; keep shared dev values in Infisical.
 
 Local `.env.local` is created by:
 

@@ -4,5 +4,6 @@ import { config } from "dotenv";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../..");
 
+config({ path: join(repoRoot, ".env.override.local"), quiet: true });
 config({ path: join(repoRoot, ".env.local"), quiet: true });
 config({ path: join(repoRoot, ".env"), quiet: true });
