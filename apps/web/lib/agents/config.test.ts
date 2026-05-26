@@ -51,7 +51,7 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
     expect(config.integrations.github.repositories).toEqual([]);
   });
 
-  it("uses the last repository mention when multiple repos are present", () => {
+  it("keeps all repository mentions and binds amp to the last repository mention", () => {
     const { config } = derivePreviewConfigFromTiptapDoc({
       title: "Code agent",
       content: doc([
@@ -68,6 +68,7 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
       expect.objectContaining({ id: "amp", repository: "opencompany-runner" }),
     ]);
     expect(config.integrations.github.repositories).toEqual([
+      { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
       { id: "opencompany-runner", fullName: "opencompany/runner", defaultBranch: "develop" },
     ]);
   });

@@ -1,10 +1,10 @@
 import { getDb } from "@opencompany/db/client";
-import {
-  workspaceGitHubIntegrationInstallations,
-  workspaceGitHubIntegrationRepositories,
-} from "@opencompany/db/schema";
-import { and, eq, notInArray } from "drizzle-orm";
+import { workspaceIntegrationResources, workspaceIntegrations } from "@opencompany/db/schema";
+import { and, eq, ne, notInArray } from "drizzle-orm";
 import type { GitHubWorkRepository } from "@/lib/integrations/github";
+
+export const GITHUB_INTEGRATION_PROVIDER = "github";
+export const GITHUB_REPOSITORY_RESOURCE_TYPE = "repository";
 
 export async function syncGitHubIntegrationRepositories(input: {
   workspaceId: string;
@@ -16,78 +16,125 @@ export async function syncGitHubIntegrationRepositories(input: {
   const db = getDb();
   const now = new Date();
 
-  await db
-    .insert(workspaceGitHubIntegrationInstallations)
+  const [integration] = await db
+    .insert(workspaceIntegrations)
     .values({
-      id: `wghi_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      id: newWorkspaceIntegrationId(),
       workspaceId: input.workspaceId,
-      installationId: input.installationId,
-      accountLogin: input.accountLogin,
+      provider: GITHUB_INTEGRATION_PROVIDER,
+      externalId: input.installationId,
+      accountName: input.accountLogin,
       accountType: input.accountType,
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: workspaceGitHubIntegrationInstallations.workspaceId,
+      target: [
+        workspaceIntegrations.workspaceId,
+        workspaceIntegrations.provider,
+        workspaceIntegrations.externalId,
+      ],
       set: {
-        installationId: input.installationId,
-        accountLogin: input.accountLogin,
+        accountName: input.accountLogin,
         accountType: input.accountType,
         updatedAt: now,
       },
-    });
+    })
+    .returning({ id: workspaceIntegrations.id });
+
+  if (!integration) {
+    throw new Error("Could not persist GitHub integration.");
+  }
 
   for (const repository of input.repositories) {
     await db
-      .insert(workspaceGitHubIntegrationRepositories)
+      .insert(workspaceIntegrationResources)
       .values({
-        id: `wghr_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+        id: newWorkspaceIntegrationResourceId(),
         workspaceId: input.workspaceId,
-        installationId: input.installationId,
-        githubRepoId: repository.githubRepoId,
-        fullName: repository.fullName,
-        defaultBranch: repository.defaultBranch,
-        private: repository.private,
+        integrationId: integration.id,
+        provider: GITHUB_INTEGRATION_PROVIDER,
+        resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
+        externalId: repository.githubRepoId,
+        name: repository.fullName,
+        displayName: repository.fullName,
+        metadata: {
+          defaultBranch: repository.defaultBranch,
+          private: repository.private,
+        },
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: [
-          workspaceGitHubIntegrationRepositories.workspaceId,
-          workspaceGitHubIntegrationRepositories.fullName,
+          workspaceIntegrationResources.workspaceId,
+          workspaceIntegrationResources.provider,
+          workspaceIntegrationResources.resourceType,
+          workspaceIntegrationResources.externalId,
         ],
         set: {
-          installationId: input.installationId,
-          githubRepoId: repository.githubRepoId,
-          defaultBranch: repository.defaultBranch,
-          private: repository.private,
+          integrationId: integration.id,
+          name: repository.fullName,
+          displayName: repository.fullName,
+          metadata: {
+            defaultBranch: repository.defaultBranch,
+            private: repository.private,
+          },
           updatedAt: now,
         },
       });
   }
 
   if (input.repositories.length > 0) {
-    await db.delete(workspaceGitHubIntegrationRepositories).where(
+    await db.delete(workspaceIntegrationResources).where(
       and(
-        eq(workspaceGitHubIntegrationRepositories.workspaceId, input.workspaceId),
+        eq(workspaceIntegrationResources.workspaceId, input.workspaceId),
+        eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
         notInArray(
-          workspaceGitHubIntegrationRepositories.fullName,
-          input.repositories.map((repository) => repository.fullName),
+          workspaceIntegrationResources.externalId,
+          input.repositories.map((repository) => repository.githubRepoId),
         ),
       ),
     );
   } else {
     await db
-      .delete(workspaceGitHubIntegrationRepositories)
-      .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, input.workspaceId));
+      .delete(workspaceIntegrationResources)
+      .where(
+        and(
+          eq(workspaceIntegrationResources.workspaceId, input.workspaceId),
+          eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+          eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+        ),
+      );
   }
+
+  await db
+    .delete(workspaceIntegrations)
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, input.workspaceId),
+        eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+        ne(workspaceIntegrations.externalId, input.installationId),
+      ),
+    );
 }
 
 export async function disconnectGitHubIntegration(input: { workspaceId: string }) {
   const db = getDb();
 
   await db
-    .delete(workspaceGitHubIntegrationRepositories)
-    .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, input.workspaceId));
-  await db
-    .delete(workspaceGitHubIntegrationInstallations)
-    .where(eq(workspaceGitHubIntegrationInstallations.workspaceId, input.workspaceId));
+    .delete(workspaceIntegrations)
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, input.workspaceId),
+        eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+      ),
+    );
+}
+
+function newWorkspaceIntegrationId() {
+  return `wint_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+}
+
+function newWorkspaceIntegrationResourceId() {
+  return `wres_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }

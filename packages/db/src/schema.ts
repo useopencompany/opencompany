@@ -630,52 +630,71 @@ export const workspaceRepositories = pgTable(
   }),
 );
 
-export const workspaceGitHubIntegrationInstallations = pgTable(
-  "workspace_github_integration_installations",
+export const workspaceIntegrations = pgTable(
+  "workspace_integrations",
   {
     id: text("id").primaryKey(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    installationId: text("installation_id").notNull(),
-    accountLogin: text("account_login"),
+    provider: text("provider").notNull(),
+    externalId: text("external_id").notNull(),
+    accountName: text("account_name"),
     accountType: text("account_type"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceIdx: uniqueIndex("workspace_github_integration_installations_workspace_idx").on(
+    workspaceProviderIdx: index("workspace_integrations_workspace_provider_idx").on(
       table.workspaceId,
+      table.provider,
     ),
-    installationIdx: index("workspace_github_integration_installations_installation_idx").on(
-      table.installationId,
-    ),
+    workspaceProviderExternalIdx: uniqueIndex(
+      "workspace_integrations_workspace_provider_external_idx",
+    ).on(table.workspaceId, table.provider, table.externalId),
   }),
 );
 
-export const workspaceGitHubIntegrationRepositories = pgTable(
-  "workspace_github_integration_repositories",
+export const workspaceIntegrationResources = pgTable(
+  "workspace_integration_resources",
   {
     id: text("id").primaryKey(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    installationId: text("installation_id").notNull(),
-    githubRepoId: text("github_repo_id").notNull(),
-    fullName: text("full_name").notNull(),
-    defaultBranch: text("default_branch").notNull().default("main"),
-    private: boolean("private").notNull().default(true),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => workspaceIntegrations.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    resourceType: text("resource_type").notNull(),
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    displayName: text("display_name"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
     selectedAt: timestamp("selected_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceIdx: index("workspace_github_integration_repositories_workspace_idx").on(
-      table.workspaceId,
+    workspaceProviderTypeIdx: index(
+      "workspace_integration_resources_workspace_provider_type_idx",
+    ).on(table.workspaceId, table.provider, table.resourceType),
+    integrationIdx: index("workspace_integration_resources_integration_idx").on(
+      table.integrationId,
     ),
-    workspaceFullNameIdx: uniqueIndex(
-      "workspace_github_integration_repositories_workspace_full_name_idx",
-    ).on(table.workspaceId, table.fullName),
+    workspaceProviderTypeNameIdx: uniqueIndex(
+      "workspace_integration_resources_workspace_provider_type_name_idx",
+    ).on(table.workspaceId, table.provider, table.resourceType, table.name),
+    workspaceProviderTypeExternalIdx: uniqueIndex(
+      "workspace_integration_resources_workspace_provider_type_external_idx",
+    ).on(table.workspaceId, table.provider, table.resourceType, table.externalId),
   }),
 );
 
@@ -763,11 +782,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     fields: [workspaces.id],
     references: [workspaceRepositories.workspaceId],
   }),
-  githubIntegrationInstallation: one(workspaceGitHubIntegrationInstallations, {
-    fields: [workspaces.id],
-    references: [workspaceGitHubIntegrationInstallations.workspaceId],
-  }),
-  githubIntegrationRepositories: many(workspaceGitHubIntegrationRepositories),
+  integrations: many(workspaceIntegrations),
+  integrationResources: many(workspaceIntegrationResources),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
@@ -962,23 +978,24 @@ export const workspaceRepositoriesRelations = relations(workspaceRepositories, (
   }),
 }));
 
-export const workspaceGitHubIntegrationInstallationsRelations = relations(
-  workspaceGitHubIntegrationInstallations,
-  ({ one, many }) => ({
-    workspace: one(workspaces, {
-      fields: [workspaceGitHubIntegrationInstallations.workspaceId],
-      references: [workspaces.id],
-    }),
-    repositories: many(workspaceGitHubIntegrationRepositories),
+export const workspaceIntegrationsRelations = relations(workspaceIntegrations, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceIntegrations.workspaceId],
+    references: [workspaces.id],
   }),
-);
+  resources: many(workspaceIntegrationResources),
+}));
 
-export const workspaceGitHubIntegrationRepositoriesRelations = relations(
-  workspaceGitHubIntegrationRepositories,
+export const workspaceIntegrationResourcesRelations = relations(
+  workspaceIntegrationResources,
   ({ one }) => ({
     workspace: one(workspaces, {
-      fields: [workspaceGitHubIntegrationRepositories.workspaceId],
+      fields: [workspaceIntegrationResources.workspaceId],
       references: [workspaces.id],
+    }),
+    integration: one(workspaceIntegrations, {
+      fields: [workspaceIntegrationResources.integrationId],
+      references: [workspaceIntegrations.id],
     }),
   }),
 );
@@ -1019,10 +1036,8 @@ export const onboardingResponsesRelations = relations(onboardingResponses, ({ on
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
-export type WorkspaceGitHubIntegrationInstallation =
-  typeof workspaceGitHubIntegrationInstallations.$inferSelect;
-export type WorkspaceGitHubIntegrationRepository =
-  typeof workspaceGitHubIntegrationRepositories.$inferSelect;
+export type WorkspaceIntegration = typeof workspaceIntegrations.$inferSelect;
+export type WorkspaceIntegrationResource = typeof workspaceIntegrationResources.$inferSelect;
 export type WorkspaceCreditBalance = typeof workspaceCreditBalances.$inferSelect;
 export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSelect;
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;

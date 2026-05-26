@@ -5,7 +5,7 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
-import type { AgentToolId } from "@opencompany/db/schema";
+import type { AgentConfigTool, AgentToolId } from "@opencompany/db/schema";
 
 export type RuntimeToolName =
   | "shell"
@@ -22,10 +22,44 @@ export type RuntimeToolDefinition = {
   name: RuntimeToolName;
   kind: "sandbox" | "hosted";
   configToolId?: AgentToolId;
+  requiresRepositoryBinding?: boolean;
   description: string;
   parameters: JsonSchema;
   help?: string;
 };
+
+export type AgentToolDefinition = {
+  id: AgentToolId;
+  type: AgentConfigTool["type"];
+  provider?: "amp";
+  label: string;
+  description: string;
+  runtimeTools: RuntimeToolName[];
+  prCapableDefault?: boolean;
+};
+
+export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
+  {
+    id: "exa",
+    type: "hosted_tool",
+    label: "exa",
+    description: "Deep research on the web and people.",
+    runtimeTools: ["exa_search", "web_fetch"],
+  },
+  {
+    id: "amp",
+    type: "coding_agent",
+    provider: "amp",
+    label: "AMP",
+    description: "Delegate coding work to Amp inside an E2B sandbox.",
+    runtimeTools: ["amp_coder"],
+    prCapableDefault: true,
+  },
+];
+
+export const AGENT_TOOL_DEFINITION_BY_ID = new Map(
+  AGENT_TOOL_CATALOG.map((tool) => [tool.id, tool]),
+);
 
 export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
@@ -103,6 +137,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "amp_coder",
     kind: "sandbox",
     configToolId: "amp",
+    requiresRepositoryBinding: true,
     description:
       "Delegate coding work to Amp in the connected GitHub repository. Use for multi-file implementation, debugging, refactors, and PR-ready code changes.",
     parameters: {
@@ -291,31 +326,36 @@ export function resolveRuntimeToolNamesForConfigTools(
   const selectedToolIds = new Set(
     (tools ?? []).flatMap((tool) => (typeof tool.id === "string" ? [tool.id] : [])),
   );
-  for (const definition of HOSTED_TOOL_DEFINITIONS) {
-    if (definition.configToolId && selectedToolIds.has(definition.configToolId)) {
-      names.add(definition.name);
-    }
-  }
-  for (const definition of CORE_TOOL_DEFINITIONS) {
-    if (definition.configToolId === "amp") {
-      const ampTool = tools?.find((tool) => tool?.id === "amp");
-      if (
-        ampTool &&
-        "repository" in ampTool &&
-        typeof ampTool.repository === "string" &&
-        ampTool.repository.trim().length > 0
-      ) {
+  for (const selectedToolId of selectedToolIds) {
+    const agentTool = AGENT_TOOL_DEFINITION_BY_ID.get(selectedToolId as AgentToolId);
+    if (!agentTool) continue;
+    for (const runtimeToolName of agentTool.runtimeTools) {
+      const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(runtimeToolName);
+      if (definition && isRuntimeToolEnabledByConfig(definition, tools, selectedToolIds)) {
         names.add(definition.name);
       }
-      continue;
-    }
-
-    if (definition.configToolId && selectedToolIds.has(definition.configToolId)) {
-      names.add(definition.name);
     }
   }
 
   return Array.from(names);
+}
+
+function isRuntimeToolEnabledByConfig(
+  definition: RuntimeToolDefinition,
+  tools: ReadonlyArray<{ id?: unknown }> | undefined,
+  selectedToolIds: Set<string>,
+) {
+  if (!definition.configToolId) return false;
+  if (!selectedToolIds.has(definition.configToolId)) return false;
+  if (!definition.requiresRepositoryBinding) return true;
+
+  const configTool = tools?.find((tool) => tool?.id === definition.configToolId);
+  if (!configTool) return false;
+  return (
+    "repository" in configTool &&
+    typeof configTool.repository === "string" &&
+    configTool.repository.trim().length > 0
+  );
 }
 
 export function getRuntimeToolHelp(toolName: string, enabledTools: readonly RuntimeToolName[]) {

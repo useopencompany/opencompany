@@ -26,7 +26,8 @@ import {
   agents,
   users,
   type WorkspaceRepository,
-  workspaceGitHubIntegrationRepositories,
+  workspaceIntegrationResources,
+  workspaceIntegrations,
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
@@ -1435,14 +1436,20 @@ export function buildAmpCommand(input: { task: string; ampThreadId?: string | nu
 async function loadGitHubWorkRepository(workspaceId: string, fullName: string) {
   const [repository] = await getDb()
     .select({
-      fullName: workspaceGitHubIntegrationRepositories.fullName,
-      installationId: workspaceGitHubIntegrationRepositories.installationId,
+      fullName: workspaceIntegrationResources.name,
+      installationId: workspaceIntegrations.externalId,
     })
-    .from(workspaceGitHubIntegrationRepositories)
+    .from(workspaceIntegrationResources)
+    .innerJoin(
+      workspaceIntegrations,
+      eq(workspaceIntegrationResources.integrationId, workspaceIntegrations.id),
+    )
     .where(
       and(
-        eq(workspaceGitHubIntegrationRepositories.workspaceId, workspaceId),
-        eq(workspaceGitHubIntegrationRepositories.fullName, fullName),
+        eq(workspaceIntegrationResources.workspaceId, workspaceId),
+        eq(workspaceIntegrationResources.provider, "github"),
+        eq(workspaceIntegrationResources.resourceType, "repository"),
+        eq(workspaceIntegrationResources.name, fullName),
       ),
     )
     .limit(1);

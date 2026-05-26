@@ -69,14 +69,26 @@ Unknown model IDs fall back to `openai/gpt-5.4-mini` rather than failing the par
 
 All models are routed through Vercel AI Gateway, so the file never references a provider SDK directly.
 
-### `tools` — list of strings
+### `tools` — list of strings or tool objects
 
-Each entry is a tool ID. Unknown IDs are silently dropped.
+Each entry is a product-level tool ID, either as a string shorthand or as an
+object when the tool has persisted configuration. Unknown IDs are silently
+dropped. Labels, descriptions, runtime function names, and provider execution
+details are catalog data in code, not `.agent` file data.
 
 | ID    | Description                                      |
 | ----- | ------------------------------------------------ |
 | `exa` | Deep research on the web and people.             |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
+
+```yaml
+tools:
+  - id: amp
+    type: coding_agent
+    provider: amp
+    repository: opencompany-web
+    prCapable: true
+```
 
 ### `brain` — list of strings
 
@@ -252,13 +264,19 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     name: "openai/gpt-5.4",
   },
   tools: [
-    { id: "exa", type: "tool", label: "exa", description: "Deep research on the web and people." },
+    { id: "exa", type: "hosted_tool", label: "exa", description: "Deep research on the web and people." },
   ],
   brain: [
     { path: "/", type: "folder" },
     { path: "docs/README.md", type: "file" },
     { path: "product/", type: "folder" },
   ],
+  integrations: {
+    github: {
+      repositories: [],
+    },
+  },
+  triggers: [],
 }
 ```
 
@@ -282,7 +300,12 @@ Yes. Push them to the workspace repo and trigger a manual import — the web app
 Every save carries a content hash and version. Inngest debounces by ~10 seconds and limits one in-flight sync per agent. If GitHub returns a conflicting blob SHA, the sync refetches and retries.
 
 **How do I add a new model or tool?**
-Add it to `apps/web/lib/agents/mentions.ts` and ship. Older files that don't reference it are unaffected; clients that don't recognize a new ID will fall back gracefully.
+Add models to `packages/agent-runtime/src/models.ts`. Add product-level tools
+to `AGENT_TOOL_CATALOG` and runtime callable tools to
+`RUNTIME_TOOL_DEFINITIONS` in `packages/agent-runtime/src/tools.ts`; the web
+editor consumes that catalog through `apps/web/lib/agents/mentions.ts`. Older
+files that don't reference the new ID are unaffected; clients that don't
+recognize a new ID will fall back gracefully.
 
 **How do I evolve the format?**
 Bump `schemaVersion` in `packages/db/src/schema.ts` and add a normalizer in `parseAgentFile`. Keep additions additive so existing files keep parsing as `agent.v1` until they're re-serialized.

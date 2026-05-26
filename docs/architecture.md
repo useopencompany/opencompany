@@ -52,8 +52,8 @@ Current limitation: there is no GitHub webhook ingestion path. External GitHub e
 ## GitHub Work Integrations
 
 Agent work integrations are separate from workspace backing storage. GitHub work integration state
-is cached in `workspace_github_integration_installations` and
-`workspace_github_integration_repositories`.
+is cached as a provider row in `workspace_integrations` plus repository resource rows in
+`workspace_integration_resources`.
 
 Agents reference work integration repositories through `.agent` frontmatter under
 `integrations.github.repositories`. AMP sessions clone the configured work repository into the
@@ -125,8 +125,8 @@ The high-level table groups are:
 - Identity and tenancy: `users`, `workspaces`, `workspace_memberships`, with WorkOS Organizations mapped through `workspaces.workos_organization_id`.
 - Agent editing: `agents` stores the latest DB version and parsed config.
 - GitHub sync: `agent_sync_jobs` stores desired materialization state; `workspace_repositories` maps workspaces to managed GitHub backing repos.
-- Agent work integrations: `workspace_github_integration_installations` and
-  `workspace_github_integration_repositories`.
+- Agent work integrations: `workspace_integrations` stores connected provider accounts, and
+  `workspace_integration_resources` stores provider resources such as GitHub repositories.
 - Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store
   durable session ownership, transcript, and replayable streaming state.
 - Onboarding: `onboarding_responses`.

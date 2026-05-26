@@ -1,10 +1,7 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import {
-  workspaceGitHubIntegrationInstallations,
-  workspaceGitHubIntegrationRepositories,
-} from "@opencompany/db/schema";
+import { workspaceIntegrationResources, workspaceIntegrations } from "@opencompany/db/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { requireCurrentWorkspace, requireCurrentWorkspaceAdmin } from "@/lib/auth";
@@ -18,6 +15,8 @@ import {
 } from "@/lib/integrations/github";
 import {
   disconnectGitHubIntegration,
+  GITHUB_INTEGRATION_PROVIDER,
+  GITHUB_REPOSITORY_RESOURCE_TYPE,
   syncGitHubIntegrationRepositories,
 } from "@/lib/integrations/service";
 
@@ -33,13 +32,24 @@ export async function loadWorkspaceIntegrationState() {
   const [installation, repositories] = await Promise.all([
     db
       .select()
-      .from(workspaceGitHubIntegrationInstallations)
-      .where(eq(workspaceGitHubIntegrationInstallations.workspaceId, workspace.id))
+      .from(workspaceIntegrations)
+      .where(
+        and(
+          eq(workspaceIntegrations.workspaceId, workspace.id),
+          eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+        ),
+      )
       .limit(1),
     db
       .select()
-      .from(workspaceGitHubIntegrationRepositories)
-      .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspace.id)),
+      .from(workspaceIntegrationResources)
+      .where(
+        and(
+          eq(workspaceIntegrationResources.workspaceId, workspace.id),
+          eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+          eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+        ),
+      ),
   ]);
 
   return {
@@ -51,17 +61,17 @@ export async function loadWorkspaceIntegrationState() {
       }),
       installation: installation[0]
         ? {
-            installationId: installation[0].installationId,
-            accountLogin: installation[0].accountLogin,
+            installationId: installation[0].externalId,
+            accountLogin: installation[0].accountName,
             accountType: installation[0].accountType,
             updatedAt: installation[0].updatedAt.toISOString(),
           }
         : null,
       repositories: repositories
-        .sort((left, right) => left.fullName.localeCompare(right.fullName))
+        .sort((left, right) => left.name.localeCompare(right.name))
         .map((repository) => ({
-          fullName: repository.fullName,
-          defaultBranch: repository.defaultBranch,
+          fullName: repository.name,
+          defaultBranch: readGitHubRepositoryMetadata(repository.metadata).defaultBranch,
           selectedAt: repository.selectedAt?.toISOString() ?? null,
         })),
     },
@@ -75,21 +85,26 @@ export async function refreshGitHubRepositories() {
   const db = getDb();
   const [existingInstallation] = await db
     .select()
-    .from(workspaceGitHubIntegrationInstallations)
-    .where(eq(workspaceGitHubIntegrationInstallations.workspaceId, workspace.id))
+    .from(workspaceIntegrations)
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, workspace.id),
+        eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+      ),
+    )
     .limit(1);
 
   if (!existingInstallation) {
     return;
   }
 
-  const installationId = existingInstallation.installationId;
+  const installationId = existingInstallation.externalId;
   const installation = await getGitHubWorkInstallation({ installationId });
   const repositories = await listGitHubWorkInstallationRepositories({ installationId });
   await syncGitHubIntegrationRepositories({
     workspaceId: workspace.id,
     installationId,
-    accountLogin: installation.account?.login ?? existingInstallation.accountLogin,
+    accountLogin: installation.account?.login ?? existingInstallation.accountName,
     accountType: installation.account?.type ?? existingInstallation.accountType,
     repositories,
   });
@@ -100,12 +115,14 @@ export async function refreshGitHubRepositories() {
 export async function markGitHubRepositorySelected(fullName: string) {
   const { workspace } = await requireCurrentWorkspaceAdmin();
   await getDb()
-    .update(workspaceGitHubIntegrationRepositories)
+    .update(workspaceIntegrationResources)
     .set({ selectedAt: new Date(), updatedAt: new Date() })
     .where(
       and(
-        eq(workspaceGitHubIntegrationRepositories.workspaceId, workspace.id),
-        eq(workspaceGitHubIntegrationRepositories.fullName, fullName),
+        eq(workspaceIntegrationResources.workspaceId, workspace.id),
+        eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+        eq(workspaceIntegrationResources.name, fullName),
       ),
     );
 
@@ -123,8 +140,13 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
   const db = getDb();
   const [existingInstallation] = await db
     .select()
-    .from(workspaceGitHubIntegrationInstallations)
-    .where(eq(workspaceGitHubIntegrationInstallations.workspaceId, workspace.id))
+    .from(workspaceIntegrations)
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, workspace.id),
+        eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+      ),
+    )
     .limit(1);
 
   if (!existingInstallation) {
@@ -147,22 +169,20 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
   }
 
   const [sharedInstallation] = await db
-    .select({ workspaceId: workspaceGitHubIntegrationInstallations.workspaceId })
-    .from(workspaceGitHubIntegrationInstallations)
+    .select({ workspaceId: workspaceIntegrations.workspaceId })
+    .from(workspaceIntegrations)
     .where(
       and(
-        eq(
-          workspaceGitHubIntegrationInstallations.installationId,
-          existingInstallation.installationId,
-        ),
-        ne(workspaceGitHubIntegrationInstallations.workspaceId, workspace.id),
+        eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrations.externalId, existingInstallation.externalId),
+        ne(workspaceIntegrations.workspaceId, workspace.id),
       ),
     )
     .limit(1);
 
   if (!sharedInstallation) {
     try {
-      await deleteGitHubWorkInstallation({ installationId: existingInstallation.installationId });
+      await deleteGitHubWorkInstallation({ installationId: existingInstallation.externalId });
     } catch (error) {
       if (!(error instanceof GitHubInstallationNotFoundError)) {
         return {
@@ -196,6 +216,15 @@ function githubStatus(input: {
   if (!input.hasInstallation) return "not_connected";
   if (input.repositoryCount === 0) return "needs_repository_access";
   return "connected";
+}
+
+function readGitHubRepositoryMetadata(metadata: Record<string, unknown>) {
+  return {
+    defaultBranch:
+      typeof metadata.defaultBranch === "string" && metadata.defaultBranch.trim()
+        ? metadata.defaultBranch.trim()
+        : "main",
+  };
 }
 
 function revalidateIntegrationPaths() {

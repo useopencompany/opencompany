@@ -1,7 +1,11 @@
 import { getDb } from "@opencompany/db/client";
-import { agents, brainFiles, workspaceGitHubIntegrationRepositories } from "@opencompany/db/schema";
+import { agents, brainFiles, workspaceIntegrationResources } from "@opencompany/db/schema";
 import { and, asc, desc, eq, or } from "drizzle-orm";
 import { type AgentPayload, serializeAgent } from "@/lib/agents/payload";
+import {
+  GITHUB_INTEGRATION_PROVIDER,
+  GITHUB_REPOSITORY_RESOURCE_TYPE,
+} from "@/lib/integrations/service";
 
 async function loadBrainPathsForWorkspace(workspaceId: string): Promise<string[]> {
   const db = getDb();
@@ -17,14 +21,25 @@ async function loadGitHubIntegrationRepositoriesForWorkspace(
   workspaceId: string,
 ): Promise<Array<{ fullName: string; defaultBranch: string }>> {
   const db = getDb();
-  return db
+  const rows = await db
     .select({
-      fullName: workspaceGitHubIntegrationRepositories.fullName,
-      defaultBranch: workspaceGitHubIntegrationRepositories.defaultBranch,
+      fullName: workspaceIntegrationResources.name,
+      metadata: workspaceIntegrationResources.metadata,
     })
-    .from(workspaceGitHubIntegrationRepositories)
-    .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspaceId))
-    .orderBy(asc(workspaceGitHubIntegrationRepositories.fullName));
+    .from(workspaceIntegrationResources)
+    .where(
+      and(
+        eq(workspaceIntegrationResources.workspaceId, workspaceId),
+        eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+      ),
+    )
+    .orderBy(asc(workspaceIntegrationResources.name));
+
+  return rows.map((row) => ({
+    fullName: row.fullName,
+    defaultBranch: readGitHubRepositoryDefaultBranch(row.metadata),
+  }));
 }
 
 export async function loadAgentsForWorkspace(workspaceId: string): Promise<AgentPayload[]> {
@@ -59,4 +74,10 @@ export async function loadAgentForWorkspace(
   ]);
 
   return agent ? serializeAgent(agent, brainPaths, githubIntegrationRepositories) : null;
+}
+
+function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {
+  return typeof metadata.defaultBranch === "string" && metadata.defaultBranch.trim()
+    ? metadata.defaultBranch.trim()
+    : "main";
 }

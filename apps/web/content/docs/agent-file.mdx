@@ -60,11 +60,18 @@ All models are accessed through Vercel AI Gateway, so you never deal with provid
 
 ### `tools`
 
-A list of capabilities the agent can use beyond text generation.
+A list of capabilities the agent can use beyond text generation. A simple tool
+can be written as a string. A tool with persisted configuration is written as an
+object.
 
 ```yaml
 tools:
   - exa
+  - id: amp
+    type: coding_agent
+    provider: amp
+    repository: opencompany-web
+    prCapable: true
 ```
 
 | ID | What it does |
@@ -72,7 +79,7 @@ tools:
 | `exa` | Web and people research. The agent can search the live internet. |
 | `amp` | Coding work delegated into a sandboxed runtime. |
 
-Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file.
+Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file. Tool labels, descriptions, and runtime function names come from the platform catalog, not from this file.
 
 ### `brain`
 

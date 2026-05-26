@@ -1,4 +1,8 @@
-import { AGENT_MODEL_CATALOG } from "@opencompany/agent-runtime";
+import {
+  AGENT_MODEL_CATALOG,
+  AGENT_TOOL_CATALOG,
+  type AgentToolDefinition,
+} from "@opencompany/agent-runtime";
 import type {
   AgentBrainReference,
   AgentCodingToolConfig,
@@ -9,14 +13,6 @@ import type {
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
-
-type AgentToolDefinition = {
-  id: AgentToolId;
-  type: AgentConfigTool["type"];
-  label: string;
-  description: string;
-  provider?: "amp";
-};
 
 type AgentModelDefinition = {
   id: AgentModelId;
@@ -32,21 +28,7 @@ export type AgentConfigDerivationRepository = {
   defaultBranch: string;
 };
 
-export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = [
-  {
-    id: "exa",
-    type: "hosted_tool",
-    label: "exa",
-    description: "Deep research on the web and people.",
-  },
-  {
-    id: "amp",
-    type: "coding_agent",
-    provider: "amp",
-    label: "AMP",
-    description: "Delegate coding work to Amp inside an E2B sandbox.",
-  },
-];
+export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = AGENT_TOOL_CATALOG;
 
 export const SUPPORTED_AGENT_MODELS: AgentModelDefinition[] = AGENT_MODEL_CATALOG.map((model) => ({
   id: model.id,
@@ -130,8 +112,7 @@ export function deriveAgentConfigFromBody(input: {
   const model =
     MODEL_BY_ID.get(mentions.model ?? input.model ?? DEFAULT_MODEL_ID) ??
     MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
-  const repository = mentions.repository;
-  const tools = bodyToolsToConfig(mentions.tools, repository?.id ?? null);
+  const tools = bodyToolsToConfig(mentions.tools, mentions.activeRepository?.id ?? null);
 
   return {
     body,
@@ -147,10 +128,12 @@ export function deriveAgentConfigFromBody(input: {
       brain: mentions.brain,
       integrations: {
         github: {
-          repositories: repository ? [repository] : [],
+          repositories: mentions.repositories,
         },
       },
-      triggers: repository ? syncTriggersToRepository(input.triggers ?? [], repository) : [],
+      triggers: mentions.activeRepository
+        ? syncTriggersToRepository(input.triggers ?? [], mentions.activeRepository)
+        : [],
     },
   };
 }
@@ -167,7 +150,7 @@ export function toConfigTool(
       label: tool.label,
       description: tool.description,
       repository: overrides.repository ?? null,
-      prCapable: overrides.prCapable ?? true,
+      prCapable: overrides.prCapable ?? tool.prCapableDefault ?? true,
     };
   }
 
@@ -182,7 +165,8 @@ export function toConfigTool(
 function collectBodyMentions(body: string, repositories: AgentConfigDerivationRepository[]) {
   const repositoryCatalog = repositoryCatalogForDerivation(repositories);
   let model: AgentModelId | null = null;
-  let repository: AgentGitHubRepositoryConfig | null = null;
+  let activeRepository: AgentGitHubRepositoryConfig | null = null;
+  const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
   const tools = new Set<AgentToolId>();
   const brain = new Map<string, AgentBrainReference>();
 
@@ -207,13 +191,15 @@ function collectBodyMentions(body: string, repositories: AgentConfigDerivationRe
 
     const repositoryById = repositoryCatalog.byId.get(repositoryIdForFullName(rawId));
     if (repositoryById) {
-      repository = repositoryById;
+      repositoriesById.set(repositoryById.id, repositoryById);
+      activeRepository = repositoryById;
       continue;
     }
 
     const repositoryByFullName = repositoryCatalog.byFullName.get(rawId.toLowerCase());
     if (repositoryByFullName) {
-      repository = repositoryByFullName;
+      repositoriesById.set(repositoryByFullName.id, repositoryByFullName);
+      activeRepository = repositoryByFullName;
     }
   }
 
@@ -221,7 +207,8 @@ function collectBodyMentions(body: string, repositories: AgentConfigDerivationRe
     model,
     tools: Array.from(tools),
     brain: Array.from(brain.values()),
-    repository,
+    repositories: Array.from(repositoriesById.values()),
+    activeRepository,
   };
 }
 

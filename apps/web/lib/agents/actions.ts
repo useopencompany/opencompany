@@ -6,7 +6,7 @@ import {
   agentSyncJobs,
   agents,
   brainFiles,
-  workspaceGitHubIntegrationRepositories,
+  workspaceIntegrationResources,
 } from "@opencompany/db/schema";
 import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
@@ -33,6 +33,10 @@ import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import type { AgentModelId, TiptapDoc } from "@/lib/agents/types";
 import { getCurrentWorkspace } from "@/lib/auth";
+import {
+  GITHUB_INTEGRATION_PROVIDER,
+  GITHUB_REPOSITORY_RESOURCE_TYPE,
+} from "@/lib/integrations/service";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
   ensureWorkspaceRepository,
@@ -148,19 +152,29 @@ export async function updateAgent(
     () =>
       db
         .select({
-          fullName: workspaceGitHubIntegrationRepositories.fullName,
-          defaultBranch: workspaceGitHubIntegrationRepositories.defaultBranch,
+          fullName: workspaceIntegrationResources.name,
+          metadata: workspaceIntegrationResources.metadata,
         })
-        .from(workspaceGitHubIntegrationRepositories)
-        .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspace.id))
-        .orderBy(asc(workspaceGitHubIntegrationRepositories.fullName)),
+        .from(workspaceIntegrationResources)
+        .where(
+          and(
+            eq(workspaceIntegrationResources.workspaceId, workspace.id),
+            eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+            eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+          ),
+        )
+        .orderBy(asc(workspaceIntegrationResources.name)),
   );
+  const githubRepositories = githubIntegrationRepositories.map((repository) => ({
+    fullName: repository.fullName,
+    defaultBranch: readGitHubRepositoryDefaultBranch(repository.metadata),
+  }));
   const derivedFromTiptap = sanitizedContent
     ? derivePreviewConfigFromTiptapDoc({
         title,
         content: sanitizedContent,
         model: patch.model ?? agent.config.model.name,
-        repositories: githubIntegrationRepositories,
+        repositories: githubRepositories,
         triggers: agent.config.triggers,
       })
     : null;
@@ -173,7 +187,7 @@ export async function updateAgent(
           title,
           body: patch.body,
           model: patch.model ?? agent.config.model.name,
-          repositories: githubIntegrationRepositories,
+          repositories: githubRepositories,
           triggers: agent.config.triggers,
         })
       : derivedFromTiptap;
@@ -280,9 +294,7 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
     pathChanged,
-    agent: updatedAgent
-      ? serializeAgent(updatedAgent, brainPaths, githubIntegrationRepositories)
-      : null,
+    agent: updatedAgent ? serializeAgent(updatedAgent, brainPaths, githubRepositories) : null,
   };
 
   revalidatePath("/agents");
@@ -495,4 +507,10 @@ export async function syncAgentsFromWorkspaceRepository() {
 
   revalidatePath("/agents");
   endTimingTrace(trace, { count: files.length });
+}
+
+function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {
+  return typeof metadata.defaultBranch === "string" && metadata.defaultBranch.trim()
+    ? metadata.defaultBranch.trim()
+    : "main";
 }

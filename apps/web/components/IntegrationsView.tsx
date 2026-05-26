@@ -18,6 +18,7 @@ import {
 } from "@/lib/integrations/actions";
 
 type IntegrationStatus = "not_connected" | "connected" | "needs_repository_access" | "error";
+type IntegrationProviderId = "github";
 
 type WorkspaceIntegrationState = {
   github: {
@@ -37,11 +38,17 @@ type WorkspaceIntegrationState = {
 };
 
 type IntegrationDefinition = {
-  id: "github";
+  id: IntegrationProviderId;
   name: string;
   category: "Code";
   description: string;
   icon: LucideIcon;
+};
+
+type IntegrationCardState = {
+  status: IntegrationStatus;
+  label: string;
+  description: string;
 };
 
 type Filter = "all" | "connected" | "available" | "needs_attention";
@@ -67,7 +74,7 @@ export default function IntegrationsView({
     () =>
       INTEGRATIONS.filter((integration) => {
         const normalized = query.trim().toLowerCase();
-        const state = integrationState(integrations);
+        const state = integrationState(integration.id, integrations);
         const matchesQuery =
           normalized.length === 0 ||
           integration.name.toLowerCase().includes(normalized) ||
@@ -133,7 +140,7 @@ export default function IntegrationsView({
               <IntegrationCard
                 key={integration.id}
                 integration={integration}
-                state={integrationState(integrations)}
+                state={integrationState(integration.id, integrations)}
                 integrations={integrations}
               />
             ))}
@@ -159,7 +166,7 @@ function IntegrationCard({
   integrations,
 }: {
   integration: IntegrationDefinition;
-  state: { status: IntegrationStatus; label: string; description: string };
+  state: IntegrationCardState;
   integrations: WorkspaceIntegrationState;
 }) {
   const Icon = integration.icon;
@@ -195,19 +202,33 @@ function IntegrationCard({
       </div>
 
       <div className="mt-4 border-t border-[#ecece8] pt-4">
-        <GitHubControls integrations={integrations} />
+        <IntegrationControls provider={integration.id} integrations={integrations} />
       </div>
     </section>
   );
 }
 
-function GitHubControls({ integrations }: { integrations: WorkspaceIntegrationState }) {
+function IntegrationControls({
+  provider,
+  integrations,
+}: {
+  provider: IntegrationProviderId;
+  integrations: WorkspaceIntegrationState;
+}) {
+  switch (provider) {
+    case "github":
+      return <GitHubControls integration={integrations.github} />;
+  }
+  return assertNever(provider);
+}
+
+function GitHubControls({ integration }: { integration: WorkspaceIntegrationState["github"] }) {
   const router = useRouter();
   const [isDisconnecting, startDisconnectTransition] = useTransition();
   const [disconnectMessage, setDisconnectMessage] = useState<string | null>(null);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
-  const connected = Boolean(integrations.github.installation);
-  const configured = integrations.github.status !== "error";
+  const connected = Boolean(integration.installation);
+  const configured = integration.status !== "error";
 
   function disconnectGitHub() {
     const confirmed = window.confirm(
@@ -233,15 +254,13 @@ function GitHubControls({ integrations }: { integrations: WorkspaceIntegrationSt
       <div className="grid gap-3 sm:grid-cols-3">
         <InfoField
           label="Account"
-          value={integrations.github.installation?.accountLogin ?? "Not connected"}
+          value={integration.installation?.accountLogin ?? "Not connected"}
         />
-        <InfoField label="Repositories" value={String(integrations.github.repositories.length)} />
+        <InfoField label="Repositories" value={String(integration.repositories.length)} />
         <InfoField
           label="Last refresh"
           value={
-            integrations.github.installation
-              ? formatDateTime(integrations.github.installation.updatedAt)
-              : "Never"
+            integration.installation ? formatDateTime(integration.installation.updatedAt) : "Never"
           }
         />
       </div>
@@ -295,9 +314,9 @@ function GitHubControls({ integrations }: { integrations: WorkspaceIntegrationSt
       {disconnectError ? (
         <p className="mt-2 text-[12px] leading-5 text-[#9f2f24]">{disconnectError}</p>
       ) : null}
-      {integrations.github.repositories.length > 0 ? (
+      {integration.repositories.length > 0 ? (
         <div className="mt-4 max-h-[180px] overflow-y-auto rounded-md border border-[#e6e6e3] bg-white/55">
-          {integrations.github.repositories.map((repository) => (
+          {integration.repositories.map((repository) => (
             <div
               key={repository.fullName}
               className="flex items-center justify-between gap-4 border-t border-[#ecece8] px-3 py-2 first:border-t-0"
@@ -327,22 +346,37 @@ function InfoField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function integrationState(integrations: WorkspaceIntegrationState) {
-  if (integrations.github.status === "connected") {
+function integrationState(
+  provider: IntegrationProviderId,
+  integrations: WorkspaceIntegrationState,
+): IntegrationCardState {
+  switch (provider) {
+    case "github":
+      return githubIntegrationState(integrations.github.status);
+  }
+  return assertNever(provider);
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported integration provider: ${value}`);
+}
+
+function githubIntegrationState(status: IntegrationStatus): IntegrationCardState {
+  if (status === "connected") {
     return {
       status: "connected" as const,
       label: "Connected",
       description: "GitHub is connected.",
     };
   }
-  if (integrations.github.status === "needs_repository_access") {
+  if (status === "needs_repository_access") {
     return {
       status: "needs_repository_access" as const,
       label: "Needs access",
       description: "GitHub is installed but no repositories are available.",
     };
   }
-  if (integrations.github.status === "error") {
+  if (status === "error") {
     return {
       status: "error" as const,
       label: "Not configured",
