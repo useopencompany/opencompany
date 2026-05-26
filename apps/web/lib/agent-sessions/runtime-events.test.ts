@@ -292,6 +292,64 @@ describe("buildRuntimeToolCallsForMessage", () => {
     ]);
   });
 
+  it("marks failed tool lifecycle events with the error preview", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "read_file",
+          input: { path: "README.md" },
+        }),
+        event(2, "tool.failed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "read_file",
+          error: {
+            message: "Path must be inside work/ or brain/ for this session.",
+            code: "invalid_sandbox_path",
+            recoverable: true,
+          },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls).toMatchObject([
+      {
+        id: "call_1",
+        name: "read_file",
+        status: "failed",
+        outputPreview: expect.stringContaining("invalid_sandbox_path"),
+      },
+    ]);
+  });
+
+  it("marks the latest orphan running tool as failed when an old session has only session error", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "read_file",
+          input: { path: "README.md" },
+        }),
+        event(2, "session.error", {
+          message: "Path must be inside work/ or brain/ for this session.",
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls).toMatchObject([
+      {
+        id: "call_1",
+        status: "failed",
+        outputPreview: expect.stringContaining("Path must be inside work/ or brain/"),
+      },
+    ]);
+  });
+
   it("attaches live command output to the matching running tool", () => {
     const calls = buildRuntimeToolCallsForMessage(
       [

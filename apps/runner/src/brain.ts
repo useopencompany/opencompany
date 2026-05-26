@@ -10,7 +10,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
-import type { SandboxHandle } from "./sandbox";
+import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
 const MAX_BRAIN_FILE_BYTES = 256 * 1024;
 const MAX_BRAIN_MOUNT_FILES = 80;
@@ -29,16 +29,27 @@ export async function materializeBrainForSession(input: {
   const files = await expandBrainFiles(input.workspaceId, references);
   const folderReferences = references.filter((reference) => reference.type === "folder");
   const db = getDb();
+  const layout = sandboxLayout(input.workdir);
+  const brainManifestQuoted = shellQuote(layout.brainManifest);
 
   await input.sandbox.commands.run(
-    `rm -rf ${shellQuote(`${input.workdir}/brain`)} && mkdir -p ${shellQuote(`${input.workdir}/brain`)} ${shellQuote(`${input.workdir}/.opencompany`)}`,
+    `rm -rf ${shellQuote(layout.brainRoot)} && mkdir -p ${shellQuote(layout.brainRoot)}`,
+  );
+  // prepareWorkspace normally creates this first; keep this idempotent for resumed sessions/tests.
+  await input.sandbox.commands.run(
+    [
+      `mkdir -p ${shellQuote(layout.metadataRoot)}`,
+      `chown root:root ${shellQuote(layout.metadataRoot)}`,
+      `chmod 700 ${shellQuote(layout.metadataRoot)}`,
+    ].join(" && "),
+    { user: "root", timeoutMs: 30_000 },
   );
 
   for (const file of files) {
     await input.sandbox.commands.run(
-      `mkdir -p ${shellQuote(`${input.workdir}/brain/${dirname(file.path)}`)}`,
+      `mkdir -p ${shellQuote(`${layout.brainRoot}/${dirname(file.path)}`)}`,
     );
-    await input.sandbox.files.write(`${input.workdir}/brain/${file.path}`, file.content);
+    await input.sandbox.files.write(`${layout.brainRoot}/${file.path}`, file.content);
     await db
       .insert(agentSessionBrainMounts)
       .values({
@@ -82,8 +93,9 @@ export async function materializeBrainForSession(input: {
       });
   }
 
+  // The manifest is OpenCompany metadata. The agent sees Brain refs in agent.agent instead.
   await input.sandbox.files.write(
-    `${input.workdir}/.opencompany/brain-manifest.json`,
+    layout.brainManifest,
     JSON.stringify(
       {
         root: "brain",
@@ -102,19 +114,16 @@ export async function materializeBrainForSession(input: {
       null,
       2,
     ),
+    { user: "root" },
   );
-
   await input.sandbox.commands.run(
-    [
-      `cd ${shellQuote(input.workdir)}`,
-      "git init -q",
-      'git config user.email "agent@opencompany.local"',
-      'git config user.name "OpenCompany Agent"',
-      "git add brain .opencompany/brain-manifest.json 2>/dev/null || true",
-      'git commit -qm "Brain baseline" 2>/dev/null || true',
-    ].join(" && "),
-    { timeoutMs: 30_000 },
+    `chown root:root ${brainManifestQuoted} && chmod 600 ${brainManifestQuoted}`,
+    { user: "root" },
   );
+  await input.sandbox.commands.run(`chown -R user:user ${shellQuote(layout.brainRoot)}`, {
+    user: "root",
+    timeoutMs: 30_000,
+  });
 }
 
 export async function syncBrainFromSandbox(input: {
@@ -324,11 +333,12 @@ async function writeBrainFileToGitHub(
   if (!repository) return { commitSha: null, blobSha: null };
   const token = await getGitHubInstallationToken();
   if (!token) return { commitSha: null, blobSha: null };
+  const repositoryPath = githubRepositoryPath(repository.fullName);
   const current = await getGitHubFile(token, repository, `brain/${path}`);
   const result = await githubRequest<{ content?: { sha?: string }; commit?: { sha?: string } }>({
     token,
     repository,
-    path: `/repos/${repository.fullName}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
+    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
     method: "PUT",
     body: {
       message: `Update brain/${path}`,
@@ -348,6 +358,7 @@ async function deleteBrainFileFromGitHub(
   if (!repository) return;
   const token = await getGitHubInstallationToken();
   if (!token) return;
+  const repositoryPath = githubRepositoryPath(repository.fullName);
   const current = blobSha
     ? { sha: blobSha }
     : await getGitHubFile(token, repository, `brain/${path}`);
@@ -355,7 +366,7 @@ async function deleteBrainFileFromGitHub(
   await githubRequest({
     token,
     repository,
-    path: `/repos/${repository.fullName}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
+    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
     method: "DELETE",
     body: {
       message: `Delete brain/${path}`,
@@ -367,10 +378,11 @@ async function deleteBrainFileFromGitHub(
 
 async function getGitHubFile(token: string, repository: WorkspaceRepository, path: string) {
   try {
+    const repositoryPath = githubRepositoryPath(repository.fullName);
     return await githubRequest<{ sha?: string }>({
       token,
       repository,
-      path: `/repos/${repository.fullName}/contents/${encodeURIComponentPath(path)}?ref=${encodeURIComponent(repository.defaultBranch)}`,
+      path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}?ref=${encodeURIComponent(repository.defaultBranch)}`,
       method: "GET",
     });
   } catch (error) {
@@ -429,4 +441,11 @@ function conflictPath(path: string) {
 
 function encodeURIComponentPath(path: string) {
   return path.split("/").map(encodeURIComponent).join("/");
+}
+
+function githubRepositoryPath(fullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) {
+    throw new Error("Invalid GitHub repository full name.");
+  }
+  return fullName;
 }

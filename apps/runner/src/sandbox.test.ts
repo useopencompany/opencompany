@@ -10,7 +10,14 @@ vi.mock("e2b", () => ({
   Sandbox: e2bMocks,
 }));
 
-import { armSandboxIdleTimeout, createOrConnectSandbox } from "./sandbox";
+import {
+  armSandboxIdleTimeout,
+  createOrConnectSandbox,
+  prepareWorkspace,
+  resolveSandboxToolPath,
+  runSandboxTool,
+  sandboxLayout,
+} from "./sandbox";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -110,5 +117,168 @@ describe("armSandboxIdleTimeout", () => {
     expect(sandbox.setTimeout).not.toHaveBeenCalledWith(30_000, {
       requestTimeoutMs: 30_000,
     });
+  });
+});
+
+describe("prepareWorkspace", () => {
+  it("creates a capability-scoped workspace and root-owned metadata", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      [
+        "mkdir -p '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
+        "chown -R user:user '/home/user/workspace'",
+        "chown root:root '/home/user/.opencompany'",
+        "chmod 700 '/home/user/.opencompany'",
+      ].join(" && "),
+      { user: "root", timeoutMs: 30_000 },
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/.opencompany/agent.agent",
+      '---\ntitle: "Agent"\n---\n\nInstructions',
+      { user: "root", requestTimeoutMs: 30_000 },
+    );
+    expect(
+      sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git clone")),
+    ).toBe(false);
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "git -C '/home/user/workspace/work' init -q",
+      {
+        user: "user",
+        timeoutMs: 30_000,
+      },
+    );
+  });
+});
+
+describe("resolveSandboxToolPath", () => {
+  it("allows work and brain paths", () => {
+    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
+      "/home/user/workspace/work/foo.txt",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
+      "/home/user/workspace/brain/foo.md",
+    );
+  });
+
+  it("rejects paths outside configured tool roots", () => {
+    for (const candidate of [
+      ".opencompany/agent.agent",
+      "../.opencompany/agent.agent",
+      "/home/user/.opencompany/agent.agent",
+      "notes.md",
+      "agents/foo.agent",
+    ]) {
+      expect(() => resolveSandboxToolPath("/home/user/workspace", candidate)).toThrow(
+        /work\/ or brain\//,
+      );
+    }
+  });
+});
+
+describe("runSandboxTool", () => {
+  it("runs shell commands from the session work directory", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "done", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "shell",
+      args: { command: "pwd" },
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "pwd",
+      expect.objectContaining({ cwd: sandboxLayout("/home/user/workspace").workspaceRoot }),
+    );
+  });
+
+  it("creates parent directories before writing nested files", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "write_file",
+      args: { path: "work/sub/new/file.txt", content: "content" },
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "mkdir -p '/home/user/workspace/work/sub/new'",
+      { timeoutMs: 30_000 },
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/work/sub/new/file.txt",
+      "content",
+    );
+  });
+
+  it("lists files from the requested tool root using the workspace cwd", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "work\nwork/a.txt\n", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "list_files",
+      args: {},
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "find 'work' -maxdepth 2 -print | sort | head -200",
+      { cwd: "/home/user/workspace", timeoutMs: 30_000 },
+    );
+    expect(result).toEqual({ path: "work", entries: ["work", "work/a.txt"] });
+  });
+
+  it("returns the diff from the session work git repo including untracked files", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "diff --git a/a.txt b/a.txt\n", stderr: "" }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "git_diff",
+      args: {},
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      [
+        "git -C '/home/user/workspace/work' diff --",
+        "git -C '/home/user/workspace/work' ls-files --others --exclude-standard | while IFS= read -r file; do git -C '/home/user/workspace/work' diff --no-index -- /dev/null \"$file\" || true; done",
+      ].join(" && "),
+      { timeoutMs: 60_000 },
+    );
+    expect(result).toEqual({ diff: "diff --git a/a.txt b/a.txt\n", stderr: "" });
   });
 });

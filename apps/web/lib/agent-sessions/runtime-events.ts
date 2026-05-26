@@ -61,7 +61,7 @@ export type SessionRuntimeState = {
 export type RuntimeToolCall = {
   id: string;
   name: string;
-  status: "running" | "completed";
+  status: "running" | "completed" | "failed";
   inputPreview: string;
   activityPreview: string;
   outputPreview: string;
@@ -444,16 +444,35 @@ export function buildRuntimeToolCallsForMessage(
       call.startedEventId = event.id;
     }
 
-    if (event.type === "tool.completed") {
+    if (event.type === "tool.completed" || event.type === "tool.failed") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
-      call.status = "completed";
-      call.outputPreview = formatRuntimePreview(event.payload.output);
+      call.status = event.type === "tool.failed" ? "failed" : "completed";
+      call.outputPreview =
+        event.type === "tool.failed"
+          ? formatRuntimePreview(event.payload.error || event.payload.output)
+          : formatRuntimePreview(event.payload.output);
       const brainPath = brainPathForToolPayload(call.name, event.payload.output);
       if (brainPath) {
         call.brainPath = brainPath;
       }
       call.completedEventId = event.id;
+    }
+  }
+
+  const latestSessionError = latestSessionErrorAfter(events, messageId);
+  if (latestSessionError) {
+    const latestRunningCall = [...calls]
+      .reverse()
+      .find(
+        (call) => call.status === "running" && (call.startedEventId ?? 0) < latestSessionError.id,
+      );
+    if (latestRunningCall) {
+      latestRunningCall.status = "failed";
+      latestRunningCall.outputPreview =
+        formatRuntimePreview({ message: readString(latestSessionError.payload.message) }) ||
+        "The session failed before this tool returned a result.";
+      latestRunningCall.completedEventId = latestSessionError.id;
     }
   }
 
@@ -490,7 +509,8 @@ function buildEventAssistantTurnParts(
     if (
       event.type === "tool.delta" ||
       event.type === "tool.started" ||
-      event.type === "tool.completed"
+      event.type === "tool.completed" ||
+      event.type === "tool.failed"
     ) {
       const toolCallId = readString(event.payload.toolCallId);
       if (!toolCallId || renderedToolCallIds.has(toolCallId)) continue;
@@ -505,6 +525,24 @@ function buildEventAssistantTurnParts(
 
   flushText();
   return parts;
+}
+
+function latestSessionErrorAfter(events: RuntimeEvent[], messageId: string) {
+  let latestToolEventId = 0;
+
+  for (const event of events) {
+    if (eventBelongsToMessage(event, messageId) && event.type === "tool.started") {
+      latestToolEventId = Math.max(latestToolEventId, event.id);
+    }
+  }
+
+  let latestError: RuntimeEvent | null = null;
+  for (const event of events) {
+    if (event.type === "session.error" && event.id > latestToolEventId) {
+      latestError = event;
+    }
+  }
+  return latestToolEventId > 0 ? latestError : null;
 }
 
 function findLatestToolCall(calls: RuntimeToolCall[], name: string) {

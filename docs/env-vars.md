@@ -30,7 +30,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `RUNNER_STREAM_TOKEN_SECRET` | Vercel, Render | Web signs browser SSE tokens; runner verifies them. |
 | `RUNNER_PUBLIC_URL` | Vercel, GitHub Actions | Browser-reachable Render URL. |
 | `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin. |
-| `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner cloning. |
+| `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner Brain sync. |
 | `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Same installation target. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
@@ -94,9 +94,9 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
-| `GITHUB_APP_ID` | Yes | Enables runner workspace cloning. |
-| `GITHUB_APP_INSTALLATION_ID` | Yes | Enables runner workspace cloning. |
-| `GITHUB_APP_PRIVATE_KEY` | Yes | Enables runner workspace cloning. |
+| `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |
+| `GITHUB_APP_INSTALLATION_ID` | Yes | Enables runner Brain sync to GitHub. |
+| `GITHUB_APP_PRIVATE_KEY` | Yes | Enables runner Brain sync to GitHub. |
 | `BETTER_STACK_ERRORS_DSN` | No | Runner error capture DSN. |
 | `OBSERVABILITY_ENABLED` | No | Runner observability toggle. |
 | `OBSERVABILITY_ENV` | No | Runner observability environment. |
