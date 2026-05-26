@@ -501,6 +501,7 @@ function ReasoningSummaryCard({
 function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const isCompleted = toolCall.status === "completed";
+  const activityLine = latestActivityLine(toolCall.activityPreview);
   const isFailed = toolCall.status === "failed";
 
   return (
@@ -544,6 +545,14 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
           </span>
         ) : null}
       </button>
+      {activityLine && !expanded && !toolCall.outputPreview ? (
+        <div
+          title={activityLine}
+          className="ml-6 mt-0.5 max-w-[min(520px,calc(100vw-112px))] truncate text-[11px] leading-4 text-ink-subtle"
+        >
+          {activityLine}
+        </div>
+      ) : null}
       {expanded ? (
         <div className="ml-6 mt-1 border-l border-[#e3e3df] pl-3">
           {toolCall.inputPreview ? (
@@ -561,6 +570,16 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function latestActivityLine(value: string) {
+  return (
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .at(-1) ?? ""
   );
 }
 

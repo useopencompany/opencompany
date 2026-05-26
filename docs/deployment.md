@@ -84,6 +84,12 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_INTEGRATION_APP_ID`
+- `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
+- `GITHUB_INTEGRATION_APP_SLUG`
+- `GITHUB_INTEGRATION_APP_CLIENT_ID`
+- `GITHUB_INTEGRATION_APP_CLIENT_SECRET`
+- `GITHUB_INTEGRATION_STATE_SECRET`
 - `INNGEST_EVENT_KEY`
 - `INNGEST_SIGNING_KEY`
 - `RUNNER_PUBLIC_URL`
@@ -116,6 +122,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_INTEGRATION_APP_ID`
+- `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 
 Forward runner logs to the Better Stack source `opencompany-runner-production` using a Render Log
 Stream. Keep the source token in Render/Infisical, not in git.
@@ -165,6 +173,22 @@ Create or switch to the production WorkOS environment.
   `https://<production-web-domain>/auth/callback`
 - Set `NEXT_PUBLIC_WORKOS_REDIRECT_URI` to the same value in Vercel.
 - Generate a 32+ character `WORKOS_COOKIE_PASSWORD`.
+
+### GitHub Work Integration
+
+Create a separate production GitHub App for user-facing work repository integrations.
+
+- Set the callback URL to:
+  `https://<production-web-domain>/api/integrations/github/callback`
+- Grant repository contents read/write and pull request read/write permissions.
+- Leave webhooks inactive until a GitHub webhook ingestion route is deployed. When enabled, subscribe
+  to pull request events used by `.agent` triggers: `opened`, `reopened`, `synchronize`, and
+  `ready_for_review`.
+- Install the App only on the orgs or repositories customers should connect.
+- Set `GITHUB_INTEGRATION_APP_ID`, `GITHUB_INTEGRATION_APP_PRIVATE_KEY`,
+  `GITHUB_INTEGRATION_APP_SLUG`, `GITHUB_INTEGRATION_APP_CLIENT_ID`,
+  `GITHUB_INTEGRATION_APP_CLIENT_SECRET`, and a separate 32+ character
+  `GITHUB_INTEGRATION_STATE_SECRET` in Vercel.
 
 ### GitHub Actions
 

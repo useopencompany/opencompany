@@ -8,6 +8,7 @@ import {
   Gift,
   GitBranch,
   LogOut,
+  Plug,
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";
@@ -630,6 +631,19 @@ export default function SettingsView({ profile, workspace, billing }: Props) {
             description="How this workspace is stored and versioned."
           >
             <WorkspaceState repository={workspace.repository} />
+          </Section>
+
+          <Section
+            title="Integrations"
+            description="Connect workspace resources agents can access."
+          >
+            <Link
+              href="/settings/integrations"
+              className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"
+            >
+              <Plug size={13} strokeWidth={1.9} />
+              Open integrations
+            </Link>
           </Section>
 
           <Section title="Billing" description="Workspace credits are stored in USD cents.">

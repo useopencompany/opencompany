@@ -31,8 +31,14 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `RUNNER_PUBLIC_URL` | Vercel, GitHub Actions | Browser-reachable Render URL. |
 | `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin. |
 | `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner Brain sync. |
-| `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Same installation target. |
+| `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Managed workspace-state installation target used for workspace repo writes and runner Brain sync. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
+| `GITHUB_INTEGRATION_APP_ID` | Vercel, Render | Separate GitHub App for user-facing repository integrations. |
+| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Vercel, Render | Integration app private key, with newlines preserved or escaped as `\n`. |
+| `GITHUB_INTEGRATION_APP_SLUG` | Vercel web envs | Integration GitHub App slug. |
+| `GITHUB_INTEGRATION_APP_CLIENT_ID` | Vercel web envs | Integration GitHub App OAuth client id. |
+| `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Vercel web envs | Integration GitHub App OAuth client secret. |
+| `GITHUB_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign GitHub integration OAuth state. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
 ## Vercel Web
@@ -49,8 +55,14 @@ Set these in Vercel Production.
 | `WORKOS_REDIRECT_URI` | No | Server-only fallback. Usually leave unset. |
 | `OPENCOMPANY_GITHUB_ORG` | Yes | GitHub org where workspace repos are created. |
 | `GITHUB_APP_ID` | Yes | GitHub App id. |
-| `GITHUB_APP_INSTALLATION_ID` | Yes | GitHub App installation id. |
+| `GITHUB_APP_INSTALLATION_ID` | Yes | Managed workspace-state GitHub App installation id. Do not use this as the user-facing work integration installation. |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | GitHub App private key. |
+| `GITHUB_INTEGRATION_APP_ID` | Yes | GitHub App id for user-facing repository integrations. |
+| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Yes | Integration app private key. |
+| `GITHUB_INTEGRATION_APP_SLUG` | Yes | Integration app slug used to start workspace-level installation. |
+| `GITHUB_INTEGRATION_APP_CLIENT_ID` | Yes | Integration app OAuth client id used to verify setup redirects. |
+| `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Yes | Integration app OAuth client secret. |
+| `GITHUB_INTEGRATION_STATE_SECRET` | Yes | Dedicated secret used to sign setup state. Generate a separate 32+ character value. |
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |
@@ -92,11 +104,15 @@ Set these in the Render `opencompany-runner` service.
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
 | `EXA_API_KEY` | No | Required only for agents that enable Exa. |
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
+| `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
+| `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
 | `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |
 | `GITHUB_APP_INSTALLATION_ID` | Yes | Enables runner Brain sync to GitHub. |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | Enables runner Brain sync to GitHub. |
+| `GITHUB_INTEGRATION_APP_ID` | Yes for AMP | Enables runner cloning and PR creation for connected work repositories. |
+| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Yes for AMP | Enables runner installation tokens for connected work repositories. |
 | `BETTER_STACK_ERRORS_DSN` | No | Runner error capture DSN. |
 | `OBSERVABILITY_ENABLED` | No | Runner observability toggle. |
 | `OBSERVABILITY_ENV` | No | Runner observability environment. |
@@ -186,7 +202,16 @@ Useful local-only vars:
 | `NEON_ROLE_NAME` | Optional nonstandard Neon role. |
 | `PORT` | Optional local web port override. |
 | `INNGEST_SDK_URL` | Optional local Inngest SDK URL override. |
+| `OPENCOMPANY_NGROK_URL` | Optional stable ngrok origin for local integration callback testing. |
+| `NGROK_AUTHTOKEN` | Optional ngrok auth token for local dev. Prefer the local ngrok config unless sharing through Infisical. |
+| `OPENCOMPANY_NGROK_REQUIRED` | Set to `1` to fail `bun run dev` when ngrok cannot start. Fixed ngrok URLs are treated as required. |
+| `OPENCOMPANY_NGROK_DISABLED` | Set to `1` to skip automatic ngrok startup in `bun run dev`. |
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
+
+For local GitHub integration testing, `bun run dev` starts ngrok automatically when the local ngrok
+CLI is authenticated. It sets `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_WORKOS_REDIRECT_URI`, and appends
+the tunnel origin to `RUNNER_ALLOWED_ORIGINS` in `.env.local` before starting the app. Use a stable
+ngrok domain so the GitHub App and WorkOS dashboard settings do not need to change on every run.
 
 ## Checks
 
