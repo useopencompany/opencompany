@@ -35,6 +35,16 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; toolCallId: string; name: string; output: unknown };
     }
   | {
+      type: "tool.failed";
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        name: string;
+        output?: unknown;
+        error: { message: string; code: string; recoverable: boolean };
+      };
+    }
+  | {
       type: "file.changed";
       payload: { path: string; operation: "write" };
     }
