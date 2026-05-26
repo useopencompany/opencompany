@@ -20,6 +20,7 @@ describe("resolveAgentRuntimeConfig", () => {
       agent: config,
       workspaceName: "Acme",
       sessionTitle: "Risk review",
+      userName: "Ada Lovelace",
     });
 
     expect(resolved.model).toEqual({
@@ -35,6 +36,7 @@ describe("resolveAgentRuntimeConfig", () => {
       exposeReasoningSummary: true,
     });
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
+    expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
     expect(resolved.tools).toContain("shell");
     expect(resolved.tools).toContain("git_diff");
