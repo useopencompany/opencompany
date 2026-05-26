@@ -16,11 +16,13 @@ const action = process.argv[2];
 const projectId = realEnv("NEON_PROJECT_ID");
 const parentBranch = realEnv("NEON_PARENT_BRANCH");
 const branchNameOverride = realEnv("NEON_BRANCH_NAME");
+const branchTtlHours = realEnv("NEON_BRANCH_TTL_HOURS") ?? "24";
 const databaseName = realEnv("NEON_DATABASE_NAME");
 const roleName = realEnv("NEON_ROLE_NAME");
 const apiKey = realEnv("NEON_API_KEY");
 const DEFAULT_DATABASE_NAME = "neondb";
 const DEFAULT_ROLE_NAME = "neondb_owner";
+const MAX_BRANCH_TTL_HOURS = 24 * 30;
 
 if (!["create", "delete"].includes(action)) {
   throw new Error("Usage: node scripts/neon-branch.mjs <create|delete>");
@@ -55,6 +57,20 @@ function sanitizeBranchName(name) {
 function neonBranchName() {
   if (branchNameOverride) return sanitizeBranchName(branchNameOverride);
   return sanitizeBranchName(currentGitBranch());
+}
+
+function branchExpirationDate() {
+  const hours = Number(branchTtlHours);
+  if (!Number.isFinite(hours) || hours < 0 || hours > MAX_BRANCH_TTL_HOURS) {
+    throw new Error(
+      `NEON_BRANCH_TTL_HOURS must be between 0 and ${MAX_BRANCH_TTL_HOURS}. ` +
+        "Use 0 to disable automatic branch expiration.",
+    );
+  }
+
+  if (hours === 0) return undefined;
+
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 function neon(args) {
@@ -125,6 +141,28 @@ function connectionString(branchName) {
   return neon(args);
 }
 
+function canExpireBranch(branch) {
+  if (!branch) return true;
+  if (branch.default || branch.protected) return false;
+  if (parentBranch && branch.name === parentBranch) return false;
+  return true;
+}
+
+function setBranchExpiration(branchName, branch, expiresAt) {
+  if (!expiresAt) {
+    console.log("Neon branch expiration disabled.");
+    return;
+  }
+
+  if (!canExpireBranch(branch)) {
+    console.log(`Skipped expiration for protected/default Neon branch: ${branchName}`);
+    return;
+  }
+
+  neon(["branches", "set-expiration", branchName, "--expires-at", expiresAt]);
+  console.log(`Neon branch expires at: ${expiresAt}`);
+}
+
 function upsertEnvFile(values) {
   const envPath = ".env.local";
   const existing = existsSync(envPath) ? readFileSync(envPath, "utf8").split("\n") : [];
@@ -149,16 +187,20 @@ function upsertEnvFile(values) {
 const branchName = neonBranchName();
 
 if (action === "create") {
+  const expiresAt = branchExpirationDate();
   const branches = JSON.parse(neon(["branches", "list", "--output", "json"]));
-  const exists = branches.some((branch) => branch.name === branchName);
+  let branch = branches.find((item) => item.name === branchName);
 
-  if (!exists) {
+  if (!branch) {
     const createArgs = ["branches", "create", "--name", branchName, "--output", "json"];
     if (parentBranch) {
       createArgs.push("--parent", parentBranch);
     }
-    neon(createArgs);
+    const created = JSON.parse(neon(createArgs));
+    branch = created.branch ?? created;
   }
+
+  setBranchExpiration(branchName, branch, expiresAt);
 
   const url = connectionString(branchName);
   upsertEnvFile({

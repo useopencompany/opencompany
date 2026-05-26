@@ -70,7 +70,7 @@ Important details:
 - AI SDK Core owns the multi-step tool loop via `stopWhen: stepCountIs(8)`.
 - Runtime tools are created from `CORE_TOOL_DEFINITIONS` and then filtered by the agent's allowed
   tool names.
-- Tool input streaming emits `tool.delta`; complete validated input emits `tool.started`.
+- Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
 - Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`, and
   `tool.completed`.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
@@ -107,7 +107,6 @@ Common event types:
 - `message.created`
 - `message.completed`
 - `tool.started`
-- `tool.delta`
 - `command.output`
 - `file.changed`
 - `tool.completed`
@@ -145,6 +144,10 @@ Required environment variables:
 - optional GitHub integration app env vars for cloning configured work repositories into E2B:
   `GITHUB_INTEGRATION_APP_ID` and `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
+
+Production runner logs are structured JSON on stdout and should be forwarded by Render to the
+Better Stack source `opencompany-runner-production`. Do not add browser/client log capture to debug
+runner issues; search server logs by `session_id` first.
 
 New E2B sandboxes are created with lifecycle auto-pause and auto-resume enabled. The runner keeps
 the sandbox on a one-hour timeout while it is actively preparing or executing work, then resets it to

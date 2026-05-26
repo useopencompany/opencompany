@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
-import { captureException } from "@opencompany/observability";
+import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
@@ -10,6 +10,8 @@ import {
   ensureWorkspaceRepository,
   writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 type MaterializeMode = "scheduled" | "force";
 
@@ -78,6 +80,17 @@ export async function materializeAgentToGitHub(
           previousBlobSha: row.job.previousBlobSha,
         }
       : null;
+  const syncStartedAt = Date.now();
+  const syncLogFields = {
+    agent_id: row.agent.id,
+    workspace_id: row.workspace.id,
+    path: row.agent.path,
+    mode: options.mode,
+    desired_hash: contentHash,
+    desired_version: row.job?.desiredVersion ?? null,
+    attempts: row.job?.attempts ?? 0,
+    has_pending_rename: Boolean(pendingRename),
+  };
 
   if (row.agent.githubSyncedHash === contentHash && !pendingRename) {
     await timeAsync(trace, "db.deleteUnchangedSyncJob", () =>
@@ -100,6 +113,10 @@ export async function materializeAgentToGitHub(
       })
       .where(and(eq(agents.id, row.agent.id), eq(agents.contentHash, contentHash))),
   );
+  logger.info("Started agent GitHub sync", {
+    event: "opencompany.agent_github_sync_started",
+    ...syncLogFields,
+  });
 
   try {
     const repository = await timeAsync(trace, "github.ensureRepository", () =>
@@ -167,6 +184,14 @@ export async function materializeAgentToGitHub(
         .limit(1),
     );
     const status = latest?.contentHash === contentHash ? "synced" : "stale";
+    logger.info("Completed agent GitHub sync", {
+      event: "opencompany.agent_github_sync_succeeded",
+      ...syncLogFields,
+      status,
+      commit_sha: commitSha,
+      blob_sha: result.blobSha,
+      duration_ms: Date.now() - syncStartedAt,
+    });
     endTimingTrace(trace, { status, path: row.agent.path });
     return status === "synced"
       ? {
@@ -183,6 +208,12 @@ export async function materializeAgentToGitHub(
       agent_id: row.agent.id,
       path: row.agent.path,
       mode: options.mode,
+    });
+    logger.error("Failed agent GitHub sync", {
+      event: "opencompany.agent_github_sync_failed",
+      ...syncLogFields,
+      duration_ms: Date.now() - syncStartedAt,
+      ...errorLogFields(error),
     });
     await timeAsync(trace, "db.markSyncFailed", () =>
       db
@@ -211,4 +242,18 @@ export async function materializeAgentToGitHub(
     });
     throw error;
   }
+}
+
+function errorLogFields(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      error_name: error.name,
+      error_message: error.message,
+    };
+  }
+
+  return {
+    error_name: typeof error,
+    error_message: typeof error === "string" ? error : "Unknown error",
+  };
 }

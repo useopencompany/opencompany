@@ -23,7 +23,7 @@ Production releases are intentionally serialized:
 1. Run CI on `main`.
 2. Run Drizzle migrations against production Neon.
 3. Build and deploy the Vercel web app for the exact commit.
-4. Trigger the Render runner deploy for the same commit.
+4. Trigger and wait for the Render runner deploy for the exact commit.
 5. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
@@ -46,6 +46,13 @@ to the server runtimes, and the production workflow injects `RELEASE_SHA` as
 `NEXT_PUBLIC_OBSERVABILITY_RELEASE` during `vercel build` so browser Better Stack events group under
 the same commit. Keep `OBSERVABILITY_RELEASE` unset in normal hosted deploys; reserve it for manual
 or non-Git deploys where platform commit metadata is unavailable.
+
+Production release history is recorded with GitHub Deployments, keyed by the released commit SHA. The
+workflow creates a `production` deployment before migrations and marks it successful only after the
+deploy and smoke checks complete. If an automatic release is superseded after the deployment record is
+created but before deploy, the record is marked inactive. Use GitHub Deployments as the operational
+audit trail for what is or was in production; `CHANGELOG.md` remains a product-facing summary and does
+not drive deployment.
 
 Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
 runner deployment. Keep schema changes backwards compatible with the previous web and runner version
@@ -89,6 +96,10 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `RUNNER_STREAM_TOKEN_SECRET`
 - optional analytics, feedback, and observability env vars
 
+Forward production web logs to the Better Stack source `opencompany-web-production` using the
+Vercel Better Stack integration or a Vercel Log Drain. Keep the source token in Vercel/Infisical,
+not in git.
+
 ### Render
 
 Create the runner from `render.yaml`.
@@ -97,7 +108,7 @@ Create the runner from `render.yaml`.
 - Runtime: Docker
 - Health check: `/healthz`
 - Auto deploy: off, so GitHub Actions controls release order
-- Deploy hook: create one and store it as `RENDER_DEPLOY_HOOK_URL` in Infisical `prod` + `/release`
+- API deploys: store `RENDER_SERVICE_ID` and `RENDER_API_KEY` in Infisical `prod` + `/release`
 
 Set these in Infisical `prod` + `/runner` and sync them into Render:
 
@@ -112,6 +123,9 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `GITHUB_APP_PRIVATE_KEY`
 - `GITHUB_INTEGRATION_APP_ID`
 - `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
+
+Forward runner logs to the Better Stack source `opencompany-runner-production` using a Render Log
+Stream. Keep the source token in Render/Infisical, not in git.
 
 `RUNNER_ALLOWED_ORIGINS` must include the exact production web origin, for example
 `https://app.example.com`. Add preview origins only if you intentionally allow previews to connect
@@ -140,6 +154,15 @@ https://<production-web-domain>/api/inngest
 
 Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` in Vercel. Do not set `INNGEST_DEV=1` in hosted
 environments.
+
+The production release workflow syncs the deployed app with Inngest after the web smoke check:
+
+```bash
+bun run release:inngest:sync
+```
+
+This sends `PUT https://<production-web-domain>/api/inngest`, which refreshes the function
+definitions Inngest Cloud uses to invoke production jobs.
 
 ### WorkOS
 
@@ -199,6 +222,6 @@ bun run release:smoke
 - WorkOS production callback works.
 - Inngest production app can sync functions from `/api/inngest`.
 - Neon backups/PITR are enabled.
-- Render deploy hook works.
+- Render API deploy works for the runner service.
 - `bun run release:preflight -- --release` passes in GitHub Actions.
 - The first `Release Production` workflow finishes with smoke checks green.

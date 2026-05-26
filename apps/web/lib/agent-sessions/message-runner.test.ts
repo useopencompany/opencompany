@@ -48,6 +48,7 @@ describe("triggerAgentMessageRun", () => {
       "/internal/sessions/ses_123/messages/msg_123/run",
       {
         event: "opencompany.direct_run_message_failed",
+        workspace_id: "wks_123",
         session_id: "ses_123",
         message_id: "msg_123",
       },
@@ -57,6 +58,7 @@ describe("triggerAgentMessageRun", () => {
       "/internal/sessions/ses_123/messages/msg_123/title",
       {
         event: "opencompany.direct_generate_title_failed",
+        workspace_id: "wks_123",
         session_id: "ses_123",
         message_id: "msg_123",
       },

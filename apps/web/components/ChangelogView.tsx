@@ -2,7 +2,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
   ArrowUpRight,
-  ChevronRight,
   CircleDashed,
   ExternalLink,
   History,
@@ -10,7 +9,6 @@ import {
   MoreHorizontal,
   Plus,
   RefreshCw,
-  ScrollText,
   ShieldAlert,
   Tag,
   Trash2,
@@ -125,20 +123,9 @@ function InlineTokenView({ token }: { token: InlineToken }) {
 }
 
 function ReleasePill({ release }: { release: Release }) {
-  const isUnreleased = release.version.toLowerCase() === "unreleased";
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium tracking-[-0.005em] shadow-[0_1px_0_rgba(0,0,0,0.02)] ${
-        isUnreleased
-          ? "border-[#e4e4e0] bg-white text-ink-muted"
-          : "border-[#e6e6e3] bg-white text-ink"
-      }`}
-    >
-      <Tag
-        size={11}
-        strokeWidth={1.9}
-        className={isUnreleased ? "text-ink-subtle" : "text-ink-muted"}
-      />
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-2 py-1 text-[12px] font-medium tracking-[-0.005em] text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      <Tag size={11} strokeWidth={1.9} className="text-ink-muted" />
       <span className="font-mono text-[12px]">{release.version}</span>
     </span>
   );
@@ -245,8 +232,6 @@ function TopBar() {
   return (
     <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-[#eaeae6] bg-canvas/85 px-5 backdrop-blur-md">
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-muted">
-        <span className="truncate">acta-website</span>
-        <ChevronRight size={13} strokeWidth={1.75} className="shrink-0 text-ink-subtle" />
         <span className="truncate font-medium text-ink">CHANGELOG.md</span>
       </div>
       <div className="ml-auto flex items-center gap-1">
@@ -304,24 +289,19 @@ function OutlinePanel({ releases }: { releases: Release[] }) {
 }
 
 export default function ChangelogView({ changelog }: { changelog: Changelog }) {
-  const latest = changelog.releases.find((r) => r.version.toLowerCase() !== "unreleased");
+  const visibleReleases = changelog.releases.filter(
+    (release) => release.version.toLowerCase() !== "unreleased",
+  );
+  const latest = visibleReleases[0];
 
   return (
-    <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
+    <main className="flex min-h-screen min-w-0 flex-1 overflow-hidden bg-canvas">
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-y-auto">
             <article className="mx-auto w-full max-w-[760px] px-10 pb-16 pt-9">
               <header className="border-b border-[#ececea] pb-7">
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#ececea] text-ink">
-                    <ScrollText size={17} strokeWidth={1.8} />
-                  </span>
-                  <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
-                    Project changelog
-                  </span>
-                </div>
                 <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
                   {changelog.title}
                 </h1>
@@ -346,27 +326,27 @@ export default function ChangelogView({ changelog }: { changelog: Changelog }) {
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1">
-                      {changelog.releases.length}{" "}
-                      {changelog.releases.length === 1 ? "entry" : "entries"} total
+                      {visibleReleases.length} {visibleReleases.length === 1 ? "entry" : "entries"}{" "}
+                      total
                     </span>
                   </div>
                 )}
               </header>
 
               <div className="mt-8 space-y-10">
-                {changelog.releases.length === 0 ? (
+                {visibleReleases.length === 0 ? (
                   <p className="text-[13.5px] text-ink-muted">
                     No releases have been recorded yet.
                   </p>
                 ) : (
-                  changelog.releases.map((release) => (
+                  visibleReleases.map((release) => (
                     <ReleaseCard key={release.version} release={release} />
                   ))
                 )}
               </div>
             </article>
           </div>
-          <OutlinePanel releases={changelog.releases} />
+          <OutlinePanel releases={visibleReleases} />
         </div>
       </section>
     </main>

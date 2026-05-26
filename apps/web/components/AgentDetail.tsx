@@ -1,5 +1,6 @@
 "use client";
 
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   CheckCircle2,
@@ -7,31 +8,28 @@ import {
   CircleAlert,
   Clock3,
   Cloud,
-  Code2,
-  ExternalLink,
   FileCode2,
   GitBranch,
   Loader2,
   type LucideIcon,
   PanelRight,
   Play,
-  RefreshCw,
-  Search,
-  X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
-import { AgentEditor, type AgentEditorHandle } from "@/components/agent-editor/AgentEditor";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 import {
   AGENT_MODELS,
+  AGENT_TOOL_MENTION_ITEMS,
   type AgentMentionItem,
   type AgentModel,
   type AgentTool,
-  buildAgentMentionItems,
+  buildBrainMentionItems,
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { useToast } from "@/components/ToastProvider";
 import {
   Select,
   SelectContent,
@@ -41,31 +39,24 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from "@/components/ui/select";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
+import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
+import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { updateAgent } from "@/lib/agents/actions";
-import { deriveAgentConfigFromContent } from "@/lib/agents/config";
-import type {
-  AgentConfig,
-  AgentConfigTool,
-  AgentGitHubRepositoryConfig,
-  AgentModelId,
-  AgentTriggerConfig,
-  TiptapDoc,
-} from "@/lib/agents/types";
-import { markGitHubRepositorySelected, refreshGitHubRepositories } from "@/lib/integrations/actions";
+import { extractConfigFromMentions } from "@/lib/agents/agent-file";
+import {
+  AGENTS_QUERY_STALE_TIME_MS,
+  type AgentPayload,
+  agentQueryKeys,
+  fetchAgent,
+  fetchAgents,
+} from "@/lib/agents/payload";
+import type { AgentConfig, AgentModelId } from "@/lib/agents/types";
 
 type Props = {
-  id: string;
-  initialName: string;
-  initialBody: string;
-  initialContent: TiptapDoc;
-  initialConfig: AgentConfig;
-  initialPath: string | null;
-  initialGitHubCommitSha: string | null;
-  initialGitHubSyncedAt: string | null;
-  initialGitHubSyncStatus: string;
-  initialGitHubSyncError: string | null;
-  initialIntegrations: WorkspaceIntegrationState;
+  idOrPath: string;
+  initialAgent?: AgentPayload;
 };
 
 type SaveState = "idle" | "saving" | "saved";
@@ -78,27 +69,6 @@ type OptimisticGitHubSync = {
   baseCommitSha: string | null;
   baseSyncedAt: string | null;
 };
-type WorkspaceIntegrationState = {
-  github: {
-    status: "not_connected" | "connected" | "needs_repository_access" | "error";
-    installation: {
-      installationId: string;
-      accountLogin: string | null;
-      accountType: string | null;
-      updatedAt: string;
-    } | null;
-    repositories: Array<{
-      fullName: string;
-      defaultBranch: string;
-      selectedAt: string | null;
-    }>;
-  };
-};
-type AgentConfigSelection = {
-  tools: AgentConfigTool[];
-  repositories: AgentGitHubRepositoryConfig[];
-  triggers: AgentTriggerConfig[];
-};
 
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
@@ -109,98 +79,124 @@ function getStoredInspectorCollapsed() {
   return stored === null ? true : stored === "true";
 }
 
-function githubConnectHref(returnTo: string) {
-  return `/api/integrations/github/start?intent=agent&returnTo=${encodeURIComponent(returnTo)}`;
+function updateAgentQueries(
+  queryClient: QueryClient,
+  workspaceId: string,
+  agent: AgentPayload,
+  previousIdOrPath: string,
+) {
+  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, previousIdOrPath), agent);
+  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.id), agent);
+  if (agent.path) {
+    queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), agent);
+  }
+  queryClient.setQueryData<AgentPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
+    if (!agents) return [agent];
+
+    const next = agents.map((item) => (item.id === agent.id ? agent : item));
+    if (!next.some((item) => item.id === agent.id)) next.unshift(agent);
+    return next.toSorted(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+    );
+  });
 }
 
-export default function AgentDetail({
-  id,
-  initialName,
-  initialBody,
-  initialContent,
-  initialConfig,
-  initialPath,
-  initialGitHubCommitSha,
-  initialGitHubSyncedAt,
-  initialGitHubSyncStatus,
-  initialGitHubSyncError,
-  initialIntegrations,
-}: Props) {
-  const mentionItems = useMemo(
-    () => buildAgentMentionItems(initialIntegrations.github.repositories),
-    [initialIntegrations.github.repositories],
-  );
-  const [name, setName] = useState(initialName);
-  const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
-    findModel(initialConfig.model.name)?.id ?? DEFAULT_MODEL_ID,
-  );
-  const [configTools, setConfigTools] = useState<AgentConfigTool[]>(initialConfig.tools);
-  const [configRepositories, setConfigRepositories] = useState<AgentGitHubRepositoryConfig[]>(
-    initialConfig.integrations.github.repositories,
-  );
-  const [configTriggers, setConfigTriggers] = useState<AgentTriggerConfig[]>(
-    initialConfig.triggers,
-  );
-  const [githubSelected, setGithubSelected] = useState(
-    initialConfig.integrations.github.repositories.length > 0,
-  );
-  const configRef = useRef({
-    tools: initialConfig.tools,
-    repositories: initialConfig.integrations.github.repositories,
-    triggers: initialConfig.triggers,
+function findCachedAgent(
+  agents: AgentPayload[] | undefined,
+  idOrPath: string,
+): AgentPayload | undefined {
+  return agents?.find((agent) => agent.id === idOrPath || agent.path === idOrPath);
+}
+
+export default function AgentDetail({ initialAgent, idOrPath }: Props) {
+  const { workspaceId } = useWorkspaceContext();
+  const queryClient = useQueryClient();
+  const cachedAgent =
+    initialAgent ??
+    findCachedAgent(queryClient.getQueryData(agentQueryKeys.list(workspaceId)), idOrPath);
+  const { data: agent } = useQuery({
+    queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
+    queryFn: () => fetchAgent(idOrPath),
+    initialData: cachedAgent,
+    staleTime: AGENTS_QUERY_STALE_TIME_MS,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data?.githubSyncStatus === "pending" || data?.githubSyncStatus === "syncing"
+        ? 2500
+        : false;
+    },
   });
-  const editorRef = useRef<AgentEditorHandle | null>(null);
+
+  if (!agent) {
+    return <AgentDetailSkeleton />;
+  }
+
+  return <AgentDetailContent agent={agent} idOrPath={idOrPath} workspaceId={workspaceId} />;
+}
+
+function AgentDetailContent({
+  agent,
+  idOrPath,
+  workspaceId,
+}: {
+  agent: AgentPayload;
+  idOrPath: string;
+  workspaceId: string;
+}) {
+  const queryClient = useQueryClient();
+  const { showError } = useToast();
+  const initialBody = agent.body || agent.config.instructions;
+  const [name, setName] = useState(agent.name);
+  const [body, setBody] = useState(initialBody);
+  const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
+    findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
+  );
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const openRepoPickerAfterGitHubSetup =
-    searchParams.get("integration") === "github" &&
-    searchParams.get("setup") === "connected" &&
-    initialIntegrations.github.repositories.length > 0;
   const [, startTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
-  const [githubSetupIntent, setGithubSetupIntent] = useState<"github" | "amp" | null>(null);
-  const [repoPickerOpen, setRepoPickerOpen] = useState(openRepoPickerAfterGitHubSetup);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
-  const pendingRef = useRef<{
-    name?: string;
-    body?: string;
-    content?: TiptapDoc;
-    model?: AgentModelId;
-    config?: {
-      tools?: AgentConfigTool[];
-      integrations?: AgentConfig["integrations"];
-      triggers?: AgentTriggerConfig[];
-    };
-  }>({});
+  const pendingRef = useRef<{ name?: string; body?: string; model?: AgentModelId }>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const configPreview = buildConfigPreview({
-    fallback: initialConfig,
+    body,
+    fallback: agent.config,
     selectedModelId,
-    tools: configTools,
   });
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
-    initialGitHubSyncStatus === optimisticGitHubSync.baseStatus &&
-    initialGitHubSyncError === optimisticGitHubSync.baseError &&
-    initialGitHubCommitSha === optimisticGitHubSync.baseCommitSha &&
-    initialGitHubSyncedAt === optimisticGitHubSync.baseSyncedAt;
+    agent.githubSyncStatus === optimisticGitHubSync.baseStatus &&
+    agent.githubSyncError === optimisticGitHubSync.baseError &&
+    agent.githubCommitSha === optimisticGitHubSync.baseCommitSha &&
+    agent.githubSyncedAt === optimisticGitHubSync.baseSyncedAt;
   const githubSyncStatus = showOptimisticGitHubSync
     ? optimisticGitHubSync.status
-    : initialGitHubSyncStatus;
+    : agent.githubSyncStatus;
   const githubSyncError = showOptimisticGitHubSync
     ? optimisticGitHubSync.error
-    : initialGitHubSyncError;
-  const githubCommitSha = initialGitHubCommitSha;
-  const githubSyncedAt = initialGitHubSyncedAt;
+    : agent.githubSyncError;
+  const githubCommitSha = agent.githubCommitSha;
+  const githubSyncedAt = agent.githubSyncedAt;
+  const mentionItems: AgentMentionItem[] = useMemo(
+    () => [...AGENT_TOOL_MENTION_ITEMS, ...buildBrainMentionItems(agent.brainPaths)],
+    [agent.brainPaths],
+  );
 
   useEffect(() => {
-    if (pendingRef.current.model) return;
-    setSelectedModelId(findModel(initialConfig.model.name)?.id ?? DEFAULT_MODEL_ID);
-  }, [initialConfig.model.name]);
+    if (
+      pendingRef.current.name !== undefined ||
+      pendingRef.current.body !== undefined ||
+      pendingRef.current.model !== undefined
+    ) {
+      return;
+    }
+    setName(agent.name);
+    setBody(agent.body || agent.config.instructions);
+    setSelectedModelId(findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID);
+  }, [agent.id, agent.name, agent.body, agent.config.instructions, agent.config.model.name]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -209,25 +205,26 @@ export default function AgentDetail({
 
   const flush = () => {
     const patch = { ...pendingRef.current };
-    if (typeof patch.name !== "string" && patch.body === undefined && !patch.model && !patch.config)
-      return;
+    if (typeof patch.name !== "string" && patch.body === undefined && !patch.model) return;
     pendingRef.current = {};
     setSaveState("saving");
     setOptimisticGitHubSync({
       status: "pending",
       error: null,
-      baseStatus: initialGitHubSyncStatus,
-      baseError: initialGitHubSyncError,
-      baseCommitSha: initialGitHubCommitSha,
-      baseSyncedAt: initialGitHubSyncedAt,
+      baseStatus: agent.githubSyncStatus,
+      baseError: agent.githubSyncError,
+      baseCommitSha: agent.githubCommitSha,
+      baseSyncedAt: agent.githubSyncedAt,
     });
     startTransition(async () => {
-      const result = await updateAgent(id, patch);
+      const result = await updateAgent(agent.id, patch);
       setSaveState("saved");
+      if (result?.agent) {
+        updateAgentQueries(queryClient, workspaceId, result.agent, idOrPath);
+      }
       if (result?.pathChanged) {
         router.replace(`/agents/${result.path}`);
       }
-      router.refresh();
     });
   };
 
@@ -236,74 +233,11 @@ export default function AgentDetail({
     timerRef.current = setTimeout(flush, 600);
   };
 
-  function applyDerivedConfig(next: AgentConfigSelection) {
-    const changed = !sameConfigSelection(next, configRef.current);
-    configRef.current = next;
-    setConfigTools(next.tools);
-    setConfigRepositories(next.repositories);
-    setConfigTriggers(next.triggers);
-
-    if (changed) {
-      pendingRef.current.config = configPatchFromSelection(next);
-    }
-  }
-
-  function handleMentionSelect(item: AgentMentionItem) {
-    if (item.kind === "model") {
-      setSelectedModelId(item.id);
-      pendingRef.current.model = item.id;
-      schedule();
-      return;
-    }
-
-    if (item.kind === "tool" && item.id === "amp") {
-      if (!initialIntegrations.github.installation) {
-        setGithubSetupIntent("amp");
-        return;
-      }
-      if (configRef.current.repositories.length === 0) {
-        setRepoPickerOpen(true);
-      }
-      return;
-    }
-
-    if (item.kind === "integration" && item.provider === "github") {
-      if (!initialIntegrations.github.installation) {
-        setGithubSetupIntent("github");
-        return;
-      }
-      if (item.fullName) {
-        startTransition(async () => {
-          await markGitHubRepositorySelected(item.fullName!);
-        });
-        return;
-      }
-      setRepoPickerOpen(true);
-    }
-  }
-
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (githubSyncStatus !== "pending" && githubSyncStatus !== "syncing") return;
-    const interval = setInterval(() => router.refresh(), 2500);
-    return () => clearInterval(interval);
-  }, [githubSyncStatus, router]);
-
-  function selectRepository(repository: { fullName: string; defaultBranch: string }) {
-    editorRef.current?.selectRepositoryMention(repository);
-    setGithubSelected(true);
-    setRepoPickerOpen(false);
-    startTransition(async () => {
-      await markGitHubRepositorySelected(repository.fullName);
-    });
-  }
-
-  const agentReturnPath = initialPath ? `/agents/${initialPath}` : `/agents/${id}`;
 
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
@@ -312,6 +246,23 @@ export default function AgentDetail({
           <div className="flex items-center justify-between text-[12px] text-ink-muted">
             <Link
               href="/agents"
+              prefetch
+              onMouseEnter={() => {
+                router.prefetch("/agents");
+                void queryClient.prefetchQuery({
+                  queryKey: agentQueryKeys.list(workspaceId),
+                  queryFn: fetchAgents,
+                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
+                });
+              }}
+              onFocus={() => {
+                router.prefetch("/agents");
+                void queryClient.prefetchQuery({
+                  queryKey: agentQueryKeys.list(workspaceId),
+                  queryFn: fetchAgents,
+                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
+                });
+              }}
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-[#ececea]/70"
             >
               <ChevronLeft size={12} strokeWidth={1.9} />
@@ -323,7 +274,17 @@ export default function AgentDetail({
                   if (timerRef.current) clearTimeout(timerRef.current);
                   flush();
                   startTransition(async () => {
-                    await createAgentSession(id);
+                    const result = await createAgentSession(agent.id);
+                    if (!result.ok) {
+                      if ("redirectTo" in result) {
+                        router.push(result.redirectTo);
+                        return;
+                      }
+                      showError(result.error, "Could not start session");
+                      return;
+                    }
+                    seedSessionQueries(queryClient, workspaceId, result.detail);
+                    router.push(`/session/${result.session.id}`);
                   });
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-[12px] text-ink/85 hover:bg-[#fafaf8]"
@@ -392,23 +353,12 @@ export default function AgentDetail({
 
           <div className="mt-6">
             <AgentEditor
-              ref={editorRef}
+              key={agent.id}
               initialBody={initialBody}
-              initialContent={initialContent}
               mentionItems={mentionItems}
-              onMentionSelect={handleMentionSelect}
-              onChange={(body, content) => {
-                const nextConfig = deriveConfigFromEditorContent({
-                  title: name,
-                  content: content as TiptapDoc,
-                  model: selectedModelId,
-                  current: configRef.current,
-                  repositories: initialIntegrations.github.repositories,
-                });
+              onChange={(body) => {
+                setBody(body);
                 pendingRef.current.body = body;
-                pendingRef.current.content = content as TiptapDoc;
-                setGithubSelected(nextConfig.repositories.length > 0);
-                applyDerivedConfig(nextConfig);
                 schedule();
               }}
             />
@@ -438,17 +388,11 @@ export default function AgentDetail({
         </div>
         <AgentInspector
           name={name}
-          path={initialPath}
+          path={agent.path}
           model={configPreview.model}
           modelIsExplicit={configPreview.modelIsExplicit}
           tools={configPreview.tools}
-          configTools={configTools}
-          configRepositories={configRepositories}
-          configTriggers={configTriggers}
-          githubSelected={githubSelected}
-          workspaceIntegrations={initialIntegrations}
-          onChooseRepository={() => setRepoPickerOpen(true)}
-          connectHref={githubConnectHref(agentReturnPath)}
+          brain={configPreview.brain}
           saveState={saveState}
           githubStatus={githubSyncStatus}
           githubError={githubSyncError}
@@ -466,24 +410,6 @@ export default function AgentDetail({
       >
         <PanelRight size={15} strokeWidth={1.75} />
       </button>
-
-      {githubSetupIntent ? (
-        <GitHubSetupModal
-          intent={githubSetupIntent}
-          href={githubConnectHref(agentReturnPath)}
-          onClose={() => setGithubSetupIntent(null)}
-        />
-      ) : null}
-
-      {repoPickerOpen ? (
-        <RepositoryPickerModal
-          repositories={initialIntegrations.github.repositories}
-          selectedRepository={configRepositories[0] ?? null}
-          connectHref={githubConnectHref(agentReturnPath)}
-          onSelect={selectRepository}
-          onClose={() => setRepoPickerOpen(false)}
-        />
-      ) : null}
     </main>
   );
 }
@@ -494,13 +420,7 @@ function AgentInspector({
   model,
   modelIsExplicit,
   tools,
-  configTools,
-  configRepositories,
-  configTriggers,
-  githubSelected,
-  workspaceIntegrations,
-  onChooseRepository,
-  connectHref,
+  brain,
   saveState,
   githubStatus,
   githubError,
@@ -512,13 +432,7 @@ function AgentInspector({
   model: AgentModel;
   modelIsExplicit: boolean;
   tools: AgentTool[];
-  configTools: AgentConfigTool[];
-  configRepositories: AgentGitHubRepositoryConfig[];
-  configTriggers: AgentTriggerConfig[];
-  githubSelected: boolean;
-  workspaceIntegrations: WorkspaceIntegrationState;
-  onChooseRepository: () => void;
-  connectHref: string;
+  brain: Array<{ path: string; type: "file" | "folder" }>;
   saveState: SaveState;
   githubStatus: string;
   githubError: string | null;
@@ -550,6 +464,30 @@ function AgentInspector({
 
       <div>
         <InspectorHeader
+          label="Brain"
+          countLabel={`${brain.length} ${brain.length === 1 ? "path" : "paths"}`}
+        />
+        {brain.length > 0 ? (
+          <div className="space-y-2">
+            {brain.map((reference) => (
+              <ConfigItem
+                key={reference.path}
+                icon={Brain}
+                label={`brain/${reference.path}`}
+                description={reference.type === "folder" ? "Mounted folder" : "Mounted file"}
+                tone="tool"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+            No brain paths mounted
+          </div>
+        )}
+      </div>
+
+      <div>
+        <InspectorHeader
           label="Tools"
           countLabel={`${tools.length} ${tools.length === 1 ? "tool" : "tools"}`}
         />
@@ -572,16 +510,6 @@ function AgentInspector({
         )}
       </div>
 
-      <IntegrationPanel
-        configTools={configTools}
-        repositories={configRepositories}
-        triggers={configTriggers}
-        githubSelected={githubSelected}
-        workspaceIntegrations={workspaceIntegrations}
-        onChooseRepository={onChooseRepository}
-        connectHref={connectHref}
-      />
-
       <GitHubSyncPanel
         saveState={saveState}
         status={githubStatus}
@@ -589,304 +517,6 @@ function AgentInspector({
         commitSha={githubCommitSha}
         syncedAt={githubSyncedAt}
       />
-    </div>
-  );
-}
-
-function IntegrationPanel({
-  configTools,
-  repositories,
-  triggers,
-  githubSelected,
-  workspaceIntegrations,
-  onChooseRepository,
-  connectHref,
-}: {
-  configTools: AgentConfigTool[];
-  repositories: AgentGitHubRepositoryConfig[];
-  triggers: AgentTriggerConfig[];
-  githubSelected: boolean;
-  workspaceIntegrations: WorkspaceIntegrationState;
-  onChooseRepository: () => void;
-  connectHref: string;
-}) {
-  const ampTool = configTools.find((tool) => tool.id === "amp");
-  const selectedRepositoryId =
-    ampTool?.id === "amp" ? ampTool.repository : (repositories[0]?.id ?? null);
-  const selectedRepository =
-    repositories.find((repository) => repository.id === selectedRepositoryId) ?? repositories[0];
-  const triggerEnabled = triggers.some((trigger) => trigger.type === "github.pull_request");
-  const availableRepositories = workspaceIntegrations.github.repositories;
-  const selectedRepositoryUnavailable = Boolean(
-    selectedRepository &&
-      !availableRepositories.some(
-        (repository) => repository.fullName === selectedRepository.fullName,
-      ),
-  );
-
-  if (!ampTool && !githubSelected && repositories.length === 0 && !triggerEnabled) return null;
-
-  return (
-    <div>
-      <InspectorHeader
-        label="Work integrations"
-        countLabel={repositories.length ? "configured" : "needs config"}
-      />
-      <div className="space-y-3">
-        {(githubSelected || repositories.length > 0 || ampTool) && (
-          <div className="rounded-lg border border-[#e2e2de] bg-white/60 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <GitBranch size={14} strokeWidth={1.9} className="text-ink-muted" />
-                <div className="min-w-0">
-                  <div className="text-[12.5px] font-medium text-ink">GitHub work repo</div>
-                  <div className="truncate text-[11.5px] text-ink-muted">
-                    {workspaceIntegrations.github.installation?.accountLogin
-                      ? `Installed on ${workspaceIntegrations.github.installation.accountLogin}`
-                      : "Connect GitHub to choose a repository"}
-                  </div>
-                </div>
-              </div>
-              {workspaceIntegrations.github.installation ? (
-                <form action={refreshGitHubRepositories}>
-                  <button
-                    type="submit"
-                    className="inline-flex h-7 items-center gap-1 rounded-md border border-[#e4e4e0] bg-white px-2 text-[11.5px] text-ink/85 hover:bg-[#fafaf8]"
-                  >
-                    <RefreshCw size={11} strokeWidth={2} />
-                    Refresh
-                  </button>
-                </form>
-              ) : (
-                <a
-                  href={connectHref}
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-[#e4e4e0] bg-white px-2 text-[11.5px] text-ink/85 hover:bg-[#fafaf8]"
-                >
-                  <ExternalLink size={11} strokeWidth={2} />
-                  Connect
-                </a>
-              )}
-            </div>
-            <div className="mt-3 rounded-md border border-[#e2e2de] bg-white px-2.5 py-2">
-              <div className="text-[10.5px] font-medium uppercase text-ink-subtle">Repository</div>
-              <div className="mt-1 flex items-center justify-between gap-3">
-                <div className="min-w-0 truncate text-[12.5px] font-medium text-ink">
-                  {selectedRepository?.fullName ?? "No repository selected"}
-                </div>
-                <button
-                  type="button"
-                  onClick={onChooseRepository}
-                  disabled={
-                    !workspaceIntegrations.github.installation || availableRepositories.length === 0
-                  }
-                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-[#e4e4e0] bg-white px-2 text-[11.5px] text-ink/85 hover:bg-[#fafaf8] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {selectedRepository ? "Change" : "Choose"}
-                </button>
-              </div>
-            </div>
-            {selectedRepositoryUnavailable ? (
-              <div className="mt-2 text-[11.5px] leading-4 text-[#9f2f21]">
-                This repository is no longer available from the GitHub work integration.
-              </div>
-            ) : null}
-            {ampTool && !selectedRepository ? (
-              <div className="mt-2 text-[11.5px] leading-4 text-ink-subtle">
-                Mention a GitHub work repository in the agent body before runtime can expose AMP.
-              </div>
-            ) : null}
-          </div>
-        )}
-
-        {ampTool ? (
-          <div className="rounded-lg border border-[#e2e2de] bg-white/60 p-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <Code2 size={14} strokeWidth={1.9} className="text-ink-muted" />
-              <div>
-                <div className="text-[12.5px] font-medium text-ink">AMP</div>
-                <div className="text-[11.5px] text-ink-muted">
-                  Runs with OpenCompany platform support
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {triggerEnabled ? (
-          <div className="rounded-lg border border-[#e2e2de] bg-white/60 p-3">
-            <InspectorHeader label="Trigger" countLabel={triggerEnabled ? "draft" : "off"} />
-            <div className="text-[12px] text-ink-muted">Draft GitHub pull request trigger</div>
-            <div className="mt-2 text-[11.5px] leading-4 text-ink-subtle">
-              Saved to YAML but disabled until webhook execution ships.
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function GitHubSetupModal({
-  intent,
-  href,
-  onClose,
-}: {
-  intent: "github" | "amp";
-  href: string;
-  onClose: () => void;
-}) {
-  return (
-    <ModalShell onClose={onClose}>
-      <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#e2e2de] bg-[#f7f7f4] text-ink-muted">
-          <GitBranch size={17} strokeWidth={1.9} />
-        </span>
-        <div className="min-w-0">
-          <h2 className="text-[14px] font-semibold text-ink">Connect GitHub</h2>
-          <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-            {intent === "amp"
-              ? "AMP needs access to a GitHub repository before it can work on code."
-              : "Connect GitHub to choose a repository for this agent."}
-          </p>
-        </div>
-      </div>
-      <div className="mt-5 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex h-8 items-center rounded-md border border-[#e3e3df] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#f7f7f5]"
-        >
-          Not now
-        </button>
-        <a
-          href={href}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-black"
-        >
-          <ExternalLink size={13} strokeWidth={1.9} />
-          Connect GitHub
-        </a>
-      </div>
-    </ModalShell>
-  );
-}
-
-function RepositoryPickerModal({
-  repositories,
-  selectedRepository,
-  connectHref,
-  onSelect,
-  onClose,
-}: {
-  repositories: WorkspaceIntegrationState["github"]["repositories"];
-  selectedRepository: AgentGitHubRepositoryConfig | null;
-  connectHref: string;
-  onSelect: (repository: { fullName: string; defaultBranch: string }) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const filtered = repositories.filter((repository) =>
-    repository.fullName.toLowerCase().includes(query.trim().toLowerCase()),
-  );
-
-  return (
-    <ModalShell onClose={onClose}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-[14px] font-semibold text-ink">Choose repository</h2>
-          <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-            The selected repository will be written into the agent body as a mention.
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-label="Close repository picker"
-          onClick={onClose}
-          className="rounded-md p-1 text-ink-muted hover:bg-[#eeeeeb] hover:text-ink"
-        >
-          <X size={15} strokeWidth={1.9} />
-        </button>
-      </div>
-
-      {repositories.length > 0 ? (
-        <>
-          <div className="mt-4 flex h-8 items-center gap-2 rounded-md border border-[#e3e3df] bg-white px-2.5">
-            <Search size={13} strokeWidth={1.9} className="text-ink-subtle" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search repositories"
-              className="h-full min-w-0 flex-1 bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
-            />
-          </div>
-          <div className="mt-3 max-h-[280px] overflow-y-auto rounded-md border border-[#e3e3df] bg-white/65">
-            {filtered.map((repository) => {
-              const selected = selectedRepository?.fullName === repository.fullName;
-              return (
-                <button
-                  key={repository.fullName}
-                  type="button"
-                  onClick={() => onSelect(repository)}
-                  className={`flex w-full items-center justify-between gap-4 border-t border-[#ecece8] px-3 py-2.5 text-left first:border-t-0 hover:bg-[#f7f7f5] ${
-                    selected ? "bg-[#f1f6f2]" : ""
-                  }`}
-                >
-                  <span className="min-w-0 truncate text-[12.5px] font-medium text-ink">
-                    {repository.fullName}
-                  </span>
-                  <span className="shrink-0 text-[11.5px] text-ink-subtle">
-                    {repository.defaultBranch}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      ) : (
-        <div className="mt-4 rounded-md border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12.5px] leading-5 text-ink-muted">
-          No repositories are available yet.
-        </div>
-      )}
-
-      <div className="mt-4 flex justify-between gap-2">
-        <form action={refreshGitHubRepositories}>
-          <button
-            type="submit"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#e3e3df] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#f7f7f5]"
-          >
-            <RefreshCw size={13} strokeWidth={1.9} />
-            Refresh
-          </button>
-        </form>
-        <a
-          href={connectHref}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#e3e3df] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#f7f7f5]"
-        >
-          <ExternalLink size={13} strokeWidth={1.9} />
-          Reconnect
-        </a>
-      </div>
-    </ModalShell>
-  );
-}
-
-function ModalShell({
-  children,
-  onClose,
-}: {
-  children: ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
-      <button
-        type="button"
-        aria-label="Close modal"
-        className="absolute inset-0 bg-black/[0.12]"
-        onClick={onClose}
-      />
-      <div className="relative w-full max-w-[480px] rounded-lg border border-[#deded9] bg-[#fbfbfa] p-4 shadow-[0_18px_48px_rgba(0,0,0,0.16)]">
-        {children}
-      </div>
     </div>
   );
 }
@@ -1069,53 +699,20 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
   );
 }
 
-function deriveConfigFromEditorContent(input: {
-  title: string;
-  content: TiptapDoc;
-  model: AgentModelId;
-  current: AgentConfigSelection;
-  repositories: Array<{ fullName: string; defaultBranch: string }>;
-}): AgentConfigSelection {
-  const { config } = deriveAgentConfigFromContent({
-    title: input.title,
-    content: input.content,
-    model: input.model,
-    repositories: input.repositories,
-    triggers: input.current.triggers,
-  });
-
-  return {
-    tools: config.tools,
-    repositories: config.integrations.github.repositories,
-    triggers: config.triggers,
-  };
-}
-
-function sameConfigSelection(left: AgentConfigSelection, right: AgentConfigSelection) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function configPatchFromSelection(selection: AgentConfigSelection) {
-  return {
-    tools: selection.tools,
-    integrations: { github: { repositories: selection.repositories } },
-    triggers: selection.triggers,
-  };
-}
-
 function buildConfigPreview({
+  body,
   fallback,
   selectedModelId,
-  tools: configTools,
 }: {
+  body: string;
   fallback: AgentConfig;
   selectedModelId: AgentModelId;
-  tools: AgentConfigTool[];
 }) {
+  const config = extractConfigFromMentions(body);
   const model =
     findModel(selectedModelId) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
-  const tools = configTools.flatMap((toolConfig) => {
-    const tool = findTool(toolConfig.id);
+  const tools = config.tools.flatMap((toolId) => {
+    const tool = findTool(toolId);
     return tool ? [tool] : [];
   });
 
@@ -1123,6 +720,7 @@ function buildConfigPreview({
     model: model!,
     modelIsExplicit: selectedModelId !== DEFAULT_MODEL_ID,
     tools,
+    brain: config.brain,
   };
 }
 

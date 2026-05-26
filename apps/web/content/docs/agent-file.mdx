@@ -1,169 +1,229 @@
 ---
 title: The .agent file
-description: Every agent in opencompany is a text file with documented YAML frontmatter and Markdown instructions.
+description: Every agent in opencompany is a single text file. Here's what's in it and how to write one.
 ---
 
 ## The whole thing in one screen
 
-An `.agent` file has YAML frontmatter for configuration and a Markdown body for instructions.
+An `.agent` file has two parts: a short header with metadata, and a body of instructions you write in plain English.
 
 ```yaml
 ---
-version: 2
-title: "AMP code agent"
+title: "Fundraising copilot"
 model: openai/gpt-5.4
 tools:
-  - id: amp
-    type: coding_agent
-    provider: amp
-    repository: web-app
-    prCapable: true
-  - id: exa
-    type: hosted_tool
-integrations:
-  github:
-    repositories:
-      - id: web-app
-        fullName: opencompany/opencompany
-        defaultBranch: main
-triggers:
-  - id: pr-work
-    type: github.pull_request
-    repository: web-app
-    events: [opened, reopened, synchronize, ready_for_review]
-    branches: [main]
-    enabled: false
+  - exa
+brain:
+  - docs/README.md
 ---
 
-Use @amp for code changes in @opencompany/opencompany. Open draft PRs when the task is ready for review.
+Research investors with @exa. Use @deep for thesis write-ups. Read @brain/docs/README.md first.
 ```
 
-The header controls what the runtime can do. The body tells the model how to behave.
+That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
 
-## Frontmatter
+## The header
 
-| Field | What it means |
+The header is YAML — a simple `key: value` format. It has three fields.
+
+### `title`
+
+The name of the agent. Used in the sidebar, in URLs, and as a hint to the model about what its job is.
+
+```yaml
+title: "Fundraising copilot"
+```
+
+If you leave it empty, opencompany fills in `"Untitled agent"` so the file is always valid.
+
+### `model`
+
+Which AI model runs this agent. Pick one of:
+
+| ID | What it's good for |
 | --- | --- |
-| `version` | Current value: `2`. |
-| `title` | Agent name shown in the app. |
-| `model` | Model used by the main OpenCompany agent. |
-| `tools` | Callable capabilities like Exa or AMP. |
-| `integrations` | Connected resources, such as GitHub repositories. |
-| `triggers` | Event entrypoints. PR triggers are saved but not active yet. |
+| `openai/gpt-5.4-mini` | The default. Fast and cheap. Use for most agents. |
+| `openai/gpt-5.4` | Slower, smarter. Use when accuracy matters more than speed. |
+| `anthropic/claude-haiku-4.5` | Cheap and fast, Claude flavor. |
+| `anthropic/claude-sonnet-4.6` | Smart and careful, especially good at code and structured writing. |
 
-Tools are callable runtime capabilities. Integrations are external resources or authority
-boundaries. Platform provider credentials can power tools without becoming integrations in the
-`.agent` file.
+If you type something that isn't on this list, opencompany falls back to `openai/gpt-5.4-mini`.
 
-Supported models:
+All models are accessed through Vercel AI Gateway, so you never deal with provider API keys directly.
 
-| ID | Good for |
-| --- | --- |
-| `openai/gpt-5.4-mini` | Default fast agent work. |
-| `openai/gpt-5.4` | More complex reasoning. |
-| `anthropic/claude-haiku-4.5` | Fast Claude workloads. |
-| `anthropic/claude-sonnet-4.6` | Coding-heavy and careful work. |
+### `tools`
 
-## Tools
-
-Tools are structured callable capabilities.
+A list of capabilities the agent can use beyond text generation.
 
 ```yaml
 tools:
-  - id: exa
-    type: hosted_tool
+  - exa
 ```
 
-`exa` lets the agent search and fetch live web sources.
-
-```yaml
-tools:
-  - id: amp
-    type: coding_agent
-    provider: amp
-    repository: web-app
-    prCapable: true
-```
-
-`amp` lets the main agent delegate code changes to Amp inside an E2B sandbox. AMP is a tool; the
-repository value must match a GitHub repository listed under `integrations` because GitHub is the
-connected resource AMP works against.
-
-`prCapable: true` means the agent can create a generated branch and draft pull request when its
-instructions call for it. It does not allow direct pushes to the default branch.
-
-## Integrations
-
-GitHub repositories live under `integrations.github.repositories`.
-
-```yaml
-integrations:
-  github:
-    repositories:
-      - id: web-app
-        fullName: opencompany/opencompany
-        defaultBranch: main
-```
-
-The `id` is the short handle used by tools and triggers. The OpenCompany-managed workspace repo
-that stores `.agent` files is separate from these GitHub work integration repositories.
-
-AMP does not live under `integrations`. OpenCompany's platform AMP credential powers the AMP tool
-outside the `.agent` file.
-
-## Triggers
-
-Pull request triggers can be saved now:
-
-```yaml
-triggers:
-  - id: pr-work
-    type: github.pull_request
-    repository: web-app
-    events: [opened, reopened, synchronize, ready_for_review]
-    branches: [main]
-    enabled: false
-```
-
-They are intentionally inactive in this release. Webhook execution will be added later.
-
-## Body and mentions
-
-The body is Markdown. Write the outcome, constraints, review policy, and preferred workflow here.
-
-Rich mentions like `@amp`, `@exa`, or an explicit GitHub work repository mention such as
-`@opencompany/opencompany` are the authored source for selected tools and integrations. The server
-derives the structured frontmatter from these mention nodes on save, then downstream runtime code
-reads the normalized frontmatter.
-
-Use the Add Mention menu to insert supported tool and integration mentions. For AMP, mention both
-`@amp` and the GitHub work repository it should use. Removing a supported mention from the body
-removes its derived frontmatter config on the next save.
-
-Model shortcuts are still recognized in the editor:
-
-| Mention | Model |
+| ID | What it does |
 | --- | --- |
-| `@fast`, `@default` | `openai/gpt-5.4-mini` |
+| `exa` | Web and people research. The agent can search the live internet. |
+
+Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file.
+
+### `brain`
+
+A list of long-lived context files or folders the agent can access in a session.
+
+```yaml
+brain:
+  - docs/README.md
+  - product/
+```
+
+These paths live under `brain/` in the workspace repo. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
+
+## The body
+
+The body is plain Markdown. Whatever you write here, the model reads as its instructions. Treat it like an SOP for a new hire: describe the outcome, the constraints, and the style.
+
+A good body says:
+
+- **What success looks like.** "Return one paragraph per fund." "Always include a source link."
+- **What to avoid.** "Don't include funds with fewer than three investments this year."
+- **Who the output is for.** "Write for a founder reading on their phone."
+
+There's no length limit, but shorter is usually better. If the instructions are getting long, that's often a sign the agent should be two agents.
+
+## Mentions
+
+Inside the body you can write `@something` to attach a model, tool, or Brain path. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
+
+```text
+Find investors with @exa.        ← tool: exa
+Use @deep for the write-up.      ← model: openai/gpt-5.4
+Read @brain/product/ first.      ← Brain folder
+```
+
+This is what mentions can be:
+
+- A tool ID, like `@exa`
+- A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
+- A Brain path, like `@brain/docs/README.md` or `@brain/product/`
+- A shortcut name (see below)
+
+If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
+
+### Shortcuts
+
+You don't have to type the full model name every time. These shortcuts work inside the body:
+
+| Shortcut | Stands for |
+| --- | --- |
+| `@fast` or `@default` | `openai/gpt-5.4-mini` |
 | `@deep` | `openai/gpt-5.4` |
 
-## Validation
+So writing "Use `@deep` for the summary" is the same as setting `model: openai/gpt-5.4` in the header.
 
-The parser tries to keep files loadable:
+### What happens if the body has no model mention
 
-- Unknown models fall back to `openai/gpt-5.4-mini`.
-- Unknown tools are dropped.
-- Invalid GitHub repositories are dropped.
-- AMP with a missing repository binding stays visible but cannot run until fixed.
-- Triggers pointing at missing repositories are dropped.
+The agent runs on `openai/gpt-5.4-mini`. That's the default.
 
-## Builder mapping
+### What happens if the body mentions two different models
 
-The agent builder writes this same YAML:
+The last one wins. If you write "Start with `@fast`, then switch to `@deep`," the agent will run on `@deep`. (The model itself can't actually switch mid-run — the mention controls the configuration, not the runtime behavior.)
 
-- The model menu updates `model`.
-- Add Mention tool selections derive `tools`.
-- Add Mention integration selections derive `integrations.github.repositories`.
-- The right sidebar configures the selected GitHub repository for AMP work.
-- The AMP tool points at the selected repository when one is configured.
-- The pull request trigger control writes a disabled trigger draft.
+## Saving and syncing
+
+When you save an agent:
+
+1. The change is stored immediately. Refresh, close the tab, do whatever — your edit is safe.
+2. A few seconds later, opencompany commits the file to your workspace's GitHub repo.
+3. If the commit fails for any reason (rare), you'll see a warning on the agent's row. Your work is still saved; only the GitHub copy is behind.
+
+You can also edit the file directly in GitHub or in your local editor. The next time opencompany reads from the repo, your changes show up.
+
+## Where files live
+
+In your workspace's GitHub repo, agents live under `agents/`:
+
+```text
+your-workspace-repo/
+├── agents/
+│   ├── fundraising-copilot.agent
+│   ├── ops-triage.agent
+│   └── sales-research.agent
+└── brain/
+    ├── docs/README.md
+    └── product/positioning.md
+```
+
+The filename comes from the title — lowercased, with spaces turned into dashes. Rename the title, and the next save will use the new filename.
+
+## Examples
+
+### A small one
+
+```yaml
+---
+title: "Notes"
+model: openai/gpt-5.4-mini
+tools: []
+---
+
+Summarize whatever I paste below in three bullets. Skip preamble.
+```
+
+### A research agent
+
+```yaml
+---
+title: "Investor research"
+model: openai/gpt-5.4
+tools:
+  - exa
+---
+
+Find investors active in seed-stage developer tools. For each fund:
+
+- Use @exa to find their most recent investment in the space.
+- Write one paragraph covering thesis, typical check size, and that recent
+  investment.
+- Include a link to one primary source per fund.
+
+Skip funds that haven't made an investment in the last 12 months.
+```
+
+### One where mentions do the work
+
+You can write only the instructions and let opencompany figure out the header:
+
+```yaml
+---
+title: "Research"
+model: openai/gpt-5.4
+tools:
+  - exa
+---
+
+Find investors with @exa. Run a deep pass with @deep before writing.
+```
+
+After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The `@deep` mention set the model.
+
+## How forgiving the format is
+
+You don't need to be careful with this file. The parser is built to never reject what you wrote.
+
+- Missing header? Treated as a body with default settings.
+- Unknown model name? Falls back to the default.
+- Unknown tool name? Dropped.
+- Weird whitespace or line endings? Cleaned up automatically.
+
+The goal is that you can write what's in your head, save, and trust that the file is valid.
+
+## Questions
+
+**Can I write `.agent` files by hand and commit them?**
+Yes. Push them to your workspace's GitHub repo, then trigger an import from the app. opencompany reads the format the same way no matter who wrote it.
+
+**Can two people edit the same agent at the same time?**
+Yes, but the last save wins for now. We're working on something better. In the meantime, if you're collaborating on a complex agent, it's worth coordinating.
+
+**How do I add a new model or tool?**
+That requires a code change — we ship a curated catalog so every workspace knows the same set of models and tools work. Open a request and we'll prioritize.

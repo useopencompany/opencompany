@@ -18,49 +18,27 @@ export type TiptapDoc = {
   content?: any[];
 };
 
-export type AgentToolId = "exa" | "amp";
+export type AgentToolId = "exa";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
   | "anthropic/claude-haiku-4.5"
   | "anthropic/claude-sonnet-4.6";
 
-export type AgentHostedToolConfig = {
-  id: "exa";
-  type: "hosted_tool";
+export type AgentConfigTool = {
+  id: AgentToolId;
+  type: "tool";
   label: string;
   description: string;
 };
 
-export type AgentCodingToolConfig = {
-  id: "amp";
-  type: "coding_agent";
-  provider: "amp";
-  label: string;
-  description: string;
-  repository: string | null;
-  prCapable: boolean;
-};
-
-export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig;
-
-export type AgentGitHubRepositoryConfig = {
-  id: string;
-  fullName: string;
-  defaultBranch: string;
-};
-
-export type AgentTriggerConfig = {
-  id: string;
-  type: "github.pull_request";
-  repository: string;
-  events: Array<"opened" | "reopened" | "synchronize" | "ready_for_review">;
-  branches: string[];
-  enabled: boolean;
+export type AgentBrainReference = {
+  path: string;
+  type: "file" | "folder";
 };
 
 export type AgentConfig = {
-  version: 2;
+  schemaVersion: "agent.v1";
   title: string;
   instructions: string;
   model: {
@@ -68,12 +46,7 @@ export type AgentConfig = {
     name: AgentModelId;
   };
   tools: AgentConfigTool[];
-  integrations: {
-    github: {
-      repositories: AgentGitHubRepositoryConfig[];
-    };
-  };
-  triggers: AgentTriggerConfig[];
+  brain: AgentBrainReference[];
 };
 
 export const users = pgTable(
@@ -162,7 +135,7 @@ export const agents = pgTable(
       .$type<AgentConfig>()
       .notNull()
       .default(
-        sql`'{"version":2,"title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
+        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[]}'::jsonb`,
       ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -197,6 +170,64 @@ export const agentSyncJobs = pgTable(
   (table) => ({
     workspaceIdx: index("agent_sync_jobs_workspace_idx").on(table.workspaceId),
     nextRunAtIdx: index("agent_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+  }),
+);
+
+export const brainFiles = pgTable(
+  "brain_files",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: text("content").notNull().default(""),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    githubBlobSha: text("github_blob_sha"),
+    githubCommitSha: text("github_commit_sha"),
+    githubSyncedHash: text("github_synced_hash"),
+    githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
+    githubSyncStatus: text("github_sync_status").notNull().default("pending"),
+    githubSyncError: text("github_sync_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("brain_files_workspace_idx").on(table.workspaceId),
+    workspacePathIdx: uniqueIndex("brain_files_workspace_path_idx").on(
+      table.workspaceId,
+      table.path,
+    ),
+  }),
+);
+
+export const brainSyncJobs = pgTable(
+  "brain_sync_jobs",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    operation: text("operation").notNull().default("upsert"),
+    desiredHash: text("desired_hash"),
+    previousPath: text("previous_path"),
+    previousBlobSha: text("previous_blob_sha"),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("brain_sync_jobs_workspace_idx").on(table.workspaceId),
+    workspacePathIdx: uniqueIndex("brain_sync_jobs_workspace_path_idx").on(
+      table.workspaceId,
+      table.path,
+    ),
+    nextRunAtIdx: index("brain_sync_jobs_next_run_at_idx").on(table.nextRunAt),
   }),
 );
 
@@ -240,6 +271,35 @@ export const agentSessions = pgTable(
       table.userId,
       table.archivedAt,
       table.updatedAt,
+    ),
+  }),
+);
+
+export const agentSessionBrainMounts = pgTable(
+  "agent_session_brain_mounts",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    requestedPath: text("requested_path").notNull(),
+    path: text("path").notNull(),
+    referenceType: text("reference_type").notNull().default("file"),
+    baseHash: text("base_hash"),
+    lastSyncedHash: text("last_synced_hash"),
+    status: text("status").notNull().default("mounted"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_brain_mounts_session_idx").on(table.sessionId),
+    workspaceIdx: index("agent_session_brain_mounts_workspace_idx").on(table.workspaceId),
+    sessionPathIdx: uniqueIndex("agent_session_brain_mounts_session_path_idx").on(
+      table.sessionId,
+      table.path,
     ),
   }),
 );
@@ -536,79 +596,6 @@ export const workspaceRepositories = pgTable(
   }),
 );
 
-export const workspaceGitHubIntegrationInstallations = pgTable(
-  "workspace_github_integration_installations",
-  {
-    id: text("id").primaryKey(),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    installationId: text("installation_id").notNull(),
-    accountLogin: text("account_login"),
-    accountType: text("account_type"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    workspaceIdx: uniqueIndex("workspace_github_integration_installations_workspace_idx").on(
-      table.workspaceId,
-    ),
-    installationIdx: index("workspace_github_integration_installations_installation_idx").on(
-      table.installationId,
-    ),
-  }),
-);
-
-export const workspaceGitHubIntegrationRepositories = pgTable(
-  "workspace_github_integration_repositories",
-  {
-    id: text("id").primaryKey(),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    installationId: text("installation_id").notNull(),
-    githubRepoId: text("github_repo_id").notNull(),
-    fullName: text("full_name").notNull(),
-    defaultBranch: text("default_branch").notNull().default("main"),
-    private: boolean("private").notNull().default(true),
-    selectedAt: timestamp("selected_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    workspaceIdx: index("workspace_github_integration_repositories_workspace_idx").on(
-      table.workspaceId,
-    ),
-    workspaceFullNameIdx: uniqueIndex(
-      "workspace_github_integration_repositories_workspace_full_name_idx",
-    ).on(table.workspaceId, table.fullName),
-  }),
-);
-
-export const agentSessionAmpArtifacts = pgTable(
-  "agent_session_amp_artifacts",
-  {
-    id: serial("id").primaryKey(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => agentSessions.id, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => agentSessionMessages.id, {
-      onDelete: "set null",
-    }),
-    toolCallId: text("tool_call_id").notNull(),
-    repositoryFullName: text("repository_full_name").notNull(),
-    branchName: text("branch_name"),
-    pullRequestUrl: text("pull_request_url"),
-    diffStat: text("diff_stat"),
-    diffPreview: text("diff_preview"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    sessionIdx: index("agent_session_amp_artifacts_session_idx").on(table.sessionId),
-    toolCallIdx: index("agent_session_amp_artifacts_tool_call_idx").on(table.toolCallId),
-  }),
-);
-
 export const onboardingResponses = pgTable(
   "onboarding_responses",
   {
@@ -649,6 +636,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   memberships: many(workspaceMemberships),
   agents: many(agents),
   agentSyncJobs: many(agentSyncJobs),
+  brainFiles: many(brainFiles),
+  brainSyncJobs: many(brainSyncJobs),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   creditBalance: one(workspaceCreditBalances, {
@@ -662,11 +651,6 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
     fields: [workspaces.id],
     references: [workspaceRepositories.workspaceId],
   }),
-  githubIntegrationInstallation: one(workspaceGitHubIntegrationInstallations, {
-    fields: [workspaces.id],
-    references: [workspaceGitHubIntegrationInstallations.workspaceId],
-  }),
-  githubIntegrationRepositories: many(workspaceGitHubIntegrationRepositories),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
@@ -679,6 +663,20 @@ export const agentsRelations = relations(agents, ({ one, many }) => ({
     references: [agentSyncJobs.agentId],
   }),
   sessions: many(agentSessions),
+}));
+
+export const brainFilesRelations = relations(brainFiles, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [brainFiles.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const brainSyncJobsRelations = relations(brainSyncJobs, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [brainSyncJobs.workspaceId],
+    references: [workspaces.id],
+  }),
 }));
 
 export const agentSessionsRelations = relations(agentSessions, ({ one, many }) => ({
@@ -698,7 +696,18 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   events: many(agentSessionEvents),
   usage: many(agentSessionUsage),
   toolUsage: many(agentSessionToolUsage),
-  ampArtifacts: many(agentSessionAmpArtifacts),
+  brainMounts: many(agentSessionBrainMounts),
+}));
+
+export const agentSessionBrainMountsRelations = relations(agentSessionBrainMounts, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionBrainMounts.sessionId],
+    references: [agentSessions.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [agentSessionBrainMounts.workspaceId],
+    references: [workspaces.id],
+  }),
 }));
 
 export const agentSessionMessagesRelations = relations(agentSessionMessages, ({ one, many }) => ({
@@ -835,38 +844,6 @@ export const workspaceRepositoriesRelations = relations(workspaceRepositories, (
   }),
 }));
 
-export const workspaceGitHubIntegrationInstallationsRelations = relations(
-  workspaceGitHubIntegrationInstallations,
-  ({ one, many }) => ({
-    workspace: one(workspaces, {
-      fields: [workspaceGitHubIntegrationInstallations.workspaceId],
-      references: [workspaces.id],
-    }),
-    repositories: many(workspaceGitHubIntegrationRepositories),
-  }),
-);
-
-export const workspaceGitHubIntegrationRepositoriesRelations = relations(
-  workspaceGitHubIntegrationRepositories,
-  ({ one }) => ({
-    workspace: one(workspaces, {
-      fields: [workspaceGitHubIntegrationRepositories.workspaceId],
-      references: [workspaces.id],
-    }),
-  }),
-);
-
-export const agentSessionAmpArtifactsRelations = relations(agentSessionAmpArtifacts, ({ one }) => ({
-  session: one(agentSessions, {
-    fields: [agentSessionAmpArtifacts.sessionId],
-    references: [agentSessions.id],
-  }),
-  message: one(agentSessionMessages, {
-    fields: [agentSessionAmpArtifacts.messageId],
-    references: [agentSessionMessages.id],
-  }),
-}));
-
 export const workspaceMembershipsRelations = relations(workspaceMemberships, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [workspaceMemberships.workspaceId],
@@ -892,21 +869,19 @@ export const onboardingResponsesRelations = relations(onboardingResponses, ({ on
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
-export type WorkspaceGitHubIntegrationInstallation =
-  typeof workspaceGitHubIntegrationInstallations.$inferSelect;
-export type WorkspaceGitHubIntegrationRepository =
-  typeof workspaceGitHubIntegrationRepositories.$inferSelect;
 export type WorkspaceCreditBalance = typeof workspaceCreditBalances.$inferSelect;
 export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSelect;
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
 export type CreditCode = typeof creditCodes.$inferSelect;
 export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
 export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
+export type BrainFile = typeof brainFiles.$inferSelect;
+export type BrainSyncJob = typeof brainSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
+export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect;
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
 export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
-export type AgentSessionAmpArtifact = typeof agentSessionAmpArtifacts.$inferSelect;
 export type AgentSessionToolUsage = typeof agentSessionToolUsage.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;

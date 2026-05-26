@@ -1,52 +1,35 @@
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS, toConfigTool } from "./config";
+import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "./config";
 import type {
+  AgentBrainReference,
   AgentConfig,
   AgentConfigTool,
   AgentFile,
-  AgentGitHubRepositoryConfig,
   AgentModelId,
   AgentToolId,
-  AgentTriggerConfig,
 } from "./types";
 
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const MODEL_BY_ID = new Map(SUPPORTED_AGENT_MODELS.map((model) => [model.id, model]));
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));
-const GITHUB_PULL_REQUEST_EVENTS = new Set<AgentTriggerConfig["events"][number]>([
-  "opened",
-  "reopened",
-  "synchronize",
-  "ready_for_review",
-]);
 
 type Frontmatter = {
-  version?: unknown;
-  title?: unknown;
-  model?: unknown;
-  tools?: unknown;
-  integrations?: unknown;
-  triggers?: unknown;
-};
-
-export type AgentConfigPatch = {
-  tools?: AgentConfigTool[];
-  integrations?: AgentConfig["integrations"];
-  triggers?: AgentTriggerConfig[];
+  title?: string;
+  model?: string;
+  tools?: string[];
+  brain?: string[];
 };
 
 export function parseAgentFile(source: string): AgentFile {
   const { frontmatter, body } = splitFrontmatter(source);
-  const title = normalizeTitle(readString(frontmatter.title) ?? "Untitled agent");
-  const model = normalizeModelId(readString(frontmatter.model) ?? DEFAULT_MODEL_ID);
-  const repositories = normalizeGitHubRepositories(frontmatter.integrations);
-  const tools = normalizeTools(frontmatter.tools, repositories);
-  const triggers = normalizeTriggers(frontmatter.triggers, repositories);
+  const title = normalizeTitle(frontmatter.title ?? "Untitled agent");
+  const model = normalizeModelId(frontmatter.model ?? DEFAULT_MODEL_ID);
+  const tools = normalizeTools(frontmatter.tools ?? []);
+  const brain = normalizeBrainReferences(frontmatter.brain ?? []);
 
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools, repositories, triggers }),
+    config: buildAgentConfig({ title, body, model, tools, brain }),
   };
 }
 
@@ -54,62 +37,64 @@ export function serializeAgentFile(input: {
   title: string;
   body: string;
   model?: AgentModelId;
-  tools?: AgentConfigTool[];
-  integrations?: AgentConfig["integrations"];
-  triggers?: AgentTriggerConfig[];
+  tools?: AgentToolId[];
+  brain?: AgentBrainReference[];
 }) {
   const title = normalizeTitle(input.title);
   const body = normalizeBody(input.body);
-  const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
-  const repositories = normalizeGitHubRepositories(input.integrations);
-  const tools = normalizeTools(input.tools ?? [], repositories);
-  const triggers = normalizeTriggers(input.triggers ?? [], repositories);
-  const frontmatter = {
-    version: 2,
-    title,
-    model,
-    tools: serializeTools(tools),
-    integrations: {
-      github: {
-        repositories,
-      },
-    },
-    triggers,
-  };
+  const fromMentions = extractConfigFromMentions(body);
+  const model = input.model ?? fromMentions.model;
+  const tools = input.tools ?? fromMentions.tools;
+  const brain = input.brain ?? fromMentions.brain;
 
-  return ["---", stringifyYaml(frontmatter, { lineWidth: 0 }).trimEnd(), "---", "", body].join(
-    "\n",
-  );
+  return [
+    "---",
+    `title: ${quoteYamlString(title)}`,
+    `model: ${model}`,
+    "tools:",
+    ...tools.map((tool) => `  - ${tool}`),
+    "brain:",
+    ...brain.map((reference) => `  - ${reference.path}`),
+    "---",
+    "",
+    body,
+  ].join("\n");
 }
 
-export function buildAgentFile(input: {
-  title: string;
-  body: string;
-  model?: AgentModelId;
-  config?: AgentConfigPatch;
-}): AgentFile {
+export function buildAgentFile(input: { title: string; body: string }): AgentFile {
   const body = normalizeBody(input.body);
+  const mentioned = extractConfigFromMentions(body);
   const title = normalizeTitle(input.title);
-  const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
-  const repositories = normalizeGitHubRepositories(input.config?.integrations);
-  const tools = normalizeTools(input.config?.tools ?? [], repositories);
-  const triggers = normalizeTriggers(input.config?.triggers ?? [], repositories);
 
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools, repositories, triggers }),
+    config: buildAgentConfig({
+      title,
+      body,
+      model: mentioned.model,
+      tools: mentioned.tools,
+      brain: mentioned.brain,
+    }),
   };
 }
 
 export function extractConfigFromMentions(body: string): {
   model: AgentModelId;
   tools: AgentToolId[];
+  brain: AgentBrainReference[];
 } {
   let model = DEFAULT_MODEL_ID;
   const tools = new Set<AgentToolId>();
+  const brain = new Map<string, AgentBrainReference>();
 
   for (const rawId of extractMentionIds(body)) {
+    const brainReference = mentionBrainReference(rawId);
+    if (brainReference) {
+      brain.set(brainReference.path, brainReference);
+      continue;
+    }
+
     const modelId = mentionModelId(rawId);
     if (modelId) {
       model = modelId;
@@ -121,7 +106,7 @@ export function extractConfigFromMentions(body: string): {
     }
   }
 
-  return { model, tools: Array.from(tools) };
+  return { model, tools: Array.from(tools), brain: Array.from(brain.values()) };
 }
 
 export function extractMentionIds(body: string) {
@@ -168,33 +153,26 @@ export function legacyModelId(id: string): AgentModelId {
   return normalizeModelId(id);
 }
 
-export function repositoryIdForFullName(fullName: string) {
-  return normalizeRepositoryId(fullName);
-}
-
 function buildAgentConfig(input: {
   title: string;
   body: string;
   model: AgentModelId;
-  tools: AgentConfigTool[];
-  repositories: AgentGitHubRepositoryConfig[];
-  triggers: AgentTriggerConfig[];
+  tools: AgentToolId[];
+  brain: AgentBrainReference[];
 }): AgentConfig {
   return {
-    version: 2,
+    schemaVersion: "agent.v1",
     title: input.title,
     instructions: input.body,
     model: {
       provider: "vercel-ai-gateway",
       name: input.model,
     },
-    tools: input.tools,
-    integrations: {
-      github: {
-        repositories: input.repositories,
-      },
-    },
-    triggers: input.triggers,
+    tools: input.tools.flatMap((id): AgentConfigTool[] => {
+      const tool = TOOL_BY_ID.get(id);
+      return tool ? [{ ...tool }] : [];
+    }),
+    brain: input.brain,
   };
 }
 
@@ -221,12 +199,68 @@ function splitFrontmatter(source: string): {
 }
 
 function parseFrontmatter(yaml: string): Frontmatter {
-  try {
-    const parsed = parseYaml(yaml);
-    return isRecord(parsed) ? parsed : {};
-  } catch {
-    return {};
+  const frontmatter: Frontmatter = {};
+  const lines = yaml.split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined || !line.trim() || line.trimStart().startsWith("#")) continue;
+
+    const match = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    const [, key, rawValue = ""] = match;
+
+    if (key === "title") {
+      frontmatter.title = unquoteYamlString(rawValue);
+      continue;
+    }
+
+    if (key === "model") {
+      frontmatter.model = unquoteYamlString(rawValue);
+      continue;
+    }
+
+    if (key === "tools") {
+      const inline = rawValue.trim();
+      if (inline.startsWith("[") && inline.endsWith("]")) {
+        frontmatter.tools = inline
+          .slice(1, -1)
+          .split(",")
+          .map((item) => unquoteYamlString(item.trim()))
+          .filter(Boolean);
+        continue;
+      }
+
+      const tools: string[] = [];
+      while (lines[index + 1]?.startsWith("  - ")) {
+        index += 1;
+        tools.push(unquoteYamlString((lines[index] ?? "").slice("  - ".length)));
+      }
+      frontmatter.tools = tools;
+      continue;
+    }
+
+    if (key === "brain") {
+      const inline = rawValue.trim();
+      if (inline.startsWith("[") && inline.endsWith("]")) {
+        frontmatter.brain = inline
+          .slice(1, -1)
+          .split(",")
+          .map((item) => unquoteYamlString(item.trim()))
+          .filter(Boolean);
+        continue;
+      }
+
+      const brain: string[] = [];
+      while (lines[index + 1]?.startsWith("  - ")) {
+        index += 1;
+        brain.push(unquoteYamlString((lines[index] ?? "").slice("  - ".length)));
+      }
+      frontmatter.brain = brain;
+    }
   }
+
+  return frontmatter;
 }
 
 function normalizeTitle(title: string) {
@@ -250,140 +284,50 @@ function mentionModelId(id: string): AgentModelId | null {
   return MODEL_BY_ID.has(id as AgentModelId) ? (id as AgentModelId) : null;
 }
 
-function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfig[]) {
-  const tools: AgentConfigTool[] = [];
-  const seen = new Set<string>();
-  const repoIds = new Set(repositories.map((repository) => repository.id));
+function mentionBrainReference(id: string): AgentBrainReference | null {
+  if (!id.startsWith("brain/")) return null;
+  return normalizeBrainReference(id.slice("brain/".length));
+}
 
-  for (const item of Array.isArray(value) ? value : []) {
-    const id = typeof item === "string" ? item : readString(isRecord(item) ? item.id : undefined);
-    if (!id || seen.has(id)) continue;
-    const definition = TOOL_BY_ID.get(id as AgentToolId);
-    if (!definition) continue;
-
-    if (id === "amp") {
-      const record = isRecord(item) ? item : {};
-      const repository = normalizeNullableRepositoryId(record.repository);
-      tools.push(
-        toConfigTool(definition, {
-          repository: repository && repoIds.has(repository) ? repository : null,
-          prCapable: readBoolean(record.prCapable) ?? true,
-        }),
-      );
-    } else {
-      tools.push(toConfigTool(definition));
-    }
-    seen.add(id);
+function normalizeTools(ids: string[]) {
+  const tools = new Set<AgentToolId>();
+  for (const id of ids) {
+    if (TOOL_BY_ID.has(id as AgentToolId)) tools.add(id as AgentToolId);
   }
-
-  return tools;
+  return Array.from(tools);
 }
 
-function serializeTools(tools: AgentConfigTool[]) {
-  return tools.map((tool) => {
-    if (tool.id === "amp") {
-      return {
-        id: tool.id,
-        type: tool.type,
-        provider: tool.provider,
-        repository: tool.repository,
-        prCapable: tool.prCapable,
-      };
-    }
-
-    return {
-      id: tool.id,
-      type: tool.type,
-    };
-  });
-}
-
-function normalizeGitHubRepositories(value: unknown): AgentGitHubRepositoryConfig[] {
-  const repositoriesValue = isRecord(value)
-    ? isRecord(value.github)
-      ? value.github.repositories
-      : undefined
-    : undefined;
-  const rows = Array.isArray(repositoriesValue) ? repositoriesValue : [];
-  const repositories: AgentGitHubRepositoryConfig[] = [];
-  const seen = new Set<string>();
-
-  for (const item of rows) {
-    if (!isRecord(item)) continue;
-    const fullName = readString(item.fullName);
-    if (!fullName || !isValidGitHubFullName(fullName)) continue;
-    const id = normalizeRepositoryId(readString(item.id) ?? repositoryIdForFullName(fullName));
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    repositories.push({
-      id,
-      fullName,
-      defaultBranch: normalizeBranch(readString(item.defaultBranch) ?? "main"),
-    });
+function normalizeBrainReferences(ids: string[]) {
+  const references = new Map<string, AgentBrainReference>();
+  for (const id of ids) {
+    const reference = normalizeBrainReference(id);
+    if (reference) references.set(reference.path, reference);
   }
-
-  return repositories;
+  return Array.from(references.values());
 }
 
-function normalizeTriggers(value: unknown, repositories: AgentGitHubRepositoryConfig[]) {
-  const repoIds = new Set(repositories.map((repository) => repository.id));
-  const triggers: AgentTriggerConfig[] = [];
-  const seen = new Set<string>();
-
-  for (const item of Array.isArray(value) ? value : []) {
-    if (!isRecord(item)) continue;
-    const type = readString(item.type);
-    const repository = normalizeNullableRepositoryId(item.repository);
-    if (type !== "github.pull_request" || !repository || !repoIds.has(repository)) continue;
-    const id = normalizeRepositoryId(readString(item.id) ?? `${repository}-pr`);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    const events = (Array.isArray(item.events) ? item.events : [])
-      .flatMap((event) => (typeof event === "string" ? [event] : []))
-      .filter((event): event is AgentTriggerConfig["events"][number] =>
-        GITHUB_PULL_REQUEST_EVENTS.has(event as AgentTriggerConfig["events"][number]),
-      );
-    triggers.push({
-      id,
-      type,
-      repository,
-      events: events.length > 0 ? Array.from(new Set(events)) : ["opened", "synchronize"],
-      branches: normalizeBranches(item.branches),
-      enabled: readBoolean(item.enabled) ?? false,
-    });
-  }
-
-  return triggers;
-}
-
-function normalizeBranches(value: unknown) {
-  const branches = (Array.isArray(value) ? value : [])
-    .flatMap((branch) => (typeof branch === "string" ? [normalizeBranch(branch)] : []))
-    .filter(Boolean);
-  return branches.length > 0 ? Array.from(new Set(branches)) : ["main"];
-}
-
-function normalizeBranch(value: string) {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : "main";
-}
-
-function normalizeRepositoryId(value: string) {
-  return value
+function normalizeBrainReference(input: string): AgentBrainReference | null {
+  const folder = input.trim().endsWith("/");
+  const path = input
     .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
-}
+    .replace(/^brain\//, "")
+    .replace(/^\/+/, "")
+    .replace(/\/{2,}/g, "/");
+  const normalized = folder ? `${path.replace(/\/+$/g, "")}/` : path.replace(/\/+$/g, "");
 
-function normalizeNullableRepositoryId(value: unknown) {
-  const repository = readString(value);
-  return repository ? normalizeRepositoryId(repository) : null;
-}
+  if (
+    !normalized ||
+    normalized === "/" ||
+    normalized.includes("..") ||
+    normalized.startsWith(".")
+  ) {
+    return null;
+  }
 
-function isValidGitHubFullName(value: string) {
-  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value);
+  return {
+    path: normalized,
+    type: normalized.endsWith("/") ? "folder" : "file",
+  };
 }
 
 function isMentionChar(char: string) {
@@ -398,14 +342,25 @@ function isMentionChar(char: string) {
   );
 }
 
-function readString(value: unknown) {
-  return typeof value === "string" ? value.trim() : null;
+function quoteYamlString(value: string) {
+  return JSON.stringify(value);
 }
 
-function readBoolean(value: unknown) {
-  return typeof value === "boolean" ? value : null;
-}
+function unquoteYamlString(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    try {
+      if (trimmed.startsWith('"')) return JSON.parse(trimmed);
+      return trimmed.slice(1, -1).replace(/''/g, "'");
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+
+  return trimmed;
 }

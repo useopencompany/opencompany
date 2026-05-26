@@ -97,10 +97,97 @@ body {
   background: #eef7f0;
   color: #246238;
 }
-.agent-mention[data-kind="integration"] {
-  border-color: #ddd7c7;
-  background: #f8f2e4;
-  color: #6c5220;
+.agent-mention[data-kind="brain"] {
+  border-color: #ded6e9;
+  background: #f4f0fb;
+  color: #5a3b78;
+}
+
+.tiptap-brain > *:first-child {
+  margin-top: 0;
+}
+.tiptap-brain > *:last-child {
+  margin-bottom: 0;
+}
+.tiptap-brain p,
+.tiptap-brain ul,
+.tiptap-brain ol,
+.tiptap-brain blockquote,
+.tiptap-brain pre {
+  margin: 0 0 0.82em;
+}
+.tiptap-brain h1,
+.tiptap-brain h2,
+.tiptap-brain h3 {
+  color: var(--color-ink);
+  font-weight: 680;
+  line-height: 1.18;
+}
+.tiptap-brain h1 {
+  margin: 1.15em 0 0.34em;
+  font-size: 34px;
+}
+.tiptap-brain h2 {
+  margin: 1.25em 0 0.34em;
+  font-size: 24px;
+}
+.tiptap-brain h3 {
+  margin: 1.1em 0 0.3em;
+  font-size: 17px;
+}
+.tiptap-brain ul,
+.tiptap-brain ol {
+  padding-left: 1.35em;
+}
+.tiptap-brain ul {
+  list-style: disc;
+}
+.tiptap-brain ol {
+  list-style: decimal;
+}
+.tiptap-brain li {
+  padding-left: 0.16em;
+}
+.tiptap-brain li + li {
+  margin-top: 0.18em;
+}
+.tiptap-brain li > p {
+  margin: 0.12em 0;
+}
+.tiptap-brain blockquote {
+  border-left: 3px solid #d9d9d3;
+  padding-left: 0.95em;
+  color: var(--color-ink-muted);
+}
+.tiptap-brain code {
+  border-radius: 5px;
+  background: #ececea;
+  padding: 0.12em 0.34em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  color: var(--color-ink);
+}
+.tiptap-brain pre {
+  overflow-x: auto;
+  border: 1px solid #e2e2de;
+  border-radius: 8px;
+  background: #f0f0ed;
+  padding: 0.85em 1em;
+  line-height: 1.55;
+}
+.tiptap-brain pre code {
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+}
+.tiptap-brain hr {
+  margin: 1.25em 0;
+  border: 0;
+  border-top: 1px solid #deded9;
+}
+.tiptap-brain .ProseMirror-selectednode {
+  outline: 2px solid #cfcfc8;
 }
 
 .session-markdown > *:first-child {

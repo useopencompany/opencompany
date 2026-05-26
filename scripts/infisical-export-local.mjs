@@ -10,7 +10,13 @@ if (paths.length === 0) {
   paths.push("/web", "/runner");
 }
 
-const preserveLocalKeys = new Set(["DATABASE_URL", "NEON_BRANCH", "INNGEST_DEV"]);
+const preserveLocalKeys = new Set([
+  "DATABASE_URL",
+  "NEON_BRANCH",
+  "INNGEST_DEV",
+  "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
+]);
+const localDefaultLines = ['OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"'];
 const chunks = [];
 for (const path of paths) {
   const result = spawnSync(
@@ -69,13 +75,22 @@ function readListFlag(name) {
 
 function readExistingLocalOnly(path) {
   try {
-    return readFileSync(path, "utf8")
+    const existing = readFileSync(path, "utf8")
       .split("\n")
       .filter((line) => {
         const match = line.match(/^([A-Z0-9_]+)=/);
         return match && preserveLocalKeys.has(match[1]);
       });
+    return appendMissingLocalDefaults(existing);
   } catch {
-    return [];
+    return appendMissingLocalDefaults([]);
   }
+}
+
+function appendMissingLocalDefaults(lines) {
+  const seen = new Set(
+    lines.map((line) => line.match(/^([A-Z0-9_]+)=/)?.[1]).filter((key) => key !== undefined),
+  );
+
+  return [...lines, ...localDefaultLines.filter((line) => !seen.has(line.split("=")[0]))];
 }

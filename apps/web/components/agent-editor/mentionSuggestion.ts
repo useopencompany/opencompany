@@ -2,20 +2,16 @@ import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 import { MentionList, type MentionListHandle } from "./MentionList";
-import { type AgentMentionItem } from "./tools";
+import { AGENT_TOOL_MENTION_ITEMS, type AgentMentionItem } from "./tools";
 
-export function createMentionSuggestion({
-  getItems,
-  onSelect,
-}: {
-  getItems: () => AgentMentionItem[];
-  onSelect?: (item: AgentMentionItem) => void;
-}): Omit<SuggestionOptions<AgentMentionItem>, "editor"> {
+export function createMentionSuggestion(
+  items: AgentMentionItem[] = AGENT_TOOL_MENTION_ITEMS,
+): Omit<SuggestionOptions<AgentMentionItem>, "editor"> {
   return {
     char: "@",
     items: ({ query }) => {
       const q = query.toLowerCase();
-      return getItems().filter((item) => {
+      return items.filter((item) => {
         return (
           item.kind.includes(q) ||
           item.id.toLowerCase().includes(q) ||
@@ -33,7 +29,7 @@ export function createMentionSuggestion({
       return {
         onStart: (props) => {
           component = new ReactRenderer(MentionList, {
-            props: { ...props, onSelect },
+            props,
             editor: props.editor,
           });
 
@@ -51,7 +47,7 @@ export function createMentionSuggestion({
           });
         },
         onUpdate: (props) => {
-          component?.updateProps({ ...props, onSelect });
+          component?.updateProps(props);
           if (!props.clientRect || !popup) return;
           popup.setProps({
             getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
@@ -74,3 +70,5 @@ export function createMentionSuggestion({
     },
   };
 }
+
+export const mentionSuggestion = createMentionSuggestion();

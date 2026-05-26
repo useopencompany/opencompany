@@ -1,12 +1,9 @@
 export type {
-  AgentCodingToolConfig,
+  AgentBrainReference,
   AgentConfig,
   AgentConfigTool,
-  AgentGitHubRepositoryConfig,
-  AgentHostedToolConfig,
   AgentModelId,
   AgentToolId,
-  AgentTriggerConfig,
   TiptapDoc,
 } from "@opencompany/db";
 

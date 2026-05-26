@@ -99,7 +99,15 @@ const SHARED_DEV_ENV_KEYS = [
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
-const LOCAL_ONLY_ENV_KEYS = new Set(["DATABASE_URL", "NEON_BRANCH", "INNGEST_DEV"]);
+const LOCAL_ONLY_ENV_KEYS = new Set([
+  "DATABASE_URL",
+  "NEON_BRANCH",
+  "INNGEST_DEV",
+  "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
+]);
+const LOCAL_DEV_DEFAULT_ENV_VALUES = {
+  OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS: "louis@acta.so",
+};
 
 function assertNodeVersion() {
   const current = versions.node.split(".").map(Number);
@@ -361,6 +369,18 @@ async function ensureEnvFile(state) {
   ok("Created .env.local from .env.example");
 }
 
+async function ensureLocalDevDefaults() {
+  const env = parseEnv(".env.local");
+  const missingDefaults = Object.fromEntries(
+    Object.entries(LOCAL_DEV_DEFAULT_ENV_VALUES).filter(([key]) => !(key in env)),
+  );
+
+  if (Object.keys(missingDefaults).length === 0) return;
+
+  writeEnvValues(".env.local", missingDefaults);
+  ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
+}
+
 function canPullSharedDevEnvFromInfisical() {
   if (!existsSync(".infisical.json")) return false;
 
@@ -569,6 +589,7 @@ async function main() {
       requireDatabaseUrl: SHARED_DATABASE_MODE,
       requireNeonProject: !SHARED_DATABASE_MODE,
     });
+    await ensureLocalDevDefaults();
     ok(`Updated .env.local with shared setup values from ${source}`);
     return;
   }
@@ -576,6 +597,7 @@ async function main() {
   if (STRIPE_MODE) {
     console.log("\n\x1b[1mStripe local credentials\x1b[0m");
     await ensureEnvFile(inspectState());
+    await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
     return;
   }
@@ -637,6 +659,7 @@ async function main() {
 
   const state = inspectState();
   await ensureEnvFile(state);
+  await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
   if (SHARED_DATABASE_MODE) {
     await ensureSharedDatabaseUrl(inspectState());

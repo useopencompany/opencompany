@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Cpu, Plug, Wrench } from "lucide-react";
+import { BookOpenText, ChevronLeft, ChevronRight, Cpu, Wrench } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
@@ -12,11 +12,10 @@ type Props = {
   items: AgentMentionItem[];
   query?: string;
   command: (item: { id: string; label: string }) => void;
-  onSelect?: (item: AgentMentionItem) => void;
 };
 
 export const MentionList = forwardRef<MentionListHandle, Props>(function MentionList(
-  { items, query = "", command, onSelect },
+  { items, query = "", command },
   ref,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -40,10 +39,10 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
     },
     {
       type: "category" as const,
-      kind: "integration" as const,
-      label: "Work integrations",
-      description: `${items.filter((item) => item.kind === "integration").length} available`,
-      icon: Plug,
+      kind: "brain" as const,
+      label: "Brain",
+      description: `${items.filter((item) => item.kind === "brain").length} available`,
+      icon: BookOpenText,
     },
   ].filter((row) => items.some((item) => item.kind === row.kind));
 
@@ -73,7 +72,6 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       setSelectedIndex(0);
       return;
     }
-    onSelect?.(row.item);
     command({ id: row.item.mentionId, label: row.item.label });
   };
 
@@ -186,5 +184,5 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
-  return "Integrations";
+  return "Brain";
 }

@@ -31,21 +31,24 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; toolCallId: string; name: string; input?: unknown };
     }
   | {
-      type: "tool.delta";
-      payload: {
-        messageId: string;
-        toolCallId: string;
-        delta: string;
-        stream?: "stdout" | "stderr";
-      };
-    }
-  | {
       type: "tool.completed";
       payload: { messageId: string; toolCallId: string; name: string; output: unknown };
     }
   | {
       type: "file.changed";
       payload: { path: string; operation: "write" };
+    }
+  | {
+      type: "brain.file_changed";
+      payload: { path: string; savedPath?: string; operation: "write" | "delete" };
+    }
+  | {
+      type: "brain.conflict";
+      payload: {
+        path: string;
+        savedPath?: string;
+        operation: "conflict_copy" | "delete_conflict";
+      };
     }
   | {
       type: "command.output";

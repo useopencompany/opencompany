@@ -96,7 +96,7 @@ costs become unpredictable, or release ordering with the runner becomes too cons
 **What it is:** Hosting platform for the long-lived agent runner.
 
 **What it does for us:** Runs the Bun/Fastify runner as `opencompany-runner` with a health check and
-manual deploy hook controlled by GitHub Actions.
+API-triggered deploys controlled by GitHub Actions.
 
 **Where it is used:**
 

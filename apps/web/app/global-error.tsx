@@ -62,7 +62,6 @@ function readBrowserErrorContext() {
   if (typeof window === "undefined") return {};
 
   return {
-    browser_url: window.location.href,
     browser_pathname: window.location.pathname,
     browser_online: navigator.onLine,
     document_visibility_state: document.visibilityState,

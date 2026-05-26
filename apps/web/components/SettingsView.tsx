@@ -651,13 +651,13 @@ export default function SettingsView({ profile, workspace, billing }: Props) {
           </Section>
 
           <Section title="Account" description="Sign out of all sessions for this device.">
-            <Link
+            <a
               href="/auth/sign-out"
               className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"
             >
               <LogOut size={13} strokeWidth={1.9} />
               Log out
-            </Link>
+            </a>
           </Section>
         </div>
       </div>

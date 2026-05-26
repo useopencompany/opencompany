@@ -1,36 +1,51 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
-import { getDb } from "@opencompany/db/client";
-import { agentSessions } from "@opencompany/db/schema";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { cookies } from "next/headers";
+import { Suspense } from "react";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
+import QueryProvider from "@/components/QueryProvider";
 import Sidebar from "@/components/Sidebar";
+import { ToastProvider } from "@/components/ToastProvider";
+import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { loadSidebarSessionsForWorkspace } from "@/lib/agent-sessions/data";
+import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { requireCurrentWorkspace } from "@/lib/auth";
+
+const SIDEBAR_COLLAPSED_COOKIE = "opencompany-sidebar-collapsed";
+
+async function SidebarWithSessions({
+  userName,
+  userEmail,
+  workspaceName,
+  initialCollapsed,
+  sessionsPromise,
+}: {
+  userName: string;
+  userEmail: string;
+  workspaceName: string;
+  initialCollapsed: boolean;
+  sessionsPromise: Promise<SidebarSessionPayload[]>;
+}) {
+  const sessions = await sessionsPromise;
+
+  return (
+    <Sidebar
+      userName={userName}
+      userEmail={userEmail}
+      workspaceName={workspaceName}
+      initialCollapsed={initialCollapsed}
+      initialSessions={sessions}
+    />
+  );
+}
 
 export default async function AppShell({ children }: { children: React.ReactNode }) {
   const { authUser, user, workspace } = await requireCurrentWorkspace();
+  const cookieStore = await cookies();
+  const sidebarCollapsedCookie = cookieStore.get(SIDEBAR_COLLAPSED_COOKIE);
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
-  const db = getDb();
-  const sessions = await db
-    .select({
-      id: agentSessions.id,
-      title: agentSessions.title,
-      status: agentSessions.status,
-      modelName: agentSessions.modelName,
-      lastError: agentSessions.lastError,
-      createdAt: agentSessions.createdAt,
-      updatedAt: agentSessions.updatedAt,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.workspaceId, workspace.id),
-        eq(agentSessions.userId, user.id),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .orderBy(desc(agentSessions.updatedAt))
-    .limit(50);
+  const sessionsPromise = loadSidebarSessionsForWorkspace(user.id, workspace.id);
+  const initialSidebarCollapsed = sidebarCollapsedCookie?.value === "true";
 
   return (
     <AnalyticsProvider
@@ -42,20 +57,36 @@ export default async function AppShell({ children }: { children: React.ReactNode
         lastName: authUser.lastName,
       }}
     >
-      <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-      <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-        <Sidebar
-          userName={userName}
-          userEmail={authUser.email}
-          workspaceName={workspace.name}
-          sessions={sessions.map((session) => ({
-            ...session,
-            createdAt: session.createdAt.toISOString(),
-            updatedAt: session.updatedAt.toISOString(),
-          }))}
-        />
-        {children}
-      </div>
+      <QueryProvider>
+        <WorkspaceProvider workspaceId={workspace.id}>
+          <ToastProvider>
+            <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
+            <div className="flex h-screen w-screen overflow-hidden bg-canvas">
+              <Suspense
+                fallback={
+                  <Sidebar
+                    userName={userName}
+                    userEmail={authUser.email}
+                    workspaceName={workspace.name}
+                    initialCollapsed={initialSidebarCollapsed}
+                    initialSessions={[]}
+                    sessionsLoading
+                  />
+                }
+              >
+                <SidebarWithSessions
+                  userName={userName}
+                  userEmail={authUser.email}
+                  workspaceName={workspace.name}
+                  initialCollapsed={initialSidebarCollapsed}
+                  sessionsPromise={sessionsPromise}
+                />
+              </Suspense>
+              {children}
+            </div>
+          </ToastProvider>
+        </WorkspaceProvider>
+      </QueryProvider>
     </AnalyticsProvider>
   );
 }
