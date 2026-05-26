@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   applyRuntimeEventToState,
   buildAssistantTurnParts,
+  buildBackgroundActivityParts,
   buildRuntimeToolCallsForMessage,
   emptyCostSummary,
   emptyUsageSummary,
   isInspectableRuntimeEvent,
   type RuntimeEvent,
+  type SessionMessage,
   type SessionRuntimeState,
 } from "./runtime-events";
 
@@ -682,6 +684,154 @@ describe("buildAssistantTurnParts", () => {
           id: "call_1",
           name: "write_file",
           brainPath: "foo.md",
+        },
+      },
+    ]);
+  });
+});
+
+describe("buildBackgroundActivityParts", () => {
+  it("groups after-session lifecycle events into one completed tool call row", () => {
+    const parts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.started", {
+          runId: 12,
+          messageId: "msg_user",
+          idleDelaySeconds: 180,
+        }),
+        event(2, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+        }),
+      ],
+      [],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "after-session:12",
+          name: "after_session",
+          status: "completed",
+          inputPreview: "",
+          activityPreview: "",
+          outputPreview: "Completed",
+          startedEventId: 1,
+          completedEventId: 2,
+        },
+      },
+    ]);
+  });
+
+  it("does not surface skipped older after-session checks as chat activity", () => {
+    const parts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.skipped", {
+          messageId: "msg_old",
+          reason: "newer_message",
+        }),
+      ],
+      [],
+    );
+
+    expect(parts).toEqual([]);
+  });
+
+  it("reconciles after-session lifecycle events by message id when an older event has no run id", () => {
+    const parts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.started", {
+          messageId: "msg_user",
+          idleDelaySeconds: 180,
+        }),
+        event(2, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+        }),
+      ],
+      [],
+    );
+
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toMatchObject({
+      type: "tool-call",
+      toolCall: {
+        status: "completed",
+        startedEventId: 1,
+        completedEventId: 2,
+      },
+    });
+  });
+
+  it("reuses assistant tool-call rendering data for internal after-session tool calls", () => {
+    const assistantMessage = {
+      id: "msg_internal",
+      role: "assistant",
+      content: "",
+      status: "completed",
+      internal: true,
+      modelMessage: {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "write_file",
+            input: { path: "brain/memory.md", content: "Preference saved" },
+          },
+        ],
+      },
+    } satisfies SessionMessage;
+
+    const parts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.started", {
+          runId: 12,
+          messageId: "msg_user",
+          idleDelaySeconds: 180,
+        }),
+        event(2, "tool.started", {
+          messageId: "msg_internal",
+          toolCallId: "call_1",
+          name: "write_file",
+          input: { path: "brain/memory.md", content: "Preference saved" },
+        }),
+        event(3, "file.changed", {
+          messageId: "msg_internal",
+          path: "brain/memory.md",
+          operation: "write",
+        }),
+        event(4, "tool.completed", {
+          messageId: "msg_internal",
+          toolCallId: "call_1",
+          name: "write_file",
+          output: { path: "brain/memory.md", bytes: 16 },
+        }),
+        event(5, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+        }),
+      ],
+      [assistantMessage],
+    );
+
+    expect(parts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "after-session:12",
+          name: "after_session",
+          status: "completed",
+        },
+      },
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "call_1",
+          name: "write_file",
+          status: "completed",
+          brainPath: "memory.md",
         },
       },
     ]);

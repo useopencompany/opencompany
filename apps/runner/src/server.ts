@@ -4,7 +4,13 @@ import { agentSessions } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import Fastify from "fastify";
-import { abortSession, archiveSession, runMessage, startSession } from "./agent-loop";
+import {
+  abortSession,
+  archiveSession,
+  runAfterSession,
+  runMessage,
+  startSession,
+} from "./agent-loop";
 import type { RunnerEnv } from "./env";
 import { listSessionEvents, type PersistedRuntimeEvent, subscribeSessionEvents } from "./events";
 import { generateSessionTitleForMessage } from "./session-title";
@@ -87,6 +93,31 @@ export function createServer(env: RunnerEnv) {
         message_id: messageId,
       });
       logger.warn("Runner title generation failed", { session_id: id, message_id: messageId });
+    });
+    reply.status(202).send({ ok: true });
+  });
+
+  app.post("/internal/sessions/:id/after-session", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id } = request.params as { id: string };
+    const query = request.query as { messageId?: string };
+    const messageId = query.messageId?.trim();
+    if (!messageId) {
+      reply.status(400).send({ error: "messageId is required." });
+      return;
+    }
+    logger.info("Runner after-session accepted", {
+      event: "opencompany.runner_after_session_accepted",
+      session_id: id,
+      message_id: messageId,
+    });
+    void runAfterSession({ sessionId: id, messageId, env }).catch((error) => {
+      logger.error("Runner after-session failed", {
+        event: "opencompany.runner_after_session_failed",
+        session_id: id,
+        message_id: messageId,
+        error,
+      });
     });
     reply.status(202).send({ ok: true });
   });

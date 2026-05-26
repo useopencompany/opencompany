@@ -1,6 +1,7 @@
 import {
   Bot,
   Brain,
+  Clock3,
   Code2,
   FileText,
   Folder,
@@ -8,11 +9,12 @@ import {
   type LucideIcon,
   Search,
 } from "lucide-react";
+import { AFTER_SESSION_TAG } from "@/lib/agents/after-session";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 import { repositoryIdForFullName } from "@/lib/agents/mentions";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
-type AgentMentionKind = "model" | "tool" | "integration" | "brain";
+type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook";
 
 type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -53,7 +55,17 @@ export type AgentBrainMention = BaseAgentMentionItem & {
   path: string;
 };
 
-export type AgentMentionItem = AgentModel | AgentTool | AgentIntegration | AgentBrainMention;
+export type AgentHookMention = BaseAgentMentionItem & {
+  id: string;
+  kind: "hook";
+};
+
+export type AgentMentionItem =
+  | AgentModel
+  | AgentTool
+  | AgentIntegration
+  | AgentBrainMention
+  | AgentHookMention;
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
@@ -91,6 +103,17 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
 
 export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [...AGENT_MODELS, ...AGENT_TOOLS];
 export const AGENT_TOOL_MENTION_ITEMS: AgentMentionItem[] = AGENT_TOOLS;
+export const AGENT_AFTER_SESSION_MENTION_ITEMS: AgentHookMention[] = [
+  {
+    id: AFTER_SESSION_TAG.slice(1),
+    mentionId: AFTER_SESSION_TAG.slice(1),
+    kind: "hook",
+    label: AFTER_SESSION_TAG.slice(1),
+    displayLabel: AFTER_SESSION_TAG,
+    description: "Run the prompt after the session goes idle",
+    icon: Clock3,
+  },
+];
 
 export function buildAgentMentionItems(
   repositories: Array<{ fullName: string; defaultBranch: string }> = [],

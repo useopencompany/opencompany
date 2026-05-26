@@ -1,4 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { extractAfterSessionConfig } from "./after-session";
 import {
   extractConfigFromMentions,
   normalizeAgentBody,
@@ -188,6 +189,8 @@ function buildAgentConfig(input: {
   repositories: AgentGitHubRepositoryConfig[];
   triggers: AgentTriggerConfig[];
 }): AgentConfig {
+  const afterSession = extractAfterSessionConfig(input.body);
+
   return {
     schemaVersion: "agent.v1",
     title: input.title,
@@ -198,6 +201,7 @@ function buildAgentConfig(input: {
     },
     tools: input.tools,
     brain: input.brain,
+    ...(afterSession ? { afterSession } : {}),
     integrations: {
       github: {
         repositories: input.repositories,

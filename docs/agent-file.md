@@ -163,6 +163,16 @@ Aliases are only recognized inside body mentions — not as raw `model:` values.
 
 Unknown `@text` that doesn't match a model, tool, or alias stays in the body as plain text — no error, no contribution to frontmatter.
 
+### After-session memory hook
+
+Add `#after-session` inside the body to enable a background pass after a session has been idle for 3 minutes. The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. The marker remains part of the normal instructions, but the runtime also uses the parsed prompt for an internal after-session run.
+
+```text
+Help the user during the session. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+```
+
+The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should update only mounted Brain files when there is useful long-lived context to preserve.
+
 ## Storage layout
 
 ```text
@@ -271,6 +281,11 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     { path: "docs/README.md", type: "file" },
     { path: "product/", type: "folder" },
   ],
+  afterSession: {
+    enabled: true,
+    prompt: "Update @brain/memory.md with durable preferences and decisions from the transcript.",
+    idleDelaySeconds: 180,
+  },
   integrations: {
     github: {
       repositories: [],

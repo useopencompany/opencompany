@@ -143,6 +143,16 @@ This is what mentions can be:
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
 
+### After-session memory
+
+Add `#after-session` to run a background memory pass after a session has been idle for 3 minutes:
+
+```text
+Help with customer calls. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+```
+
+The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update mounted Brain files when there is useful long-lived context to save.
+
 ### Shortcuts
 
 You don't have to type the full model name every time. These shortcuts work inside the body:

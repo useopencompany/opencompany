@@ -16,11 +16,16 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "message.created";
-      payload: { messageId: string; role: "user" | "assistant" | "tool" };
+      payload: { messageId: string; role: "user" | "assistant" | "tool"; internal?: boolean };
     }
   | {
       type: "message.completed";
-      payload: { messageId: string; content?: string; modelMessage?: Record<string, unknown> };
+      payload: {
+        messageId: string;
+        content?: string;
+        modelMessage?: Record<string, unknown>;
+        internal?: boolean;
+      };
     }
   | {
       type: "message.reasoning_summary";
@@ -124,6 +129,22 @@ export type AgentRuntimeEvent =
         sandboxKilled: boolean;
         sandboxAlreadyStopped: boolean;
       };
+    }
+  | {
+      type: "after_session.started";
+      payload: { runId?: number; messageId: string; idleDelaySeconds: number };
+    }
+  | {
+      type: "after_session.completed";
+      payload: { runId?: number; messageId: string };
+    }
+  | {
+      type: "after_session.skipped";
+      payload: { messageId: string; reason: string };
+    }
+  | {
+      type: "after_session.failed";
+      payload: { runId?: number; messageId: string; message: string };
     };
 
 export type AgentRuntimeEventType = AgentRuntimeEvent["type"];

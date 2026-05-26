@@ -3,6 +3,7 @@ export type SessionMessage = {
   role: string;
   content: string;
   status: string;
+  internal?: boolean;
   modelMessage?: Record<string, unknown> | null;
   toolName?: string | null;
   toolCallId?: string | null;
@@ -175,6 +176,7 @@ export function applyRuntimeEventToState(
             role,
             content: "",
             status: "running",
+            internal: readBoolean(event.payload.internal),
             createdAt: new Date().toISOString(),
           },
         ],
@@ -225,6 +227,10 @@ export function applyRuntimeEventToState(
   }
 
   return next;
+}
+
+function readBoolean(value: unknown) {
+  return value === true;
 }
 
 export function emptyUsageSummary(): SessionUsageSummary {
@@ -371,6 +377,110 @@ export function buildAssistantTurnParts(
   }
   if (reasoningParts.length > 0) return reasoningParts;
   return message.content ? [{ type: "text", text: message.content }] : [];
+}
+
+export function buildBackgroundActivityParts(
+  events: RuntimeEvent[],
+  messages: SessionMessage[],
+): AssistantTurnPart[] {
+  const partsWithOrder: Array<{ order: number; part: AssistantTurnPart }> = [];
+
+  for (const toolCall of buildAfterSessionLifecycleToolCalls(events)) {
+    partsWithOrder.push({
+      order: toolCall.startedEventId ?? toolCall.completedEventId ?? Number.MAX_SAFE_INTEGER,
+      part: { type: "tool-call", toolCall },
+    });
+  }
+
+  for (const message of messages) {
+    if (message.role !== "assistant" || !message.internal) continue;
+
+    const messageParts = buildAssistantTurnParts(message, events, messages);
+    for (const part of messageParts) {
+      if (part.type !== "tool-call") continue;
+      partsWithOrder.push({
+        order:
+          part.toolCall.startedEventId ??
+          part.toolCall.completedEventId ??
+          eventOrderForMessage(events, message.id) ??
+          Number.MAX_SAFE_INTEGER,
+        part,
+      });
+    }
+  }
+
+  return partsWithOrder.sort((left, right) => left.order - right.order).map((item) => item.part);
+}
+
+function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
+  const calls: RuntimeToolCall[] = [];
+  const callsByKey = new Map<string, RuntimeToolCall>();
+  const callsByMessageId = new Map<string, RuntimeToolCall>();
+
+  function getCall(input: { runId: string; messageId: string }) {
+    const key = input.runId || input.messageId;
+    const existing =
+      (input.runId ? callsByKey.get(input.runId) : undefined) ||
+      (input.messageId ? callsByMessageId.get(input.messageId) : undefined);
+    if (existing) {
+      if (input.runId) callsByKey.set(input.runId, existing);
+      if (input.messageId) callsByMessageId.set(input.messageId, existing);
+      return existing;
+    }
+
+    const call: RuntimeToolCall = {
+      id: `after-session:${key}`,
+      name: "after_session",
+      status: "running",
+      inputPreview: "",
+      activityPreview: "",
+      outputPreview: "",
+      startedEventId: null,
+      completedEventId: null,
+    };
+    calls.push(call);
+    if (input.runId) callsByKey.set(input.runId, call);
+    if (input.messageId) callsByMessageId.set(input.messageId, call);
+    return call;
+  }
+
+  for (const event of events) {
+    if (!event.type.startsWith("after_session.")) continue;
+    if (event.type === "after_session.skipped") continue;
+
+    const runId = readEventKey(event.payload.runId);
+    const messageId = readString(event.payload.messageId);
+    if (!runId && !messageId) continue;
+
+    const call = getCall({ runId, messageId });
+    if (event.type === "after_session.started") {
+      call.status = "running";
+      call.startedEventId = event.id;
+    }
+    if (event.type === "after_session.completed") {
+      call.status = "completed";
+      call.outputPreview = "Completed";
+      call.completedEventId = event.id;
+    }
+    if (event.type === "after_session.failed") {
+      call.status = "failed";
+      call.outputPreview = readString(event.payload.message) || "After-session run failed.";
+      call.completedEventId = event.id;
+    }
+  }
+
+  return calls;
+}
+
+function readEventKey(value: unknown) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function eventOrderForMessage(events: RuntimeEvent[], messageId: string) {
+  const event = events.find((item) => item.messageId === messageId);
+  return event?.id;
 }
 
 export function buildRuntimeToolCallsForMessage(

@@ -3,6 +3,7 @@ import {
   AGENT_TOOL_CATALOG,
   type AgentToolDefinition,
 } from "@opencompany/agent-runtime";
+import { extractAfterSessionConfig } from "./after-session";
 import type {
   AgentBrainReference,
   AgentCodingToolConfig,
@@ -82,12 +83,15 @@ export function extractConfigFromMentions(body: string): {
   model: AgentModelId;
   tools: AgentToolId[];
   brain: AgentBrainReference[];
+  afterSession?: AgentConfig["afterSession"];
 } {
   const mentions = collectBodyMentions(body, []);
+  const afterSession = extractAfterSessionConfig(body);
   return {
     model: mentions.model ?? DEFAULT_MODEL_ID,
     tools: mentions.tools,
     brain: mentions.brain,
+    ...(afterSession ? { afterSession } : {}),
   };
 }
 
@@ -109,6 +113,7 @@ export function deriveAgentConfigFromBody(input: {
 }): { body: string; config: AgentConfig } {
   const body = normalizeAgentBody(input.body);
   const mentions = collectBodyMentions(body, input.repositories);
+  const afterSession = extractAfterSessionConfig(body);
   const model =
     MODEL_BY_ID.get(mentions.model ?? input.model ?? DEFAULT_MODEL_ID) ??
     MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
@@ -126,6 +131,7 @@ export function deriveAgentConfigFromBody(input: {
       },
       tools,
       brain: mentions.brain,
+      ...(afterSession ? { afterSession } : {}),
       integrations: {
         github: {
           repositories: mentions.repositories,

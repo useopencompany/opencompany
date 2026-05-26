@@ -68,7 +68,9 @@ function nodeText(node: TiptapNode): string {
   if (node.type === "mention") {
     const attrs = asRecord(node.attrs);
     const display = mentionDisplayText(attrs);
-    return display ? `@${display}` : "";
+    const char =
+      typeof attrs?.mentionSuggestionChar === "string" ? attrs.mentionSuggestionChar : "@";
+    return display ? `${char}${display}` : "";
   }
   return (node.content ?? []).map(nodeText).join("");
 }
@@ -83,6 +85,7 @@ function mentionDisplayText(attrs: Record<string, unknown> | null) {
     return label || id.slice("integration:github:".length);
   }
   if (id === "integration:github") return "github";
+  if (id === "after-session") return "after-session";
 
   const label = typeof attrs?.label === "string" ? attrs.label.trim() : "";
   const normalizedLabel = label.toLowerCase();

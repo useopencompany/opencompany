@@ -458,6 +458,7 @@ function AgentDetailContent({
           modelIsExplicit={configPreview.modelIsExplicit}
           tools={configPreview.tools}
           brain={configPreview.brain}
+          afterSession={configPreview.config.afterSession}
           saveState={saveState}
           githubStatus={githubSyncStatus}
           githubError={githubSyncError}
@@ -512,6 +513,7 @@ function AgentInspector({
   modelIsExplicit,
   tools,
   brain,
+  afterSession,
   saveState,
   githubStatus,
   githubError,
@@ -525,6 +527,7 @@ function AgentInspector({
   modelIsExplicit: boolean;
   tools: AgentTool[];
   brain: Array<{ path: string; type: "file" | "folder" }>;
+  afterSession: AgentConfig["afterSession"];
   saveState: SaveState;
   githubStatus: string;
   githubError: string | null;
@@ -603,6 +606,20 @@ function AgentInspector({
         )}
       </div>
 
+      <div>
+        <InspectorHeader
+          label="After-session"
+          countLabel={afterSession?.enabled ? "enabled" : "off"}
+        />
+        {afterSession?.enabled ? (
+          <AfterSessionConfigItem prompt={afterSession.prompt} />
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+            Add #after-session to enable an idle memory update
+          </div>
+        )}
+      </div>
+
       <GitHubSyncPanel
         saveState={saveState}
         status={githubStatus}
@@ -612,6 +629,21 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+    </div>
+  );
+}
+
+function AfterSessionConfigItem({ prompt }: { prompt: string }) {
+  return (
+    <div className="rounded-lg border border-[#d8e1d7] bg-[#f5faf6] px-3 py-3">
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/70 bg-white/70 text-ink-muted">
+          <Clock3 size={14} strokeWidth={1.9} />
+        </span>
+        <div className="min-w-0 whitespace-pre-wrap break-words text-[12.5px] leading-5 text-ink">
+          {prompt}
+        </div>
+      </div>
     </div>
   );
 }

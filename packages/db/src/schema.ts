@@ -49,6 +49,12 @@ export type AgentBrainReference = {
   type: "file" | "folder";
 };
 
+export type AgentAfterSessionConfig = {
+  enabled: boolean;
+  prompt: string;
+  idleDelaySeconds: number;
+};
+
 export type AgentGitHubRepositoryConfig = {
   id: string;
   fullName: string;
@@ -75,6 +81,7 @@ export type AgentConfig = {
   };
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {
       repositories: AgentGitHubRepositoryConfig[];
@@ -348,6 +355,7 @@ export const agentSessionMessages = pgTable(
     role: text("role").notNull(),
     status: text("status").notNull().default("created"),
     content: text("content").notNull().default(""),
+    internal: boolean("internal").notNull().default(false),
     modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
@@ -363,6 +371,43 @@ export const agentSessionMessages = pgTable(
     ),
     responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
       table.responseToMessageId,
+    ),
+  }),
+);
+
+export const agentSessionAfterSessionRuns = pgTable(
+  "agent_session_after_session_runs",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    lastUserMessageId: text("last_user_message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    agentVersion: integer("agent_version").notNull(),
+    status: text("status").notNull().default("queued"),
+    runLeaseId: text("run_lease_id"),
+    skippedReason: text("skipped_reason"),
+    lastError: text("last_error"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_after_session_runs_session_idx").on(table.sessionId),
+    workspaceIdx: index("agent_session_after_session_runs_workspace_idx").on(table.workspaceId),
+    idempotencyIdx: uniqueIndex("agent_session_after_session_runs_idempotency_idx").on(
+      table.sessionId,
+      table.lastUserMessageId,
+      table.agentVersion,
     ),
   }),
 );

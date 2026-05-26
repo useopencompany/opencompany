@@ -1,4 +1,5 @@
 export type {
+  AgentAfterSessionConfig,
   AgentBrainReference,
   AgentCodingToolConfig,
   AgentConfig,

@@ -1,4 +1,5 @@
 import {
+  AGENT_AFTER_SESSION_CHECK_EVENT,
   AGENT_MESSAGE_SUBMITTED_EVENT,
   AGENT_SESSION_ABORT_REQUESTED_EVENT,
   AGENT_SESSION_STARTED_EVENT,
@@ -131,6 +132,37 @@ export const generateAgentSessionTitle = inngest.createFunction(
   },
 );
 
+export const runAgentAfterSession = inngest.createFunction(
+  {
+    id: "run-agent-after-session",
+    name: "Run agent after-session hook",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: AGENT_AFTER_SESSION_CHECK_EVENT },
+  },
+  async ({ event, step }) => {
+    await step.sleep("wait for session idle", "180s");
+
+    return step.run("run after-session hook if still idle", async () => {
+      await callRunner(
+        `/internal/sessions/${event.data.sessionId}/after-session?messageId=${encodeURIComponent(
+          event.data.messageId,
+        )}`,
+        {
+          event: "opencompany.inngest_after_session_failed",
+          workspace_id: event.data.workspaceId,
+          session_id: event.data.sessionId,
+          message_id: event.data.messageId,
+        },
+      );
+      return { ok: true };
+    });
+  },
+);
+
 export const abortAgentSession = inngest.createFunction(
   {
     id: "abort-agent-session",
@@ -156,5 +188,6 @@ export const inngestFunctions = [
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,
+  runAgentAfterSession,
   abortAgentSession,
 ];
