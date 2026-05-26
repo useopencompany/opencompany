@@ -1,5 +1,5 @@
 import type { Agent } from "@opencompany/db/schema";
-import type { AgentConfig } from "@/lib/agents/types";
+import type { AgentConfig, TiptapDoc } from "@/lib/agents/types";
 
 export const AGENTS_QUERY_STALE_TIME_MS = 30_000;
 
@@ -9,6 +9,7 @@ export type AgentPayload = {
   path: string | null;
   name: string;
   body: string;
+  content: TiptapDoc;
   config: AgentConfig;
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
@@ -17,15 +18,21 @@ export type AgentPayload = {
   createdAt: string;
   updatedAt: string;
   brainPaths: string[];
+  githubIntegrationRepositories: Array<{ fullName: string; defaultBranch: string }>;
 };
 
-export function serializeAgent(agent: Agent, brainPaths: string[] = []): AgentPayload {
+export function serializeAgent(
+  agent: Agent,
+  brainPaths: string[] = [],
+  githubIntegrationRepositories: Array<{ fullName: string; defaultBranch: string }> = [],
+): AgentPayload {
   return {
     id: agent.id,
     workspaceId: agent.workspaceId,
     path: agent.path,
     name: agent.name,
     body: agent.body || agent.config.instructions,
+    content: agent.content,
     config: agent.config,
     githubCommitSha: agent.githubCommitSha,
     githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,
@@ -34,6 +41,7 @@ export function serializeAgent(agent: Agent, brainPaths: string[] = []): AgentPa
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     brainPaths,
+    githubIntegrationRepositories,
   };
 }
 
@@ -64,13 +72,14 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function fetchAgents(): Promise<AgentPayload[]> {
-  const response = await fetch("/api/agents", { credentials: "same-origin" });
+  const response = await fetch("/api/agents", { cache: "no-store", credentials: "same-origin" });
   const body = await readJson<{ agents: AgentPayload[] }>(response);
   return body.agents;
 }
 
 export async function fetchAgent(idOrPath: string): Promise<AgentPayload> {
   const response = await fetch(`/api/agents/${agentApiPath(idOrPath)}`, {
+    cache: "no-store",
     credentials: "same-origin",
   });
   const body = await readJson<{ agent: AgentPayload }>(response);

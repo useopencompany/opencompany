@@ -99,6 +99,9 @@ export async function prepareWorkspace(input: {
   sandbox: SandboxHandle;
   workdir: string;
   agentFile: string;
+  repositoryFullName?: string | null | undefined;
+  repositoryDefaultBranch?: string | null | undefined;
+  githubToken?: string | null | undefined;
 }) {
   const layout = sandboxLayout(input.workdir);
 
@@ -111,10 +114,20 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
-  await input.sandbox.commands.run(`git -C ${shellQuote(layout.workRoot)} init -q`, {
-    user: SANDBOX_USER,
-    timeoutMs: 30_000,
-  });
+  if (input.repositoryFullName && input.githubToken) {
+    await prepareGitHubRepository({
+      sandbox: input.sandbox,
+      workdir: layout.workRoot,
+      repositoryFullName: input.repositoryFullName,
+      defaultBranch: input.repositoryDefaultBranch ?? "main",
+      githubToken: input.githubToken,
+    });
+  } else {
+    await input.sandbox.commands.run(`git -C ${shellQuote(layout.workRoot)} init -q`, {
+      user: SANDBOX_USER,
+      timeoutMs: 30_000,
+    });
+  }
   await input.sandbox.files.write(layout.agentFile, input.agentFile, {
     user: SANDBOX_ROOT_USER,
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
@@ -122,6 +135,44 @@ export async function prepareWorkspace(input: {
   await input.sandbox.commands.run(
     `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
+}
+
+async function prepareGitHubRepository(input: {
+  sandbox: SandboxHandle;
+  workdir: string;
+  repositoryFullName: string;
+  defaultBranch: string;
+  githubToken: string;
+}) {
+  const origin = await input.sandbox.commands.run(
+    [
+      `if [ -d ${shellQuote(`${input.workdir}/.git`)} ]; then`,
+      `  cd ${shellQuote(input.workdir)} && git remote get-url origin 2>/dev/null || true;`,
+      "else",
+      "  echo __opencompany_missing_git__;",
+      "fi;",
+    ].join("\n"),
+    { timeoutMs: 30_000 },
+  );
+  const currentOrigin = String(origin.stdout ?? "").trim();
+  const cloneUrl = githubRemoteUrl(input.repositoryFullName);
+  if (githubRemoteMatches(currentOrigin, input.repositoryFullName)) {
+    await input.sandbox.commands.run(
+      `cd ${shellQuote(input.workdir)} && git remote set-url origin ${shellQuote(cloneUrl)}`,
+      { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 30_000 },
+    );
+    return;
+  }
+
+  await input.sandbox.commands.run(
+    [
+      `rm -rf ${shellQuote(input.workdir)}`,
+      `git ${gitAuthExtraHeaderArg()} clone --depth 1 --branch ${shellQuote(
+        input.defaultBranch,
+      )} ${shellQuote(cloneUrl)} ${shellQuote(input.workdir)}`,
+    ].join(" && "),
+    { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 120_000 },
   );
 }
 
@@ -258,6 +309,29 @@ function relativePath(workdir: string, filePath: string) {
 function isSandboxNotFound(error: unknown) {
   if (!(error instanceof Error)) return false;
   return error.name === "SandboxNotFoundError" || /not found|404/i.test(error.message);
+}
+
+function githubRemoteUrl(repositoryFullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
+    throw new Error("Invalid GitHub repository name for workspace clone.");
+  }
+
+  return `https://github.com/${repositoryFullName}.git`;
+}
+
+function gitAuthExtraHeaderArg() {
+  return '-c http.extraheader="Authorization: Bearer $GITHUB_TOKEN"';
+}
+
+export function githubRemoteMatches(remote: string, repositoryFullName: string) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
+    throw new Error("Invalid GitHub repository name for workspace clone.");
+  }
+
+  const escaped = repositoryFullName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `^(?:https://github\\.com/|https://x-access-token:[^@]+@github\\.com/|git@github\\.com:)${escaped}(?:\\.git)?$`,
+  ).test(remote.trim());
 }
 
 function truncate<T extends Record<string, unknown>>(value: T): T {

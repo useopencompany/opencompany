@@ -7,13 +7,15 @@ This is the short map for coming back to the project after time away. Source fil
 - `apps/web` is the Next.js app. Server Components read from Postgres through Drizzle, and server actions mutate app state.
 - WorkOS AuthKit handles identity. `getCurrentWorkspace()` resolves the signed-in user and workspace before app data is read or written.
 - Neon Postgres is the immediate app source of truth. The shared DB client lives in `packages/db/src/client.ts`; the schema lives in `packages/db/src/schema.ts`.
-- GitHub stores workspace state in a managed private repo per workspace. In the current app-authored flow it is an async mirror, not the blocking source for editor saves.
+- GitHub stores workspace state in an OpenCompany-managed private repo per workspace. This backing
+  repo is separate from GitHub work integrations that agents use for coding workflows.
 - Inngest runs background jobs. The app exposes `/api/inngest`, and local development runs the Inngest dev server through the `@opencompany/inngest-dev` workspace.
 - `apps/runner` is the long-lived agent-session data plane. It provisions E2B sandboxes, runs the model/tool loop through Vercel AI Gateway and AI SDK Core, and writes replayable runtime events to Postgres.
 
 ## Agent Editing Flow
 
-Agent pages read the `agents` table for the current workspace. The editor is a textarea-based client component with `@` mention suggestions for supported models and tools.
+Agent pages read the `agents` table for the current workspace. The editor is a rich text client
+component with `@` mention suggestions for supported models, tools, and agent work integrations.
 
 When an agent is created or edited:
 
@@ -27,7 +29,9 @@ The editor debounces saves by about 600ms in `AgentDetail.tsx`. Failed GitHub sy
 
 ## Agent File Format
 
-Workspace repos store agents as `agents/<slug>.agent` files. The format is a Markdown body with a YAML frontmatter header; the body is the source of truth and the frontmatter is derived from `@mention` tokens inside it.
+Workspace backing repos store agents as `agents/<slug>.agent` files. The format is a Markdown body
+with a YAML frontmatter header. In version `2`, saved frontmatter is the runtime contract, while
+the web editor derives tool and integration frontmatter deterministically from rich mention nodes.
 
 For the full spec — fields, validation rules, supported models and tools, examples, and the compiled `AgentConfig` shape — see [agent-file.md](./agent-file.md).
 
@@ -44,6 +48,21 @@ GitHub logic lives in `apps/web/lib/workspace-state/github.ts`.
 - `listWorkspaceAgentFiles()` and `readWorkspaceFile()` support manual GitHub-to-DB import through `syncAgentsFromWorkspaceRepository()`.
 
 Current limitation: there is no GitHub webhook ingestion path. External GitHub edits are only reflected after an explicit sync-from-repository action.
+
+## GitHub Work Integrations
+
+Agent work integrations are separate from workspace backing storage. GitHub work integration state
+is cached as a provider row in `workspace_integrations` plus repository resource rows in
+`workspace_integration_resources`.
+
+Agents reference work integration repositories through `.agent` frontmatter under
+`integrations.github.repositories`. AMP sessions clone the configured work repository into the
+runner sandbox with an installation token minted from the workspace work integration installation,
+not the managed workspace-state installation.
+
+AMP itself is modeled as an agent tool, not a workspace integration. Workspace-scoped provider
+credentials are not required for AMP; the runner uses the platform `AMP_API_KEY` only when the AMP
+tool runs.
 
 ## Agent Sessions
 
@@ -105,7 +124,9 @@ The high-level table groups are:
 
 - Identity and tenancy: `users`, `workspaces`, `workspace_memberships`, with WorkOS Organizations mapped through `workspaces.workos_organization_id`.
 - Agent editing: `agents` stores the latest DB version and parsed config.
-- GitHub sync: `agent_sync_jobs` stores desired materialization state; `workspace_repositories` maps workspaces to managed GitHub repos.
+- GitHub sync: `agent_sync_jobs` stores desired materialization state; `workspace_repositories` maps workspaces to managed GitHub backing repos.
+- Agent work integrations: `workspace_integrations` stores connected provider accounts, and
+  `workspace_integration_resources` stores provider resources such as GitHub repositories.
 - Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store
   durable session ownership, transcript, and replayable streaming state.
 - Onboarding: `onboarding_responses`.
@@ -114,16 +135,22 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 
 ## Operational Notes
 
-- `bun run dev` starts the web app, local Inngest dev helper, and runner.
+- `bun run dev` starts ngrok when authenticated, then starts the web app, local Inngest dev helper,
+  Stripe webhook listener, and runner. ngrok is the expected local path for callback/webhook
+  integrations such as GitHub.
 - `bun run dev:web` runs only the web app.
 - `bun run dev:runner` runs only the runner.
 - `bun run db:generate` creates migrations from `packages/db/src/schema.ts`.
 - `bun run db:migrate` applies migrations to `DATABASE_URL`.
 - Production releases run migrations from the `Release Production` GitHub Actions workflow before
   deploying Vercel web and Render runner.
-- GitHub workspace-state env vars are `OPENCOMPANY_GITHUB_ORG`, `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`.
+- GitHub workspace-state env vars are `OPENCOMPANY_GITHUB_ORG`, `GITHUB_APP_ID`,
+  `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`. GitHub work integrations use the
+  separate `GITHUB_INTEGRATION_APP_*` env vars.
 - Inngest uses `INNGEST_DEV` for local development; hosted environments should also set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
 - Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
   `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`, `E2B_API_KEY`,
-  `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`, and optional
+  `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`,
+  `AMP_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, optional `GITHUB_INTEGRATION_APP_ID`
+  / `GITHUB_INTEGRATION_APP_PRIVATE_KEY` for AMP work-repository cloning and PRs, and optional
   `RUNNER_E2B_IDLE_TIMEOUT_MS` / `RUNNER_INSTANCE_ID`.

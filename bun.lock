@@ -27,11 +27,11 @@
     },
     "apps/inngest-dev": {
       "name": "@opencompany/inngest-dev",
-      "version": "0.1.0",
+      "version": "0.2.0",
     },
     "apps/runner": {
       "name": "@opencompany/runner",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/billing": "workspace:*",
@@ -52,11 +52,11 @@
     },
     "apps/stripe-webhooks": {
       "name": "@opencompany/stripe-webhooks",
-      "version": "0.1.0",
+      "version": "0.2.0",
     },
     "apps/web": {
       "name": "@opencompany/web",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@opencompany/agent-runtime": "workspace:*",
         "@opencompany/analytics": "workspace:*",
@@ -89,6 +89,7 @@
         "stripe": "^22.1.1",
         "tailwind-merge": "^3.6.0",
         "tippy.js": "^6.3.7",
+        "yaml": "^2.9.0",
       },
       "devDependencies": {
         "@tailwindcss/postcss": "^4.3.0",
@@ -105,7 +106,7 @@
     },
     "packages/agent-runtime": {
       "name": "@opencompany/agent-runtime",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@opencompany/db": "workspace:*",
       },
@@ -117,7 +118,7 @@
     },
     "packages/analytics": {
       "name": "@opencompany/analytics",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@opencompany/observability": "workspace:*",
         "posthog-js": "^1.299.1",
@@ -134,7 +135,7 @@
     },
     "packages/billing": {
       "name": "@opencompany/billing",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@opencompany/db": "workspace:*",
         "drizzle-orm": "^0.45.2",
@@ -147,7 +148,7 @@
     },
     "packages/db": {
       "name": "@opencompany/db",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@neondatabase/serverless": "^1.1.0",
         "drizzle-orm": "^0.45.2",
@@ -160,7 +161,7 @@
     },
     "packages/observability": {
       "name": "@opencompany/observability",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "devDependencies": {
         "@types/node": "^25.9.1",
         "typescript": "^6.0.3",

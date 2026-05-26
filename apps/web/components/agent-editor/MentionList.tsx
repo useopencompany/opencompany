@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenText, ChevronLeft, ChevronRight, Cpu, Wrench } from "lucide-react";
+import { BookOpenText, ChevronLeft, ChevronRight, Clock3, Cpu, Plug, Wrench } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
@@ -13,10 +13,11 @@ type Props = {
   query?: string;
   showCategories?: boolean;
   command: (item: { id: string; label: string }) => void;
+  onSelect?: (item: AgentMentionItem) => void;
 };
 
 export const MentionList = forwardRef<MentionListHandle, Props>(function MentionList(
-  { items, query = "", showCategories = true, command },
+  { items, query = "", showCategories = true, command, onSelect },
   ref,
 ) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -37,6 +38,20 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       label: "Tools",
       description: `${items.filter((item) => item.kind === "tool").length} available`,
       icon: Wrench,
+    },
+    {
+      type: "category" as const,
+      kind: "integration" as const,
+      label: "Work integrations",
+      description: `${items.filter((item) => item.kind === "integration").length} available`,
+      icon: Plug,
+    },
+    {
+      type: "category" as const,
+      kind: "hook" as const,
+      label: "Hooks",
+      description: `${items.filter((item) => item.kind === "hook").length} available`,
+      icon: Clock3,
     },
     {
       type: "category" as const,
@@ -74,6 +89,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       return;
     }
     command({ id: row.item.mentionId, label: row.item.label });
+    onSelect?.(row.item);
   };
 
   useImperativeHandle(ref, () => ({
@@ -185,6 +201,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
+  if (kind === "integration") return "Work integrations";
   if (kind === "hook") return "Hooks";
   return "Brain";
 }

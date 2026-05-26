@@ -14,6 +14,8 @@ describe("resolveAgentRuntimeConfig", () => {
       },
       tools: [],
       brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({
@@ -62,6 +64,8 @@ describe("resolveAgentRuntimeConfig", () => {
         },
       ],
       brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });
@@ -89,6 +93,8 @@ describe("resolveAgentRuntimeConfig", () => {
       },
       tools: [],
       brain: [{ path: "/", type: "folder" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });
@@ -128,6 +134,8 @@ describe("resolveAgentRuntimeConfig", () => {
       },
       tools: [],
       brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     const resolved = resolveAgentRuntimeConfig({ agent: config });

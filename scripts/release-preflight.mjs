@@ -15,6 +15,12 @@ const groups = {
       "GITHUB_APP_ID",
       "GITHUB_APP_INSTALLATION_ID",
       "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_INTEGRATION_APP_ID",
+      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      "GITHUB_INTEGRATION_APP_SLUG",
+      "GITHUB_INTEGRATION_APP_CLIENT_ID",
+      "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
+      "GITHUB_INTEGRATION_STATE_SECRET",
       "INNGEST_EVENT_KEY",
       "INNGEST_SIGNING_KEY",
       "RUNNER_PUBLIC_URL",
@@ -43,10 +49,14 @@ const groups = {
       "GITHUB_APP_ID",
       "GITHUB_APP_INSTALLATION_ID",
       "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_INTEGRATION_APP_ID",
+      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
     ],
     optional: [
       "EXA_API_KEY",
       "OPENCOMPANY_E2B_TEMPLATE",
+      "AMP_API_KEY",
+      "OPENCOMPANY_AMP_E2B_TEMPLATE",
       "RUNNER_E2B_IDLE_TIMEOUT_MS",
       "RUNNER_INSTANCE_ID",
       "BETTER_STACK_ERRORS_DSN",
@@ -104,6 +114,12 @@ const cookiePassword = process.env.WORKOS_COOKIE_PASSWORD;
 if (!isUnset(cookiePassword) && cookiePassword.length < 32) {
   failed = true;
   console.log("\nWORKOS_COOKIE_PASSWORD must be at least 32 characters.");
+}
+
+const githubIntegrationStateSecret = process.env.GITHUB_INTEGRATION_STATE_SECRET;
+if (!isUnset(githubIntegrationStateSecret) && githubIntegrationStateSecret.length < 32) {
+  failed = true;
+  console.log("\nGITHUB_INTEGRATION_STATE_SECRET must be at least 32 characters.");
 }
 
 const redirectUri = process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI;

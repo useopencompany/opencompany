@@ -34,11 +34,19 @@ Frontmatter is **derived from the body**, not authored independently. When the e
 - The most recent supported `@model` mention wins → written to `model:`.
 - Unique supported `@tool` mentions → written to `tools:`.
 - Unique supported `@brain/<path>` mentions → written to `brain:`.
+- A supported GitHub repository mention, such as `@owner/repo`, is written to
+  `integrations.github.repositories` and used by repository-aware coding tools.
 - The title input → written to `title:`.
 
 Editing `@deep` into the body changes the model. Removing `@exa` removes the tool. One source of truth, zero drift between what the instructions reference and what the runtime is configured to do.
 
 If the body has no model mention, `model:` defaults to `openai/gpt-5.4-mini`.
+
+### Tiptap content is not the contract
+
+The web editor may store a Tiptap JSON document so mentions can render as chips when the agent is reopened. That JSON is an editor presentation cache only. It can be stale, incomplete, or missing mention attributes after a client update, so persisted saves must never derive runtime config from Tiptap JSON when body text is available.
+
+On save, the server derives frontmatter/config from the body text that will be written to the `.agent` file, then stores sanitized Tiptap JSON separately for editor hydration. If body and Tiptap content disagree, the body wins.
 
 ## Frontmatter fields
 
@@ -61,13 +69,26 @@ Unknown model IDs fall back to `openai/gpt-5.4-mini` rather than failing the par
 
 All models are routed through Vercel AI Gateway, so the file never references a provider SDK directly.
 
-### `tools` — list of strings
+### `tools` — list of strings or tool objects
 
-Each entry is a tool ID. Unknown IDs are silently dropped.
+Each entry is a product-level tool ID, either as a string shorthand or as an
+object when the tool has persisted configuration. Unknown IDs are silently
+dropped. Labels, descriptions, runtime function names, and provider execution
+details are catalog data in code, not `.agent` file data.
 
-| ID    | Description                          |
-| ----- | ------------------------------------ |
-| `exa` | Deep research on the web and people. |
+| ID    | Description                                      |
+| ----- | ------------------------------------------------ |
+| `exa` | Deep research on the web and people.             |
+| `amp` | Coding agent delegated into a sandboxed runtime. |
+
+```yaml
+tools:
+  - id: amp
+    type: coding_agent
+    provider: amp
+    repository: opencompany-web
+    prCapable: true
+```
 
 ### `brain` — list of strings
 
@@ -82,19 +103,52 @@ brain:
 
 Use `/` to mount the whole Brain root. The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
 
+### `integrations.github.repositories` — list of repository objects
+
+Each entry binds a workspace-authorized GitHub repository referenced by the body.
+
+```yaml
+integrations:
+  github:
+    repositories:
+      - id: opencompany-web
+        fullName: opencompany/web
+        defaultBranch: main
+```
+
+`id` is the normalized repository ID used by tools and triggers. `fullName` is the GitHub `owner/repo` name shown in body mentions. Unknown or unauthorized repository mentions stay in the body but do not contribute to the compiled config.
+
+### `triggers` — list of trigger objects
+
+Pull request triggers reference repository IDs from `integrations.github.repositories`.
+
+```yaml
+triggers:
+  - id: opencompany-web-pr
+    type: github.pull_request
+    repository: opencompany-web
+    events:
+      - opened
+      - synchronize
+    branches:
+      - main
+    enabled: true
+```
+
 ## The body
 
 Markdown. The model sees it verbatim as system instructions. There is no preprocessing besides mention parsing.
 
 ### Mention syntax
 
-`@<id>` where `<id>` is a tool ID, a model ID, a Brain path, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
+`@<id>` where `<id>` is a tool ID, a model ID, a Brain path, a GitHub `owner/repo`, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
 
 ```text
 Find investors with @exa.        ← @exa            (tool)
 Use @openai/gpt-5.4 for this.    ← @openai/gpt-5.4 (model)
 Run @deep on the summary.        ← @deep           (alias → openai/gpt-5.4)
 Read @brain/product/ first.      ← @brain/product/ (Brain folder)
+Work in @opencompany/web.        ← @opencompany/web (GitHub repository)
 Read @brain/ first.              ← @brain/         (Brain root folder)
 ```
 
@@ -142,7 +196,7 @@ If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix 
 
 When the editor saves an agent:
 
-1. Postgres receives the title, body, parsed config, content hash, and version — synchronously. This is the "saved" state from the user's perspective.
+1. Postgres receives the title, body, body-derived config, sanitized editor content, content hash, and version — synchronously. This is the "saved" state from the user's perspective.
 2. `agent_sync_jobs` is upserted with a `nextRunAt` ~10 seconds out, debouncing rapid edits. If the title change produced a new path, the previous path and blob SHA are recorded on the job so the worker can delete the old GitHub file.
 3. `agent.sync_requested` is dispatched to Inngest.
 4. Inngest writes the file to GitHub asynchronously.
@@ -220,7 +274,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     name: "openai/gpt-5.4",
   },
   tools: [
-    { id: "exa", type: "tool", label: "exa", description: "Deep research on the web and people." },
+    { id: "exa", type: "hosted_tool", label: "exa", description: "Deep research on the web and people." },
   ],
   brain: [
     { path: "/", type: "folder" },
@@ -232,6 +286,12 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     prompt: "Update @brain/memory.md with durable preferences and decisions from the transcript.",
     idleDelaySeconds: 180,
   },
+  integrations: {
+    github: {
+      repositories: [],
+    },
+  },
+  triggers: [],
 }
 ```
 
@@ -240,7 +300,8 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
 ## Where the code lives
 
 - Parser and serializer — `apps/web/lib/agents/agent-file.ts`
-- Catalog of supported models and tools — `apps/web/lib/agents/config.ts`
+- Mention parsing, supported catalogs, and body-derived config — `apps/web/lib/agents/mentions.ts`
+- Tiptap preview adapter — `apps/web/lib/agents/config.ts`
 - Compiled config type — `packages/db/src/schema.ts` (`AgentConfig`)
 - Editor — `apps/web/components/agent-editor/AgentEditor.tsx`
 - Save action and GitHub sync — `apps/web/lib/agents/actions.ts`, `apps/web/lib/inngest/functions.ts`
@@ -254,7 +315,12 @@ Yes. Push them to the workspace repo and trigger a manual import — the web app
 Every save carries a content hash and version. Inngest debounces by ~10 seconds and limits one in-flight sync per agent. If GitHub returns a conflicting blob SHA, the sync refetches and retries.
 
 **How do I add a new model or tool?**
-Add it to `apps/web/lib/agents/config.ts` and ship. Older files that don't reference it are unaffected; clients that don't recognize a new ID will fall back gracefully.
+Add models to `packages/agent-runtime/src/models.ts`. Add product-level tools
+to `AGENT_TOOL_CATALOG` and runtime callable tools to
+`RUNTIME_TOOL_DEFINITIONS` in `packages/agent-runtime/src/tools.ts`; the web
+editor consumes that catalog through `apps/web/lib/agents/mentions.ts`. Older
+files that don't reference the new ID are unaffected; clients that don't
+recognize a new ID will fall back gracefully.
 
 **How do I evolve the format?**
 Bump `schemaVersion` in `packages/db/src/schema.ts` and add a normalizer in `parseAgentFile`. Keep additions additive so existing files keep parsing as `agent.v1` until they're re-serialized.

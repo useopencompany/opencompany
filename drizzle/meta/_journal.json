@@ -131,8 +131,36 @@
     {
       "idx": 18,
       "version": "7",
-      "when": 1779805358808,
-      "tag": "0018_yielding_mandarin",
+      "when": 1779791168763,
+      "tag": "0018_steady_lady_ursula",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1779800935085,
+      "tag": "0019_add_amp_thread_artifact_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1779801493899,
+      "tag": "0020_generalize_agent_session_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1779810103820,
+      "tag": "0021_watery_silver_sable",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1779811175790,
+      "tag": "0022_modern_morbius",
       "breakpoints": true
     }
   ]

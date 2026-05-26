@@ -12,8 +12,10 @@ type WorkspaceRepositoryRecord = typeof workspaceRepositories.$inferSelect;
 
 type GitHubRepo = {
   id: number | string;
+  name?: string;
   full_name: string;
   default_branch?: string;
+  private?: boolean;
 };
 
 type GitHubContent = {
@@ -43,6 +45,18 @@ type GitHubTree = {
     type?: string;
     sha?: string;
   }>;
+};
+
+type GitHubInstallation = {
+  id: number | string;
+  account?: {
+    login?: string;
+    type?: string;
+  };
+};
+
+type GitHubInstallationRepositories = {
+  repositories?: GitHubRepo[];
 };
 
 export async function ensureWorkspaceRepository(input: {
@@ -282,6 +296,32 @@ export async function readWorkspaceFile(input: {
   };
 }
 
+export async function getConfiguredGitHubInstallation() {
+  const token = await createAppJwt();
+  const installationId = requiredEnv("GITHUB_APP_INSTALLATION_ID");
+  return githubRequest<GitHubInstallation>({
+    token,
+    path: `/app/installations/${installationId}`,
+    method: "GET",
+  });
+}
+
+export async function listConfiguredInstallationRepositories() {
+  const token = await getInstallationToken();
+  const result = await githubRequest<GitHubInstallationRepositories>({
+    token,
+    path: "/installation/repositories?per_page=100",
+    method: "GET",
+  });
+
+  return (result.repositories ?? []).map((repo) => ({
+    githubRepoId: String(repo.id),
+    fullName: repo.full_name,
+    defaultBranch: repo.default_branch ?? "main",
+    private: repo.private ?? true,
+  }));
+}
+
 async function ensureManagedGitHubRepo(workspace: Workspace): Promise<GitHubRepo> {
   const org = requiredEnv("OPENCOMPANY_GITHUB_ORG");
   const token = await getInstallationToken();
@@ -335,6 +375,10 @@ type CachedInstallationToken = {
 };
 
 let cachedInstallationToken: CachedInstallationToken | null = null;
+
+export async function getWorkspaceGitHubInstallationToken() {
+  return getInstallationToken();
+}
 
 async function getInstallationToken() {
   if (cachedInstallationToken && cachedInstallationToken.expiresAt - Date.now() > 60_000) {

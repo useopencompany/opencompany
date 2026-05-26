@@ -21,6 +21,8 @@ describe("serializeRuntimeAgentFile", () => {
         },
       ],
       brain: [{ path: "product/", type: "folder" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     expect(serializeRuntimeAgentFile(config)).toBe(
@@ -50,6 +52,8 @@ describe("serializeRuntimeAgentFile", () => {
       },
       tools: [],
       brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
     };
 
     expect(serializeRuntimeAgentFile(config)).toContain(

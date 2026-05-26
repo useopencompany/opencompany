@@ -14,22 +14,35 @@ export type HostedToolResult = {
   usage?: HostedToolUsage;
 };
 
+type HostedToolHandler = {
+  execute: (input: {
+    args: unknown;
+    env: RunnerEnv;
+    enabledTools: RuntimeToolName[];
+    signal: AbortSignal;
+  }) => HostedToolResult | Promise<HostedToolResult>;
+  validateEnvironment?: (env: RunnerEnv) => void;
+  failureContext?: (input: { args: unknown; error: unknown }) => Record<string, unknown>;
+};
+
+export class MissingEnvError extends Error {
+  constructor(
+    readonly envName: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "MissingEnvError";
+  }
+}
+
 export function getHostedToolFailureContext(input: {
   name: RuntimeToolName;
   args: unknown;
   error: unknown;
 }): Record<string, unknown> {
-  if (input.name === "exa_search") {
-    return getExaSearchFailureContext(input.args, input.error);
-  }
-
-  if (input.name === "web_fetch") {
-    return {
-      hosted_provider: "direct_http",
-      hosted_operation: "fetch",
-      tool_error_stage: "unknown",
-      tool_error_code: "hosted_tool_failed",
-    };
+  const handler = HOSTED_TOOL_HANDLERS[input.name];
+  if (handler?.failureContext) {
+    return handler.failureContext({ args: input.args, error: input.error });
   }
 
   return {
@@ -45,29 +58,46 @@ export async function executeHostedTool(input: {
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
 }): Promise<HostedToolResult> {
-  if (input.name === "tool_help") {
-    return executeToolHelp(input.args, input.enabledTools);
-  }
-
-  if (input.name === "exa_search") {
-    return executeExaSearch(input.args, input.env, input.signal);
-  }
-
-  if (input.name === "web_fetch") {
-    return executeWebFetch(input.args, input.signal);
-  }
-
-  throw new Error(`Unknown hosted tool: ${input.name}`);
+  const handler = HOSTED_TOOL_HANDLERS[input.name];
+  if (!handler) throw new Error(`Unknown hosted tool: ${input.name}`);
+  return handler.execute(input);
 }
 
 export function validateHostedToolEnvironment(input: {
   enabledTools: RuntimeToolName[];
   env: RunnerEnv;
 }) {
-  if (input.enabledTools.includes("exa_search") && !input.env.exaApiKey) {
-    throw new Error("The exa_search tool is enabled, but EXA_API_KEY is not configured.");
+  for (const tool of input.enabledTools) {
+    HOSTED_TOOL_HANDLERS[tool]?.validateEnvironment?.(input.env);
   }
 }
+
+const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> = {
+  tool_help: {
+    execute: ({ args, enabledTools }) => executeToolHelp(args, enabledTools),
+  },
+  exa_search: {
+    execute: ({ args, env, signal }) => executeExaSearch(args, env, signal),
+    failureContext: ({ args, error }) => getExaSearchFailureContext(args, error),
+    validateEnvironment: (env) => {
+      if (!env.exaApiKey) {
+        throw new MissingEnvError(
+          "EXA_API_KEY",
+          "The exa_search tool is enabled, but EXA_API_KEY is not configured.",
+        );
+      }
+    },
+  },
+  web_fetch: {
+    execute: ({ args, signal }) => executeWebFetch(args, signal),
+    failureContext: () => ({
+      hosted_provider: "direct_http",
+      hosted_operation: "fetch",
+      tool_error_stage: "unknown",
+      tool_error_code: "hosted_tool_failed",
+    }),
+  },
+};
 
 function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
   const toolName = readString(asRecord(args), "tool");
@@ -91,7 +121,7 @@ async function executeExaSearch(
   signal: AbortSignal,
 ): Promise<HostedToolResult> {
   if (!env.exaApiKey) {
-    throw new Error("EXA_API_KEY is required for exa_search.");
+    throw new MissingEnvError("EXA_API_KEY", "EXA_API_KEY is required for exa_search.");
   }
 
   const request = buildExaSearchRequest(args);
@@ -146,7 +176,7 @@ async function executeWebFetch(args: unknown, signal: AbortSignal): Promise<Host
   const response = await fetch(request.url.toString(), {
     headers: {
       Accept: "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.1",
-      "User-Agent": "OpenCompanyAgent/0.1 (+https://opencompany.ai)",
+      "User-Agent": "OpenCompanyAgent/0.2.0 (+https://opencompany.ai)",
     },
     redirect: "follow",
     signal,

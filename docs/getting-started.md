@@ -102,6 +102,10 @@ After adding personal overrides, run `bun run setup`. Shared dev secrets still c
 
 If you want setup to launch the dev server after migrations, run `bun run setup:dev`.
 
+`bun run dev` also attempts to start ngrok before the app when the local ngrok CLI is authenticated.
+That gives integrations such as GitHub a public callback URL without a separate command. Set
+`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel.
+
 The older shared database path is still available with `bun run setup -- --shared-db`, but the default is branch isolation because this repo is commonly used from multiple Git worktrees. See [database.md](./database.md).
 
 ## For agents
@@ -134,9 +138,10 @@ in Infisical `dev` + `/web` and `/runner`:
 `DATABASE_URL` can exist in Infisical `dev` only for the explicit `--shared-db` mode, but normal
 local setup writes `.env.local` with a Neon branch-specific URL.
 
-Runner-only development secrets such as `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, and
-`EXA_API_KEY` are also pulled from Infisical `dev` + `/runner` into `.env.local` when present. This lets the
-local runner use the same shared provider credentials without copying them by hand.
+Runner-only development secrets such as `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`,
+`EXA_API_KEY`, and `AMP_API_KEY` are also pulled from Infisical `dev` + `/runner` into
+`.env.local` when present. This lets the local runner use the same shared provider credentials
+without copying them by hand.
 
 Stripe setup has a local fallback: if `STRIPE_SECRET_KEY` or `STRIPE_WEBHOOK_SECRET` are still
 placeholders, `bun run setup` reads the active Stripe CLI test key and runs
@@ -164,6 +169,10 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
   AuthKit env vars into Infisical `dev` + `/web`.
 - **Initial Stripe CLI bootstrap only:** run `stripe login` once. For shared development env vars,
   prefer storing a restricted test key as `STRIPE_SECRET_KEY` in Infisical `dev` + `/web`.
+- **Initial GitHub integration bootstrap only:** create a dedicated development GitHub App and a
+  stable ngrok domain when testing the user-facing GitHub work integration locally. ngrok is required
+  for the smoothest developer experience on callback/webhook integrations. See
+  [github-local-dev.md](./github-local-dev.md).
 - **Production WorkOS:** create a production WorkOS environment in the dashboard and set the redirect
   URI to your prod callback URL. Keep production values in Infisical `prod`, separate from `dev`.
 

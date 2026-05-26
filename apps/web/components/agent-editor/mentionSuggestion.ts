@@ -2,19 +2,24 @@ import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 import { MentionList, type MentionListHandle } from "./MentionList";
-import { AGENT_TOOL_MENTION_ITEMS, type AgentMentionItem } from "./tools";
+import { type AgentMentionItem } from "./tools";
 
-export function createMentionSuggestion(
-  items: AgentMentionItem[] = AGENT_TOOL_MENTION_ITEMS,
-  options: { char?: string; showCategories?: boolean } = {},
-): Omit<SuggestionOptions<AgentMentionItem>, "editor"> {
-  const char = options.char ?? "@";
-
+export function createMentionSuggestion({
+  getItems,
+  onSelect,
+  char = "@",
+  showCategories = true,
+}: {
+  getItems: () => AgentMentionItem[];
+  onSelect?: (item: AgentMentionItem) => void;
+  char?: string;
+  showCategories?: boolean;
+}): Omit<SuggestionOptions<AgentMentionItem>, "editor"> {
   return {
     char,
     items: ({ query }) => {
       const q = query.toLowerCase();
-      return items.filter((item) => {
+      return getItems().filter((item) => {
         return (
           item.kind.includes(q) ||
           item.id.toLowerCase().includes(q) ||
@@ -32,7 +37,7 @@ export function createMentionSuggestion(
       return {
         onStart: (props) => {
           component = new ReactRenderer(MentionList, {
-            props: { ...props, showCategories: options.showCategories ?? true },
+            props: { ...props, onSelect, showCategories },
             editor: props.editor,
           });
 
@@ -50,7 +55,7 @@ export function createMentionSuggestion(
           });
         },
         onUpdate: (props) => {
-          component?.updateProps({ ...props, showCategories: options.showCategories ?? true });
+          component?.updateProps({ ...props, onSelect, showCategories });
           if (!props.clientRect || !popup) return;
           popup.setProps({
             getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
@@ -73,5 +78,3 @@ export function createMentionSuggestion(
     },
   };
 }
-
-export const mentionSuggestion = createMentionSuggestion();
