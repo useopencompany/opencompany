@@ -106,7 +106,7 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
 
         {state?.ok && (
           <div className="flex items-center justify-between gap-3 rounded-md border border-[#badbcc] bg-[#f0fdf4] px-3 py-2 text-[12.5px] text-[#1f7a3a]">
-            <span>Sent to Linear.</span>
+            <span>Thanks, we are on it.</span>
             {state.issueUrl && (
               <a
                 href={state.issueUrl}
