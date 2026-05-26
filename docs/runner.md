@@ -44,8 +44,7 @@ The V1 loop is intentionally custom and narrow:
 3. Inngest calls `POST /internal/sessions/:id/start` on the runner with
    `RUNNER_INTERNAL_TOKEN`.
 4. The runner marks the session `provisioning`, creates or reconnects the E2B sandbox, prepares
-   `/home/user/workspace`, optionally clones the managed GitHub workspace repo, and marks the
-   session `ready`.
+   the capability-scoped workspace layout, and marks the session `ready`.
 5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
    The token is a short-lived HMAC token minted by the web app.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
@@ -78,6 +77,11 @@ Important details:
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are
   replayed into later model requests. This avoids replaying orphan tool results without their
   matching assistant tool calls.
+- The runner does not clone the full workspace repo into E2B. It materializes only configured
+  Brain files under `/home/user/workspace/brain` plus a session-local
+  `/home/user/workspace/work` directory.
+- OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
+  the full serialized `.agent` source and Brain manifest.
 
 V1 tools:
 
@@ -87,8 +91,9 @@ V1 tools:
 - `list_files`
 - `git_diff`
 
-All file-oriented tools must remain confined to the session workdir. Keep path validation in the
-runtime/sandbox layer rather than relying on model behavior.
+File-oriented tools must remain confined to `/home/user/workspace/work` or configured
+`/home/user/workspace/brain` paths. Shell commands run from `work/` by default. Keep path validation
+in the runtime/sandbox layer rather than relying on model behavior.
 
 ## Event model
 
@@ -138,7 +143,7 @@ Required environment variables:
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
-- optional GitHub App env vars for cloning the managed workspace repo into E2B:
+- optional GitHub App env vars used for Brain sync back to the managed workspace repo:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 
@@ -238,5 +243,5 @@ without fighting request-duration limits.
   cancellation inside long sandbox commands is still minimal.
 - The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. This is intentional for V1
   because durable replay from Postgres is the product-critical stream contract.
-- E2B workspace hydration is basic. Empty sessions work, and GitHub clone support exists when the
-  GitHub App env vars are present.
+- E2B workspace hydration is capability-scoped. Full workspace repo cloning is intentionally not
+  part of V1; add explicit file mounts later if agents need broader project access.

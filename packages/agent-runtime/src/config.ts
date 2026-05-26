@@ -24,6 +24,7 @@ export function resolveAgentRuntimeConfig(input: {
     "You are an OpenCompany agent running in an isolated cloud sandbox.",
     "Use tools when you need to inspect or change files, run commands, or verify work.",
     "Keep command output concise and explain material changes to the user.",
+    "Use ./work for session-local files and scratch work.",
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
           .map((reference) => reference.path)

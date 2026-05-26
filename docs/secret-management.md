@@ -24,7 +24,7 @@ Use secret paths by deployment surface:
 | Path | Used by | Purpose |
 |---|---|---|
 | `/web` | Vercel web, local web | Next.js app, WorkOS, Inngest, GitHub App, analytics, feedback, runner client config. |
-| `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App clone support. |
+| `/runner` | Render runner, local runner | Fastify runner, E2B, AI Gateway, runner auth, GitHub App Brain sync. |
 | `/release` | GitHub Actions release workflow | Production migration/deploy orchestration. |
 
 For local `dev`, keep Infisical focused on shared non-database secrets. The existing setup script

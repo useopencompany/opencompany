@@ -5,6 +5,7 @@ import {
   type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
+  serializeRuntimeAgentFile,
 } from "@opencompany/agent-runtime";
 import {
   calculateHostedToolUsageCost,
@@ -1317,7 +1318,7 @@ async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
-      agentFile: row.agent.body,
+      agentFile: serializeRuntimeAgentFile(row.agent.config),
     });
     await materializeBrainForSession({
       sandbox,

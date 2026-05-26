@@ -6,6 +6,20 @@ export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
 
 const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
+const SANDBOX_USER = "user";
+const SANDBOX_ROOT_USER = "root";
+const METADATA_ROOT = "/home/user/.opencompany";
+
+export function sandboxLayout(workdir: string) {
+  return {
+    workspaceRoot: workdir,
+    brainRoot: `${workdir}/brain`,
+    workRoot: `${workdir}/work`,
+    metadataRoot: METADATA_ROOT,
+    agentFile: `${METADATA_ROOT}/agent.agent`,
+    brainManifest: `${METADATA_ROOT}/brain-manifest.json`,
+  };
+}
 
 export async function createOrConnectSandbox(input: {
   sandboxId?: string | null;
@@ -85,26 +99,26 @@ export async function prepareWorkspace(input: {
   sandbox: SandboxHandle;
   workdir: string;
   agentFile: string;
-  repositoryFullName?: string | null | undefined;
-  githubToken?: string | null | undefined;
 }) {
-  if (input.repositoryFullName && input.githubToken) {
-    const cloneUrl = githubCloneUrl(input.repositoryFullName);
-    await input.sandbox.commands.run(
-      [
-        `if [ ! -d ${shellQuote(`${input.workdir}/.git`)} ]; then`,
-        `  rm -rf ${shellQuote(input.workdir)};`,
-        `  git clone --depth 1 "${cloneUrl}" ${shellQuote(input.workdir)};`,
-        "fi;",
-      ].join("\n"),
-      { envs: { GITHUB_TOKEN: input.githubToken }, timeoutMs: 120_000 },
-    );
-  }
+  const layout = sandboxLayout(input.workdir);
 
   await input.sandbox.commands.run(
-    `mkdir -p ${shellQuote(input.workdir)} ${shellQuote(`${input.workdir}/.opencompany`)}`,
+    [
+      `mkdir -p ${shellQuote(layout.brainRoot)} ${shellQuote(layout.workRoot)} ${shellQuote(layout.metadataRoot)}`,
+      `chown -R ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(layout.workspaceRoot)}`,
+      `chown root:root ${shellQuote(layout.metadataRoot)}`,
+      `chmod 700 ${shellQuote(layout.metadataRoot)}`,
+    ].join(" && "),
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
-  await input.sandbox.files.write(`${input.workdir}/.opencompany/agent.md`, input.agentFile);
+  await input.sandbox.files.write(layout.agentFile, input.agentFile, {
+    user: SANDBOX_ROOT_USER,
+    requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+  });
+  await input.sandbox.commands.run(
+    `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
 }
 
 export async function runSandboxTool(input: {
@@ -118,18 +132,17 @@ export async function runSandboxTool(input: {
 
   if (input.name === "shell") {
     const command = readString(args, "command");
-    const result = await input.sandbox.commands.run(
-      `cd ${shellQuote(input.workdir)} && ${command}`,
-      {
-        timeoutMs: 120_000,
-        onStdout: async (data: string) => {
-          await input.onOutput?.("stdout", data);
-        },
-        onStderr: async (data: string) => {
-          await input.onOutput?.("stderr", data);
-        },
+    const layout = sandboxLayout(input.workdir);
+    const result = await input.sandbox.commands.run(command, {
+      cwd: layout.workRoot,
+      timeoutMs: 120_000,
+      onStdout: async (data: string) => {
+        await input.onOutput?.("stdout", data);
       },
-    );
+      onStderr: async (data: string) => {
+        await input.onOutput?.("stderr", data);
+      },
+    });
     return truncate({
       stdout: String(result.stdout ?? ""),
       stderr: String(result.stderr ?? ""),
@@ -138,7 +151,7 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "read_file") {
-    const filePath = resolveWorkspacePath(input.workdir, readString(args, "path"));
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
     return truncate({
       path: relativePath(input.workdir, filePath),
       content: await input.sandbox.files.read(filePath),
@@ -146,9 +159,8 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "write_file") {
-    const filePath = resolveWorkspacePath(input.workdir, readString(args, "path"));
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
     const content = readString(args, "content");
-    await input.sandbox.commands.run(`mkdir -p ${shellQuote(path.posix.dirname(filePath))}`);
     await input.sandbox.files.write(filePath, content);
     return {
       path: relativePath(input.workdir, filePath),
@@ -157,7 +169,10 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "list_files") {
-    const dirPath = resolveWorkspacePath(input.workdir, readOptionalString(args, "path") ?? ".");
+    const dirPath = resolveSandboxToolPath(
+      input.workdir,
+      readOptionalString(args, "path") ?? "work",
+    );
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
     const result = await input.sandbox.commands.run(
       `cd ${shellQuote(input.workdir)} && find ${shellQuote(relativePath(input.workdir, dirPath) || ".")} -maxdepth ${depth} -print | sort | head -200`,
@@ -182,6 +197,27 @@ export async function runSandboxTool(input: {
   }
 
   throw new Error(`Unknown tool: ${input.name}`);
+}
+
+export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
+  let resolved: string;
+  try {
+    resolved = resolveWorkspacePath(workdir, inputPath);
+  } catch {
+    throw new Error("Path must be inside work/ or brain/ for this session.");
+  }
+  const relative = relativePath(workdir, resolved);
+
+  if (
+    relative === "work" ||
+    relative.startsWith("work/") ||
+    relative === "brain" ||
+    relative.startsWith("brain/")
+  ) {
+    return resolved;
+  }
+
+  throw new Error("Path must be inside work/ or brain/ for this session.");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -213,14 +249,6 @@ function relativePath(workdir: string, filePath: string) {
 function isSandboxNotFound(error: unknown) {
   if (!(error instanceof Error)) return false;
   return error.name === "SandboxNotFoundError" || /not found|404/i.test(error.message);
-}
-
-function githubCloneUrl(repositoryFullName: string) {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
-    throw new Error("Invalid GitHub repository name for workspace clone.");
-  }
-
-  return `https://x-access-token:$GITHUB_TOKEN@github.com/${repositoryFullName}.git`;
 }
 
 function truncate<T extends Record<string, unknown>>(value: T): T {
