@@ -24,6 +24,7 @@ import {
   agentSessionToolUsage,
   agentSessionUsage,
   agents,
+  users,
   type WorkspaceRepository,
   workspaceGitHubIntegrationRepositories,
   workspaceRepositories,
@@ -255,6 +256,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       agent: row.agent.config,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
+      ...optionalUserName(row.user),
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -2062,10 +2064,12 @@ async function loadSession(sessionId: string) {
       session: agentSessions,
       agent: agents,
       workspace: workspaces,
+      user: users,
     })
     .from(agentSessions)
     .innerJoin(agents, eq(agentSessions.agentId, agents.id))
     .innerJoin(workspaces, eq(agentSessions.workspaceId, workspaces.id))
+    .innerJoin(users, eq(agentSessions.userId, users.id))
     .where(eq(agentSessions.id, sessionId))
     .limit(1);
 
@@ -2080,6 +2084,11 @@ async function loadSession(sessionId: string) {
     .limit(1);
 
   return { ...row, repository: repository ?? null };
+}
+
+function optionalUserName(user: Pick<typeof users.$inferSelect, "firstName" | "lastName">) {
+  const userName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  return userName ? { userName } : {};
 }
 
 type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
