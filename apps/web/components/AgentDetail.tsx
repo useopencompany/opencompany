@@ -21,11 +21,10 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 import {
   AGENT_MODELS,
-  AGENT_TOOL_MENTION_ITEMS,
   type AgentMentionItem,
   type AgentModel,
   type AgentTool,
-  buildBrainMentionItems,
+  buildAgentMentionItems,
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
@@ -52,7 +51,7 @@ import {
   fetchAgent,
   fetchAgents,
 } from "@/lib/agents/payload";
-import type { AgentConfig, AgentModelId } from "@/lib/agents/types";
+import type { AgentConfig, AgentModelId, TiptapDoc } from "@/lib/agents/types";
 
 type Props = {
   idOrPath: string;
@@ -158,7 +157,12 @@ function AgentDetailContent({
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
-  const pendingRef = useRef<{ name?: string; body?: string; model?: AgentModelId }>({});
+  const pendingRef = useRef<{
+    name?: string;
+    body?: string;
+    content?: TiptapDoc;
+    model?: AgentModelId;
+  }>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const configPreview = buildConfigPreview({
     body,
@@ -181,14 +185,15 @@ function AgentDetailContent({
   const githubCommitSha = agent.githubCommitSha;
   const githubSyncedAt = agent.githubSyncedAt;
   const mentionItems: AgentMentionItem[] = useMemo(
-    () => [...AGENT_TOOL_MENTION_ITEMS, ...buildBrainMentionItems(agent.brainPaths)],
-    [agent.brainPaths],
+    () => buildAgentMentionItems(agent.githubIntegrationRepositories, agent.brainPaths),
+    [agent.brainPaths, agent.githubIntegrationRepositories],
   );
 
   useEffect(() => {
     if (
       pendingRef.current.name !== undefined ||
       pendingRef.current.body !== undefined ||
+      pendingRef.current.content !== undefined ||
       pendingRef.current.model !== undefined
     ) {
       return;
@@ -205,7 +210,14 @@ function AgentDetailContent({
 
   const flush = () => {
     const patch = { ...pendingRef.current };
-    if (typeof patch.name !== "string" && patch.body === undefined && !patch.model) return;
+    if (
+      typeof patch.name !== "string" &&
+      patch.body === undefined &&
+      patch.content === undefined &&
+      !patch.model
+    ) {
+      return;
+    }
     pendingRef.current = {};
     setSaveState("saving");
     setOptimisticGitHubSync({
@@ -356,9 +368,10 @@ function AgentDetailContent({
               key={agent.id}
               initialBody={initialBody}
               mentionItems={mentionItems}
-              onChange={(body) => {
+              onChange={(body, content) => {
                 setBody(body);
                 pendingRef.current.body = body;
+                pendingRef.current.content = content as TiptapDoc;
                 schedule();
               }}
             />

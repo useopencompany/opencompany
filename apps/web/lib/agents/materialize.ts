@@ -69,6 +69,7 @@ export async function materializeAgentToGitHub(
     body: row.agent.body,
     model: row.agent.config.model.name,
     tools: row.agent.config.tools,
+    brain: row.agent.config.brain,
     integrations: row.agent.config.integrations,
     triggers: row.agent.config.triggers,
   });

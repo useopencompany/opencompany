@@ -1,10 +1,11 @@
-import { Bot, Brain, FileText, type LucideIcon, Search } from "lucide-react";
+import { Bot, Brain, Code2, FileText, GitBranch, type LucideIcon, Search } from "lucide-react";
+import { repositoryIdForFullName } from "@/lib/agents/agent-file";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
-type AgentMentionKind = "model" | "tool" | "brain";
+type AgentMentionKind = "model" | "tool" | "integration" | "brain";
 
-export type AgentMentionItem = {
+type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
   mentionId: string;
   kind: AgentMentionKind;
@@ -16,24 +17,38 @@ export type AgentMentionItem = {
   supportsReasoning?: boolean;
 };
 
-export type AgentTool = AgentMentionItem & {
+export type AgentTool = BaseAgentMentionItem & {
   id: AgentToolId;
   kind: "tool";
 };
 
-export type AgentModel = AgentMentionItem & {
+export type AgentModel = BaseAgentMentionItem & {
   id: AgentModelId;
   kind: "model";
 };
 
-export type AgentBrainMention = AgentMentionItem & {
+export type AgentIntegration = Omit<
+  BaseAgentMentionItem,
+  "id" | "category" | "supportsReasoning"
+> & {
+  id: string;
+  kind: "integration";
+  provider: "github";
+  fullName?: string;
+  defaultBranch?: string;
+};
+
+export type AgentBrainMention = BaseAgentMentionItem & {
   id: string;
   kind: "brain";
   path: string;
 };
 
+export type AgentMentionItem = AgentModel | AgentTool | AgentIntegration | AgentBrainMention;
+
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
+  amp: Code2,
 };
 
 const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
@@ -68,6 +83,45 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
 export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [...AGENT_MODELS, ...AGENT_TOOLS];
 export const AGENT_TOOL_MENTION_ITEMS: AgentMentionItem[] = AGENT_TOOLS;
 
+export function buildAgentMentionItems(
+  repositories: Array<{ fullName: string; defaultBranch: string }> = [],
+  brainPaths: string[] = [],
+): AgentMentionItem[] {
+  const githubItem: AgentIntegration = {
+    id: "github",
+    mentionId: "integration:github",
+    kind: "integration",
+    provider: "github",
+    label: "github",
+    displayLabel: "GitHub",
+    description: "Workspace GitHub integration.",
+    icon: GitBranch,
+  };
+  const repositoryItems: AgentIntegration[] = repositories.map((repository) => {
+    const repositoryId = repositoryIdForFullName(repository.fullName);
+    return {
+      id: repositoryId,
+      mentionId: `integration:github:${repositoryId}`,
+      kind: "integration",
+      provider: "github",
+      label: repository.fullName,
+      displayLabel: repository.fullName,
+      description: "GitHub repository",
+      icon: GitBranch,
+      fullName: repository.fullName,
+      defaultBranch: repository.defaultBranch,
+    };
+  });
+
+  return [
+    ...AGENT_MODELS,
+    ...AGENT_TOOLS,
+    githubItem,
+    ...repositoryItems,
+    ...buildBrainMentionItems(brainPaths),
+  ];
+}
+
 export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
   const folders = new Set<string>();
   for (const path of paths) {
@@ -89,10 +143,19 @@ export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {
   }));
 }
 
-export function findMentionItem(id: string): AgentMentionItem | undefined {
+export function findMentionItem(
+  id: string,
+  items: AgentMentionItem[] = AGENT_MENTION_ITEMS,
+): AgentMentionItem | undefined {
+  const normalized = id.toLowerCase();
   return (
-    AGENT_MENTION_ITEMS.find((item) => item.mentionId === id) ??
-    AGENT_MENTION_ITEMS.find((item) => item.id === id)
+    items.find((item) => item.mentionId === id) ??
+    items.find((item) => item.id === id) ??
+    items.find((item) => item.label === id) ??
+    items.find((item) => item.displayLabel === id) ??
+    items.find((item) => item.id.toLowerCase() === normalized) ??
+    items.find((item) => item.label.toLowerCase() === normalized) ??
+    items.find((item) => item.displayLabel.toLowerCase() === normalized)
   );
 }
 

@@ -114,6 +114,11 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           description: "Optional draft pull request title when createPullRequest is true.",
         },
+        ampThreadId: {
+          type: "string",
+          description:
+            "Existing ampThreadId from a previous amp_coder result to continue instead of starting a new Amp thread.",
+        },
       },
       required: ["task"],
       additionalProperties: false,
@@ -121,6 +126,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use amp_coder for substantial codebase work that benefits from Amp's coding-agent loop.",
       "Give Amp a concrete task and any constraints from the user or agent instructions.",
+      "When the user asks for a follow-up to prior Amp work, pass the previous ampThreadId so Amp continues that thread with its existing context.",
+      "The tool output includes ampResult, ampStatus, ampThreadId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on ampResult when present.",
       "Set createPullRequest=true only when the instructions call for a reviewable PR.",
       "The tool works on a generated branch and never pushes directly to the default branch.",
     ].join("\n"),

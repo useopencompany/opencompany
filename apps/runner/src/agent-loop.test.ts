@@ -12,7 +12,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acquireRunLease,
   appendRuntimeEventForLease,
+  buildAmpCommand,
   completeAssistantMessageForLease,
+  createAmpStreamAccumulator,
   createAssistantMessageForLease,
   executeRuntimeTool,
   normalizeReasoningSummary,
@@ -417,6 +419,152 @@ describe("stream error handling", () => {
   });
 });
 
+describe("Amp stream parsing", () => {
+  it("starts a new Amp thread when no prior thread id is provided", () => {
+    expect(buildAmpCommand({ task: "implement the change" })).toBe(
+      "amp --dangerously-allow-all --stream-json -x 'implement the change'",
+    );
+  });
+
+  it("continues an existing Amp thread when a prior thread id is provided", () => {
+    expect(
+      buildAmpCommand({
+        task: "address the follow-up",
+        ampThreadId: "T-2775dc92-90ed-4f85-8b73-8f9766029e83",
+      }),
+    ).toBe(
+      "amp threads continue --dangerously-allow-all --stream-json -x 'address the follow-up' 'T-2775dc92-90ed-4f85-8b73-8f9766029e83'",
+    );
+  });
+
+  it("captures the final successful Amp result across stdout chunks", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      [
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "T-123",
+          tools: [],
+          mcp_servers: [],
+        }),
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "intermediate answer" }],
+            stop_reason: "end_turn",
+          },
+          parent_tool_use_id: null,
+          session_id: "T-123",
+        }),
+      ].join("\n"),
+    );
+    stream.push(
+      `\n${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 1200,
+        is_error: false,
+        num_turns: 1,
+        result: "final answer",
+        session_id: "T-123",
+      }).slice(0, 80)}`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 1200,
+        is_error: false,
+        num_turns: 1,
+        result: "final answer",
+        session_id: "T-123",
+      }).slice(80)}\n`,
+    );
+
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      threadId: "T-123",
+      status: "success",
+      result: "final answer",
+      error: null,
+      durationMs: 1200,
+      numTurns: 1,
+      permissionDenials: [],
+    });
+  });
+
+  it("falls back to the last assistant text when Amp omits result text", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "assistant fallback" }],
+          stop_reason: "end_turn",
+        },
+        parent_tool_use_id: null,
+        session_id: "T-456",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 900,
+        is_error: false,
+        num_turns: 1,
+        result: "",
+        session_id: "T-456",
+      })}\n`,
+    );
+
+    stream.finish();
+
+    expect(stream.summary()).toMatchObject({
+      threadId: "T-456",
+      status: "success",
+      result: "assistant fallback",
+      error: null,
+    });
+  });
+
+  it("captures Amp execution errors as structured output", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        duration_ms: 300,
+        is_error: true,
+        num_turns: 1,
+        error: "permission denied",
+        session_id: "T-789",
+        permission_denials: ["Bash rm -rf"],
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      threadId: "T-789",
+      status: "error",
+      result: "",
+      error: "permission denied",
+      durationMs: 300,
+      numTurns: 1,
+      permissionDenials: ["Bash rm -rf"],
+    });
+  });
+});
+
 describe("reasoning stream helpers", () => {
   it("reads reasoning parts without treating them as assistant text", () => {
     expect(readReasoningTextDelta({ type: "reasoning", text: "Reviewed constraints." })).toBe(
@@ -614,7 +762,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
 
 function agentConfig() {
   return {
-    version: 2 as const,
+    schemaVersion: "agent.v1" as const,
     title: "Test agent",
     instructions: "Test.",
     model: {
@@ -622,6 +770,7 @@ function agentConfig() {
       name: "openai/gpt-5.4-mini" as const,
     },
     tools: [],
+    brain: [],
     integrations: { github: { repositories: [] } },
     triggers: [],
   };

@@ -5,6 +5,7 @@ import {
   type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
+  shellQuote,
 } from "@opencompany/agent-runtime";
 import {
   calculateHostedToolUsageCost,
@@ -14,6 +15,8 @@ import {
 } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
+  type AgentConfig,
+  agentSessionAmpArtifacts,
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
@@ -21,6 +24,7 @@ import {
   agentSessionUsage,
   agents,
   type WorkspaceRepository,
+  workspaceGitHubIntegrationRepositories,
   workspaceRepositories,
   workspaces,
 } from "@opencompany/db/schema";
@@ -48,6 +52,11 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { materializeBrainForSession, syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
+import {
+  createDraftPullRequest,
+  getGitHubInstallationToken,
+  getGitHubWorkInstallationToken,
+} from "./github";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
@@ -360,6 +369,8 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       assistantMessageId,
       runLeaseId: leaseId,
       runLeaseOwner: leaseOwner,
+      workspaceId: row.workspace.id,
+      agentConfig: row.agent.config,
       getSandbox,
       workdir: row.session.workdir,
       env: input.env,
@@ -680,6 +691,8 @@ function createToolSet(input: {
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
+  workspaceId: string;
+  agentConfig: AgentConfig;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -719,6 +732,8 @@ function createToolSet(input: {
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
           runLeaseOwner: input.runLeaseOwner,
+          workspaceId: input.workspaceId,
+          agentConfig: input.agentConfig,
           toolCallId: options.toolCallId,
           definition,
           args: toolInput,
@@ -750,6 +765,8 @@ export async function executeRuntimeTool(input: {
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
+  workspaceId?: string;
+  agentConfig?: AgentConfig;
   toolCallId: string;
   definition: RuntimeToolDefinition;
   args: unknown;
@@ -783,6 +800,40 @@ export async function executeRuntimeTool(input: {
 
       const activeSandbox = await input.getSandbox();
       sandboxIdForCapture = activeSandbox.sandboxId;
+      if (input.definition.name === "amp_coder") {
+        if (!input.workspaceId || !input.agentConfig) {
+          throw new Error("AMP requires workspace and agent configuration context.");
+        }
+        return runAmpCoderTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          workspaceId: input.workspaceId,
+          toolCallId: input.toolCallId,
+          agentConfig: input.agentConfig,
+          env: input.env,
+          onOutput: async (delta) => {
+            await input.checkAbort();
+            await requireLeaseWrite(
+              appendRuntimeEventForLease({
+                sessionId: input.sessionId,
+                messageId: input.assistantMessageId,
+                leaseId: input.runLeaseId,
+                leaseOwner: input.runLeaseOwner,
+                type: "command.output",
+                payload: {
+                  command: input.definition.name,
+                  toolCallId: input.toolCallId,
+                  stream: "stdout",
+                  delta,
+                },
+              }),
+            );
+          },
+        });
+      }
       return runSandboxTool({
         sandbox: activeSandbox,
         workdir: input.workdir,
@@ -1102,6 +1153,340 @@ export async function recordToolUsage(input: {
   );
 }
 
+async function runAmpCoderTool(input: {
+  sandbox: SandboxHandle;
+  workdir: string;
+  args: unknown;
+  sessionId: string;
+  messageId: string;
+  workspaceId: string;
+  toolCallId: string;
+  agentConfig: AgentConfig;
+  env: RunnerEnv;
+  onOutput?: (delta: string) => Promise<void> | void;
+}) {
+  const args = isRecord(input.args) ? input.args : {};
+  const task = typeof args.task === "string" ? args.task.trim() : "";
+  if (!task) throw new Error("AMP task is required.");
+  const requestedAmpThreadId =
+    typeof args.ampThreadId === "string" && args.ampThreadId.trim()
+      ? args.ampThreadId.trim()
+      : null;
+
+  const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
+  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) {
+    throw new Error("The amp_coder tool is enabled, but no GitHub repository is bound.");
+  }
+  const repository = input.agentConfig.integrations.github.repositories.find(
+    (candidate) => candidate.id === ampTool.repository,
+  );
+  if (!repository) {
+    throw new Error(`AMP repository binding ${ampTool.repository} was not found.`);
+  }
+
+  const ampApiKey = loadPlatformAmpApiKey(input.env);
+  await input.sandbox.commands.run(
+    `git config --global --add safe.directory ${shellQuote(input.workdir)}`,
+  );
+  const gitCheck = await input.sandbox.commands.run(
+    `cd ${shellQuote(input.workdir)} && git rev-parse --is-inside-work-tree`,
+    { timeoutMs: 30_000 },
+  );
+  if (String(gitCheck.stdout ?? "").trim() !== "true") {
+    throw new Error(
+      "AMP requires a cloned GitHub repository. Check the workspace GitHub installation and repository binding.",
+    );
+  }
+  const ampStream = createAmpStreamAccumulator();
+  const result = await input.sandbox.commands.run(
+    `cd ${shellQuote(input.workdir)} && ${buildAmpCommand({
+      task,
+      ampThreadId: requestedAmpThreadId,
+    })}`,
+    {
+      envs: { AMP_API_KEY: ampApiKey },
+      timeoutMs: 600_000,
+      onStdout: async (data: string) => {
+        ampStream.push(data);
+        await input.onOutput?.(formatAmpOutput(data));
+      },
+      onStderr: async (data: string) => {
+        await input.onOutput?.(data);
+      },
+    },
+  );
+  ampStream.finish();
+  const ampSummary = ampStream.summary();
+
+  const diffStat = await input.sandbox.commands.run(
+    `cd ${shellQuote(input.workdir)} && git diff HEAD --stat`,
+    { timeoutMs: 60_000 },
+  );
+  const diffPreview = await input.sandbox.commands.run(
+    `cd ${shellQuote(input.workdir)} && git diff HEAD -- | head -400`,
+    { timeoutMs: 60_000 },
+  );
+  const hasDiff = String(diffStat.stdout ?? "").trim().length > 0;
+  let branchName: string | null = null;
+  let pullRequestUrl: string | null = null;
+
+  if (args.createPullRequest === true && hasDiff) {
+    if (!ampTool.prCapable) {
+      throw new Error("AMP is not configured for pull request creation.");
+    }
+    const integrationRepository = await loadGitHubWorkRepository(
+      input.workspaceId,
+      repository.fullName,
+    );
+    const token = await getGitHubWorkInstallationToken(integrationRepository.installationId);
+    if (!token) {
+      throw new Error("GitHub App credentials are required to push AMP changes.");
+    }
+    branchName = `opencompany/amp-${input.sessionId.slice(-8)}-${Date.now()}`;
+    const commitMessage = normalizeCommitMessage(
+      typeof args.pullRequestTitle === "string" ? args.pullRequestTitle : task,
+    );
+    await input.sandbox.commands.run(
+      [
+        `cd ${shellQuote(input.workdir)}`,
+        `git config user.name ${shellQuote("OpenCompany Agent")}`,
+        `git config user.email ${shellQuote("agents@opencompany.ai")}`,
+        `git checkout -b ${shellQuote(branchName)}`,
+        "git add -A",
+        `git commit -m ${shellQuote(commitMessage)}`,
+        `git push origin ${shellQuote(branchName)}`,
+      ].join(" && "),
+      { envs: { GITHUB_TOKEN: token }, timeoutMs: 180_000 },
+    );
+    const pr = await createDraftPullRequest({
+      installationId: integrationRepository.installationId,
+      repositoryFullName: repository.fullName,
+      title: commitMessage,
+      head: branchName,
+      base: repository.defaultBranch,
+      body: ["Created by OpenCompany AMP.", "", `Task: ${task}`].join("\n"),
+    });
+    pullRequestUrl = pr.html_url ?? null;
+  }
+
+  await getDb()
+    .insert(agentSessionAmpArtifacts)
+    .values({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      toolCallId: input.toolCallId,
+      ampThreadId: ampSummary.threadId,
+      continuedFromAmpThreadId: requestedAmpThreadId,
+      repositoryFullName: repository.fullName,
+      branchName,
+      pullRequestUrl,
+      diffStat: truncateText(String(diffStat.stdout ?? ""), 4000),
+      diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
+    });
+
+  return {
+    repository: repository.fullName,
+    ampThreadId: ampSummary.threadId,
+    continuedFromAmpThreadId: requestedAmpThreadId,
+    ampStatus: ampSummary.status,
+    ampResult: truncateText(ampSummary.result, 24_000),
+    ampError: ampSummary.error,
+    ampDurationMs: ampSummary.durationMs,
+    ampNumTurns: ampSummary.numTurns,
+    ampPermissionDenials: ampSummary.permissionDenials,
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+    diffStat: truncateText(String(diffStat.stdout ?? ""), 4000),
+    diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
+    branchName,
+    pullRequestUrl,
+  };
+}
+
+export function buildAmpCommand(input: { task: string; ampThreadId?: string | null }) {
+  const task = shellQuote(input.task);
+  const ampThreadId = input.ampThreadId?.trim();
+  if (ampThreadId) {
+    return [
+      "amp",
+      "threads",
+      "continue",
+      "--dangerously-allow-all",
+      "--stream-json",
+      "-x",
+      task,
+      shellQuote(ampThreadId),
+    ].join(" ");
+  }
+
+  return `amp --dangerously-allow-all --stream-json -x ${task}`;
+}
+
+async function loadGitHubWorkRepository(workspaceId: string, fullName: string) {
+  const [repository] = await getDb()
+    .select({
+      fullName: workspaceGitHubIntegrationRepositories.fullName,
+      installationId: workspaceGitHubIntegrationRepositories.installationId,
+    })
+    .from(workspaceGitHubIntegrationRepositories)
+    .where(
+      and(
+        eq(workspaceGitHubIntegrationRepositories.workspaceId, workspaceId),
+        eq(workspaceGitHubIntegrationRepositories.fullName, fullName),
+      ),
+    )
+    .limit(1);
+
+  if (!repository) {
+    throw new Error(`GitHub work repository ${fullName} is not available to this workspace.`);
+  }
+
+  return repository;
+}
+
+function loadPlatformAmpApiKey(env: RunnerEnv) {
+  if (!env.ampApiKey) {
+    throw new Error("AMP_API_KEY is required on the runner to use the AMP coding tool.");
+  }
+  return env.ampApiKey;
+}
+
+type AmpStreamSummary = {
+  threadId: string | null;
+  status: "success" | "error" | "unknown";
+  result: string;
+  error: string | null;
+  durationMs: number | null;
+  numTurns: number | null;
+  permissionDenials: string[];
+};
+
+export function createAmpStreamAccumulator() {
+  let buffer = "";
+  let threadId: string | null = null;
+  let status: AmpStreamSummary["status"] = "unknown";
+  let result = "";
+  let error: string | null = null;
+  let durationMs: number | null = null;
+  let numTurns: number | null = null;
+  let lastAssistantText = "";
+  let permissionDenials: string[] = [];
+
+  function consumeLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      return;
+    }
+    if (!isRecord(event)) return;
+
+    const eventThreadId = readOptionalText(event.session_id);
+    if (eventThreadId) threadId = eventThreadId;
+
+    if (event.type === "assistant") {
+      const message = isRecord(event.message) ? event.message : {};
+      lastAssistantText = readAmpAssistantText(message) || lastAssistantText;
+      return;
+    }
+
+    if (event.type !== "result") return;
+
+    durationMs = readOptionalFiniteNumber(event.duration_ms) ?? durationMs;
+    numTurns = readOptionalFiniteNumber(event.num_turns) ?? numTurns;
+    permissionDenials = readStringArray(event.permission_denials);
+
+    if (event.is_error === true || event.subtype !== "success") {
+      status = "error";
+      error = readOptionalText(event.error) ?? "Amp failed without an error message.";
+      result = "";
+      return;
+    }
+
+    status = "success";
+    result = readOptionalText(event.result) ?? lastAssistantText;
+    error = null;
+  }
+
+  return {
+    push(data: string) {
+      buffer += data;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
+    },
+    finish() {
+      if (buffer.trim()) consumeLine(buffer);
+      buffer = "";
+    },
+    summary(): AmpStreamSummary {
+      return {
+        threadId,
+        status,
+        result: result || lastAssistantText,
+        error,
+        durationMs,
+        numTurns,
+        permissionDenials,
+      };
+    },
+  };
+}
+
+function readAmpAssistantText(message: Record<string, unknown>) {
+  const content = Array.isArray(message.content) ? message.content : [];
+  return content
+    .flatMap((part) =>
+      isRecord(part) && part.type === "text" && typeof part.text === "string" ? [part.text] : [],
+    )
+    .join("\n")
+    .trim();
+}
+
+function formatAmpOutput(data: string) {
+  const lines = data.split("\n").filter(Boolean);
+  const formatted = lines
+    .map((line) => {
+      try {
+        const event = JSON.parse(line) as { type?: unknown };
+        if (typeof event.type === "string") return `[amp:${event.type}] ${line}\n`;
+      } catch {
+        // Keep raw output when Amp emits non-JSON text.
+      }
+      return `${line}\n`;
+    })
+    .join("");
+  return truncateText(formatted || data, 8000);
+}
+
+function normalizeCommitMessage(value: string) {
+  const firstLine = value
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  const title = firstLine || "Apply AMP changes";
+  return title.length > 72 ? `${title.slice(0, 69)}...` : title;
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
+}
+
+function readOptionalText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function readOptionalFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => (typeof item === "string" ? [item] : []));
+}
+
 function buildCacheableSystemPrompt(
   systemPrompt: string,
   modelName: string,
@@ -1307,17 +1692,22 @@ async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   try {
     sandbox = await createOrConnectSandbox({
       sandboxId: row.session.e2bSandboxId,
-      template: env.e2bTemplate,
+      template: resolveSandboxTemplate(row.agent.config, env),
       envs: {
         E2B_API_KEY: env.e2bApiKey,
         VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
       },
       idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
     });
+    const sessionRepository = resolveSessionRepository(row);
+    const githubToken = await resolveGitHubToken(row, sessionRepository);
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
       agentFile: row.agent.body,
+      repositoryFullName: sessionRepository?.fullName ?? row.repository?.fullName,
+      repositoryDefaultBranch: sessionRepository?.defaultBranch ?? row.repository?.defaultBranch,
+      githubToken,
     });
     await materializeBrainForSession({
       sandbox,
@@ -1342,6 +1732,37 @@ async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     }
     throw error;
   }
+}
+
+function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
+  return agentConfig.tools.some(
+    (tool) => tool.id === "amp" && typeof tool.repository === "string" && tool.repository,
+  )
+    ? (env.ampE2bTemplate ?? "amp")
+    : env.e2bTemplate;
+}
+
+function resolveSessionRepository(row: LoadedSession) {
+  const ampTool = row.agent.config.tools.find((tool) => tool.id === "amp");
+  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
+  return (
+    row.agent.config.integrations.github.repositories.find(
+      (repository) => repository.id === ampTool.repository,
+    ) ?? null
+  );
+}
+
+async function resolveGitHubToken(
+  row: LoadedSession,
+  sessionRepository: ReturnType<typeof resolveSessionRepository>,
+) {
+  if (!sessionRepository) return getGitHubInstallationToken();
+
+  const integrationRepository = await loadGitHubWorkRepository(
+    row.workspace.id,
+    sessionRepository.fullName,
+  );
+  return getGitHubWorkInstallationToken(integrationRepository.installationId);
 }
 
 async function parkSandboxWhenIdle(sandbox: SandboxHandle, env: RunnerEnv) {

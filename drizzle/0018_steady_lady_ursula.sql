@@ -3,6 +3,8 @@ CREATE TABLE "agent_session_amp_artifacts" (
 	"session_id" text NOT NULL,
 	"message_id" text,
 	"tool_call_id" text NOT NULL,
+	"amp_thread_id" text,
+	"continued_from_amp_thread_id" text,
 	"repository_full_name" text NOT NULL,
 	"branch_name" text,
 	"pull_request_url" text,
@@ -34,18 +36,7 @@ CREATE TABLE "workspace_github_integration_repositories" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "agents" ALTER COLUMN "config" SET DEFAULT '{"version":2,"title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb;--> statement-breakpoint
-UPDATE "agents"
-SET "config" = jsonb_build_object(
-	'version', 2,
-	'title', "name",
-	'instructions', "body",
-	'model', COALESCE("config"->'model', '{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"}'::jsonb),
-	'tools', '[]'::jsonb,
-	'integrations', '{"github":{"repositories":[]}}'::jsonb,
-	'triggers', '[]'::jsonb
-)
-WHERE "config"->>'version' IS DISTINCT FROM '2';--> statement-breakpoint
+ALTER TABLE "agents" ALTER COLUMN "config" SET DEFAULT '{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb;--> statement-breakpoint
 ALTER TABLE "agent_session_amp_artifacts" ADD CONSTRAINT "agent_session_amp_artifacts_session_id_agent_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."agent_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_session_amp_artifacts" ADD CONSTRAINT "agent_session_amp_artifacts_message_id_agent_session_messages_id_fk" FOREIGN KEY ("message_id") REFERENCES "public"."agent_session_messages"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "workspace_github_integration_installations" ADD CONSTRAINT "workspace_github_integration_installations_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

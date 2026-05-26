@@ -57,9 +57,7 @@ describe("AgentEditor", () => {
     // would otherwise survive editor edits and re-pollute the next save.
     const ref = createRef<AgentEditorHandle>();
     const captured: Array<{ body: string; content: unknown }> = [];
-    const items = buildAgentMentionItems([
-      { fullName: "opencompany/web", defaultBranch: "main" },
-    ]);
+    const items = buildAgentMentionItems([{ fullName: "opencompany/web", defaultBranch: "main" }]);
 
     render(
       <AgentEditor

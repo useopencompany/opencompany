@@ -9,14 +9,20 @@ import {
   useEditor,
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useMemo, useState } from "react";
+import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
 import { createMentionSuggestion } from "./mentionSuggestion";
-import { AGENT_TOOL_MENTION_ITEMS, type AgentMentionItem } from "./tools";
+import { type AgentMentionItem, buildAgentMentionItems, findMentionItem } from "./tools";
 
 type Props = {
   initialBody: string;
-  onChange: (body: string) => void;
+  initialContent?: JSONContent | null;
+  onChange: (body: string, content: JSONContent) => void;
   mentionItems?: AgentMentionItem[];
+  onMentionSelect?: (item: AgentMentionItem) => void;
+};
+
+export type AgentEditorHandle = {
+  selectRepositoryMention: (repository: { fullName: string; defaultBranch: string }) => void;
 };
 
 const plainTextKeysExtension = Extension.create({
@@ -29,11 +35,16 @@ const plainTextKeysExtension = Extension.create({
   },
 });
 
-export function AgentEditor({
-  initialBody,
-  onChange,
-  mentionItems = AGENT_TOOL_MENTION_ITEMS,
-}: Props) {
+export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEditor(
+  {
+    initialBody,
+    initialContent,
+    onChange,
+    mentionItems = buildAgentMentionItems(),
+    onMentionSelect,
+  },
+  ref,
+) {
   const [isEmpty, setIsEmpty] = useState(initialBody.trim().length === 0);
   const mentionExtension = useMemo(
     () =>
@@ -41,28 +52,25 @@ export function AgentEditor({
         HTMLAttributes: {
           class: "agent-mention",
         },
-        suggestion: createMentionSuggestion(mentionItems),
+        suggestion: createMentionSuggestion({
+          getItems: () => mentionItems,
+          ...(onMentionSelect ? { onSelect: onMentionSelect } : {}),
+        }),
         renderText({ node, suggestion }) {
-          return `${suggestion?.char ?? "@"}${node.attrs.label ?? node.attrs.id}`;
+          return renderMentionText(node.attrs, suggestion?.char ?? "@");
         },
         renderHTML({ options, node }) {
           const id = typeof node.attrs.id === "string" ? node.attrs.id : "";
-          const kind = id.startsWith("model:")
-            ? "model"
-            : id.startsWith("tool:")
-              ? "tool"
-              : id.startsWith("brain/")
-                ? "brain"
-                : undefined;
+          const kind = mentionKindFromId(id);
 
           return [
             "span",
             mergeAttributes(options.HTMLAttributes, kind ? { "data-kind": kind } : {}),
-            `${node.attrs.mentionSuggestionChar ?? "@"}${node.attrs.label ?? node.attrs.id}`,
+            renderMentionText(node.attrs),
           ];
         },
       }),
-    [mentionItems],
+    [mentionItems, onMentionSelect],
   );
   const editor = useEditor({
     immediatelyRender: false,
@@ -79,20 +87,40 @@ export function AgentEditor({
       mentionExtension,
       plainTextKeysExtension,
     ],
-    content: bodyToTiptapDoc(initialBody, mentionItems),
+    content: hasUsableDocumentContent(initialContent, initialBody)
+      ? initialContent
+      : bodyToTiptapDoc(initialBody, mentionItems),
     editorProps: {
       attributes: {
         class: "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
       },
     },
     onUpdate: ({ editor }) => {
+      const doc = stripEmptyMentions(editor.getJSON());
       setIsEmpty(editor.isEmpty);
-      onChange(tiptapDocToBody(editor.getJSON()));
+      onChange(tiptapDocToBody(doc), doc);
     },
     onCreate: ({ editor }) => {
       setIsEmpty(editor.isEmpty);
     },
   });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      selectRepositoryMention(repository) {
+        if (!editor) return;
+        const item = findMentionItem(repository.fullName, buildAgentMentionItems([repository]));
+        if (!item) return;
+
+        const nextDoc = withRepositoryMention(stripEmptyMentions(editor.getJSON()), item);
+        editor.commands.setContent(nextDoc);
+        setIsEmpty(false);
+        onChange(tiptapDocToBody(nextDoc), nextDoc);
+      },
+    }),
+    [editor, onChange],
+  );
 
   return (
     <div className="relative">
@@ -104,6 +132,48 @@ export function AgentEditor({
       <EditorContent editor={editor} />
     </div>
   );
+});
+
+function hasUsableDocumentContent(
+  content: JSONContent | null | undefined,
+  body: string,
+): content is JSONContent {
+  return (
+    content?.type === "doc" &&
+    Array.isArray(content.content) &&
+    content.content.length > 0 &&
+    mentionsHaveDisplayText(content) &&
+    bodyMatchesContent(body, content)
+  );
+}
+
+function bodyMatchesContent(body: string, content: JSONContent) {
+  return normalizeBodyForComparison(tiptapDocToBody(content)) === normalizeBodyForComparison(body);
+}
+
+function normalizeBodyForComparison(body: string) {
+  return body
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function mentionsHaveDisplayText(node: JSONContent): boolean {
+  if (node.type === "mention" && mentionDisplayText(node.attrs).length === 0) {
+    return false;
+  }
+
+  return (node.content ?? []).every(mentionsHaveDisplayText);
+}
+
+function stripEmptyMentions(node: JSONContent): JSONContent {
+  if (!node.content) return node;
+  const next = (node.content ?? [])
+    .filter((child) => !(child.type === "mention" && mentionDisplayText(child.attrs).length === 0))
+    .map(stripEmptyMentions);
+  return { ...node, content: next };
 }
 
 function bodyToTiptapDoc(body: string, mentionItems: AgentMentionItem[]): JSONContent {
@@ -168,16 +238,6 @@ function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONC
   return content;
 }
 
-function findMentionItem(
-  id: string,
-  mentionItems: AgentMentionItem[],
-): AgentMentionItem | undefined {
-  return (
-    mentionItems.find((item) => item.mentionId === id) ??
-    mentionItems.find((item) => item.id === id)
-  );
-}
-
 function pushText(content: JSONContent[], text: string) {
   if (text.length === 0) return;
   content.push({ type: "text", text });
@@ -190,16 +250,115 @@ function tiptapDocToBody(doc: JSONContent) {
     .replace(/\s+$/g, "");
 }
 
+function withRepositoryMention(doc: JSONContent, item: AgentMentionItem): JSONContent {
+  const mention = mentionNode(item);
+  const next = cloneJsonContent(doc);
+  const path = lastGitHubMentionPath(next);
+
+  if (path) {
+    replaceAtPath(next, path, mention);
+    return next;
+  }
+
+  const paragraph = lastParagraph(next);
+  if (paragraph) {
+    paragraph.content ??= [];
+    if (paragraph.content.length > 0) {
+      paragraph.content.push({ type: "text", text: " " });
+    }
+    paragraph.content.push(mention);
+    return next;
+  }
+
+  return { type: "doc", content: [{ type: "paragraph", content: [mention] }] };
+}
+
+function mentionNode(item: AgentMentionItem): JSONContent {
+  return {
+    type: "mention",
+    attrs: {
+      id: item.mentionId,
+      label: item.label,
+      mentionSuggestionChar: "@",
+    },
+  };
+}
+
+function lastGitHubMentionPath(doc: JSONContent) {
+  let found: number[] | null = null;
+
+  walkContent(doc, [], (node, path) => {
+    if (node.type !== "mention") return;
+    const id = typeof node.attrs?.id === "string" ? node.attrs.id : "";
+    const label = typeof node.attrs?.label === "string" ? node.attrs.label : "";
+    if (id === "integration:github" || id === "github" || id.startsWith("integration:github:")) {
+      found = path;
+      return;
+    }
+    if (label.includes("/")) {
+      found = path;
+    }
+  });
+
+  return found;
+}
+
+function walkContent(
+  node: JSONContent,
+  path: number[],
+  visit: (node: JSONContent, path: number[]) => void,
+) {
+  visit(node, path);
+  node.content?.forEach((child, index) => walkContent(child, [...path, index], visit));
+}
+
+function replaceAtPath(doc: JSONContent, path: number[], nextNode: JSONContent) {
+  const parentPath = path.slice(0, -1);
+  const index = path.at(-1);
+  const parent = parentPath.reduce<JSONContent | undefined>(
+    (node, item) => node?.content?.[item],
+    doc,
+  );
+  if (!parent?.content || index === undefined) return;
+  parent.content[index] = nextNode;
+}
+
+function lastParagraph(doc: JSONContent) {
+  const blocks = doc.content ?? [];
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    if (blocks[index]?.type === "paragraph") return blocks[index];
+  }
+  return null;
+}
+
+function cloneJsonContent(doc: JSONContent): JSONContent {
+  return JSON.parse(JSON.stringify(doc)) as JSONContent;
+}
+
 function nodeText(node: JSONContent): string {
   if (node.type === "text") return node.text ?? "";
   if (node.type === "hardBreak") return "\n";
   if (node.type === "mention") {
-    const label = typeof node.attrs?.label === "string" ? node.attrs.label : null;
-    const id = typeof node.attrs?.id === "string" ? node.attrs.id : "";
-    return `@${label ?? id}`;
+    const displayText = mentionDisplayText(node.attrs);
+    return displayText.length > 0 ? `@${displayText}` : "";
   }
 
   return (node.content ?? []).map((child) => nodeText(child)).join("");
+}
+
+function renderMentionText(attrs: JSONContent["attrs"], fallbackChar = "@") {
+  const suggestionChar =
+    typeof attrs?.mentionSuggestionChar === "string" ? attrs.mentionSuggestionChar : fallbackChar;
+  const displayText = mentionDisplayText(attrs);
+  return displayText.length > 0 ? `${suggestionChar}${displayText}` : "";
+}
+
+function mentionDisplayText(attrs: JSONContent["attrs"]) {
+  const label = typeof attrs?.label === "string" ? attrs.label : "";
+  if (label.trim().length > 0) return label;
+
+  const id = typeof attrs?.id === "string" ? attrs.id : "";
+  return id.trim().length > 0 ? id : "";
 }
 
 function isMentionChar(char: string) {
@@ -212,4 +371,12 @@ function isMentionChar(char: string) {
     char === "/" ||
     char === "-"
   );
+}
+
+function mentionKindFromId(id: string) {
+  if (id.startsWith("model:")) return "model";
+  if (id.startsWith("tool:")) return "tool";
+  if (id.startsWith("integration:")) return "integration";
+  if (id.startsWith("brain/")) return "brain";
+  return undefined;
 }

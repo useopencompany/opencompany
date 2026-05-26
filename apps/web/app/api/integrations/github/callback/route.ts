@@ -22,7 +22,9 @@ export async function GET(request: Request) {
   try {
     state = verifyGitHubIntegrationState(stateValue);
   } catch {
-    return NextResponse.redirect(new URL("/settings/integrations?integration=github&setup=error", url));
+    return NextResponse.redirect(
+      new URL("/settings/integrations?integration=github&setup=error", url),
+    );
   }
 
   if (state.workspaceId !== current.workspace.id || state.userId !== current.user.id) {
@@ -59,14 +61,14 @@ export async function GET(request: Request) {
     await syncGitHubIntegrationRepositories({
       workspaceId: current.workspace.id,
       installationId,
-      accountLogin:
-        installation.account?.login ?? verifiedInstallation.account?.login ?? null,
-      accountType:
-        installation.account?.type ?? verifiedInstallation.account?.type ?? null,
+      accountLogin: installation.account?.login ?? verifiedInstallation.account?.login ?? null,
+      accountType: installation.account?.type ?? verifiedInstallation.account?.type ?? null,
       repositories,
     });
 
-    return NextResponse.redirect(new URL(appendIntegrationStatus(state.returnTo, "connected"), url));
+    return NextResponse.redirect(
+      new URL(appendIntegrationStatus(state.returnTo, "connected"), url),
+    );
   } catch {
     return NextResponse.redirect(new URL(appendIntegrationStatus(state.returnTo, "error"), url));
   }

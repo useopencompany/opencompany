@@ -88,6 +88,9 @@ V1 tools:
 - `git_diff`
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 
+`amp_coder` returns an `ampThreadId`. Later follow-up tasks can pass that id back as
+`ampThreadId` so the runner invokes `amp threads continue` instead of starting a fresh Amp thread.
+
 All file-oriented tools must remain confined to the session workdir. Keep path validation in the
 runtime/sandbox layer rather than relying on model behavior.
 

@@ -1,5 +1,5 @@
 import { getDb } from "@opencompany/db/client";
-import { agents, brainFiles } from "@opencompany/db/schema";
+import { agents, brainFiles, workspaceGitHubIntegrationRepositories } from "@opencompany/db/schema";
 import { and, asc, desc, eq, or } from "drizzle-orm";
 import { cache } from "react";
 import { type AgentPayload, serializeAgent } from "@/lib/agents/payload";
@@ -13,6 +13,20 @@ const loadBrainPathsForWorkspace = cache(async (workspaceId: string): Promise<st
     .orderBy(asc(brainFiles.path));
   return rows.map((row) => row.path);
 });
+
+const loadGitHubIntegrationRepositoriesForWorkspace = cache(
+  async (workspaceId: string): Promise<Array<{ fullName: string; defaultBranch: string }>> => {
+    const db = getDb();
+    return db
+      .select({
+        fullName: workspaceGitHubIntegrationRepositories.fullName,
+        defaultBranch: workspaceGitHubIntegrationRepositories.defaultBranch,
+      })
+      .from(workspaceGitHubIntegrationRepositories)
+      .where(eq(workspaceGitHubIntegrationRepositories.workspaceId, workspaceId))
+      .orderBy(asc(workspaceGitHubIntegrationRepositories.fullName));
+  },
+);
 
 export const loadAgentsForWorkspace = cache(
   async (workspaceId: string): Promise<AgentPayload[]> => {
@@ -30,7 +44,7 @@ export const loadAgentsForWorkspace = cache(
 export const loadAgentForWorkspace = cache(
   async (workspaceId: string, idOrPath: string): Promise<AgentPayload | null> => {
     const db = getDb();
-    const [[agent], brainPaths] = await Promise.all([
+    const [[agent], brainPaths, githubIntegrationRepositories] = await Promise.all([
       db
         .select()
         .from(agents)
@@ -42,8 +56,9 @@ export const loadAgentForWorkspace = cache(
         )
         .limit(1),
       loadBrainPathsForWorkspace(workspaceId),
+      loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
     ]);
 
-    return agent ? serializeAgent(agent, brainPaths) : null;
+    return agent ? serializeAgent(agent, brainPaths, githubIntegrationRepositories) : null;
   },
 );

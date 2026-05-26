@@ -77,9 +77,9 @@ describe(".agent files", () => {
       body: "Find people with @exa and use @deep.",
     });
 
-    expect(source).toContain('title: "Research"');
+    expect(source).toContain("title: Research");
     expect(source).toContain("model: openai/gpt-5.4");
-    expect(source).toContain("  - exa");
+    expect(source).toContain("id: exa");
     expect(source).toContain("brain:");
     expect(source.endsWith("Find people with @exa and use @deep.")).toBe(true);
   });

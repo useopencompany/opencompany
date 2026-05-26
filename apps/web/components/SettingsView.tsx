@@ -7,8 +7,8 @@ import {
   ExternalLink,
   Gift,
   GitBranch,
-  Plug,
   LogOut,
+  Plug,
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";

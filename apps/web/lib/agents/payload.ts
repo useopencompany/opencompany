@@ -17,9 +17,14 @@ export type AgentPayload = {
   createdAt: string;
   updatedAt: string;
   brainPaths: string[];
+  githubIntegrationRepositories: Array<{ fullName: string; defaultBranch: string }>;
 };
 
-export function serializeAgent(agent: Agent, brainPaths: string[] = []): AgentPayload {
+export function serializeAgent(
+  agent: Agent,
+  brainPaths: string[] = [],
+  githubIntegrationRepositories: Array<{ fullName: string; defaultBranch: string }> = [],
+): AgentPayload {
   return {
     id: agent.id,
     workspaceId: agent.workspaceId,
@@ -34,6 +39,7 @@ export function serializeAgent(agent: Agent, brainPaths: string[] = []): AgentPa
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     brainPaths,
+    githubIntegrationRepositories,
   };
 }
 
