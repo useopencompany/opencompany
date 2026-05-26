@@ -320,24 +320,25 @@ body {
   }
 }
 
-.session-pulse {
-  animation: session-pulse 2.6s ease-in-out infinite;
+.session-pulse circle {
   transform-origin: center;
+  transform-box: fill-box;
+  animation: session-pulse 2.6s ease-in-out infinite;
 }
 
 @keyframes session-pulse {
   0%,
   100% {
-    transform: scale(1);
+    transform: scale(0.75);
   }
   50% {
-    transform: scale(1.333); /* 6px -> 8px integer */
+    transform: scale(1);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-pulse {
+  .session-pulse circle {
     animation: none;
-    opacity: 0.9;
+    transform: scale(0.9);
   }
 }
