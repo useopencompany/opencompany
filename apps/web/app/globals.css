@@ -319,3 +319,25 @@ body {
     -webkit-text-fill-color: currentColor;
   }
 }
+
+.session-pulse {
+  animation: session-pulse 2.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes session-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.333); /* 6px -> 8px integer */
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-pulse {
+    animation: none;
+    opacity: 0.9;
+  }
+}
