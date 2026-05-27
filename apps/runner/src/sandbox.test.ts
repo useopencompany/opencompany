@@ -17,7 +17,9 @@ import {
   prepareWorkspace,
   resolveSandboxToolPath,
   runSandboxTool,
+  SandboxPreparationError,
   sandboxLayout,
+  sandboxPreparationErrorFields,
 } from "./sandbox";
 
 afterEach(() => {
@@ -184,11 +186,17 @@ describe("prepareWorkspace", () => {
     );
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("clone --depth 1 --branch 'main'"),
-      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+      {
+        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+        timeoutMs: 120_000,
+      },
     );
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("-c http.extraheader"),
-      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+      {
+        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+        timeoutMs: 120_000,
+      },
     );
     expect(
       sandbox.commands.run.mock.calls.some(([command]) =>
@@ -197,7 +205,10 @@ describe("prepareWorkspace", () => {
     ).toBe(false);
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("'/home/user/workspace/work'"),
-      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+      {
+        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+        timeoutMs: 120_000,
+      },
     );
     expect(
       sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git -C")),
@@ -225,7 +236,10 @@ describe("prepareWorkspace", () => {
     expect(commands.some((command) => command.includes("git clone"))).toBe(false);
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("git remote set-url origin"),
-      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 30_000 },
+      {
+        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+        timeoutMs: 30_000,
+      },
     );
   });
 
@@ -243,8 +257,54 @@ describe("prepareWorkspace", () => {
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("clone --depth 1 --branch 'develop'"),
-      { envs: { GITHUB_TOKEN: "ghs_token" }, timeoutMs: 120_000 },
+      {
+        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+        timeoutMs: 120_000,
+      },
     );
+  });
+
+  it("adds searchable stage context to repository preparation failures", async () => {
+    const cloneError = new Error("exit status 128");
+    cloneError.name = "CommandExitError";
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (command: string) => {
+          if (command.includes("git remote get-url origin")) {
+            return { stdout: "__opencompany_missing_git__\n", stderr: "", exitCode: 0 };
+          }
+          if (command.includes(" clone --depth")) throw cloneError;
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    let caught: unknown;
+    try {
+      await prepareWorkspace({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+        repositoryFullName: "opencompany/app",
+        repositoryDefaultBranch: "main",
+        githubToken: "ghs_token",
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SandboxPreparationError);
+    expect(sandboxPreparationErrorFields(caught)).toMatchObject({
+      sandbox_stage: "clone_work_repository",
+      sandbox_command: "git_clone",
+      repository_full_name: "opencompany/app",
+      repository_default_branch: "main",
+      cause_name: "CommandExitError",
+      cause_message: "exit status 128",
+    });
   });
 
   it("matches tokenized GitHub remotes without exposing the token", () => {

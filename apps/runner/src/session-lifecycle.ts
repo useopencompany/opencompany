@@ -24,12 +24,14 @@ import {
   killSandbox,
   prepareWorkspace,
   type SandboxHandle,
+  sandboxPreparationErrorFields,
 } from "./sandbox";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
+  let sessionRepository: ReturnType<typeof resolveSessionRepository> = null;
   try {
     sandbox = await createOrConnectSandbox({
       sandboxId: row.session.e2bSandboxId,
@@ -40,7 +42,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       },
       idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
     });
-    const sessionRepository = resolveSessionRepository(row);
+    sessionRepository = resolveSessionRepository(row);
     const githubToken = await resolveGitHubToken(row, sessionRepository);
     await prepareWorkspace({
       sandbox,
@@ -75,6 +77,9 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       session_id: row.session.id,
       sandbox_id: sandbox?.sandboxId ?? row.session.e2bSandboxId,
       existing_sandbox: Boolean(row.session.e2bSandboxId),
+      repository_full_name: sessionRepository?.fullName,
+      repository_default_branch: sessionRepository?.defaultBranch,
+      ...sandboxPreparationErrorFields(error),
     });
     if (sandbox) {
       await parkSandboxWhenIdle(sandbox, env);

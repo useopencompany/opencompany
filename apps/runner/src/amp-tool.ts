@@ -11,6 +11,8 @@ import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
+const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
+
 export async function runAmpCoderTool(input: {
   sandbox: SandboxHandle;
   workdir: string;
@@ -143,7 +145,7 @@ export async function runAmpCoderTool(input: {
       `cd ${shellQuote(layout.workRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
         branchName,
       )}`,
-      { envs: { GITHUB_TOKEN: token }, timeoutMs: 180_000 },
+      { envs: { [GITHUB_AUTH_HEADER_ENV]: gitAuthHeader(token) }, timeoutMs: 180_000 },
     );
     await requireLeaseWrite(
       isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
@@ -513,7 +515,13 @@ function githubRemoteUrl(repositoryFullName: string) {
 }
 
 function gitAuthExtraHeaderArg() {
-  return '-c http.extraheader="Authorization: Bearer $GITHUB_TOKEN"';
+  return `-c http.extraheader="$${GITHUB_AUTH_HEADER_ENV}"`;
+}
+
+function gitAuthHeader(token: string) {
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64",
+  )}`;
 }
 
 export async function readSandboxBrainSnapshot(sandbox: SandboxHandle, workdir: string) {
