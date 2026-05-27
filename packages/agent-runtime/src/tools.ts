@@ -10,6 +10,7 @@ import type { AgentConfigTool, AgentToolId } from "./types";
 export type RuntimeToolName =
   | "shell"
   | "read_file"
+  | "edit_file"
   | "write_file"
   | "list_files"
   | "git_diff"
@@ -93,10 +94,62 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
   },
   {
+    name: "edit_file",
+    kind: "sandbox",
+    description:
+      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work or ./brain. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        instructions: {
+          type: "string",
+          description:
+            "Brief human-readable summary of the intended change. Used for auditability and model planning.",
+        },
+        edits: {
+          type: "array",
+          description:
+            "Ordered exact replacements applied to an in-memory copy of the file. Each edit's oldString is matched against the content as mutated by prior edits in the same call. The file is only written if every edit succeeds.",
+          items: {
+            type: "object",
+            properties: {
+              oldString: {
+                type: "string",
+                description:
+                  "Exact existing text to replace. Include enough surrounding context to make it unique.",
+              },
+              newString: { type: "string", description: "Replacement text." },
+              replaceAll: {
+                type: "boolean",
+                description:
+                  "When true, replace every exact occurrence of oldString. Defaults to false.",
+                default: false,
+              },
+            },
+            required: ["oldString", "newString"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["path", "instructions", "edits"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use edit_file for targeted changes to existing text files.",
+      "The tool performs deterministic exact string replacement. It does not use regex, fuzzy matching, line numbers, or a hidden apply model.",
+      "Each oldString must match the current file exactly, including indentation and whitespace.",
+      "By default, oldString must appear exactly once. If the same replacement should happen everywhere, set replaceAll=true.",
+      "All edits in one call are applied in order to an in-memory copy and written once. Each oldString is matched against the content as mutated by prior edits in the same call, not against the original file. If any edit fails, no changes are written.",
+      "For simple line changes, set oldString to the exact current line plus enough surrounding context to make the match unique.",
+      "Use write_file for creating new files or intentionally replacing a whole file.",
+    ].join("\n"),
+  },
+  {
     name: "write_file",
     kind: "sandbox",
     description:
-      "Write a UTF-8 text file inside ./work or ./brain. The path must start with work/ or brain/.",
+      "Create or overwrite a UTF-8 text file inside ./work or ./brain. Use edit_file for targeted changes to existing files. The path must start with work/ or brain/.",
     parameters: {
       type: "object",
       properties: {

@@ -28,6 +28,7 @@ export function resolveAgentRuntimeConfig(input: {
     "Keep command output concise and explain material changes to the user.",
     "The sandbox workspace root contains exactly two visible file roots: ./work for session-local files and scratch work, and ./brain for mounted Brain context.",
     "File tools require paths prefixed with work/ or brain/. Bare paths like README.md are invalid; use work/README.md or brain/README.md.",
+    "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
           .map((reference) => formatBrainReferencePath(reference.path))

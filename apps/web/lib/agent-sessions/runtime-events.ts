@@ -718,7 +718,7 @@ function brainPathForToolCallPart(part: Record<string, unknown>) {
 }
 
 function brainPathForToolPayload(name: string, payload: unknown) {
-  if (name !== "write_file" || !isRecord(payload)) return undefined;
+  if ((name !== "write_file" && name !== "edit_file") || !isRecord(payload)) return undefined;
   return normalizeBrainWorkspacePath(payload.path);
 }
 

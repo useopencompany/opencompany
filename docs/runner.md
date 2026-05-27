@@ -73,6 +73,9 @@ Important details:
 - Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
 - Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`,
   `tool.completed`, and recoverable `tool.failed` results.
+- `edit_file` applies ordered exact-string replacements atomically to existing files. It is the
+  preferred tool for targeted file changes; `write_file` remains for creates and intentional
+  full-file overwrites.
 - Hosted tools have per-assistant-message budgets in the runner. Over-budget calls return a
   recoverable `tool.failed` result before reaching the provider, which bounds runaway search/fetch
   fan-out even if prompting fails.
@@ -95,6 +98,7 @@ V1 tools:
 
 - `shell`
 - `read_file`
+- `edit_file`
 - `write_file`
 - `list_files`
 - `git_diff`

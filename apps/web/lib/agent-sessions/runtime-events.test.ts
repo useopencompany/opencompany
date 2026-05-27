@@ -455,6 +455,43 @@ describe("buildRuntimeToolCallsForMessage", () => {
 
     expect(calls[0]?.brainPath).toBeUndefined();
   });
+
+  it("marks edit_file calls that update brain paths", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "edit_file",
+          input: {
+            path: "brain/foo.md",
+            instructions: "Update durable notes.",
+            edits: [{ oldString: "Old", newString: "New" }],
+          },
+        }),
+        event(2, "file.changed", {
+          messageId: "msg_assistant",
+          path: "brain/foo.md",
+          operation: "write",
+        }),
+        event(3, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "edit_file",
+          output: { path: "brain/foo.md", editsApplied: 1, replacements: 1, bytes: 3 },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls).toMatchObject([
+      {
+        id: "call_1",
+        name: "edit_file",
+        brainPath: "foo.md",
+      },
+    ]);
+  });
 });
 
 describe("buildAssistantTurnParts", () => {
