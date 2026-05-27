@@ -159,6 +159,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -246,6 +247,17 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     knownEventIds,
     onEvent: applyRuntimeEvent,
   });
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (input.length === 0) {
+      el.style.height = "";
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [input]);
 
   // Stale stream means the SSE connection is wedged, most often from a transient drop or an
   // expired runner token. Refresh just the stream credential so reconnects do not reload the
@@ -373,10 +385,11 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         </div>
 
         <div className="bg-canvas px-8 py-4">
-          <div className="mx-auto max-w-[760px]">
+          <div className="group/composer mx-auto max-w-[760px]">
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
-            <div className="flex items-end gap-2 rounded-xl border border-[#e4e4e0] bg-white px-3 py-2">
+            <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -386,16 +399,45 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   }
                 }}
                 placeholder="Ask this agent to do something"
-                rows={2}
-                className="min-h-10 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                rows={1}
+                className="max-h-[220px] min-h-9 flex-1 resize-none content-center bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
               />
-              <button
-                disabled={isPending || !input.trim()}
-                onClick={submit}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white disabled:opacity-40"
-              >
-                <ArrowUp size={14} strokeWidth={2.2} />
-              </button>
+              {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={requestAbort}
+                  aria-label="Stop generating"
+                  title="Stop generating"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[#f0c0b8] bg-[#fff5f3] text-[#9f2f21] transition-colors hover:bg-[#ffebe7] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  <CircleStop size={16} strokeWidth={1.9} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isPending || !input.trim()}
+                  onClick={submit}
+                  aria-label="Send message"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-[#111] text-white transition-opacity hover:bg-black disabled:opacity-40"
+                >
+                  <ArrowUp size={13} strokeWidth={2} />
+                </button>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/composer:opacity-100">
+              <span>
+                <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+                  ↵
+                </kbd>{" "}
+                send
+              </span>
+              <span>
+                <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+                  ⇧↵
+                </kbd>{" "}
+                new line
+              </span>
             </div>
           </div>
         </div>
