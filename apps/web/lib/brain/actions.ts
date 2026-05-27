@@ -4,12 +4,11 @@ import { getDb } from "@opencompany/db/client";
 import { brainFiles, brainSyncJobs } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { after } from "next/server";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { brainSyncJobUpsert, resolveBrainSyncRename } from "@/lib/brain/jobs";
 import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
-import { dispatchBrainSyncRequested } from "@/lib/brain/sync-events";
+import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
 
 type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
 
@@ -93,7 +92,7 @@ export async function renameBrainFile(
       }),
     ]);
 
-    queueBrainSync(workspace.id, to);
+    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: to });
     revalidatePath("/brain");
     return { ok: true, path: to };
   } catch (error) {
@@ -190,7 +189,9 @@ export async function renameBrainFolder(
       }),
     ]);
 
-    for (const move of movedFiles) queueBrainSync(workspace.id, move.path);
+    for (const move of movedFiles) {
+      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: move.path });
+    }
     revalidatePath("/brain");
     return { ok: true, path: to };
   } catch (error) {
@@ -223,7 +224,7 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
       }),
     ]);
 
-    queueBrainSync(workspace.id, normalized);
+    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: normalized });
     revalidatePath("/brain");
     return { ok: true, path: normalized };
   } catch (error) {
@@ -264,7 +265,9 @@ export async function deleteBrainFolder(path: string): Promise<BrainActionResult
 
     await db.batch([firstDeleteQuery, ...deleteQueries.slice(1)]);
 
-    for (const file of deletedFiles) queueBrainSync(workspace.id, file.path);
+    for (const file of deletedFiles) {
+      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: file.path });
+    }
     revalidatePath("/brain");
     return { ok: true, path: folderPath };
   } catch (error) {
@@ -324,18 +327,12 @@ async function upsertBrainFile(input: {
       }),
     ]);
 
-    queueBrainSync(workspace.id, path);
+    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path });
     revalidatePath("/brain");
     return { ok: true, path };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Save failed." };
   }
-}
-
-function queueBrainSync(workspaceId: string, path: string) {
-  after(async () => {
-    await dispatchBrainSyncRequested({ workspaceId, path });
-  });
 }
 
 function normalizeBrainFolderPath(path: string) {

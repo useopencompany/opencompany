@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [0.3.0] - 2026-05-27
+
+### Added
+- Deterministic `edit_file` support for hosted agents, giving runner sessions a safer and more reviewable way to modify files.
+- Expanded hosted Exa tools and clearer search schema guidance for agent research workflows.
+- Common Vercel AI Gateway model presets across the editor, runtime configuration, and billing calculations.
+- Model and turn-cost analytics for better visibility into session usage and credit spend.
+- Signup welcome emails, session-aware feedback reports, and an onboarding call booking step.
+- A pulsing sidebar indicator for active sessions.
+
+### Changed
+- Runner internals now separate session lifecycle, job leasing, tool dispatch, model streaming, and usage recording for more reliable hosted runs.
+- Agent file parsing, mention handling, runtime types, and after-session behavior now live in the shared agent runtime package used by both web and runner.
+- GitHub sync jobs now have retry and sweeper support to recover pending workspace file updates more reliably.
+- Development and review tooling now includes CodeRabbit configuration and more consistent local script environment loading.
+
+### Fixed
+- Blank user messages now survive session payload handling and runtime event rendering.
+- Agent detail mention caches no longer leak across agent boundaries.
+- Hosted tool fan-out is capped to avoid runaway parallel tool execution.
+- GitHub integration callback diagnostics now expose enough detail to troubleshoot failed setup flows.
+
 ## [0.2.0] - 2026-05-26
 
 ### Added
