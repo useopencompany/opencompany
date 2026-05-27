@@ -5,21 +5,29 @@ describe("runtime tool definitions", () => {
   it("keeps Exa category compatibility guidance in the visible search schema", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search");
 
-    expect(definition?.description).toContain("category=people/company");
-    expect(definition?.description).toContain("date filters");
-    expect(definition?.description).toContain("LinkedIn-only");
+    if (!definition) {
+      throw new Error("Expected exa_search runtime tool definition to exist");
+    }
 
-    const properties = definition?.parameters.properties as Record<
-      string,
-      { description?: string }
-    >;
+    expect(definition.description).toContain("category=people/company");
+    expect(definition.description).toContain("date filters");
+    expect(definition.description).toContain("LinkedIn-only");
 
-    expect(properties.category.description).toContain("cannot combine with date filters");
-    expect(properties.includeDomains.description).toContain("LinkedIn domains only");
-    expect(properties.excludeDomains.description).toContain("Not supported with category=people");
-    expect(properties.startPublishedDate.description).toContain(
-      "Not supported with category=people",
-    );
-    expect(properties.endPublishedDate.description).toContain("Not supported with category=people");
+    const properties = definition.parameters.properties as Record<string, { description?: string }>;
+    const descriptionFor = (propertyName: string) => {
+      const property = properties[propertyName];
+
+      if (!property?.description) {
+        throw new Error(`Expected ${propertyName} to have a description`);
+      }
+
+      return property.description;
+    };
+
+    expect(descriptionFor("category")).toContain("cannot combine with date filters");
+    expect(descriptionFor("includeDomains")).toContain("LinkedIn domains only");
+    expect(descriptionFor("excludeDomains")).toContain("Not supported with category=people");
+    expect(descriptionFor("startPublishedDate")).toContain("Not supported with category=people");
+    expect(descriptionFor("endPublishedDate")).toContain("Not supported with category=people");
   });
 });
