@@ -238,7 +238,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     kind: "hosted",
     configToolId: "exa",
     description:
-      "Search the live web with Exa, including vertical searches for people, companies, news, research papers, personal sites, and financial reports. Returns compact citation-friendly results with highlights.",
+      "Search the live web with Exa. Start with one broad source-seeking query, then refine from results. For category=people/company, do not use date filters or excludeDomains; category=people includeDomains must be LinkedIn-only.",
     parameters: {
       type: "object",
       properties: {
@@ -268,25 +268,29 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
             "financial report",
           ],
           description:
-            'Optional Exa vertical. Use "people" for finding professional profiles, founders, investors, executives, authors, or experts; use "company" for company homepages and profiles.',
+            'Optional Exa vertical. Use "people" for professional profiles, founders, investors, executives, authors, or experts; use "company" for company homepages and profiles. People/company searches cannot combine with date filters or excludeDomains.',
         },
         includeDomains: {
           type: "array",
           items: { type: "string" },
-          description: "Only return results from these domains.",
+          description:
+            "Only return results from these domains. With category=people, use LinkedIn domains only.",
         },
         excludeDomains: {
           type: "array",
           items: { type: "string" },
-          description: "Exclude results from these domains.",
+          description:
+            "Exclude results from these domains. Not supported with category=people or category=company.",
         },
         startPublishedDate: {
           type: "string",
-          description: "ISO 8601 lower bound for published date.",
+          description:
+            "ISO 8601 lower bound for published date. Not supported with category=people or category=company.",
         },
         endPublishedDate: {
           type: "string",
-          description: "ISO 8601 upper bound for published date.",
+          description:
+            "ISO 8601 upper bound for published date. Not supported with category=people or category=company.",
         },
         fresh: {
           type: "boolean",

@@ -16,7 +16,7 @@ import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
-  type AgentPayload,
+  type AgentListItemPayload,
   agentQueryKeys,
   fetchAgents,
 } from "@/lib/agents/payload";
@@ -115,7 +115,9 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 export default function MainPanel({ agents: initialAgents }: { agents: AgentOption[] }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
-  const cachedAgents = queryClient.getQueryData<AgentPayload[]>(agentQueryKeys.list(workspaceId));
+  const cachedAgents = queryClient.getQueryData<AgentListItemPayload[]>(
+    agentQueryKeys.list(workspaceId),
+  );
   const { data: agents = cachedAgents } = useQuery({
     queryKey: agentQueryKeys.list(workspaceId),
     queryFn: fetchAgents,

@@ -105,6 +105,8 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     agent_id: agent.id,
     session_id: sessionId,
     message_id: messageId,
+    model_provider: agent.config.model.provider,
+    model_name: agent.config.model.name,
     is_initial_message: true,
     message_length: trimmed.length,
   });
@@ -129,7 +131,12 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
 
   const db = getDb();
   const [session] = await db
-    .select({ id: agentSessions.id, agentId: agentSessions.agentId })
+    .select({
+      id: agentSessions.id,
+      agentId: agentSessions.agentId,
+      modelProvider: agentSessions.modelProvider,
+      modelName: agentSessions.modelName,
+    })
     .from(agentSessions)
     .where(
       and(
@@ -153,6 +160,8 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
     agent_id: session.agentId,
     session_id: sessionId,
     message_id: messageId,
+    model_provider: session.modelProvider,
+    model_name: session.modelName,
     is_initial_message: false,
     message_length: trimmed.length,
   });
