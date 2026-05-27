@@ -7,6 +7,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./types": {
+      "types": "./src/types.ts",
+      "default": "./src/types.ts"
     }
   },
   "scripts": {
@@ -14,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@opencompany/db": "workspace:*"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

@@ -26,6 +26,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
+import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { archiveAgentSession } from "@/lib/agent-sessions/actions";
@@ -143,8 +144,10 @@ function SessionHistoryItem({
 
   return (
     <div
-      className={`group flex w-full items-center rounded-md text-[13px] transition-colors duration-150 ${
-        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+        active
+          ? "mx-1.5 my-[3px] bg-[#e3e3df] text-ink"
+          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
       } ${isPending ? "opacity-60" : ""}`}
     >
       <Link
@@ -157,6 +160,9 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
+        {session.status === "running" || session.status === "provisioning" ? (
+          <SessionStatusDot status={session.status} pulse />
+        ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
       <button

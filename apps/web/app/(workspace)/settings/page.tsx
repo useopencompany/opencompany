@@ -2,7 +2,7 @@ import { getDb } from "@opencompany/db/client";
 import { workspaceRepositories } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
-import { requireCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
 
 function initialsFor(name: string, email: string) {
@@ -27,7 +27,7 @@ function formatDate(date: Date) {
 }
 
 export default async function SettingsPage() {
-  const { authUser, workspace } = await requireCurrentWorkspace();
+  const { authUser, workspace } = await currentWorkspace();
   const db = getDb();
   const [[repository], billing] = await Promise.all([
     db

@@ -1,13 +1,13 @@
+import { parseAgentFile, serializeAgentFile } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import { after } from "next/server";
-import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { resolveAgentPath } from "@/lib/agents/paths";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
-import type { AgentModelId } from "@/lib/agents/types";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 const AGENT_SYNC_DISPATCH_DELAY_MS = 10_000;
@@ -100,13 +100,6 @@ export function buildPendingAgent(input: {
       previousBlobSha: null,
     },
   };
-}
-
-export function agentSyncJobUpsert(
-  db: Pick<ReturnType<typeof getDb>, "insert">,
-  input: AgentSyncJobInput,
-) {
-  return prepareAgentSyncJobUpsert(db, input).query;
 }
 
 export function prepareAgentSyncJobUpsert(
@@ -202,7 +195,7 @@ export function scheduleAgentSyncDispatch(input: {
   });
 }
 
-export function errorLogFields(error: unknown) {
+function errorLogFields(error: unknown) {
   if (error instanceof Error) {
     return {
       error_name: error.name,

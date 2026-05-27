@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Called by: @opencompany/stripe-webhooks `bun run dev`, usually through the root dev stack.
+// Purpose: forwards Stripe CLI webhook events to the local web app.
+
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
 

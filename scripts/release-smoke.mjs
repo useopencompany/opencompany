@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Called by: .github/workflows/release-production.yml and root `bun run release:smoke`.
+// Purpose: polls production web and runner health checks after deployment.
+
 const webUrl = normalizeBaseUrl(process.env.PRODUCTION_WEB_URL || process.env.WEB_URL);
 const runnerUrl = normalizeBaseUrl(process.env.RUNNER_PUBLIC_URL);
 const expectedRelease = process.env.EXPECTED_RELEASE;

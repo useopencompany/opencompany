@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Called by: root `bun run infisical:export`.
+// Purpose: exports selected Infisical paths into a local dotenv file while preserving local-only keys.
+
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 

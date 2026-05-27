@@ -3,9 +3,14 @@ import {
   deriveAgentConfigFromBody,
   SUPPORTED_AGENT_MODELS,
   SUPPORTED_AGENT_TOOLS,
-} from "./mentions";
+} from "@opencompany/agent-runtime";
+import type {
+  AgentConfig,
+  AgentModelId,
+  AgentTriggerConfig,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import { asRecord, sanitizeTiptapDoc, type TiptapNode } from "./tiptap";
-import type { AgentConfig, AgentModelId, AgentTriggerConfig, TiptapDoc } from "./types";
 
 const TOOL_ID_BY_LABEL = new Map(
   SUPPORTED_AGENT_TOOLS.map((tool) => [tool.label.toLowerCase(), tool.id]),
@@ -14,26 +19,7 @@ const MODEL_ID_BY_LABEL = new Map(
   SUPPORTED_AGENT_MODELS.map((model) => [model.label.toLowerCase(), model.id]),
 );
 
-export {
-  type AgentConfigDerivationRepository,
-  deriveAgentConfigFromBody,
-  SUPPORTED_AGENT_MODELS,
-  SUPPORTED_AGENT_TOOLS,
-  toConfigTool,
-} from "./mentions";
-
-/**
- * Derives config from Tiptap JSON only for editor previews and legacy callers.
- * Persisted saves should use deriveAgentConfigFromBody so stale presentation
- * state cannot override the .agent body contract.
- */
-export function extractAgentConfig(input: { name: string; content: TiptapDoc }): AgentConfig {
-  return derivePreviewConfigFromTiptapDoc({
-    title: input.name,
-    content: input.content,
-    repositories: [],
-  }).config;
-}
+export { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@opencompany/agent-runtime";
 
 export function derivePreviewConfigFromTiptapDoc(input: {
   title: string;

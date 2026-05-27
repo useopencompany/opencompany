@@ -4,20 +4,23 @@ We use [WorkOS AuthKit](https://www.authkit.com) for session management and [`@w
 
 ## The flow
 
-1. `apps/web/proxy.ts` wraps the app with `authkitProxy`. Anything outside the public allowlist (`/`, `/signin`, `/signup`, auth routes, and docs) requires a session.
+1. `apps/web/proxy.ts` uses AuthKit's composable `authkit()` flow and returns through `handleAuthkitHeaders()`. Anything outside the public allowlist (`/`, `/signin`, `/signup`, auth routes, and docs) requires a session.
 2. Unauthenticated user hits a gated route → redirected to WorkOS hosted UI.
 3. After login, WorkOS redirects to `/auth/callback` → AuthKit sets the session cookie.
 4. The callback syncs the WorkOS user and Organization into Postgres. If WorkOS did not return an Organization, the app invisibly creates the user's default Organization and refreshes the session into it.
-5. The first request to any page calls `getCurrentWorkspace()` in `apps/web/lib/auth.ts`, which requires `session.organizationId` and resolves the app workspace by `workspaces.workos_organization_id`.
+5. The first request to any page calls `currentWorkspace()` in `apps/web/lib/auth.ts`, which requires `session.organizationId` and resolves the app workspace by `workspaces.workos_organization_id`.
 6. Subsequent requests use the cached context via React `cache()`.
 
-## Key helpers in `apps/web/lib/auth.ts`
+## The `currentWorkspace()` helper in `apps/web/lib/auth.ts`
 
-- `getOptionalCurrentWorkspace()` — returns `null` if no session. Use on public-ish pages.
-- `getCurrentWorkspace()` — calls `withAuth({ ensureSignedIn: true })`, redirects to sign-in if missing.
-- `requireCurrentWorkspace()` — returns the current workspace or redirects unauthenticated users to `/signup`.
+A single function with options:
 
-All three are React-`cache()`'d so calling them multiple times per request is free.
+- `currentWorkspace()` — returns the workspace, or redirects unauthenticated users to `/signup`.
+- `currentWorkspace({ optional: true })` — returns `null` if no session. Use on public-ish pages.
+- `currentWorkspace({ skipOnboarding: true })` — same as above but does not enforce the onboarding redirect. Combine with `optional` as needed.
+- `currentWorkspace({ requireAdmin: true })` — throws if the caller isn't a workspace admin.
+
+The underlying session/workspace lookup is React-`cache()`'d, so calling `currentWorkspace()` multiple times per request only hits the DB once.
 
 ## Configuring WorkOS
 
@@ -62,10 +65,10 @@ New sign-ups currently get one invisible default WorkOS Organization. Multi-work
 Anything not in `apps/web/proxy.ts`'s `unauthenticatedPaths` is protected by default. In the page itself:
 
 ```ts
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 export default async function Page() {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   // ...
 }
 ```

@@ -5,7 +5,7 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
-import type { AgentConfigTool, AgentToolId } from "@opencompany/db/schema";
+import type { AgentConfigTool, AgentToolId } from "./types";
 
 export type RuntimeToolName =
   | "shell"
@@ -536,16 +536,5 @@ export function getRuntimeToolHelp(toolName: string, enabledTools: readonly Runt
     help:
       definition.help ??
       "No extended help is available. Use the schema and description for this tool.",
-  };
-}
-
-export function toOpenAiTool(definition: RuntimeToolDefinition) {
-  return {
-    type: "function" as const,
-    function: {
-      name: definition.name,
-      description: definition.description,
-      parameters: definition.parameters,
-    },
   };
 }

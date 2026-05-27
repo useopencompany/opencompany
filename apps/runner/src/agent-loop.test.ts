@@ -331,6 +331,33 @@ describe("usage recording", () => {
     });
   });
 
+  it("reuses an incomplete assistant response for a retried user message", async () => {
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      messages: [
+        {
+          id: "msg_assistant_1",
+          sessionId: "ses_123",
+          status: "running",
+          responseToMessageId: "msg_user",
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      createAssistantMessageForLease({
+        id: "msg_assistant_1",
+        sessionId: "ses_123",
+        responseToMessageId: "msg_user",
+        leaseId: "run_123",
+        leaseOwner: "runner-test",
+      }),
+    ).resolves.toBe(true);
+
+    expect(db.state.messages).toHaveLength(1);
+  });
+
   it("blocks hosted search fan-out after the per-message budget", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);
@@ -1053,6 +1080,15 @@ function createLeaseDb(input: {
                     return [];
                   }
                   if (table === agentSessions) return [{ id: state.session.id }];
+                  if (table === agentSessionMessages) {
+                    return state.messages
+                      .filter((message) => message.responseToMessageId)
+                      .map((message) => ({
+                        id: message.id,
+                        status: message.status ?? "running",
+                      }))
+                      .slice(0, 1);
+                  }
                   return [];
                 },
               };

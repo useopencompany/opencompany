@@ -8,7 +8,7 @@ import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadSidebarSessionsForWorkspace } from "@/lib/agent-sessions/data";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
-import { requireCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 const SIDEBAR_COLLAPSED_COOKIE = "opencompany-sidebar-collapsed";
 
@@ -39,7 +39,7 @@ async function SidebarWithSessions({
 }
 
 export default async function AppShell({ children }: { children: React.ReactNode }) {
-  const { authUser, user, workspace } = await requireCurrentWorkspace();
+  const { authUser, user, workspace } = await currentWorkspace();
   const cookieStore = await cookies();
   const sidebarCollapsedCookie = cookieStore.get(SIDEBAR_COLLAPSED_COOKIE);
   const userName =

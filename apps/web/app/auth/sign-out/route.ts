@@ -1,6 +1,6 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { signOut } from "@workos-inc/authkit-nextjs";
-import { getOptionalCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 function signOutSource(request: Request) {
   const referer = request.headers.get("referer");
@@ -18,7 +18,7 @@ function signOutSource(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const context = await getOptionalCurrentWorkspaceWithoutOnboarding();
+  const context = await currentWorkspace({ optional: true, skipOnboarding: true });
   if (context) {
     await captureServerEvent("sign_out", context.user.id, {
       user_id: context.user.id,

@@ -2,10 +2,10 @@ import { getDb } from "@opencompany/db/client";
 import { brainFiles } from "@opencompany/db/schema";
 import { asc, eq } from "drizzle-orm";
 import BrainView from "@/components/BrainView";
-import { requireCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 export default async function BrainPage() {
-  const { workspace } = await requireCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const files = await getDb()
     .select()
     .from(brainFiles)

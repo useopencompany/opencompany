@@ -2,14 +2,14 @@
 
 An open platform for running AI agents inside a company.
 
-Agents are **plain-text files** — Markdown with a small YAML header — versioned in a GitHub repo per workspace. The web app is the editor and the operations layer. GitHub is the source of truth. Vercel AI Gateway is the runtime.
+Agents are **plain-text files** — Markdown with a small YAML header — versioned in a GitHub repo per workspace. The `.agent` file is the portable contract, while Postgres is the interactive source of truth for saved app state. GitHub stores asynchronously materialized, versioned copies. Vercel AI Gateway is the runtime.
 
 ## The model
 
 - **Workspace** — a tenant. One company, one managed private GitHub repo, one set of members.
 - **Agent** — a `.agent` file at `agents/<slug>.agent` in the workspace repo. Title, instructions, model, tools — one file, no separate config.
 - **Mentions** — write `@exa` or `@deep` in the body. The editor parses mentions and rewrites the frontmatter, so the instructions stay the source of truth.
-- **Sync** — every save commits to Postgres immediately and queues an asynchronous GitHub write. The editor never blocks on GitHub.
+- **Sync** — every save commits to Postgres immediately and queues an asynchronous GitHub write. The editor never blocks on GitHub, and failed GitHub sync does not make the app save unsaved.
 - **Runtime** — agents run through Vercel AI Gateway, which abstracts OpenAI, Anthropic, and other providers behind a single API.
 
 The `.agent` file is the contract. Anything that touches an agent — the UI, the sync worker, the runtime — reads or writes that format. See [docs/agent-file.md](./docs/agent-file.md) for the full spec.

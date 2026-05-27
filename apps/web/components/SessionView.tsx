@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -264,11 +265,14 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     startTransition(async () => {
       const result = await submitAgentSessionMessage(session.id, content);
       if (result.ok) {
-        queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
-          current
-            ? addUserMessageToSessionDetail(current, { messageId: result.messageId, content })
-            : current,
-        );
+        const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
+        if (current) {
+          const next = updateSessionStatusInDetail(
+            addUserMessageToSessionDetail(current, { messageId: result.messageId, content }),
+            "running",
+          );
+          seedSessionQueries(queryClient, workspaceId, next);
+        }
         return;
       }
       setFormError(result.error);
@@ -877,19 +881,6 @@ function InspectorStatusField({ status, lastError }: { status: string; lastError
       </div>
     </div>
   );
-}
-
-function SessionStatusDot({ status }: { status: string }) {
-  const tone =
-    status === "failed"
-      ? "bg-[#dc2626] shadow-[0_0_0_2px_rgba(220,38,38,0.1)]"
-      : status === "running" || status === "provisioning"
-        ? "bg-[#16a34a] shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
-        : status === "aborting" || status === "archiving"
-          ? "bg-[#d97706] shadow-[0_0_0_2px_rgba(217,119,6,0.11)]"
-          : "bg-ink-subtle/45";
-
-  return <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} />;
 }
 
 function InspectorLink({ label, href, value }: { label: string; href: string; value: string }) {

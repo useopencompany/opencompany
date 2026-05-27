@@ -1,19 +1,13 @@
 import { verifySessionStreamToken } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
-import { captureException, createLogger } from "@opencompany/observability";
+import { createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import Fastify from "fastify";
-import {
-  abortSession,
-  archiveSession,
-  runAfterSession,
-  runMessage,
-  startSession,
-} from "./agent-loop";
+import { abortSession, archiveSession } from "./agent-loop";
 import type { RunnerEnv } from "./env";
 import { listSessionEvents, type PersistedRuntimeEvent, subscribeSessionEvents } from "./events";
-import { generateSessionTitleForMessage } from "./session-title";
+import { enqueueRunnerJob } from "./jobs";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
@@ -54,12 +48,9 @@ export function createServer(env: RunnerEnv) {
       event: "opencompany.runner_session_start_accepted",
       session_id: id,
     });
-    void startSession(id, env).catch((error) => {
-      captureException(error, {
-        event: "opencompany.runner_start_failed",
-        session_id: id,
-      });
-      logger.error("Runner start session failed", { session_id: id, error });
+    await enqueueRunnerJob({
+      kind: "start",
+      sessionId: id,
     });
     reply.status(202).send({ ok: true });
   });
@@ -72,13 +63,10 @@ export function createServer(env: RunnerEnv) {
       session_id: id,
       message_id: messageId,
     });
-    void runMessage({ sessionId: id, messageId, env }).catch((error) => {
-      logger.error("Runner message failed", {
-        event: "opencompany.runner_message_failed",
-        session_id: id,
-        message_id: messageId,
-        error,
-      });
+    await enqueueRunnerJob({
+      kind: "message",
+      sessionId: id,
+      messageId,
     });
     reply.status(202).send({ ok: true });
   });
@@ -86,13 +74,10 @@ export function createServer(env: RunnerEnv) {
   app.post("/internal/sessions/:id/messages/:messageId/title", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id, messageId } = request.params as { id: string; messageId: string };
-    void generateSessionTitleForMessage({ sessionId: id, messageId, env }).catch((error) => {
-      captureException(error, {
-        event: "opencompany.runner_title_generation_failed",
-        session_id: id,
-        message_id: messageId,
-      });
-      logger.warn("Runner title generation failed", { session_id: id, message_id: messageId });
+    await enqueueRunnerJob({
+      kind: "title",
+      sessionId: id,
+      messageId,
     });
     reply.status(202).send({ ok: true });
   });
@@ -111,13 +96,10 @@ export function createServer(env: RunnerEnv) {
       session_id: id,
       message_id: messageId,
     });
-    void runAfterSession({ sessionId: id, messageId, env }).catch((error) => {
-      logger.error("Runner after-session failed", {
-        event: "opencompany.runner_after_session_failed",
-        session_id: id,
-        message_id: messageId,
-        error,
-      });
+    await enqueueRunnerJob({
+      kind: "after_session",
+      sessionId: id,
+      messageId,
     });
     reply.status(202).send({ ok: true });
   });
