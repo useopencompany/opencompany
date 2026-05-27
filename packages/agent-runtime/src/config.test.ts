@@ -1,6 +1,6 @@
-import type { AgentConfig } from "@opencompany/db/schema";
 import { describe, expect, it } from "vitest";
 import { resolveAgentRuntimeConfig } from "./config";
+import type { AgentConfig } from "./types";
 
 describe("resolveAgentRuntimeConfig", () => {
   it("builds the system prompt and keeps the configured Vercel AI Gateway model", () => {

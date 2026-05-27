@@ -22,10 +22,10 @@ import {
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
 import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 export async function createAgentSession(idOrPath: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
     return {
       ok: false,
@@ -64,7 +64,7 @@ export async function createAgentSession(idOrPath: string) {
 }
 
 export async function createAgentSessionFromPrompt(agentId: string, content: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
@@ -118,7 +118,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
 }
 
 export async function submitAgentSessionMessage(sessionId: string, content: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
@@ -166,7 +166,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
 }
 
 export async function abortAgentSession(sessionId: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const db = getDb();
   const [session] = await db
     .select({ id: agentSessions.id })
@@ -202,7 +202,7 @@ export async function abortAgentSession(sessionId: string) {
 }
 
 export async function archiveAgentSession(sessionId: string) {
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const db = getDb();
   const [session] = await db
     .select({

@@ -1,4 +1,4 @@
-import type { AgentModelId } from "@opencompany/db/schema";
+import type { AgentModelId } from "./types";
 
 export type ModelProviderOptions = Record<string, Record<string, boolean | number | string | null>>;
 

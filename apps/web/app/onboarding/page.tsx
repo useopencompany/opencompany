@@ -1,10 +1,10 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { redirect } from "next/navigation";
 import OnboardingForm from "@/components/OnboardingForm";
-import { getCurrentWorkspaceWithoutOnboarding, hasCompletedOnboarding } from "@/lib/auth";
+import { currentWorkspace, hasCompletedOnboarding } from "@/lib/auth";
 
 export default async function OnboardingPage() {
-  const { authUser, user, workspace } = await getCurrentWorkspaceWithoutOnboarding();
+  const { authUser, user, workspace } = await currentWorkspace({ skipOnboarding: true });
 
   if (await hasCompletedOnboarding(user)) {
     redirect("/");

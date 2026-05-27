@@ -1,3 +1,6 @@
+// Called by: @opencompany/inngest-dev `bun run dev`, usually through the root dev stack.
+// Purpose: starts the local Inngest dev server against the web app SDK endpoint.
+
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { env, exit } from "node:process";

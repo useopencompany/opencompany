@@ -5,7 +5,7 @@ import { brainFiles, brainSyncJobs } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { brainSyncJobUpsert, resolveBrainSyncRename } from "@/lib/brain/jobs";
 import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
@@ -25,7 +25,7 @@ export async function renameBrainFile(
   fromPath: string,
   toPath: string,
 ): Promise<BrainActionResult> {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
 
   try {
@@ -105,7 +105,7 @@ export async function renameBrainFolder(
   fromPath: string,
   toPath: string,
 ): Promise<BrainActionResult> {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
 
   try {
@@ -199,7 +199,7 @@ export async function renameBrainFolder(
 }
 
 export async function deleteBrainFile(path: string): Promise<BrainActionResult> {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
 
   try {
@@ -232,7 +232,7 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
 }
 
 export async function deleteBrainFolder(path: string): Promise<BrainActionResult> {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
 
   try {
@@ -277,7 +277,7 @@ async function upsertBrainFile(input: {
   content: string;
   createOnly: boolean;
 }): Promise<BrainActionResult> {
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
 
   try {
     const path = normalizeBrainPath(input.path);

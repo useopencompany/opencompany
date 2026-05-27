@@ -1,9 +1,9 @@
+import { parseAgentFile, serializeAgentFile } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents } from "@opencompany/db/schema";
 import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
 import { ensureUserOnboardingScaffold } from "./scaffold";

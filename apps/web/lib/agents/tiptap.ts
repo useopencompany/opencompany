@@ -1,19 +1,11 @@
-import type { TiptapDoc } from "./types";
+import type {
+  JsonValue,
+  TiptapDoc,
+  TiptapMark,
+  TiptapNode,
+} from "@opencompany/agent-runtime/types";
 
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
-
-export type TiptapNode = {
-  type?: string;
-  text?: string;
-  attrs?: Record<string, JsonValue>;
-  marks?: TiptapMark[];
-  content?: TiptapNode[];
-};
-
-type TiptapMark = {
-  type: string;
-  attrs?: Record<string, JsonValue>;
-};
+export type { TiptapNode } from "@opencompany/agent-runtime/types";
 
 export function sanitizeTiptapDoc(value: unknown): TiptapDoc {
   const doc = asRecord(value);

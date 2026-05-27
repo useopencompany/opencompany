@@ -1,4 +1,4 @@
-import { agentPathForSlug, slugifyAgentTitle } from "@/lib/agents/agent-file";
+import { agentPathForSlug, slugifyAgentTitle } from "@opencompany/agent-runtime";
 
 export function resolveAgentPath(input: {
   title: string;

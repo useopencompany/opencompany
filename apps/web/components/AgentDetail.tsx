@@ -1,5 +1,7 @@
 "use client";
 
+import { serializeAgentFrontmatter } from "@opencompany/agent-runtime";
+import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -43,7 +45,6 @@ import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { updateAgent } from "@/lib/agents/actions";
-import { serializeAgentFrontmatter } from "@/lib/agents/agent-file";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
@@ -52,7 +53,6 @@ import {
   fetchAgent,
   fetchAgents,
 } from "@/lib/agents/payload";
-import type { AgentConfig, AgentModelId, TiptapDoc } from "@/lib/agents/types";
 
 type Props = {
   idOrPath: string;

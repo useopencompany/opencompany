@@ -1,6 +1,6 @@
 import { captureException, createLogger } from "@opencompany/observability";
 import { NextResponse } from "next/server";
-import { requireCurrentWorkspaceAdmin } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import {
   appendIntegrationStatus,
   buildGitHubUserAuthorizationUrl,
@@ -17,7 +17,7 @@ import { syncGitHubIntegrationRepositories } from "@/lib/integrations/service";
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export async function GET(request: Request) {
-  const current = await requireCurrentWorkspaceAdmin();
+  const current = await currentWorkspace({ requireAdmin: true });
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 

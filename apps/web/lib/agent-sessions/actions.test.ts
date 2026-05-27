@@ -10,7 +10,7 @@ import {
 } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import {
   createAgentSession,
   createAgentSessionFromPrompt,
@@ -41,7 +41,7 @@ vi.mock("next/server", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  getCurrentWorkspace: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/agent-sessions/data", () => ({
@@ -63,7 +63,7 @@ vi.mock("@/lib/agent-sessions/runner", () => ({
   getRunnerPublicUrl: vi.fn().mockReturnValue(null),
 }));
 
-const getCurrentWorkspaceMock = vi.mocked(getCurrentWorkspace);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const hasPositiveWorkspaceBalanceMock = vi.mocked(hasPositiveWorkspaceBalance);
 const getDbMock = vi.mocked(getDb);
 const newAgentSessionIdMock = vi.mocked(newAgentSessionId);
@@ -141,7 +141,7 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
 describe("createAgentSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
@@ -233,7 +233,7 @@ describe("createAgentSession", () => {
 describe("createAgentSessionFromPrompt", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);
@@ -317,7 +317,7 @@ describe("createAgentSessionFromPrompt", () => {
 describe("submitAgentSessionMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);

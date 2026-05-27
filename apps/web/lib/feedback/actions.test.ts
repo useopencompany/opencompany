@@ -1,17 +1,17 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { submitFeedback } from "./actions";
 
 vi.mock("@/lib/auth", () => ({
-  getCurrentWorkspace: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
 }));
 
-const getCurrentWorkspaceMock = vi.mocked(getCurrentWorkspace);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const getDbMock = vi.mocked(getDb);
 
 function mockSessionLookup(rows: Array<{ id: string }>) {
@@ -73,7 +73,7 @@ describe("submitFeedback", () => {
     delete process.env.LINEAR_FEEDBACK_PROJECT_ID;
     delete process.env.LINEAR_FEEDBACK_LABELS;
 
-    getCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       authUser: {
         id: "workos_123",
         email: "lee@example.com",
@@ -84,7 +84,7 @@ describe("submitFeedback", () => {
       workspace: { id: "wks_123", name: "Acme" },
       role: "member",
       isNewUser: false,
-    } as Awaited<ReturnType<typeof getCurrentWorkspace>>);
+    } as Awaited<ReturnType<typeof currentWorkspace>>);
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(labelsResponse()));
   });

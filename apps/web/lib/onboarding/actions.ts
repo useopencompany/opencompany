@@ -5,7 +5,7 @@ import { getDb } from "@opencompany/db/client";
 import { onboardingResponses, workspaces } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { ensureUserOnboardingScaffold } from "@/lib/onboarding/scaffold";
 import {
   type FieldErrors,
@@ -45,7 +45,7 @@ export async function completeOnboarding(
     return { errors, values };
   }
 
-  const { user, workspace } = await getCurrentWorkspaceWithoutOnboarding();
+  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const db = getDb();
   const now = new Date();
 

@@ -1,7 +1,9 @@
+import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -11,94 +13,6 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-
-export type TiptapDoc = {
-  type: "doc";
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  content?: any[];
-};
-
-export type AgentToolId = "exa" | "amp";
-export type AgentModelId =
-  | "openai/gpt-5.4-mini"
-  | "openai/gpt-5.4"
-  | "openai/gpt-5.4-nano"
-  | "anthropic/claude-haiku-4.5"
-  | "anthropic/claude-sonnet-4.6"
-  | "anthropic/claude-opus-4.7"
-  | "google/gemini-3-flash"
-  | "google/gemini-3.1-flash-lite-preview"
-  | "deepseek/deepseek-v4-flash"
-  | "mistral/mistral-medium-3.5"
-  | "moonshotai/kimi-k2.6"
-  | "zai/glm-5.1"
-  | "zai/glm-5-turbo"
-  | "zai/glm-5v-turbo";
-
-export type AgentHostedToolConfig = {
-  id: "exa";
-  type: "tool" | "hosted_tool";
-  label: string;
-  description: string;
-};
-
-export type AgentCodingToolConfig = {
-  id: "amp";
-  type: "coding_agent";
-  provider: "amp";
-  label: string;
-  description: string;
-  repository: string | null;
-  prCapable: boolean;
-};
-
-export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig;
-
-export type AgentBrainReference = {
-  path: string;
-  type: "file" | "folder";
-};
-
-export type AgentAfterSessionConfig = {
-  enabled: boolean;
-  prompt: string;
-  idleDelaySeconds: number;
-};
-
-export type AgentGitHubRepositoryConfig = {
-  id: string;
-  fullName: string;
-  defaultBranch: string;
-};
-
-export type AgentTriggerConfig = {
-  id: string;
-  type: "github.pull_request";
-  repository: string;
-  events: Array<"opened" | "reopened" | "synchronize" | "ready_for_review">;
-  branches: string[];
-  enabled: boolean;
-};
-
-export type AgentConfig = {
-  schemaVersion: "agent.v1";
-  version?: 2;
-  title: string;
-  instructions: string;
-  model: {
-    provider: "vercel-ai-gateway";
-    name: AgentModelId;
-  };
-  tools: AgentConfigTool[];
-  brain: AgentBrainReference[];
-  afterSession?: AgentAfterSessionConfig;
-  integrations: {
-    github: {
-      repositories: AgentGitHubRepositoryConfig[];
-    };
-  };
-  triggers: AgentTriggerConfig[];
-};
 
 export const users = pgTable(
   "users",
@@ -418,6 +332,49 @@ export const agentSessionAfterSessionRuns = pgTable(
       table.sessionId,
       table.lastUserMessageId,
       table.agentVersion,
+    ),
+  }),
+);
+
+export const agentSessionRunJobs = pgTable(
+  "agent_session_run_jobs",
+  {
+    id: serial("id").primaryKey(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "cascade",
+    }),
+    kind: text("kind").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    leaseId: text("lease_id"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    idempotencyIdx: uniqueIndex("agent_session_run_jobs_idempotency_idx").on(table.idempotencyKey),
+    sessionIdx: index("agent_session_run_jobs_session_idx").on(table.sessionId),
+    statusNextRunAtIdx: index("agent_session_run_jobs_status_next_run_at_idx").on(
+      table.status,
+      table.nextRunAt,
+    ),
+    leaseExpiresAtIdx: index("agent_session_run_jobs_lease_expires_at_idx").on(
+      table.leaseExpiresAt,
+    ),
+    kindCheck: check(
+      "agent_session_run_jobs_kind_check",
+      sql`${table.kind} IN ('start', 'message', 'title', 'after_session')`,
+    ),
+    statusCheck: check(
+      "agent_session_run_jobs_status_check",
+      sql`${table.status} IN ('pending', 'running', 'completed', 'failed')`,
     ),
   }),
 );
@@ -886,6 +843,7 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   toolUsage: many(agentSessionToolUsage),
   brainMounts: many(agentSessionBrainMounts),
   artifacts: many(agentSessionArtifacts),
+  runJobs: many(agentSessionRunJobs),
 }));
 
 export const agentSessionBrainMountsRelations = relations(agentSessionBrainMounts, ({ one }) => ({
@@ -938,6 +896,17 @@ export const agentSessionToolUsageRelations = relations(agentSessionToolUsage, (
   }),
   message: one(agentSessionMessages, {
     fields: [agentSessionToolUsage.messageId],
+    references: [agentSessionMessages.id],
+  }),
+}));
+
+export const agentSessionRunJobsRelations = relations(agentSessionRunJobs, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionRunJobs.sessionId],
+    references: [agentSessions.id],
+  }),
+  message: one(agentSessionMessages, {
+    fields: [agentSessionRunJobs.messageId],
     references: [agentSessionMessages.id],
   }),
 }));
@@ -1108,6 +1077,7 @@ export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
 export type AgentSessionArtifact = typeof agentSessionArtifacts.$inferSelect;
 export type AgentSessionToolUsage = typeof agentSessionToolUsage.$inferSelect;
+export type AgentSessionRunJob = typeof agentSessionRunJobs.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;

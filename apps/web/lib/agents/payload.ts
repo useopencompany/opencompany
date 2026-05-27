@@ -1,5 +1,5 @@
+import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
 import type { Agent } from "@opencompany/db/schema";
-import type { AgentConfig, TiptapDoc } from "@/lib/agents/types";
 
 export const AGENTS_QUERY_STALE_TIME_MS = 30_000;
 
