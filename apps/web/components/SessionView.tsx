@@ -340,7 +340,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="border-b border-[#eaeae6] bg-canvas/90 px-6 py-3">
-          <div className="mx-auto flex w-full max-w-[640px] items-center gap-3">
+          <div className="mx-auto flex w-full max-w-[320px] items-center gap-3">
             <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
             <div className="min-w-0 pr-10">
               <div className="truncate text-[13px] font-medium tracking-[-0.005em] text-ink">
@@ -394,7 +394,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
               </div>
             </div>
           ) : null}
-          <div className="mx-auto max-w-[640px] space-y-5">
+          <div className="mx-auto max-w-[320px] space-y-5">
             {runtime.lastError ? (
               <div className="flex items-start gap-2 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[12.5px] leading-5 text-[#9f1d1d]">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
@@ -448,8 +448,8 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   <div
                     className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-7 after:content-[''] ${
                       message.role === "user"
-                        ? "max-w-[62%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
-                        : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
+                        ? "max-w-[62%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+                        : "max-w-[86%] break-words text-[14px] leading-6 text-ink/90"
                     }`}
                   >
                     {message.role === "assistant" ? (
@@ -479,7 +479,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 {backgroundParts.map((part) =>
                   part.type === "tool-call" ? (
                     <div key={part.toolCall.id} className="flex justify-start">
-                      <div className="max-w-[86%] break-words text-[13px] leading-6 text-ink/90">
+                      <div className="max-w-[86%] break-words text-[14px] leading-6 text-ink/90">
                         <ToolCallCard toolCall={part.toolCall} />
                       </div>
                     </div>
@@ -491,7 +491,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         </div>
 
         <div className="bg-canvas px-8 py-4">
-          <div className="group/composer mx-auto max-w-[640px]">
+          <div className="group/composer mx-auto max-w-[320px]">
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
             <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               <div ref={attachMenuRef} className="relative">
@@ -557,7 +557,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 }}
                 placeholder="Ask this agent to do something"
                 rows={1}
-                className="max-h-[220px] min-h-9 flex-1 resize-none content-center bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                className="max-h-[220px] min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
               />
               {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
                 <button
