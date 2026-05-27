@@ -15,6 +15,8 @@ export type RuntimeToolName =
   | "git_diff"
   | "amp_coder"
   | "exa_search"
+  | "exa_contents"
+  | "exa_answer"
   | "web_fetch"
   | "tool_help";
 
@@ -43,8 +45,8 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     id: "exa",
     type: "hosted_tool",
     label: "exa",
-    description: "Deep research on the web and people.",
-    runtimeTools: ["exa_search", "web_fetch"],
+    description: "Web research with search, content extraction, people lookup, and cited answers.",
+    runtimeTools: ["exa_search", "exa_contents", "exa_answer", "web_fetch"],
   },
   {
     id: "amp",
@@ -183,7 +185,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     kind: "hosted",
     configToolId: "exa",
     description:
-      "Search the live web with Exa and return compact, citation-friendly results with highlights.",
+      "Search the live web with Exa, including vertical searches for people, companies, news, research papers, personal sites, and financial reports. Returns compact citation-friendly results with highlights.",
     parameters: {
       type: "object",
       properties: {
@@ -198,7 +200,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         type: {
           type: "string",
-          enum: ["auto", "fast", "instant", "deep-lite", "deep"],
+          enum: ["auto", "fast", "instant", "deep-lite", "deep", "deep-reasoning"],
           description: "Search mode. Defaults to auto.",
           default: "auto",
         },
@@ -212,7 +214,8 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
             "personal site",
             "financial report",
           ],
-          description: "Optional Exa category filter.",
+          description:
+            'Optional Exa vertical. Use "people" for finding professional profiles, founders, investors, executives, authors, or experts; use "company" for company homepages and profiles.',
         },
         includeDomains: {
           type: "array",
@@ -245,11 +248,120 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Use exa_search when you need current web evidence, source discovery, company/person/news/research lookup, or citation-ready URLs.",
       "Defaults are type=auto, numResults=5, and highlights-only content to keep context small.",
       "Avoid launching many search calls at once. Inspect results before deciding whether more searches are useful.",
-      "Use type=fast or instant only when latency matters more than depth. Use deep/deep-lite only for complex multi-source synthesis.",
+      "Use type=fast or instant only when latency matters more than depth. Use deep/deep-lite/deep-reasoning only for complex multi-source synthesis.",
       "Set fresh=true only for time-sensitive facts; it forces live crawling and can be slower.",
-      "For company and people categories, avoid excludeDomains and published date filters because Exa does not support those combinations.",
+      'For people lookup, set category="people" and use queries like "Jane Doe investor fintech LinkedIn" or "founders at Acme AI"; do not use published-date filters or excludeDomains.',
+      "For company and people categories, avoid excludeDomains and published date filters because Exa does not support those combinations. For people, includeDomains is only valid for LinkedIn domains.",
       'Prefer includeDomains for official-source lookups, for example includeDomains: ["sec.gov", "company.com"].',
-      "After finding a promising result, use web_fetch on the result URL to read the actual page text and links.",
+      "After finding promising URLs, use exa_contents to extract clean page text, highlights, summaries, PDFs, JavaScript-rendered pages, or selected subpages.",
+    ].join("\n"),
+  },
+  {
+    name: "exa_contents",
+    kind: "hosted",
+    configToolId: "exa",
+    description:
+      "Extract clean LLM-ready content from known URLs with Exa. Use it after search or when the user provides URLs; it handles complex pages, JavaScript-rendered pages, PDFs, summaries, highlights, and subpage crawling better than a raw HTTP fetch.",
+    parameters: {
+      type: "object",
+      properties: {
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "URLs to extract. Maximum 10 per call in this harness; keep batches small and focused.",
+        },
+        mode: {
+          type: "string",
+          enum: ["highlights", "text", "summary"],
+          description:
+            "Extraction mode. Use highlights for efficient evidence, text for full-page reading, and summary for source-level synthesis or structured extraction.",
+          default: "highlights",
+        },
+        query: {
+          type: "string",
+          description:
+            "Optional focus query for highlights or summary, such as the fact, section, or extraction target you care about.",
+        },
+        maxCharacters: {
+          type: "number",
+          description:
+            "Character budget per URL for highlights or text. Defaults are conservative; raise only when full context matters.",
+        },
+        summarySchema: {
+          type: "object",
+          description:
+            "Optional JSON Schema Draft 7 object for structured summary extraction. Only used with mode=summary.",
+        },
+        maxAgeHours: {
+          type: "number",
+          description:
+            "Content freshness. Omit for Exa default cache with livecrawl fallback; 0 always livecrawls; -1 uses cache only; positive values use cache if newer than that many hours.",
+        },
+        subpages: {
+          type: "number",
+          description:
+            "Number of linked subpages to crawl per URL. Start small, such as 3-5, when reading docs, company pages, or site sections.",
+        },
+        subpageTarget: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            'Keywords that guide subpage selection, such as ["pricing", "docs", "careers", "api"].',
+        },
+        includeLinks: {
+          type: "boolean",
+          description: "Whether to ask Exa for extracted page links. Defaults to false.",
+          default: false,
+        },
+      },
+      required: ["urls"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use exa_contents when you already have one or more URLs and need reliable page content, especially PDFs, docs pages, JavaScript-rendered pages, or pages where direct HTTP extraction may be poor.",
+      "Use mode=highlights first for agent workflows; it returns source excerpts that are much more token-efficient than full text.",
+      "Use mode=text when you must inspect the full page. Set maxCharacters to a bounded value such as 8000 or 15000.",
+      "Use mode=summary for page-level synthesis or structured extraction. Add query to say what to summarize; add summarySchema only when you need JSON-shaped output.",
+      "Use maxAgeHours=0 only when freshness is critical because livecrawl is slower and can cost more. Use maxAgeHours=-1 for static pages when speed matters.",
+      "Use subpages with subpageTarget for docs, company sites, pricing pages, careers pages, or support sections. Start with 3-5 subpages before expanding.",
+      "Check statuses in the output: Exa can return HTTP 200 while individual URLs fail to crawl.",
+    ].join("\n"),
+  },
+  {
+    name: "exa_answer",
+    kind: "hosted",
+    configToolId: "exa",
+    description:
+      "Ask Exa for a direct cited answer or short cited synthesis. Use it for quick factual questions or concise research answers when you want Exa to search and synthesize sources in one call.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "Natural-language question or instruction. Ask a specific, answerable question and include constraints such as date, geography, or source preference.",
+        },
+        includeText: {
+          type: "boolean",
+          description:
+            "Whether citations should include page text. Defaults to false to keep output compact.",
+          default: false,
+        },
+        outputSchema: {
+          type: "object",
+          description:
+            "Optional JSON Schema Draft 7 object for a structured answer instead of plain text.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use exa_answer for fast cited answers when the user asks a specific web-backed question and does not need you to manually inspect every source first.",
+      "Prefer exa_search plus exa_contents when source selection, detailed evidence review, or multi-step investigation matters.",
+      "Set includeText=true only when you need snippets from the cited pages; citation URLs and metadata are returned by default.",
+      "Use outputSchema only for small structured answers. For larger extraction tasks across known URLs, use exa_contents mode=summary with summarySchema.",
     ].join("\n"),
   },
   {
@@ -281,7 +393,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
     help: [
-      "Use web_fetch after exa_search finds a relevant URL, or when the user gives you a specific page to inspect.",
+      "Prefer exa_contents for robust extraction from known URLs when @exa is enabled. Use web_fetch as a free direct-HTTP fallback for simple HTML/text pages, or when you specifically need raw page links from a normal HTTP fetch.",
       "It does not run a browser. It performs a direct HTTP fetch, extracts readable text from HTML, and returns absolute links so you can fetch a follow-up page.",
       "Use it for articles, docs pages, company pages, and other mostly-readable pages. It may not work for JavaScript-rendered apps, PDFs, login-gated pages, or pages that block automated HTTP clients.",
       "Keep maxCharacters modest unless you need more context. The default is designed to avoid flooding the model context.",

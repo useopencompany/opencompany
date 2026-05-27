@@ -165,6 +165,26 @@ describe("executeHostedTool", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects Exa people searches with non-LinkedIn includeDomains before calling Exa", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "exa_search",
+        args: {
+          query: "OpenAI leadership",
+          category: "people",
+          includeDomains: ["example.com"],
+        },
+        env: env(),
+        enabledTools: ["tool_help", "exa_search"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("Exa people category searches only support LinkedIn includeDomains.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed Exa responses", async () => {
     vi.stubGlobal(
       "fetch",
@@ -180,6 +200,222 @@ describe("executeHostedTool", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow("unexpected response shape");
+  });
+
+  it("calls Exa contents for focused highlights and normalizes statuses", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            requestId: "contents_req_123",
+            costDollars: { total: 0.004 },
+            results: [
+              {
+                title: "Example Docs",
+                url: "https://example.com/docs",
+                highlights: ["Relevant docs excerpt"],
+                extras: { links: ["https://example.com/docs/api"] },
+                subpages: [
+                  {
+                    title: "API",
+                    url: "https://example.com/docs/api",
+                    highlights: ["API excerpt"],
+                  },
+                ],
+              },
+            ],
+            statuses: [
+              { id: "https://example.com/docs", status: "success" },
+              {
+                id: "https://example.com/missing",
+                status: "error",
+                error: { tag: "CRAWL_NOT_FOUND", httpStatusCode: 404 },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "exa_contents",
+      args: {
+        urls: ["https://example.com/docs"],
+        query: "API reference",
+        maxCharacters: 2000,
+        maxAgeHours: 0,
+        subpages: 3,
+        subpageTarget: ["api"],
+        includeLinks: true,
+      },
+      env: env(),
+      enabledTools: ["tool_help", "exa_contents"],
+      signal: new AbortController().signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.exa.ai/contents",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": "exa_test",
+        },
+        body: JSON.stringify({
+          urls: ["https://example.com/docs"],
+          maxAgeHours: 0,
+          livecrawlTimeout: 15000,
+          subpages: 3,
+          subpageTarget: ["api"],
+          extras: { links: 20 },
+          highlights: { query: "API reference", maxCharacters: 2000 },
+        }),
+      }),
+    );
+    expect(result.output).toEqual({
+      requestId: "contents_req_123",
+      costDollars: 0.004,
+      results: [
+        {
+          title: "Example Docs",
+          url: "https://example.com/docs",
+          highlights: ["Relevant docs excerpt"],
+          extras: { links: ["https://example.com/docs/api"] },
+          subpages: [
+            {
+              title: "API",
+              url: "https://example.com/docs/api",
+              highlights: ["API excerpt"],
+            },
+          ],
+        },
+      ],
+      statuses: [
+        { id: "https://example.com/docs", status: "success" },
+        {
+          id: "https://example.com/missing",
+          status: "error",
+          error: { tag: "CRAWL_NOT_FOUND", httpStatusCode: 404 },
+        },
+      ],
+    });
+    expect(result.usage).toMatchObject({
+      provider: "exa",
+      operation: "contents",
+      providerRequestId: "contents_req_123",
+      costUsdMicros: 4000,
+    });
+  });
+
+  it("calls Exa contents with text mode and truncates returned text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              results: [
+                {
+                  title: "Long Page",
+                  url: "https://example.com/long",
+                  text: "x".repeat(2000),
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const result = await executeHostedTool({
+      name: "exa_contents",
+      args: {
+        urls: ["https://example.com/long"],
+        mode: "text",
+        maxCharacters: 1000,
+      },
+      env: env(),
+      enabledTools: ["tool_help", "exa_contents"],
+      signal: new AbortController().signal,
+    });
+
+    expect((result.output as { results: Array<{ text: string }> }).results[0]?.text).toHaveLength(
+      1000,
+    );
+  });
+
+  it("calls Exa answer with compact citations", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            requestId: "answer_req_123",
+            answer: "Paris.",
+            citations: [
+              {
+                title: "Paris",
+                url: "https://example.com/paris",
+                text: "Full source text should not be forwarded by default",
+              },
+            ],
+            costDollars: { total: 0.006 },
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "exa_answer",
+      args: {
+        query: "What is the capital of France?",
+        outputSchema: {
+          type: "object",
+          properties: { answer: { type: "string" } },
+          required: ["answer"],
+        },
+      },
+      env: env(),
+      enabledTools: ["tool_help", "exa_answer"],
+      signal: new AbortController().signal,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.exa.ai/answer",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": "exa_test",
+        },
+        body: JSON.stringify({
+          query: "What is the capital of France?",
+          outputSchema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+          },
+        }),
+      }),
+    );
+    expect(result.output).toEqual({
+      requestId: "answer_req_123",
+      answer: "Paris.",
+      costDollars: 0.006,
+      citations: [
+        {
+          title: "Paris",
+          url: "https://example.com/paris",
+        },
+      ],
+    });
+    expect(result.usage).toMatchObject({
+      provider: "exa",
+      operation: "answer",
+      providerRequestId: "answer_req_123",
+      costUsdMicros: 6000,
+    });
   });
 
   it("fetches a web page and returns readable text with absolute links", async () => {
@@ -307,6 +543,26 @@ describe("getHostedToolFailureContext", () => {
     });
   });
 
+  it("classifies unsupported Exa people includeDomains for monitoring", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "exa_search",
+        args: {
+          query: "OpenAI leadership",
+          category: "people",
+          includeDomains: ["example.com"],
+        },
+        error: new Error("Exa people category searches only support LinkedIn includeDomains."),
+      }),
+    ).toMatchObject({
+      hosted_provider: "exa",
+      hosted_operation: "search",
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_unsupported_people_domain_filter",
+      exa_category: "people",
+    });
+  });
+
   it("classifies Exa provider HTTP failures with status", () => {
     expect(
       getHostedToolFailureContext({
@@ -322,10 +578,25 @@ describe("getHostedToolFailureContext", () => {
       provider_status: 401,
     });
   });
+
+  it("classifies Exa contents validation failures", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "exa_contents",
+        args: { urls: [] },
+        error: new Error("exa_contents urls must include at least one URL."),
+      }),
+    ).toMatchObject({
+      hosted_provider: "exa",
+      hosted_operation: "contents",
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_invalid_urls",
+    });
+  });
 });
 
 describe("validateHostedToolEnvironment", () => {
-  it("requires EXA_API_KEY only when exa_search is enabled", () => {
+  it("requires EXA_API_KEY only when an Exa provider tool is enabled", () => {
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help"],
@@ -335,6 +606,12 @@ describe("validateHostedToolEnvironment", () => {
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help", "exa_search"],
+        env: env({ exaApiKey: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "exa_contents"],
         env: env({ exaApiKey: undefined }),
       }),
     ).toThrow(MissingEnvError);

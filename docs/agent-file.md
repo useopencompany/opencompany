@@ -88,7 +88,7 @@ details are catalog data in code, not `.agent` file data.
 
 | ID    | Description                                      |
 | ----- | ------------------------------------------------ |
-| `exa` | Deep research on the web and people.             |
+| `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
 
 ```yaml
@@ -284,7 +284,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     name: "openai/gpt-5.4",
   },
   tools: [
-    { id: "exa", type: "hosted_tool", label: "exa", description: "Deep research on the web and people." },
+    { id: "exa", type: "hosted_tool", label: "exa", description: "Web research with search, content extraction, people lookup, and cited answers." },
   ],
   brain: [
     { path: "/", type: "folder" },

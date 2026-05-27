@@ -99,6 +99,8 @@ const activeRuns = new Map<string, { leaseId: string; controller: AbortControlle
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
   exa_search: 8,
+  exa_contents: 8,
+  exa_answer: 4,
   web_fetch: 12,
 };
 
