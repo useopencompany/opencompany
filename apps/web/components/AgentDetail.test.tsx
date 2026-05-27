@@ -1,5 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AgentConfig } from "@opencompany/agent-runtime/types";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";

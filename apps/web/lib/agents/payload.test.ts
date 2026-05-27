@@ -25,9 +25,7 @@ const agent = {
     content: [
       {
         type: "paragraph",
-        content: [
-          { type: "text", text: "Use @opencompany/web and @brain/product/brief.md." },
-        ],
+        content: [{ type: "text", text: "Use @opencompany/web and @brain/product/brief.md." }],
       },
     ],
   },
