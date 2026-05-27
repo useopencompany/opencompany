@@ -9,11 +9,14 @@ import {
   Check,
   ChevronRight,
   CircleStop,
+  ClipboardPaste,
   Copy,
   ExternalLink,
   LoaderCircle,
   PanelRight,
+  Plus,
   TerminalSquare,
+  Upload,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
@@ -145,7 +148,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   const session = detail.session;
   const { data: streamCredential } = useQuery({
     queryKey: streamCredentialKey,
@@ -159,7 +162,9 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -270,6 +275,25 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     lastStaleRefetchAtRef.current = now;
     void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
   }, [stream.status, queryClient, streamCredentialKey]);
+
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      if (!attachMenuRef.current) return;
+      if (!attachMenuRef.current.contains(event.target as Node)) {
+        setAttachMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAttachMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [attachMenuOpen]);
 
   const submit = () => {
     const content = input.trim();
@@ -408,6 +432,57 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
           <div className="group/composer mx-auto max-w-[760px]">
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
             <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+              <div ref={attachMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setAttachMenuOpen((prev) => !prev)}
+                  aria-label="Attach file"
+                  aria-expanded={attachMenuOpen}
+                  aria-haspopup="menu"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-[#6b6b6b] hover:bg-[#f3f3f0] hover:text-[#111]"
+                >
+                  <Plus size={15} strokeWidth={1.75} />
+                </button>
+                {attachMenuOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute bottom-full left-0 mb-2 z-20 min-w-[200px] overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        showToast({
+                          title: "Coming soon",
+                          description: "File attachments will be available soon.",
+                          tone: "default",
+                        });
+                        setAttachMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                    >
+                      <Upload size={13} strokeWidth={1.75} />
+                      Upload file
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        showToast({
+                          title: "Coming soon",
+                          description: "File attachments will be available soon.",
+                          tone: "default",
+                        });
+                        setAttachMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                    >
+                      <ClipboardPaste size={13} strokeWidth={1.75} />
+                      Paste from clipboard
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <textarea
                 ref={textareaRef}
                 value={input}
