@@ -31,7 +31,7 @@ import {
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
-import { serializeAgent } from "@/lib/agents/payload";
+import { serializeAgentDetail } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
@@ -296,7 +296,7 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
     pathChanged,
-    agent: updatedAgent ? serializeAgent(updatedAgent, brainPaths, githubRepositories) : null,
+    agent: updatedAgent ? serializeAgentDetail(updatedAgent, brainPaths, githubRepositories) : null,
   };
 
   revalidatePath("/agents");
