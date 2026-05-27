@@ -55,8 +55,7 @@ export function serializeAgentDetail(
   agent: Agent,
   brainPaths: string[] = [],
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
-  usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] =
-    githubIntegrationRepositories,
+  usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
 ): AgentDetailPayload {
   return {
     ...serializeAgentListItem(agent),

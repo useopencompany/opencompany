@@ -43,4 +43,34 @@ describe("githubStatus", () => {
       }),
     ).toBe("connected");
   });
+
+  it("returns error when not configured", () => {
+    expect(
+      githubStatus({
+        configured: false,
+        connectionStatuses: ["connected"],
+        availableRepositoryCount: 1,
+      }),
+    ).toBe("error");
+  });
+
+  it("returns not_connected when all connections are disconnected", () => {
+    expect(
+      githubStatus({
+        configured: true,
+        connectionStatuses: ["disconnected"],
+        availableRepositoryCount: 1,
+      }),
+    ).toBe("not_connected");
+  });
+
+  it("returns needs_repository_access when connected but no available repositories", () => {
+    expect(
+      githubStatus({
+        configured: true,
+        connectionStatuses: ["connected"],
+        availableRepositoryCount: 0,
+      }),
+    ).toBe("needs_repository_access");
+  });
 });

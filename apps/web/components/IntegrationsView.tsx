@@ -470,13 +470,15 @@ function DisconnectGitHubDialog({
   onConfirm: () => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
   useEffect(() => {
     if (!connection) return;
 
     const frame = window.requestAnimationFrame(() => cancelRef.current?.focus());
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onCancel();
+      if (event.key === "Escape") onCancelRef.current();
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -484,7 +486,7 @@ function DisconnectGitHubDialog({
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [connection, onCancel]);
+  }, [connection]);
 
   if (!connection) return null;
 
