@@ -1,5 +1,8 @@
 "use server";
 
+import { getDb } from "@opencompany/db/client";
+import { agentSessions } from "@opencompany/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { getCurrentWorkspace } from "@/lib/auth";
 
 type FeedbackKind = "bug" | "feedback" | "idea";
@@ -107,16 +110,18 @@ function buildDescription({
   kind,
   user,
   workspace,
+  sessionId,
 }: {
   message: string;
   kind: FeedbackKind;
   user: { email: string; firstName?: string | null; lastName?: string | null };
   workspace: { id: string; name: string };
+  sessionId?: string | null;
 }) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const submittedBy = name ? `${name} <${user.email}>` : user.email;
 
-  return [
+  const context = [
     message,
     "",
     "---",
@@ -124,8 +129,31 @@ function buildDescription({
     `Submitted by: ${submittedBy}`,
     `User email: ${user.email}`,
     `Workspace: ${workspace.name} (${workspace.id})`,
+    ...(sessionId ? [`Session ID: ${sessionId}`] : []),
     `Type: ${kind}`,
-  ].join("\n");
+  ];
+
+  return context.join("\n");
+}
+
+async function resolveFeedbackSessionId(sessionId: string, userId: string, workspaceId: string) {
+  if (!sessionId) return null;
+
+  const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspaceId),
+        eq(agentSessions.userId, userId),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  return session?.id ?? null;
 }
 
 async function linearGraphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -288,6 +316,7 @@ export async function submitFeedback(
 ): Promise<FeedbackActionState> {
   const rawKind = readString(formData, "kind");
   const message = readString(formData, "message");
+  const rawSessionId = readString(formData, "sessionId");
 
   const kind = isFeedbackKind(rawKind) ? rawKind : "feedback";
 
@@ -299,13 +328,15 @@ export async function submitFeedback(
     return { ok: false, error: "Keep feedback under 4,000 characters." };
   }
 
-  const { authUser, workspace } = await getCurrentWorkspace();
+  const { authUser, user, workspace } = await getCurrentWorkspace();
+  const sessionId = await resolveFeedbackSessionId(rawSessionId, user.id, workspace.id);
   const title = titleFromMessage(kind, message);
   const description = buildDescription({
     message,
     kind,
     user: authUser,
     workspace,
+    sessionId,
   });
 
   try {
