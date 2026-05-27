@@ -325,28 +325,26 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
               return (
                 <div
                   key={message.id}
-                  className={`flex ${
-                    message.role === "user" ? "justify-end" : "justify-start"
-                  }`}
+                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
                     className={`group/message flex w-fit max-w-full flex-col gap-1 ${
                       message.role === "user" ? "items-end" : "items-start"
                     }`}
                   >
-                  <div
-                    className={
-                      message.role === "user"
-                        ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
-                        : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
-                    }
-                  >
-                    {message.role === "assistant" ? (
-                      <AssistantMessageContent message={message} parts={assistantParts} />
-                    ) : (
-                      message.content
-                    )}
-                  </div>
+                    <div
+                      className={
+                        message.role === "user"
+                          ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
+                          : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
+                      }
+                    >
+                      {message.role === "assistant" ? (
+                        <AssistantMessageContent message={message} parts={assistantParts} />
+                      ) : (
+                        message.content
+                      )}
+                    </div>
                     {canCopy && message.status !== "running" ? (
                       <CopyMessageButton text={copyText} />
                     ) : null}
