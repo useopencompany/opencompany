@@ -110,7 +110,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         edits: {
           type: "array",
           description:
-            "Ordered exact replacements to apply atomically. All edits are validated before the file is written.",
+            "Ordered exact replacements applied to an in-memory copy of the file. Each edit's oldString is matched against the content as mutated by prior edits in the same call. The file is only written if every edit succeeds.",
           items: {
             type: "object",
             properties: {
@@ -140,7 +140,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool performs deterministic exact string replacement. It does not use regex, fuzzy matching, line numbers, or a hidden apply model.",
       "Each oldString must match the current file exactly, including indentation and whitespace.",
       "By default, oldString must appear exactly once. If the same replacement should happen everywhere, set replaceAll=true.",
-      "All edits in one call are applied in order to an in-memory copy and written once. If any edit fails, no changes are written.",
+      "All edits in one call are applied in order to an in-memory copy and written once. Each oldString is matched against the content as mutated by prior edits in the same call, not against the original file. If any edit fails, no changes are written.",
       "For simple line changes, set oldString to the exact current line plus enough surrounding context to make the match unique.",
       "Use write_file for creating new files or intentionally replacing a whole file.",
     ].join("\n"),
