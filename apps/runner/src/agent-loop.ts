@@ -1068,6 +1068,7 @@ async function captureTurnCompletedAnalytics(input: {
     .from(workspaceCreditLedger)
     .where(
       and(
+        eq(workspaceCreditLedger.workspaceId, input.workspaceId),
         eq(workspaceCreditLedger.sessionId, input.sessionId),
         eq(workspaceCreditLedger.messageId, input.assistantMessageId),
       ),
