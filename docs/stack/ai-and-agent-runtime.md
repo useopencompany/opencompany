@@ -128,6 +128,7 @@ Core tools are always available to runner sessions:
 
 - `shell`
 - `read_file`
+- `edit_file`
 - `write_file`
 - `list_files`
 - `git_diff`

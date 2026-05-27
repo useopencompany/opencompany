@@ -29,12 +29,19 @@ describe("agent detail API route", () => {
       path: "agents/leo.agent",
       name: "Leo",
       body: "Help with issues",
+      content: {
+        type: "doc",
+        content: [{ type: "paragraph", content: [{ type: "text", text: "Help with issues" }] }],
+      },
       config: {
         schemaVersion: "agent.v1",
         title: "Leo",
         instructions: "Help with issues",
         model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
         tools: [],
+        brain: [],
+        integrations: { github: { repositories: [] } },
+        triggers: [],
       },
       githubCommitSha: null,
       githubSyncedAt: null,
@@ -42,6 +49,8 @@ describe("agent detail API route", () => {
       githubSyncError: null,
       createdAt: "2026-05-24T10:00:00.000Z",
       updatedAt: "2026-05-24T10:00:00.000Z",
+      brainPaths: ["product/brief.md"],
+      githubIntegrationRepositories: [{ fullName: "opencompany/web", defaultBranch: "main" }],
     });
 
     const response = await GET(new Request("https://app.example.com/api/agents/agents/leo.agent"), {
@@ -53,6 +62,9 @@ describe("agent detail API route", () => {
       agent: expect.objectContaining({
         id: "agt_123",
         path: "agents/leo.agent",
+        body: "Help with issues",
+        brainPaths: ["product/brief.md"],
+        githubIntegrationRepositories: [{ fullName: "opencompany/web", defaultBranch: "main" }],
       }),
     });
     expect(loadAgentForWorkspaceMock).toHaveBeenCalledWith("wks_123", "agents/leo.agent");

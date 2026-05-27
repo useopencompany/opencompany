@@ -508,6 +508,49 @@ describe("usage recording", () => {
     );
   });
 
+  it("preflights edit_file paths before hydrating E2B", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => {
+      throw new Error("sandbox should not hydrate");
+    });
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        toolCallId: "call_edit",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("edit_file") as RuntimeToolDefinition,
+        args: {
+          path: "README.md",
+          instructions: "Edit a bare path.",
+          edits: [{ oldString: "old", newString: "new" }],
+        },
+        getSandbox,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["edit_file"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        code: "invalid_sandbox_path",
+        recoverable: true,
+      }),
+    });
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "edit_file",
+      toolCallId: "call_edit",
+    });
+  });
+
   it("returns recoverable sandbox execution failures as tool results after hydration", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);

@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+early_access: false
+tone_instructions: "Be direct, specific, and concise. Prioritize correctness, reliability, security, maintainability, and user-facing regressions."
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  commit_status: true
+  fail_commit_status: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: false
+  poem: false
+  in_progress_fortune: false
+  enable_prompt_for_ai_agents: true
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    ignore_title_keywords:
+      - "wip"
+      - "do not review"
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: "Use a concise, descriptive title that states the user-visible or engineering outcome."
+    description:
+      mode: "warning"
+    custom_checks:
+      - name: "Verification documented"
+        mode: "warning"
+        instructions: "The pull request description should list the checks or browser flows that were run. If verification was blocked, it should state the exact blocker."
+      - name: "Database migration included"
+        mode: "warning"
+        instructions: "If packages/db/src/schema.ts changes, the pull request must include the corresponding Drizzle migration under drizzle/ and explain any data or rollback implications."
+      - name: "Agent file contract preserved"
+        mode: "warning"
+        instructions: "If code changes parsing, editing, syncing, storing, or running .agent files, the pull request must preserve the contract documented in docs/agent-file.md."
+  path_instructions:
+    - path: "apps/web/**"
+      instructions: "Review against Next.js App Router conventions: prefer Server Components by default, use Client Components only for interactivity, use Server Actions for mutations where appropriate, and require loading, empty, error, and slow states for user-facing flows. UI changes should use existing design primitives and be verified in a browser when practical."
+    - path: "apps/runner/**"
+      instructions: "Review runner changes for agent runtime reliability, clear error propagation, safe handling of external inputs, and preservation of the .agent file product contract."
+    - path: "packages/db/src/schema.ts"
+      instructions: "Every Drizzle schema change must include a matching migration and should call out data, rollout, and rollback implications."
+    - path: "drizzle/**"
+      instructions: "Review migrations for consistency with packages/db/src/schema.ts, idempotent intent, production safety, and any destructive or one-way data operation."
+    - path: "**/*.agent"
+      instructions: "Preserve the plain-text agent file contract in docs/agent-file.md. Avoid hidden metadata or formatting changes that would make GitHub diffs less clear."
+    - path: ".github/workflows/**"
+      instructions: "Review CI changes for least privilege permissions, secret safety, deterministic Bun setup, and consistency with the local checks in CONTRIBUTING.md."
+
+knowledge_base:
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "docs/agent-file.md"
+      - "docs/database.md"
+      - "docs/deployment.md"
+      - "docs/env-vars.md"
+  learnings:
+    scope: "local"
+  issues:
+    scope: "local"
+  pull_requests:
+    scope: "local"
+
+chat:
+  art: false
+  auto_reply: true
+  allow_non_org_members: false
+
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "**/*.{ts,tsx}"
+        instructions: "Use the existing Vitest and Testing Library patterns. Prefer focused unit tests for pure logic and exercise real app paths for server actions or data flows when practical."
+  docstrings:
+    path_instructions:
+      - path: "**/*.{ts,tsx}"
+        instructions: "Only add docstrings when they clarify non-obvious behavior or public APIs. Do not narrate straightforward implementation details."

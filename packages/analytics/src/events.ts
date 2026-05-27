@@ -45,8 +45,25 @@ export type AnalyticsEventPropertiesByName = {
     agent_id: string;
     session_id: string;
     message_id: string;
+    model_provider: string;
+    model_name: string;
     is_initial_message: boolean;
     message_length: number;
+  };
+  session_turn_completed: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string;
+    session_id: string;
+    user_message_id: string;
+    assistant_message_id: string;
+    model_provider: string;
+    model_name: string;
+    provider_cost_usd_micros: number;
+    platform_fee_usd_micros: number;
+    total_cost_usd_micros: number;
+    model_cost_usd_micros: number;
+    tool_cost_usd_micros: number;
   };
   sign_out: {
     user_id: string;
@@ -127,8 +144,29 @@ export const analyticsEvents = {
       "agent_id",
       "session_id",
       "message_id",
+      "model_provider",
+      "model_name",
       "is_initial_message",
       "message_length",
+    ],
+  },
+  session_turn_completed: {
+    name: "session_turn_completed",
+    description: "An agent completed a turn in response to a user message.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "agent_id",
+      "session_id",
+      "user_message_id",
+      "assistant_message_id",
+      "model_provider",
+      "model_name",
+      "provider_cost_usd_micros",
+      "platform_fee_usd_micros",
+      "total_cost_usd_micros",
+      "model_cost_usd_micros",
+      "tool_cost_usd_micros",
     ],
   },
   sign_out: {

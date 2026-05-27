@@ -7,6 +7,7 @@ import {
   refreshIntoWorkspaceOrganization,
   syncUserAndWorkspace,
 } from "@/lib/auth";
+import { dispatchSignupWelcomeEmailRequested } from "@/lib/email/events";
 
 export const GET = handleAuth({
   returnPathname: "/onboarding",
@@ -25,6 +26,22 @@ export const GET = handleAuth({
           user_id: context.user.id,
           workspace_id: context.workspace.id,
         });
+
+        try {
+          await dispatchSignupWelcomeEmailRequested({
+            userId: context.user.id,
+            workspaceId: context.workspace.id,
+            email: context.user.email,
+            firstName: context.user.firstName,
+            lastName: context.user.lastName,
+          });
+        } catch (error) {
+          captureException(error, {
+            event: "opencompany.signup_welcome_email_dispatch_failed",
+            user_id: context.user.id,
+            workspace_id: context.workspace.id,
+          });
+        }
       }
     } catch (error) {
       captureException(error, {

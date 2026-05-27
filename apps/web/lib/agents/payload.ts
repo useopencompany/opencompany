@@ -15,45 +15,55 @@ export type GitHubIntegrationRepositoryPayload = AgentConfigDerivationRepository
   connectionStatus?: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
 };
 
-export type AgentPayload = {
+export type AgentListItemPayload = {
   id: string;
   workspaceId: string;
   path: string | null;
   name: string;
-  body: string;
-  content: TiptapDoc;
   config: AgentConfig;
-  githubCommitSha: string | null;
-  githubSyncedAt: string | null;
   githubSyncStatus: string;
   githubSyncError: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentDetailPayload = AgentListItemPayload & {
+  body: string;
+  content: TiptapDoc;
+  githubCommitSha: string | null;
+  githubSyncedAt: string | null;
   brainPaths: string[];
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
 };
 
-export function serializeAgent(
-  agent: Agent,
-  brainPaths: string[] = [],
-  githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
-  usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
-): AgentPayload {
+export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
   return {
     id: agent.id,
     workspaceId: agent.workspaceId,
     path: agent.path,
     name: agent.name,
-    body: agent.body || agent.config.instructions,
-    content: agent.content,
     config: agent.config,
-    githubCommitSha: agent.githubCommitSha,
-    githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,
     githubSyncStatus: agent.githubSyncStatus,
     githubSyncError: agent.githubSyncError,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
+  };
+}
+
+export function serializeAgentDetail(
+  agent: Agent,
+  brainPaths: string[] = [],
+  githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
+  usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] =
+    githubIntegrationRepositories,
+): AgentDetailPayload {
+  return {
+    ...serializeAgentListItem(agent),
+    body: agent.body || agent.config.instructions,
+    content: agent.content,
+    githubCommitSha: agent.githubCommitSha,
+    githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,
     brainPaths,
     githubIntegrationRepositories,
     usableGitHubIntegrationRepositories,
@@ -108,7 +118,21 @@ function gitHubRepositoryCatalogKey(repository: AgentConfigDerivationRepository)
   return repository.fullName.toLowerCase();
 }
 
-export function agentHref(agent: Pick<AgentPayload, "id" | "path">) {
+export function agentDetailToListItem(agent: AgentDetailPayload): AgentListItemPayload {
+  return {
+    id: agent.id,
+    workspaceId: agent.workspaceId,
+    path: agent.path,
+    name: agent.name,
+    config: agent.config,
+    githubSyncStatus: agent.githubSyncStatus,
+    githubSyncError: agent.githubSyncError,
+    createdAt: agent.createdAt,
+    updatedAt: agent.updatedAt,
+  };
+}
+
+export function agentHref(agent: Pick<AgentListItemPayload, "id" | "path">) {
   return `/agents/${agent.path ?? agent.id}`;
 }
 
@@ -134,17 +158,17 @@ async function readJson<T>(response: Response): Promise<T> {
   throw new Error(message);
 }
 
-export async function fetchAgents(): Promise<AgentPayload[]> {
+export async function fetchAgents(): Promise<AgentListItemPayload[]> {
   const response = await fetch("/api/agents", { cache: "no-store", credentials: "same-origin" });
-  const body = await readJson<{ agents: AgentPayload[] }>(response);
+  const body = await readJson<{ agents: AgentListItemPayload[] }>(response);
   return body.agents;
 }
 
-export async function fetchAgent(idOrPath: string): Promise<AgentPayload> {
+export async function fetchAgent(idOrPath: string): Promise<AgentDetailPayload> {
   const response = await fetch(`/api/agents/${agentApiPath(idOrPath)}`, {
     cache: "no-store",
     credentials: "same-origin",
   });
-  const body = await readJson<{ agent: AgentPayload }>(response);
+  const body = await readJson<{ agent: AgentDetailPayload }>(response);
   return body.agent;
 }

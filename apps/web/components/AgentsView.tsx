@@ -15,14 +15,14 @@ import { AgentsPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgent } from "@/lib/agents/actions";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
-  type AgentPayload,
+  type AgentListItemPayload,
   agentHref,
   agentQueryKeys,
   fetchAgent,
   fetchAgents,
 } from "@/lib/agents/payload";
 
-function collectMentions(agent: AgentPayload): AgentMentionItem[] {
+function collectMentions(agent: AgentListItemPayload): AgentMentionItem[] {
   const model = findMentionItem(`model:${agent.config.model.name}`);
   const tools = agent.config.tools.flatMap((tool) => {
     const item = findMentionItem(`tool:${tool.id}`);
@@ -70,7 +70,7 @@ function MarkdownPreviewThumb({ mentions }: { mentions: AgentMentionItem[] }) {
   );
 }
 
-function AgentRow({ agent, workspaceId }: { agent: AgentPayload; workspaceId: string }) {
+function AgentRow({ agent, workspaceId }: { agent: AgentListItemPayload; workspaceId: string }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const mentions = collectMentions(agent);
@@ -133,7 +133,7 @@ function NewAgentButton({ label = "New agent" }: { label?: string }) {
   );
 }
 
-export default function AgentsView({ initialAgents }: { initialAgents?: AgentPayload[] }) {
+export default function AgentsView({ initialAgents }: { initialAgents?: AgentListItemPayload[] }) {
   const { workspaceId } = useWorkspaceContext();
   const toolCount = AGENT_TOOLS.length;
   const modelCount = AGENT_MODELS.length;

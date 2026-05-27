@@ -76,6 +76,10 @@ Set these in Vercel Production.
 | `LINEAR_TEAM_ID` | No | Linear team for feedback. |
 | `LINEAR_FEEDBACK_PROJECT_ID` | No | Optional project routing for feedback. |
 | `LINEAR_FEEDBACK_LABELS` | No | Optional comma-separated labels. |
+| `RESEND_API_KEY` | No | Enables transactional email through Resend. Missing values disable email sends. |
+| `RESEND_WELCOME_FROM` | No | Sender identity for the signup welcome email. Defaults to `Louis from OpenCompany <louis@opencompany.cloud>`. |
+| `RESEND_REPLY_TO` | No | Reply-to address for transactional emails. Defaults to `louis@opencompany.cloud`. |
+| `RESEND_REGISTERED_USERS_SEGMENT_ID` | Required with `RESEND_API_KEY` | Resend Segment ID for the `Registered Users` Segment. Create the Segment in Resend and store its ID in Infisical/Vercel before enabling Resend. |
 | `NEXT_PUBLIC_POSTHOG_TOKEN` | No | Enables PostHog client/server analytics. |
 | `NEXT_PUBLIC_POSTHOG_HOST` | No | PostHog host. |
 | `NEXT_PUBLIC_ANALYTICS_DEBUG` | No | Local/debug analytics logging. |

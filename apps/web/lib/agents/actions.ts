@@ -38,7 +38,7 @@ import { randomAgentName } from "@/lib/agents/names";
 import {
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
-  serializeAgent,
+  serializeAgentDetail,
 } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
@@ -351,7 +351,7 @@ export async function updateAgent(
     path,
     pathChanged,
     agent: updatedAgent
-      ? serializeAgent(updatedAgent, brainPaths, derivationRepositories, usableRepositories)
+      ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories)
       : null,
   };
 
