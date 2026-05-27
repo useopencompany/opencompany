@@ -244,13 +244,23 @@ export async function runSandboxTool(input: {
     for (const [index, edit] of edits.entries()) {
       const count = countOccurrences(content, edit.oldString);
       if (count === 0) {
+        const crlfHint =
+          content.includes("\r\n") &&
+          !edit.oldString.includes("\r\n") &&
+          edit.oldString.includes("\n")
+            ? " The file uses CRLF (\\r\\n) line endings; include them in oldString."
+            : "";
         throw new Error(
-          `Edit ${index + 1} failed: oldString was not found in ${toolRelativePath}.`,
+          `Edit ${index + 1} failed: oldString was not found in ${toolRelativePath}.${crlfHint}`,
         );
       }
       if (!edit.replaceAll && count > 1) {
+        const cascadeHint =
+          index > 0
+            ? " A previous edit may have created additional matches — try descending order, more surrounding context, or replaceAll."
+            : "";
         throw new Error(
-          `Edit ${index + 1} failed: oldString matched ${count} times in ${toolRelativePath}. Include more context or set replaceAll=true.`,
+          `Edit ${index + 1} failed: oldString matched ${count} times in ${toolRelativePath}. Include more context or set replaceAll=true.${cascadeHint}`,
         );
       }
 
@@ -261,7 +271,11 @@ export async function runSandboxTool(input: {
     }
 
     if (content === originalContent) {
-      throw new Error(`No changes made to ${toolRelativePath}.`);
+      throw new Error(
+        edits.length > 1
+          ? `No net change to ${toolRelativePath} (edits cancel each other). Re-check the edit order or merge into a single edit.`
+          : `No changes made to ${toolRelativePath}.`,
+      );
     }
 
     await input.sandbox.files.write(filePath, content);
@@ -362,20 +376,29 @@ function readEditOperations(record: Record<string, unknown>): EditOperation[] {
   }
 
   return value.map((item, index) => {
-    const edit = asRecord(item);
-    const oldString = readString(edit, "oldString");
-    if (!oldString) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(
+        `Edit ${index + 1} must be an object with oldString and newString.`,
+      );
+    }
+    const edit = item as Record<string, unknown>;
+    if (typeof edit.oldString !== "string") {
+      throw new Error(`Edit ${index + 1} oldString must be a string.`);
+    }
+    if (edit.oldString === "") {
       throw new Error(`Edit ${index + 1} oldString must not be empty.`);
     }
-    const newString = readString(edit, "newString");
+    if (typeof edit.newString !== "string") {
+      throw new Error(`Edit ${index + 1} newString must be a string.`);
+    }
     const replaceAllValue = edit.replaceAll;
     if (replaceAllValue !== undefined && typeof replaceAllValue !== "boolean") {
       throw new Error(`Edit ${index + 1} replaceAll must be a boolean when provided.`);
     }
 
     return {
-      oldString,
-      newString,
+      oldString: edit.oldString,
+      newString: edit.newString,
       replaceAll: replaceAllValue === true,
     };
   });
