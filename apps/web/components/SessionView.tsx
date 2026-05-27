@@ -163,8 +163,10 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const [formError, setFormError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
+  const [isDragActive, setIsDragActive] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const dragCounterRef = useRef(0);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -331,7 +333,50 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-8 py-6">
+        <div
+          className="relative flex-1 overflow-y-auto px-8 py-6"
+          onDragEnter={(event) => {
+            if (!event.dataTransfer?.types?.includes("Files")) return;
+            event.preventDefault();
+            dragCounterRef.current += 1;
+            setIsDragActive(true);
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer?.types?.includes("Files")) return;
+            event.preventDefault();
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+            if (dragCounterRef.current === 0) {
+              setIsDragActive(false);
+            }
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            dragCounterRef.current = 0;
+            setIsDragActive(false);
+            if (event.dataTransfer?.files?.length > 0) {
+              showToast({
+                title: "Coming soon",
+                description: "File attachments will be available soon.",
+                tone: "default",
+              });
+            }
+          }}
+        >
+          {isDragActive ? (
+            <div
+              className="pointer-events-none sticky inset-0 z-30 flex h-full items-center justify-center"
+              aria-hidden="true"
+            >
+              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-[#9a9a96] bg-canvas/85 px-8 py-6 backdrop-blur-sm">
+                <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
+                <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
+                <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · auch via Cmd+V</p>
+              </div>
+            </div>
+          ) : null}
           <div className="mx-auto max-w-[760px] space-y-5">
             {runtime.lastError ? (
               <div className="flex items-start gap-2 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[12.5px] leading-5 text-[#9f1d1d]">
