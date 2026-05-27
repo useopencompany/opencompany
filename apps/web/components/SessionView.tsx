@@ -340,7 +340,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="border-b border-[#eaeae6] bg-canvas/90 px-6 py-3">
-          <div className="mx-auto flex w-full max-w-[560px] items-center gap-3">
+          <div className="mx-auto flex w-full max-w-[640px] items-center gap-3">
             <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
             <div className="min-w-0 pr-10">
               <div className="truncate text-[13px] font-medium tracking-[-0.005em] text-ink">
@@ -351,7 +351,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         </div>
 
         <div
-          className="relative flex-1 overflow-y-auto px-16 py-6"
+          className="relative flex-1 overflow-y-auto px-12 py-6"
           onDragEnter={(event) => {
             if (!event.dataTransfer?.types?.includes("Files")) return;
             event.preventDefault();
@@ -394,7 +394,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
               </div>
             </div>
           ) : null}
-          <div className="mx-auto max-w-[560px] space-y-5">
+          <div className="mx-auto max-w-[640px] space-y-5">
             {runtime.lastError ? (
               <div className="flex items-start gap-2 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[12.5px] leading-5 text-[#9f1d1d]">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
@@ -490,8 +490,8 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
           </div>
         </div>
 
-        <div className="bg-canvas px-16 py-4">
-          <div className="group/composer mx-auto max-w-[560px]">
+        <div className="bg-canvas px-12 py-4">
+          <div className="group/composer mx-auto max-w-[640px]">
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
             <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               <div ref={attachMenuRef} className="relative">
