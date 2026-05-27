@@ -521,6 +521,21 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                     submit();
                   }
                 }}
+                onPaste={(event) => {
+                  const items = event.clipboardData?.items;
+                  if (!items) return;
+                  for (const item of Array.from(items)) {
+                    if (item.kind === "file" && item.type.startsWith("image/")) {
+                      event.preventDefault();
+                      showToast({
+                        title: "Coming soon",
+                        description: "Image upload will be available soon.",
+                        tone: "default",
+                      });
+                      return;
+                    }
+                  }
+                }}
                 placeholder="Ask this agent to do something"
                 rows={1}
                 className="max-h-[220px] min-h-9 flex-1 resize-none content-center bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
