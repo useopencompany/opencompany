@@ -7,6 +7,10 @@ import {
   finishRunLease as finishDbRunLease,
 } from "./run-control";
 
+// Session-execution lease helpers. See `jobs.ts` for the separate job-delivery lease;
+// this layer owns in-flight model/tool execution and gates every persisted write so
+// that a stale runner cannot stomp on a session that was reclaimed elsewhere.
+
 export async function acquireRunLease(input: {
   sessionId: string;
   messageId: string;

@@ -1,5 +1,5 @@
 {
-  "id": "7dbf42a4-8fb9-49cd-9acf-a44db5715629",
+  "id": "f95f6671-e752-48d5-9ed6-a7936b6098d2",
   "prevId": "2570b0ea-b21d-4a91-a142-64a8f6c08d25",
   "version": "7",
   "dialect": "postgresql",
@@ -1001,7 +1001,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "agent_session_run_jobs_kind_check": {
+          "name": "agent_session_run_jobs_kind_check",
+          "value": "\"agent_session_run_jobs\".\"kind\" IN ('start', 'message', 'title', 'after_session')"
+        },
+        "agent_session_run_jobs_status_check": {
+          "name": "agent_session_run_jobs_status_check",
+          "value": "\"agent_session_run_jobs\".\"status\" IN ('pending', 'running', 'completed', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.agent_session_tool_usage": {

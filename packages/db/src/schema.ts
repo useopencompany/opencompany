@@ -3,6 +3,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -366,6 +367,14 @@ export const agentSessionRunJobs = pgTable(
     ),
     leaseExpiresAtIdx: index("agent_session_run_jobs_lease_expires_at_idx").on(
       table.leaseExpiresAt,
+    ),
+    kindCheck: check(
+      "agent_session_run_jobs_kind_check",
+      sql`${table.kind} IN ('start', 'message', 'title', 'after_session')`,
+    ),
+    statusCheck: check(
+      "agent_session_run_jobs_status_check",
+      sql`${table.status} IN ('pending', 'running', 'completed', 'failed')`,
     ),
   }),
 );

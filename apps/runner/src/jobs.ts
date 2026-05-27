@@ -6,9 +6,17 @@ import { runAfterSession, runMessage, startSession } from "./agent-loop";
 import type { RunnerEnv } from "./env";
 import { generateSessionTitleForMessage } from "./session-title";
 
+// Runner has two lease layers that work together:
+//   - This job lease (RUNNER_JOB_LEASE_TTL_MS) is the *delivery* lease. It guarantees one
+//     runner instance owns the right to dispatch a job kind+session+message tuple.
+//   - The session run lease in `run-control.ts` is the *execution* lease. It guarantees one
+//     in-flight model/tool loop per session and is what session writes check via `lease-writes.ts`.
+// Both heartbeat at RUN_HEARTBEAT_INTERVAL_MS / RUNNER_JOB_HEARTBEAT_INTERVAL_MS. TTLs must
+// be > 2× the heartbeat interval to survive a hiccup but short enough that a crashed runner's
+// jobs/sessions get reclaimed quickly.
 const logger = createLogger({ service: "opencompany-runner", runtime: "jobs" });
 
-export const RUNNER_JOB_LEASE_TTL_MS = 10 * 60 * 1000;
+export const RUNNER_JOB_LEASE_TTL_MS = 90 * 1000;
 export const RUNNER_JOB_HEARTBEAT_INTERVAL_MS = 5_000;
 export const RUNNER_JOB_MAX_ATTEMPTS = 5;
 const DEFAULT_WORKER_CONCURRENCY = 2;
@@ -256,31 +264,38 @@ export async function runClaimedRunnerJob(input: {
   const handlers = input.handlers ?? defaultRunnerJobHandlers;
   const leaseId = requireJobLease(input.job, "leaseId");
   const leaseOwner = requireJobLease(input.job, "leaseOwner");
+  // Aborts when the job lease is lost so inflight model/tool work stops promptly
+  // instead of running until the next persisted-write checkpoint.
+  const abortController = new AbortController();
   let leaseActive = true;
+
+  const handleLeaseLost = () => {
+    if (!leaseActive) return;
+    leaseActive = false;
+    abortController.abort();
+    logger.warn("Runner job lease lost", {
+      event: "opencompany.runner_job_lease_lost",
+      runner_job_id: input.job.id,
+      runner_job_kind: input.job.kind,
+      session_id: input.job.sessionId,
+      message_id: input.job.messageId,
+    });
+  };
 
   const heartbeat = async () => {
     const now = new Date();
-    leaseActive = await store.heartbeat({
+    const active = await store.heartbeat({
       id: input.job.id,
       leaseId,
       leaseOwner,
       now,
       leaseExpiresAt: runnerJobLeaseExpiresAt(now),
     });
-    if (!leaseActive) {
-      logger.warn("Runner job lease lost", {
-        event: "opencompany.runner_job_lease_lost",
-        runner_job_id: input.job.id,
-        runner_job_kind: input.job.kind,
-        session_id: input.job.sessionId,
-        message_id: input.job.messageId,
-      });
-    }
+    if (!active) handleLeaseLost();
   };
 
   const heartbeatTimer = setInterval(() => {
     void heartbeat().catch((error) => {
-      leaseActive = false;
       captureException(error, {
         event: "opencompany.runner_job_heartbeat_failed",
         runner_job_id: input.job.id,
@@ -296,11 +311,12 @@ export async function runClaimedRunnerJob(input: {
         message_id: input.job.messageId,
         error,
       });
+      handleLeaseLost();
     });
   }, RUNNER_JOB_HEARTBEAT_INTERVAL_MS);
 
   try {
-    await dispatchRunnerJob(input.job, input.env, handlers);
+    await dispatchRunnerJob(input.job, input.env, handlers, abortController.signal);
     if (!leaseActive) return;
     await store.complete({ id: input.job.id, leaseId, leaseOwner, now: new Date() });
   } catch (error) {
@@ -393,7 +409,12 @@ const defaultRunnerJobHandlers: RunnerJobHandlers = {
   runAfterSession,
 };
 
-async function dispatchRunnerJob(job: RunnerJob, env: RunnerEnv, handlers: RunnerJobHandlers) {
+async function dispatchRunnerJob(
+  job: RunnerJob,
+  env: RunnerEnv,
+  handlers: RunnerJobHandlers,
+  externalSignal: AbortSignal,
+) {
   if (job.kind === "start") {
     await handlers.startSession(job.sessionId, env);
     return;
@@ -401,14 +422,14 @@ async function dispatchRunnerJob(job: RunnerJob, env: RunnerEnv, handlers: Runne
 
   const messageId = requireJobMessageId(job);
   if (job.kind === "message") {
-    await handlers.runMessage({ sessionId: job.sessionId, messageId, env });
+    await handlers.runMessage({ sessionId: job.sessionId, messageId, env, externalSignal });
     return;
   }
   if (job.kind === "title") {
     await handlers.generateSessionTitleForMessage({ sessionId: job.sessionId, messageId, env });
     return;
   }
-  await handlers.runAfterSession({ sessionId: job.sessionId, messageId, env });
+  await handlers.runAfterSession({ sessionId: job.sessionId, messageId, env, externalSignal });
 }
 
 async function failRunnerJob(input: {

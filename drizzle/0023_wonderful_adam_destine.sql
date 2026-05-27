@@ -12,7 +12,9 @@ CREATE TABLE "agent_session_run_jobs" (
 	"lease_expires_at" timestamp with time zone,
 	"last_error" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "agent_session_run_jobs_kind_check" CHECK ("agent_session_run_jobs"."kind" IN ('start', 'message', 'title', 'after_session')),
+	CONSTRAINT "agent_session_run_jobs_status_check" CHECK ("agent_session_run_jobs"."status" IN ('pending', 'running', 'completed', 'failed'))
 );
 --> statement-breakpoint
 ALTER TABLE "agent_session_run_jobs" ADD CONSTRAINT "agent_session_run_jobs_session_id_agent_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."agent_sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

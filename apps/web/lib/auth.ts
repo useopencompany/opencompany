@@ -396,7 +396,9 @@ type OptionalCurrentWorkspaceOptions = CurrentWorkspaceOptions & {
 export function currentWorkspace(
   options: OptionalCurrentWorkspaceOptions,
 ): Promise<CurrentWorkspaceContext | null>;
-export function currentWorkspace(options?: CurrentWorkspaceOptions): Promise<CurrentWorkspaceContext>;
+export function currentWorkspace(
+  options?: CurrentWorkspaceOptions,
+): Promise<CurrentWorkspaceContext>;
 export async function currentWorkspace(options: CurrentWorkspaceOptions = {}) {
   const context = await resolveWorkspaceContext();
 

@@ -89,32 +89,26 @@ export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-export async function runMessage(input: { sessionId: string; messageId: string; env: RunnerEnv }) {
-  const db = getDb();
-  const trace = startTimingTrace("runner.run_message", {
-    session_id: input.sessionId,
-    message_id: input.messageId,
-    runner_instance_id: input.env.instanceId,
-  });
-  const controller = new AbortController();
-  const leaseId = newRunLeaseId();
-  const leaseOwner = input.env.instanceId;
-  const runLease = { sessionId: input.sessionId, leaseId, leaseOwner };
+export async function runMessage(input: {
+  sessionId: string;
+  messageId: string;
+  env: RunnerEnv;
+  externalSignal?: AbortSignal;
+}) {
+  const ctx = createRunContext("runner.run_message", input);
   let assistantMessageId = newAgentSessionMessageId();
-  let sandbox: SandboxHandle | null = null;
-  let sandboxPromise: Promise<SandboxHandle> | null = null;
   let leaseAcquired = false;
-  let lastHeartbeatAt = 0;
   let workspaceId: string | undefined;
   let userId: string | undefined;
   let agentId: string | undefined;
   let modelProvider: string | undefined;
   let modelName: string | undefined;
-  let sandboxId: string | undefined;
+  const sandboxRef: { id: string | undefined } = { id: undefined };
   let outcome = "unknown";
+  let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
 
   try {
-    const row = await timeAsync(trace, "load_session", () => loadSession(input.sessionId));
+    const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
       return;
@@ -122,14 +116,15 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     workspaceId = row.workspace.id;
     userId = row.session.userId;
     agentId = row.agent.id;
+
     if (
-      !(await timeAsync(trace, "check_workspace_credits", () =>
-        hasPositiveWorkspaceBalance({ db, workspaceId: row.session.workspaceId }),
+      !(await timeAsync(ctx.trace, "check_workspace_credits", () =>
+        hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
       ))
     ) {
       outcome = "skipped_no_credits";
       await setStatus(input.sessionId, "ready");
-      await appendRuntimeEvent(db, {
+      await appendRuntimeEvent(ctx.db, {
         sessionId: input.sessionId,
         type: "session.status",
         payload: { status: "ready", message: "Add workspace credits to continue running agents." },
@@ -137,7 +132,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       return;
     }
 
-    const userMessage = await timeAsync(trace, "load_user_message", () =>
+    const userMessage = await timeAsync(ctx.trace, "load_user_message", () =>
       loadUserMessage(input.sessionId, input.messageId),
     );
     if (!userMessage) {
@@ -146,7 +141,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     }
 
     const existingAssistantResponse = await timeAsync(
-      trace,
+      ctx.trace,
       "load_existing_assistant_response",
       () => loadAssistantResponseForMessage(input.sessionId, input.messageId),
     );
@@ -167,12 +162,12 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
 
-    const lease = await timeAsync(trace, "acquire_run_lease", () =>
+    const lease = await timeAsync(ctx.trace, "acquire_run_lease", () =>
       acquireRunLease({
         sessionId: input.sessionId,
         messageId: input.messageId,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         modelProvider: runtime.model.provider,
         modelName: runtime.model.name,
       }),
@@ -183,29 +178,19 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     }
 
     leaseAcquired = true;
-    lastHeartbeatAt = Date.now();
-    setActiveRun(input.sessionId, leaseId, controller);
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
-    const checkAbort = async () => {
-      const heartbeat = await maybeHeartbeatRunLease({ ...runLease, lastHeartbeatAt });
-      lastHeartbeatAt = heartbeat.heartbeatAt;
-      if (!heartbeat.leaseActive) {
-        controller.abort();
-        throw new RunLeaseLostError();
-      }
-      await checkRunControl({ ...runLease, controller });
-    };
-
-    await timeAsync(trace, "initial_run_control_check", checkAbort);
+    const checkAbort = createLeaseAbortCheck(ctx);
+    await timeAsync(ctx.trace, "initial_run_control_check", checkAbort);
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
-      timeAsync(trace, "append_running_status", () =>
+      timeAsync(ctx.trace, "append_running_status", () =>
         appendRuntimeEventForLease({
           sessionId: input.sessionId,
           messageId: null,
-          leaseId,
-          leaseOwner,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
           type: "session.status",
           payload: { status: "running", message: "Agent is running" },
         }),
@@ -222,25 +207,23 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       model_name: modelName,
     });
 
-    const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
-
-    const assistantCreated = await timeAsync(trace, "create_assistant_message", () =>
+    const assistantCreated = await timeAsync(ctx.trace, "create_assistant_message", () =>
       createAssistantMessageForLease({
         id: assistantMessageId,
         sessionId: input.sessionId,
         responseToMessageId: input.messageId,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
       }),
     );
     if (!assistantCreated) {
       outcome = "skipped_assistant_exists";
-      await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
       return;
     }
 
-    const storedMessages = await timeAsync(trace, "load_model_messages", () =>
-      db
+    const storedMessages = await timeAsync(ctx.trace, "load_model_messages", () =>
+      ctx.db
         .select()
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
@@ -249,97 +232,51 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     const messages = buildModelMessages(
       storedMessages.filter((message) => message.id !== assistantMessageId && !message.internal),
     );
-    const getSandbox = async () => {
-      if (sandbox) return sandbox;
-      if (sandboxPromise) return sandboxPromise;
 
-      sandboxPromise = (async () => {
-        const hydratedSandbox = await timeAsync(
-          trace,
-          "ensure_sandbox",
-          () => ensureSandbox(row, input.env),
-          {
-            existing_sandbox: Boolean(row.session.e2bSandboxId),
-          },
-        );
-        await checkAbort();
-        const updated = await timeAsync(trace, "update_sandbox_for_lease", () =>
-          updateSandboxForLease(input.sessionId, leaseId, leaseOwner, hydratedSandbox.sandboxId),
-        );
-        if (!updated) {
-          await killSandbox(hydratedSandbox.sandboxId);
-          throw new StaleRunLeaseError();
-        }
+    sandboxAcquirer = createSandboxAcquirer({
+      row,
+      env: input.env,
+      trace: ctx.trace,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      checkAbort,
+      onHydrated: (sandbox) => {
+        sandboxRef.id = sandbox.sandboxId;
+      },
+    });
 
-        sandbox = hydratedSandbox;
-        sandboxId = hydratedSandbox.sandboxId;
-        return hydratedSandbox;
-      })().catch((error) => {
-        sandboxPromise = null;
-        throw error;
-      });
-
-      return sandboxPromise;
-    };
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
-      runLeaseId: leaseId,
-      runLeaseOwner: leaseOwner,
+      runLeaseId: ctx.leaseId,
+      runLeaseOwner: ctx.leaseOwner,
       workspaceId: row.workspace.id,
       agentConfig: row.agent.config,
-      getSandbox,
+      getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
       enabledTools: runtime.tools,
       repository: row.repository,
-      signal: controller.signal,
+      signal: ctx.controller.signal,
       checkAbort,
-      observabilityContext: {
-        workspaceId,
-        userId,
-        agentId,
-        modelProvider,
-        modelName,
-      },
+      observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
     });
 
-    const result = streamText({
-      model: gateway(runtime.model.name),
-      system: buildCacheableSystemPrompt(runtime.systemPrompt, runtime.model.name),
-      messages,
-      tools: pickRuntimeTools(tools, runtime.tools),
-      stopWhen: stepCountIs(8),
-      abortSignal: controller.signal,
-      ...(runtime.model.providerOptions ? { providerOptions: runtime.model.providerOptions } : {}),
-    });
-    const { assistantContent, assistantReplayParts, reasoningSummary } = await timeAsync(
-      trace,
-      "model_stream_total",
-      () =>
-        collectAssistantStream({
-          stream: result.fullStream,
-          readFirstPart: (iterator) =>
-            timeAsync(trace, "model_first_stream_part", () => iterator.next(), {
-              model_provider: runtime.model.provider,
-              model_name: runtime.model.name,
-            }),
-          sessionId: input.sessionId,
-          assistantMessageId,
-          runLeaseId: leaseId,
-          runLeaseOwner: leaseOwner,
-          modelProvider: runtime.model.provider,
-          modelName: runtime.model.name,
-          exposeReasoningSummary: runtime.model.exposeReasoningSummary,
-          signal: controller.signal,
-          checkAbort,
-        }),
-    );
+    const { assistantContent, assistantReplayParts, reasoningSummary } =
+      await streamAssistantResponse({
+        ctx,
+        runtime,
+        system: runtime.systemPrompt,
+        messages,
+        tools,
+        assistantMessageId,
+        checkAbort,
+      });
 
-    if (sandbox) {
-      const activeSandbox = sandbox;
-      await timeAsync(trace, "sync_brain_after_message", () =>
+    if (sandboxAcquirer.current) {
+      const activeSandbox = sandboxAcquirer.current;
+      await timeAsync(ctx.trace, "sync_brain_after_message", () =>
         syncBrainFromSandbox({
           sandbox: activeSandbox,
           sessionId: input.sessionId,
@@ -355,60 +292,30 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       throw new Error("Model stream completed without text or tool calls.");
     }
 
-    const assistantModelMessage = buildAssistantModelMessage({
-      content: assistantContent,
-      parts: assistantReplayParts,
+    await persistAssistantCompletion({
+      sessionId: input.sessionId,
+      assistantMessageId,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      assistantContent,
+      assistantReplayParts,
+      reasoningSummary,
+      internal: false,
     });
-    const persistedAssistantModelMessage = toPersistedModelMessage(assistantModelMessage);
 
-    await requireLeaseWrite(
-      completeAssistantMessageForLease({
-        sessionId: input.sessionId,
-        assistantMessageId,
-        leaseId,
-        leaseOwner,
-        content: assistantContent,
-        modelMessage: persistedAssistantModelMessage,
-      }),
-    );
-    const normalizedReasoningSummary = normalizeReasoningSummary(reasoningSummary);
-    if (normalizedReasoningSummary) {
-      await requireLeaseWrite(
-        appendRuntimeEventForLease({
-          sessionId: input.sessionId,
-          messageId: assistantMessageId,
-          leaseId,
-          leaseOwner,
-          type: "message.reasoning_summary",
-          payload: { messageId: assistantMessageId, summary: normalizedReasoningSummary },
-        }),
-      );
-    }
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: assistantMessageId,
-        leaseId,
-        leaseOwner,
-        type: "message.completed",
-        payload: {
-          messageId: assistantMessageId,
-          content: assistantContent,
-          modelMessage: persistedAssistantModelMessage,
-        },
-      }),
-    );
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
         messageId: null,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         type: "session.status",
         payload: { status: "completed", message: "Agent completed" },
       }),
     );
-    await requireLeaseWrite(releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed"));
+    await requireLeaseWrite(
+      releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
+    );
     outcome = "completed";
     logger.info("Runner session completed", {
       event: "opencompany.runner_session_completed",
@@ -418,7 +325,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandboxId,
+      sandbox_id: sandboxRef.id,
       model_provider: modelProvider,
       model_name: modelName,
     });
@@ -428,10 +335,16 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       return;
     }
 
-    if (controller.signal.aborted || error instanceof RunAbortError) {
+    if (ctx.controller.signal.aborted || error instanceof RunAbortError) {
       outcome = "aborted";
       if (leaseAcquired) {
-        await failRunLease(input.sessionId, leaseId, leaseOwner, "aborting", "Run aborted.");
+        await failRunLease(
+          input.sessionId,
+          ctx.leaseId,
+          ctx.leaseOwner,
+          "aborting",
+          "Run aborted.",
+        );
       }
       logger.info("Runner session aborted", {
         event: "opencompany.runner_session_aborted",
@@ -441,7 +354,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         session_id: input.sessionId,
         message_id: input.messageId,
         assistant_message_id: assistantMessageId,
-        sandbox_id: sandboxId,
+        sandbox_id: sandboxRef.id,
         model_provider: modelProvider,
         model_name: modelName,
       });
@@ -457,7 +370,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandboxId,
+      sandbox_id: sandboxRef.id,
       model_provider: modelProvider,
       model_name: modelName,
     });
@@ -465,8 +378,8 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       await appendRuntimeEventForLease({
         sessionId: input.sessionId,
         messageId: null,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         type: "session.error",
         payload: { message },
       });
@@ -474,9 +387,9 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
     const updated = leaseAcquired
       ? await failRunLease(
           input.sessionId,
-          leaseId,
-          leaseOwner,
-          controller.signal.aborted ? "aborting" : "failed",
+          ctx.leaseId,
+          ctx.leaseOwner,
+          ctx.controller.signal.aborted ? "aborting" : "failed",
           message,
         )
       : false;
@@ -490,24 +403,20 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandboxId,
+      sandbox_id: sandboxRef.id,
       model_provider: modelProvider,
       model_name: modelName,
       error,
     });
     throw error;
   } finally {
-    clearActiveRun(input.sessionId, controller);
-    endTimingTrace(trace, {
+    await finalizeRun({
+      ctx,
       outcome,
-      model_provider: modelProvider,
-      model_name: modelName,
-      sandbox_hydrated: Boolean(sandbox),
+      modelProvider,
+      modelName,
+      sandbox: sandboxAcquirer?.current ?? null,
     });
-    const sandboxToPark = sandbox;
-    if (sandboxToPark) {
-      await timeAsync(trace, "park_sandbox", () => parkSandboxWhenIdle(sandboxToPark, input.env));
-    }
   }
 }
 
@@ -515,33 +424,23 @@ export async function runAfterSession(input: {
   sessionId: string;
   messageId: string;
   env: RunnerEnv;
+  externalSignal?: AbortSignal;
 }) {
-  const db = getDb();
-  const trace = startTimingTrace("runner.run_after_session", {
-    session_id: input.sessionId,
-    message_id: input.messageId,
-    runner_instance_id: input.env.instanceId,
-  });
-  const controller = new AbortController();
-  const leaseId = newRunLeaseId();
-  const leaseOwner = input.env.instanceId;
-  const runLease = { sessionId: input.sessionId, leaseId, leaseOwner };
+  const ctx = createRunContext("runner.run_after_session", input);
   const assistantMessageId = newAgentSessionMessageId();
-  let sandbox: SandboxHandle | null = null;
-  let sandboxPromise: Promise<SandboxHandle> | null = null;
   let leaseAcquired = false;
-  let lastHeartbeatAt = 0;
   let afterSessionRunId: number | undefined;
   let workspaceId: string | undefined;
   let userId: string | undefined;
   let agentId: string | undefined;
   let modelProvider: string | undefined;
   let modelName: string | undefined;
-  let sandboxId: string | undefined;
+  const sandboxRef: { id: string | undefined } = { id: undefined };
   let outcome = "unknown";
+  let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
 
   try {
-    const row = await timeAsync(trace, "load_session", () => loadSession(input.sessionId));
+    const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
     workspaceId = row.workspace.id;
     userId = row.session.userId;
     agentId = row.agent.id;
@@ -556,7 +455,7 @@ export async function runAfterSession(input: {
       return;
     }
 
-    const latestUserMessage = await timeAsync(trace, "load_latest_user_message", () =>
+    const latestUserMessage = await timeAsync(ctx.trace, "load_latest_user_message", () =>
       loadLatestUserMessage(input.sessionId),
     );
     if (!latestUserMessage || latestUserMessage.id !== input.messageId) {
@@ -584,7 +483,7 @@ export async function runAfterSession(input: {
       agentId: row.agent.id,
       lastUserMessageId: input.messageId,
       agentVersion: row.agent.version,
-      runLeaseId: leaseId,
+      runLeaseId: ctx.leaseId,
     });
     if (!afterRun) {
       outcome = "skipped_duplicate";
@@ -593,8 +492,8 @@ export async function runAfterSession(input: {
     afterSessionRunId = afterRun.id;
 
     if (
-      !(await timeAsync(trace, "check_workspace_credits", () =>
-        hasPositiveWorkspaceBalance({ db, workspaceId: row.session.workspaceId }),
+      !(await timeAsync(ctx.trace, "check_workspace_credits", () =>
+        hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
       ))
     ) {
       outcome = "skipped_no_credits";
@@ -619,12 +518,12 @@ export async function runAfterSession(input: {
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
 
-    const lease = await timeAsync(trace, "acquire_run_lease", () =>
+    const lease = await timeAsync(ctx.trace, "acquire_run_lease", () =>
       acquireRunLease({
         sessionId: input.sessionId,
         messageId: `after-session:${input.messageId}`,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         modelProvider: runtime.model.provider,
         modelName: runtime.model.name,
       }),
@@ -644,31 +543,21 @@ export async function runAfterSession(input: {
     }
 
     leaseAcquired = true;
-    lastHeartbeatAt = Date.now();
-    setActiveRun(input.sessionId, leaseId, controller);
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
-    const checkAbort = async () => {
-      const heartbeat = await maybeHeartbeatRunLease({ ...runLease, lastHeartbeatAt });
-      lastHeartbeatAt = heartbeat.heartbeatAt;
-      if (!heartbeat.leaseActive) {
-        controller.abort();
-        throw new RunLeaseLostError();
-      }
-      await checkRunControl({ ...runLease, controller });
-    };
-
-    await timeAsync(trace, "initial_run_control_check", checkAbort);
+    const checkAbort = createLeaseAbortCheck(ctx);
+    await timeAsync(ctx.trace, "initial_run_control_check", checkAbort);
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
         messageId: null,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         type: "after_session.started",
         payload: {
-          runId: afterSessionRunId!,
+          runId: afterSessionRunId,
           messageId: input.messageId,
           idleDelaySeconds: afterSession.idleDelaySeconds,
         },
@@ -685,24 +574,23 @@ export async function runAfterSession(input: {
       model_name: modelName,
     });
 
-    const gateway = createGateway({ apiKey: input.env.vercelAiGatewayApiKey });
-    const assistantCreated = await timeAsync(trace, "create_internal_assistant_message", () =>
+    const assistantCreated = await timeAsync(ctx.trace, "create_internal_assistant_message", () =>
       createAssistantMessageForLease({
         id: assistantMessageId,
         sessionId: input.sessionId,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         internal: true,
       }),
     );
     if (!assistantCreated) {
       outcome = "skipped_assistant_exists";
-      await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
       return;
     }
 
-    const storedMessages = await timeAsync(trace, "load_model_messages", () =>
-      db
+    const storedMessages = await timeAsync(ctx.trace, "load_model_messages", () =>
+      ctx.db
         .select()
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
@@ -714,106 +602,54 @@ export async function runAfterSession(input: {
     const messages: ModelMessage[] = buildModelMessages(visibleStoredMessages);
     messages.push({
       role: "user",
-      content: buildAfterSessionPrompt({
-        prompt: afterSession.prompt,
-      }),
+      content: buildAfterSessionPrompt({ prompt: afterSession.prompt }),
     });
 
-    const getSandbox = async () => {
-      if (sandbox) return sandbox;
-      if (sandboxPromise) return sandboxPromise;
+    sandboxAcquirer = createSandboxAcquirer({
+      row,
+      env: input.env,
+      trace: ctx.trace,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      checkAbort,
+      onHydrated: (sandbox) => {
+        sandboxRef.id = sandbox.sandboxId;
+      },
+    });
 
-      sandboxPromise = (async () => {
-        const hydratedSandbox = await timeAsync(
-          trace,
-          "ensure_sandbox",
-          () => ensureSandbox(row, input.env),
-          {
-            existing_sandbox: Boolean(row.session.e2bSandboxId),
-          },
-        );
-        await checkAbort();
-        const updated = await timeAsync(trace, "update_sandbox_for_lease", () =>
-          updateSandboxForLease(input.sessionId, leaseId, leaseOwner, hydratedSandbox.sandboxId),
-        );
-        if (!updated) {
-          await killSandbox(hydratedSandbox.sandboxId);
-          throw new StaleRunLeaseError();
-        }
-
-        sandbox = hydratedSandbox;
-        sandboxId = hydratedSandbox.sandboxId;
-        return hydratedSandbox;
-      })().catch((error) => {
-        sandboxPromise = null;
-        throw error;
-      });
-
-      return sandboxPromise;
-    };
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
-      runLeaseId: leaseId,
-      runLeaseOwner: leaseOwner,
+      runLeaseId: ctx.leaseId,
+      runLeaseOwner: ctx.leaseOwner,
       internalMessages: true,
       workspaceId: row.workspace.id,
       agentConfig: row.agent.config,
-      getSandbox,
+      getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
       enabledTools: runtime.tools,
       repository: row.repository,
-      signal: controller.signal,
+      signal: ctx.controller.signal,
       checkAbort,
-      observabilityContext: {
-        workspaceId,
-        userId,
-        agentId,
-        modelProvider,
-        modelName,
-      },
+      observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
     });
 
-    const result = streamText({
-      model: gateway(runtime.model.name),
-      system: buildCacheableSystemPrompt(
-        `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
-        runtime.model.name,
-      ),
-      messages,
-      tools: pickRuntimeTools(tools, runtime.tools),
-      stopWhen: stepCountIs(8),
-      abortSignal: controller.signal,
-      ...(runtime.model.providerOptions ? { providerOptions: runtime.model.providerOptions } : {}),
-    });
-    let { assistantContent, assistantReplayParts, reasoningSummary } = await timeAsync(
-      trace,
-      "model_stream_total",
-      () =>
-        collectAssistantStream({
-          stream: result.fullStream,
-          readFirstPart: (iterator) =>
-            timeAsync(trace, "model_first_stream_part", () => iterator.next(), {
-              model_provider: runtime.model.provider,
-              model_name: runtime.model.name,
-            }),
-          sessionId: input.sessionId,
-          assistantMessageId,
-          runLeaseId: leaseId,
-          runLeaseOwner: leaseOwner,
-          modelProvider: runtime.model.provider,
-          modelName: runtime.model.name,
-          exposeReasoningSummary: runtime.model.exposeReasoningSummary,
-          signal: controller.signal,
-          checkAbort,
-        }),
-    );
+    let { assistantContent, assistantReplayParts, reasoningSummary } =
+      await streamAssistantResponse({
+        ctx,
+        runtime,
+        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+        messages,
+        tools,
+        assistantMessageId,
+        checkAbort,
+      });
 
-    if (sandbox) {
-      const activeSandbox = sandbox;
-      await timeAsync(trace, "sync_brain_after_session", () =>
+    if (sandboxAcquirer.current) {
+      const activeSandbox = sandboxAcquirer.current;
+      await timeAsync(ctx.trace, "sync_brain_after_session", () =>
         syncBrainFromSandbox({
           sandbox: activeSandbox,
           sessionId: input.sessionId,
@@ -830,64 +666,31 @@ export async function runAfterSession(input: {
       appendAssistantTextPart(assistantReplayParts, assistantContent);
     }
 
-    const persistedAssistantModelMessage = toPersistedModelMessage(
-      buildAssistantModelMessage({
-        content: assistantContent,
-        parts: assistantReplayParts,
-      }),
-    );
-    await requireLeaseWrite(
-      completeAssistantMessageForLease({
-        sessionId: input.sessionId,
-        assistantMessageId,
-        leaseId,
-        leaseOwner,
-        content: assistantContent,
-        modelMessage: persistedAssistantModelMessage,
-      }),
-    );
+    await persistAssistantCompletion({
+      sessionId: input.sessionId,
+      assistantMessageId,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      assistantContent,
+      assistantReplayParts,
+      reasoningSummary,
+      internal: true,
+    });
 
-    const normalizedReasoningSummary = normalizeReasoningSummary(reasoningSummary);
-    if (normalizedReasoningSummary) {
-      await requireLeaseWrite(
-        appendRuntimeEventForLease({
-          sessionId: input.sessionId,
-          messageId: assistantMessageId,
-          leaseId,
-          leaseOwner,
-          type: "message.reasoning_summary",
-          payload: { messageId: assistantMessageId, summary: normalizedReasoningSummary },
-        }),
-      );
-    }
-
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: assistantMessageId,
-        leaseId,
-        leaseOwner,
-        type: "message.completed",
-        payload: {
-          messageId: assistantMessageId,
-          content: assistantContent,
-          modelMessage: persistedAssistantModelMessage,
-          internal: true,
-        },
-      }),
-    );
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
         messageId: null,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         type: "after_session.completed",
-        payload: { runId: afterSessionRunId!, messageId: input.messageId },
+        payload: { runId: afterSessionRunId, messageId: input.messageId },
       }),
     );
-    await completeAfterSessionRun(afterSessionRunId!, { status: "completed" });
-    await requireLeaseWrite(releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed"));
+    await completeAfterSessionRun(afterSessionRunId, { status: "completed" });
+    await requireLeaseWrite(
+      releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
+    );
     outcome = "completed";
     logger.info("Runner after-session completed", {
       event: "opencompany.runner_after_session_completed",
@@ -897,7 +700,7 @@ export async function runAfterSession(input: {
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandboxId,
+      sandbox_id: sandboxRef.id,
       model_provider: modelProvider,
       model_name: modelName,
     });
@@ -908,7 +711,7 @@ export async function runAfterSession(input: {
     }
 
     const message =
-      controller.signal.aborted || error instanceof RunAbortError
+      ctx.controller.signal.aborted || error instanceof RunAbortError
         ? "After-session run aborted."
         : error instanceof Error
           ? error.message
@@ -921,7 +724,7 @@ export async function runAfterSession(input: {
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandboxId,
+      sandbox_id: sandboxRef.id,
       model_provider: modelProvider,
       model_name: modelName,
     });
@@ -929,8 +732,8 @@ export async function runAfterSession(input: {
       await appendRuntimeEventForLease({
         sessionId: input.sessionId,
         messageId: null,
-        leaseId,
-        leaseOwner,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
         type: "after_session.failed",
         payload: {
           ...(afterSessionRunId ? { runId: afterSessionRunId } : {}),
@@ -938,9 +741,9 @@ export async function runAfterSession(input: {
           message,
         },
       });
-      await releaseRunLease(input.sessionId, leaseId, leaseOwner, "completed");
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
     } else {
-      await appendRuntimeEvent(db, {
+      await appendRuntimeEvent(ctx.db, {
         sessionId: input.sessionId,
         type: "after_session.failed",
         payload: {
@@ -962,23 +765,257 @@ export async function runAfterSession(input: {
       session_id: input.sessionId,
       message_id: input.messageId,
       assistant_message_id: assistantMessageId,
-      sandbox_id: sandboxId,
+      sandbox_id: sandboxRef.id,
       model_provider: modelProvider,
       model_name: modelName,
       error,
     });
     throw error;
   } finally {
-    clearActiveRun(input.sessionId, controller);
-    endTimingTrace(trace, {
+    await finalizeRun({
+      ctx,
       outcome,
-      model_provider: modelProvider,
-      model_name: modelName,
-      sandbox_hydrated: Boolean(sandbox),
+      modelProvider,
+      modelName,
+      sandbox: sandboxAcquirer?.current ?? null,
     });
-    const sandboxToPark = sandbox;
-    if (sandboxToPark) {
-      await timeAsync(trace, "park_sandbox", () => parkSandboxWhenIdle(sandboxToPark, input.env));
-    }
   }
+}
+
+type RunContext = {
+  sessionId: string;
+  env: RunnerEnv;
+  db: ReturnType<typeof getDb>;
+  trace: ReturnType<typeof startTimingTrace>;
+  controller: AbortController;
+  leaseId: string;
+  leaseOwner: string;
+  runLease: { sessionId: string; leaseId: string; leaseOwner: string };
+};
+
+function createRunContext(
+  traceName: string,
+  input: { sessionId: string; messageId: string; env: RunnerEnv; externalSignal?: AbortSignal },
+): RunContext {
+  const controller = new AbortController();
+  linkExternalAbortSignal(controller, input.externalSignal);
+  const leaseId = newRunLeaseId();
+  const leaseOwner = input.env.instanceId;
+  return {
+    sessionId: input.sessionId,
+    env: input.env,
+    db: getDb(),
+    trace: startTimingTrace(traceName, {
+      session_id: input.sessionId,
+      message_id: input.messageId,
+      runner_instance_id: input.env.instanceId,
+    }),
+    controller,
+    leaseId,
+    leaseOwner,
+    runLease: { sessionId: input.sessionId, leaseId, leaseOwner },
+  };
+}
+
+function createLeaseAbortCheck(ctx: RunContext) {
+  let lastHeartbeatAt = Date.now();
+  return async () => {
+    const heartbeat = await maybeHeartbeatRunLease({ ...ctx.runLease, lastHeartbeatAt });
+    lastHeartbeatAt = heartbeat.heartbeatAt;
+    if (!heartbeat.leaseActive) {
+      ctx.controller.abort();
+      throw new RunLeaseLostError();
+    }
+    await checkRunControl({ ...ctx.runLease, controller: ctx.controller });
+  };
+}
+
+type SandboxAcquirer = {
+  get: () => Promise<SandboxHandle>;
+  readonly current: SandboxHandle | null;
+};
+
+function createSandboxAcquirer(input: {
+  row: LoadedSession;
+  env: RunnerEnv;
+  trace: ReturnType<typeof startTimingTrace>;
+  leaseId: string;
+  leaseOwner: string;
+  checkAbort: () => Promise<void>;
+  onHydrated: (sandbox: SandboxHandle) => void;
+}): SandboxAcquirer {
+  let sandbox: SandboxHandle | null = null;
+  let sandboxPromise: Promise<SandboxHandle> | null = null;
+
+  const get = async () => {
+    if (sandbox) return sandbox;
+    if (sandboxPromise) return sandboxPromise;
+
+    sandboxPromise = (async () => {
+      const hydrated = await timeAsync(
+        input.trace,
+        "ensure_sandbox",
+        () => ensureSandbox(input.row, input.env),
+        { existing_sandbox: Boolean(input.row.session.e2bSandboxId) },
+      );
+      await input.checkAbort();
+      const updated = await timeAsync(input.trace, "update_sandbox_for_lease", () =>
+        updateSandboxForLease(
+          input.row.session.id,
+          input.leaseId,
+          input.leaseOwner,
+          hydrated.sandboxId,
+        ),
+      );
+      if (!updated) {
+        await killSandbox(hydrated.sandboxId);
+        throw new StaleRunLeaseError();
+      }
+      sandbox = hydrated;
+      input.onHydrated(hydrated);
+      return hydrated;
+    })().catch((error) => {
+      sandboxPromise = null;
+      throw error;
+    });
+
+    return sandboxPromise;
+  };
+
+  return {
+    get,
+    get current() {
+      return sandbox;
+    },
+  };
+}
+
+async function streamAssistantResponse(input: {
+  ctx: RunContext;
+  runtime: ReturnType<typeof resolveAgentRuntimeConfig>;
+  system: string;
+  messages: ModelMessage[];
+  tools: ReturnType<typeof createToolSet>;
+  assistantMessageId: string;
+  checkAbort: () => Promise<void>;
+}) {
+  const gateway = createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
+  const result = streamText({
+    model: gateway(input.runtime.model.name),
+    system: buildCacheableSystemPrompt(input.system, input.runtime.model.name),
+    messages: input.messages,
+    tools: pickRuntimeTools(input.tools, input.runtime.tools),
+    stopWhen: stepCountIs(8),
+    abortSignal: input.ctx.controller.signal,
+    ...(input.runtime.model.providerOptions
+      ? { providerOptions: input.runtime.model.providerOptions }
+      : {}),
+  });
+
+  return timeAsync(input.ctx.trace, "model_stream_total", () =>
+    collectAssistantStream({
+      stream: result.fullStream,
+      readFirstPart: (iterator) =>
+        timeAsync(input.ctx.trace, "model_first_stream_part", () => iterator.next(), {
+          model_provider: input.runtime.model.provider,
+          model_name: input.runtime.model.name,
+        }),
+      sessionId: input.ctx.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.ctx.leaseId,
+      runLeaseOwner: input.ctx.leaseOwner,
+      modelProvider: input.runtime.model.provider,
+      modelName: input.runtime.model.name,
+      exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
+      signal: input.ctx.controller.signal,
+      checkAbort: input.checkAbort,
+    }),
+  );
+}
+
+async function persistAssistantCompletion(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  leaseId: string;
+  leaseOwner: string;
+  assistantContent: string;
+  assistantReplayParts: Awaited<ReturnType<typeof collectAssistantStream>>["assistantReplayParts"];
+  reasoningSummary: Awaited<ReturnType<typeof collectAssistantStream>>["reasoningSummary"];
+  internal: boolean;
+}) {
+  const persistedAssistantModelMessage = toPersistedModelMessage(
+    buildAssistantModelMessage({
+      content: input.assistantContent,
+      parts: input.assistantReplayParts,
+    }),
+  );
+  await requireLeaseWrite(
+    completeAssistantMessageForLease({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      leaseId: input.leaseId,
+      leaseOwner: input.leaseOwner,
+      content: input.assistantContent,
+      modelMessage: persistedAssistantModelMessage,
+    }),
+  );
+  const normalizedReasoningSummary = normalizeReasoningSummary(input.reasoningSummary);
+  if (normalizedReasoningSummary) {
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.leaseId,
+        leaseOwner: input.leaseOwner,
+        type: "message.reasoning_summary",
+        payload: { messageId: input.assistantMessageId, summary: normalizedReasoningSummary },
+      }),
+    );
+  }
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.leaseId,
+      leaseOwner: input.leaseOwner,
+      type: "message.completed",
+      payload: {
+        messageId: input.assistantMessageId,
+        content: input.assistantContent,
+        modelMessage: persistedAssistantModelMessage,
+        ...(input.internal ? { internal: true } : {}),
+      },
+    }),
+  );
+}
+
+async function finalizeRun(input: {
+  ctx: RunContext;
+  outcome: string;
+  modelProvider: string | undefined;
+  modelName: string | undefined;
+  sandbox: SandboxHandle | null;
+}) {
+  clearActiveRun(input.ctx.sessionId, input.ctx.controller);
+  endTimingTrace(input.ctx.trace, {
+    outcome: input.outcome,
+    model_provider: input.modelProvider,
+    model_name: input.modelName,
+    sandbox_hydrated: Boolean(input.sandbox),
+  });
+  if (input.sandbox) {
+    const sandbox = input.sandbox;
+    await timeAsync(input.ctx.trace, "park_sandbox", () =>
+      parkSandboxWhenIdle(sandbox, input.ctx.env),
+    );
+  }
+}
+
+function linkExternalAbortSignal(controller: AbortController, signal: AbortSignal | undefined) {
+  if (!signal) return;
+  if (signal.aborted) {
+    controller.abort();
+    return;
+  }
+  signal.addEventListener("abort", () => controller.abort(), { once: true });
 }
