@@ -144,8 +144,10 @@ function SessionHistoryItem({
 
   return (
     <div
-      className={`group mx-1.5 my-[3px] flex items-center rounded-md text-[13px] transition-colors duration-150 ${
-        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+        active
+          ? "mx-1.5 my-[3px] bg-[#e3e3df] text-ink"
+          : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
       } ${isPending ? "opacity-60" : ""}`}
     >
       <Link
@@ -156,17 +158,11 @@ function SessionHistoryItem({
         onFocus={schedulePrefetch}
         onBlur={cancelPrefetch}
         onTouchStart={schedulePrefetch}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-l-md px-3 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        <span
-          className={`inline-flex shrink-0 items-center overflow-hidden transition-[width] duration-[380ms] ease-out ${
-            session.status === "running" || session.status === "provisioning" ? "w-3" : "w-0"
-          }`}
-        >
-          {session.status === "running" || session.status === "provisioning" ? (
-            <SessionStatusDot status={session.status} pulse />
-          ) : null}
-        </span>
+        {session.status === "running" || session.status === "provisioning" ? (
+          <SessionStatusDot status={session.status} pulse />
+        ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
       <button
