@@ -31,7 +31,7 @@ Linear's docs describe Triage as the inbox for integration-created issues and Tr
 ## Recommended Flow
 
 1. User submits feedback in the app.
-2. App creates a Linear issue with app/user/workspace context and first-pass labels.
+2. App creates a Linear issue with app/user/workspace context, the current session ID when submitted from a session page, and first-pass labels.
 3. Linear Triage Intelligence enriches the issue.
 4. The feedback owner accepts, dedupes, scopes, or ships from Linear.
 

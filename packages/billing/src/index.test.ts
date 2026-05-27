@@ -36,6 +36,31 @@ describe("calculateModelUsageCost", () => {
     expect(cost.platformFeeUsdMicros).toBe(1_905);
   });
 
+  it.each([
+    ["openai/gpt-5.4-nano", 1_670],
+    ["anthropic/claude-opus-4.7", 36_750],
+    ["google/gemini-3-flash", 4_050],
+    ["google/gemini-3.1-flash-lite-preview", 2_030],
+    ["deepseek/deepseek-v4-flash", 563],
+    ["mistral/mistral-medium-3.5", 10_500],
+    ["moonshotai/kimi-k2.6", 6_060],
+    ["zai/glm-5.1", 7_460],
+    ["zai/glm-5-turbo", 6_640],
+    ["zai/glm-5v-turbo", 6_640],
+  ])("prices %s from Vercel AI Gateway published rates", (modelName, expectedProviderCost) => {
+    const cost = calculateModelUsageCost({
+      modelName,
+      inputTokens: 4_000,
+      inputNoCacheTokens: 1_000,
+      inputCacheReadTokens: 1_000,
+      inputCacheWriteTokens: 1_000,
+      outputTokens: 1_000,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(expectedProviderCost);
+    expect(cost.billable).toBe(true);
+  });
+
   it("bills output reasoning tokens as output tokens", () => {
     const cost = calculateModelUsageCost({
       modelName: "openai/gpt-5.4",

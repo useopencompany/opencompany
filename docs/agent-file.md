@@ -58,12 +58,22 @@ Human-readable name. Serialized as a YAML double-quoted string. Trimmed. Empty v
 
 The model the agent runs on. Must be one of:
 
-| ID                            | Notes                                                           |
-| ----------------------------- | --------------------------------------------------------------- |
-| `openai/gpt-5.4-mini`         | Default. Cost-efficient for agentic production work.            |
-| `openai/gpt-5.4`              | High-capability reasoning across long workflows.                |
-| `anthropic/claude-haiku-4.5`  | Cost-efficient Claude for fast workloads.                       |
-| `anthropic/claude-sonnet-4.6` | High-capability Claude for coding-heavy and professional tasks. |
+| ID                                         | Notes                                                           |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| `openai/gpt-5.4-mini`                      | Default. Cost-efficient for agentic production work.            |
+| `openai/gpt-5.4-nano`                      | Lowest-cost GPT for high-volume lightweight tasks.              |
+| `openai/gpt-5.4`                           | High-capability reasoning across long workflows.                |
+| `anthropic/claude-haiku-4.5`               | Cost-efficient Claude for fast workloads.                       |
+| `anthropic/claude-sonnet-4.6`              | High-capability Claude for coding-heavy and professional tasks. |
+| `anthropic/claude-opus-4.7`                | Highest-capability Claude for demanding agent workflows.        |
+| `google/gemini-3-flash`                    | Popular Gemini model with strong speed and long context.        |
+| `google/gemini-3.1-flash-lite-preview`     | Very fast, low-cost Gemini for simple high-volume tasks.        |
+| `deepseek/deepseek-v4-flash`               | High-throughput DeepSeek for cost-sensitive work.               |
+| `mistral/mistral-medium-3.5`               | Mistral model balancing quality, latency, and cost.             |
+| `moonshotai/kimi-k2.6`                     | Latest Kimi for long-horizon coding and agent workflows.        |
+| `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
+| `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
+| `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |
 
 Unknown model IDs fall back to `openai/gpt-5.4-mini` rather than failing the parse.
 

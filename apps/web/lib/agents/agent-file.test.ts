@@ -48,6 +48,17 @@ describe(".agent files", () => {
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa"]);
   });
 
+  test("round-trips newly supported AI Gateway models", () => {
+    const source = serializeAgentFile({
+      title: "Gemini agent",
+      body: "Use the selected gateway model.",
+      model: "google/gemini-3-flash",
+    });
+
+    expect(source).toContain("model: google/gemini-3-flash");
+    expect(parseAgentFile(source).config.model.name).toBe("google/gemini-3-flash");
+  });
+
   test("syncs config from markdown mentions", () => {
     const config = extractConfigFromMentions(
       "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",

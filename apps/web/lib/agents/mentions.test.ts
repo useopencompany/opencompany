@@ -13,6 +13,20 @@ describe("extractConfigFromMentions", () => {
     expect(config.model).toBe("openai/gpt-5.4");
   });
 
+  it("resolves supported AI Gateway model mentions", () => {
+    const config = extractConfigFromMentions(
+      "Use @google/gemini-3-flash first, then @deepseek/deepseek-v4-flash.",
+    );
+
+    expect(config.model).toBe("deepseek/deepseek-v4-flash");
+  });
+
+  it("resolves Kimi and GLM model mentions", () => {
+    const config = extractConfigFromMentions("Use @moonshotai/kimi-k2.6 first, then @zai/glm-5.1.");
+
+    expect(config.model).toBe("zai/glm-5.1");
+  });
+
   it("resolves tool ids and labels", () => {
     const config = extractConfigFromMentions("Research with @exa and implement with @AMP.");
 
