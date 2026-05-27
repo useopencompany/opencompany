@@ -167,6 +167,8 @@ export function applyRuntimeEventToState(
     const messageId = readString(event.payload.messageId);
     const role = readString(event.payload.role);
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
+      const status =
+        optionalString(event.payload.status) ?? (role === "user" ? "completed" : "running");
       next = {
         ...next,
         messages: [
@@ -174,8 +176,8 @@ export function applyRuntimeEventToState(
           {
             id: messageId,
             role,
-            content: "",
-            status: "running",
+            content: optionalString(event.payload.content) ?? "",
+            status,
             internal: readBoolean(event.payload.internal),
             createdAt: new Date().toISOString(),
           },
