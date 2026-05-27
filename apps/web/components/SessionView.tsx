@@ -351,7 +351,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         </div>
 
         <div
-          className="relative flex-1 overflow-y-auto px-16 py-6"
+          className="relative flex-1 overflow-y-auto px-8 py-6"
           onDragEnter={(event) => {
             if (!event.dataTransfer?.types?.includes("Files")) return;
             event.preventDefault();
@@ -490,7 +490,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
           </div>
         </div>
 
-        <div className="bg-canvas px-16 py-4">
+        <div className="bg-canvas px-8 py-4">
           <div className="group/composer mx-auto max-w-[640px]">
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
             <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
