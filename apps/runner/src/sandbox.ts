@@ -226,6 +226,68 @@ export async function runSandboxTool(input: {
     };
   }
 
+  if (input.name === "edit_file") {
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
+    const toolRelativePath = relativePath(input.workdir, filePath);
+    readString(args, "instructions");
+    const edits = readEditOperations(args);
+    let content: string;
+    try {
+      content = await input.sandbox.files.read(filePath);
+    } catch {
+      throw new Error(
+        `File not found or unreadable: ${toolRelativePath}. Use write_file to create new files.`,
+      );
+    }
+
+    const originalContent = content;
+    let replacements = 0;
+    for (const [index, edit] of edits.entries()) {
+      const count = countOccurrences(content, edit.oldString);
+      if (count === 0) {
+        const crlfHint =
+          content.includes("\r\n") &&
+          !edit.oldString.includes("\r\n") &&
+          edit.oldString.includes("\n")
+            ? " The file uses CRLF (\\r\\n) line endings; include them in oldString."
+            : "";
+        throw new Error(
+          `Edit ${index + 1} failed: oldString was not found in ${toolRelativePath}.${crlfHint}`,
+        );
+      }
+      if (!edit.replaceAll && count > 1) {
+        const cascadeHint =
+          index > 0
+            ? " A previous edit may have created additional matches — try descending order, more surrounding context, or replaceAll."
+            : "";
+        throw new Error(
+          `Edit ${index + 1} failed: oldString matched ${count} times in ${toolRelativePath}. Include more context or set replaceAll=true.${cascadeHint}`,
+        );
+      }
+
+      content = edit.replaceAll
+        ? content.split(edit.oldString).join(edit.newString)
+        : replaceFirst(content, edit.oldString, edit.newString);
+      replacements += edit.replaceAll ? count : 1;
+    }
+
+    if (content === originalContent) {
+      throw new Error(
+        edits.length > 1
+          ? `No net change to ${toolRelativePath} (edits cancel each other). Re-check the edit order or merge into a single edit.`
+          : `No changes made to ${toolRelativePath}.`,
+      );
+    }
+
+    await input.sandbox.files.write(filePath, content);
+    return {
+      path: toolRelativePath,
+      editsApplied: edits.length,
+      replacements,
+      bytes: Buffer.byteLength(content, "utf8"),
+    };
+  }
+
   if (input.name === "list_files") {
     const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"));
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
@@ -300,6 +362,62 @@ function readOptionalString(record: Record<string, unknown>, key: string) {
 function readOptionalNumber(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+type EditOperation = {
+  oldString: string;
+  newString: string;
+  replaceAll: boolean;
+};
+
+function readEditOperations(record: Record<string, unknown>): EditOperation[] {
+  const value = record.edits;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("Tool argument edits must be a non-empty array.");
+  }
+
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Edit ${index + 1} must be an object with oldString and newString.`);
+    }
+    const edit = item as Record<string, unknown>;
+    if (typeof edit.oldString !== "string") {
+      throw new Error(`Edit ${index + 1} oldString must be a string.`);
+    }
+    if (edit.oldString === "") {
+      throw new Error(`Edit ${index + 1} oldString must not be empty.`);
+    }
+    if (typeof edit.newString !== "string") {
+      throw new Error(`Edit ${index + 1} newString must be a string.`);
+    }
+    const replaceAllValue = edit.replaceAll;
+    if (replaceAllValue !== undefined && typeof replaceAllValue !== "boolean") {
+      throw new Error(`Edit ${index + 1} replaceAll must be a boolean when provided.`);
+    }
+
+    return {
+      oldString: edit.oldString,
+      newString: edit.newString,
+      replaceAll: replaceAllValue === true,
+    };
+  });
+}
+
+function countOccurrences(content: string, needle: string) {
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const index = content.indexOf(needle, offset);
+    if (index === -1) return count;
+    count += 1;
+    offset = index + needle.length;
+  }
+}
+
+function replaceFirst(content: string, oldString: string, newString: string) {
+  const index = content.indexOf(oldString);
+  if (index === -1) return content;
+  return `${content.slice(0, index)}${newString}${content.slice(index + oldString.length)}`;
 }
 
 function relativePath(workdir: string, filePath: string) {

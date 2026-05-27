@@ -335,7 +335,9 @@ export async function executeRuntimeTool(input: {
     !failedOutput && isRecord(output) && Object.prototype.hasOwnProperty.call(output, "path")
       ? (output as { path: unknown }).path
       : null;
-  if (input.definition.name === "write_file" && typeof changedPath === "string") {
+  const fileMutationTool =
+    input.definition.name === "write_file" || input.definition.name === "edit_file";
+  if (fileMutationTool && typeof changedPath === "string") {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
@@ -353,14 +355,14 @@ export async function executeRuntimeTool(input: {
   if (isRecord(output) && "brainChanged" in output) {
     output = shellOutput;
   }
-  const writeChangedBrain =
-    input.definition.name === "write_file" &&
+  const toolChangedBrain =
+    fileMutationTool &&
     typeof changedPath === "string" &&
     changedPath.replace(/^\/+/, "").startsWith("brain/");
   if (
     !failedOutput &&
     input.definition.kind === "sandbox" &&
-    (writeChangedBrain || shellChangedBrain)
+    (toolChangedBrain || shellChangedBrain)
   ) {
     const activeSandbox = await input.getSandbox();
     await syncBrainFromSandbox({
@@ -453,7 +455,12 @@ function preflightSandboxToolArgs(input: {
   args: unknown;
   workdir: string;
 }) {
-  if (input.name !== "read_file" && input.name !== "write_file" && input.name !== "list_files") {
+  if (
+    input.name !== "read_file" &&
+    input.name !== "write_file" &&
+    input.name !== "edit_file" &&
+    input.name !== "list_files"
+  ) {
     return;
   }
 

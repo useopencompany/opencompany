@@ -308,6 +308,8 @@ describe("createAgentSessionFromPrompt", () => {
       agent_id: "agt_123",
       session_id: "ses_123",
       message_id: "msg_123",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
       is_initial_message: true,
       message_length: "Ship it".length,
     });
@@ -326,7 +328,14 @@ describe("submitAgentSessionMessage", () => {
   });
 
   it("captures a message-sent event when a user submits a follow-up message", async () => {
-    const limit = vi.fn().mockResolvedValue([{ id: "ses_123", agentId: "agt_123" }]);
+    const limit = vi.fn().mockResolvedValue([
+      {
+        id: "ses_123",
+        agentId: "agt_123",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+      },
+    ]);
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
@@ -354,6 +363,8 @@ describe("submitAgentSessionMessage", () => {
       agent_id: "agt_123",
       session_id: "ses_123",
       message_id: "msg_456",
+      model_provider: "vercel-ai-gateway",
+      model_name: "openai/gpt-5.4-mini",
       is_initial_message: false,
       message_length: "Follow up".length,
     });
