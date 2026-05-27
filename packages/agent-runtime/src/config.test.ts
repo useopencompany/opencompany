@@ -78,6 +78,8 @@ describe("resolveAgentRuntimeConfig", () => {
         "git_diff",
         "tool_help",
         "exa_search",
+        "exa_contents",
+        "exa_answer",
         "web_fetch",
       ]),
     );
@@ -121,6 +123,8 @@ describe("resolveAgentRuntimeConfig", () => {
 
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
+    expect(resolved.tools).not.toContain("exa_contents");
+    expect(resolved.tools).not.toContain("exa_answer");
     expect(resolved.tools).not.toContain("web_fetch");
   });
 
