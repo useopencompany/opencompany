@@ -505,7 +505,7 @@ function CopyMessageButton({ text }: { text: string }) {
       onClick={handleCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className="inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 hover:bg-[#f0f0ec] hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100"
+      className="hidden h-5 w-5 items-center justify-center rounded text-ink-subtle hover:bg-[#f0f0ec] hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:inline-flex"
     >
       {copied ? (
         <Check size={10} strokeWidth={2} className="text-[#16a34a]" />
