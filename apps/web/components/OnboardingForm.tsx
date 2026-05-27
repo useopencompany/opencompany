@@ -2,7 +2,7 @@
 
 import { captureEvent } from "@opencompany/analytics/client";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { completeOnboarding, type OnboardingActionState } from "@/lib/onboarding/actions";
 import {
@@ -25,6 +25,22 @@ const initialState: OnboardingActionState = {
   },
 };
 
+const onboardingCallCalLink = "team/opencompany/intro-call";
+const onboardingCallUrl = `https://cal.com/${onboardingCallCalLink}?overlayCalendar=true`;
+const calEmbedScriptSrc = "https://app.cal.com/embed/embed.js";
+
+type CalCommand = [string, ...unknown[]];
+type CalApi = ((...args: CalCommand) => void) & {
+  loaded?: boolean;
+  q?: CalCommand[];
+};
+
+declare global {
+  interface Window {
+    Cal?: CalApi;
+  }
+}
+
 const steps = [
   {
     title: "Where did you hear about opencompany?",
@@ -42,7 +58,13 @@ const steps = [
     title: "Where should agents help first?",
     subtitle: "Choose every area that matters right now.",
   },
+  {
+    title: "Book your onboarding call",
+    subtitle: "Pick a time with the opencompany team, then finish setup.",
+  },
 ] as const;
+
+const onboardingCallStepIndex = steps.length - 1;
 
 function firstErrorMessage(errors: OnboardingActionState["errors"]) {
   return (
@@ -69,7 +91,81 @@ function isValidCompanyUrl(value: string) {
   }
 }
 
-function SubmitButton() {
+function ensureCalApi() {
+  if (window.Cal) return window.Cal;
+
+  const cal = ((...args: CalCommand) => {
+    cal.q = cal.q ?? [];
+    cal.q.push(args);
+  }) as CalApi;
+
+  cal.q = [];
+  window.Cal = cal;
+  return cal;
+}
+
+function loadCalEmbed() {
+  const cal = ensureCalApi();
+
+  if (!cal.loaded && !document.querySelector(`script[src="${calEmbedScriptSrc}"]`)) {
+    const script = document.createElement("script");
+    script.src = calEmbedScriptSrc;
+    script.async = true;
+    document.head.appendChild(script);
+  }
+
+  cal.loaded = true;
+  return cal;
+}
+
+function OnboardingCallEmbed() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hasQueuedEmbedRef = useRef(false);
+
+  useEffect(() => {
+    if (hasQueuedEmbedRef.current || !containerRef.current) return;
+
+    hasQueuedEmbedRef.current = true;
+
+    const cal = loadCalEmbed();
+    cal("init", { origin: "https://cal.com" });
+    cal("inline", {
+      elementOrSelector: containerRef.current,
+      calLink: onboardingCallCalLink,
+      config: {
+        layout: "month_view",
+      },
+    });
+    cal("ui", {
+      hideEventTypeDetails: false,
+      styles: {
+        body: {
+          background: "#ffffff",
+        },
+      },
+    });
+  }, []);
+
+  return (
+    <div className="space-y-3">
+      <div
+        ref={containerRef}
+        aria-label="Book an onboarding call"
+        className="min-h-[620px] overflow-hidden rounded-lg border border-[#e2e2de] bg-white shadow-[0_1px_2px_rgba(17,17,17,0.04)]"
+      />
+      <a
+        href={onboardingCallUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mx-auto flex h-7 w-fit items-center rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-[#eeeeeb] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        Open scheduler in a new tab
+      </a>
+    </div>
+  );
+}
+
+function SubmitButton({ label = "Start using opencompany" }: { label?: string }) {
   const { pending } = useFormStatus();
 
   return (
@@ -78,7 +174,7 @@ function SubmitButton() {
       disabled={pending}
       className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
     >
-      <span>{pending ? "Saving" : "Start using opencompany"}</span>
+      <span>{pending ? "Saving" : label}</span>
       <ArrowRight size={12} strokeWidth={2} />
     </button>
   );
@@ -123,7 +219,8 @@ export default function OnboardingForm({
   const [values, setValues] = useState(initialState.values);
 
   const currentStep = steps[step] ?? steps[0];
-  const isLastStep = step === steps.length - 1;
+  const isLastStep = step === onboardingCallStepIndex;
+  const isCalendarStep = step === onboardingCallStepIndex;
   const displayedError = error || firstErrorMessage(serverState.errors);
 
   useEffect(() => {
@@ -216,7 +313,11 @@ export default function OnboardingForm({
 
   return (
     <main className="flex min-h-screen w-screen bg-canvas px-5">
-      <section className="mx-auto flex min-h-screen w-full max-w-[460px] flex-col pb-8 pt-[13vh]">
+      <section
+        className={`mx-auto flex min-h-screen w-full flex-col pb-8 ${
+          isCalendarStep ? "max-w-[960px] pt-8" : "max-w-[460px] pt-[13vh]"
+        }`}
+      >
         <form action={action}>
           <input type="hidden" name="heardFrom" value={values.heardFrom} />
           <input type="hidden" name="heardFromDetail" value={values.heardFromDetail} />
@@ -352,6 +453,8 @@ export default function OnboardingForm({
               </div>
             ) : null}
 
+            {step === onboardingCallStepIndex ? <OnboardingCallEmbed /> : null}
+
             {displayedError ? (
               <p className="mt-4 text-center text-[12px] leading-4 text-red-700">
                 {displayedError}
@@ -361,7 +464,7 @@ export default function OnboardingForm({
 
           <div className="mt-5 space-y-3">
             {isLastStep ? (
-              <SubmitButton />
+              <SubmitButton label="Finish onboarding" />
             ) : (
               <button
                 type="button"

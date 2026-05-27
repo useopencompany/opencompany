@@ -10,6 +10,8 @@ import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { materializeBrainFileToGitHub } from "@/lib/brain/materialize";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
+import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
+import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import {
   sweepAgentSyncOutbox as runAgentSyncOutboxSweep,
@@ -213,6 +215,24 @@ export const abortAgentSession = inngest.createFunction(
   },
 );
 
+export const sendSignupWelcome = inngest.createFunction(
+  {
+    id: "send-signup-welcome-email",
+    name: "Send signup welcome email",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.userId",
+    },
+    triggers: { event: SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT },
+  },
+  async ({ event, step }) => {
+    return step.run("send signup welcome email", async () => {
+      return sendSignupWelcomeEmail(event.data as SignupWelcomeEmailInput);
+    });
+  },
+);
+
 export const inngestFunctions = [
   syncAgentToGitHub,
   syncBrainToGitHub,
@@ -223,4 +243,5 @@ export const inngestFunctions = [
   generateAgentSessionTitle,
   runAgentAfterSession,
   abortAgentSession,
+  sendSignupWelcome,
 ];
