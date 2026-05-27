@@ -13,16 +13,19 @@ import {
   acquireRunLease,
   appendRuntimeEventForLease,
   buildAmpCommand,
+  buildAmpCommandEnv,
   completeAssistantMessageForLease,
   createAmpActivityFormatter,
   createAmpStreamAccumulator,
   createAssistantMessageForLease,
   createHostedToolBudget,
+  createKnownSecretRedactor,
   executeRuntimeTool,
   normalizeReasoningSummary,
   readReasoningTextDelta,
   recordStepUsage,
   recordToolUsage,
+  selectPublishBranch,
   throwIfStreamErrorPart,
 } from "./agent-loop";
 import type { RunnerEnv } from "./env";
@@ -783,6 +786,63 @@ describe("Amp stream parsing", () => {
     ).toBe(
       "amp threads continue --dangerously-allow-all --stream-json -x 'address the follow-up' 'T-2775dc92-90ed-4f85-8b73-8f9766029e83'",
     );
+  });
+
+  it("builds ephemeral GitHub auth env for Amp without putting tokens in the command", () => {
+    const env = buildAmpCommandEnv({
+      ampApiKey: "amp_secret_123",
+      githubAuthHeader: "Authorization: Basic github_basic_secret",
+      githubToken: "github_token_123",
+      toolCallId: "toolu/with spaces",
+    });
+
+    expect(env).toMatchObject({
+      AMP_API_KEY: "amp_secret_123",
+      GH_TOKEN: "github_token_123",
+      GH_PROMPT_DISABLED: "1",
+      GH_NO_UPDATE_NOTIFIER: "1",
+      GH_CONFIG_DIR: "/tmp/opencompany-gh-toolu-with-spaces",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: "Authorization: Basic github_basic_secret",
+    });
+    expect(buildAmpCommand({ task: "open a pr" })).not.toContain("github_token_123");
+  });
+
+  it("redacts known Amp and GitHub secrets from streamed or saved text", () => {
+    const redact = createKnownSecretRedactor([
+      "amp_secret_123",
+      "github_token_123",
+      "Authorization: Basic github_basic_secret",
+    ]);
+
+    expect(
+      redact(
+        "AMP=amp_secret_123 GH=github_token_123 header=Authorization: Basic github_basic_secret",
+      ),
+    ).toBe("AMP=[redacted] GH=[redacted] header=[redacted]");
+  });
+
+  it("publishes Amp's non-default branch when one exists", () => {
+    expect(
+      selectPublishBranch({
+        currentBranch: "feature/from-amp",
+        defaultBranch: "main",
+        sessionId: "ses_845254899642482b9082",
+        now: 123,
+      }),
+    ).toBe("feature/from-amp");
+  });
+
+  it("uses a generated branch instead of pushing the default branch", () => {
+    expect(
+      selectPublishBranch({
+        currentBranch: "main",
+        defaultBranch: "main",
+        sessionId: "ses_845254899642482b9082",
+        now: 123,
+      }),
+    ).toBe("opencompany/amp-482b9082-123");
   });
 
   it("captures the final successful Amp result across stdout chunks", () => {
