@@ -1,8 +1,7 @@
 import { getDb } from "@opencompany/db/client";
-import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace } from "@/lib/auth";
-import { dispatchBrainSyncRequested } from "@/lib/brain/sync-events";
+import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
 import { deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
 
 vi.mock("@opencompany/db/client", () => ({
@@ -13,22 +12,17 @@ vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-vi.mock("next/server", () => ({
-  after: vi.fn(),
-}));
-
 vi.mock("@/lib/auth", () => ({
   currentWorkspace: vi.fn(),
 }));
 
-vi.mock("@/lib/brain/sync-events", () => ({
-  dispatchBrainSyncRequested: vi.fn(),
+vi.mock("@/lib/brain/sync-dispatch", () => ({
+  scheduleBrainSyncDispatch: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
-const afterMock = vi.mocked(after);
 const currentWorkspaceMock = vi.mocked(currentWorkspace);
-const dispatchBrainSyncRequestedMock = vi.mocked(dispatchBrainSyncRequested);
+const scheduleBrainSyncDispatchMock = vi.mocked(scheduleBrainSyncDispatch);
 
 function createDbMock(input: { selectResults: unknown[][]; insertReturning?: unknown[][] }) {
   const pendingSelectResults = [...input.selectResults];
@@ -99,7 +93,7 @@ describe("renameBrainFile", () => {
     });
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();
-    expect(afterMock).not.toHaveBeenCalled();
+    expect(scheduleBrainSyncDispatchMock).not.toHaveBeenCalled();
   });
 
   it("records the previous path and blob for GitHub sync", async () => {
@@ -146,12 +140,8 @@ describe("renameBrainFile", () => {
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
-    expect(afterMock).toHaveBeenCalledOnce();
-
-    const callback = afterMock.mock.calls[0]?.[0];
-    expect(callback).toBeTypeOf("function");
-    await callback?.();
-    expect(dispatchBrainSyncRequestedMock).toHaveBeenCalledWith({
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledOnce();
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
       workspaceId: "wks_123",
       path: "docs/new.md",
     });
@@ -214,7 +204,15 @@ describe("renameBrainFile", () => {
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
-    expect(afterMock).toHaveBeenCalledTimes(2);
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledTimes(2);
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
+      workspaceId: "wks_123",
+      path: "archive/docs/a.md",
+    });
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
+      workspaceId: "wks_123",
+      path: "archive/docs/deep/b.md",
+    });
   });
 
   it("rejects moving a folder over an existing file path", async () => {
@@ -281,6 +279,14 @@ describe("renameBrainFile", () => {
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
-    expect(afterMock).toHaveBeenCalledTimes(2);
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledTimes(2);
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
+      workspaceId: "wks_123",
+      path: "docs/a.md",
+    });
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
+      workspaceId: "wks_123",
+      path: "docs/deep/b.md",
+    });
   });
 });
