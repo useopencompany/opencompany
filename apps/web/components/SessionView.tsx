@@ -6,8 +6,10 @@ import {
   ArrowUp,
   Bot,
   Brain,
+  Check,
   ChevronRight,
   CircleStop,
+  Copy,
   ExternalLink,
   LoaderCircle,
   PanelRight,
@@ -314,12 +316,24 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
             {visibleMessages.map((message) => {
               const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
+              const copyText =
+                message.role === "assistant"
+                  ? extractAssistantText(assistantParts) || message.content
+                  : message.content;
+              const canCopy = copyText.trim().length > 0;
 
               return (
                 <div
                   key={message.id}
-                  className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
+                  className={`flex ${
+                    message.role === "user" ? "justify-end" : "justify-start"
+                  }`}
                 >
+                  <div
+                    className={`group/message flex w-fit max-w-full flex-col gap-1 ${
+                      message.role === "user" ? "items-end" : "items-start"
+                    }`}
+                  >
                   <div
                     className={
                       message.role === "user"
@@ -332,6 +346,10 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                     ) : (
                       message.content
                     )}
+                  </div>
+                    {canCopy && message.status !== "running" ? (
+                      <CopyMessageButton text={copyText} />
+                    ) : null}
                   </div>
                 </div>
               );
@@ -446,6 +464,57 @@ function AssistantMarkdown({ content }: { content: string }) {
         {content}
       </ReactMarkdown>
     </div>
+  );
+}
+
+function extractAssistantText(parts: AssistantTurnPart[]): string {
+  return parts
+    .map((part) => {
+      if (part.type === "text") return part.text;
+      if (part.type === "reasoning") return part.text ?? "";
+      return "";
+    })
+    .filter((chunk) => chunk.length > 0)
+    .join("\n\n");
+}
+
+function CopyMessageButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore — clipboard may be blocked in insecure contexts
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Copied" : "Copy message"}
+      title={copied ? "Copied" : "Copy"}
+      className="inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 hover:bg-[#f0f0ec] hover:text-ink focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100"
+    >
+      {copied ? (
+        <Check size={10} strokeWidth={2} className="text-[#16a34a]" />
+      ) : (
+        <Copy size={10} strokeWidth={1.75} />
+      )}
+    </button>
   );
 }
 
