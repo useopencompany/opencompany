@@ -448,7 +448,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   <div
                     className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-7 after:content-[''] ${
                       message.role === "user"
-                        ? "max-w-[62%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+                        ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[14px] leading-6 text-ink"
                         : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
                     }`}
                   >
