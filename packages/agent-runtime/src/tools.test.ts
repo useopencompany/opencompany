@@ -26,8 +26,14 @@ describe("runtime tool definitions", () => {
 
     expect(descriptionFor("category")).toContain("cannot combine with date filters");
     expect(descriptionFor("includeDomains")).toContain("LinkedIn domains only");
-    expect(descriptionFor("excludeDomains")).toContain("Not supported with category=people");
-    expect(descriptionFor("startPublishedDate")).toContain("Not supported with category=people");
-    expect(descriptionFor("endPublishedDate")).toContain("Not supported with category=people");
+    expect(descriptionFor("excludeDomains")).toContain(
+      "Not supported with category=people or category=company",
+    );
+    expect(descriptionFor("startPublishedDate")).toContain(
+      "Not supported with category=people or category=company",
+    );
+    expect(descriptionFor("endPublishedDate")).toContain(
+      "Not supported with category=people or category=company",
+    );
   });
 });
