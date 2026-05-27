@@ -229,6 +229,7 @@ export async function runSandboxTool(input: {
   if (input.name === "edit_file") {
     const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
     const toolRelativePath = relativePath(input.workdir, filePath);
+    readString(args, "instructions");
     const edits = readEditOperations(args);
     let content: string;
     try {
@@ -377,9 +378,7 @@ function readEditOperations(record: Record<string, unknown>): EditOperation[] {
 
   return value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
-      throw new Error(
-        `Edit ${index + 1} must be an object with oldString and newString.`,
-      );
+      throw new Error(`Edit ${index + 1} must be an object with oldString and newString.`);
     }
     const edit = item as Record<string, unknown>;
     if (typeof edit.oldString !== "string") {

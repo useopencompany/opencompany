@@ -466,6 +466,29 @@ describe("runSandboxTool", () => {
     expect(sandbox.files.write).not.toHaveBeenCalled();
   });
 
+  it("requires edit_file instructions", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("content"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "edit_file",
+        args: {
+          path: "work/file.txt",
+          edits: [{ oldString: "content", newString: "updated" }],
+        },
+      }),
+    ).rejects.toThrow(/Tool argument instructions must be a string/);
+    expect(sandbox.files.read).not.toHaveBeenCalled();
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
   it("rejects no-op edit results", async () => {
     const sandbox = {
       files: {
