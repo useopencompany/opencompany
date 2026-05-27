@@ -146,7 +146,7 @@ function SessionHistoryItem({
     <div
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
         active
-          ? "mx-1.5 my-[3px] bg-[#e3e3df] text-ink"
+          ? "bg-[#e3e3df] text-ink"
           : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
       } ${isPending ? "opacity-60" : ""}`}
     >
