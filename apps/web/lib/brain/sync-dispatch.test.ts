@@ -1,8 +1,8 @@
 import { captureException } from "@opencompany/observability";
 import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { dispatchBrainSyncRequested } from "@/lib/brain/sync-events";
 import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
+import { dispatchBrainSyncRequested } from "@/lib/brain/sync-events";
 
 const mocks = vi.hoisted(() => ({
   logger: {
