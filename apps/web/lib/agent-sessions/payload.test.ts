@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
   type AgentSessionDetailPayload,
+  addUserMessageToSessionDetail,
   applyRuntimeEventToSessionDetail,
   invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
@@ -314,6 +315,29 @@ describe("session payload cache helpers", () => {
 
     expect(merged.messages[0]?.status).toBe("completed");
     expect(merged.messages[0]?.outputReasoningTokens).toBe(12);
+  });
+
+  it("fills an empty user message placeholder created by the live event stream", () => {
+    const current = applyRuntimeEventToSessionDetail(detail(), {
+      id: 1,
+      type: "message.created",
+      messageId: "msg_user",
+      payload: { messageId: "msg_user", role: "user" },
+    });
+
+    const next = addUserMessageToSessionDetail(current, {
+      messageId: "msg_user",
+      content: "Ship it",
+      createdAt: "2026-05-24T10:01:00.000Z",
+    });
+
+    expect(next.messages).toHaveLength(1);
+    expect(next.messages[0]).toMatchObject({
+      id: "msg_user",
+      role: "user",
+      content: "Ship it",
+      status: "completed",
+    });
   });
 
   it("preserves the streamed reasoning-token max while the assistant message is still running", () => {
