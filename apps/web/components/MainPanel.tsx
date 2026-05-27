@@ -169,8 +169,8 @@ export default function MainPanel({ agents: initialAgents }: { agents: AgentOpti
     agents?.map((agent) => ({ id: agent.id, name: agent.name })) ?? initialAgents;
 
   return (
-    <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-[680px] px-6 pt-10">
+    <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
+      <div className="w-full max-w-[680px]">
         <Prompt agents={agentOptions} />
       </div>
     </main>
