@@ -95,8 +95,10 @@ runtime customization requirements outgrow hosted E2B.
 
 **What it is:** Web search API.
 
-**What it does for us:** Powers the optional `@exa` hosted agent tool. The runner also includes a
-direct HTTP `web_fetch` tool for reading fetched HTML/text pages after search discovery.
+**What it does for us:** Powers the optional `@exa` hosted agent tool. Agents use Exa search for
+source discovery and vertical people/company/news/research lookups, Exa contents for clean
+LLM-ready extraction from known URLs, and Exa answer for short cited web-backed answers. The runner
+also keeps a direct HTTP `web_fetch` fallback for simple HTML/text pages.
 
 **Where it is used:**
 
@@ -137,6 +139,8 @@ for session-local scratch changes, and configured Brain files are mounted separa
 Hosted tools are enabled by agent configuration:
 
 - `exa_search`
+- `exa_contents`
+- `exa_answer`
 - `web_fetch`
 
 Provider-backed coding tools are also enabled by agent configuration:

@@ -129,6 +129,25 @@ describe("applyRuntimeEventToState", () => {
     );
   });
 
+  it("uses content and completed status from user message created events", () => {
+    const state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", {
+        messageId: "msg_new_user",
+        role: "user",
+        content: "Please ship this",
+        status: "completed",
+      }),
+    );
+
+    expect(state.messages.find((message) => message.id === "msg_new_user")).toMatchObject({
+      id: "msg_new_user",
+      role: "user",
+      content: "Please ship this",
+      status: "completed",
+    });
+  });
+
   it("does not apply duplicate event ids twice", () => {
     let state = initialState();
     state = applyRuntimeEventToState(

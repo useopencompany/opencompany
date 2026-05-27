@@ -97,6 +97,12 @@ import { normalizeModelUsage } from "./usage";
 
 const activeRuns = new Map<string, { leaseId: string; controller: AbortController }>();
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
+const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
+  exa_search: 8,
+  exa_contents: 8,
+  exa_answer: 4,
+  web_fetch: 12,
+};
 
 type ToolObservabilityContext = {
   workspaceId?: string;
@@ -104,6 +110,10 @@ type ToolObservabilityContext = {
   agentId?: string;
   modelProvider?: string;
   modelName?: string;
+};
+
+type ToolBudget = {
+  reserve: (definition: RuntimeToolDefinition) => () => void;
 };
 
 type FailedToolOutput = {
@@ -399,6 +409,7 @@ export async function runMessage(input: { sessionId: string; messageId: string; 
         modelProvider,
         modelName,
       },
+      toolBudget: createHostedToolBudget(),
     });
 
     let assistantContent = "";
@@ -905,6 +916,7 @@ export async function runAfterSession(input: {
         modelProvider,
         modelName,
       },
+      toolBudget: createHostedToolBudget(),
     });
 
     let assistantContent = "";
@@ -1223,6 +1235,7 @@ function createToolSet(input: {
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
+  toolBudget?: ToolBudget | undefined;
 }) {
   const tools: ToolSet = {};
 
@@ -1268,6 +1281,7 @@ function createToolSet(input: {
           signal: input.signal,
           checkAbort: input.checkAbort,
           observabilityContext: input.observabilityContext,
+          toolBudget: input.toolBudget,
         }),
     });
   }
@@ -1281,6 +1295,34 @@ function pickRuntimeTools(tools: ToolSet, names: string[]) {
     if (tools[name]) picked[name] = tools[name];
   }
   return picked;
+}
+
+export function createHostedToolBudget(): ToolBudget {
+  const callsByTool = new Map<RuntimeToolName, number>();
+
+  return {
+    reserve(definition) {
+      if (definition.kind !== "hosted") return () => {};
+
+      const limit = HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE[definition.name];
+      if (limit === undefined) return () => {};
+
+      const used = callsByTool.get(definition.name) ?? 0;
+      if (used >= limit) {
+        throw new RecoverableToolError(
+          `${formatRuntimeToolName(definition.name)} reached the per-response limit of ${limit} calls. Summarize what you found so far, broaden one follow-up search, or ask the user to continue instead of starting more granular searches.`,
+          "tool_call_limit_exceeded",
+        );
+      }
+
+      callsByTool.set(definition.name, used + 1);
+      return () => {};
+    },
+  };
+}
+
+function formatRuntimeToolName(name: RuntimeToolName) {
+  return name.replace(/_/g, " ");
 }
 
 export async function executeRuntimeTool(input: {
@@ -1302,12 +1344,15 @@ export async function executeRuntimeTool(input: {
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
+  toolBudget?: ToolBudget | undefined;
 }) {
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
   let usage: HostedToolUsage | undefined;
   let sandboxIdForCapture: string | undefined;
+  let releaseToolBudget: (() => void) | undefined;
   try {
+    releaseToolBudget = input.toolBudget?.reserve(input.definition);
     output = await withRunControlChecks(input.checkAbort, async () => {
       throwIfAborted(input.signal);
 
@@ -1431,6 +1476,8 @@ export async function executeRuntimeTool(input: {
     });
     failedOutput = buildFailedToolOutput(error);
     output = failedOutput;
+  } finally {
+    releaseToolBudget?.();
   }
 
   const changedPath =

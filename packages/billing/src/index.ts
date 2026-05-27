@@ -8,7 +8,14 @@ export const PLATFORM_FEE_BPS = 1000;
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
 
-type PricingProvider = "openai" | "anthropic";
+type PricingProvider =
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "deepseek"
+  | "mistral"
+  | "moonshotai"
+  | "zai";
 
 type ModelPricing = {
   model: AgentModelId;
@@ -61,6 +68,14 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cacheWriteUsdMicrosPerMillion: 750_000,
     outputUsdMicrosPerMillion: 4_500_000,
   },
+  "openai/gpt-5.4-nano": {
+    model: "openai/gpt-5.4-nano",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 200_000,
+    cachedInputUsdMicrosPerMillion: 20_000,
+    cacheWriteUsdMicrosPerMillion: 200_000,
+    outputUsdMicrosPerMillion: 1_250_000,
+  },
   "openai/gpt-5.4": {
     model: "openai/gpt-5.4",
     provider: "openai",
@@ -84,6 +99,78 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cachedInputUsdMicrosPerMillion: 300_000,
     cacheWriteUsdMicrosPerMillion: 3_750_000,
     outputUsdMicrosPerMillion: 15_000_000,
+  },
+  "anthropic/claude-opus-4.7": {
+    model: "anthropic/claude-opus-4.7",
+    provider: "anthropic",
+    inputUsdMicrosPerMillion: 5_000_000,
+    cachedInputUsdMicrosPerMillion: 500_000,
+    cacheWriteUsdMicrosPerMillion: 6_250_000,
+    outputUsdMicrosPerMillion: 25_000_000,
+  },
+  "google/gemini-3-flash": {
+    model: "google/gemini-3-flash",
+    provider: "google",
+    inputUsdMicrosPerMillion: 500_000,
+    cachedInputUsdMicrosPerMillion: 50_000,
+    cacheWriteUsdMicrosPerMillion: 500_000,
+    outputUsdMicrosPerMillion: 3_000_000,
+  },
+  "google/gemini-3.1-flash-lite-preview": {
+    model: "google/gemini-3.1-flash-lite-preview",
+    provider: "google",
+    inputUsdMicrosPerMillion: 250_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 250_000,
+    outputUsdMicrosPerMillion: 1_500_000,
+  },
+  "deepseek/deepseek-v4-flash": {
+    model: "deepseek/deepseek-v4-flash",
+    provider: "deepseek",
+    inputUsdMicrosPerMillion: 140_000,
+    cachedInputUsdMicrosPerMillion: 2_800,
+    cacheWriteUsdMicrosPerMillion: 140_000,
+    outputUsdMicrosPerMillion: 280_000,
+  },
+  "mistral/mistral-medium-3.5": {
+    model: "mistral/mistral-medium-3.5",
+    provider: "mistral",
+    inputUsdMicrosPerMillion: 1_500_000,
+    cachedInputUsdMicrosPerMillion: 0,
+    cacheWriteUsdMicrosPerMillion: 1_500_000,
+    outputUsdMicrosPerMillion: 7_500_000,
+  },
+  "moonshotai/kimi-k2.6": {
+    model: "moonshotai/kimi-k2.6",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 950_000,
+    cachedInputUsdMicrosPerMillion: 160_000,
+    cacheWriteUsdMicrosPerMillion: 950_000,
+    outputUsdMicrosPerMillion: 4_000_000,
+  },
+  "zai/glm-5.1": {
+    model: "zai/glm-5.1",
+    provider: "zai",
+    inputUsdMicrosPerMillion: 1_400_000,
+    cachedInputUsdMicrosPerMillion: 260_000,
+    cacheWriteUsdMicrosPerMillion: 1_400_000,
+    outputUsdMicrosPerMillion: 4_400_000,
+  },
+  "zai/glm-5-turbo": {
+    model: "zai/glm-5-turbo",
+    provider: "zai",
+    inputUsdMicrosPerMillion: 1_200_000,
+    cachedInputUsdMicrosPerMillion: 240_000,
+    cacheWriteUsdMicrosPerMillion: 1_200_000,
+    outputUsdMicrosPerMillion: 4_000_000,
+  },
+  "zai/glm-5v-turbo": {
+    model: "zai/glm-5v-turbo",
+    provider: "zai",
+    inputUsdMicrosPerMillion: 1_200_000,
+    cachedInputUsdMicrosPerMillion: 240_000,
+    cacheWriteUsdMicrosPerMillion: 1_200_000,
+    outputUsdMicrosPerMillion: 4_000_000,
   },
 };
 

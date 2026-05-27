@@ -25,6 +25,21 @@ type HostedToolHandler = {
   failureContext?: (input: { args: unknown; error: unknown }) => Record<string, unknown>;
 };
 
+type NormalizedExaResult = {
+  id?: string;
+  title?: string;
+  url?: string;
+  publishedDate?: string;
+  author?: string;
+  image?: string;
+  favicon?: string;
+  highlights?: string[];
+  summary?: string;
+  text?: string;
+  extras?: { links?: string[] };
+  subpages?: NormalizedExaResult[];
+};
+
 export class MissingEnvError extends Error {
   constructor(
     readonly envName: string,
@@ -79,14 +94,17 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
   exa_search: {
     execute: ({ args, env, signal }) => executeExaSearch(args, env, signal),
     failureContext: ({ args, error }) => getExaSearchFailureContext(args, error),
-    validateEnvironment: (env) => {
-      if (!env.exaApiKey) {
-        throw new MissingEnvError(
-          "EXA_API_KEY",
-          "The exa_search tool is enabled, but EXA_API_KEY is not configured.",
-        );
-      }
-    },
+    validateEnvironment: (env) => validateExaEnvironment(env, "exa_search"),
+  },
+  exa_contents: {
+    execute: ({ args, env, signal }) => executeExaContents(args, env, signal),
+    failureContext: ({ args, error }) => getExaContentsFailureContext(args, error),
+    validateEnvironment: (env) => validateExaEnvironment(env, "exa_contents"),
+  },
+  exa_answer: {
+    execute: ({ args, env, signal }) => executeExaAnswer(args, env, signal),
+    failureContext: ({ args, error }) => getExaAnswerFailureContext(args, error),
+    validateEnvironment: (env) => validateExaEnvironment(env, "exa_answer"),
   },
   web_fetch: {
     execute: ({ args, signal }) => executeWebFetch(args, signal),
@@ -98,6 +116,15 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
     }),
   },
 };
+
+function validateExaEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
+  if (!env.exaApiKey) {
+    throw new MissingEnvError(
+      "EXA_API_KEY",
+      `The ${toolName} tool is enabled, but EXA_API_KEY is not configured.`,
+    );
+  }
+}
 
 function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
   const toolName = readString(asRecord(args), "tool");
@@ -135,7 +162,7 @@ async function executeExaSearch(
     signal,
   });
 
-  const body = await readJsonResponse(response);
+  const body = await readJsonResponse(response, "search");
   if (!response.ok) {
     const message =
       isRecord(body) && typeof body.error === "string" ? body.error : response.statusText;
@@ -155,7 +182,9 @@ async function executeExaSearch(
       requestId,
       searchType,
       costDollars,
-      results: body.results.map(normalizeExaResult).slice(0, request.numResults),
+      results: body.results
+        .map((result) => normalizeExaResult(result))
+        .slice(0, request.numResults),
     },
     usage: {
       provider: "exa",
@@ -165,6 +194,129 @@ async function executeExaSearch(
       rawUsage: {
         requestId,
         searchType,
+        costDollars: isRecord(body.costDollars) ? body.costDollars : {},
+      },
+    },
+  };
+}
+
+async function executeExaContents(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  if (!env.exaApiKey) {
+    throw new MissingEnvError("EXA_API_KEY", "EXA_API_KEY is required for exa_contents.");
+  }
+
+  const request = buildExaContentsRequest(args);
+  const response = await fetch("https://api.exa.ai/contents", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.exaApiKey,
+    },
+    body: JSON.stringify(request.body),
+    signal,
+  });
+
+  const body = await readJsonResponse(response, "contents");
+  if (!response.ok) {
+    const message =
+      isRecord(body) && typeof body.error === "string" ? body.error : response.statusText;
+    throw new Error(`Exa contents failed (${response.status}): ${message}`);
+  }
+  if (!isRecord(body) || !Array.isArray(body.results)) {
+    throw new Error("Exa contents returned an unexpected response shape.");
+  }
+
+  const requestId = typeof body.requestId === "string" ? body.requestId : undefined;
+  const costDollars = readCostDollars(body.costDollars);
+
+  return {
+    output: omitUndefined({
+      requestId,
+      costDollars,
+      results: body.results.map((result) =>
+        normalizeExaResult(result, {
+          includeText: request.includeText,
+          textMaxCharacters: request.textMaxCharacters,
+          includeExtras: request.includeExtras,
+          includeSubpages: request.includeSubpages,
+        }),
+      ),
+      statuses: Array.isArray(body.statuses)
+        ? body.statuses.map(normalizeExaContentStatus)
+        : undefined,
+    }),
+    usage: {
+      provider: "exa",
+      operation: "contents",
+      ...(requestId ? { providerRequestId: requestId } : {}),
+      costUsdMicros: Math.round(costDollars * 1_000_000),
+      rawUsage: {
+        requestId,
+        costDollars: isRecord(body.costDollars) ? body.costDollars : {},
+      },
+    },
+  };
+}
+
+async function executeExaAnswer(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  if (!env.exaApiKey) {
+    throw new MissingEnvError("EXA_API_KEY", "EXA_API_KEY is required for exa_answer.");
+  }
+
+  const request = buildExaAnswerRequest(args);
+  const response = await fetch("https://api.exa.ai/answer", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.exaApiKey,
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  const body = await readJsonResponse(response, "answer");
+  if (!response.ok) {
+    const message =
+      isRecord(body) && typeof body.error === "string" ? body.error : response.statusText;
+    throw new Error(`Exa answer failed (${response.status}): ${message}`);
+  }
+  if (!isRecord(body) || !("answer" in body)) {
+    throw new Error("Exa answer returned an unexpected response shape.");
+  }
+
+  const requestId = typeof body.requestId === "string" ? body.requestId : undefined;
+  const costDollars = readCostDollars(body.costDollars);
+  const includeText = Boolean(request.text);
+
+  return {
+    output: {
+      requestId,
+      answer: body.answer,
+      costDollars,
+      citations: Array.isArray(body.citations)
+        ? body.citations.map((citation) =>
+            normalizeExaResult(citation, {
+              includeText,
+              textMaxCharacters: 2500,
+            }),
+          )
+        : [],
+    },
+    usage: {
+      provider: "exa",
+      operation: "answer",
+      ...(requestId ? { providerRequestId: requestId } : {}),
+      costUsdMicros: Math.round(costDollars * 1_000_000),
+      rawUsage: {
+        requestId,
         costDollars: isRecord(body.costDollars) ? body.costDollars : {},
       },
     },
@@ -238,6 +390,7 @@ function buildExaSearchRequest(args: unknown) {
   ]);
   const startPublishedDate = readOptionalString(record, "startPublishedDate");
   const endPublishedDate = readOptionalString(record, "endPublishedDate");
+  const includeDomains = readOptionalStringArray(record, "includeDomains");
   const excludeDomains = readOptionalStringArray(record, "excludeDomains");
 
   if (
@@ -248,6 +401,9 @@ function buildExaSearchRequest(args: unknown) {
       "Exa company and people category searches do not support excludeDomains or published date filters.",
     );
   }
+  if (category === "people" && includeDomains.some((domain) => !isLinkedInDomain(domain))) {
+    throw new Error("Exa people category searches only support LinkedIn includeDomains.");
+  }
 
   const numResults = Math.min(Math.max(readOptionalNumber(record, "numResults") ?? 5, 1), 10);
   const fresh = readOptionalBoolean(record, "fresh") ?? false;
@@ -257,14 +413,90 @@ function buildExaSearchRequest(args: unknown) {
   return omitUndefined({
     query,
     type:
-      readOptionalEnum(record, "type", ["auto", "fast", "instant", "deep-lite", "deep"]) ?? "auto",
+      readOptionalEnum(record, "type", [
+        "auto",
+        "fast",
+        "instant",
+        "deep-lite",
+        "deep",
+        "deep-reasoning",
+      ]) ?? "auto",
     numResults,
     category,
-    includeDomains: nonEmptyArray(readOptionalStringArray(record, "includeDomains")),
+    includeDomains: nonEmptyArray(includeDomains),
     excludeDomains: nonEmptyArray(excludeDomains),
     startPublishedDate,
     endPublishedDate,
     contents,
+  });
+}
+
+function buildExaContentsRequest(args: unknown) {
+  const record = asRecord(args);
+  const urls = readOptionalStringArray(record, "urls");
+  if (urls.length === 0) throw new Error("exa_contents urls must include at least one URL.");
+  if (urls.length > 10) throw new Error("exa_contents supports a maximum of 10 URLs per call.");
+  for (const url of urls) {
+    assertHttpUrl(url, "exa_contents urls");
+  }
+
+  const mode =
+    readOptionalEnum(record, "mode", ["highlights", "text", "summary"] as const) ?? "highlights";
+  const query = readOptionalString(record, "query");
+  const maxCharacters = readBoundedOptionalInteger(record, "maxCharacters", 500, 30_000);
+  const maxAgeHours = readBoundedOptionalInteger(record, "maxAgeHours", -1, 24 * 30);
+  const subpages = readBoundedOptionalInteger(record, "subpages", 0, 10);
+  const subpageTarget = readOptionalStringArray(record, "subpageTarget");
+  const includeLinks = readOptionalBoolean(record, "includeLinks") ?? false;
+  const summarySchema = readOptionalObject(record, "summarySchema");
+  if (summarySchema && mode !== "summary") {
+    throw new Error("exa_contents summarySchema requires mode=summary.");
+  }
+
+  const body: Record<string, unknown> = {
+    urls,
+    ...(maxAgeHours !== undefined ? { maxAgeHours, livecrawlTimeout: 15_000 } : {}),
+    ...(subpages !== undefined && subpages > 0 ? { subpages } : {}),
+    ...(subpageTarget.length > 0 ? { subpageTarget } : {}),
+    ...(includeLinks ? { extras: { links: 20 } } : {}),
+  };
+
+  if (mode === "text") {
+    body.text = maxCharacters ? { maxCharacters } : true;
+  } else if (mode === "summary") {
+    body.summary = omitUndefined({
+      query,
+      schema: summarySchema,
+    });
+    if (Object.keys(body.summary as Record<string, unknown>).length === 0) body.summary = true;
+  } else {
+    body.highlights = omitUndefined({
+      query,
+      ...(maxCharacters ? { maxCharacters } : {}),
+    });
+    if (Object.keys(body.highlights as Record<string, unknown>).length === 0) {
+      body.highlights = true;
+    }
+  }
+
+  return {
+    body,
+    includeText: mode === "text",
+    textMaxCharacters: maxCharacters ?? 12_000,
+    includeExtras: includeLinks,
+    includeSubpages: Boolean(subpages && subpages > 0),
+  };
+}
+
+function buildExaAnswerRequest(args: unknown) {
+  const record = asRecord(args);
+  const query = readString(record, "query").trim();
+  if (!query) throw new Error("exa_answer query must not be empty.");
+
+  return omitUndefined({
+    query,
+    text: readOptionalBoolean(record, "includeText") || undefined,
+    outputSchema: readOptionalObject(record, "outputSchema"),
   });
 }
 
@@ -305,6 +537,17 @@ function getExaSearchFailureContext(args: unknown, error: unknown) {
     };
   }
 
+  if (
+    category === "people" &&
+    readOptionalStringArray(record, "includeDomains").some((domain) => !isLinkedInDomain(domain))
+  ) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_unsupported_people_domain_filter",
+    };
+  }
+
   if (message.startsWith("EXA_API_KEY") || message.includes("EXA_API_KEY is not configured")) {
     return {
       ...context,
@@ -314,6 +557,89 @@ function getExaSearchFailureContext(args: unknown, error: unknown) {
   }
 
   if (message.startsWith("Exa search failed (")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "exa_http_error",
+      ...readHttpStatusFromMessage(message),
+    };
+  }
+
+  if (message.includes("unexpected response shape") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "exa_malformed_response",
+    };
+  }
+
+  return context;
+}
+
+function getExaContentsFailureContext(args: unknown, error: unknown) {
+  const record = isRecord(args) ? args : {};
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const context = baseExaFailureContext("contents");
+
+  const urls = readOptionalStringArray(record, "urls");
+  if (urls.length === 0 || urls.length > 10) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_invalid_urls",
+    };
+  }
+
+  if (message.includes("summarySchema requires")) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_invalid_contents_options",
+    };
+  }
+
+  return classifySharedExaFailure(message, context, "contents");
+}
+
+function getExaAnswerFailureContext(args: unknown, error: unknown) {
+  const record = isRecord(args) ? args : {};
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const context = baseExaFailureContext("answer");
+
+  if (!readOptionalString(record, "query")?.trim()) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "exa_invalid_query",
+    };
+  }
+
+  return classifySharedExaFailure(message, context, "answer");
+}
+
+function baseExaFailureContext(operation: "contents" | "answer") {
+  return {
+    hosted_provider: "exa",
+    hosted_operation: operation,
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+  };
+}
+
+function classifySharedExaFailure(
+  message: string,
+  context: Record<string, unknown>,
+  operation: "contents" | "answer",
+) {
+  if (message.startsWith("EXA_API_KEY") || message.includes("EXA_API_KEY is not configured")) {
+    return {
+      ...context,
+      tool_error_stage: "configuration",
+      tool_error_code: "exa_missing_api_key",
+    };
+  }
+
+  if (message.startsWith(`Exa ${operation} failed (`)) {
     return {
       ...context,
       tool_error_stage: "provider_response",
@@ -363,27 +689,78 @@ function buildWebFetchRequest(args: unknown) {
   };
 }
 
-async function readJsonResponse(response: Response) {
+async function readJsonResponse(response: Response, operation: string) {
   const text = await response.text();
   if (!text) return {};
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new Error(`Exa search returned non-JSON response (${response.status}).`);
+    throw new Error(`Exa ${operation} returned non-JSON response (${response.status}).`);
   }
 }
 
-function normalizeExaResult(value: unknown) {
+function normalizeExaResult(
+  value: unknown,
+  options: {
+    includeText?: boolean;
+    textMaxCharacters?: number;
+    includeExtras?: boolean;
+    includeSubpages?: boolean;
+  } = {},
+): NormalizedExaResult {
   const record = asRecord(value);
   return omitUndefined({
+    id: readOptionalString(record, "id"),
     title: readOptionalString(record, "title"),
     url: readOptionalString(record, "url"),
     publishedDate: readOptionalString(record, "publishedDate"),
     author: readOptionalString(record, "author"),
-    highlights: readOptionalStringArray(record, "highlights").map((highlight) =>
-      truncate(highlight, 1000),
+    image: readOptionalString(record, "image"),
+    favicon: readOptionalString(record, "favicon"),
+    highlights: nonEmptyArray(
+      readOptionalStringArray(record, "highlights").map((highlight) => truncate(highlight, 1000)),
     ),
     summary: truncate(readOptionalString(record, "summary") ?? "", 1500) || undefined,
+    text:
+      options.includeText && typeof record.text === "string"
+        ? truncate(record.text, options.textMaxCharacters ?? 12_000)
+        : undefined,
+    extras:
+      options.includeExtras && isRecord(record.extras)
+        ? normalizeExaExtras(record.extras)
+        : undefined,
+    subpages:
+      options.includeSubpages && Array.isArray(record.subpages)
+        ? record.subpages.map((subpage) => normalizeExaResult(subpage))
+        : undefined,
+  });
+}
+
+function normalizeExaContentStatus(value: unknown) {
+  const record = asRecord(value);
+  const error = record.error;
+  return omitUndefined({
+    id: readOptionalString(record, "id"),
+    url: readOptionalString(record, "url"),
+    status: readOptionalString(record, "status"),
+    error:
+      typeof error === "string"
+        ? error
+        : isRecord(error)
+          ? omitUndefined({
+              tag: readOptionalString(error, "tag"),
+              httpStatusCode:
+                typeof error.httpStatusCode === "number" ? error.httpStatusCode : undefined,
+            })
+          : undefined,
+  });
+}
+
+function normalizeExaExtras(value: Record<string, unknown>) {
+  return omitUndefined({
+    links: Array.isArray(value.links)
+      ? value.links.flatMap((link) => (typeof link === "string" ? [link] : [])).slice(0, 50)
+      : undefined,
   });
 }
 
@@ -572,6 +949,22 @@ function readOptionalBoolean(record: Record<string, unknown>, key: string) {
   return typeof value === "boolean" ? value : undefined;
 }
 
+function readBoundedOptionalInteger(
+  record: Record<string, unknown>,
+  key: string,
+  min: number,
+  max: number,
+) {
+  const value = readOptionalNumber(record, key);
+  if (value === undefined) return undefined;
+  return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function readOptionalObject(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
+}
+
 function readOptionalStringArray(record: Record<string, unknown>, key: string) {
   const value = record[key];
   if (!Array.isArray(value)) return [];
@@ -597,7 +990,25 @@ function omitUndefined<T extends Record<string, unknown>>(value: T) {
   };
 }
 
+function assertHttpUrl(rawUrl: string, label: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`${label} must contain valid absolute URLs.`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${label} only supports http and https URLs.`);
+  }
+}
+
+function isLinkedInDomain(value: string) {
+  const domain = value.trim().toLowerCase().replace(/^\*\./, "").split("/")[0] ?? "";
+  return domain === "linkedin.com" || domain.endsWith(".linkedin.com");
+}
+
 function truncate(value: string, maxLength: number) {
   if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 1)}...`;
+  if (maxLength <= 3) return value.slice(0, maxLength);
+  return `${value.slice(0, maxLength - 3)}...`;
 }

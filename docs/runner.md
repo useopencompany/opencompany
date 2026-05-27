@@ -73,6 +73,9 @@ Important details:
 - Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
 - Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`,
   `tool.completed`, and recoverable `tool.failed` results.
+- Hosted tools have per-assistant-message budgets in the runner. Over-budget calls return a
+  recoverable `tool.failed` result before reaching the provider, which bounds runaway search/fetch
+  fan-out even if prompting fails.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
   first tool execution, so text-only fast-model turns avoid that fixed pre-token latency.
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are

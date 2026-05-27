@@ -382,7 +382,7 @@ async function insertUserMessage(sessionId: string, content: string) {
       sessionId,
       messageId,
       type: "message.created",
-      payload: { messageId, role: "user" },
+      payload: { messageId, role: "user", content, status: "completed" },
     }),
   ]);
 

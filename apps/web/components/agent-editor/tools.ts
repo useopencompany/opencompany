@@ -75,8 +75,18 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
 const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
   "openai/gpt-5.4-mini": Bot,
   "openai/gpt-5.4": Brain,
+  "openai/gpt-5.4-nano": Bot,
   "anthropic/claude-haiku-4.5": Bot,
   "anthropic/claude-sonnet-4.6": Brain,
+  "anthropic/claude-opus-4.7": Brain,
+  "google/gemini-3-flash": Bot,
+  "google/gemini-3.1-flash-lite-preview": Bot,
+  "deepseek/deepseek-v4-flash": Bot,
+  "mistral/mistral-medium-3.5": Brain,
+  "moonshotai/kimi-k2.6": Brain,
+  "zai/glm-5.1": Brain,
+  "zai/glm-5-turbo": Bot,
+  "zai/glm-5v-turbo": Brain,
 };
 
 export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => ({

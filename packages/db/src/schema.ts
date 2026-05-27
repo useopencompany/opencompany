@@ -22,8 +22,18 @@ export type AgentToolId = "exa" | "amp";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
+  | "openai/gpt-5.4-nano"
   | "anthropic/claude-haiku-4.5"
-  | "anthropic/claude-sonnet-4.6";
+  | "anthropic/claude-sonnet-4.6"
+  | "anthropic/claude-opus-4.7"
+  | "google/gemini-3-flash"
+  | "google/gemini-3.1-flash-lite-preview"
+  | "deepseek/deepseek-v4-flash"
+  | "mistral/mistral-medium-3.5"
+  | "moonshotai/kimi-k2.6"
+  | "zai/glm-5.1"
+  | "zai/glm-5-turbo"
+  | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
   id: "exa";

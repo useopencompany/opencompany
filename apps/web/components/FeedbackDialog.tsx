@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink, Send, X } from "lucide-react";
+import { Send, X } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { useActionState, useEffect, useRef } from "react";
 import { type FeedbackActionState, submitFeedback } from "@/lib/feedback/actions";
 
@@ -15,11 +16,24 @@ type Props = {
   onClose: () => void;
 };
 
+function sessionIdFromPathname(pathname: string | null) {
+  const [section, encodedSessionId] = pathname?.split("/").filter(Boolean) ?? [];
+  if (section !== "session" || !encodedSessionId) return "";
+
+  try {
+    return decodeURIComponent(encodedSessionId);
+  } catch {
+    return encodedSessionId;
+  }
+}
+
 function FeedbackForm({ onClose }: { onClose: () => void }) {
   const [state, formAction, isPending] = useActionState<FeedbackActionState | null, FormData>(
     submitFeedback,
     null,
   );
+  const pathname = usePathname();
+  const sessionId = sessionIdFromPathname(pathname);
   const messageRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -49,6 +63,8 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
       className="w-full max-w-[520px] overflow-hidden rounded-lg border border-black/[0.1] bg-[#fbfbfa] shadow-[0_24px_64px_rgba(0,0,0,0.2),0_4px_14px_rgba(0,0,0,0.1)]"
       action={formAction}
     >
+      {sessionId && <input type="hidden" name="sessionId" value={sessionId} />}
+
       <div className="flex items-center justify-between border-b border-black/[0.08] px-4 py-3">
         <h2 id="feedback-title" className="text-[14px] font-semibold text-ink">
           Send feedback
@@ -105,19 +121,8 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
         )}
 
         {state?.ok && (
-          <div className="flex items-center justify-between gap-3 rounded-md border border-[#badbcc] bg-[#f0fdf4] px-3 py-2 text-[12.5px] text-[#1f7a3a]">
+          <div className="rounded-md border border-[#badbcc] bg-[#f0fdf4] px-3 py-2 text-[12.5px] text-[#1f7a3a]">
             <span>Thanks, we are on it.</span>
-            {state.issueUrl && (
-              <a
-                href={state.issueUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex shrink-0 items-center gap-1 font-medium text-[#176b31] hover:underline"
-              >
-                Open
-                <ExternalLink size={12.5} strokeWidth={1.9} />
-              </a>
-            )}
           </div>
         )}
       </div>

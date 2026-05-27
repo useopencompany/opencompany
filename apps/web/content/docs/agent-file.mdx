@@ -50,9 +50,19 @@ Which AI model runs this agent. Pick one of:
 | ID | What it's good for |
 | --- | --- |
 | `openai/gpt-5.4-mini` | The default. Fast and cheap. Use for most agents. |
+| `openai/gpt-5.4-nano` | Lowest-cost GPT for high-volume lightweight tasks. |
 | `openai/gpt-5.4` | Slower, smarter. Use when accuracy matters more than speed. |
 | `anthropic/claude-haiku-4.5` | Cheap and fast, Claude flavor. |
 | `anthropic/claude-sonnet-4.6` | Smart and careful, especially good at code and structured writing. |
+| `anthropic/claude-opus-4.7` | Most capable Claude option for demanding work. |
+| `google/gemini-3-flash` | Fast, popular Gemini model with a long context window. |
+| `google/gemini-3.1-flash-lite-preview` | Very fast and low cost for simple high-volume tasks. |
+| `deepseek/deepseek-v4-flash` | High-throughput model for cost-sensitive work. |
+| `mistral/mistral-medium-3.5` | Balanced Mistral model for quality, latency, and cost. |
+| `moonshotai/kimi-k2.6` | Latest Kimi for long-horizon coding and agent workflows. |
+| `zai/glm-5.1` | Latest GLM for coding-heavy and agentic engineering tasks. |
+| `zai/glm-5-turbo` | Faster GLM 5 variant for production agent workflows. |
+| `zai/glm-5v-turbo` | Multimodal GLM 5 model for visual coding and GUI tasks. |
 
 If you type something that isn't on this list, opencompany falls back to `openai/gpt-5.4-mini`.
 
@@ -76,7 +86,7 @@ tools:
 
 | ID | What it does |
 | --- | --- |
-| `exa` | Web and people research. The agent can search the live internet. |
+| `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `amp` | Coding work delegated into a sandboxed runtime. |
 
 Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file. Tool labels, descriptions, and runtime function names come from the platform catalog, not from this file.
