@@ -3,7 +3,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useToast } from "@/components/ToastProvider";
 import {
   Select,
   SelectContent,
@@ -30,12 +31,25 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const router = useRouter();
+  const { showToast } = useToast();
   const [input, setInput] = useState("");
   const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (input.length === 0) {
+      el.style.height = "";
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  }, [input]);
 
   const submit = () => {
     const content = input.trim();
@@ -63,9 +77,10 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         event.preventDefault();
         submit();
       }}
-      className="rounded-xl border border-[#e4e4e0] bg-white px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]"
+      className="group/prompt rounded-xl border border-[#e4e4e0] bg-white px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]"
     >
       <textarea
+        ref={textareaRef}
         value={input}
         onChange={(event) => setInput(event.target.value)}
         onKeyDown={(event) => {
@@ -74,9 +89,24 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             submit();
           }
         }}
-        rows={2}
+        onPaste={(event) => {
+          const items = event.clipboardData?.items;
+          if (!items) return;
+          for (const item of Array.from(items)) {
+            if (item.kind === "file" && item.type.startsWith("image/")) {
+              event.preventDefault();
+              showToast({
+                title: "Coming soon",
+                description: "Image upload will be available soon.",
+                tone: "default",
+              });
+              return;
+            }
+          }
+        }}
+        rows={1}
         placeholder="Ask Open Company to build, fix bugs, explore"
-        className="min-h-12 w-full resize-none bg-transparent text-[14px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
+        className="max-h-[220px] min-h-9 w-full resize-none content-center bg-transparent text-[14px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
       />
       <div className="mt-6 flex items-center">
         <Select
@@ -102,11 +132,25 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         <button
           type="submit"
           disabled={!canSubmit}
-          className="ml-auto flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+          className="ml-auto flex h-9 w-9 items-center justify-center rounded-full bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
           aria-label="Start session"
         >
-          <ArrowUp size={14} strokeWidth={2.25} />
+          <ArrowUp size={13} strokeWidth={2} />
         </button>
+      </div>
+      <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/prompt:opacity-100">
+        <span>
+          <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+            ↵
+          </kbd>{" "}
+          start
+        </span>
+        <span>
+          <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+            ⇧↵
+          </kbd>{" "}
+          new line
+        </span>
       </div>
     </form>
   );
