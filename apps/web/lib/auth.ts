@@ -14,6 +14,12 @@ import { cache } from "react";
 import { grantDefaultSignupCreditForWorkspace } from "@/lib/billing/service";
 import { getWorkOSClient } from "@/lib/workos";
 
+// Workspace auth is a small data access layer: one request-memoized resolver loads
+// the WorkOS session and local workspace context, while currentWorkspace() applies
+// route policy such as optional access, onboarding, or admin-only authorization.
+// Unauthenticated users (no session or no organization) are redirected to /signup
+// to keep the acquisition funnel intact; route handlers opt into anonymous access
+// via { optional: true }.
 type AppUser = typeof users.$inferSelect;
 type AppWorkspace = typeof workspaces.$inferSelect;
 type OnboardingUser = Pick<AppUser, "id" | "email">;
@@ -358,7 +364,9 @@ export async function hasCompletedOnboarding(user: string | OnboardingUser) {
   return Boolean(response);
 }
 
-export const getOptionalCurrentWorkspaceWithoutOnboarding = cache(async () => {
+const hasCompletedOnboardingForUser = cache(hasCompletedOnboarding);
+
+const resolveWorkspaceContext = cache(async () => {
   const session = await withAuth();
 
   if (!session.user || !session.organizationId) {
@@ -375,61 +383,35 @@ export const getOptionalCurrentWorkspaceWithoutOnboarding = cache(async () => {
   );
 });
 
-export const getCurrentWorkspaceWithoutOnboarding = cache(async () => {
-  const session = await withAuth({ ensureSignedIn: true });
+type CurrentWorkspaceOptions = {
+  optional?: boolean;
+  skipOnboarding?: boolean;
+  requireAdmin?: boolean;
+};
 
-  if (!session.organizationId) {
-    redirect("/auth/organization");
-  }
+type OptionalCurrentWorkspaceOptions = CurrentWorkspaceOptions & {
+  optional: true;
+};
 
-  return (
-    (await loadCurrentWorkspaceContextReadOnly(session.user, session.organizationId)) ??
-    (await syncUserAndWorkspace(
-      session.user,
-      session.organizationId,
-      session.role ?? session.roles?.[0],
-    ))
-  );
-});
-
-export const getOptionalCurrentWorkspace = cache(async () => {
-  const context = await getOptionalCurrentWorkspaceWithoutOnboarding();
+export function currentWorkspace(
+  options: OptionalCurrentWorkspaceOptions,
+): Promise<CurrentWorkspaceContext | null>;
+export function currentWorkspace(options?: CurrentWorkspaceOptions): Promise<CurrentWorkspaceContext>;
+export async function currentWorkspace(options: CurrentWorkspaceOptions = {}) {
+  const context = await resolveWorkspaceContext();
 
   if (!context) {
-    return null;
-  }
-
-  if (!(await hasCompletedOnboarding(context.user))) {
-    redirect("/onboarding");
-  }
-
-  return context;
-});
-
-export const getCurrentWorkspace = cache(async () => {
-  const context = await getCurrentWorkspaceWithoutOnboarding();
-
-  if (!(await hasCompletedOnboarding(context.user))) {
-    redirect("/onboarding");
-  }
-
-  return context;
-});
-
-export async function requireCurrentWorkspace() {
-  const context = await getOptionalCurrentWorkspace();
-
-  if (!context) {
+    if (options.optional) return null;
     redirect("/signup");
   }
 
-  return context;
-}
-
-export async function requireCurrentWorkspaceAdmin() {
-  const context = await requireCurrentWorkspace();
-  if (context.role !== ADMIN_ROLE) {
-    throw new Error("Only workspace admins can manage workspace integrations.");
+  if (!options.skipOnboarding && !(await hasCompletedOnboardingForUser(context.user))) {
+    redirect("/onboarding");
   }
+
+  if (options.requireAdmin && context.role !== ADMIN_ROLE) {
+    throw new Error("Only workspace admins can perform this action.");
+  }
+
   return context;
 }

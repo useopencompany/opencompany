@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Called by: .github/workflows/release-production.yml and root `bun run release:render`.
+// Purpose: triggers and waits for the Render runner deploy for the release commit.
+
 const renderApiUrl = process.env.RENDER_API_URL ?? "https://api.render.com/v1";
 const serviceId = requiredEnv("RENDER_SERVICE_ID");
 const apiKey = requiredEnv("RENDER_API_KEY");

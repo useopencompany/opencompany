@@ -1,11 +1,7 @@
+import type { AgentAfterSessionConfig } from "./types";
+
 export const AFTER_SESSION_TAG = "#after-session";
 export const DEFAULT_AFTER_SESSION_IDLE_DELAY_SECONDS = 180;
-
-export type AgentAfterSessionConfig = {
-  enabled: boolean;
-  prompt: string;
-  idleDelaySeconds: number;
-};
 
 export function extractAfterSessionConfig(body: string): AgentAfterSessionConfig | undefined {
   const prompt = extractAfterSessionPrompt(body);

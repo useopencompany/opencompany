@@ -5,10 +5,13 @@ This is the short map for coming back to the project after time away. Source fil
 ## Runtime Shape
 
 - `apps/web` is the Next.js app. Server Components read from Postgres through Drizzle, and server actions mutate app state.
-- WorkOS AuthKit handles identity. `getCurrentWorkspace()` resolves the signed-in user and workspace before app data is read or written.
-- Neon Postgres is the immediate app source of truth. The shared DB client lives in `packages/db/src/client.ts`; the schema lives in `packages/db/src/schema.ts`.
-- GitHub stores workspace state in an OpenCompany-managed private repo per workspace. This backing
-  repo is separate from GitHub work integrations that agents use for coding workflows.
+- WorkOS AuthKit handles identity. `currentWorkspace()` resolves the signed-in user and workspace before app data is read or written.
+- Neon Postgres is the canonical interactive app state. Once a save transaction succeeds, the app
+  treats that state as saved. The shared DB client lives in `packages/db/src/client.ts`; the schema
+  lives in `packages/db/src/schema.ts`.
+- GitHub stores asynchronously materialized workspace files in an OpenCompany-managed private repo
+  per workspace. This backing repo is separate from GitHub work integrations that agents use for
+  coding workflows.
 - Inngest runs background jobs. The app exposes `/api/inngest`, and local development runs the Inngest dev server through the `@opencompany/inngest-dev` workspace.
 - `apps/runner` is the long-lived agent-session data plane. It provisions E2B sandboxes, runs the model/tool loop through Vercel AI Gateway and AI SDK Core, and writes replayable runtime events to Postgres.
 
@@ -27,6 +30,8 @@ When an agent is created or edited:
 
 The editor debounces saves by about 600ms in `AgentDetail.tsx`. Failed GitHub syncs should not make the editor look unsaved; they set `githubSyncStatus = failed` and keep the error on the agent row.
 
+Agents are one instance of the broader [synced workspace resource](#synced-workspace-resources) pattern.
+
 ## Agent File Format
 
 Workspace backing repos store agents as `agents/<slug>.agent` files. The format is a Markdown body
@@ -35,7 +40,9 @@ the web editor derives tool and integration frontmatter deterministically from r
 
 For the full spec — fields, validation rules, supported models and tools, examples, and the compiled `AgentConfig` shape — see [agent-file.md](./agent-file.md).
 
-The parser and serializer live in `apps/web/lib/agents/agent-file.ts`; the catalog of supported models and tools lives in `apps/web/lib/agents/config.ts`.
+The parser and serializer live in `packages/agent-runtime/src/agent-file.ts`; the catalog of
+supported models and tools lives in `packages/agent-runtime/src/models.ts` and
+`packages/agent-runtime/src/tools.ts`.
 
 ## GitHub Workspace State
 
@@ -45,9 +52,52 @@ GitHub logic lives in `apps/web/lib/workspace-state/github.ts`.
 - The repo record is cached in `workspace_repositories`.
 - GitHub App credentials provide installation tokens; the token is cached in memory until close to expiry.
 - Writes use the Contents API. The app reuses the last `githubBlobSha` when available, then refetches on content conflicts.
-- `listWorkspaceAgentFiles()` and `readWorkspaceFile()` support manual GitHub-to-DB import through `syncAgentsFromWorkspaceRepository()`.
+- `listWorkspaceAgentFiles()` and `readWorkspaceFile()` support manual GitHub-to-DB reconciliation
+  through `syncAgentsFromWorkspaceRepository()`.
 
-Current limitation: there is no GitHub webhook ingestion path. External GitHub edits are only reflected after an explicit sync-from-repository action.
+Current limitation: there is no GitHub webhook ingestion path. External GitHub edits are not part
+of the normal authority path; they are only reflected after an explicit sync-from-repository action.
+
+## Synced Workspace Resources
+
+A synced workspace resource is workspace-scoped state whose latest editable version is stored in
+Postgres and whose versioned file copy is materialized to the managed GitHub repo. A write updates
+Postgres and a sync job together, then an Inngest event materializes the desired GitHub file
+asynchronously. Content hashes make repeated jobs idempotent, and the sync job row stores the
+desired state plus retry metadata.
+
+Current instances:
+
+- Agents use `agents` and `agent_sync_jobs`. Writes live in `apps/web/lib/agents/actions.ts`,
+  materialization lives in `apps/web/lib/agents/materialize.ts`, and dispatch uses
+  `agent.sync_requested`.
+- Brain files use `brain_files` and `brain_sync_jobs`. Writes live in
+  `apps/web/lib/brain/actions.ts`, materialization lives in `apps/web/lib/brain/materialize.ts`,
+  and dispatch uses `brain.sync_requested`.
+
+Every implementation of this pattern should include:
+
+- A workspace-scoped unique index on `(workspaceId, path)` when path identifies the resource.
+- A resource `contentHash` column.
+- A `*_sync_jobs` table with desired hash, `nextRunAt`, status, attempts, last error, and previous
+  path/blob metadata for renames or deletes. Include desired version only when the resource is
+  versioned.
+- A single `db.batch([...])` that writes the resource row and upserts the sync job.
+- Fire-and-forget Inngest dispatch after the response has been sent.
+- Idempotent materialization that no-ops when the GitHub synced hash already matches current
+  content and no rename or delete remains.
+
+Keep the two current implementations separate. When a third synced workspace resource is added,
+first decide whether to extract shared helpers under `lib/workspace-state/synced-resource/`, and
+whether sync jobs should stay per-resource or move into a generic table. That tradeoff should be
+settled before copying the pattern a third time.
+
+Known differences to preserve or reconcile during extraction:
+
+- Agents are versioned and their sync jobs are keyed by `agentId`.
+- Brain sync jobs are keyed by `(workspaceId, path)` and carry `operation: "upsert" | "delete"`.
+- Brain supports folder rename/delete fan-out, while agents focus on one `.agent` path and
+  title-driven renames.
 
 ## GitHub Work Integrations
 
@@ -76,8 +126,7 @@ The important files are:
 - `apps/web/lib/agent-sessions/runner.ts`: server-to-server calls from web/Inngest to the runner.
 - `apps/web/components/SessionView.tsx`: reads persisted messages and applies SSE events.
 - `apps/runner/src/server.ts`: Fastify routes for health, internal mutations, and SSE.
-- `apps/runner/src/agent-loop.ts`: E2B provisioning, AI SDK `streamText`, tool execution, and
-  event writes.
+- `apps/runner/src/agent-loop.ts`: orchestrates a single message run — lease acquisition, assistant streaming, and step bookkeeping. Sandbox provisioning lives in `session-lifecycle.ts`, the model stream loop in `model-stream-runner.ts`, tool dispatch in `tool-dispatcher.ts`, AMP integration in `amp-tool.ts`, and event/usage writes in `lease-writes.ts` and `usage-recorder.ts`.
 - `packages/agent-runtime`: shared config resolution, tool catalog, runtime event types, ids,
   signed stream tokens, and path helpers.
 
@@ -106,7 +155,7 @@ Inngest setup is in:
 - `apps/web/app/api/inngest/route.ts`
 - `scripts/inngest-dev.mjs`
 
-`sync-agent-to-github` listens for `agent.sync_requested`, sleeps 10 seconds to coalesce rapid edits, then calls `materializeAgentToGitHub()`.
+`sync-agent-to-github` listens for `agent.sync_requested`, sleeps 10 seconds to coalesce rapid edits, then calls `materializeAgentToGitHub()`. Cron sweepers also scan due `agent_sync_jobs` and `brain_sync_jobs` rows once per minute and re-dispatch the same sync events, so a missed post-response dispatch can recover without another edit.
 
 `materializeAgentToGitHub()`:
 
@@ -116,7 +165,7 @@ Inngest setup is in:
 - marks the agent `syncing`, writes the `.agent` file to GitHub, then marks it `synced`;
 - records failure on both the agent and sync job, then rethrows so Inngest retries.
 
-Inngest concurrency is limited to one active sync per `agentId`. There is no cron sweeper yet, so if the event dispatch after the DB write never reaches Inngest, another edit is currently the practical way to enqueue a fresh sync.
+Inngest concurrency is limited to one active sync per `agentId` for agents and one active sync per workspace/path for Brain files. The outbox sweepers fan out recovery events, while the existing sync functions remain the only materialization path.
 
 ## Database Model
 

@@ -4,7 +4,7 @@ import { getDb } from "@opencompany/db/client";
 import { workspaces } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { AUTHENTICATION_REQUIRED_MESSAGE, getOptionalCurrentWorkspace } from "@/lib/auth";
+import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos";
 
 export async function updateWorkspaceName(name: string) {
@@ -14,7 +14,7 @@ export async function updateWorkspaceName(name: string) {
     return { ok: false as const, error: "Name is too long (max 80 chars)." };
   }
 
-  const context = await getOptionalCurrentWorkspace();
+  const context = await currentWorkspace({ optional: true });
   if (!context) {
     return { ok: false as const, error: AUTHENTICATION_REQUIRED_MESSAGE };
   }

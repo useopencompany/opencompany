@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getOptionalCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { getWorkOSClient } from "@/lib/workos";
 import { updateWorkspaceName } from "./actions";
 
@@ -10,7 +10,7 @@ vi.mock("@opencompany/db/client", () => ({
 
 vi.mock("@/lib/auth", () => ({
   AUTHENTICATION_REQUIRED_MESSAGE: "Your session expired. Sign in again to continue.",
-  getOptionalCurrentWorkspace: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/workos", () => ({
@@ -22,7 +22,7 @@ vi.mock("next/cache", () => ({
 }));
 
 const getDbMock = vi.mocked(getDb);
-const getOptionalCurrentWorkspaceMock = vi.mocked(getOptionalCurrentWorkspace);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const getWorkOSClientMock = vi.mocked(getWorkOSClient);
 
 describe("updateWorkspaceName", () => {
@@ -47,7 +47,7 @@ describe("updateWorkspaceName", () => {
     getWorkOSClientMock.mockReturnValue({
       organizations: { updateOrganization },
     } as never);
-    getOptionalCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       workspace: {
         id: "wks_123",
         workosOrganizationId: "org_123",
@@ -71,7 +71,7 @@ describe("updateWorkspaceName", () => {
   });
 
   it("returns an auth error without updating WorkOS when the session is missing", async () => {
-    getOptionalCurrentWorkspaceMock.mockResolvedValue(null);
+    currentWorkspaceMock.mockResolvedValue(null);
 
     const result = await updateWorkspaceName("New workspace");
 

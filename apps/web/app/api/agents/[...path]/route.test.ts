@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadAgentForWorkspace } from "@/lib/agents/data";
-import { requireCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { GET } from "./route";
 
 vi.mock("@/lib/agents/data", () => ({
@@ -8,16 +8,16 @@ vi.mock("@/lib/agents/data", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  requireCurrentWorkspace: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 const loadAgentForWorkspaceMock = vi.mocked(loadAgentForWorkspace);
-const requireCurrentWorkspaceMock = vi.mocked(requireCurrentWorkspace);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 
 describe("agent detail API route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    requireCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       workspace: { id: "wks_123" },
     } as never);
   });

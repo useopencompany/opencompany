@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@opencompany/db": "workspace:*",
+    "@opencompany/agent-runtime": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

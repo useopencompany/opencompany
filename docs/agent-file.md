@@ -200,7 +200,10 @@ If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix 
 ### Renames
 
 - **Editor-originated** (changing the title): the new slug is computed at save time, the file is written at the new path, and the old GitHub file is deleted as part of the same sync job (tracked via `previousPath` / `previousBlobSha` on `agent_sync_jobs`).
-- **GitHub-originated** (renaming the file directly in the repo): treated as a new agent on the next import, because the workspace sync keys off the file path. Renaming in GitHub will desync until a re-save in the editor reconciles the slug.
+- **GitHub-originated** (renaming the file directly in the repo): handled only through manual
+  import/reconciliation. Because the app keys workspace sync by file path, a GitHub rename is
+  treated as a new agent on the next import and can stay out of sync until the editor re-saves the
+  canonical Postgres state.
 
 ## Save behavior
 
@@ -309,17 +312,20 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
 
 ## Where the code lives
 
-- Parser and serializer — `apps/web/lib/agents/agent-file.ts`
-- Mention parsing, supported catalogs, and body-derived config — `apps/web/lib/agents/mentions.ts`
+- Parser and serializer — `packages/agent-runtime/src/agent-file.ts`
+- Mention parsing and body-derived config — `packages/agent-runtime/src/mentions.ts`
+- Supported model and tool catalogs — `packages/agent-runtime/src/models.ts`, `packages/agent-runtime/src/tools.ts`
 - Tiptap preview adapter — `apps/web/lib/agents/config.ts`
-- Compiled config type — `packages/db/src/schema.ts` (`AgentConfig`)
+- Compiled config type — `packages/agent-runtime/src/types.ts` (`AgentConfig`)
 - Editor — `apps/web/components/agent-editor/AgentEditor.tsx`
 - Save action and GitHub sync — `apps/web/lib/agents/actions.ts`, `apps/web/lib/inngest/functions.ts`
 
 ## FAQ
 
 **Can I commit `.agent` files by hand?**
-Yes. Push them to the workspace repo and trigger a manual import — the web app reads the format directly. Mentions in the body will be picked up just like edits made in the editor.
+Yes. Push them to the workspace repo and trigger a manual import/reconciliation. The web app reads
+the format directly and writes the imported result into Postgres; normal editor saves remain the
+canonical app state after the database transaction succeeds.
 
 **What happens if two saves race?**
 Every save carries a content hash and version. Inngest debounces by ~10 seconds and limits one in-flight sync per agent. If GitHub returns a conflicting blob SHA, the sync refetches and retries.
@@ -328,9 +334,10 @@ Every save carries a content hash and version. Inngest debounces by ~10 seconds 
 Add models to `packages/agent-runtime/src/models.ts`. Add product-level tools
 to `AGENT_TOOL_CATALOG` and runtime callable tools to
 `RUNTIME_TOOL_DEFINITIONS` in `packages/agent-runtime/src/tools.ts`; the web
-editor consumes that catalog through `apps/web/lib/agents/mentions.ts`. Older
-files that don't reference the new ID are unaffected; clients that don't
-recognize a new ID will fall back gracefully.
+editor consumes that catalog through `apps/web/lib/agents/config.ts` and
+`apps/web/components/agent-editor/tools.ts`. Older files that don't reference
+the new ID are unaffected; clients that don't recognize a new ID will fall back
+gracefully.
 
 **How do I evolve the format?**
 Bump `schemaVersion` in `packages/db/src/schema.ts` and add a normalizer in `parseAgentFile`. Keep additions additive so existing files keep parsing as `agent.v1` until they're re-serialized.

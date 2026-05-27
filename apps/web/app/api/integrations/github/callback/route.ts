@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireCurrentWorkspaceAdmin } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import {
   appendIntegrationStatus,
   buildGitHubUserAuthorizationUrl,
@@ -14,7 +14,7 @@ import {
 import { syncGitHubIntegrationRepositories } from "@/lib/integrations/service";
 
 export async function GET(request: Request) {
-  const current = await requireCurrentWorkspaceAdmin();
+  const current = await currentWorkspace({ requireAdmin: true });
   const url = new URL(request.url);
   const stateValue = url.searchParams.get("state") ?? "";
 

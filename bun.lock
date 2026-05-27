@@ -89,7 +89,6 @@
         "stripe": "^22.1.1",
         "tailwind-merge": "^3.6.0",
         "tippy.js": "^6.3.7",
-        "yaml": "^2.9.0",
       },
       "devDependencies": {
         "@tailwindcss/postcss": "^4.3.0",
@@ -108,7 +107,7 @@
       "name": "@opencompany/agent-runtime",
       "version": "0.2.0",
       "dependencies": {
-        "@opencompany/db": "workspace:*",
+        "yaml": "^2.9.0",
       },
       "devDependencies": {
         "@types/node": "^25.9.1",
@@ -137,7 +136,7 @@
       "name": "@opencompany/billing",
       "version": "0.2.0",
       "dependencies": {
-        "@opencompany/db": "workspace:*",
+        "@opencompany/agent-runtime": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "devDependencies": {
@@ -151,6 +150,7 @@
       "version": "0.2.0",
       "dependencies": {
         "@neondatabase/serverless": "^1.1.0",
+        "@opencompany/agent-runtime": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "devDependencies": {

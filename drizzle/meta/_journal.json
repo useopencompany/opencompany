@@ -162,6 +162,13 @@
       "when": 1779811175790,
       "tag": "0022_modern_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1779874702386,
+      "tag": "0023_bent_doctor_strange",
+      "breakpoints": true
     }
   ]
 }

@@ -1,3 +1,6 @@
+// Called by: apps/web package scripts for dev, build, and start.
+// Purpose: runs Next.js from the web app directory with repo-root env loading.
+
 import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";

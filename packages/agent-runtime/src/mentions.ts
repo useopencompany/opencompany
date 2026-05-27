@@ -1,9 +1,6 @@
-import {
-  AGENT_MODEL_CATALOG,
-  AGENT_TOOL_CATALOG,
-  type AgentToolDefinition,
-} from "@opencompany/agent-runtime";
 import { extractAfterSessionConfig } from "./after-session";
+import { AGENT_MODEL_CATALOG } from "./models";
+import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import type {
   AgentBrainReference,
   AgentCodingToolConfig,

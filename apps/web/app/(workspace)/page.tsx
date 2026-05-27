@@ -2,10 +2,10 @@ import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
 import { desc, eq } from "drizzle-orm";
 import MainPanel from "@/components/MainPanel";
-import { requireCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 export default async function Home() {
-  const context = await requireCurrentWorkspace();
+  const context = await currentWorkspace();
 
   const db = getDb();
   const rows = await db
