@@ -20,14 +20,7 @@ import {
   markGitHubIntegrationStatus,
   syncGitHubIntegrationRepositories,
 } from "@/lib/integrations/service";
-
-export type WorkspaceIntegrationStatus =
-  | "not_connected"
-  | "connected"
-  | "needs_repository_access"
-  | "needs_reauth"
-  | "sync_failed"
-  | "error";
+import { githubStatus } from "@/lib/integrations/status";
 
 export async function loadWorkspaceIntegrationState() {
   const { workspace } = await currentWorkspace();
@@ -241,22 +234,6 @@ export async function disconnectGitHubIntegrationAction(
       ? "GitHub was disconnected from this workspace. The GitHub App remains installed because another workspace still uses it."
       : "GitHub was disconnected from this workspace.",
   };
-}
-
-export function githubStatus(input: {
-  configured: boolean;
-  connectionStatuses: Array<"connected" | "needs_reauth" | "sync_failed" | "disconnected">;
-  availableRepositoryCount: number;
-}): WorkspaceIntegrationStatus {
-  if (!input.configured) return "error";
-  const activeConnectionStatuses = input.connectionStatuses.filter(
-    (status) => status !== "disconnected",
-  );
-  if (activeConnectionStatuses.length === 0) return "not_connected";
-  if (activeConnectionStatuses.includes("needs_reauth")) return "needs_reauth";
-  if (activeConnectionStatuses.includes("sync_failed")) return "sync_failed";
-  if (input.availableRepositoryCount > 0) return "connected";
-  return "needs_repository_access";
 }
 
 function classifyGitHubSyncFailure(error: unknown): "needs_reauth" | "sync_failed" {

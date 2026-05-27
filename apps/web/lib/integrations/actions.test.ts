@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { githubStatus } from "./actions";
+import { githubStatus } from "./status";
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
