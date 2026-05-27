@@ -325,28 +325,25 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
               return (
                 <div
                   key={message.id}
-                  className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                  className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
                 >
                   <div
-                    className={`group/message flex w-fit max-w-full flex-col gap-1 ${
-                      message.role === "user" ? "items-end" : "items-start"
+                    className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-7 after:content-[''] ${
+                      message.role === "user"
+                        ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
+                        : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
                     }`}
                   >
-                    <div
-                      className={
-                        message.role === "user"
-                          ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
-                          : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
-                      }
-                    >
-                      {message.role === "assistant" ? (
-                        <AssistantMessageContent message={message} parts={assistantParts} />
-                      ) : (
-                        message.content
-                      )}
-                    </div>
+                    {message.role === "assistant" ? (
+                      <AssistantMessageContent message={message} parts={assistantParts} />
+                    ) : (
+                      message.content
+                    )}
                     {canCopy && message.status !== "running" ? (
-                      <CopyMessageButton text={copyText} />
+                      <CopyMessageButton
+                        text={copyText}
+                        align={message.role === "user" ? "left" : "right"}
+                      />
                     ) : null}
                   </div>
                 </div>
@@ -476,7 +473,7 @@ function extractAssistantText(parts: AssistantTurnPart[]): string {
     .join("\n\n");
 }
 
-function CopyMessageButton({ text }: { text: string }) {
+function CopyMessageButton({ text, align }: { text: string; align: "left" | "right" }) {
   const [copied, setCopied] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -499,13 +496,15 @@ function CopyMessageButton({ text }: { text: string }) {
     }
   };
 
+  const positionClasses = align === "left" ? "top-full right-0 mt-1" : "top-full left-0 mt-1";
+
   return (
     <button
       type="button"
       onClick={handleCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className="hidden h-5 w-5 items-center justify-center rounded text-ink-subtle hover:bg-[#f0f0ec] hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:inline-flex"
+      className={`absolute ${positionClasses} z-10 hidden h-5 w-5 items-center justify-center rounded text-ink-subtle hover:bg-[#f0f0ec] hover:text-ink focus-visible:inline-flex focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:inline-flex`}
     >
       {copied ? (
         <Check size={10} strokeWidth={2} className="text-[#16a34a]" />
