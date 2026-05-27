@@ -1,5 +1,6 @@
 "use client";
 
+import type { JsonValue } from "@opencompany/agent-runtime/types";
 import { BookOpenText, ChevronLeft, ChevronRight, Clock3, Cpu, Plug, Wrench } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
@@ -12,7 +13,7 @@ type Props = {
   items: AgentMentionItem[];
   query?: string;
   showCategories?: boolean;
-  command: (item: { id: string; label: string }) => void;
+  command: (item: { id: string; label: string } & Record<string, JsonValue>) => void;
   onSelect?: (item: AgentMentionItem) => void;
 };
 
@@ -88,7 +89,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       setSelectedIndex(0);
       return;
     }
-    command({ id: row.item.mentionId, label: row.item.label });
+    command(mentionCommandItem(row.item));
     onSelect?.(row.item);
   };
 
@@ -204,4 +205,16 @@ function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "integration") return "Work integrations";
   if (kind === "hook") return "Hooks";
   return "Brain";
+}
+
+function mentionCommandItem(item: AgentMentionItem) {
+  return {
+    id: item.mentionId,
+    label: item.label,
+    ...(item.kind === "integration" && item.fullName ? { fullName: item.fullName } : {}),
+    ...(item.kind === "integration" && item.defaultBranch
+      ? { defaultBranch: item.defaultBranch }
+      : {}),
+    ...(item.kind === "integration" && item.binding ? { binding: item.binding } : {}),
+  };
 }

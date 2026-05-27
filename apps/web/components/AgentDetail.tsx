@@ -203,8 +203,8 @@ function AgentDetailContent({
   const githubCommitSha = agent.githubCommitSha;
   const githubSyncedAt = agent.githubSyncedAt;
   const mentionItems: AgentMentionItem[] = useMemo(
-    () => buildAgentMentionItems(agent.githubIntegrationRepositories, agent.brainPaths),
-    [agent.brainPaths, agent.githubIntegrationRepositories],
+    () => buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths),
+    [agent.brainPaths, agent.usableGitHubIntegrationRepositories],
   );
 
   useEffect(() => {
@@ -860,6 +860,9 @@ function buildConfigPreview({
         content,
         model: selectedModelId,
         repositories,
+        preferredRepositories: fallback.integrations.github.repositories.filter(
+          (repository) => repository.binding,
+        ),
         triggers,
       }).config
     : {

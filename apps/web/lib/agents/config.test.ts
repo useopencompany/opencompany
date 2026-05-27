@@ -7,6 +7,18 @@ const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },
   { fullName: "opencompany/runner", defaultBranch: "develop" },
 ];
+const repositoryBinding = {
+  provider: "github" as const,
+  resourceType: "repository" as const,
+  externalId: "repo_123",
+  displayName: "opencompany/web",
+  connection: {
+    externalId: "install_123",
+    label: "OpenCompany",
+    accountName: "opencompany",
+    accountType: "Organization",
+  },
+};
 
 describe("derivePreviewConfigFromTiptapDoc", () => {
   it("binds amp to the mentioned GitHub work repository", () => {
@@ -151,6 +163,80 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
     expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
     expect(config.model.name).toBe("openai/gpt-5.4");
   });
+
+  it("uses saved mention binding attrs to resolve duplicate GitHub repository names", () => {
+    const secondBinding = {
+      ...repositoryBinding,
+      externalId: "repo_456",
+      connection: {
+        ...repositoryBinding.connection,
+        externalId: "install_456",
+        label: "OpenCompany EU",
+      },
+    };
+    const { body, config } = derivePreviewConfigFromTiptapDoc({
+      title: "Code agent",
+      content: doc([
+        mention("tool:amp", "amp"),
+        text(" in "),
+        mention("integration:github:opencompany-web:install_456:repo_456", "opencompany/web", {
+          fullName: "opencompany/web",
+          defaultBranch: "main",
+          binding: secondBinding,
+        }),
+      ]),
+      repositories: [
+        { fullName: "opencompany/web", defaultBranch: "main", binding: repositoryBinding },
+        { fullName: "opencompany/web", defaultBranch: "main", binding: secondBinding },
+      ],
+    });
+
+    expect(body).toBe("@amp in @opencompany/web");
+    expect(config.integrations.github.repositories).toEqual([
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+        binding: secondBinding,
+      },
+    ]);
+  });
+
+  it("uses saved repository bindings when old mention attrs do not include binding", () => {
+    const secondBinding = {
+      ...repositoryBinding,
+      externalId: "repo_456",
+      connection: {
+        ...repositoryBinding.connection,
+        externalId: "install_456",
+        label: "OpenCompany EU",
+      },
+    };
+    const { config } = derivePreviewConfigFromTiptapDoc({
+      title: "Code agent",
+      content: doc([
+        mention("tool:amp", "amp"),
+        text(" in "),
+        mention("integration:github:opencompany-web", "opencompany/web"),
+      ]),
+      repositories: [
+        { fullName: "opencompany/web", defaultBranch: "main", binding: repositoryBinding },
+        { fullName: "opencompany/web", defaultBranch: "main", binding: secondBinding },
+      ],
+      preferredRepositories: [
+        { fullName: "opencompany/web", defaultBranch: "main", binding: repositoryBinding },
+      ],
+    });
+
+    expect(config.integrations.github.repositories).toEqual([
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+        binding: repositoryBinding,
+      },
+    ]);
+  });
 });
 
 describe("deriveAgentConfigFromBody", () => {
@@ -212,10 +298,10 @@ function doc(content: NonNullable<TiptapDoc["content"]>[number]["content"]): Tip
   };
 }
 
-function mention(id: string, label?: string) {
+function mention(id: string, label?: string, attrs: Record<string, unknown> = {}) {
   return {
     type: "mention",
-    attrs: { id, ...(label ? { label } : {}), mentionSuggestionChar: "@" },
+    attrs: { id, ...(label ? { label } : {}), ...attrs, mentionSuggestionChar: "@" },
   };
 }
 

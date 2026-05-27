@@ -13,6 +13,7 @@ import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "reac
 import { createMentionSuggestion } from "./mentionSuggestion";
 import {
   AGENT_AFTER_SESSION_MENTION_ITEMS,
+  type AgentIntegration,
   type AgentMentionItem,
   buildAgentMentionItems,
   findMentionItem,
@@ -27,7 +28,12 @@ type Props = {
 };
 
 export type AgentEditorHandle = {
-  selectRepositoryMention: (repository: { fullName: string; defaultBranch: string }) => void;
+  selectRepositoryMention: (
+    repository: Pick<AgentIntegration, "fullName" | "defaultBranch" | "binding"> & {
+      fullName: string;
+      defaultBranch: string;
+    },
+  ) => void;
 };
 
 const plainTextKeysExtension = Extension.create({
@@ -61,7 +67,16 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
   );
   const mentionExtension = useMemo(
     () =>
-      Mention.configure({
+      Mention.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            fullName: { default: null },
+            defaultBranch: { default: null },
+            binding: { default: null },
+          };
+        },
+      }).configure({
         HTMLAttributes: {
           class: "agent-mention",
         },
@@ -369,6 +384,11 @@ function mentionNode(item: AgentMentionItem): JSONContent {
       id: item.mentionId,
       label: item.label,
       mentionSuggestionChar: "@",
+      ...(item.kind === "integration" && item.fullName ? { fullName: item.fullName } : {}),
+      ...(item.kind === "integration" && item.defaultBranch
+        ? { defaultBranch: item.defaultBranch }
+        : {}),
+      ...(item.kind === "integration" && item.binding ? { binding: item.binding } : {}),
     },
   };
 }

@@ -1,7 +1,17 @@
 import { getDb } from "@opencompany/db/client";
-import { agents, brainFiles, workspaceIntegrationResources } from "@opencompany/db/schema";
+import {
+  agents,
+  brainFiles,
+  workspaceIntegrationResources,
+  workspaceIntegrations,
+} from "@opencompany/db/schema";
 import { and, asc, desc, eq, or } from "drizzle-orm";
-import { type AgentPayload, serializeAgent } from "@/lib/agents/payload";
+import {
+  type AgentPayload,
+  buildGitHubRepositoryCatalogs,
+  type GitHubIntegrationRepositoryPayload,
+  serializeAgent,
+} from "@/lib/agents/payload";
 import {
   GITHUB_INTEGRATION_PROVIDER,
   GITHUB_REPOSITORY_RESOURCE_TYPE,
@@ -19,14 +29,28 @@ async function loadBrainPathsForWorkspace(workspaceId: string): Promise<string[]
 
 async function loadGitHubIntegrationRepositoriesForWorkspace(
   workspaceId: string,
-): Promise<Array<{ fullName: string; defaultBranch: string }>> {
+): Promise<GitHubIntegrationRepositoryPayload[]> {
   const db = getDb();
   const rows = await db
     .select({
       fullName: workspaceIntegrationResources.name,
+      externalId: workspaceIntegrationResources.externalId,
+      displayName: workspaceIntegrationResources.displayName,
+      status: workspaceIntegrationResources.status,
+      statusReason: workspaceIntegrationResources.statusReason,
+      lastSyncedAt: workspaceIntegrationResources.lastSyncedAt,
       metadata: workspaceIntegrationResources.metadata,
+      connectionExternalId: workspaceIntegrations.externalId,
+      connectionLabel: workspaceIntegrations.connectionLabel,
+      accountName: workspaceIntegrations.accountName,
+      accountType: workspaceIntegrations.accountType,
+      connectionStatus: workspaceIntegrations.status,
     })
     .from(workspaceIntegrationResources)
+    .innerJoin(
+      workspaceIntegrations,
+      eq(workspaceIntegrationResources.integrationId, workspaceIntegrations.id),
+    )
     .where(
       and(
         eq(workspaceIntegrationResources.workspaceId, workspaceId),
@@ -39,6 +63,22 @@ async function loadGitHubIntegrationRepositoriesForWorkspace(
   return rows.map((row) => ({
     fullName: row.fullName,
     defaultBranch: readGitHubRepositoryDefaultBranch(row.metadata),
+    status: row.status,
+    statusReason: row.statusReason,
+    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+    connectionStatus: row.connectionStatus,
+    binding: {
+      provider: "github",
+      resourceType: "repository",
+      externalId: row.externalId,
+      displayName: row.displayName ?? row.fullName,
+      connection: {
+        externalId: row.connectionExternalId,
+        label: row.connectionLabel ?? row.accountName ?? "GitHub",
+        accountName: row.accountName,
+        accountType: row.accountType,
+      },
+    },
   }));
 }
 
@@ -73,7 +113,14 @@ export async function loadAgentForWorkspace(
     loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
   ]);
 
-  return agent ? serializeAgent(agent, brainPaths, githubIntegrationRepositories) : null;
+  if (!agent) return null;
+
+  const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
+    repositories: githubIntegrationRepositories,
+    savedRepositories: agent.config.integrations.github.repositories,
+  });
+
+  return serializeAgent(agent, brainPaths, derivationRepositories, usableRepositories);
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

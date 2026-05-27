@@ -71,10 +71,24 @@ export type AgentAfterSessionConfig = {
   idleDelaySeconds: number;
 };
 
+export type AgentGitHubRepositoryBinding = {
+  provider: "github";
+  resourceType: "repository";
+  externalId: string;
+  displayName: string;
+  connection: {
+    externalId: string;
+    label: string;
+    accountName: string | null;
+    accountType: string | null;
+  };
+};
+
 export type AgentGitHubRepositoryConfig = {
   id: string;
   fullName: string;
   defaultBranch: string;
+  binding?: AgentGitHubRepositoryBinding;
 };
 
 export type AgentTriggerConfig = {
@@ -88,7 +102,6 @@ export type AgentTriggerConfig = {
 
 export type AgentConfig = {
   schemaVersion: "agent.v1";
-  version?: 2;
   title: string;
   instructions: string;
   model: {

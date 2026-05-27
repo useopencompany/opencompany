@@ -15,6 +15,7 @@ const githubEnvNames = [
   "GITHUB_INTEGRATION_APP_CLIENT_ID",
   "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
   "GITHUB_INTEGRATION_STATE_SECRET",
+  "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
 ] as const;
 const originalGithubEnv = Object.fromEntries(
   githubEnvNames.map((name) => [name, process.env[name]]),
@@ -96,6 +97,9 @@ describe("GitHub integration state", () => {
     process.env.GITHUB_INTEGRATION_APP_CLIENT_ID = "Iv1.test";
     process.env.GITHUB_INTEGRATION_APP_CLIENT_SECRET = "test-secret";
     process.env.GITHUB_INTEGRATION_STATE_SECRET = "test-state-secret";
+    expect(isGitHubWorkIntegrationConfigured()).toBe(false);
+
+    process.env.INTEGRATION_CREDENTIAL_ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64");
 
     expect(isGitHubWorkIntegrationConfigured()).toBe(true);
   });

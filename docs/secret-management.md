@@ -119,6 +119,8 @@ For Infisical `dev`, `/web` should include:
 - GitHub integration app vars: `GITHUB_INTEGRATION_APP_ID`,
   `GITHUB_INTEGRATION_APP_PRIVATE_KEY`, `GITHUB_INTEGRATION_APP_SLUG`,
   `GITHUB_INTEGRATION_APP_CLIENT_ID`, and `GITHUB_INTEGRATION_APP_CLIENT_SECRET`
+- `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` for encrypted workspace provider credentials stored in
+  Neon
 - runner connection vars
 - optional Linear, analytics, and observability vars
 
