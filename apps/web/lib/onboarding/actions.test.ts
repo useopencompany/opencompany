@@ -1,7 +1,7 @@
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentWorkspaceWithoutOnboarding } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { ensureUserOnboardingScaffold } from "@/lib/onboarding/scaffold";
 import { completeOnboarding, type OnboardingActionState } from "./actions";
 
@@ -20,7 +20,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  getCurrentWorkspaceWithoutOnboarding: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/onboarding/scaffold", () => ({
@@ -29,7 +29,7 @@ vi.mock("@/lib/onboarding/scaffold", () => ({
 
 const getDbMock = vi.mocked(getDb);
 const captureServerEventMock = vi.mocked(captureServerEvent);
-const getCurrentWorkspaceWithoutOnboardingMock = vi.mocked(getCurrentWorkspaceWithoutOnboarding);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const ensureUserOnboardingScaffoldMock = vi.mocked(ensureUserOnboardingScaffold);
 
 const previousState: OnboardingActionState = {
@@ -85,7 +85,7 @@ describe("completeOnboarding", () => {
   it("creates the user onboarding scaffold before redirecting", async () => {
     const { db } = createDbMock();
     getDbMock.mockReturnValue(db as never);
-    getCurrentWorkspaceWithoutOnboardingMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
     } as never);

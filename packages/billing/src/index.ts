@@ -1,4 +1,4 @@
-import type { AgentModelId } from "@opencompany/db/schema";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { type SQLWrapper, sql } from "drizzle-orm";
 
 export const USD_MICROS_PER_CENT = 10_000;

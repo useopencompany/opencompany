@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import { dispatchBrainSyncRequested } from "@/lib/brain/sync-events";
 import { deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
 
@@ -18,7 +18,7 @@ vi.mock("next/server", () => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  getCurrentWorkspace: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/brain/sync-events", () => ({
@@ -27,7 +27,7 @@ vi.mock("@/lib/brain/sync-events", () => ({
 
 const getDbMock = vi.mocked(getDb);
 const afterMock = vi.mocked(after);
-const getCurrentWorkspaceMock = vi.mocked(getCurrentWorkspace);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const dispatchBrainSyncRequestedMock = vi.mocked(dispatchBrainSyncRequested);
 
 function createDbMock(input: { selectResults: unknown[][]; insertReturning?: unknown[][] }) {
@@ -71,7 +71,7 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturning?: unk
 describe("renameBrainFile", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       workspace: { id: "wks_123" },
     } as never);
   });

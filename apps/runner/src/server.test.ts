@@ -1,7 +1,7 @@
 import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runAfterSession } from "./agent-loop";
 import type { PersistedRuntimeEvent } from "./events";
+import { enqueueRunnerJob } from "./jobs";
 import {
   createServer,
   createSseHeaders,
@@ -9,18 +9,17 @@ import {
   formatStreamError,
   redactStreamToken,
 } from "./server";
-import { generateSessionTitleForMessage } from "./session-title";
 
 vi.mock("./agent-loop", () => ({
   abortSession: vi.fn(async () => undefined),
   archiveSession: vi.fn(async () => undefined),
-  runAfterSession: vi.fn(async () => undefined),
-  runMessage: vi.fn(async () => undefined),
-  startSession: vi.fn(async () => undefined),
 }));
 
-vi.mock("./session-title", () => ({
-  generateSessionTitleForMessage: vi.fn(async () => ({ ok: true, title: "Generated title" })),
+vi.mock("./jobs", () => ({
+  enqueueRunnerJob: vi.fn(async () => ({
+    id: 1,
+    status: "pending",
+  })),
 }));
 
 const env = {
@@ -123,6 +122,47 @@ describe("session event stream auth", () => {
   });
 });
 
+describe("internal session start endpoint", () => {
+  it("persists a runner job before accepting authenticated start requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/start",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(enqueueRunnerJob).toHaveBeenCalledWith({
+      kind: "start",
+      sessionId: "ses_123",
+    });
+  });
+});
+
+describe("internal message run endpoint", () => {
+  it("persists a runner job before accepting authenticated message requests", async () => {
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/internal/sessions/ses_123/messages/msg_123/run",
+      headers: { authorization: `Bearer ${env.internalToken}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toEqual({ ok: true });
+    expect(enqueueRunnerJob).toHaveBeenCalledWith({
+      kind: "message",
+      sessionId: "ses_123",
+      messageId: "msg_123",
+    });
+  });
+});
+
 describe("internal session title endpoint", () => {
   it("accepts authenticated title generation requests", async () => {
     const server = createServer(env);
@@ -136,10 +176,10 @@ describe("internal session title endpoint", () => {
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ ok: true });
-    expect(generateSessionTitleForMessage).toHaveBeenCalledWith({
+    expect(enqueueRunnerJob).toHaveBeenCalledWith({
+      kind: "title",
       sessionId: "ses_123",
       messageId: "msg_123",
-      env,
     });
   });
 });
@@ -157,10 +197,10 @@ describe("internal after-session endpoint", () => {
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({ ok: true });
-    expect(runAfterSession).toHaveBeenCalledWith({
+    expect(enqueueRunnerJob).toHaveBeenCalledWith({
+      kind: "after_session",
       sessionId: "ses_123",
       messageId: "msg_123",
-      env,
     });
   });
 

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Called by: release workflow checks and root `bun run release:preflight`.
+// Purpose: validates required release, web, runner, and smoke-check environment variables.
+
 import "./load-env.mjs";
 
 const groups = {

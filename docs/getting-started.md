@@ -79,6 +79,33 @@ bun run dev
 
 Re-running it is safe.
 
+## Local scripts
+
+These are the root commands a contributor is expected to run directly:
+
+| Command | Use when |
+| --- | --- |
+| `bun run setup` | Prepare or refresh local env files, Neon branch database, Stripe fallback values, and migrations. |
+| `bun run setup:dev` | Run setup, then start the full local dev stack. |
+| `bun run setup:personal` | Create `.env.override.local` for developer-owned values such as a personal Neon project. |
+| `bun run setup:stripe` | Fill only missing local Stripe values after the main setup already ran. |
+| `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
+| `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, and ngrok when available. |
+| `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
+| `bun run dev:web` | Start only the Next.js web app. |
+| `bun run dev:runner` | Start only the runner service. |
+| `bun run dev:kill-port` | Stop whichever process is listening on port 3000, or pass another port after `--`. |
+| `bun run dev:kill-3000` | Stop whichever process is listening on port 3000. |
+| `bun run github:tunnel` | Start or refresh an ngrok tunnel for local GitHub integration callbacks. |
+| `bun run db:generate` | Generate a Drizzle migration after changing `packages/db/src/schema.ts`. |
+| `bun run db:migrate` | Apply pending Drizzle migrations to the current `DATABASE_URL`. |
+| `bun run db:branch:create` | Create or refresh the Neon branch for the current Git branch. |
+| `bun run db:branch:delete` | Delete the Neon branch for the current Git branch. |
+| `bun run db:seed` | Insert the idempotent development user and workspace seed data. |
+
+Release automation commands are documented in [deployment.md](./deployment.md), not in this
+onboarding flow.
+
 ## Personal overrides
 
 Use a personal override file for developer-owned resources that should not be pulled from

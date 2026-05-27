@@ -6,16 +6,20 @@ import {
 } from "@opencompany/observability";
 import * as Sentry from "@sentry/bun";
 import { loadEnv } from "./env";
+import { startRunnerJobWorker } from "./jobs";
 import { createServer } from "./server";
 
 initializeExceptionReporting();
 
 const env = loadEnv();
 const server = createServer(env);
+const jobWorker = startRunnerJobWorker(env);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void flushObservability().finally(() => process.exit(0));
+    void Promise.allSettled([jobWorker.stop(), server.close()])
+      .then(() => flushObservability())
+      .finally(() => process.exit(0));
   });
 }
 

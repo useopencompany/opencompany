@@ -3,7 +3,7 @@
 import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 type FeedbackKind = "bug" | "feedback" | "idea";
 
@@ -328,7 +328,7 @@ export async function submitFeedback(
     return { ok: false, error: "Keep feedback under 4,000 characters." };
   }
 
-  const { authUser, user, workspace } = await getCurrentWorkspace();
+  const { authUser, user, workspace } = await currentWorkspace();
   const sessionId = await resolveFeedbackSessionId(rawSessionId, user.id, workspace.id);
   const title = titleFromMessage(kind, message);
   const description = buildDescription({

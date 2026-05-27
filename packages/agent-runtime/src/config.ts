@@ -1,6 +1,6 @@
-import type { AgentConfig } from "@opencompany/db/schema";
 import { getAgentModelRuntimeOptions, type ModelProviderOptions } from "./models";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
+import type { AgentConfig } from "./types";
 
 export type ResolvedAgentRuntimeConfig = {
   systemPrompt: string;

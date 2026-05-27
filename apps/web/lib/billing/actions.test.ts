@@ -1,6 +1,6 @@
 import { captureException } from "@opencompany/observability";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getOptionalCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import {
   createPendingCheckoutRecord,
   markCheckoutRecordFailed,
@@ -26,7 +26,7 @@ vi.mock("@opencompany/observability", () => ({
 
 vi.mock("@/lib/auth", () => ({
   AUTHENTICATION_REQUIRED_MESSAGE: "Your session expired. Sign in again to continue.",
-  getOptionalCurrentWorkspace: vi.fn(),
+  currentWorkspace: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/stripe", () => ({
@@ -45,7 +45,7 @@ vi.mock("@/lib/billing/service", async (importOriginal) => {
   };
 });
 
-const getOptionalCurrentWorkspaceMock = vi.mocked(getOptionalCurrentWorkspace);
+const currentWorkspaceMock = vi.mocked(currentWorkspace);
 const getStripeMock = vi.mocked(getStripe);
 const getAppUrlMock = vi.mocked(getAppUrl);
 const createPendingCheckoutRecordMock = vi.mocked(createPendingCheckoutRecord);
@@ -62,7 +62,7 @@ describe("createCreditCheckoutSession", () => {
     });
     newStripeCheckoutRecordIdMock.mockReturnValue("chk_123");
     getAppUrlMock.mockReturnValue("https://app.example.com");
-    getOptionalCurrentWorkspaceMock.mockResolvedValue({
+    currentWorkspaceMock.mockResolvedValue({
       authUser: { email: "user@example.com" },
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
@@ -81,7 +81,7 @@ describe("createCreditCheckoutSession", () => {
   });
 
   it("returns an auth error without starting checkout when the session is missing", async () => {
-    getOptionalCurrentWorkspaceMock.mockResolvedValue(null);
+    currentWorkspaceMock.mockResolvedValue(null);
 
     const result = await createCreditCheckoutSession(2500);
 

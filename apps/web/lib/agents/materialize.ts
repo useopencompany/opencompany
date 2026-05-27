@@ -1,10 +1,11 @@
+import { serializeAgentFile } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
-import { serializeAgentFile } from "@/lib/agents/agent-file";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
+import { nextSyncRetryAt } from "@/lib/sync-outbox/retry";
 import {
   deleteWorkspaceFile,
   ensureWorkspaceRepository,
@@ -216,6 +217,8 @@ export async function materializeAgentToGitHub(
       duration_ms: Date.now() - syncStartedAt,
       ...errorLogFields(error),
     });
+    const failedAttempts = (row.job?.attempts ?? 0) + 1;
+    const now = new Date();
     await timeAsync(trace, "db.markSyncFailed", () =>
       db
         .update(agents)
@@ -230,9 +233,10 @@ export async function materializeAgentToGitHub(
         .update(agentSyncJobs)
         .set({
           status: "failed",
-          attempts: (row.job?.attempts ?? 0) + 1,
+          attempts: failedAttempts,
+          nextRunAt: nextSyncRetryAt(now, failedAttempts),
           lastError: message,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(eq(agentSyncJobs.agentId, row.agent.id)),
     );

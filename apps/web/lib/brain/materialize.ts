@@ -4,6 +4,7 @@ import { captureException } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { workspaceBrainPath } from "@/lib/brain/paths";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
+import { nextSyncRetryAt } from "@/lib/sync-outbox/retry";
 import {
   deleteWorkspaceFile,
   ensureWorkspaceRepository,
@@ -138,6 +139,8 @@ export async function materializeBrainFileToGitHub(input: { workspaceId: string;
     return { status: "synced" as const, commitSha, blobSha };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown GitHub sync error";
+    const failedAttempts = row.job.attempts + 1;
+    const now = new Date();
     captureException(error, {
       event: "opencompany.brain_github_sync_failed",
       workspace_id: input.workspaceId,
@@ -146,15 +149,16 @@ export async function materializeBrainFileToGitHub(input: { workspaceId: string;
     await db.batch([
       db
         .update(brainFiles)
-        .set({ githubSyncStatus: "failed", githubSyncError: message, updatedAt: new Date() })
+        .set({ githubSyncStatus: "failed", githubSyncError: message, updatedAt: now })
         .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, input.path))),
       db
         .update(brainSyncJobs)
         .set({
           status: "failed",
-          attempts: row.job.attempts + 1,
+          attempts: failedAttempts,
+          nextRunAt: nextSyncRetryAt(now, failedAttempts),
           lastError: message,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(eq(brainSyncJobs.id, row.job.id)),
     ]);

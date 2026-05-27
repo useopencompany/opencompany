@@ -4,9 +4,11 @@
 
 **What it is:** Managed serverless Postgres.
 
-**What it does for us:** Stores product data for users, workspaces, agents, GitHub sync state,
-agent sessions, runtime events, billing credits, and onboarding state. Local development uses
-branch-specific Neon databases by default.
+**What it does for us:** Stores product data for users, workspaces, agents, Brain files, GitHub
+sync state, agent sessions, runtime events, billing credits, and onboarding state. For MVP,
+Postgres is the canonical interactive app state: once an app save transaction succeeds, the UI
+treats that state as saved while GitHub materialization happens asynchronously. Local development
+uses branch-specific Neon databases by default.
 
 **Where it is used:**
 
@@ -51,8 +53,9 @@ Drizzle handles cleanly; or the team needs a more batteries-included ORM workflo
 
 **What it is:** GitHub integration authenticated as an app installation.
 
-**What it does for us:** Creates and writes to managed private workspace repositories. GitHub is the
-source of truth for `.agent` files; Postgres stores the latest app state and sync job state.
+**What it does for us:** Creates and writes to managed private workspace repositories. GitHub stores
+versioned `.agent` and Brain file copies for durability, ownership, and manual reconciliation;
+Postgres stores the canonical interactive app state and sync job state.
 
 **Where it is used:**
 

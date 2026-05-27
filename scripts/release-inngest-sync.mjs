@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Called by: .github/workflows/release-production.yml and root `bun run release:inngest:sync`.
+// Purpose: asks the deployed web app to sync Inngest functions after a production release.
+
 const baseUrl = normalizeBaseUrl(process.env.PRODUCTION_WEB_URL || process.env.WEB_URL);
 const targetUrl =
   normalizeEndpoint(process.env.INNGEST_SYNC_URL) || normalizeEndpoint("/api/inngest");
