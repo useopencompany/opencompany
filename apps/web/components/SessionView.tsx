@@ -9,7 +9,6 @@ import {
   Check,
   ChevronRight,
   CircleStop,
-  ClipboardPaste,
   Copy,
   ExternalLink,
   LoaderCircle,
@@ -491,7 +490,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 {attachMenuOpen ? (
                   <div
                     role="menu"
-                    className="absolute bottom-full left-0 mb-2 z-20 min-w-[200px] overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                    className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
                   >
                     <button
                       type="button"
@@ -508,22 +507,6 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                     >
                       <Upload size={13} strokeWidth={1.75} />
                       Upload file
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        showToast({
-                          title: "Coming soon",
-                          description: "File attachments will be available soon.",
-                          tone: "default",
-                        });
-                        setAttachMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
-                    >
-                      <ClipboardPaste size={13} strokeWidth={1.75} />
-                      Paste from clipboard
                     </button>
                   </div>
                 ) : null}
