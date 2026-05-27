@@ -40,8 +40,10 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
     expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
+    expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
     expect(resolved.tools).toContain("shell");
+    expect(resolved.tools).toContain("edit_file");
     expect(resolved.tools).toContain("git_diff");
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
@@ -75,6 +77,7 @@ describe("resolveAgentRuntimeConfig", () => {
       expect.arrayContaining([
         "shell",
         "read_file",
+        "edit_file",
         "git_diff",
         "tool_help",
         "exa_search",

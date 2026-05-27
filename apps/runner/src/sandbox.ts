@@ -226,6 +226,53 @@ export async function runSandboxTool(input: {
     };
   }
 
+  if (input.name === "edit_file") {
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
+    const toolRelativePath = relativePath(input.workdir, filePath);
+    const edits = readEditOperations(args);
+    let content: string;
+    try {
+      content = await input.sandbox.files.read(filePath);
+    } catch {
+      throw new Error(
+        `File not found or unreadable: ${toolRelativePath}. Use write_file to create new files.`,
+      );
+    }
+
+    const originalContent = content;
+    let replacements = 0;
+    for (const [index, edit] of edits.entries()) {
+      const count = countOccurrences(content, edit.oldString);
+      if (count === 0) {
+        throw new Error(
+          `Edit ${index + 1} failed: oldString was not found in ${toolRelativePath}.`,
+        );
+      }
+      if (!edit.replaceAll && count > 1) {
+        throw new Error(
+          `Edit ${index + 1} failed: oldString matched ${count} times in ${toolRelativePath}. Include more context or set replaceAll=true.`,
+        );
+      }
+
+      content = edit.replaceAll
+        ? content.split(edit.oldString).join(edit.newString)
+        : replaceFirst(content, edit.oldString, edit.newString);
+      replacements += edit.replaceAll ? count : 1;
+    }
+
+    if (content === originalContent) {
+      throw new Error(`No changes made to ${toolRelativePath}.`);
+    }
+
+    await input.sandbox.files.write(filePath, content);
+    return {
+      path: toolRelativePath,
+      editsApplied: edits.length,
+      replacements,
+      bytes: Buffer.byteLength(content, "utf8"),
+    };
+  }
+
   if (input.name === "list_files") {
     const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"));
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
@@ -300,6 +347,55 @@ function readOptionalString(record: Record<string, unknown>, key: string) {
 function readOptionalNumber(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+type EditOperation = {
+  oldString: string;
+  newString: string;
+  replaceAll: boolean;
+};
+
+function readEditOperations(record: Record<string, unknown>): EditOperation[] {
+  const value = record.edits;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("Tool argument edits must be a non-empty array.");
+  }
+
+  return value.map((item, index) => {
+    const edit = asRecord(item);
+    const oldString = readString(edit, "oldString");
+    if (!oldString) {
+      throw new Error(`Edit ${index + 1} oldString must not be empty.`);
+    }
+    const newString = readString(edit, "newString");
+    const replaceAllValue = edit.replaceAll;
+    if (replaceAllValue !== undefined && typeof replaceAllValue !== "boolean") {
+      throw new Error(`Edit ${index + 1} replaceAll must be a boolean when provided.`);
+    }
+
+    return {
+      oldString,
+      newString,
+      replaceAll: replaceAllValue === true,
+    };
+  });
+}
+
+function countOccurrences(content: string, needle: string) {
+  let count = 0;
+  let offset = 0;
+  while (true) {
+    const index = content.indexOf(needle, offset);
+    if (index === -1) return count;
+    count += 1;
+    offset = index + needle.length;
+  }
+}
+
+function replaceFirst(content: string, oldString: string, newString: string) {
+  const index = content.indexOf(oldString);
+  if (index === -1) return content;
+  return `${content.slice(0, index)}${newString}${content.slice(index + oldString.length)}`;
 }
 
 function relativePath(workdir: string, filePath: string) {

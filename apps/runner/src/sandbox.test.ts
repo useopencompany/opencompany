@@ -334,6 +334,184 @@ describe("runSandboxTool", () => {
     );
   });
 
+  it("applies ordered exact edits atomically", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("one\ntwo\nthree\n"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "edit_file",
+      args: {
+        path: "work/file.txt",
+        instructions: "Update two lines.",
+        edits: [
+          { oldString: "one", newString: "ONE" },
+          { oldString: "three", newString: "THREE" },
+        ],
+      },
+    });
+
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/work/file.txt",
+      "ONE\ntwo\nTHREE\n",
+    );
+    expect(result).toEqual({
+      path: "work/file.txt",
+      editsApplied: 2,
+      replacements: 2,
+      bytes: 14,
+    });
+  });
+
+  it("supports replacing every exact occurrence", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("alpha beta alpha"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "edit_file",
+      args: {
+        path: "work/file.txt",
+        instructions: "Rename alpha.",
+        edits: [{ oldString: "alpha", newString: "omega", replaceAll: true }],
+      },
+    });
+
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/work/file.txt",
+      "omega beta omega",
+    );
+    expect(result).toMatchObject({ replacements: 2 });
+  });
+
+  it("rejects ambiguous edits without writing", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("alpha beta alpha"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "edit_file",
+        args: {
+          path: "work/file.txt",
+          instructions: "Rename one alpha.",
+          edits: [{ oldString: "alpha", newString: "omega" }],
+        },
+      }),
+    ).rejects.toThrow(/matched 2 times/);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing edit matches without writing earlier edits", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("one\ntwo\nthree\n"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "edit_file",
+        args: {
+          path: "work/file.txt",
+          instructions: "Apply multiple edits.",
+          edits: [
+            { oldString: "one", newString: "ONE" },
+            { oldString: "missing", newString: "MISSING" },
+          ],
+        },
+      }),
+    ).rejects.toThrow(/oldString was not found/);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty oldString edits", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("content"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "edit_file",
+        args: {
+          path: "work/file.txt",
+          instructions: "Invalid edit.",
+          edits: [{ oldString: "", newString: "content" }],
+        },
+      }),
+    ).rejects.toThrow(/oldString must not be empty/);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects no-op edit results", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("content"),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "edit_file",
+        args: {
+          path: "work/file.txt",
+          instructions: "No-op edit.",
+          edits: [{ oldString: "content", newString: "content" }],
+        },
+      }),
+    ).rejects.toThrow(/No changes made/);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
+  it("tells the model to use write_file when editing a missing file", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockRejectedValue(new Error("not found")),
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "edit_file",
+        args: {
+          path: "work/missing.txt",
+          instructions: "Edit missing file.",
+          edits: [{ oldString: "old", newString: "new" }],
+        },
+      }),
+    ).rejects.toThrow(/Use write_file to create new files/);
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
   it("lists files from the requested tool root using the workspace cwd", async () => {
     const sandbox = {
       commands: {
