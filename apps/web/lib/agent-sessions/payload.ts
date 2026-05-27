@@ -256,7 +256,31 @@ export function addUserMessageToSessionDetail(
   detail: AgentSessionDetailPayload,
   input: { messageId: string; content: string; createdAt?: string },
 ): AgentSessionDetailPayload {
-  if (detail.messages.some((message) => message.id === input.messageId)) return detail;
+  const existing = detail.messages.find((message) => message.id === input.messageId);
+  if (existing) {
+    const nextMessage: SessionMessage = {
+      ...existing,
+      role: "user",
+      content: input.content,
+      status: "completed",
+      createdAt: existing.createdAt ?? input.createdAt ?? new Date().toISOString(),
+    };
+    if (
+      existing.role === nextMessage.role &&
+      existing.content === nextMessage.content &&
+      existing.status === nextMessage.status &&
+      existing.createdAt === nextMessage.createdAt
+    ) {
+      return detail;
+    }
+
+    return {
+      ...detail,
+      messages: detail.messages.map((message) =>
+        message.id === input.messageId ? nextMessage : message,
+      ),
+    };
+  }
 
   return {
     ...detail,
