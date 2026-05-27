@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { captureException } from "@opencompany/observability";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import {
@@ -8,6 +9,20 @@ import {
   sweepAgentSyncOutbox,
   sweepBrainSyncOutbox,
 } from "./sweeper";
+
+const mocks = vi.hoisted(() => ({
+  logger: {
+    error: vi.fn(),
+    warn: vi.fn(),
+  },
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: vi.fn(),
+  createLogger: vi.fn(() => mocks.logger),
+}));
+
+const captureExceptionMock = vi.mocked(captureException);
 
 function createStepMock() {
   return {
@@ -120,6 +135,10 @@ describe("sync outbox due-job filtering", () => {
 });
 
 describe("sync outbox sweepers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("dispatches one agent sync event for each due job", async () => {
     const step = createStepMock();
 
@@ -143,6 +162,11 @@ describe("sync outbox sweepers", () => {
         data: { agentId: "agt_2", workspaceId: "wks_123" },
       },
     ]);
+    expect(mocks.logger.warn).toHaveBeenCalledWith("Dispatched sync outbox recovery events", {
+      event: "opencompany.sync_outbox_recovery_dispatched",
+      resource_type: "agent",
+      dispatched_count: 2,
+    });
   });
 
   it("dispatches one brain sync event for each due job", async () => {
@@ -168,6 +192,11 @@ describe("sync outbox sweepers", () => {
         data: { workspaceId: "wks_123", path: "docs/b.md" },
       },
     ]);
+    expect(mocks.logger.warn).toHaveBeenCalledWith("Dispatched sync outbox recovery events", {
+      event: "opencompany.sync_outbox_recovery_dispatched",
+      resource_type: "brain",
+      dispatched_count: 2,
+    });
   });
 
   it("does not dispatch when no sync jobs are due", async () => {
@@ -180,5 +209,63 @@ describe("sync outbox sweepers", () => {
     ).resolves.toEqual({ dispatched: 0 });
 
     expect(step.sendEvent).not.toHaveBeenCalled();
+    expect(mocks.logger.warn).not.toHaveBeenCalled();
+    expect(mocks.logger.error).not.toHaveBeenCalled();
+  });
+
+  it("captures and rethrows agent recovery dispatch failures", async () => {
+    const step = createStepMock();
+    const error = new Error("Inngest unavailable");
+    step.sendEvent.mockRejectedValue(error);
+
+    await expect(
+      sweepAgentSyncOutbox(step, {
+        loadDueDispatches: async () => [{ agentId: "agt_1", workspaceId: "wks_123" }],
+      }),
+    ).rejects.toThrow(error);
+
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      event: "opencompany.sync_outbox_recovery_dispatch_failed",
+      resource_type: "agent",
+      dispatched_count: 1,
+    });
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "Failed to dispatch sync outbox recovery events",
+      {
+        event: "opencompany.sync_outbox_recovery_dispatch_failed",
+        resource_type: "agent",
+        dispatched_count: 1,
+        error_name: "Error",
+        error_message: "Inngest unavailable",
+      },
+    );
+  });
+
+  it("captures and rethrows brain recovery dispatch failures", async () => {
+    const step = createStepMock();
+    const error = new Error("Inngest unavailable");
+    step.sendEvent.mockRejectedValue(error);
+
+    await expect(
+      sweepBrainSyncOutbox(step, {
+        loadDueDispatches: async () => [{ workspaceId: "wks_123", path: "docs/a.md" }],
+      }),
+    ).rejects.toThrow(error);
+
+    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+      event: "opencompany.sync_outbox_recovery_dispatch_failed",
+      resource_type: "brain",
+      dispatched_count: 1,
+    });
+    expect(mocks.logger.error).toHaveBeenCalledWith(
+      "Failed to dispatch sync outbox recovery events",
+      {
+        event: "opencompany.sync_outbox_recovery_dispatch_failed",
+        resource_type: "brain",
+        dispatched_count: 1,
+        error_name: "Error",
+        error_message: "Inngest unavailable",
+      },
+    );
   });
 });
