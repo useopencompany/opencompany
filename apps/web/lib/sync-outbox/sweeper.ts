@@ -1,5 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { agentSyncJobs, brainSyncJobs } from "@opencompany/db/schema";
+import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, inArray, lte } from "drizzle-orm";
 import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
@@ -13,6 +14,9 @@ export {
 } from "@/lib/sync-outbox/retry";
 
 type Db = ReturnType<typeof getDb>;
+type SyncResourceType = "agent" | "brain";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export const SYNC_OUTBOX_SWEEP_CRON = "* * * * *";
 export const SYNC_OUTBOX_SWEEP_LIMIT = 50;
@@ -139,12 +143,16 @@ export async function sweepAgentSyncOutbox(
   )) as AgentSyncDispatch[];
   if (dueJobs.length === 0) return { dispatched: 0 };
 
-  await step.sendEvent(
+  const events: SyncOutboxEvent[] = dueJobs.map((job) => ({
+    name: AGENT_SYNC_REQUESTED_EVENT,
+    data: job,
+  }));
+  await dispatchRecoveryEvents(
+    step,
     "dispatch agent sync requests",
-    dueJobs.map((job) => ({
-      name: AGENT_SYNC_REQUESTED_EVENT,
-      data: job,
-    })),
+    events,
+    "agent",
+    dueJobs.length,
   );
   return { dispatched: dueJobs.length };
 }
@@ -158,14 +166,63 @@ export async function sweepBrainSyncOutbox(
   )) as BrainSyncDispatch[];
   if (dueJobs.length === 0) return { dispatched: 0 };
 
-  await step.sendEvent(
+  const events: SyncOutboxEvent[] = dueJobs.map((job) => ({
+    name: BRAIN_SYNC_REQUESTED_EVENT,
+    data: job,
+  }));
+  await dispatchRecoveryEvents(
+    step,
     "dispatch brain sync requests",
-    dueJobs.map((job) => ({
-      name: BRAIN_SYNC_REQUESTED_EVENT,
-      data: job,
-    })),
+    events,
+    "brain",
+    dueJobs.length,
   );
   return { dispatched: dueJobs.length };
+}
+
+async function dispatchRecoveryEvents(
+  step: SyncOutboxStep,
+  id: string,
+  events: SyncOutboxEvent[],
+  resourceType: SyncResourceType,
+  dispatchedCount: number,
+) {
+  try {
+    await step.sendEvent(id, events);
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.sync_outbox_recovery_dispatch_failed",
+      resource_type: resourceType,
+      dispatched_count: dispatchedCount,
+    });
+    logger.error("Failed to dispatch sync outbox recovery events", {
+      event: "opencompany.sync_outbox_recovery_dispatch_failed",
+      resource_type: resourceType,
+      dispatched_count: dispatchedCount,
+      ...errorLogFields(error),
+    });
+    throw error;
+  }
+
+  logger.warn("Dispatched sync outbox recovery events", {
+    event: "opencompany.sync_outbox_recovery_dispatched",
+    resource_type: resourceType,
+    dispatched_count: dispatchedCount,
+  });
+}
+
+function errorLogFields(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      error_name: error.name,
+      error_message: error.message,
+    };
+  }
+
+  return {
+    error_name: typeof error,
+    error_message: typeof error === "string" ? error : "Unknown error",
+  };
 }
 
 function filterDueSyncJobs<T extends SyncJobCandidate>(rows: T[], now: Date, limit: number): T[] {
