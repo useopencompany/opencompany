@@ -48,7 +48,9 @@ import { updateAgent } from "@/lib/agents/actions";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
-  type AgentPayload,
+  type AgentDetailPayload,
+  type AgentListItemPayload,
+  agentDetailToListItem,
   agentQueryKeys,
   fetchAgent,
   fetchAgents,
@@ -56,7 +58,7 @@ import {
 
 type Props = {
   idOrPath: string;
-  initialAgent?: AgentPayload;
+  initialAgent?: AgentDetailPayload;
 };
 
 type SaveState = "idle" | "saving" | "saved";
@@ -82,7 +84,7 @@ function getStoredInspectorCollapsed() {
 function updateAgentQueries(
   queryClient: QueryClient,
   workspaceId: string,
-  agent: AgentPayload,
+  agent: AgentDetailPayload,
   previousIdOrPath: string,
 ) {
   queryClient.setQueryData(agentQueryKeys.detail(workspaceId, previousIdOrPath), agent);
@@ -90,34 +92,24 @@ function updateAgentQueries(
   if (agent.path) {
     queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), agent);
   }
-  queryClient.setQueryData<AgentPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
-    if (!agents) return [agent];
+  const listItem = agentDetailToListItem(agent);
+  queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
+    if (!agents) return [listItem];
 
-    const next = agents.map((item) => (item.id === agent.id ? agent : item));
-    if (!next.some((item) => item.id === agent.id)) next.unshift(agent);
+    const next = agents.map((item) => (item.id === agent.id ? listItem : item));
+    if (!next.some((item) => item.id === agent.id)) next.unshift(listItem);
     return next.toSorted(
       (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
     );
   });
 }
 
-function findCachedAgent(
-  agents: AgentPayload[] | undefined,
-  idOrPath: string,
-): AgentPayload | undefined {
-  return agents?.find((agent) => agent.id === idOrPath || agent.path === idOrPath);
-}
-
 export default function AgentDetail({ initialAgent, idOrPath }: Props) {
   const { workspaceId } = useWorkspaceContext();
-  const queryClient = useQueryClient();
-  const cachedAgent =
-    initialAgent ??
-    findCachedAgent(queryClient.getQueryData(agentQueryKeys.list(workspaceId)), idOrPath);
   const { data: agent } = useQuery({
     queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
     queryFn: () => fetchAgent(idOrPath),
-    initialData: cachedAgent,
+    initialData: initialAgent,
     staleTime: AGENTS_QUERY_STALE_TIME_MS,
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -139,7 +131,7 @@ function AgentDetailContent({
   idOrPath,
   workspaceId,
 }: {
-  agent: AgentPayload;
+  agent: AgentDetailPayload;
   idOrPath: string;
   workspaceId: string;
 }) {
@@ -850,7 +842,7 @@ function buildConfigPreview({
   content: TiptapDoc;
   fallback: AgentConfig;
   selectedModelId: AgentModelId;
-  repositories: AgentPayload["githubIntegrationRepositories"];
+  repositories: AgentDetailPayload["githubIntegrationRepositories"];
   triggers: AgentConfig["triggers"];
   useDerivedConfig: boolean;
 }) {
