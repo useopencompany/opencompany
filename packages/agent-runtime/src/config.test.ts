@@ -39,6 +39,7 @@ describe("resolveAgentRuntimeConfig", () => {
     });
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
     expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
+    expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
     expect(resolved.tools).toContain("shell");
     expect(resolved.tools).toContain("git_diff");

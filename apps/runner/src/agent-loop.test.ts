@@ -17,6 +17,7 @@ import {
   createAmpActivityFormatter,
   createAmpStreamAccumulator,
   createAssistantMessageForLease,
+  createHostedToolBudget,
   executeRuntimeTool,
   normalizeReasoningSummary,
   readReasoningTextDelta,
@@ -328,6 +329,87 @@ describe("usage recording", () => {
       toolName: "exa_search",
       toolCallId: "call_exa",
     });
+  });
+
+  it("blocks hosted search fan-out after the per-message budget", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            requestId: "exa_req_123",
+            searchType: "auto",
+            costDollars: { total: 0.001 },
+            results: [],
+          }),
+          { status: 200 },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const budget = createHostedToolBudget();
+
+    for (let index = 0; index < 8; index += 1) {
+      await executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        agentConfig: agentConfig(),
+        toolCallId: `call_exa_${index}`,
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search") as RuntimeToolDefinition,
+        args: { query: `test ${index}` },
+        getSandbox: async () => {
+          throw new Error("sandbox should not hydrate");
+        },
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["tool_help", "exa_search"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+        toolBudget: budget,
+      });
+    }
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: agentConfig(),
+      toolCallId: "call_exa_over_budget",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search") as RuntimeToolDefinition,
+      args: { query: "too many" },
+      getSandbox: async () => {
+        throw new Error("sandbox should not hydrate");
+      },
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["tool_help", "exa_search"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      toolBudget: budget,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(db.state.toolUsage).toHaveLength(8);
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toMatchObject({
+      ok: false,
+      error: { code: "tool_call_limit_exceeded", recoverable: true },
+    });
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          toolCallId: "call_exa_over_budget",
+          name: "exa_search",
+          error: expect.objectContaining({ code: "tool_call_limit_exceeded" }),
+        }),
+      }),
+    );
   });
 
   it("returns recoverable sandbox path failures as tool results without hydrating E2B", async () => {

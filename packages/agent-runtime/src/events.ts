@@ -16,7 +16,13 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "message.created";
-      payload: { messageId: string; role: "user" | "assistant" | "tool"; internal?: boolean };
+      payload: {
+        messageId: string;
+        role: "user" | "assistant" | "tool";
+        content?: string;
+        status?: "running" | "completed";
+        internal?: boolean;
+      };
     }
   | {
       type: "message.completed";

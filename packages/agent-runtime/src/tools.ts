@@ -244,6 +244,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use exa_search when you need current web evidence, source discovery, company/person/news/research lookup, or citation-ready URLs.",
       "Defaults are type=auto, numResults=5, and highlights-only content to keep context small.",
+      "Avoid launching many search calls at once. Inspect results before deciding whether more searches are useful.",
       "Use type=fast or instant only when latency matters more than depth. Use deep/deep-lite only for complex multi-source synthesis.",
       "Set fresh=true only for time-sensitive facts; it forces live crawling and can be slower.",
       "For company and people categories, avoid excludeDomains and published date filters because Exa does not support those combinations.",
