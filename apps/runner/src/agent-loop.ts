@@ -3,9 +3,10 @@ import {
   newRunLeaseId,
   resolveAgentRuntimeConfig,
 } from "@opencompany/agent-runtime";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
-import { agentSessionMessages } from "@opencompany/db/schema";
+import { agentSessionMessages, workspaceCreditLedger } from "@opencompany/db/schema";
 import {
   captureException,
   createLogger,
@@ -14,7 +15,7 @@ import {
   timeAsync,
 } from "@opencompany/observability";
 import { createGateway, type ModelMessage, stepCountIs, streamText } from "ai";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
@@ -329,6 +330,30 @@ export async function runMessage(input: {
       model_provider: modelProvider,
       model_name: modelName,
     });
+    await timeAsync(ctx.trace, "capture_turn_analytics", () =>
+      captureTurnCompletedAnalytics({
+        ctx,
+        userId,
+        workspaceId,
+        agentId,
+        sessionId: input.sessionId,
+        userMessageId: input.messageId,
+        assistantMessageId,
+        modelProvider,
+        modelName,
+      }).catch((error) => {
+        logger.warn("Failed to capture turn analytics", {
+          event: "opencompany.runner_turn_analytics_failed",
+          workspace_id: workspaceId,
+          user_id: userId,
+          agent_id: agentId,
+          session_id: input.sessionId,
+          message_id: input.messageId,
+          assistant_message_id: assistantMessageId,
+          error,
+        });
+      }),
+    );
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
@@ -1009,6 +1034,61 @@ async function finalizeRun(input: {
       parkSandboxWhenIdle(sandbox, input.ctx.env),
     );
   }
+}
+
+async function captureTurnCompletedAnalytics(input: {
+  ctx: RunContext;
+  userId: string | undefined;
+  workspaceId: string | undefined;
+  agentId: string | undefined;
+  sessionId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  modelProvider: string | undefined;
+  modelName: string | undefined;
+}) {
+  if (
+    !input.userId ||
+    !input.workspaceId ||
+    !input.agentId ||
+    !input.modelProvider ||
+    !input.modelName
+  ) {
+    return;
+  }
+
+  const [cost] = await input.ctx.db
+    .select({
+      providerCostUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.providerCostUsdMicros}), 0)`,
+      platformFeeUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.platformFeeUsdMicros}), 0)`,
+      totalCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}), 0)`,
+      modelCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'model_usage'), 0)`,
+      toolCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'tool_usage'), 0)`,
+    })
+    .from(workspaceCreditLedger)
+    .where(
+      and(
+        eq(workspaceCreditLedger.workspaceId, input.workspaceId),
+        eq(workspaceCreditLedger.sessionId, input.sessionId),
+        eq(workspaceCreditLedger.messageId, input.assistantMessageId),
+      ),
+    );
+
+  await captureServerEvent("session_turn_completed", input.userId, {
+    user_id: input.userId,
+    workspace_id: input.workspaceId,
+    agent_id: input.agentId,
+    session_id: input.sessionId,
+    user_message_id: input.userMessageId,
+    assistant_message_id: input.assistantMessageId,
+    model_provider: input.modelProvider,
+    model_name: input.modelName,
+    provider_cost_usd_micros: cost?.providerCostUsdMicros ?? 0,
+    platform_fee_usd_micros: cost?.platformFeeUsdMicros ?? 0,
+    total_cost_usd_micros: cost?.totalCostUsdMicros ?? 0,
+    model_cost_usd_micros: cost?.modelCostUsdMicros ?? 0,
+    tool_cost_usd_micros: cost?.toolCostUsdMicros ?? 0,
+  });
 }
 
 function linkExternalAbortSignal(controller: AbortController, signal: AbortSignal | undefined) {
