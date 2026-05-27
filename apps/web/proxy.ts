@@ -2,6 +2,9 @@ import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
 import type { NextRequest } from "next/server";
 import { getWorkOSRedirectUri } from "@/lib/workos";
 
+// Next.js 16 renamed Middleware to Proxy; keep this file as proxy.ts.
+// https://nextjs.org/docs/app/getting-started/proxy
+
 const SIGN_UP_PATHS = ["/auth/sign-up"];
 
 const UNAUTHENTICATED_PATHS = [

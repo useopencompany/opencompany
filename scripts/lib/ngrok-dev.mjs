@@ -1,3 +1,6 @@
+// Called by: scripts/dev.mjs and scripts/github-tunnel.mjs.
+// Purpose: shared ngrok startup, URL detection, and .env.local tunnel updates.
+
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

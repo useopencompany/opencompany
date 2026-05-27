@@ -13,6 +13,11 @@ import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
+import {
+  sweepAgentSyncOutbox as runAgentSyncOutboxSweep,
+  sweepBrainSyncOutbox as runBrainSyncOutboxSweep,
+  SYNC_OUTBOX_SWEEP_CRON,
+} from "@/lib/sync-outbox/sweeper";
 
 export const syncAgentToGitHub = inngest.createFunction(
   {
@@ -54,6 +59,32 @@ export const syncBrainToGitHub = inngest.createFunction(
         path: event.data.path,
       });
     });
+  },
+);
+
+export const sweepAgentSyncOutbox = inngest.createFunction(
+  {
+    id: "sweep-agent-sync-outbox",
+    name: "Sweep agent sync outbox",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return runAgentSyncOutboxSweep(step);
+  },
+);
+
+export const sweepBrainSyncOutbox = inngest.createFunction(
+  {
+    id: "sweep-brain-sync-outbox",
+    name: "Sweep brain sync outbox",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return runBrainSyncOutboxSweep(step);
   },
 );
 
@@ -205,6 +236,8 @@ export const sendSignupWelcome = inngest.createFunction(
 export const inngestFunctions = [
   syncAgentToGitHub,
   syncBrainToGitHub,
+  sweepAgentSyncOutbox,
+  sweepBrainSyncOutbox,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,

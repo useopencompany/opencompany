@@ -4,7 +4,7 @@ import { getDb } from "@opencompany/db/client";
 import { workspaceIntegrationResources, workspaceIntegrations } from "@opencompany/db/schema";
 import { and, eq, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { requireCurrentWorkspace, requireCurrentWorkspaceAdmin } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import {
   deleteGitHubWorkInstallation,
   GitHubInstallationNotFoundError,
@@ -27,7 +27,7 @@ export type WorkspaceIntegrationStatus =
   | "error";
 
 export async function loadWorkspaceIntegrationState() {
-  const { workspace } = await requireCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
   const [installation, repositories] = await Promise.all([
     db
@@ -79,7 +79,7 @@ export async function loadWorkspaceIntegrationState() {
 }
 
 export async function refreshGitHubRepositories() {
-  const { workspace } = await requireCurrentWorkspaceAdmin();
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
   if (!isGitHubWorkIntegrationConfigured()) return;
 
   const db = getDb();
@@ -113,7 +113,7 @@ export async function refreshGitHubRepositories() {
 }
 
 export async function markGitHubRepositorySelected(fullName: string) {
-  const { workspace } = await requireCurrentWorkspaceAdmin();
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
   await getDb()
     .update(workspaceIntegrationResources)
     .set({ selectedAt: new Date(), updatedAt: new Date() })
@@ -136,7 +136,7 @@ export type DisconnectGitHubIntegrationResult = {
 };
 
 export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGitHubIntegrationResult> {
-  const { workspace } = await requireCurrentWorkspaceAdmin();
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
   const db = getDb();
   const [existingInstallation] = await db
     .select()

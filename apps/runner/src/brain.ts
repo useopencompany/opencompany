@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
-import { shellQuote } from "@opencompany/agent-runtime";
+import { type AgentBrainReference, shellQuote } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
-  type AgentBrainReference,
   agentSessionBrainMounts,
   brainFiles,
   type WorkspaceRepository,

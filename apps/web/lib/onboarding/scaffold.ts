@@ -1,8 +1,8 @@
+import { agentPathForSlug } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
-import { agentPathForSlug } from "@/lib/agents/agent-file";
 import {
   buildPendingAgent,
   logAgentSyncJobQueued,

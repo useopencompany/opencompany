@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import { parseAgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
-import { requireCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 
 const SESSION_API_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { user, workspace } = await requireCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const detail = await loadAgentSessionDetailForWorkspace(id, user.id, workspace.id);
 
   if (!detail) {

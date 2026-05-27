@@ -1,3 +1,6 @@
+// Called by: root `bun run dev` and `bun run dev:stream`.
+// Purpose: starts ngrok when available, then runs the local Turbo dev stack.
+
 import "./load-env.mjs";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";

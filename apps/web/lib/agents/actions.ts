@@ -1,5 +1,14 @@
 "use server";
 
+import {
+  type AgentConfigPatch,
+  collectBodyRepositoryMentions,
+  deriveAgentConfigFromBody,
+  normalizeAgentBody,
+  parseAgentFile,
+  serializeAgentFile,
+} from "@opencompany/agent-runtime";
+import type { AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -11,7 +20,6 @@ import {
 import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { type AgentConfigPatch, parseAgentFile, serializeAgentFile } from "@/lib/agents/agent-file";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   buildPendingAgent,
@@ -22,17 +30,11 @@ import {
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
-import {
-  collectBodyRepositoryMentions,
-  deriveAgentConfigFromBody,
-  normalizeAgentBody,
-} from "@/lib/agents/mentions";
 import { randomAgentName } from "@/lib/agents/names";
-import { serializeAgent } from "@/lib/agents/payload";
+import { serializeAgentDetail } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
-import type { AgentModelId, TiptapDoc } from "@/lib/agents/types";
-import { getCurrentWorkspace } from "@/lib/auth";
+import { currentWorkspace } from "@/lib/auth";
 import {
   GITHUB_INTEGRATION_PROVIDER,
   GITHUB_REPOSITORY_RESOURCE_TYPE,
@@ -47,7 +49,7 @@ import {
 
 export async function createAgent() {
   const trace = startTimingTrace("agents.create");
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const db = getDb();
   const title = randomAgentName();
   const path = await timeAsync(trace, "db.nextAvailableAgentPath", () =>
@@ -99,7 +101,7 @@ export async function updateAgent(
     hasModel: typeof patch.model === "string",
     hasConfig: Boolean(patch.config),
   });
-  const { user, workspace } = await getCurrentWorkspace();
+  const { user, workspace } = await currentWorkspace();
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
   const changedFields: Array<"name" | "body" | "model" | "config"> = [];
@@ -294,7 +296,7 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
     pathChanged,
-    agent: updatedAgent ? serializeAgent(updatedAgent, brainPaths, githubRepositories) : null,
+    agent: updatedAgent ? serializeAgentDetail(updatedAgent, brainPaths, githubRepositories) : null,
   };
 
   revalidatePath("/agents");
@@ -332,7 +334,7 @@ function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tipta
 
 export async function materializeLegacyAgentFiles() {
   const trace = startTimingTrace("agents.materializeLegacy");
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
   const rows = await timeAsync(trace, "db.selectAgents", () =>
     db
@@ -412,7 +414,7 @@ export async function materializeLegacyAgentFiles() {
 
 export async function syncAgentsFromWorkspaceRepository() {
   const trace = startTimingTrace("agents.syncFromWorkspaceRepository");
-  const { workspace } = await getCurrentWorkspace();
+  const { workspace } = await currentWorkspace();
   const db = getDb();
   const repository = await timeAsync(trace, "github.ensureRepository", () =>
     ensureWorkspaceRepository({ db, workspace }),

@@ -1,7 +1,7 @@
+import { deriveAgentConfigFromBody } from "@opencompany/agent-runtime";
+import type { TiptapDoc } from "@opencompany/agent-runtime/types";
 import { describe, expect, it } from "vitest";
 import { derivePreviewConfigFromTiptapDoc } from "./config";
-import { deriveAgentConfigFromBody } from "./mentions";
-import type { TiptapDoc } from "./types";
 
 const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },

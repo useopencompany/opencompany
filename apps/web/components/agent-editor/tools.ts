@@ -1,3 +1,5 @@
+import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-runtime";
+import type { AgentModelId, AgentToolId } from "@opencompany/agent-runtime/types";
 import {
   Bot,
   Brain,
@@ -9,10 +11,7 @@ import {
   type LucideIcon,
   Search,
 } from "lucide-react";
-import { AFTER_SESSION_TAG } from "@/lib/agents/after-session";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
-import { repositoryIdForFullName } from "@/lib/agents/mentions";
-import type { AgentModelId, AgentToolId } from "@/lib/agents/types";
 
 type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook";
 

@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import SignupPanel from "@/components/SignupPanel";
-import { getOptionalCurrentWorkspaceWithoutOnboarding, hasCompletedOnboarding } from "@/lib/auth";
+import { currentWorkspace, hasCompletedOnboarding } from "@/lib/auth";
 
 export default async function SignUpPage() {
-  const context = await getOptionalCurrentWorkspaceWithoutOnboarding();
+  const context = await currentWorkspace({ optional: true, skipOnboarding: true });
 
   if (context) {
     if (!(await hasCompletedOnboarding(context.user))) {
