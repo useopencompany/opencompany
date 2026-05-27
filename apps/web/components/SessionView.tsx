@@ -321,8 +321,28 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
                 <p className="mt-1 text-[12.5px] text-ink-muted">
-                  Send the first instruction to start working with this agent.
+                  Start with one of these, or write your own.
                 </p>
+                <div className="mt-5 flex flex-wrap justify-center gap-2">
+                  {[
+                    "Set up the dev environment",
+                    "Run the test suite",
+                    "Open a PR for current changes",
+                    "Explain the codebase",
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => {
+                        setInput(chip);
+                        textareaRef.current?.focus();
+                      }}
+                      className="rounded-full border border-[#e6e6e3] bg-white px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
               </div>
             ) : null}
 
