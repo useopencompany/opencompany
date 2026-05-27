@@ -93,14 +93,17 @@ export async function GET(request: Request) {
   }
 
   if (!code) {
-    logger.info("GitHub integration installation callback accepted; requesting user authorization", {
-      event: "opencompany.github_integration_oauth_redirect",
-      workspace_id: current.workspace.id,
-      user_id: current.user.id,
-      intent: state.intent,
-      installation_id: installationId,
-      setup_action: url.searchParams.get("setup_action"),
-    });
+    logger.info(
+      "GitHub integration installation callback accepted; requesting user authorization",
+      {
+        event: "opencompany.github_integration_oauth_redirect",
+        workspace_id: current.workspace.id,
+        user_id: current.user.id,
+        intent: state.intent,
+        installation_id: installationId,
+        setup_action: url.searchParams.get("setup_action"),
+      },
+    );
     const nextState = createGitHubIntegrationState({
       workspaceId: state.workspaceId,
       userId: state.userId,
