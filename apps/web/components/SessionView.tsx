@@ -168,6 +168,10 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+  // Some browsers fire the Enter keydown that committed an IME composition
+  // *after* compositionend, with `isComposing` already false. Track when the
+  // composition ended so we can swallow that follow-up Enter.
+  const compositionEndAtRef = useRef(0);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -344,7 +348,51 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+        onDragEnter={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+          dragCounterRef.current += 1;
+          setIsDragActive(true);
+        }}
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes("Files")) return;
+          event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+          if (dragCounterRef.current === 0) {
+            setIsDragActive(false);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          dragCounterRef.current = 0;
+          setIsDragActive(false);
+          if (event.dataTransfer.files.length > 0) {
+            showToast({
+              title: "Coming soon",
+              description: "File attachments will be available soon.",
+              tone: "default",
+            });
+          }
+        }}
+      >
+        {isDragActive ? (
+          <div
+            className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
+            aria-hidden="true"
+          >
+            <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-[#9a9a96] bg-canvas/85 px-8 py-6 backdrop-blur-sm">
+              <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
+              <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
+              <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="border-b border-[#eaeae6] bg-canvas/90 px-6 py-3">
           <div className="mx-auto flex w-full max-w-[960px] items-center gap-3">
             <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
@@ -356,50 +404,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
           </div>
         </div>
 
-        <div
-          className="relative flex-1 overflow-y-auto px-8 lg:px-12 py-6"
-          onDragEnter={(event) => {
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-            dragCounterRef.current += 1;
-            setIsDragActive(true);
-          }}
-          onDragOver={(event) => {
-            if (!event.dataTransfer.types.includes("Files")) return;
-            event.preventDefault();
-          }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
-            if (dragCounterRef.current === 0) {
-              setIsDragActive(false);
-            }
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            dragCounterRef.current = 0;
-            setIsDragActive(false);
-            if (event.dataTransfer.files.length > 0) {
-              showToast({
-                title: "Coming soon",
-                description: "File attachments will be available soon.",
-                tone: "default",
-              });
-            }
-          }}
-        >
-          {isDragActive ? (
-            <div
-              className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
-              aria-hidden="true"
-            >
-              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-[#9a9a96] bg-canvas/85 px-8 py-6 backdrop-blur-sm">
-                <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
-                <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
-              </div>
-            </div>
-          ) : null}
+        <div className="flex-1 overflow-y-auto px-8 lg:px-12 py-6">
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError ? (
               <div className="flex items-start gap-2 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[12.5px] leading-5 text-[#9f1d1d]">
@@ -539,12 +544,19 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 ref={textareaRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
+                onCompositionEnd={() => {
+                  compositionEndAtRef.current = performance.now();
+                }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    if (isBusy) return;
-                    submit();
-                  }
+                  if (event.key !== "Enter" || event.shiftKey) return;
+                  // Enter inside an active IME composition: never submit.
+                  if (event.nativeEvent.isComposing) return;
+                  // Enter immediately after compositionend (the keystroke that
+                  // committed the candidate): swallow once.
+                  if (performance.now() - compositionEndAtRef.current < 50) return;
+                  event.preventDefault();
+                  if (isBusy) return;
+                  submit();
                 }}
                 onPaste={(event) => {
                   const items = event.clipboardData?.items;
@@ -573,16 +585,23 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
               />
-              {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
+              {(canAbort && (hasRunningAssistantMessage || showWaitingForAssistant)) ||
+              runtime.currentStatus === "aborting" ? (
                 <button
                   type="button"
-                  disabled={isPending}
+                  disabled={isPending || runtime.currentStatus === "aborting"}
                   onClick={requestAbort}
-                  aria-label="Stop generating"
-                  title="Stop generating"
+                  aria-label={
+                    runtime.currentStatus === "aborting" ? "Aborting…" : "Stop generating"
+                  }
+                  title={runtime.currentStatus === "aborting" ? "Aborting…" : "Stop generating"}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-[#f0c0b8] bg-[#fff5f3] text-[#9f2f21] transition-colors hover:bg-[#ffebe7] disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  <CircleStop size={16} strokeWidth={1.9} />
+                  {runtime.currentStatus === "aborting" ? (
+                    <LoaderCircle size={14} strokeWidth={2} className="animate-spin" />
+                  ) : (
+                    <CircleStop size={16} strokeWidth={1.9} />
+                  )}
                 </button>
               ) : (
                 <button

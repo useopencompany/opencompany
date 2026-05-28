@@ -39,6 +39,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const compositionEndAtRef = useRef(0);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
 
@@ -89,11 +90,15 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         ref={textareaRef}
         value={input}
         onChange={(event) => setInput(event.target.value)}
+        onCompositionEnd={() => {
+          compositionEndAtRef.current = performance.now();
+        }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            submit();
-          }
+          if (event.key !== "Enter" || event.shiftKey) return;
+          if (event.nativeEvent.isComposing) return;
+          if (performance.now() - compositionEndAtRef.current < 50) return;
+          event.preventDefault();
+          submit();
         }}
         onPaste={(event) => {
           const items = event.clipboardData?.items;
