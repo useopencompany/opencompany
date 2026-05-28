@@ -315,26 +315,28 @@ body {
 .thinking-shimmer {
   background: linear-gradient(
     90deg,
-    rgba(17, 17, 17, 0.25) 0%,
-    rgba(17, 17, 17, 0.25) 25%,
-    rgba(17, 17, 17, 0.95) 50%,
-    rgba(17, 17, 17, 0.25) 75%,
-    rgba(17, 17, 17, 0.25) 100%
+    rgba(17, 17, 17, 0.3) 0%,
+    rgba(17, 17, 17, 0.3) 40%,
+    rgba(17, 17, 17, 0.92) 50%,
+    rgba(17, 17, 17, 0.3) 60%,
+    rgba(17, 17, 17, 0.3) 100%
   );
-  background-size: 220% 100%;
+  background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  animation: thinking-shimmer 1.6s linear infinite;
+  animation: thinking-shimmer 2.2s ease-in-out infinite;
+  will-change: background-position;
 }
 
 @keyframes thinking-shimmer {
-  0% {
-    background-position: 110% 0;
-  }
+  0%,
   100% {
-    background-position: -110% 0;
+    background-position: 150% 0;
+  }
+  50% {
+    background-position: -50% 0;
   }
 }
 
