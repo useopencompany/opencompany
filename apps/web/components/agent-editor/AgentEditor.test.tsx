@@ -324,6 +324,39 @@ describe("AgentEditor", () => {
     }
   });
 
+  it("converts pasted plain text containing mentions into mention nodes", async () => {
+    const user = userEvent.setup();
+    const captured: Array<{ body: string; content: unknown }> = [];
+
+    const { container } = render(
+      <AgentEditor
+        initialBody=""
+        mentionItems={buildAgentMentionItems()}
+        onChange={(body, content) =>
+          captured.push({ body, content: JSON.parse(JSON.stringify(content)) })
+        }
+      />,
+    );
+    const editor = container.querySelector(".ProseMirror") as HTMLElement;
+    editor.focus();
+
+    await user.paste("Use @amp for code changes.");
+
+    expect(await screen.findByText("@amp")).toBeInTheDocument();
+    expect(captured.at(-1)?.body).toBe("Use @amp for code changes.");
+
+    const paragraph = (
+      captured.at(-1)?.content as {
+        content?: Array<{ content?: Array<{ type?: string; attrs?: Record<string, unknown> }> }>;
+      }
+    )?.content?.[0];
+    const mention = paragraph?.content?.find((node) => node.type === "mention");
+    expect(mention).toMatchObject({
+      type: "mention",
+      attrs: { id: "tool:amp", label: "amp" },
+    });
+  });
+
   it("replaces generic GitHub mentions when a repository is chosen", async () => {
     const ref = createRef<AgentEditorHandle>();
     const onChange = vi.fn();
