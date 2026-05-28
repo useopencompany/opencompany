@@ -165,6 +165,18 @@ export function applyRuntimeEventToState(
     }
   }
 
+  if (event.type === "session.delegated_usage") {
+    const usage = isRecord(event.payload.usage) ? event.payload.usage : {};
+    const cost = isRecord(event.payload.cost) ? event.payload.cost : {};
+    const toolUsage = isRecord(event.payload.toolUsage) ? event.payload.toolUsage : {};
+    next = {
+      ...next,
+      usage: addUsageSummary(next.usage, usage),
+      cost: addCostRollup(next.cost, cost),
+      toolUsage: addToolUsageRollup(next.toolUsage, toolUsage),
+    };
+  }
+
   if (event.type === "message.created") {
     const messageId = readString(event.payload.messageId);
     const role = readString(event.payload.role);
@@ -311,6 +323,58 @@ function addCostSummary(
     totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
     modelCostUsdMicros: totals.modelCostUsdMicros + (kind === "model" ? totalCostUsdMicros : 0),
     toolCostUsdMicros: totals.toolCostUsdMicros + (kind === "tool" ? totalCostUsdMicros : 0),
+  };
+}
+
+function addCostRollup(
+  totals: SessionCostSummary,
+  payload: Partial<Record<keyof SessionCostSummary, unknown>>,
+): SessionCostSummary {
+  const providerCostUsdMicros = readNumber(payload.providerCostUsdMicros);
+  const platformFeeUsdMicros = readNumber(payload.platformFeeUsdMicros);
+  const totalCostUsdMicros = readNumber(
+    payload.totalCostUsdMicros ?? providerCostUsdMicros + platformFeeUsdMicros,
+  );
+  return {
+    providerCostUsdMicros: totals.providerCostUsdMicros + providerCostUsdMicros,
+    platformFeeUsdMicros: totals.platformFeeUsdMicros + platformFeeUsdMicros,
+    totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
+    modelCostUsdMicros: totals.modelCostUsdMicros + readNumber(payload.modelCostUsdMicros),
+    toolCostUsdMicros: totals.toolCostUsdMicros + readNumber(payload.toolCostUsdMicros),
+  };
+}
+
+function addToolUsageRollup(
+  totals: SessionToolUsageSummary,
+  payload: Record<string, unknown>,
+): SessionToolUsageSummary {
+  const rows = Array.isArray(payload.byProviderOperation) ? payload.byProviderOperation : [];
+  const byProviderOperation = new Map(
+    totals.byProviderOperation.map((item) => [`${item.provider}:${item.operation}`, { ...item }]),
+  );
+
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const provider = readString(row.provider);
+    const operation = readString(row.operation);
+    if (!provider || !operation) continue;
+    const key = `${provider}:${operation}`;
+    const current = byProviderOperation.get(key) ?? {
+      provider,
+      operation,
+      costUsdMicros: 0,
+      calls: 0,
+    };
+    current.costUsdMicros += readNumber(row.costUsdMicros);
+    current.calls += readNumber(row.calls);
+    byProviderOperation.set(key, current);
+  }
+
+  return {
+    totalCostUsdMicros: totals.totalCostUsdMicros + readNumber(payload.totalCostUsdMicros),
+    byProviderOperation: Array.from(byProviderOperation.values()).sort((left, right) =>
+      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
+    ),
   };
 }
 

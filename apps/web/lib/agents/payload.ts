@@ -6,6 +6,7 @@ import {
 import type {
   AgentConfig,
   AgentGitHubRepositoryConfig,
+  AgentReference,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { Agent } from "@opencompany/db/schema";
@@ -39,6 +40,7 @@ export type AgentDetailPayload = AgentListItemPayload & {
   brainPaths: string[];
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
+  workspaceAgents: AgentReference[];
   mcp: {
     mcpEnabled: boolean;
     linearConfigured: boolean;
@@ -66,6 +68,7 @@ export function serializeAgentDetail(
   brainPaths: string[] = [],
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
+  workspaceAgents: AgentReference[] = [],
   mcp: AgentDetailPayload["mcp"] = { mcpEnabled: false, linearConfigured: false },
 ): AgentDetailPayload {
   const config = normalizeAgentConfig(agent.config);
@@ -79,6 +82,7 @@ export function serializeAgentDetail(
     brainPaths,
     githubIntegrationRepositories,
     usableGitHubIntegrationRepositories,
+    workspaceAgents,
     mcp,
   };
 }

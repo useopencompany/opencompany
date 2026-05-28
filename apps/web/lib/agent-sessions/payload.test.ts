@@ -55,6 +55,24 @@ describe("session payload cache helpers", () => {
     ).toEqual([sidebarSession("ses_keep", "Keep")]);
   });
 
+  it("does not add agent-generated sessions to the sidebar cache", () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    const childDetail = detail();
+    childDetail.session.source = "agent";
+
+    queryClient.setQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId), [
+      sidebarSession(childDetail.session.id, "Generated child"),
+      sidebarSession("ses_keep", "Keep"),
+    ]);
+
+    seedSessionQueries(queryClient, workspaceId, childDetail);
+
+    expect(
+      queryClient.getQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId)),
+    ).toEqual([sidebarSession("ses_keep", "Keep")]);
+  });
+
   it("merges refetched detail without discarding streamed events or content", () => {
     const current = detail({
       events: [
@@ -542,6 +560,33 @@ describe("session payload cache helpers", () => {
     expect(invalidations).toBe(0);
   });
 
+  it("invalidates the current session detail when delegated sessions change", () => {
+    const queryClient = new QueryClient();
+    const invalidated: unknown[][] = [];
+    queryClient.invalidateQueries = (filters) => {
+      invalidated.push((filters as { queryKey: unknown[] }).queryKey);
+      return Promise.resolve();
+    };
+
+    invalidateRelatedCachesForSessionEvent(
+      queryClient,
+      "wks_123",
+      "agt_123",
+      {
+        id: 1,
+        type: "tool.completed",
+        messageId: "msg_1",
+        payload: {
+          name: "delegate_to_agent",
+          output: { childSessionId: "ses_child" },
+        },
+      },
+      { sessionId: "ses_parent" },
+    );
+
+    expect(invalidated).toEqual([sessionQueryKeys.detail("wks_123", "ses_parent")]);
+  });
+
   it("applies runtime status, error, and title updates to detail", () => {
     let current = detail();
 
@@ -619,6 +664,57 @@ describe("session payload cache helpers", () => {
       }),
     ).toThrow("Invalid modelName.");
   });
+
+  it("parses related parent and child sessions", () => {
+    const parsed = parseAgentSessionDetailResponse({
+      detail: {
+        ...detail(),
+        related: {
+          parent: {
+            id: "ses_parent",
+            title: "Parent",
+            status: "completed",
+            agentName: "Leo",
+            agentPath: "agents/leo.agent",
+            parentMessageId: null,
+            parentToolCallId: null,
+            createdAt: "2026-05-24T09:00:00.000Z",
+            updatedAt: "2026-05-24T09:30:00.000Z",
+          },
+          children: [
+            {
+              id: "ses_child",
+              title: "Child",
+              status: "running",
+              agentName: "Research",
+              agentPath: "agents/research.agent",
+              parentMessageId: "msg_parent",
+              parentToolCallId: "call_delegate",
+              createdAt: "2026-05-24T10:00:00.000Z",
+              updatedAt: "2026-05-24T10:01:00.000Z",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.detail.related.parent?.id).toBe("ses_parent");
+    expect(parsed.detail.related.children[0]?.parentToolCallId).toBe("call_delegate");
+  });
+
+  it("rejects malformed related sessions", () => {
+    expect(() =>
+      parseAgentSessionDetailResponse({
+        detail: {
+          ...detail(),
+          related: {
+            parent: null,
+            children: [{ id: "ses_child", title: "Child" }],
+          },
+        },
+      }),
+    ).toThrow("Invalid status.");
+  });
 });
 
 function sidebarSession(id: string, title: string) {
@@ -644,8 +740,12 @@ function detail(
       agentPath: "agents/leo.agent",
       title: "Original",
       status: "created",
+      source: "user",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
+      parentSessionId: null,
+      parentMessageId: null,
+      parentToolCallId: null,
       e2bSandboxId: null,
       workdir: "/workspace",
       runLeaseId: null,
@@ -654,6 +754,7 @@ function detail(
       createdAt: "2026-05-24T10:00:00.000Z",
       updatedAt: "2026-05-24T10:00:00.000Z",
     },
+    related: { parent: null, children: [] },
     messages: overrides.messages ?? [],
     events: overrides.events ?? [],
     usage: {

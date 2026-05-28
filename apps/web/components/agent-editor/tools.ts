@@ -2,6 +2,7 @@ import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-r
 import type {
   AgentGitHubRepositoryBinding,
   AgentModelId,
+  AgentReference,
   AgentToolId,
 } from "@opencompany/agent-runtime/types";
 import {
@@ -14,11 +15,12 @@ import {
   GitBranch,
   ListTodo,
   type LucideIcon,
+  MessagesSquare,
   Search,
 } from "lucide-react";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
-type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook";
+type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent";
 
 type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -65,12 +67,19 @@ export type AgentHookMention = BaseAgentMentionItem & {
   kind: "hook";
 };
 
+export type AgentWorkspaceMention = BaseAgentMentionItem & {
+  id: string;
+  kind: "agent";
+  path: string;
+};
+
 export type AgentMentionItem =
   | AgentModel
   | AgentTool
   | AgentIntegration
   | AgentBrainMention
-  | AgentHookMention;
+  | AgentHookMention
+  | AgentWorkspaceMention;
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
@@ -140,7 +149,7 @@ export function buildAgentMentionItems(
     statusReason?: string | null;
   }> = [],
   brainPaths: string[] = [],
-  options: { includeMcpTools?: boolean } = {},
+  options: { includeMcpTools?: boolean; agents?: AgentReference[] } = {},
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
     id: "github",
@@ -172,10 +181,38 @@ export function buildAgentMentionItems(
   return [
     ...AGENT_MODELS,
     ...AGENT_TOOLS.filter((tool) => tool.id !== "linear" || options.includeMcpTools),
+    ...buildWorkspaceAgentMentionItems(options.agents ?? []),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): AgentWorkspaceMention[] {
+  return agents.flatMap((agent) => {
+    const mentionId = agentMentionId(agent.path);
+    if (!mentionId) return [];
+    return [
+      {
+        id: mentionId,
+        mentionId,
+        kind: "agent" as const,
+        path: agent.path,
+        label: mentionId,
+        displayLabel: agent.name,
+        description: agent.path,
+        icon: MessagesSquare,
+      },
+    ];
+  });
+}
+
+function agentMentionId(path: string) {
+  const normalized = path.trim();
+  if (!normalized.startsWith("agents/") || !normalized.endsWith(".agent")) return null;
+  const slug = normalized.slice("agents/".length, -".agent".length);
+  if (!slug || slug.includes("/")) return null;
+  return `agent/${slug}`;
 }
 
 function repositoryMentionId(repository: {

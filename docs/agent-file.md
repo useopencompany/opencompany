@@ -15,9 +15,12 @@ tools:
 brain:
   - docs/README.md
   - product/
+agents:
+  - path: agents/sales-research.agent
+    name: Sales research
 ---
 
-Research investors with @exa. Use @deep for fund-thesis write-ups. Keep context from @brain/docs/README.md close.
+Research investors with @exa. Use @deep for fund-thesis write-ups. Keep context from @brain/docs/README.md close. Ask @agent/sales-research for account notes.
 ```
 
 A `.agent` file has two parts:
@@ -36,6 +39,7 @@ Frontmatter is **derived from the body**, not authored independently. When the e
 - Unique supported `@brain/<path>` mentions → written to `brain:`.
 - A supported GitHub repository mention, such as `@owner/repo`, is written to
   `integrations.github.repositories` and used by repository-aware coding tools.
+- Unique supported `@agent/<slug>` mentions → written to `agents:`.
 - The title input → written to `title:`.
 
 Editing `@deep` into the body changes the model. Removing `@exa` removes the tool. One source of truth, zero drift between what the instructions reference and what the runtime is configured to do.
@@ -120,6 +124,25 @@ brain:
 
 Use `/` to mount the whole Brain root. The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
 
+### `agents` — list of workspace agent references
+
+Each entry binds another agent in the same workspace. The path points at the
+target `.agent` file under `agents/`; `name` is a human-readable label for the
+editor and runtime prompt.
+
+```yaml
+agents:
+  - path: agents/sales-research.agent
+    name: Sales research
+```
+
+When a session runs, referenced agents expose an internal `delegate_to_agent`
+runtime tool. Calling it creates an inspectable child session for the target
+agent, hides that child from sidebar history, and returns that child session's
+final answer plus `childSessionId` as a tool result. Later calls can pass that
+`childSessionId` as `sessionId` with a new prompt to continue the same delegated
+child session.
+
 ### `integrations.github.repositories` — list of repository objects
 
 Each entry binds a workspace-authorized GitHub repository referenced by the body.
@@ -168,7 +191,7 @@ Markdown. The model sees it verbatim as system instructions. There is no preproc
 
 ### Mention syntax
 
-`@<id>` where `<id>` is a tool ID, a model ID, a Brain path, a GitHub `owner/repo`, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
+`@<id>` where `<id>` is a tool ID, a model ID, a Brain path, a workspace agent reference, a GitHub `owner/repo`, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
 
 ```text
 Find investors with @exa.        ← @exa            (tool)
@@ -177,6 +200,7 @@ Run @deep on the summary.        ← @deep           (alias → openai/gpt-5.4)
 Read @brain/product/ first.      ← @brain/product/ (Brain folder)
 Work in @opencompany/web.        ← @opencompany/web (GitHub repository)
 Read @brain/ first.              ← @brain/         (Brain root folder)
+Ask @agent/sales-research.       ← @agent/sales-research (workspace agent)
 ```
 
 ### Aliases
@@ -310,6 +334,9 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     { path: "/", type: "folder" },
     { path: "docs/README.md", type: "file" },
     { path: "product/", type: "folder" },
+  ],
+  agents: [
+    { path: "agents/sales-research.agent", name: "Sales research" },
   ],
   afterSession: {
     enabled: true,

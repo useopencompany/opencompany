@@ -634,6 +634,7 @@ function mentionIdDisplayText(id: string) {
   if (trimmed.startsWith("tool:")) return trimmed.slice("tool:".length);
   if (trimmed.startsWith("model:")) return trimmed.slice("model:".length);
   if (trimmed.startsWith("brain/")) return trimmed;
+  if (trimmed.startsWith("agent/")) return trimmed;
   if (trimmed === "integration:github") return "github";
   if (trimmed === "after-session") return "after-session";
   return "";
@@ -656,5 +657,6 @@ function mentionKindFromId(id: string) {
   if (id.startsWith("tool:")) return "tool";
   if (id.startsWith("integration:")) return "integration";
   if (id.startsWith("brain/")) return "brain";
+  if (id.startsWith("agent/")) return "agent";
   return undefined;
 }

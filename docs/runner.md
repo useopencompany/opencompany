@@ -106,6 +106,9 @@ V1 tools:
 - `write_file`
 - `list_files`
 - `git_diff`
+- `delegate_to_agent` when the saved agent references other workspace agents; pass `agent` to
+  start an inspectable child session hidden from sidebar history, or pass a returned
+  `childSessionId` as `sessionId` to continue that child session
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has a workspace bearer token configured

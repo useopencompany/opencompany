@@ -45,6 +45,13 @@ export function resolveAgentRuntimeConfig(input: {
             ", ",
           )}. Only edit files inside mounted brain paths when updating long-lived context.`
       : null,
+    input.agent.agents?.length
+      ? `Delegatable workspace agents: ${input.agent.agents
+          .map((agent) => `${agent.name} (${agent.path})`)
+          .join(
+            ", ",
+          )}. Use delegate_to_agent for focused subtasks that should be handled by one of these agents. The tool returns a childSessionId; pass that id as sessionId in a later delegate_to_agent call to continue the same delegated session when continuity matters.`
+      : null,
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
     input.userName ? `User: ${input.userName}` : null,
@@ -61,7 +68,7 @@ export function resolveAgentRuntimeConfig(input: {
       ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),
       exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
     },
-    tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
+    tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools, input.agent.agents),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
 }
@@ -73,6 +80,7 @@ export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
     ...config,
     tools: Array.isArray(persisted.tools) ? persisted.tools : [],
     brain: Array.isArray(persisted.brain) ? persisted.brain : [],
+    agents: Array.isArray(persisted.agents) ? persisted.agents : [],
     integrations: {
       github: {
         repositories: Array.isArray(persisted.integrations?.github?.repositories)

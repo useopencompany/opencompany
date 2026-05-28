@@ -16,6 +16,9 @@ tools:
 brain:
   - /
   - docs/README.md
+agents:
+  - path: agents/sales-research.agent
+    name: Sales research
 integrations:
   github:
     repositories:
@@ -24,14 +27,14 @@ integrations:
         defaultBranch: main
 ---
 
-Research investors with @exa. Use @deep for thesis write-ups. Read @brain/ first. Work in @opencompany/web with @amp.
+Research investors with @exa. Use @deep for thesis write-ups. Read @brain/ first. Ask @agent/sales-research for account notes. Work in @opencompany/web with @amp.
 ```
 
 That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
 
 ## The header
 
-The header is YAML — a simple `key: value` format. It has four fields.
+The header is YAML — a simple `key: value` format. These are the main fields.
 
 ### `title`
 
@@ -104,6 +107,19 @@ brain:
 
 These paths live under `brain/` in the workspace repo. Use `/` to mount the whole Brain root. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
 
+### `agents`
+
+A list of other agents in the same workspace that this agent can delegate work to.
+
+```yaml
+agents:
+  - path: agents/sales-research.agent
+    name: Sales research
+```
+
+The body mention is `@agent/<slug>`, where `<slug>` is the filename without `agents/` or `.agent`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
+The result also includes `childSessionId`; passing that id back as `sessionId` with a new prompt continues the same delegated child session.
+
 ### `integrations.github.repositories`
 
 A list of workspace-authorized GitHub repositories referenced by the body.
@@ -143,7 +159,7 @@ There's no length limit, but shorter is usually better. If the instructions are 
 
 ## Mentions
 
-Inside the body you can write `@something` to attach a model, tool, Brain path, or GitHub repository. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
+Inside the body you can write `@something` to attach a model, tool, Brain path, workspace agent, or GitHub repository. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
 
 ```text
 Find investors with @exa.        ← tool: exa
@@ -151,6 +167,7 @@ Use @deep for the write-up.      ← model: openai/gpt-5.4
 Read @brain/product/ first.      ← Brain folder
 Work in @opencompany/web.        ← GitHub repository
 Read @brain/ first.              ← Brain root folder
+Ask @agent/sales-research.       ← workspace agent
 ```
 
 This is what mentions can be:
@@ -158,6 +175,7 @@ This is what mentions can be:
 - A tool ID, like `@exa`
 - A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
 - A Brain path, like `@brain/`, `@brain/docs/README.md`, or `@brain/product/`
+- A workspace agent, like `@agent/sales-research`
 - A GitHub `owner/repo`, like `@opencompany/web`
 - A shortcut name (see below)
 

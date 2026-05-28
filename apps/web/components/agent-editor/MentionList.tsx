@@ -1,7 +1,16 @@
 "use client";
 
 import type { JsonValue } from "@opencompany/agent-runtime/types";
-import { BookOpenText, ChevronLeft, ChevronRight, Clock3, Cpu, Plug, Wrench } from "lucide-react";
+import {
+  BookOpenText,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Cpu,
+  MessagesSquare,
+  Plug,
+  Wrench,
+} from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
@@ -39,6 +48,13 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       label: "Tools",
       description: `${items.filter((item) => item.kind === "tool").length} available`,
       icon: Wrench,
+    },
+    {
+      type: "category" as const,
+      kind: "agent" as const,
+      label: "Agents",
+      description: `${items.filter((item) => item.kind === "agent").length} available`,
+      icon: MessagesSquare,
     },
     {
       type: "category" as const,
@@ -202,6 +218,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
+  if (kind === "agent") return "Agents";
   if (kind === "integration") return "Work integrations";
   if (kind === "hook") return "Hooks";
   return "Brain";
