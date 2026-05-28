@@ -90,6 +90,7 @@ details are catalog data in code, not `.agent` file data.
 | ----- | ------------------------------------------------ |
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
+| `codex` | Codex coding agent delegated into a sandboxed runtime. |
 | `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
 
 ```yaml
@@ -97,6 +98,11 @@ tools:
   - id: amp
     type: coding_agent
     provider: amp
+    repository: opencompany-web
+    prCapable: true
+  - id: codex
+    type: coding_agent
+    provider: codex
     repository: opencompany-web
     prCapable: true
   - id: linear

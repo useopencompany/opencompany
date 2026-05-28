@@ -15,6 +15,7 @@ export type RuntimeToolName =
   | "list_files"
   | "git_diff"
   | "amp_coder"
+  | "codex_coder"
   | "exa_search"
   | "exa_contents"
   | "exa_answer"
@@ -42,7 +43,7 @@ export type AgentToolWorkspaceResourceRequirement = {
 export type AgentToolDefinition = {
   id: AgentToolId;
   type: AgentConfigTool["type"];
-  provider?: "amp";
+  provider?: "amp" | "codex";
   server?: AgentMcpToolConfig["server"];
   label: string;
   description: string;
@@ -75,6 +76,23 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "mixed",
     requiredPlatformEnvVars: ["AMP_API_KEY"],
+    requiredWorkspaceResource: {
+      provider: "github",
+      resourceType: "repository",
+      binding: "required",
+    },
+    prCapableDefault: true,
+  },
+  {
+    id: "codex",
+    type: "coding_agent",
+    provider: "codex",
+    label: "Codex",
+    description: "Delegate coding work to Codex inside an E2B sandbox.",
+    runtimeTools: ["codex_coder"],
+    defaultEnabled: true,
+    credentialSource: "mixed",
+    requiredPlatformEnvVars: ["CODEX_API_KEY"],
     requiredWorkspaceResource: {
       provider: "github",
       resourceType: "repository",
@@ -262,6 +280,49 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool output includes ampResult, ampStatus, ampThreadId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on ampResult when present.",
       "Amp has repository-scoped GitHub CLI and git push access when a GitHub work repository is bound.",
       "Set createPullRequest=true only when the instructions call for a reviewable PR. Amp may create the PR itself; if it leaves publishable local work behind, the runner creates the draft PR after Amp finishes.",
+      "The tool works on non-default branches and must never push directly to the default branch.",
+    ].join("\n"),
+  },
+  {
+    name: "codex_coder",
+    kind: "sandbox",
+    configToolId: "codex",
+    requiresRepositoryBinding: true,
+    description:
+      "Delegate coding work to Codex in the connected GitHub repository. Use for multi-file implementation, debugging, refactors, and PR-ready code changes.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "Specific coding task for Codex to perform in the connected repository.",
+        },
+        createPullRequest: {
+          type: "boolean",
+          description:
+            "Whether to commit changes to a generated branch and open a draft pull request after Codex finishes.",
+          default: false,
+        },
+        pullRequestTitle: {
+          type: "string",
+          description: "Optional draft pull request title when createPullRequest is true.",
+        },
+        codexSessionId: {
+          type: "string",
+          description:
+            "Existing codexSessionId from a previous codex_coder result to resume instead of starting a new Codex session.",
+        },
+      },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use codex_coder for substantial codebase work that benefits from Codex's coding-agent loop.",
+      "Give Codex a concrete task and any constraints from the user or agent instructions.",
+      "When the user asks for a follow-up to prior Codex work, pass the previous codexSessionId so Codex resumes that session with its existing context.",
+      "The tool output includes codexResult, codexStatus, codexSessionId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on codexResult when present.",
+      "Codex has repository-scoped GitHub CLI and git push access when a GitHub work repository is bound.",
+      "Set createPullRequest=true only when the instructions call for a reviewable PR. If Codex leaves publishable local work behind, the runner creates the draft PR after Codex finishes.",
       "The tool works on non-default branches and must never push directly to the default branch.",
     ].join("\n"),
   },

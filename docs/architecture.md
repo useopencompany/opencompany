@@ -110,10 +110,11 @@ Agents reference work integration repositories through `.agent` frontmatter unde
 runner sandbox with an installation token minted from the workspace work integration installation,
 not the managed workspace-state installation.
 
-AMP itself is modeled as an agent tool, not a workspace integration. Workspace-scoped provider
-credentials are not required for AMP; the runner uses the platform `AMP_API_KEY` when the AMP tool
-runs. For GitHub-backed AMP runs, the runner also passes a short-lived, repository-scoped GitHub App
-installation token into that AMP process so `gh` and HTTPS Git operations use the same work
+AMP and Codex are modeled as agent tools, not workspace integrations. Workspace-scoped provider
+credentials are not required for these coding agents; the runner uses platform credentials
+(`AMP_API_KEY` or `CODEX_API_KEY`) when the tool runs. For GitHub-backed coding-agent runs, the
+runner also passes a short-lived, repository-scoped GitHub App installation token into that process
+so `gh` and HTTPS Git operations use the same work
 integration identity as the clone.
 
 ## Agent Sessions
@@ -128,7 +129,7 @@ The important files are:
 - `apps/web/lib/agent-sessions/runner.ts`: server-to-server calls from web/Inngest to the runner.
 - `apps/web/components/SessionView.tsx`: reads persisted messages and applies SSE events.
 - `apps/runner/src/server.ts`: Fastify routes for health, internal mutations, and SSE.
-- `apps/runner/src/agent-loop.ts`: orchestrates a single message run — lease acquisition, assistant streaming, and step bookkeeping. Sandbox provisioning lives in `session-lifecycle.ts`, the model stream loop in `model-stream-runner.ts`, tool dispatch in `tool-dispatcher.ts`, AMP integration in `amp-tool.ts`, and event/usage writes in `lease-writes.ts` and `usage-recorder.ts`.
+- `apps/runner/src/agent-loop.ts`: orchestrates a single message run — lease acquisition, assistant streaming, and step bookkeeping. Sandbox provisioning lives in `session-lifecycle.ts`, the model stream loop in `model-stream-runner.ts`, tool dispatch in `tool-dispatcher.ts`, coding-agent integrations in `amp-tool.ts` and `codex-tool.ts`, and event/usage writes in `lease-writes.ts` and `usage-recorder.ts`.
 - `packages/agent-runtime`: shared config resolution, tool catalog, runtime event types, ids,
   signed stream tokens, and path helpers.
 
@@ -202,6 +203,7 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 - Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
   `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`, `E2B_API_KEY`,
   `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`,
-  `AMP_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, optional `GITHUB_INTEGRATION_APP_ID`
-  / `GITHUB_INTEGRATION_APP_PRIVATE_KEY` for AMP work-repository cloning and PRs, and optional
+  `AMP_API_KEY`, `CODEX_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, optional
+  `OPENCOMPANY_CODEX_E2B_TEMPLATE`, optional `GITHUB_INTEGRATION_APP_ID`
+  / `GITHUB_INTEGRATION_APP_PRIVATE_KEY` for coding-agent work-repository cloning and PRs, and optional
   `RUNNER_E2B_IDLE_TIMEOUT_MS` / `RUNNER_INSTANCE_ID`.

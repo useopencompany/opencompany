@@ -166,7 +166,7 @@ in Infisical `dev` + `/web` and `/runner`:
 local setup writes `.env.local` with a Neon branch-specific URL.
 
 Runner-only development secrets such as `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`,
-`EXA_API_KEY`, and `AMP_API_KEY` are also pulled from Infisical `dev` + `/runner` into
+`EXA_API_KEY`, `AMP_API_KEY`, and `CODEX_API_KEY` are also pulled from Infisical `dev` + `/runner` into
 `.env.local` when present. This lets the local runner use the same shared provider credentials
 without copying them by hand.
 

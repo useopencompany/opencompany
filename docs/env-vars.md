@@ -112,14 +112,16 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
+| `CODEX_API_KEY` | Codex only | Platform OpenAI API key used by the runner when agents enable the Codex coding tool. |
+| `OPENCOMPANY_CODEX_E2B_TEMPLATE` | No | Optional Codex-specific E2B template; defaults to `codex`. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | MCP only | Decrypts workspace MCP bearer tokens for dynamic MCP tools. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
 | `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |
 | `GITHUB_APP_INSTALLATION_ID` | Yes | Enables runner Brain sync to GitHub. |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | Enables runner Brain sync to GitHub. |
-| `GITHUB_INTEGRATION_APP_ID` | Yes for AMP | Enables runner cloning and PR creation for connected work repositories. |
-| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Yes for AMP | Enables runner installation tokens for connected work repositories. |
+| `GITHUB_INTEGRATION_APP_ID` | Yes for coding agents | Enables runner cloning and PR creation for connected work repositories. |
+| `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | Yes for coding agents | Enables runner installation tokens for connected work repositories. |
 | `BETTER_STACK_ERRORS_DSN` | No | Runner error capture DSN. |
 | `OBSERVABILITY_ENABLED` | No | Runner observability toggle. |
 | `OBSERVABILITY_ENV` | No | Runner observability environment. |

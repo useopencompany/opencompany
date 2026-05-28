@@ -254,7 +254,7 @@ function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfi
     const definition = TOOL_BY_ID.get(id as AgentToolId);
     if (!definition) continue;
 
-    if (id === "amp") {
+    if (definition.type === "coding_agent") {
       const record = isRecord(item) ? item : {};
       const repository = normalizeNullableRepositoryId(record.repository);
       tools.push(
@@ -276,7 +276,7 @@ function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfi
 
 function serializeTools(tools: AgentConfigTool[]) {
   return tools.map((tool) => {
-    if (tool.id === "amp") {
+    if (tool.type === "coding_agent") {
       return {
         id: tool.id,
         type: tool.type,

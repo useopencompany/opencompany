@@ -1,4 +1,5 @@
 import {
+  type AgentCodingToolConfig,
   type AgentConfig,
   normalizeAgentConfig,
   serializeAgentFile,
@@ -93,21 +94,32 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   }
 }
 
-function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
-  return agentConfig.tools.some(
-    (tool) => tool.id === "amp" && typeof tool.repository === "string" && tool.repository,
-  )
-    ? (env.ampE2bTemplate ?? "amp")
-    : env.e2bTemplate;
+export function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
+  const codingTool = resolveSessionCodingTool(agentConfig);
+  if (codingTool?.provider === "codex") return env.codexE2bTemplate ?? "codex";
+  if (codingTool?.provider === "amp") return env.ampE2bTemplate ?? "amp";
+  return env.e2bTemplate;
 }
 
 function resolveSessionRepository(agentConfig: AgentConfig) {
-  const ampTool = agentConfig.tools.find((tool) => tool.id === "amp");
-  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
+  const codingTool = resolveSessionCodingTool(agentConfig);
+  if (!codingTool?.repository) return null;
   return (
     agentConfig.integrations.github.repositories.find(
-      (repository) => repository.id === ampTool.repository,
+      (repository) => repository.id === codingTool.repository,
     ) ?? null
+  );
+}
+
+function resolveSessionCodingTool(agentConfig: AgentConfig) {
+  return (
+    agentConfig.tools.find((tool): tool is AgentCodingToolConfig => {
+      return (
+        tool.type === "coding_agent" &&
+        typeof tool.repository === "string" &&
+        tool.repository.trim().length > 0
+      );
+    }) ?? null
   );
 }
 

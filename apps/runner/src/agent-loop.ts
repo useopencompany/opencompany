@@ -64,6 +64,7 @@ import {
   loadUserMessage,
   optionalUserName,
   parkSandboxWhenIdle,
+  resolveSandboxTemplate,
   setStatus,
   startSession,
 } from "./session-lifecycle";
@@ -79,12 +80,23 @@ export {
   selectPublishBranch,
 } from "./amp-tool";
 export {
+  buildCodexCommand,
+  buildCodexCommandEnv,
+  createCodexActivityFormatter,
+  createCodexStreamAccumulator,
+} from "./codex-tool";
+export {
   acquireRunLease,
   appendRuntimeEventForLease,
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
 } from "./lease-writes";
-export { abortSession, archiveSession, startSession } from "./session-lifecycle";
+export {
+  abortSession,
+  archiveSession,
+  resolveSandboxTemplate,
+  startSession,
+} from "./session-lifecycle";
 export {
   normalizeReasoningSummary,
   readReasoningTextDelta,

@@ -14,10 +14,14 @@ import {
   appendRuntimeEventForLease,
   buildAmpCommand,
   buildAmpCommandEnv,
+  buildCodexCommand,
+  buildCodexCommandEnv,
   completeAssistantMessageForLease,
   createAmpActivityFormatter,
   createAmpStreamAccumulator,
   createAssistantMessageForLease,
+  createCodexActivityFormatter,
+  createCodexStreamAccumulator,
   createHostedToolBudget,
   createKnownSecretRedactor,
   executeRuntimeTool,
@@ -25,6 +29,7 @@ import {
   readReasoningTextDelta,
   recordStepUsage,
   recordToolUsage,
+  resolveSandboxTemplate,
   selectPublishBranch,
   throwIfStreamErrorPart,
 } from "./agent-loop";
@@ -1123,6 +1128,206 @@ describe("Amp stream parsing", () => {
   });
 });
 
+describe("Codex stream parsing", () => {
+  it("starts a new Codex session when no prior session id is provided", () => {
+    expect(
+      buildCodexCommand({
+        task: "implement the change",
+        workRoot: "/home/user/repo",
+      }),
+    ).toBe(
+      "codex exec --json --sandbox workspace-write --skip-git-repo-check -C '/home/user/repo' 'implement the change'",
+    );
+  });
+
+  it("resumes an existing Codex session when a prior session id is provided", () => {
+    expect(
+      buildCodexCommand({
+        task: "address the follow-up",
+        workRoot: "/home/user/repo",
+        codexSessionId: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+      }),
+    ).toBe(
+      "codex exec resume '0199a213-81c0-7800-8aa1-bbab2a035a53' --json --sandbox workspace-write --skip-git-repo-check -C '/home/user/repo' 'address the follow-up'",
+    );
+  });
+
+  it("builds ephemeral GitHub auth env for Codex without putting tokens in the command", () => {
+    const env = buildCodexCommandEnv({
+      codexApiKey: "codex_secret_123",
+      githubAuthHeader: "Authorization: Basic github_basic_secret",
+      githubToken: "github_token_123",
+      toolCallId: "toolu/with spaces",
+    });
+
+    expect(env).toMatchObject({
+      CODEX_API_KEY: "codex_secret_123",
+      GH_TOKEN: "github_token_123",
+      GH_PROMPT_DISABLED: "1",
+      GH_NO_UPDATE_NOTIFIER: "1",
+      GH_CONFIG_DIR: "/tmp/opencompany-gh-toolu-with-spaces",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: "Authorization: Basic github_basic_secret",
+    });
+    expect(buildCodexCommand({ task: "open a pr", workRoot: "/home/user/repo" })).not.toContain(
+      "github_token_123",
+    );
+  });
+
+  it("uses a Codex branch prefix instead of pushing the default branch", () => {
+    expect(
+      selectPublishBranch({
+        currentBranch: "main",
+        defaultBranch: "main",
+        sessionId: "ses_845254899642482b9082",
+        now: 123,
+        provider: "codex",
+      }),
+    ).toBe("opencompany/codex-482b9082-123");
+  });
+
+  it("captures the final successful Codex result across stdout chunks", () => {
+    const stream = createCodexStreamAccumulator();
+
+    stream.push(
+      [
+        JSON.stringify({
+          type: "thread.started",
+          thread_id: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item_3",
+            type: "agent_message",
+            text: "final answer",
+          },
+        }),
+      ].join("\n"),
+    );
+    stream.push(
+      `\n${JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 24763,
+          cached_input_tokens: 24448,
+          output_tokens: 122,
+        },
+      }).slice(0, 40)}`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 24763,
+          cached_input_tokens: 24448,
+          output_tokens: 122,
+        },
+      }).slice(40)}\n`,
+    );
+
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      sessionId: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+      status: "success",
+      result: "final answer",
+      error: null,
+      usage: {
+        input_tokens: 24763,
+        cached_input_tokens: 24448,
+        output_tokens: 122,
+      },
+    });
+  });
+
+  it("captures Codex execution errors as structured output", () => {
+    const stream = createCodexStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "turn.failed",
+        thread_id: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+        error: { message: "permission denied" },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      sessionId: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+      status: "error",
+      result: "",
+      error: "permission denied",
+      usage: null,
+    });
+  });
+
+  it("formats Codex stream activity without leaking partial JSON chunks", () => {
+    const formatter = createCodexActivityFormatter();
+    const commandEvent = JSON.stringify({
+      type: "item.started",
+      item: {
+        id: "item_1",
+        type: "command_execution",
+        command: "bun test apps/runner/src/agent-loop.test.ts",
+        status: "in_progress",
+      },
+    });
+
+    expect(formatter.push(`${commandEvent.slice(0, 40)}`)).toBe("");
+    expect(formatter.push(`${commandEvent.slice(40)}\n`)).toBe(
+      "Codex is running bun test apps/runner/src/agent-loop.test.ts.\n",
+    );
+  });
+});
+
+describe("coding-agent sandbox template selection", () => {
+  it("uses the Codex E2B template for repository-bound Codex agents", () => {
+    expect(
+      resolveSandboxTemplate(
+        {
+          ...agentConfig(),
+          tools: [
+            {
+              id: "codex",
+              type: "coding_agent",
+              provider: "codex",
+              label: "Codex",
+              description: "Delegate coding work to Codex inside an E2B sandbox.",
+              repository: "opencompany-web",
+              prCapable: true,
+            },
+          ],
+        },
+        env(),
+      ),
+    ).toBe("codex");
+  });
+
+  it("uses a configured Codex E2B template override when present", () => {
+    expect(
+      resolveSandboxTemplate(
+        {
+          ...agentConfig(),
+          tools: [
+            {
+              id: "codex",
+              type: "coding_agent",
+              provider: "codex",
+              label: "Codex",
+              description: "Delegate coding work to Codex inside an E2B sandbox.",
+              repository: "opencompany-web",
+              prCapable: true,
+            },
+          ],
+        },
+        env({ codexE2bTemplate: "custom-codex" }),
+      ),
+    ).toBe("custom-codex");
+  });
+});
+
 describe("reasoning stream helpers", () => {
   it("reads reasoning parts without treating them as assistant text", () => {
     expect(readReasoningTextDelta({ type: "reasoning", text: "Reviewed constraints." })).toBe(
@@ -1336,8 +1541,10 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
     ampApiKey: "amp_test",
+    codexApiKey: "codex_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
+    codexE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

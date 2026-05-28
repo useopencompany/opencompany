@@ -24,7 +24,7 @@ export type TiptapDoc = {
   content?: TiptapNode[];
 };
 
-export type AgentToolId = "exa" | "amp" | "linear";
+export type AgentToolId = "exa" | "amp" | "codex" | "linear";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -49,9 +49,9 @@ export type AgentHostedToolConfig = {
 };
 
 export type AgentCodingToolConfig = {
-  id: "amp";
+  id: "amp" | "codex";
   type: "coding_agent";
-  provider: "amp";
+  provider: "amp" | "codex";
   label: string;
   description: string;
   repository: string | null;

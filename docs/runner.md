@@ -45,7 +45,7 @@ The V1 loop is intentionally custom and narrow:
    `RUNNER_INTERNAL_TOKEN`.
 4. The runner marks the session `provisioning`, creates or reconnects the E2B sandbox, prepares
    the capability-scoped workspace layout, clones the selected connected GitHub repo into `work/`
-   for AMP agents, and marks the session `ready`.
+   for repository-bound coding agents, and marks the session `ready`.
 5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
    The token is a short-lived HMAC token minted by the web app.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
@@ -88,11 +88,12 @@ Important details:
   Brain files under `/home/user/workspace/brain` plus a session-local
   `/home/user/workspace/work` directory. For regular sessions, `work/` is initialized as an empty
   git repository so `git_diff` can report session-local scratch changes without exposing the
-  managed workspace repo. For AMP sessions, `work/` contains the selected connected GitHub
-  repository.
-- When AMP runs against a connected GitHub repository, the runner mints a repository-scoped GitHub
-  App installation token and passes it only to that AMP command through `GH_TOKEN`, a temporary
-  `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config. This lets AMP use `gh` and
+  managed workspace repo. For repository-bound coding-agent sessions, `work/` contains the selected
+  connected GitHub repository.
+- When Amp or Codex runs against a connected GitHub repository, the runner mints a
+  repository-scoped GitHub App installation token and passes it only to that coding-agent command
+  through `GH_TOKEN`, a temporary `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config.
+  This lets coding agents use `gh` and
   `git push` without persisting credentials in the sandbox home directory or repository remote.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
@@ -107,11 +108,15 @@ V1 tools:
 - `list_files`
 - `git_diff`
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
+- `codex_coder` when the saved agent enables the Codex coding-agent tool with a valid repository binding
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has a workspace bearer token configured
 
 `amp_coder` returns an `ampThreadId`. Later follow-up tasks can pass that id back as
 `ampThreadId` so the runner invokes `amp threads continue` instead of starting a fresh Amp thread.
+`codex_coder` returns a `codexSessionId`. Later follow-up tasks can pass that id back as
+`codexSessionId` so the runner invokes `codex exec resume` instead of starting a fresh Codex
+session.
 
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
 `/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
@@ -166,13 +171,15 @@ Required environment variables:
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
+- `CODEX_API_KEY` (required only for agents that enable the Codex coding tool)
+- `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional; Codex sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
 - optional GitHub integration app env vars for cloning configured work repositories into E2B and
-  creating AMP pull requests: `GITHUB_INTEGRATION_APP_ID` and
+  creating coding-agent pull requests: `GITHUB_INTEGRATION_APP_ID` and
   `GITHUB_INTEGRATION_APP_PRIVATE_KEY`
 - optional Better Stack error capture env var: `BETTER_STACK_ERRORS_DSN`
 

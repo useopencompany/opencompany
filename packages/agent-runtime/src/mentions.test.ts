@@ -46,9 +46,9 @@ describe("extractConfigFromMentions", () => {
   });
 
   it("resolves tool ids and labels", () => {
-    const config = extractConfigFromMentions("Research with @exa and implement with @AMP.");
+    const config = extractConfigFromMentions("Research with @exa, implement with @AMP and @codex.");
 
-    expect(config.tools).toEqual(["exa", "amp"]);
+    expect(config.tools).toEqual(["exa", "amp", "codex"]);
   });
 
   it("normalizes Brain file and folder paths", () => {
@@ -85,6 +85,21 @@ describe("deriveAgentConfigFromBody", () => {
 
     expect(config.tools).toEqual([
       expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
+    ]);
+    expect(config.integrations.github.repositories).toEqual([
+      { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+    ]);
+  });
+
+  it("binds Codex to the mentioned GitHub repository", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Code agent",
+      body: "Use @codex in @opencompany/web.",
+      repositories,
+    });
+
+    expect(config.tools).toEqual([
+      expect.objectContaining({ id: "codex", repository: "opencompany-web" }),
     ]);
     expect(config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },

@@ -80,6 +80,7 @@ agent sessions.
 - `apps/runner/src/agent-loop.ts`.
 - `apps/runner/src/env.ts`.
 - `E2B_API_KEY`, `OPENCOMPANY_E2B_TEMPLATE`, `OPENCOMPANY_AMP_E2B_TEMPLATE`,
+  `OPENCOMPANY_CODEX_E2B_TEMPLATE`,
   `RUNNER_E2B_IDLE_TIMEOUT_MS` in `.env.example`.
 - `docs/runner.md`.
 
@@ -147,6 +148,7 @@ Hosted tools are enabled by agent configuration:
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
+- `codex_coder` when `@codex` is enabled and bound to a connected GitHub work repository
 
 Experimental MCP tools are enabled by workspace setup plus agent configuration:
 

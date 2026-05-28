@@ -148,11 +148,11 @@ export function toConfigTool(
   tool: AgentToolDefinition,
   overrides: Partial<AgentCodingToolConfig> = {},
 ): AgentConfigTool {
-  if (tool.id === "amp") {
+  if (tool.id === "amp" || tool.id === "codex") {
     return {
-      id: "amp",
+      id: tool.id,
       type: "coding_agent",
-      provider: "amp",
+      provider: tool.id,
       label: tool.label,
       description: tool.description,
       repository: overrides.repository ?? null,
@@ -296,7 +296,9 @@ function bodyToolsToConfig(toolIds: AgentToolId[], repositoryId: string | null) 
     const tool = TOOL_BY_ID.get(id);
     if (!tool) return [];
     return [
-      tool.id === "amp" ? toConfigTool(tool, { repository: repositoryId }) : toConfigTool(tool),
+      tool.type === "coding_agent"
+        ? toConfigTool(tool, { repository: repositoryId })
+        : toConfigTool(tool),
     ];
   });
 }

@@ -300,6 +300,42 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Codex coding tool repository configuration", () => {
+    const source = serializeAgentFile({
+      title: "Code",
+      body: "Work in @opencompany/web with @codex.",
+      tools: [
+        {
+          id: "codex",
+          type: "coding_agent",
+          provider: "codex",
+          label: "Codex",
+          description: "Delegate coding work to Codex inside an E2B sandbox.",
+          repository: "opencompany-web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [
+            { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+          ],
+        },
+      },
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(parsed.config.tools).toEqual([
+      expect.objectContaining({
+        id: "codex",
+        provider: "codex",
+        repository: "opencompany-web",
+        prCapable: true,
+      }),
+    ]);
+    expect(source).toContain("provider: codex");
+  });
+
   test("round-trips optional GitHub repository connection binding", () => {
     const binding = {
       provider: "github" as const,

@@ -75,6 +75,7 @@ export type AgentMentionItem =
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   amp: Code2,
+  codex: Code2,
   linear: ListTodo,
 };
 

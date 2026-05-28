@@ -10,6 +10,7 @@ import { captureException } from "@opencompany/observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { readSandboxBrainSnapshot, runAmpCoderTool } from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
+import { runCodexCoderTool } from "./codex-tool";
 import type { RunnerEnv } from "./env";
 import {
   executeHostedTool,
@@ -231,6 +232,42 @@ export async function executeRuntimeTool(input: {
           throw new Error("AMP requires workspace and agent configuration context.");
         }
         return runAmpCoderTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          workspaceId: input.workspaceId,
+          toolCallId: input.toolCallId,
+          agentConfig: input.agentConfig,
+          env: input.env,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          onOutput: async (delta) => {
+            await input.checkAbort();
+            await requireLeaseWrite(
+              appendRuntimeEventForLease({
+                sessionId: input.sessionId,
+                messageId: input.assistantMessageId,
+                leaseId: input.runLeaseId,
+                leaseOwner: input.runLeaseOwner,
+                type: "command.output",
+                payload: {
+                  command: input.definition.name,
+                  toolCallId: input.toolCallId,
+                  stream: "stdout",
+                  delta,
+                },
+              }),
+            );
+          },
+        });
+      }
+      if (input.definition.name === "codex_coder") {
+        if (!input.workspaceId || !input.agentConfig) {
+          throw new Error("Codex requires workspace and agent configuration context.");
+        }
+        return runCodexCoderTool({
           sandbox: activeSandbox,
           workdir: input.workdir,
           args: input.args,

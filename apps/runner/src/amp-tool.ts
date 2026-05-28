@@ -313,12 +313,13 @@ export function selectPublishBranch(input: {
   defaultBranch: string;
   sessionId: string;
   now: number;
+  provider?: "amp" | "codex";
 }) {
   if (input.currentBranch && input.currentBranch !== input.defaultBranch) {
     return input.currentBranch;
   }
 
-  return `opencompany/amp-${input.sessionId.slice(-8)}-${input.now}`;
+  return `opencompany/${input.provider ?? "amp"}-${input.sessionId.slice(-8)}-${input.now}`;
 }
 
 export async function loadGitHubWorkRepository(
@@ -702,7 +703,7 @@ function compactWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-async function readCurrentGitBranch(sandbox: SandboxHandle, workRoot: string) {
+export async function readCurrentGitBranch(sandbox: SandboxHandle, workRoot: string) {
   const result = await sandbox.commands.run(
     `cd ${shellQuote(workRoot)} && git branch --show-current`,
     { timeoutMs: 30_000 },
@@ -711,7 +712,7 @@ async function readCurrentGitBranch(sandbox: SandboxHandle, workRoot: string) {
   return branch || null;
 }
 
-async function readLocalCommitCount(
+export async function readLocalCommitCount(
   sandbox: SandboxHandle,
   workRoot: string,
   defaultBranch: string,
@@ -726,7 +727,7 @@ async function readLocalCommitCount(
   return Number.isFinite(count) ? count : 0;
 }
 
-async function readPullRequestUrlForBranch(
+export async function readPullRequestUrlForBranch(
   sandbox: SandboxHandle,
   workRoot: string,
   branch: string | null,
@@ -746,7 +747,7 @@ async function readPullRequestUrlForBranch(
     : null;
 }
 
-function normalizeCommitMessage(value: string) {
+export function normalizeCommitMessage(value: string) {
   const firstLine = value
     .split("\n")
     .map((line) => line.trim())
@@ -755,7 +756,7 @@ function normalizeCommitMessage(value: string) {
   return title.length > 72 ? `${title.slice(0, 69)}...` : title;
 }
 
-function githubRemoteUrl(repositoryFullName: string) {
+export function githubRemoteUrl(repositoryFullName: string) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryFullName)) {
     throw new Error("Invalid GitHub repository name for AMP push.");
   }
@@ -763,17 +764,17 @@ function githubRemoteUrl(repositoryFullName: string) {
   return `https://github.com/${repositoryFullName}.git`;
 }
 
-function gitAuthExtraHeaderArg() {
+export function gitAuthExtraHeaderArg() {
   return `-c http.extraheader="$${GITHUB_AUTH_HEADER_ENV}"`;
 }
 
-function gitAuthHeader(token: string) {
+export function gitAuthHeader(token: string) {
   return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
     "base64",
   )}`;
 }
 
-function safePathSegment(value: string) {
+export function safePathSegment(value: string) {
   return value.replace(/[^A-Za-z0-9_.-]/g, "-") || "amp";
 }
 
@@ -785,7 +786,7 @@ export async function readSandboxBrainSnapshot(sandbox: SandboxHandle, workdir: 
   return String(result.stdout ?? "");
 }
 
-function formatAmpDiffStat(stat: unknown, status: unknown) {
+export function formatAmpDiffStat(stat: unknown, status: unknown) {
   const statText = String(stat ?? "").trim();
   const statusText = String(status ?? "").trim();
   if (!statusText) return statText;
@@ -793,23 +794,23 @@ function formatAmpDiffStat(stat: unknown, status: unknown) {
   return `${statText}\n\n${statusText}`;
 }
 
-function truncateText(value: string, maxLength: number) {
+export function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
 }
 
-function readOptionalText(value: unknown) {
+export function readOptionalText(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function readOptionalFiniteNumber(value: unknown) {
+export function readOptionalFiniteNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function readStringArray(value: unknown) {
+export function readStringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => (typeof item === "string" ? [item] : []));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object");
 }

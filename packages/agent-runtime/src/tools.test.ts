@@ -23,6 +23,7 @@ describe("AGENT_TOOL_CATALOG", () => {
 
   it("keeps workspace resource requirements aligned with repository-bound runtime tools", () => {
     const amp = AGENT_TOOL_DEFINITION_BY_ID.get("amp");
+    const codex = AGENT_TOOL_DEFINITION_BY_ID.get("codex");
 
     expect(amp?.credentialSource).toBe("mixed");
     expect(amp?.requiredPlatformEnvVars).toEqual(["AMP_API_KEY"]);
@@ -40,6 +41,26 @@ describe("AGENT_TOOL_CATALOG", () => {
       expect.objectContaining({
         name: "amp_coder",
         configToolId: "amp",
+        requiresRepositoryBinding: true,
+      }),
+    );
+
+    expect(codex?.credentialSource).toBe("mixed");
+    expect(codex?.requiredPlatformEnvVars).toEqual(["CODEX_API_KEY"]);
+    expect(codex?.requiredWorkspaceResource).toEqual({
+      provider: "github",
+      resourceType: "repository",
+      binding: "required",
+    });
+
+    const codexRuntimeTools = (codex?.runtimeTools ?? []).map((name) =>
+      RUNTIME_TOOL_DEFINITION_BY_NAME.get(name),
+    );
+
+    expect(codexRuntimeTools).toContainEqual(
+      expect.objectContaining({
+        name: "codex_coder",
+        configToolId: "codex",
         requiresRepositoryBinding: true,
       }),
     );

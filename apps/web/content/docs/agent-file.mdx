@@ -82,12 +82,19 @@ tools:
     provider: amp
     repository: opencompany-web
     prCapable: true
+  - id: codex
+    type: coding_agent
+    provider: codex
+    repository: opencompany-web
+    prCapable: true
 ```
 
 | ID | What it does |
 | --- | --- |
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `amp` | Coding work delegated into a sandboxed runtime. |
+| `codex` | Codex coding work delegated into a sandboxed runtime. |
+| `codex` | Codex coding work delegated into a sandboxed runtime. |
 
 Unknown tool names are silently ignored, so adding a tool that doesn't exist yet won't break the file. Tool labels, descriptions, and runtime function names come from the platform catalog, not from this file.
 
