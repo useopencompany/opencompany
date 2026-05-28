@@ -275,6 +275,31 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     onEvent: applyRuntimeEvent,
   });
 
+  // Data-freshness staleness detection: track when the last runtime event arrived
+  // (wall-clock time) so we can show the stale banner even when SSE reconnects keep
+  // flipping stream.status away from "stale" before the 10s timeout is reached.
+  // Initialized from session.updatedAt so sessions with no events still get a baseline.
+  const STALE_THRESHOLD_MS = 15_000;
+  const [lastRuntimeActivityMs, setLastRuntimeActivityMs] = useState<number>(() =>
+    Date.parse(detail.session.updatedAt),
+  );
+  // Whenever a new event lands (lastEventId grows), reset the activity clock.
+  useEffect(() => {
+    if (lastEventId === 0) return;
+    setLastRuntimeActivityMs(Date.now());
+  }, [lastEventId]);
+  // 1-second tick to keep the staleness check current without tying to re-renders.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 1_000);
+    return () => clearInterval(id);
+  }, []);
+  const sessionFeedsLooksStale =
+    hasRunningAssistantMessage &&
+    lastRuntimeActivityMs !== null &&
+    Date.now() - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
+  const showStaleBanner = hasRunningAssistantMessage && (stream.status === "stale" || sessionFeedsLooksStale);
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -524,7 +549,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
 
         <div className="bg-canvas px-8 lg:px-12 py-4">
           <div className="group/composer mx-auto max-w-[960px]">
-            {stream.status === "stale" && hasRunningAssistantMessage ? (
+            {showStaleBanner ? (
               <div
                 role="status"
                 aria-live="polite"

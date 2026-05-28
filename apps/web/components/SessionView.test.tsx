@@ -1,6 +1,7 @@
 /**
  * Phase B tests for AssistantMessageContent live-part rendering.
  * Phase C tests for the stale-stream banner in SessionViewContent.
+ * Phase C2 tests for the data-freshness stale detection (PRO-91 fix).
  *
  * Phase B verifies that tool-call and reasoning parts show up immediately in
  * the message body while the message is still running (status === "running"),
@@ -10,15 +11,20 @@
  * Phase C verifies that the stale-connection banner appears only when the SSE
  * stream is stale AND there is a running assistant message, and that the Retry
  * button triggers a credential cache invalidation.
+ *
+ * Phase C2 verifies data-freshness detection: the banner also appears when
+ * stream.status is "open" but no new runtime event has arrived within
+ * STALE_THRESHOLD_MS (15s), matching the real-world dead-session scenario where
+ * SSE reconnects keep flipping stream.status away from "stale".
  */
 
 import type { ComponentProps } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
-import type { AssistantTurnPart, SessionMessage } from "@/lib/agent-sessions/runtime-events";
+import type { AssistantTurnPart, RuntimeEvent, SessionMessage } from "@/lib/agent-sessions/runtime-events";
 import { AssistantMessageContent, SessionViewContent } from "./SessionView";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
@@ -262,6 +268,8 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
 // ── Phase C: Stale-stream banner ───────────────────────────────────────────
 
 function makeSession(overrides: Partial<AgentSessionDetailPayload["session"]> = {}): AgentSessionDetailPayload["session"] {
+  // Use a fresh updatedAt by default so the data-freshness stale check does not
+  // trigger in tests that don't explicitly set fake timers or a stale timestamp.
   return {
     id: "sess_001",
     agentId: "agent_001",
@@ -277,7 +285,7 @@ function makeSession(overrides: Partial<AgentSessionDetailPayload["session"]> = 
     abortRequestedAt: null,
     lastError: null,
     createdAt: "2024-01-01T00:00:00.000Z",
-    updatedAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -391,5 +399,153 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
     );
+  });
+});
+
+// ── Phase C2: Data-freshness stale detection ───────────────────────────────
+//
+// These tests verify that the banner triggers from data freshness (no new
+// runtime event for > STALE_THRESHOLD_MS) regardless of SSE stream.status.
+// Uses vi.useFakeTimers() so setInterval ticks and Date.now() are controllable.
+
+const STALE_THRESHOLD_MS = 15_000;
+
+function makeEventFixture(id: number): RuntimeEvent {
+  return { id, type: "message.delta", messageId: "msg_running", payload: {} };
+}
+
+describe("SessionViewContent — Phase C2: data-freshness stale detection", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does NOT show banner when stream is open and a recent event landed (< STALE_THRESHOLD_MS ago)", () => {
+    // Set the fake clock so "now" is 2000-01-01T00:00:30Z.
+    // updatedAt is set to 25s before now — within the 15s threshold from the last event.
+    const now = new Date("2000-01-01T00:00:30.000Z").getTime();
+    vi.setSystemTime(now);
+
+    // An event exists, initialized 5s ago relative to now.
+    const recentUpdatedAt = new Date(now - 5_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: recentUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(1)],
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Advance 1s to trigger the setInterval tick.
+    act(() => { vi.advanceTimersByTime(1_000); });
+
+    // Still within threshold (5s + 1s = 6s < 15s), no banner.
+    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+  });
+
+  it("shows banner when stream is open but no event for > STALE_THRESHOLD_MS", () => {
+    // Set the fake clock so "now" is 2000-01-01T00:01:00Z.
+    const now = new Date("2000-01-01T00:01:00.000Z").getTime();
+    vi.setSystemTime(now);
+
+    // updatedAt is 20s in the past — stale by the time the first tick fires.
+    const staleUpdatedAt = new Date(now - 20_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: staleUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [], // No events yet; component falls back to session.updatedAt.
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Advance 1s to trigger the setInterval tick.
+    act(() => { vi.advanceTimersByTime(1_000); });
+
+    // 20s + 1s tick = 21s > 15s threshold → banner must appear.
+    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+  });
+
+  it("hides banner once a new event arrives after being shown", () => {
+    const now = new Date("2000-01-01T00:02:00.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const staleUpdatedAt = new Date(now - 20_000).toISOString();
+    const detailStale = makeDetail({
+      session: makeSession({ updatedAt: staleUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [],
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detailStale} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Trigger tick → banner appears.
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+
+    // A new event arrives: rerender with a new event in the list.
+    // The component sees lastEventId change → resets lastRuntimeActivityMs to now.
+    const freshDetail = makeDetail({
+      session: makeSession({ updatedAt: new Date(now - 19_000).toISOString() }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(42)],
+    });
+
+    act(() => {
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <SessionViewContent detail={freshDetail} workspaceId="wks_test" />
+        </QueryClientProvider>,
+      );
+    });
+
+    // Banner should be gone — event just landed.
+    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+  });
+
+  it("still shows banner when stream.status is stale (regression of original Phase C behaviour)", () => {
+    // stream.status = "stale" path still works independently of data freshness.
+    const now = new Date("2000-01-01T00:03:00.000Z").getTime();
+    vi.setSystemTime(now);
+
+    // updatedAt is recent (1s ago) so data-freshness path alone would NOT fire.
+    const recentUpdatedAt = new Date(now - 1_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: recentUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(99)],
+    });
+
+    // Force status to stale (SSE path).
+    mockStreamStatus.value = "stale";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Banner must appear immediately (stream.status === "stale") without needing tick.
+    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
   });
 });
