@@ -24,11 +24,12 @@ export type TiptapDoc = {
   content?: TiptapNode[];
 };
 
-export type AgentToolId = "exa" | "amp";
+export type AgentToolId = "exa" | "amp" | "linear";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
   | "openai/gpt-5.4-nano"
+  | "openai/gpt-5.2-codex"
   | "anthropic/claude-haiku-4.5"
   | "anthropic/claude-sonnet-4.6"
   | "anthropic/claude-opus-4.7"
@@ -58,7 +59,15 @@ export type AgentCodingToolConfig = {
   prCapable: boolean;
 };
 
-export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig;
+export type AgentMcpToolConfig = {
+  id: "linear";
+  type: "mcp";
+  server: "linear";
+  label: string;
+  description: string;
+};
+
+export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig | AgentMcpToolConfig;
 
 export type AgentBrainReference = {
   path: string;

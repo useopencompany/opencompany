@@ -48,6 +48,7 @@ import {
   GITHUB_INTEGRATION_PROVIDER,
   GITHUB_REPOSITORY_RESOURCE_TYPE,
 } from "@/lib/integrations/service";
+import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
   ensureWorkspaceRepository,
@@ -319,7 +320,7 @@ export async function updateAgent(
     ]),
   );
   logAgentSyncJobQueued(syncJob.metadata);
-  const [[updatedAgent], brainPathRows] = await Promise.all([
+  const [[updatedAgent], brainPathRows, mcpSettings] = await Promise.all([
     timeAsync(trace, "db.selectUpdatedAgent", () =>
       db
         .select()
@@ -334,6 +335,7 @@ export async function updateAgent(
         .where(eq(brainFiles.workspaceId, workspace.id))
         .orderBy(asc(brainFiles.path)),
     ),
+    loadWorkspaceMcpSettingsForWorkspace(workspace.id),
   ]);
   const brainPaths = brainPathRows.map((row) => row.path);
 
@@ -352,7 +354,10 @@ export async function updateAgent(
     path,
     pathChanged,
     agent: updatedAgent
-      ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories)
+      ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories, {
+          mcpEnabled: mcpSettings.mcpEnabled,
+          linearConfigured: mcpSettings.linear.configured,
+        })
       : null,
   };
 

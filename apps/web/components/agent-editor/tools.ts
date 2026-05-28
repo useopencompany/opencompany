@@ -12,6 +12,7 @@ import {
   FileText,
   Folder,
   GitBranch,
+  ListTodo,
   type LucideIcon,
   Search,
 } from "lucide-react";
@@ -74,12 +75,14 @@ export type AgentMentionItem =
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   amp: Code2,
+  linear: ListTodo,
 };
 
 const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
   "openai/gpt-5.4-mini": Bot,
   "openai/gpt-5.4": Brain,
   "openai/gpt-5.4-nano": Bot,
+  "openai/gpt-5.2-codex": Code2,
   "anthropic/claude-haiku-4.5": Bot,
   "anthropic/claude-sonnet-4.6": Brain,
   "anthropic/claude-opus-4.7": Brain,
@@ -138,6 +141,7 @@ export function buildAgentMentionItems(
     statusReason?: string | null;
   }> = [],
   brainPaths: string[] = [],
+  options: { includeMcpTools?: boolean } = {},
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
     id: "github",
@@ -168,7 +172,7 @@ export function buildAgentMentionItems(
 
   return [
     ...AGENT_MODELS,
-    ...AGENT_TOOLS,
+    ...AGENT_TOOLS.filter((tool) => tool.id !== "linear" || options.includeMcpTools),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),

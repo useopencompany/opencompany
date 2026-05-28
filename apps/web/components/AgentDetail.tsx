@@ -195,8 +195,16 @@ function AgentDetailContent({
   const githubCommitSha = agent.githubCommitSha;
   const githubSyncedAt = agent.githubSyncedAt;
   const mentionItems: AgentMentionItem[] = useMemo(
-    () => buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths),
-    [agent.brainPaths, agent.usableGitHubIntegrationRepositories],
+    () =>
+      buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
+        includeMcpTools: agent.mcp.mcpEnabled && agent.mcp.linearConfigured,
+      }),
+    [
+      agent.brainPaths,
+      agent.mcp.linearConfigured,
+      agent.mcp.mcpEnabled,
+      agent.usableGitHubIntegrationRepositories,
+    ],
   );
 
   useEffect(() => {

@@ -88,6 +88,36 @@ describe("resolveAgentRuntimeConfig", () => {
     );
   });
 
+  it("keeps MCP tools separate from static runtime tools", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Linear agent",
+      instructions: "Triage Linear.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "linear",
+          description: "Use workspace-configured Linear MCP tools.",
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("tool_help");
+    expect(resolved.tools).not.toContain("exa_search");
+    expect(resolved.mcpServers).toEqual([config.tools[0]]);
+  });
+
   it("formats the root Brain mount clearly in the system prompt", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -213,6 +243,37 @@ describe("resolveAgentRuntimeConfig", () => {
       name: modelName,
       supportsReasoning: true,
       exposeReasoningSummary: false,
+    });
+  });
+
+  it("applies OpenAI reasoning options to GPT 5.2 Codex", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Codex agent",
+      instructions: "Work on code.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.2-codex",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.model).toEqual({
+      provider: "vercel-ai-gateway",
+      name: "openai/gpt-5.2-codex",
+      supportsReasoning: true,
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposeReasoningSummary: true,
     });
   });
 });

@@ -70,8 +70,10 @@ Create/import the web project from this repo.
 - Enable "Automatically expose System Environment Variables".
 - Enable Skew Protection.
 - If available, enable Rolling Releases with manual approval stages.
-- Disable automatic production deploys from Git once the GitHub Actions release workflow is ready.
-  Preview deploys can stay enabled.
+- Automatic Git deploys are disabled in `vercel.json` with `git.deploymentEnabled: false`.
+  Keep this disabled so pull requests, including forks without Vercel access, do not create Vercel
+  deployment checks. Production deploys are created by the GitHub Actions release workflow with
+  `vercel deploy --prebuilt --prod`.
 
 Set these in Infisical `prod` + `/web` and sync them into Vercel:
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { Mention } from "@tiptap/extension-mention";
+import { Fragment, Slice } from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
 import {
   EditorContent,
   Extension,
@@ -39,12 +41,157 @@ export type AgentEditorHandle = {
 const plainTextKeysExtension = Extension.create({
   name: "plainTextKeys",
   addKeyboardShortcuts() {
+    const swallowInStructuredBlock = () => {
+      // Inside headings and list items, a hard break would survive locally
+      // but the markdown round-trip cannot represent it (list items would
+      // turn into "item line one\nitem line two", which the parser splits
+      // into separate blocks). Swallow the shortcut instead of inserting a
+      // hard break there.
+      if (this.editor.isActive("heading") || this.editor.isActive("listItem")) {
+        return true;
+      }
+      return this.editor.commands.setHardBreak();
+    };
     return {
-      Enter: () => this.editor.commands.setHardBreak(),
+      Enter: () => {
+        if (this.editor.isActive("heading") || this.editor.isActive("listItem")) {
+          return false;
+        }
+        return this.editor.commands.setHardBreak();
+      },
+      "Shift-Enter": swallowInStructuredBlock,
+      "Mod-Enter": swallowInStructuredBlock,
       Tab: () => this.editor.commands.insertContent("  "),
     };
   },
 });
+
+const AUTO_MENTION_TOKEN_RE = /([@#])([\w./\-]+)/g;
+const AUTO_MENTION_IDLE_MS = 600;
+const autoMentionPluginKey = new PluginKey<{ force: boolean }>("autoMentionConvert");
+
+const createAutoMentionExtension = (getItems: () => AgentMentionItem[]) =>
+  Extension.create({
+    name: "autoMentionConvert",
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          key: autoMentionPluginKey,
+          view() {
+            let timer: ReturnType<typeof setTimeout> | null = null;
+            const clear = () => {
+              if (timer) {
+                clearTimeout(timer);
+                timer = null;
+              }
+            };
+            return {
+              update: (view, prevState) => {
+                const docSame = view.state.doc.eq(prevState.doc);
+                const selSame = view.state.selection.eq(prevState.selection);
+                if (docSame && selSame) return;
+
+                let pending = false;
+                view.state.doc.descendants((node) => {
+                  if (pending) return false;
+                  if (node.isText && node.text && /[@#]/.test(node.text)) pending = true;
+                });
+
+                clear();
+                if (!pending) return;
+
+                timer = setTimeout(() => {
+                  timer = null;
+                  if ((view as { isDestroyed?: boolean }).isDestroyed) return;
+                  view.dispatch(view.state.tr.setMeta(autoMentionPluginKey, { force: true }));
+                }, AUTO_MENTION_IDLE_MS);
+              },
+              destroy: clear,
+            };
+          },
+          appendTransaction: (transactions, oldState, newState) => {
+            const docChanged = transactions.some((tr) => tr.docChanged);
+            const selectionChanged = !newState.selection.eq(oldState.selection);
+            const force = transactions.some(
+              (tr) => tr.getMeta(autoMentionPluginKey)?.force === true,
+            );
+            if (!docChanged && !selectionChanged && !force) return null;
+
+            const wasTypingForward =
+              docChanged &&
+              !force &&
+              newState.selection.empty &&
+              oldState.selection.empty &&
+              newState.selection.from === oldState.selection.from + 1;
+
+            const items = getItems();
+            const cursorEmpty = newState.selection.empty;
+            const cursorPos = newState.selection.from;
+            const replacements: Array<{
+              from: number;
+              to: number;
+              trigger: string;
+              item: AgentMentionItem;
+            }> = [];
+
+            newState.doc.descendants((node, pos) => {
+              if (!node.isText || !node.text) return;
+              const text = node.text;
+              AUTO_MENTION_TOKEN_RE.lastIndex = 0;
+              let match: RegExpExecArray | null;
+              while ((match = AUTO_MENTION_TOKEN_RE.exec(text)) !== null) {
+                const matchStart = pos + match.index;
+                const trigger = match[1] ?? "";
+                const rawToken = match[2] ?? "";
+                const token = rawToken.replace(/[.,;:!?)}\]]+$/g, "");
+                if (!token) continue;
+
+                if (matchStart > 0) {
+                  const charBefore = newState.doc.textBetween(matchStart - 1, matchStart, "\n", "");
+                  if (charBefore && !/[\s([{]/.test(charBefore)) continue;
+                }
+
+                const tokenEnd = matchStart + 1 + token.length;
+                if (
+                  wasTypingForward &&
+                  cursorEmpty &&
+                  cursorPos >= matchStart &&
+                  cursorPos <= tokenEnd
+                ) {
+                  continue;
+                }
+
+                const item =
+                  trigger === "@"
+                    ? (findMentionItem(token, items) ?? findMentionItem(`${token}/`, items))
+                    : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
+                if (!item) continue;
+
+                replacements.push({ from: matchStart, to: tokenEnd, trigger, item });
+              }
+            });
+
+            if (replacements.length === 0) return null;
+
+            const mentionType = newState.schema.nodes.mention;
+            if (!mentionType) return null;
+
+            const tr = newState.tr;
+            replacements.sort((a, b) => b.from - a.from);
+            for (const r of replacements) {
+              const mentionNode = mentionType.create({
+                id: r.item.mentionId,
+                label: r.item.label,
+                mentionSuggestionChar: r.trigger,
+              });
+              tr.replaceWith(r.from, r.to, mentionNode);
+            }
+            return tr;
+          },
+        }),
+      ];
+    },
+  });
 
 export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEditor(
   {
@@ -111,25 +258,47 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
       }),
     [],
   );
+  const autoMentionExtension = useMemo(
+    () => createAutoMentionExtension(() => mentionItemsRef.current),
+    [],
+  );
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         blockquote: false,
-        bulletList: false,
         codeBlock: false,
-        heading: false,
+        heading: { levels: [1, 2, 3] },
         horizontalRule: false,
-        listItem: false,
-        orderedList: false,
       }),
       mentionExtension,
+      autoMentionExtension,
       plainTextKeysExtension,
     ],
     content: initialEditorContent,
     editorProps: {
       attributes: {
         class: "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
+      },
+      handlePaste: (view, event) => {
+        const text = event.clipboardData?.getData("text/plain");
+        if (!text || (!text.includes("@") && !text.includes("#"))) return false;
+
+        const doc = bodyToTiptapDoc(text, mentionItemsRef.current);
+        if (collectMentionDisplayTexts(doc).length === 0) return false;
+
+        const paragraphs = doc.content ?? [];
+        const inline: JSONContent[] = [];
+        paragraphs.forEach((paragraph, index) => {
+          if (index > 0) inline.push({ type: "hardBreak" });
+          inline.push(...(paragraph.content ?? []));
+        });
+
+        const { schema, tr } = view.state;
+        const nodes = inline.map((node) => schema.nodeFromJSON(node));
+        view.dispatch(tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0)));
+        event.preventDefault();
+        return true;
       },
     },
     onUpdate: ({ editor }) => {
@@ -276,18 +445,103 @@ function stripEmptyMentions(node: JSONContent): JSONContent {
   return { ...node, content: next };
 }
 
+// Markers may appear without trailing content because `tiptapDocToBody` trims
+// trailing whitespace on save: an empty heading is persisted as "#" rather
+// than "# ", and likewise for "- " / "1. ". Allow the text portion to be
+// optional so an empty block survives a save → reload round-trip.
+const HEADING_PATTERN = /^(#{1,3})(?: +(.*))?$/;
+const BULLET_PATTERN = /^[-*](?: +(.*))?$/;
+const ORDERED_PATTERN = /^(\d+)\.(?: +(.*))?$/;
+
+function isBlockStarter(line: string) {
+  return HEADING_PATTERN.test(line) || BULLET_PATTERN.test(line) || ORDERED_PATTERN.test(line);
+}
+
 function bodyToTiptapDoc(body: string, mentionItems: AgentMentionItem[]): JSONContent {
   const normalized = body.replace(/\r\n/g, "\n");
   if (normalized.trim().length === 0) {
     return { type: "doc", content: [{ type: "paragraph" }] };
   }
 
+  const lines = normalized.split("\n");
+  const blocks: JSONContent[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+
+    if (line.trim() === "") {
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = HEADING_PATTERN.exec(line);
+    if (headingMatch) {
+      const hashes = headingMatch[1] ?? "#";
+      const headingText = headingMatch[2] ?? "";
+      blocks.push({
+        type: "heading",
+        attrs: { level: hashes.length },
+        content: parseMentionText(headingText, mentionItems),
+      });
+      index += 1;
+      continue;
+    }
+
+    if (BULLET_PATTERN.test(line) || ORDERED_PATTERN.test(line)) {
+      const ordered = ORDERED_PATTERN.test(line);
+      const pattern = ordered ? ORDERED_PATTERN : BULLET_PATTERN;
+      const items: JSONContent[] = [];
+      let startNumber = 1;
+      let firstItem = true;
+      while (index < lines.length) {
+        const current = lines[index] ?? "";
+        const match = pattern.exec(current);
+        if (!match) break;
+        // Ordered pattern captures the leading number in group 1; bullet
+        // pattern captures the item text in group 1. Item text is therefore
+        // group 2 for ordered, group 1 for bullet.
+        const itemText = ordered ? (match[2] ?? "") : (match[1] ?? "");
+        if (ordered && firstItem) {
+          startNumber = Number.parseInt(match[1] ?? "1", 10);
+          if (!Number.isFinite(startNumber) || startNumber < 1) startNumber = 1;
+        }
+        firstItem = false;
+        items.push({
+          type: "listItem",
+          content: [
+            {
+              type: "paragraph",
+              content: parseMentionText(itemText, mentionItems),
+            },
+          ],
+        });
+        index += 1;
+      }
+      blocks.push(
+        ordered
+          ? { type: "orderedList", attrs: { start: startNumber }, content: items }
+          : { type: "bulletList", content: items },
+      );
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const current = lines[index] ?? "";
+      if (current.trim() === "" || isBlockStarter(current)) break;
+      paragraphLines.push(current);
+      index += 1;
+    }
+    blocks.push({
+      type: "paragraph",
+      content: parseInlineContent(paragraphLines.join("\n"), mentionItems),
+    });
+  }
+
   return {
     type: "doc",
-    content: normalized.split(/\n{2,}/).map((block) => ({
-      type: "paragraph",
-      content: parseInlineContent(block, mentionItems),
-    })),
+    content: blocks.length > 0 ? blocks : [{ type: "paragraph" }],
   };
 }
 
@@ -454,6 +708,27 @@ function nodeText(node: JSONContent): string {
         ? node.attrs.mentionSuggestionChar
         : "@";
     return displayText.length > 0 ? `${char}${displayText}` : "";
+  }
+  if (node.type === "heading") {
+    const rawLevel = typeof node.attrs?.level === "number" ? node.attrs.level : 1;
+    const level = Math.min(3, Math.max(1, Math.floor(rawLevel)));
+    const inner = (node.content ?? []).map(nodeText).join("");
+    return `${"#".repeat(level)} ${inner}`;
+  }
+  if (node.type === "bulletList" || node.type === "orderedList") {
+    const ordered = node.type === "orderedList";
+    const rawStart = ordered && typeof node.attrs?.start === "number" ? node.attrs.start : 1;
+    const start = Number.isFinite(rawStart) && rawStart >= 1 ? Math.floor(rawStart) : 1;
+    return (node.content ?? [])
+      .map((item, index) => {
+        const marker = ordered ? `${start + index}.` : "-";
+        const inner = (item.content ?? []).map(nodeText).join("\n");
+        return `${marker} ${inner}`;
+      })
+      .join("\n");
+  }
+  if (node.type === "listItem") {
+    return (node.content ?? []).map(nodeText).join("\n");
   }
 
   return (node.content ?? []).map((child) => nodeText(child)).join("");

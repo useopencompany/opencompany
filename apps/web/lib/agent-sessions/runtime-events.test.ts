@@ -180,6 +180,24 @@ describe("applyRuntimeEventToState", () => {
     expect(state.lastError).toBeNull();
   });
 
+  it("stops running assistant messages when the session fails", () => {
+    let state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+
+    state = applyRuntimeEventToState(state, event(2, "session.error", { message: "Gateway down" }));
+
+    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
+      status: "failed",
+      completedAt: expect.any(String),
+      thinkingDurationSeconds: expect.any(Number),
+    });
+  });
+
   it("adds live usage events to the session usage summary", () => {
     let state = initialState();
     state = applyRuntimeEventToState(
