@@ -226,8 +226,9 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Give Amp a concrete task and any constraints from the user or agent instructions.",
       "When the user asks for a follow-up to prior Amp work, pass the previous ampThreadId so Amp continues that thread with its existing context.",
       "The tool output includes ampResult, ampStatus, ampThreadId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on ampResult when present.",
-      "Set createPullRequest=true only when the instructions call for a reviewable PR.",
-      "The tool works on a generated branch and never pushes directly to the default branch.",
+      "Amp has repository-scoped GitHub CLI and git push access when a GitHub work repository is bound.",
+      "Set createPullRequest=true only when the instructions call for a reviewable PR. Amp may create the PR itself; if it leaves publishable local work behind, the runner creates the draft PR after Amp finishes.",
+      "The tool works on non-default branches and must never push directly to the default branch.",
     ].join("\n"),
   },
 ];
