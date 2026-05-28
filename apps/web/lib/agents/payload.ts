@@ -1,4 +1,8 @@
-import type { AgentConfigDerivationRepository } from "@opencompany/agent-runtime";
+import {
+  type AgentConfigDerivationRepository,
+  agentGitHubRepositories,
+  normalizeAgentConfig,
+} from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
   AgentGitHubRepositoryConfig,
@@ -37,35 +41,7 @@ export type AgentDetailPayload = AgentListItemPayload & {
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
 };
 
-type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & {
-  integrations?: {
-    github?: {
-      repositories?: AgentGitHubRepositoryConfig[];
-    };
-  };
-};
-
-export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
-  const persisted = config as PartialPersistedAgentConfig;
-
-  return {
-    ...config,
-    tools: Array.isArray(persisted.tools) ? persisted.tools : [],
-    brain: Array.isArray(persisted.brain) ? persisted.brain : [],
-    integrations: {
-      github: {
-        repositories: Array.isArray(persisted.integrations?.github?.repositories)
-          ? persisted.integrations.github.repositories
-          : [],
-      },
-    },
-    triggers: Array.isArray(persisted.triggers) ? persisted.triggers : [],
-  };
-}
-
-export function agentGitHubRepositories(config: AgentConfig): AgentGitHubRepositoryConfig[] {
-  return normalizeAgentConfig(config).integrations.github.repositories;
-}
+export { agentGitHubRepositories, normalizeAgentConfig };
 
 export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
   return {

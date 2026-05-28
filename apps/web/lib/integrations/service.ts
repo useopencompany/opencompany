@@ -11,6 +11,7 @@ import { sanitizeIntegrationStatusReason } from "@/lib/integrations/status";
 
 export const GITHUB_INTEGRATION_PROVIDER = "github";
 export const GITHUB_REPOSITORY_RESOURCE_TYPE = "repository";
+const INCOMPLETE_SYNC_STATUS_REASON = "GitHub integration sync has not completed.";
 
 export async function syncGitHubIntegrationRepositories(input: {
   workspaceId: string;
@@ -24,13 +25,12 @@ export async function syncGitHubIntegrationRepositories(input: {
   const db = getDb();
   const now = new Date();
   const connectionLabel = input.accountLogin?.trim() || "GitHub";
-  const integrationUpdate = {
+  const incompleteIntegrationUpdate = {
     connectionLabel,
     accountName: input.accountLogin,
     accountType: input.accountType,
-    status: "connected" as const,
-    statusReason: null,
-    lastSyncedAt: now,
+    status: "sync_failed" as const,
+    statusReason: INCOMPLETE_SYNC_STATUS_REASON,
     updatedAt: now,
     ...(input.connectedByUserId ? { connectedByUserId: input.connectedByUserId } : {}),
   };
@@ -47,9 +47,9 @@ export async function syncGitHubIntegrationRepositories(input: {
       accountEmail: null,
       accountType: input.accountType,
       connectedByUserId: input.connectedByUserId ?? null,
-      status: "connected",
-      statusReason: null,
-      lastSyncedAt: now,
+      status: "sync_failed",
+      statusReason: INCOMPLETE_SYNC_STATUS_REASON,
+      lastSyncedAt: null,
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -58,7 +58,7 @@ export async function syncGitHubIntegrationRepositories(input: {
         workspaceIntegrations.provider,
         workspaceIntegrations.externalId,
       ],
-      set: integrationUpdate,
+      set: incompleteIntegrationUpdate,
     })
     .returning({ id: workspaceIntegrations.id });
 
@@ -159,6 +159,22 @@ export async function syncGitHubIntegrationRepositories(input: {
         ),
       );
   }
+
+  await db
+    .update(workspaceIntegrations)
+    .set({
+      status: "connected",
+      statusReason: null,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(workspaceIntegrations.workspaceId, input.workspaceId),
+        eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrations.id, integration.id),
+      ),
+    );
 }
 
 export async function markGitHubIntegrationStatus(input: {

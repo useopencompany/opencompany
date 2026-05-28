@@ -1,6 +1,7 @@
 import {
   newAgentSessionMessageId,
   newRunLeaseId,
+  normalizeAgentConfig,
   resolveAgentRuntimeConfig,
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
@@ -113,6 +114,7 @@ export async function runMessage(input: {
 
   try {
     const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
+    const agentConfig = normalizeAgentConfig(row.agent.config);
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
       return;
@@ -158,7 +160,7 @@ export async function runMessage(input: {
     }
 
     const runtime = resolveAgentRuntimeConfig({
-      agent: row.agent.config,
+      agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserName(row.user),
@@ -255,7 +257,7 @@ export async function runMessage(input: {
       runLeaseId: ctx.leaseId,
       runLeaseOwner: ctx.leaseOwner,
       workspaceId: row.workspace.id,
-      agentConfig: row.agent.config,
+      agentConfig,
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
@@ -469,11 +471,12 @@ export async function runAfterSession(input: {
 
   try {
     const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
+    const agentConfig = normalizeAgentConfig(row.agent.config);
     workspaceId = row.workspace.id;
     userId = row.session.userId;
     agentId = row.agent.id;
 
-    const afterSession = row.agent.config.afterSession;
+    const afterSession = agentConfig.afterSession;
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
       return;
@@ -538,7 +541,7 @@ export async function runAfterSession(input: {
     }
 
     const runtime = resolveAgentRuntimeConfig({
-      agent: row.agent.config,
+      agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserName(row.user),
@@ -652,7 +655,7 @@ export async function runAfterSession(input: {
       runLeaseOwner: ctx.leaseOwner,
       internalMessages: true,
       workspaceId: row.workspace.id,
-      agentConfig: row.agent.config,
+      agentConfig,
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,

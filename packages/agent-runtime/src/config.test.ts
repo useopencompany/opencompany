@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAgentRuntimeConfig } from "./config";
+import { agentGitHubRepositories, normalizeAgentConfig, resolveAgentRuntimeConfig } from "./config";
 import type { AgentConfig } from "./types";
 
 describe("resolveAgentRuntimeConfig", () => {
@@ -214,5 +214,27 @@ describe("resolveAgentRuntimeConfig", () => {
       supportsReasoning: true,
       exposeReasoningSummary: false,
     });
+  });
+});
+
+describe("normalizeAgentConfig", () => {
+  it("fills arrays and GitHub integrations missing from legacy persisted configs", () => {
+    const config = {
+      schemaVersion: "agent.v1",
+      title: "Legacy agent",
+      instructions: "Use old persisted config.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+    } as unknown as AgentConfig;
+
+    const normalized = normalizeAgentConfig(config);
+
+    expect(normalized.tools).toEqual([]);
+    expect(normalized.brain).toEqual([]);
+    expect(normalized.integrations.github.repositories).toEqual([]);
+    expect(normalized.triggers).toEqual([]);
+    expect(agentGitHubRepositories(config)).toEqual([]);
   });
 });

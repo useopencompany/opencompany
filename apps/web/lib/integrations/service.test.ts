@@ -102,9 +102,9 @@ describe("syncGitHubIntegrationRepositories", () => {
             accountEmail: null,
             accountType: "Organization",
             connectedByUserId: "usr_123",
-            status: "connected",
-            statusReason: null,
-            lastSyncedAt: expect.any(Date),
+            status: "sync_failed",
+            statusReason: "GitHub integration sync has not completed.",
+            lastSyncedAt: null,
           }),
         },
       ]),
@@ -140,9 +140,8 @@ describe("syncGitHubIntegrationRepositories", () => {
               accountName: "opencompany",
               accountType: "Organization",
               connectedByUserId: "usr_123",
-              status: "connected",
-              statusReason: null,
-              lastSyncedAt: expect.any(Date),
+              status: "sync_failed",
+              statusReason: "GitHub integration sync has not completed.",
             }),
           }),
         },
@@ -160,6 +159,18 @@ describe("syncGitHubIntegrationRepositories", () => {
               statusReason: null,
               lastSyncedAt: expect.any(Date),
             }),
+          }),
+        },
+      ]),
+    );
+    expect(db.updateValues).toEqual(
+      expect.arrayContaining([
+        {
+          table: workspaceIntegrations,
+          values: expect.objectContaining({
+            status: "connected",
+            statusReason: null,
+            lastSyncedAt: expect.any(Date),
           }),
         },
       ]),
@@ -221,6 +232,39 @@ describe("syncGitHubIntegrationRepositories", () => {
       (insert) => insert.table === workspaceIntegrationCredentials,
     );
     expect(JSON.stringify(credentialInsert?.values)).not.toContain("ghu_secret");
+  });
+
+  it("leaves the integration sync_failed when credential persistence fails", async () => {
+    await expect(
+      syncGitHubIntegrationRepositories({
+        workspaceId: "wks_123",
+        installationId: "12345",
+        accountLogin: "opencompany",
+        accountType: "Organization",
+        repositories: [],
+        userOAuthToken: "ghu_secret",
+      }),
+    ).rejects.toThrow("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required");
+
+    expect(db.insertValues).toEqual(
+      expect.arrayContaining([
+        {
+          table: workspaceIntegrations,
+          values: expect.objectContaining({
+            status: "sync_failed",
+            statusReason: "GitHub integration sync has not completed.",
+          }),
+        },
+      ]),
+    );
+    expect(db.updateValues).not.toEqual(
+      expect.arrayContaining([
+        {
+          table: workspaceIntegrations,
+          values: expect.objectContaining({ status: "connected" }),
+        },
+      ]),
+    );
   });
 });
 

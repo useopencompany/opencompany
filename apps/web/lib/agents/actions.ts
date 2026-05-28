@@ -36,7 +36,6 @@ import {
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
 import {
-  agentGitHubRepositories,
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
   normalizeAgentConfig,
@@ -213,13 +212,12 @@ export async function updateAgent(
         },
       },
     }));
+  const savedRepositories = currentConfig.integrations.github.repositories;
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubRepositories,
-    savedRepositories: agentGitHubRepositories(currentConfig),
+    savedRepositories,
   });
-  const savedPreferredRepositories = agentGitHubRepositories(currentConfig).filter(
-    (repository) => repository.binding,
-  );
+  const savedPreferredRepositories = savedRepositories.filter((repository) => repository.binding);
   const preferredRepositories = [
     ...savedPreferredRepositories,
     ...(sanitizedContent
