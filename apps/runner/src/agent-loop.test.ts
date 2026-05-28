@@ -4,10 +4,12 @@ import {
   type RuntimeToolDefinition,
 } from "@opencompany/agent-runtime";
 import {
+  agentSessionEvents,
   agentSessionMessages,
   agentSessions,
   agentSessionToolUsage,
   agentSessionUsage,
+  agents,
 } from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -16,6 +18,7 @@ import {
   buildAmpCommand,
   buildAmpCommandEnv,
   completeAssistantMessageForLease,
+  createAgentDelegationHandler,
   createAmpActivityFormatter,
   createAmpStreamAccumulator,
   createAssistantMessageForLease,
@@ -346,6 +349,533 @@ describe("usage recording", () => {
       toolName: "exa_search",
       toolCallId: "call_exa",
     });
+  });
+
+  it("executes agent delegation as an internal tool without hydrating the sandbox", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => {
+      throw new Error("sandbox should not hydrate");
+    });
+    const delegateToAgent = vi.fn(async () => ({
+      ok: true,
+      status: "completed",
+      childSessionId: "ses_child",
+      answer: "Research complete.",
+    }));
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: agentConfig(),
+      toolCallId: "call_delegate",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("delegate_to_agent") as RuntimeToolDefinition,
+      args: { agent: "agent/research", prompt: "Summarize the market." },
+      getSandbox,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["tool_help", "delegate_to_agent"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      delegateToAgent,
+    });
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(delegateToAgent).toHaveBeenCalledWith({
+      agent: "agent/research",
+      prompt: "Summarize the market.",
+      toolCallId: "call_delegate",
+    });
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "delegate_to_agent",
+      toolCallId: "call_delegate",
+      content: expect.stringContaining("Research complete."),
+    });
+  });
+
+  it("creates delegated child sessions with durable parent linkage", async () => {
+    const db = createDelegationDb();
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Research complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    const result = await delegate({
+      agent: "agent/research",
+      prompt: "Summarize the market.",
+      toolCallId: "call_delegate",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: "completed",
+      agentName: "Research",
+      agentPath: "agents/research.agent",
+      answer: "Research complete.",
+    });
+    expect(db.state.sessions[0]).toMatchObject({
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      agentId: "agt_research",
+      source: "agent",
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentToolCallId: "call_delegate",
+    });
+    expect(runChildMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: db.state.sessions[0]?.id,
+        depth: 0,
+      }),
+    );
+  });
+
+  it("emits delegated usage rollups on the parent session", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_parent",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_parent",
+          status: "running",
+          parentSessionId: null,
+          runLeaseId: "run_parent",
+          archivedAt: null,
+        },
+      ],
+      rollupRow: {
+        inputTokens: 100,
+        inputNoCacheTokens: 80,
+        inputCacheReadTokens: 10,
+        inputCacheWriteTokens: 10,
+        outputTokens: 25,
+        outputTextTokens: 20,
+        outputReasoningTokens: 5,
+        totalTokens: 125,
+        providerCostUsdMicros: 1000,
+        platformFeeUsdMicros: 100,
+        totalCostUsdMicros: 1100,
+        modelCostUsdMicros: 770,
+        toolCostUsdMicros: 330,
+        toolUsageTotalCostUsdMicros: 300,
+        toolUsageByProviderOperation: [
+          { provider: "exa", operation: "search", costUsdMicros: 300, calls: 1 },
+        ],
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Research complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await delegate({
+      agent: "agent/research",
+      prompt: "Summarize the market.",
+      toolCallId: "call_delegate",
+    });
+
+    const childSession = db.state.sessions.find(
+      (session) => session.parentSessionId === "ses_parent",
+    );
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        messageId: "msg_parent_assistant",
+        type: "session.delegated_usage",
+        payload: expect.objectContaining({
+          childSessionId: childSession?.id,
+          parentToolCallId: "call_delegate",
+          usage: expect.objectContaining({ totalTokens: 125 }),
+          cost: expect.objectContaining({ totalCostUsdMicros: 1100 }),
+          toolUsage: expect.objectContaining({ totalCostUsdMicros: 300 }),
+        }),
+      }),
+    );
+  });
+
+  it("emits only delegated usage deltas when resuming a child session", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_parent",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+      rollupRow: {
+        inputTokens: 100,
+        inputNoCacheTokens: 100,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 25,
+        outputTextTokens: 25,
+        outputReasoningTokens: 0,
+        totalTokens: 125,
+        providerCostUsdMicros: 1000,
+        platformFeeUsdMicros: 100,
+        totalCostUsdMicros: 1100,
+        modelCostUsdMicros: 1100,
+        toolCostUsdMicros: 0,
+        toolUsageTotalCostUsdMicros: 0,
+        toolUsageByProviderOperation: [],
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: `msg_child_answer_${messageId}`,
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Done.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await delegate({
+      sessionId: "ses_child",
+      prompt: "First pass.",
+      toolCallId: "call_delegate_first",
+    });
+    const firstEvent = vi.mocked(appendRuntimeEvent).mock.calls.at(-1)?.[1];
+    db.state.events.push({
+      sessionId: "ses_parent",
+      type: "session.delegated_usage",
+      payload: firstEvent?.payload,
+    });
+    db.state.rollupRow = {
+      inputTokens: 150,
+      inputNoCacheTokens: 150,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 40,
+      outputTextTokens: 40,
+      outputReasoningTokens: 0,
+      totalTokens: 190,
+      providerCostUsdMicros: 1500,
+      platformFeeUsdMicros: 150,
+      totalCostUsdMicros: 1650,
+      modelCostUsdMicros: 1650,
+      toolCostUsdMicros: 0,
+      toolUsageTotalCostUsdMicros: 0,
+      toolUsageByProviderOperation: [],
+    };
+
+    await delegate({
+      sessionId: "ses_child",
+      prompt: "Follow up.",
+      toolCallId: "call_delegate_second",
+    });
+
+    expect(appendRuntimeEvent).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        type: "session.delegated_usage",
+        payload: expect.objectContaining({
+          childSessionId: "ses_child",
+          parentToolCallId: "call_delegate_second",
+          usage: expect.objectContaining({ totalTokens: 65 }),
+          cost: expect.objectContaining({ totalCostUsdMicros: 550 }),
+        }),
+      }),
+    );
+  });
+
+  it("resumes an existing delegated child session with a new user message", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_parent",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Follow-up complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    const result = await delegate({
+      sessionId: "ses_child",
+      prompt: "Continue with pricing.",
+      toolCallId: "call_delegate_resume",
+    });
+
+    const resumedUserMessage = db.state.messages.find(
+      (message) => message.role === "user" && message.content === "Continue with pricing.",
+    );
+    expect(resumedUserMessage).toBeTruthy();
+    expect(result).toMatchObject({
+      ok: true,
+      status: "completed",
+      resumed: true,
+      childSessionId: "ses_child",
+      messageId: resumedUserMessage?.id,
+      agentName: "Research",
+      agentPath: "agents/research.agent",
+      answer: "Follow-up complete.",
+    });
+    expect(runChildMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "ses_child",
+        messageId: resumedUserMessage?.id,
+      }),
+    );
+  });
+
+  it("rejects resume for sessions outside the current parent session", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_other",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async () => null);
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await expect(
+      delegate({
+        sessionId: "ses_child",
+        prompt: "Continue.",
+        toolCallId: "call_delegate_resume",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      status: "failed",
+      childSessionId: "ses_child",
+      error: expect.stringContaining("not a child session"),
+    });
+    expect(runChildMessage).not.toHaveBeenCalled();
+    expect(db.state.messages).toHaveLength(0);
+  });
+
+  it("rejects resume for archived or active child sessions", async () => {
+    for (const child of [
+      { id: "ses_archived", status: "completed", runLeaseId: null, archivedAt: new Date() },
+      { id: "ses_running", status: "running", runLeaseId: "run_child", archivedAt: null },
+    ]) {
+      const db = createDelegationDb({
+        sessions: [
+          {
+            ...child,
+            workspaceId: "wsp_123",
+            userId: "usr_123",
+            agentId: "agt_research",
+            parentSessionId: "ses_parent",
+          },
+        ],
+      });
+      dbMocks.getDb.mockReturnValue(db);
+      const runChildMessage = vi.fn(async () => null);
+      const delegate = createAgentDelegationHandler({
+        parentSessionId: "ses_parent",
+        parentMessageId: "msg_parent_assistant",
+        parentRunLeaseId: "run_parent",
+        parentRunLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        userId: "usr_123",
+        env: env(),
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+        depth: 0,
+        agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+        runChildMessage,
+      });
+
+      await expect(
+        delegate({
+          sessionId: child.id,
+          prompt: "Continue.",
+          toolCallId: "call_delegate_resume",
+        }),
+      ).resolves.toMatchObject({
+        ok: false,
+        status: "failed",
+        childSessionId: child.id,
+      });
+      expect(runChildMessage).not.toHaveBeenCalled();
+      expect(db.state.messages).toHaveLength(0);
+    }
+  });
+
+  it("passes the parent abort signal into resumed child runs", async () => {
+    const controller = new AbortController();
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_parent",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId, signal }) => {
+      expect(signal).toBe(controller.signal);
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Follow-up complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: controller.signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await delegate({
+      sessionId: "ses_child",
+      prompt: "Continue.",
+      toolCallId: "call_delegate_resume",
+    });
+
+    expect(runChildMessage).toHaveBeenCalledOnce();
   });
 
   it("reuses an incomplete assistant response for a retried user message", async () => {
@@ -1462,6 +1992,20 @@ type ToolUsageState = {
   costUsdMicros: number;
 };
 
+type DelegationSessionState = {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  agentId: string;
+  status: string;
+  source?: string;
+  parentSessionId?: string | null;
+  parentMessageId?: string | null;
+  parentToolCallId?: string | null;
+  runLeaseId?: string | null;
+  archivedAt?: Date | null;
+};
+
 function createLeaseDb(input: {
   runLeaseId?: string | null;
   runLeaseExpiresAt?: Date | null;
@@ -1609,6 +2153,151 @@ function createLeaseDb(input: {
       state.ledgerDebits += 1;
       return { rows: [{ ledgerId: state.ledgerDebits, balanceUsdMicros: 100_000 }] };
     },
+  };
+}
+
+function createDelegationDb(
+  input: { sessions?: DelegationSessionState[]; rollupRow?: Record<string, unknown> } = {},
+) {
+  const state = {
+    agent: {
+      id: "agt_research",
+      name: "Research",
+      path: "agents/research.agent",
+      config: {
+        ...agentConfig(),
+        title: "Research",
+        agents: [],
+      },
+    },
+    sessions: [...(input.sessions ?? [])],
+    messages: [] as MessageState[],
+    events: [] as Array<{ sessionId?: string; type?: string; payload?: unknown }>,
+    rollupRow: input.rollupRow ?? defaultDelegationRollupRow(),
+  };
+  let executeCount = 0;
+
+  const db = {
+    state,
+    select() {
+      const query = {
+        table: undefined as unknown,
+        from(table: unknown) {
+          query.table = table;
+          return query;
+        },
+        innerJoin() {
+          return query;
+        },
+        where() {
+          return query;
+        },
+        async limit() {
+          if (query.table === agents) {
+            return [state.agent];
+          }
+          if (query.table === agentSessions) {
+            const session =
+              state.sessions.find((item) => item.runLeaseId === "run_parent") ??
+              state.sessions.at(0);
+            if (!session) return [];
+            return [
+              {
+                ...session,
+                agentName: state.agent.name,
+                agentPath: state.agent.path,
+                source: session.source ?? "agent",
+              },
+            ];
+          }
+          if (query.table === agentSessionMessages) {
+            const assistant = [...state.messages]
+              .reverse()
+              .find((message) => message.role === "assistant" && message.responseToMessageId);
+            return assistant
+              ? [
+                  {
+                    id: assistant.id,
+                    status: assistant.status ?? "completed",
+                    content: assistant.content ?? "",
+                  },
+                ]
+              : [];
+          }
+          return [];
+        },
+      };
+      return query;
+    },
+    insert(table: unknown) {
+      return {
+        values(values: Record<string, unknown>) {
+          if (table === agentSessions) {
+            state.sessions.push({
+              id: values.id as string,
+              workspaceId: values.workspaceId as string,
+              userId: values.userId as string,
+              agentId: values.agentId as string,
+              status: (values.status as string | undefined) ?? "created",
+              source: (values.source as string | undefined) ?? "user",
+              parentSessionId: (values.parentSessionId as string | null | undefined) ?? null,
+              parentMessageId: (values.parentMessageId as string | null | undefined) ?? null,
+              parentToolCallId: (values.parentToolCallId as string | null | undefined) ?? null,
+              runLeaseId: null,
+              archivedAt: null,
+            });
+          }
+          if (table === agentSessionMessages) {
+            state.messages.push(values as MessageState);
+          }
+          if (table === agentSessionEvents) {
+            state.events.push(values);
+          }
+          return {};
+        },
+      };
+    },
+    async batch(statements: unknown[]) {
+      return statements;
+    },
+    async execute() {
+      executeCount += 1;
+      if (executeCount % 2 === 0) {
+        return {
+          rows: state.events
+            .filter(
+              (event) =>
+                event.sessionId === "ses_parent" && event.type === "session.delegated_usage",
+            )
+            .map((event) => ({ payload: event.payload })),
+        };
+      }
+      return {
+        rows: [state.rollupRow],
+      };
+    },
+  };
+
+  return db;
+}
+
+function defaultDelegationRollupRow() {
+  return {
+    inputTokens: 0,
+    inputNoCacheTokens: 0,
+    inputCacheReadTokens: 0,
+    inputCacheWriteTokens: 0,
+    outputTokens: 0,
+    outputTextTokens: 0,
+    outputReasoningTokens: 0,
+    totalTokens: 0,
+    providerCostUsdMicros: 0,
+    platformFeeUsdMicros: 0,
+    totalCostUsdMicros: 0,
+    modelCostUsdMicros: 0,
+    toolCostUsdMicros: 0,
+    toolUsageTotalCostUsdMicros: 0,
+    toolUsageByProviderOperation: [],
   };
 }
 

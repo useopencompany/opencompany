@@ -4,6 +4,7 @@ import { serializeAgentFrontmatter } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
   AgentModelId,
+  AgentReference,
   AgentToolId,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
@@ -19,6 +20,7 @@ import {
   GitBranch,
   Loader2,
   type LucideIcon,
+  MessagesSquare,
   PanelRight,
   Play,
 } from "lucide-react";
@@ -172,12 +174,14 @@ function AgentDetailContent({
         fallback: agent.config,
         selectedModelId,
         repositories: agent.githubIntegrationRepositories,
+        agents: agent.workspaceAgents,
         triggers: agent.config.triggers,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
       }),
     [
       agent.config,
       agent.githubIntegrationRepositories,
+      agent.workspaceAgents,
       content,
       hasEditorDraft,
       name,
@@ -205,6 +209,7 @@ function AgentDetailContent({
     if (agent.mcp.mcpEnabled && agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
     return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
       enabledMcpToolIds,
+      agents: agent.workspaceAgents,
     });
   }, [
     agent.brainPaths,
@@ -212,6 +217,7 @@ function AgentDetailContent({
     agent.mcp.mcpEnabled,
     agent.mcp.slackConfigured,
     agent.usableGitHubIntegrationRepositories,
+    agent.workspaceAgents,
   ]);
 
   useEffect(() => {
@@ -465,6 +471,7 @@ function AgentDetailContent({
           modelIsExplicit={configPreview.modelIsExplicit}
           tools={configPreview.tools}
           brain={configPreview.brain}
+          agents={configPreview.agents}
           afterSession={configPreview.config.afterSession}
           saveState={saveState}
           githubStatus={githubSyncStatus}
@@ -520,6 +527,7 @@ function AgentInspector({
   modelIsExplicit,
   tools,
   brain,
+  agents,
   afterSession,
   saveState,
   githubStatus,
@@ -534,6 +542,7 @@ function AgentInspector({
   modelIsExplicit: boolean;
   tools: AgentTool[];
   brain: Array<{ path: string; type: "file" | "folder" }>;
+  agents: AgentReference[];
   afterSession: AgentConfig["afterSession"];
   saveState: SaveState;
   githubStatus: string;
@@ -585,6 +594,30 @@ function AgentInspector({
         ) : (
           <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
             No brain paths mounted
+          </div>
+        )}
+      </div>
+
+      <div>
+        <InspectorHeader
+          label="Agents"
+          countLabel={`${agents.length} ${agents.length === 1 ? "agent" : "agents"}`}
+        />
+        {agents.length > 0 ? (
+          <div className="space-y-2">
+            {agents.map((agent) => (
+              <ConfigItem
+                key={agent.path}
+                icon={MessagesSquare}
+                label={agent.name}
+                description={agent.path}
+                tone="tool"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+            No agents selected
           </div>
         )}
       </div>
@@ -850,6 +883,7 @@ function buildConfigPreview({
   fallback,
   selectedModelId,
   repositories,
+  agents,
   triggers,
   useDerivedConfig,
 }: {
@@ -858,6 +892,7 @@ function buildConfigPreview({
   fallback: AgentConfig;
   selectedModelId: AgentModelId;
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
+  agents: AgentReference[];
   triggers: AgentConfig["triggers"];
   useDerivedConfig: boolean;
 }) {
@@ -867,6 +902,7 @@ function buildConfigPreview({
         content,
         model: selectedModelId,
         repositories,
+        agents,
         preferredRepositories: fallback.integrations.github.repositories.filter(
           (repository) => repository.binding,
         ),
@@ -892,12 +928,14 @@ function buildConfigPreview({
     modelIsExplicit: config.model.name !== DEFAULT_MODEL_ID,
     tools,
     brain: config.brain,
+    agents: config.agents ?? [],
     config,
     fullConfig: serializeAgentFrontmatter({
       title: config.title,
       model: config.model.name,
       tools: config.tools,
       brain: config.brain,
+      agents: config.agents ?? [],
       integrations: config.integrations,
       triggers: config.triggers,
     }),

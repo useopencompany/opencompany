@@ -251,6 +251,46 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips delegated agent frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Coordinator",
+      body: "Delegate research to @agent/research.",
+      agents: [{ path: "agents/research.agent", name: "Research" }],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("agents:\n  - path: agents/research.agent\n    name: Research");
+    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+  });
+
+  test("drops invalid delegated agent frontmatter entries", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Coordinator"',
+        "agents:",
+        "  - path: agents/research.agent",
+        "    name: Research",
+        "  - path: ../secret.agent",
+        "    name: Missing",
+        "---",
+        "",
+        "Delegate work.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+  });
+
+  test("does not derive unknown delegated agent mentions without a catalog", () => {
+    const source = serializeAgentFile({
+      title: "Coordinator",
+      body: "Delegate research to @agent/research.",
+    });
+
+    expect(parseAgentFile(source).config.agents).toEqual([]);
+  });
+
   test("serializes explicit model selection ahead of legacy model mentions", () => {
     const source = serializeAgentFile({
       title: "Research",
