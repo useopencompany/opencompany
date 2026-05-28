@@ -80,12 +80,12 @@ OPENCOMPANY_NGROK_URL=https://your-static-domain.ngrok.app bun run github:tunnel
 The tunnel helper writes these local values to `.env.local`:
 
 - `NEXT_PUBLIC_APP_URL=https://your-static-domain.ngrok.app`
-- `NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://your-static-domain.ngrok.app/auth/callback`
+- `NEXT_PUBLIC_WORKOS_REDIRECT_URI=http://localhost:3000/auth/callback`
 - `RUNNER_ALLOWED_ORIGINS` with the ngrok origin appended
 
 When using `bun run github:tunnel` separately, restart `bun run dev` after starting the tunnel so
 Next.js and the runner reload env vars. Then open the app through the ngrok URL, sign in through
-WorkOS, and start the GitHub integration from `/settings/integrations`.
+WorkOS with the localhost callback, and start the GitHub integration from `/settings/integrations`.
 
 Set `OPENCOMPANY_NGROK_DISABLED=1` to skip ngrok for a dev session.
 
@@ -99,12 +99,12 @@ patterns:
 - Concurrent GitHub integration tests: reserve a static ngrok domain per worktree, run each web app on
   a different `PORT`, and create one dev GitHub App per static domain.
 
-Avoid dynamic ngrok URLs for this flow. Every new URL requires GitHub App, WorkOS, and local env
-changes, which removes most of the speed gained by the local setup scripts.
+Avoid dynamic ngrok URLs for this flow. Every new URL requires GitHub App and local env changes,
+which removes most of the speed gained by the local setup scripts.
 
 ## Current ngrok Plan Expectations
 
 ngrok's free plan includes one automatically assigned dev domain. That is enough for the local
-GitHub flow as long as you add the assigned domain to GitHub and WorkOS. Free accounts cannot choose
-or customize the domain name. Upgrade ngrok only if you need a specific branded ngrok domain, a
+GitHub flow as long as you add the assigned domain to GitHub. Free accounts cannot choose or
+customize the domain name. Upgrade ngrok only if you need a specific branded ngrok domain, a
 bring-your-own custom domain, or more domain capacity for concurrent worktrees.
