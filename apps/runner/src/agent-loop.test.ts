@@ -15,8 +15,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acquireRunLease,
   appendRuntimeEventForLease,
+  assertTurnComplete,
   buildAmpCommand,
   buildAmpCommandEnv,
+  collectAssistantStream,
   completeAssistantMessageForLease,
   createAgentDelegationHandler,
   createAmpActivityFormatter,
@@ -25,11 +27,13 @@ import {
   createHostedToolBudget,
   createKnownSecretRedactor,
   executeRuntimeTool,
+  MAX_MODEL_STEPS,
   normalizeReasoningSummary,
   readReasoningTextDelta,
   recordStepUsage,
   recordToolUsage,
   selectPublishBranch,
+  ToolStepLimitExceededError,
   throwIfStreamErrorPart,
 } from "./agent-loop";
 import { loadGitHubWorkRepository } from "./amp-tool";
@@ -1557,6 +1561,76 @@ describe("usage recording", () => {
 });
 
 describe("stream error handling", () => {
+  it("records terminal stream metadata from finish-step parts", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    async function* stream() {
+      yield { type: "text-delta", text: "Working" } as never;
+      yield {
+        type: "finish-step",
+        finishReason: "tool-calls",
+        rawFinishReason: "tool_calls",
+        response: {
+          id: "response_123",
+          timestamp: new Date("2026-05-22T12:00:00.000Z"),
+          modelId: "openai/gpt-5.4-mini",
+        },
+        usage: usage(100, 20),
+      } as never;
+    }
+
+    const result = await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      exposeReasoningSummary: false,
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    expect(result).toMatchObject({
+      assistantContent: "Working",
+      stepCount: 1,
+      lastFinishReason: "tool-calls",
+      lastRawFinishReason: "tool_calls",
+      lastStepEndedWithToolCalls: true,
+    });
+  });
+
+  it("rejects turn completion when the model is still requesting tools at the step cap", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Partial progress.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "list_files",
+            input: {},
+          },
+        ],
+        lastStepEndedWithToolCalls: true,
+        stepCount: MAX_MODEL_STEPS,
+      }),
+    ).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("allows normal turns that end with final assistant text", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Done.",
+        assistantReplayParts: [{ type: "text", text: "Done." }],
+        lastStepEndedWithToolCalls: false,
+        stepCount: 2,
+      }),
+    ).not.toThrow();
+  });
+
   it("throws model stream errors instead of allowing blank completions", () => {
     expect(() =>
       throwIfStreamErrorPart({ type: "error", error: new Error("gateway failed") } as never),
