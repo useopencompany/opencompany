@@ -561,6 +561,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   type="button"
                   onClick={() => {
                     void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+                    void queryClient.invalidateQueries({ queryKey: detailKey });
                   }}
                   className="shrink-0 rounded border border-[#d4c47c] bg-white px-2.5 py-1 text-[11.5px] font-medium text-[#7a6120] hover:bg-[#fdf8e1]"
                 >
