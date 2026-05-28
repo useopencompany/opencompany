@@ -145,7 +145,7 @@ const createAutoMentionExtension = (getItems: () => AgentMentionItem[]) =>
 
                 const item =
                   trigger === "@"
-                    ? findMentionItem(token, items) ?? findMentionItem(`${token}/`, items)
+                    ? (findMentionItem(token, items) ?? findMentionItem(`${token}/`, items))
                     : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
                 if (!item) continue;
 
