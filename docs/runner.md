@@ -90,6 +90,10 @@ Important details:
   git repository so `git_diff` can report session-local scratch changes without exposing the
   managed workspace repo. For AMP sessions, `work/` contains the selected connected GitHub
   repository.
+- When AMP runs against a connected GitHub repository, the runner mints a repository-scoped GitHub
+  App installation token and passes it only to that AMP command through `GH_TOKEN`, a temporary
+  `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config. This lets AMP use `gh` and
+  `git push` without persisting credentials in the sandbox home directory or repository remote.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest.
