@@ -14,6 +14,7 @@ import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
 const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
+const AMP_API_BASE_URL = "https://ampcode.com";
 
 export async function runAmpCoderTool(input: {
   sandbox: SandboxHandle;
@@ -226,6 +227,9 @@ export async function runAmpCoderTool(input: {
     });
 
   const ampUsage = ampSummary.usage;
+  const costUsdMicros = ampSummary.threadId
+    ? (await fetchAmpThreadCost(ampSummary.threadId, ampApiKey)) ?? 0
+    : 0;
 
   return {
     repository: repository.fullName,
@@ -250,7 +254,7 @@ export async function runAmpCoderTool(input: {
           usage: {
             provider: "amp",
             operation: "session",
-            costUsdMicros: 0,
+            costUsdMicros,
             rawUsage: {
               input_tokens: ampUsage.input_tokens,
               output_tokens: ampUsage.output_tokens,
@@ -485,6 +489,34 @@ function loadPlatformAmpApiKey(env: RunnerEnv) {
     throw new Error("AMP_API_KEY is required on the runner to use the AMP coding tool.");
   }
   return env.ampApiKey;
+}
+
+/**
+ * Fetch the real USD cost of an AMP thread from the AMP Enterprise API.
+ * Returns cost in USD micros (1 USD = 1_000_000 micros), or null if the cost
+ * cannot be retrieved (non-Enterprise account, auth failure, network error, etc.).
+ */
+export async function fetchAmpThreadCost(
+  threadId: string,
+  apiKey: string,
+  baseUrl = AMP_API_BASE_URL,
+): Promise<number | null> {
+  try {
+    const url = `${baseUrl}/api/v2/threads/${encodeURIComponent(threadId)}/usage`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return null;
+    const body: unknown = await response.json();
+    if (!isRecord(body)) return null;
+    const usage = body.usage;
+    if (typeof usage !== "number" || !Number.isFinite(usage) || usage < 0) return null;
+    return Math.round(usage * 1_000_000);
+  } catch {
+    return null;
+  }
 }
 
 interface AmpUsage {
