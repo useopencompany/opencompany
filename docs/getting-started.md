@@ -126,12 +126,15 @@ NEON_API_KEY=""
 
 After adding personal overrides, run `bun run setup`. Shared dev secrets still come from Infisical
 `dev` + `/web` and `/runner`, but the local override wins for keys like `NEON_PROJECT_ID`.
+Setup pins local WorkOS redirects to `http://localhost:3000/auth/callback` even if shared Infisical
+dev values contain an ngrok URL.
 
 If you want setup to launch the dev server after migrations, run `bun run setup:dev`.
 
 `bun run dev` also attempts to start ngrok before the app when the local ngrok CLI is authenticated.
 That gives integrations such as GitHub a public callback URL without a separate command. Set
-`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel.
+`OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel. WorkOS still redirects to localhost for local
+sign-in.
 
 The older shared database path is still available with `bun run setup -- --shared-db`, but the default is branch isolation because this repo is commonly used from multiple Git worktrees. See [database.md](./database.md).
 
