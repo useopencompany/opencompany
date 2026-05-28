@@ -31,19 +31,32 @@ body {
 .tiptap-agent p:last-child {
   margin-bottom: 0;
 }
+.tiptap-agent h1,
+.tiptap-agent h2,
+.tiptap-agent h3 {
+  color: var(--color-ink);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.tiptap-agent h1 {
+  margin: 0.6em 0 0.2em;
+  font-size: 22px;
+  font-weight: 650;
+}
 .tiptap-agent h2 {
-  margin: 1.2em 0 0.3em;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
+  margin: 0.55em 0 0.15em;
+  font-size: 18px;
+  font-weight: 650;
 }
 .tiptap-agent h3 {
-  margin: 1em 0 0.2em;
-  font-size: 11px;
+  margin: 0.5em 0 0.1em;
+  font-size: 15px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-ink-subtle);
+}
+.tiptap-agent > h1:first-child,
+.tiptap-agent > h2:first-child,
+.tiptap-agent > h3:first-child {
+  margin-top: 0;
 }
 .tiptap-agent ul,
 .tiptap-agent ol {
