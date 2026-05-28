@@ -4,29 +4,39 @@ import {
   workspaceMcpCredentials,
   workspaceMcpServers,
 } from "@opencompany/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 export const MCP_EXPERIMENT_KEY = "mcp";
 export const LINEAR_MCP_SERVER_KEY = "linear";
 export const LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
 export const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+export const SLACK_MCP_SERVER_KEY = "slack";
+export const SLACK_MCP_ENDPOINT_URL = "https://mcp.slack.com/mcp";
+export const SLACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+
+export const MCP_PROVIDER_KEYS = [LINEAR_MCP_SERVER_KEY, SLACK_MCP_SERVER_KEY] as const;
+
+export type McpProviderKey = (typeof MCP_PROVIDER_KEYS)[number];
 
 export type WorkspaceMcpSettings = {
   mcpEnabled: boolean;
-  linear: {
-    configured: boolean;
-    serverId: string | null;
-    status: "configured" | "missing_credential" | "disabled" | "error" | null;
-    statusReason: string | null;
-    updatedAt: string | null;
-  };
+  linear: WorkspaceMcpProviderSettings;
+  slack: WorkspaceMcpProviderSettings;
+};
+
+export type WorkspaceMcpProviderSettings = {
+  configured: boolean;
+  serverId: string | null;
+  status: "configured" | "missing_credential" | "disabled" | "error" | null;
+  statusReason: string | null;
+  updatedAt: string | null;
 };
 
 export async function loadWorkspaceMcpSettingsForWorkspace(
   workspaceId: string,
 ): Promise<WorkspaceMcpSettings> {
   const db = getDb();
-  const [[experiment], [server], credentials] = await Promise.all([
+  const [[experiment], servers, credentials] = await Promise.all([
     db
       .select({ enabled: workspaceExperiments.enabled })
       .from(workspaceExperiments)
@@ -40,6 +50,7 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
     db
       .select({
         id: workspaceMcpServers.id,
+        serverKey: workspaceMcpServers.serverKey,
         status: workspaceMcpServers.status,
         statusReason: workspaceMcpServers.statusReason,
         updatedAt: workspaceMcpServers.updatedAt,
@@ -48,12 +59,12 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
       .where(
         and(
           eq(workspaceMcpServers.workspaceId, workspaceId),
-          eq(workspaceMcpServers.serverKey, LINEAR_MCP_SERVER_KEY),
+          inArray(workspaceMcpServers.serverKey, [...MCP_PROVIDER_KEYS]),
         ),
-      )
-      .limit(1),
+      ),
     db
       .select({
+        serverKey: workspaceMcpServers.serverKey,
         kind: workspaceMcpCredentials.kind,
       })
       .from(workspaceMcpCredentials)
@@ -62,24 +73,37 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
         and(
           eq(workspaceMcpServers.workspaceId, workspaceMcpCredentials.workspaceId),
           eq(workspaceMcpServers.id, workspaceMcpCredentials.serverId),
-          eq(workspaceMcpServers.serverKey, LINEAR_MCP_SERVER_KEY),
+          inArray(workspaceMcpServers.serverKey, [...MCP_PROVIDER_KEYS]),
         ),
       )
       .where(eq(workspaceMcpCredentials.workspaceId, workspaceId)),
   ]);
-  const hasLinearCredential = credentials.some(
-    (credential) =>
-      credential.kind === "bearer_token" || credential.kind === LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
-  );
 
-  return {
-    mcpEnabled: experiment?.enabled === true,
-    linear: {
-      configured: Boolean(hasLinearCredential && server?.status === "configured"),
+  const serverByKey = new Map(servers.map((server) => [server.serverKey, server]));
+
+  function settingsFor(provider: McpProviderKey): WorkspaceMcpProviderSettings {
+    const server = serverByKey.get(provider);
+    const hasCredential = credentials.some((credential) => {
+      if (credential.serverKey !== provider) return false;
+      if (provider === LINEAR_MCP_SERVER_KEY) {
+        return (
+          credential.kind === "bearer_token" || credential.kind === LINEAR_MCP_OAUTH_CREDENTIAL_KIND
+        );
+      }
+      return credential.kind === SLACK_MCP_OAUTH_CREDENTIAL_KIND;
+    });
+    return {
+      configured: Boolean(hasCredential && server?.status === "configured"),
       serverId: server?.id ?? null,
       status: server?.status ?? null,
       statusReason: server?.statusReason ?? null,
       updatedAt: server?.updatedAt.toISOString() ?? null,
-    },
+    };
+  }
+
+  return {
+    mcpEnabled: experiment?.enabled === true,
+    linear: settingsFor(LINEAR_MCP_SERVER_KEY),
+    slack: settingsFor(SLACK_MCP_SERVER_KEY),
   };
 }

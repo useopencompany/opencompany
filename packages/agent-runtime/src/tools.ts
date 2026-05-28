@@ -92,6 +92,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "workspace",
   },
+  {
+    id: "slack",
+    type: "mcp",
+    server: "slack",
+    label: "slack",
+    description: "Use workspace-configured Slack MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
 ];
 
 export const AGENT_TOOL_DEFINITION_BY_ID = new Map(

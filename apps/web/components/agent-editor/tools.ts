@@ -14,6 +14,7 @@ import {
   GitBranch,
   ListTodo,
   type LucideIcon,
+  MessageSquare,
   Search,
 } from "lucide-react";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
@@ -76,6 +77,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   amp: Code2,
   linear: ListTodo,
+  slack: MessageSquare,
 };
 
 const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
@@ -141,7 +143,7 @@ export function buildAgentMentionItems(
     statusReason?: string | null;
   }> = [],
   brainPaths: string[] = [],
-  options: { includeMcpTools?: boolean } = {},
+  options: { enabledMcpToolIds?: AgentToolId[]; includeMcpTools?: boolean } = {},
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
     id: "github",
@@ -172,11 +174,21 @@ export function buildAgentMentionItems(
 
   return [
     ...AGENT_MODELS,
-    ...AGENT_TOOLS.filter((tool) => tool.id !== "linear" || options.includeMcpTools),
+    ...AGENT_TOOLS.filter(
+      (tool) =>
+        tool.kind !== "tool" ||
+        !isMcpToolId(tool.id) ||
+        options.includeMcpTools ||
+        Boolean(options.enabledMcpToolIds?.includes(tool.id)),
+    ),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+function isMcpToolId(id: AgentToolId) {
+  return id === "linear" || id === "slack";
 }
 
 function repositoryMentionId(repository: {

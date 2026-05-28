@@ -357,6 +357,7 @@ export async function updateAgent(
       ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories, {
           mcpEnabled: mcpSettings.mcpEnabled,
           linearConfigured: mcpSettings.linear.configured,
+          slackConfigured: mcpSettings.slack.configured,
         })
       : null,
   };

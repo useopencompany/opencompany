@@ -42,6 +42,7 @@ export type AgentDetailPayload = AgentListItemPayload & {
   mcp: {
     mcpEnabled: boolean;
     linearConfigured: boolean;
+    slackConfigured: boolean;
   };
 };
 
@@ -66,7 +67,11 @@ export function serializeAgentDetail(
   brainPaths: string[] = [],
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
-  mcp: AgentDetailPayload["mcp"] = { mcpEnabled: false, linearConfigured: false },
+  mcp: AgentDetailPayload["mcp"] = {
+    mcpEnabled: false,
+    linearConfigured: false,
+    slackConfigured: false,
+  },
 ): AgentDetailPayload {
   const config = normalizeAgentConfig(agent.config);
 

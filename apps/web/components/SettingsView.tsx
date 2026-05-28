@@ -10,6 +10,7 @@ import {
   GitBranch,
   KeyRound,
   LogOut,
+  MessageSquare,
   Plug,
   Trash2,
   WalletCards,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/billing/constants";
 import {
   removeLinearMcpToken,
+  removeSlackMcpConnection,
   saveLinearMcpToken,
   setWorkspaceMcpExperimentEnabled,
 } from "@/lib/mcp/actions";
@@ -35,6 +37,8 @@ import { updateWorkspaceName } from "@/lib/workspaces/actions";
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
 const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
 const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
+const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
+const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
 
 type Props = {
   profile: {
@@ -81,6 +85,12 @@ type Props = {
   mcp: {
     mcpEnabled: boolean;
     linear: {
+      configured: boolean;
+      status: "configured" | "missing_credential" | "disabled" | "error" | null;
+      statusReason: string | null;
+      updatedAt: string | null;
+    };
+    slack: {
       configured: boolean;
       status: "configured" | "missing_credential" | "disabled" | "error" | null;
       statusReason: string | null;
@@ -545,6 +555,10 @@ function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
     linearSetupStatus === "connected" || linearSetupStatus === "error" ? linearSetupStatus : null;
   const linearSetupReason =
     searchParams.get("mcp") === "linear" ? searchParams.get("reason") : null;
+  const slackSetupStatus = searchParams.get("mcp") === "slack" ? searchParams.get("setup") : null;
+  const normalizedSlackSetupStatus =
+    slackSetupStatus === "connected" || slackSetupStatus === "error" ? slackSetupStatus : null;
+  const slackSetupReason = searchParams.get("mcp") === "slack" ? searchParams.get("reason") : null;
 
   return (
     <div className="space-y-3">
@@ -595,11 +609,18 @@ function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
       </div>
 
       {enabled ? (
-        <LinearMcpCard
-          linear={mcp.linear}
-          setupStatus={normalizedLinearSetupStatus}
-          setupReason={linearSetupReason}
-        />
+        <>
+          <LinearMcpCard
+            linear={mcp.linear}
+            setupStatus={normalizedLinearSetupStatus}
+            setupReason={linearSetupReason}
+          />
+          <SlackMcpCard
+            slack={mcp.slack}
+            setupStatus={normalizedSlackSetupStatus}
+            setupReason={slackSetupReason}
+          />
+        </>
       ) : null}
     </div>
   );
@@ -772,6 +793,117 @@ function LinearMcpCard({
   );
 }
 
+function SlackMcpCard({
+  slack,
+  setupStatus,
+  setupReason,
+}: {
+  slack: Props["mcp"]["slack"];
+  setupStatus: "connected" | "error" | null;
+  setupReason: string | null;
+}) {
+  const router = useRouter();
+  const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
+    null,
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const configured = slack.configured;
+  const setupMessage =
+    setupStatus && setupStatus !== dismissedSetupStatus
+      ? {
+          type: setupStatus === "connected" ? ("success" as const) : ("error" as const),
+          text:
+            setupStatus === "connected"
+              ? "Slack connected."
+              : slackMcpSetupErrorMessage(setupReason),
+        }
+      : null;
+  const visibleMessage = message ?? setupMessage;
+
+  return (
+    <div className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+            <MessageSquare size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Slack MCP</div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
+                  configured
+                    ? "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]"
+                    : "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]"
+                }`}
+              >
+                {configured ? "Configured" : "Not connected"}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+              Agents can opt in with @slack after Slack is connected.
+            </p>
+            {slack.statusReason ? (
+              <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">{slack.statusReason}</p>
+            ) : null}
+          </div>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => {
+              setMessage(null);
+              setDismissedSetupStatus(setupStatus);
+              startTransition(async () => {
+                const result = await removeSlackMcpConnection();
+                if (result.ok) {
+                  setMessage({ type: "success", text: "Slack MCP connection removed." });
+                  router.refresh();
+                }
+              });
+            }}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 border-t border-[#ecece8] pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={SLACK_MCP_START_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {configured ? "Reconnect Slack" : "Connect Slack"}
+          </a>
+          <a
+            href={SLACK_MCP_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-[#f5f5f1] hover:text-ink"
+          >
+            MCP docs
+            <ExternalLink size={12} strokeWidth={1.9} />
+          </a>
+        </div>
+      </div>
+      {visibleMessage && (
+        <div
+          className={`mt-2 text-[12px] ${
+            visibleMessage.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+          }`}
+        >
+          {visibleMessage.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function linearMcpSetupErrorMessage(reason: string | null) {
   switch (reason) {
     case "invalid_state":
@@ -788,6 +920,25 @@ function linearMcpSetupErrorMessage(reason: string | null) {
       return "Could not start Linear authorization. Check the server logs and try again.";
     default:
       return "Linear connection failed. Try reconnecting Linear.";
+  }
+}
+
+function slackMcpSetupErrorMessage(reason: string | null) {
+  switch (reason) {
+    case "invalid_state":
+      return "Slack connection expired or was started in another browser tab. Try reconnecting Slack.";
+    case "session_mismatch":
+      return "Slack returned to a different OpenCompany session. Sign in to the same workspace and try again.";
+    case "slack_denied":
+      return "Slack did not authorize the connection.";
+    case "missing_code":
+      return "Slack did not return an authorization code. Try reconnecting Slack.";
+    case "token_exchange_failed":
+      return "Slack authorized the connection, but token exchange failed. Check the server logs and try again.";
+    case "start_failed":
+      return "Could not start Slack authorization. Check SLACK_MCP_CLIENT_ID and SLACK_MCP_CLIENT_SECRET, then try again.";
+    default:
+      return "Slack connection failed. Try reconnecting Slack.";
   }
 }
 

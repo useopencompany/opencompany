@@ -91,6 +91,7 @@ details are catalog data in code, not `.agent` file data.
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
 | `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
+| `slack` | Experimental workspace MCP access to Slack search, messages, files, emoji, and users. |
 
 ```yaml
 tools:
@@ -102,6 +103,9 @@ tools:
   - id: linear
     type: mcp
     server: linear
+  - id: slack
+    type: mcp
+    server: slack
 ```
 
 MCP tools are beta workspace tools. The `.agent` file only records the MCP server binding; tokens
