@@ -189,6 +189,9 @@ function decryptPayload(
     if (error instanceof Error && error.message.includes("Unsupported MCP credential")) {
       throw error;
     }
+    if (isEncryptionKeyConfigurationError(error)) {
+      throw error;
+    }
     throw new Error("MCP credential could not be decrypted.");
   }
 }
@@ -217,6 +220,10 @@ function loadEncryptionKey() {
     throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
   }
   return key;
+}
+
+function isEncryptionKeyConfigurationError(error: unknown) {
+  return error instanceof Error && error.message.includes(ENCRYPTION_KEY_ENV);
 }
 
 function newWorkspaceMcpCredentialId() {

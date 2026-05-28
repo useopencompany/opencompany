@@ -22,12 +22,27 @@ const leaseWrites = vi.hoisted(() => ({
   requireLeaseWrite: vi.fn(async (write) => write),
 }));
 
+const observability = vi.hoisted(() => ({
+  captureException: vi.fn(),
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => db,
 }));
 
 vi.mock("@ai-sdk/mcp", () => ({
   createMCPClient: vi.fn(async () => mcpClient),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: observability.captureException,
+  createLogger: vi.fn(() => observability.logger),
 }));
 
 vi.mock("./lease-writes", () => leaseWrites);
@@ -83,6 +98,31 @@ describe("createMcpToolSet", () => {
   it("fails clearly when Linear MCP is enabled on the agent but not configured", async () => {
     await expect(createMcpToolSet(baseInput())).rejects.toThrow(
       "Linear MCP is enabled on this agent, but the workspace MCP beta is off.",
+    );
+  });
+
+  it("surfaces missing encryption key configuration for Linear MCP credentials", async () => {
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    vi.unstubAllEnvs();
+
+    await expect(createMcpToolSet(baseInput())).rejects.toThrow(
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+    );
+    expect(observability.logger.error).toHaveBeenCalledWith(
+      "Linear MCP connection setup failed",
+      expect.objectContaining({
+        event: "opencompany.runner_mcp_connection_failed",
+        mcp_failure_reason: "encryption_key_configuration",
+        mcp_server: "linear",
+        workspace_id: "wks_123",
+      }),
+    );
+    expect(observability.captureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        event: "opencompany.runner_mcp_connection_failed",
+        mcp_failure_reason: "encryption_key_configuration",
+      }),
     );
   });
 
