@@ -176,7 +176,7 @@ export async function recordToolUsage(input: {
       providerCostUsdMicros: cost.providerCostUsdMicros,
       platformFeeUsdMicros: cost.platformFeeUsdMicros,
       totalCostUsdMicros: cost.totalCostUsdMicros,
-      costBasis: cost.costBasis,
+      costBasis: input.usage.costBasis ?? cost.costBasis,
       metadata: {
         runLeaseId: input.runLeaseId,
         toolCallId: input.toolCallId,

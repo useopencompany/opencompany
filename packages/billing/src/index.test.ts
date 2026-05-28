@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculateCodexToolUsageCost,
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
   calculatePlatformFeeUsdMicros,
@@ -117,6 +118,63 @@ describe("calculateModelUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(0);
+  });
+});
+
+describe("calculateCodexToolUsageCost", () => {
+  it("prices Codex uncached input, cached input, and output tokens", () => {
+    const cost = calculateCodexToolUsageCost({
+      modelName: "gpt-5.4",
+      inputTokens: 4_000,
+      cachedInputTokens: 3_000,
+      outputTokens: 500,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(10_750);
+    expect(cost.platformFeeUsdMicros).toBe(1_075);
+    expect(cost.totalCostUsdMicros).toBe(11_825);
+    expect(cost.costBasis).toMatchObject({
+      kind: "tool_usage",
+      provider: "codex",
+      operation: "exec:gpt-5.4",
+      modelName: "gpt-5.4",
+      pricingVersion: "2026-05-28.openai-api",
+      tokenCounts: {
+        inputTokens: 4_000,
+        inputNoCacheTokens: 1_000,
+        inputCacheReadTokens: 3_000,
+        outputTokens: 500,
+      },
+    });
+  });
+
+  it("applies Codex long-context uplift when input exceeds the threshold", () => {
+    const cost = calculateCodexToolUsageCost({
+      modelName: "gpt-5.4",
+      inputTokens: 272_001,
+      cachedInputTokens: 0,
+      outputTokens: 1_000,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(1_382_505);
+    expect(cost.costBasis.longContextApplied).toBe(true);
+  });
+
+  it("does not guess Codex prices for unknown models", () => {
+    expect(
+      calculateCodexToolUsageCost({
+        modelName: "gpt-unknown",
+        inputTokens: 1_000,
+        cachedInputTokens: 0,
+        outputTokens: 1_000,
+      }),
+    ).toMatchObject({
+      billable: false,
+      providerCostUsdMicros: 0,
+      costBasis: {
+        reason: "unknown_codex_model",
+      },
+    });
   });
 });
 

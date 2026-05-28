@@ -80,7 +80,7 @@ agent sessions.
 - `apps/runner/src/agent-loop.ts`.
 - `apps/runner/src/env.ts`.
 - `E2B_API_KEY`, `OPENCOMPANY_E2B_TEMPLATE`, `OPENCOMPANY_AMP_E2B_TEMPLATE`,
-  `OPENCOMPANY_CODEX_E2B_TEMPLATE`,
+  `OPENCOMPANY_CODEX_MODEL`, `OPENCOMPANY_CODEX_E2B_TEMPLATE`,
   `RUNNER_E2B_IDLE_TIMEOUT_MS` in `.env.example`.
 - `docs/runner.md`.
 

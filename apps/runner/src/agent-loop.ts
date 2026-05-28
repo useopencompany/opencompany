@@ -84,6 +84,7 @@ export {
   buildCodexCommandEnv,
   createCodexActivityFormatter,
   createCodexStreamAccumulator,
+  normalizeCodexUsage,
 } from "./codex-tool";
 export {
   acquireRunLease,

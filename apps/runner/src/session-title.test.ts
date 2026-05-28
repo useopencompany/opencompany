@@ -38,6 +38,7 @@ const env = {
   exaApiKey: undefined,
   ampApiKey: undefined,
   codexApiKey: undefined,
+  codexModel: "gpt-5.4",
   e2bTemplate: undefined,
   ampE2bTemplate: undefined,
   codexE2bTemplate: undefined,

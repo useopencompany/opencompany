@@ -7,6 +7,7 @@ import {
   agentSessions,
   agentSessionToolUsage,
   agentSessionUsage,
+  workspaceIntegrationResources,
 } from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -25,6 +26,7 @@ import {
   createHostedToolBudget,
   createKnownSecretRedactor,
   executeRuntimeTool,
+  normalizeCodexUsage,
   normalizeReasoningSummary,
   readReasoningTextDelta,
   recordStepUsage,
@@ -45,6 +47,11 @@ const observabilityMocks = vi.hoisted(() => ({
   captureException: vi.fn(),
 }));
 
+const githubMocks = vi.hoisted(() => ({
+  getGitHubWorkInstallationToken: vi.fn(),
+  createDraftPullRequest: vi.fn(),
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
 }));
@@ -56,6 +63,11 @@ vi.mock("@opencompany/observability", async (importOriginal) => {
     captureException: observabilityMocks.captureException,
   };
 });
+
+vi.mock("./github", () => ({
+  getGitHubWorkInstallationToken: githubMocks.getGitHubWorkInstallationToken,
+  createDraftPullRequest: githubMocks.createDraftPullRequest,
+}));
 
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
@@ -338,6 +350,129 @@ describe("usage recording", () => {
       toolName: "exa_search",
       toolCallId: "call_exa",
     });
+  });
+
+  it("records Codex tool usage from the JSON stream without changing tool output", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_123");
+    const commandRun = vi.fn(
+      async (command: string, options?: { onStdout?: (data: string) => void }) => {
+        if (command.includes("rev-parse --is-inside-work-tree")) return { stdout: "true\n" };
+        if (command.startsWith("codex exec")) {
+          options?.onStdout?.(
+            [
+              JSON.stringify({
+                type: "thread.started",
+                thread_id: "codex_thread_123",
+              }),
+              JSON.stringify({
+                type: "item.completed",
+                item: { type: "agent_message", text: "implemented" },
+              }),
+              JSON.stringify({
+                type: "turn.completed",
+                usage: {
+                  input_tokens: 4_000,
+                  cached_input_tokens: 3_000,
+                  output_tokens: 500,
+                },
+              }),
+            ].join("\n") + "\n",
+          );
+          return { stdout: "", exitCode: 0 };
+        }
+        if (command.includes("git branch --show-current")) return { stdout: "main\n" };
+        if (command.includes("git rev-list --count")) return { stdout: "0\n" };
+        return { stdout: "", exitCode: 0 };
+      },
+    );
+    const getSandbox = vi.fn(async () => ({
+      sandboxId: "sbx_123",
+      commands: { run: commandRun },
+    }));
+    const codexAgent = {
+      ...agentConfig(),
+      tools: [
+        {
+          id: "codex" as const,
+          type: "coding_agent" as const,
+          provider: "codex" as const,
+          label: "Codex",
+          description: "Delegate coding work to Codex inside an E2B sandbox.",
+          repository: "opencompany-web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [
+            {
+              id: "opencompany-web",
+              fullName: "opencompany/web",
+              defaultBranch: "main",
+            },
+          ],
+        },
+      },
+    };
+
+    const output = await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: codexAgent,
+      toolCallId: "call_codex",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("codex_coder") as RuntimeToolDefinition,
+      args: { task: "implement the change" },
+      getSandbox: getSandbox as never,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["codex_coder"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    expect(output).toMatchObject({
+      repository: "opencompany/web",
+      codexSessionId: "codex_thread_123",
+      codexResult: "implemented",
+      codexUsage: {
+        input_tokens: 4_000,
+        cached_input_tokens: 3_000,
+        output_tokens: 500,
+      },
+    });
+    expect(db.state.toolUsage).toEqual([
+      expect.objectContaining({
+        toolCallId: "call_codex",
+        toolName: "codex_coder",
+        provider: "codex",
+        operation: "exec:gpt-5.4",
+        providerRequestId: "codex_thread_123",
+        costUsdMicros: 10_750,
+      }),
+    ]);
+    expect(db.state.ledgerDebits).toBe(1);
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "session.tool_usage",
+        payload: expect.objectContaining({
+          toolCallId: "call_codex",
+          toolName: "codex_coder",
+          provider: "codex",
+          costUsdMicros: 10_750,
+          chargedCostUsdMicros: 11_825,
+        }),
+      }),
+    );
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).not.toHaveProperty("usage");
+    expect(commandRun.mock.calls.some(([command]) => command.includes("--model 'gpt-5.4'"))).toBe(
+      true,
+    );
   });
 
   it("reuses an incomplete assistant response for a retried user message", async () => {
@@ -1134,9 +1269,10 @@ describe("Codex stream parsing", () => {
       buildCodexCommand({
         task: "implement the change",
         workRoot: "/home/user/repo",
+        codexModel: "gpt-5.4",
       }),
     ).toBe(
-      "codex exec --json --sandbox workspace-write --skip-git-repo-check -C '/home/user/repo' 'implement the change'",
+      "codex exec --model 'gpt-5.4' --json --sandbox workspace-write --skip-git-repo-check -C '/home/user/repo' 'implement the change'",
     );
   });
 
@@ -1146,9 +1282,10 @@ describe("Codex stream parsing", () => {
         task: "address the follow-up",
         workRoot: "/home/user/repo",
         codexSessionId: "0199a213-81c0-7800-8aa1-bbab2a035a53",
+        codexModel: "gpt-5.4",
       }),
     ).toBe(
-      "codex exec resume '0199a213-81c0-7800-8aa1-bbab2a035a53' --json --sandbox workspace-write --skip-git-repo-check -C '/home/user/repo' 'address the follow-up'",
+      "codex exec resume '0199a213-81c0-7800-8aa1-bbab2a035a53' --model 'gpt-5.4' --json --sandbox workspace-write --skip-git-repo-check -C '/home/user/repo' 'address the follow-up'",
     );
   });
 
@@ -1170,9 +1307,39 @@ describe("Codex stream parsing", () => {
       GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
       GIT_CONFIG_VALUE_0: "Authorization: Basic github_basic_secret",
     });
-    expect(buildCodexCommand({ task: "open a pr", workRoot: "/home/user/repo" })).not.toContain(
-      "github_token_123",
-    );
+    expect(
+      buildCodexCommand({
+        task: "open a pr",
+        workRoot: "/home/user/repo",
+        codexModel: "gpt-5.4",
+      }),
+    ).not.toContain("github_token_123");
+  });
+
+  it("normalizes Codex usage token buckets", () => {
+    expect(
+      normalizeCodexUsage({
+        input_tokens: 24_763,
+        cached_input_tokens: 24_448,
+        output_tokens: 122,
+      }),
+    ).toMatchObject({
+      inputTokens: 24_763,
+      cachedInputTokens: 24_448,
+      outputTokens: 122,
+    });
+    expect(
+      normalizeCodexUsage({
+        prompt_tokens: 100,
+        prompt_tokens_details: { cached_tokens: 40 },
+        completion_tokens: 20,
+      }),
+    ).toMatchObject({
+      inputTokens: 100,
+      cachedInputTokens: 40,
+      outputTokens: 20,
+    });
+    expect(normalizeCodexUsage({ input_tokens: "bad" })).toBeNull();
   });
 
   it("uses a Codex branch prefix instead of pushing the default branch", () => {
@@ -1433,35 +1600,53 @@ function createLeaseDb(input: {
       };
     },
     select() {
-      return {
+      let selectedTable: unknown;
+      const query = {
         from(table: unknown) {
-          return {
-            where() {
-              return {
-                async limit() {
-                  if (table === agentSessions && state.session.runLeaseId === "run_123") {
-                    return [{ id: state.session.id }];
-                  }
-                  if (table === agentSessions && state.session.runLeaseId === "run_current") {
-                    return [];
-                  }
-                  if (table === agentSessions) return [{ id: state.session.id }];
-                  if (table === agentSessionMessages) {
-                    return state.messages
-                      .filter((message) => message.responseToMessageId)
-                      .map((message) => ({
-                        id: message.id,
-                        status: message.status ?? "running",
-                      }))
-                      .slice(0, 1);
-                  }
-                  return [];
-                },
-              };
-            },
-          };
+          selectedTable = table;
+          return query;
+        },
+        innerJoin() {
+          return query;
+        },
+        where() {
+          return query;
+        },
+        async limit() {
+          if (selectedTable === agentSessions && state.session.runLeaseId === "run_123") {
+            return [{ id: state.session.id }];
+          }
+          if (selectedTable === agentSessions && state.session.runLeaseId === "run_current") {
+            return [];
+          }
+          if (selectedTable === agentSessions) return [{ id: state.session.id }];
+          if (selectedTable === agentSessionMessages) {
+            return state.messages
+              .filter((message) => message.responseToMessageId)
+              .map((message) => ({
+                id: message.id,
+                status: message.status ?? "running",
+              }))
+              .slice(0, 1);
+          }
+          if (selectedTable === workspaceIntegrationResources) {
+            return [
+              {
+                integrationId: "wint_123",
+                fullName: "opencompany/web",
+                installationId: "12345",
+                connectionLabel: "opencompany",
+                connectionStatus: "connected",
+                connectionStatusReason: null,
+                resourceStatus: "available",
+                resourceStatusReason: null,
+              },
+            ];
+          }
+          return [];
         },
       };
+      return query;
     },
     insert(table: unknown) {
       return {
@@ -1542,6 +1727,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa_test",
     ampApiKey: "amp_test",
     codexApiKey: "codex_test",
+    codexModel: "gpt-5.4",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,

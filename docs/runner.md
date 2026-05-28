@@ -172,6 +172,7 @@ Required environment variables:
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `CODEX_API_KEY` (required only for agents that enable the Codex coding tool)
+- `OPENCOMPANY_CODEX_MODEL` (optional; Codex CLI model used for delegated runs and billing, defaults to `gpt-5.4`)
 - `OPENCOMPANY_CODEX_E2B_TEMPLATE` (optional; Codex sessions default to E2B's `codex` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)

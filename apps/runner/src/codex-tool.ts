@@ -1,4 +1,9 @@
 import { type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
+import {
+  calculateCodexToolUsageCost,
+  isSupportedCodexToolModel,
+  SUPPORTED_CODEX_TOOL_MODELS,
+} from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { agentSessionArtifacts } from "@opencompany/db/schema";
 import {
@@ -20,6 +25,7 @@ import {
 } from "./amp-tool";
 import type { RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
+import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
@@ -59,6 +65,7 @@ export async function runCodexCoderTool(input: {
   }
 
   const codexApiKey = loadPlatformCodexApiKey(input.env);
+  const codexModel = loadPlatformCodexModel(input.env);
   const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
   const githubToken = await getGitHubWorkInstallationToken({
     installationId: integrationRepository.installationId,
@@ -101,6 +108,7 @@ export async function runCodexCoderTool(input: {
       task,
       workRoot: layout.workRoot,
       codexSessionId: requestedCodexSessionId,
+      codexModel,
     }),
     {
       envs: codexEnv,
@@ -120,6 +128,11 @@ export async function runCodexCoderTool(input: {
   if (remainingActivity) await input.onOutput?.(remainingActivity);
   codexStream.finish();
   const codexSummary = codexStream.summary();
+  const codexUsage = buildCodexToolUsage({
+    modelName: codexModel,
+    codexSessionId: codexSummary.sessionId,
+    usage: codexSummary.usage,
+  });
 
   await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
     timeoutMs: 60_000,
@@ -245,18 +258,21 @@ export async function runCodexCoderTool(input: {
     });
 
   return {
-    repository: repository.fullName,
-    codexSessionId: codexSummary.sessionId,
-    continuedFromCodexSessionId: requestedCodexSessionId,
-    codexStatus: codexSummary.status,
-    codexResult: truncateText(redactCodexOutput(codexSummary.result), 24_000),
-    codexError: codexSummary.error ? redactCodexOutput(codexSummary.error) : null,
-    codexUsage: codexSummary.usage,
-    exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-    diffStat: formattedDiffStat,
-    diffPreview: formattedDiffPreview,
-    branchName,
-    pullRequestUrl,
+    output: {
+      repository: repository.fullName,
+      codexSessionId: codexSummary.sessionId,
+      continuedFromCodexSessionId: requestedCodexSessionId,
+      codexStatus: codexSummary.status,
+      codexResult: truncateText(redactCodexOutput(codexSummary.result), 24_000),
+      codexError: codexSummary.error ? redactCodexOutput(codexSummary.error) : null,
+      codexUsage: codexSummary.usage,
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+      diffStat: formattedDiffStat,
+      diffPreview: formattedDiffPreview,
+      branchName,
+      pullRequestUrl,
+    },
+    ...(codexUsage ? { usage: codexUsage } : {}),
   };
 }
 
@@ -264,8 +280,11 @@ export function buildCodexCommand(input: {
   task: string;
   workRoot: string;
   codexSessionId?: string | null;
+  codexModel: string;
 }) {
   const baseArgs = [
+    "--model",
+    shellQuote(input.codexModel),
     "--json",
     "--sandbox",
     "workspace-write",
@@ -300,6 +319,13 @@ type CodexStreamSummary = {
   result: string;
   error: string | null;
   usage: Record<string, unknown> | null;
+};
+
+export type NormalizedCodexUsage = {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  rawUsage: Record<string, unknown>;
 };
 
 export function createCodexStreamAccumulator() {
@@ -347,12 +373,14 @@ export function createCodexStreamAccumulator() {
 
     if (event.type === "turn.failed") {
       status = "error";
+      usage = isRecord(event.usage) ? event.usage : usage;
       error = readCodexError(event) ?? "Codex failed without an error message.";
       return;
     }
 
     if (event.type === "error") {
       status = "error";
+      usage = isRecord(event.usage) ? event.usage : usage;
       error = readCodexError(event) ?? "Codex failed without an error message.";
     }
   }
@@ -376,6 +404,81 @@ export function createCodexStreamAccumulator() {
         error,
         usage,
       };
+    },
+  };
+}
+
+export function normalizeCodexUsage(usage: unknown): NormalizedCodexUsage | null {
+  if (!isRecord(usage)) return null;
+
+  const inputTokens = readTokenCount(
+    usage,
+    "input_tokens",
+    "inputTokens",
+    "prompt_tokens",
+    "promptTokens",
+  );
+  const cachedInputTokens = Math.min(
+    readTokenCount(
+      usage,
+      "cached_input_tokens",
+      "cachedInputTokens",
+      "input_token_details.cached_tokens",
+      "input_tokens_details.cached_tokens",
+      "prompt_tokens_details.cached_tokens",
+      "inputTokenDetails.cacheReadTokens",
+    ),
+    inputTokens,
+  );
+  const outputTokens = readTokenCount(
+    usage,
+    "output_tokens",
+    "outputTokens",
+    "completion_tokens",
+    "completionTokens",
+  );
+
+  if (inputTokens <= 0 && cachedInputTokens <= 0 && outputTokens <= 0) return null;
+
+  return {
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    rawUsage: usage,
+  };
+}
+
+function buildCodexToolUsage(input: {
+  modelName: string;
+  codexSessionId: string | null;
+  usage: Record<string, unknown> | null;
+}): HostedToolUsage | undefined {
+  const normalized = normalizeCodexUsage(input.usage);
+  if (!normalized) return undefined;
+
+  const cost = calculateCodexToolUsageCost({
+    modelName: input.modelName,
+    inputTokens: normalized.inputTokens,
+    cachedInputTokens: normalized.cachedInputTokens,
+    outputTokens: normalized.outputTokens,
+  });
+
+  return {
+    provider: "codex",
+    operation: `exec:${input.modelName}`,
+    ...(input.codexSessionId ? { providerRequestId: input.codexSessionId } : {}),
+    costUsdMicros: cost.providerCostUsdMicros,
+    costBasis: cost.costBasis,
+    rawUsage: {
+      modelName: input.modelName,
+      pricingVersion: cost.costBasis.pricingVersion,
+      codexSessionId: input.codexSessionId,
+      tokenCounts: {
+        inputTokens: normalized.inputTokens,
+        cachedInputTokens: normalized.cachedInputTokens,
+        outputTokens: normalized.outputTokens,
+      },
+      usage: normalized.rawUsage,
     },
   };
 }
@@ -473,6 +576,34 @@ function loadPlatformCodexApiKey(env: RunnerEnv) {
     throw new Error("CODEX_API_KEY is required on the runner to use the Codex coding tool.");
   }
   return env.codexApiKey;
+}
+
+function loadPlatformCodexModel(env: RunnerEnv) {
+  if (!isSupportedCodexToolModel(env.codexModel)) {
+    throw new Error(
+      `OPENCOMPANY_CODEX_MODEL must be one of: ${SUPPORTED_CODEX_TOOL_MODELS.join(", ")}.`,
+    );
+  }
+  return env.codexModel;
+}
+
+function readTokenCount(record: Record<string, unknown>, ...paths: string[]) {
+  for (const path of paths) {
+    const value = readPath(record, path);
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+  }
+  return 0;
+}
+
+function readPath(record: Record<string, unknown>, path: string): unknown {
+  let current: unknown = record;
+  for (const part of path.split(".")) {
+    if (!isRecord(current)) return undefined;
+    current = current[part];
+  }
+  return current;
 }
 
 function compactWhitespace(value: string) {

@@ -267,7 +267,7 @@ export async function executeRuntimeTool(input: {
         if (!input.workspaceId || !input.agentConfig) {
           throw new Error("Codex requires workspace and agent configuration context.");
         }
-        return runCodexCoderTool({
+        const result = await runCodexCoderTool({
           sandbox: activeSandbox,
           workdir: input.workdir,
           args: input.args,
@@ -298,6 +298,8 @@ export async function executeRuntimeTool(input: {
             );
           },
         });
+        usage = result.usage;
+        return result.output;
       }
       const brainSnapshotBefore =
         input.definition.name === "shell"

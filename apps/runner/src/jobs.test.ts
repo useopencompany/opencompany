@@ -451,6 +451,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     exaApiKey: "exa_test",
     ampApiKey: "amp_test",
     codexApiKey: "codex_test",
+    codexModel: "gpt-5.4",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
     codexE2bTemplate: undefined,

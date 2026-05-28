@@ -6,6 +6,7 @@ export type HostedToolUsage = {
   operation: string;
   providerRequestId?: string;
   costUsdMicros: number;
+  costBasis?: Record<string, unknown>;
   rawUsage: Record<string, unknown>;
 };
 

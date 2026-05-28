@@ -7,6 +7,7 @@ export const PLATFORM_FEE_BPS = 1000;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
+const CODEX_PRICING_VERSION = "2026-05-28.openai-api";
 
 type PricingProvider =
   | "openai"
@@ -26,6 +27,16 @@ type ModelPricing = {
   outputUsdMicrosPerMillion: number;
 };
 
+type CodexToolModelId = "gpt-5.4";
+
+type CodexToolPricing = {
+  model: CodexToolModelId;
+  inputUsdMicrosPerMillion: number;
+  cachedInputUsdMicrosPerMillion: number;
+  outputUsdMicrosPerMillion: number;
+  longContextPricing: boolean;
+};
+
 export type UsageCostInput = {
   modelName: string;
   inputTokens: number;
@@ -41,6 +52,13 @@ export type UsageCostResult = {
   platformFeeUsdMicros: number;
   totalCostUsdMicros: number;
   costBasis: Record<string, unknown>;
+};
+
+export type CodexToolUsageCostInput = {
+  modelName: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
 };
 
 export type WorkspaceUsageDebitInput = {
@@ -174,6 +192,18 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
   },
 };
 
+const CODEX_TOOL_PRICING: Record<CodexToolModelId, CodexToolPricing> = {
+  "gpt-5.4": {
+    model: "gpt-5.4",
+    inputUsdMicrosPerMillion: 2_500_000,
+    cachedInputUsdMicrosPerMillion: 250_000,
+    outputUsdMicrosPerMillion: 15_000_000,
+    longContextPricing: true,
+  },
+};
+
+export const SUPPORTED_CODEX_TOOL_MODELS = Object.keys(CODEX_TOOL_PRICING) as CodexToolModelId[];
+
 export function centsToUsdMicros(cents: number) {
   return Math.round(cents * USD_MICROS_PER_CENT);
 }
@@ -252,6 +282,80 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
         inputNoCache: inputNoCacheCost,
         inputCacheRead: inputCacheReadCost,
         inputCacheWrite: inputCacheWriteCost,
+        output: outputCost,
+      },
+    },
+  };
+}
+
+export function isSupportedCodexToolModel(modelName: string): modelName is CodexToolModelId {
+  return Object.prototype.hasOwnProperty.call(CODEX_TOOL_PRICING, modelName);
+}
+
+export function calculateCodexToolUsageCost(input: CodexToolUsageCostInput): UsageCostResult {
+  const pricing = CODEX_TOOL_PRICING[input.modelName as CodexToolModelId];
+  if (!pricing) {
+    return {
+      billable: false,
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+      totalCostUsdMicros: 0,
+      costBasis: {
+        kind: "tool_usage",
+        provider: "codex",
+        operation: `exec:${input.modelName}`,
+        billable: false,
+        reason: "unknown_codex_model",
+      },
+    };
+  }
+
+  const inputTokens = safeTokenCount(input.inputTokens);
+  const cachedInputTokens = Math.min(safeTokenCount(input.cachedInputTokens), inputTokens);
+  const uncachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
+  const outputTokens = safeTokenCount(input.outputTokens);
+  const longContextMultiplier =
+    pricing.longContextPricing && inputTokens > GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD
+      ? { input: 2, output: 1.5 }
+      : { input: 1, output: 1 };
+  const uncachedInputRate = pricing.inputUsdMicrosPerMillion * longContextMultiplier.input;
+  const cachedInputRate = pricing.cachedInputUsdMicrosPerMillion * longContextMultiplier.input;
+  const outputRate = pricing.outputUsdMicrosPerMillion * longContextMultiplier.output;
+
+  const inputNoCacheCost = tokenCost(uncachedInputTokens, uncachedInputRate);
+  const inputCacheReadCost = tokenCost(cachedInputTokens, cachedInputRate);
+  const outputCost = tokenCost(outputTokens, outputRate);
+  const providerCostUsdMicros = inputNoCacheCost + inputCacheReadCost + outputCost;
+  const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
+  const totalCostUsdMicros = providerCostUsdMicros + platformFeeUsdMicros;
+
+  return {
+    billable: totalCostUsdMicros > 0,
+    providerCostUsdMicros,
+    platformFeeUsdMicros,
+    totalCostUsdMicros,
+    costBasis: {
+      kind: "tool_usage",
+      provider: "codex",
+      operation: `exec:${pricing.model}`,
+      modelName: pricing.model,
+      pricingVersion: CODEX_PRICING_VERSION,
+      platformFeeBps: PLATFORM_FEE_BPS,
+      longContextApplied: longContextMultiplier.input !== 1 || longContextMultiplier.output !== 1,
+      tokenCounts: {
+        inputTokens,
+        inputNoCacheTokens: uncachedInputTokens,
+        inputCacheReadTokens: cachedInputTokens,
+        outputTokens,
+      },
+      ratesUsdMicrosPerMillion: {
+        inputNoCache: uncachedInputRate,
+        inputCacheRead: cachedInputRate,
+        output: outputRate,
+      },
+      costsUsdMicros: {
+        inputNoCache: inputNoCacheCost,
+        inputCacheRead: inputCacheReadCost,
         output: outputCost,
       },
     },

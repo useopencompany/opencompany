@@ -10,6 +10,7 @@ export type RunnerEnv = {
   exaApiKey: string | undefined;
   ampApiKey: string | undefined;
   codexApiKey: string | undefined;
+  codexModel: string;
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   codexE2bTemplate: string | undefined;
@@ -29,6 +30,7 @@ export function loadEnv(): RunnerEnv {
     exaApiKey: optionalEnv("EXA_API_KEY"),
     ampApiKey: optionalEnv("AMP_API_KEY"),
     codexApiKey: optionalEnv("CODEX_API_KEY"),
+    codexModel: optionalEnv("OPENCOMPANY_CODEX_MODEL") ?? "gpt-5.4",
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),

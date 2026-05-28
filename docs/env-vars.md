@@ -113,6 +113,7 @@ Set these in the Render `opencompany-runner` service.
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
 | `CODEX_API_KEY` | Codex only | Platform OpenAI API key used by the runner when agents enable the Codex coding tool. |
+| `OPENCOMPANY_CODEX_MODEL` | No | Codex CLI model used for delegated Codex runs and billing; defaults to `gpt-5.4`. |
 | `OPENCOMPANY_CODEX_E2B_TEMPLATE` | No | Optional Codex-specific E2B template; defaults to `codex`. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | MCP only | Decrypts workspace MCP bearer tokens for dynamic MCP tools. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
