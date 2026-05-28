@@ -38,6 +38,7 @@ import { randomAgentName } from "@/lib/agents/names";
 import {
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
+  normalizeAgentConfig,
   serializeAgentDetail,
 } from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
@@ -146,6 +147,7 @@ export async function updateAgent(
     return null;
   }
 
+  const currentConfig = normalizeAgentConfig(agent.config);
   const title = patch.name ?? agent.name;
   const path =
     typeof patch.name === "string" || !agent.path
@@ -210,13 +212,12 @@ export async function updateAgent(
         },
       },
     }));
+  const savedRepositories = currentConfig.integrations.github.repositories;
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubRepositories,
-    savedRepositories: agent.config.integrations.github.repositories,
+    savedRepositories,
   });
-  const savedPreferredRepositories = agent.config.integrations.github.repositories.filter(
-    (repository) => repository.binding,
-  );
+  const savedPreferredRepositories = savedRepositories.filter((repository) => repository.binding);
   const preferredRepositories = [
     ...savedPreferredRepositories,
     ...(sanitizedContent
@@ -227,10 +228,10 @@ export async function updateAgent(
     ? derivePreviewConfigFromTiptapDoc({
         title,
         content: sanitizedContent,
-        model: patch.model ?? agent.config.model.name,
+        model: patch.model ?? currentConfig.model.name,
         repositories: derivationRepositories,
         preferredRepositories: savedPreferredRepositories,
-        triggers: agent.config.triggers,
+        triggers: currentConfig.triggers,
       })
     : null;
   // The .agent body is the product contract and the source for runtime config.
@@ -241,10 +242,10 @@ export async function updateAgent(
       ? deriveAgentConfigFromBody({
           title,
           body: patch.body,
-          model: patch.model ?? agent.config.model.name,
+          model: patch.model ?? currentConfig.model.name,
           repositories: derivationRepositories,
           preferredRepositories,
-          triggers: agent.config.triggers,
+          triggers: currentConfig.triggers,
         })
       : derivedFromTiptap;
   warnOnBodyTiptapMismatch({
@@ -253,12 +254,12 @@ export async function updateAgent(
     ...(typeof derivedFromTiptap?.body === "string" ? { tiptapBody: derivedFromTiptap.body } : {}),
   });
   const body = typeof patch.body === "string" ? patch.body : (derived?.body ?? agent.body);
-  const model = derived?.config.model.name ?? patch.model ?? agent.config.model.name;
+  const model = derived?.config.model.name ?? patch.model ?? currentConfig.model.name;
   const nextIntegrations =
-    derived?.config.integrations ?? patch.config?.integrations ?? agent.config.integrations;
-  const nextTools = derived?.config.tools ?? patch.config?.tools ?? agent.config.tools;
-  const nextBrain = derived?.config.brain ?? patch.config?.brain ?? agent.config.brain;
-  const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? agent.config.triggers;
+    derived?.config.integrations ?? patch.config?.integrations ?? currentConfig.integrations;
+  const nextTools = derived?.config.tools ?? patch.config?.tools ?? currentConfig.tools;
+  const nextBrain = derived?.config.brain ?? patch.config?.brain ?? currentConfig.brain;
+  const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? currentConfig.triggers;
   const source = serializeAgentFile({
     title,
     body,
@@ -411,15 +412,16 @@ export async function materializeLegacyAgentFiles() {
   for (const agent of rows) {
     if (agent.path) continue;
 
-    const body = agent.body || agent.config.instructions;
+    const config = normalizeAgentConfig(agent.config);
+    const body = agent.body || config.instructions;
     const source = serializeAgentFile({
       title: agent.name,
       body,
-      model: agent.config.model.name,
-      tools: agent.config.tools,
-      brain: agent.config.brain,
-      integrations: agent.config.integrations,
-      triggers: agent.config.triggers,
+      model: config.model.name,
+      tools: config.tools,
+      brain: config.brain,
+      integrations: config.integrations,
+      triggers: config.triggers,
     });
     const parsed = parseAgentFile(source);
     const contentHash = hashAgentSource(source);

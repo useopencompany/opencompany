@@ -1,4 +1,8 @@
-import type { AgentConfigDerivationRepository } from "@opencompany/agent-runtime";
+import {
+  type AgentConfigDerivationRepository,
+  agentGitHubRepositories,
+  normalizeAgentConfig,
+} from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
   AgentGitHubRepositoryConfig,
@@ -37,13 +41,15 @@ export type AgentDetailPayload = AgentListItemPayload & {
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
 };
 
+export { agentGitHubRepositories, normalizeAgentConfig };
+
 export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
   return {
     id: agent.id,
     workspaceId: agent.workspaceId,
     path: agent.path,
     name: agent.name,
-    config: agent.config,
+    config: normalizeAgentConfig(agent.config),
     githubSyncStatus: agent.githubSyncStatus,
     githubSyncError: agent.githubSyncError,
     createdAt: agent.createdAt.toISOString(),
@@ -57,9 +63,11 @@ export function serializeAgentDetail(
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
 ): AgentDetailPayload {
+  const config = normalizeAgentConfig(agent.config);
+
   return {
     ...serializeAgentListItem(agent),
-    body: agent.body || agent.config.instructions,
+    body: agent.body || config.instructions,
     content: agent.content,
     githubCommitSha: agent.githubCommitSha,
     githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,
