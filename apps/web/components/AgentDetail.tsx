@@ -84,6 +84,19 @@ type OptimisticGitHubSync = {
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 
+// Duplicated from AgentsView.tsx — extracting to a shared module is tracked
+// as a follow-up cleanup. Without this re-throw, Next.js never gets to
+// navigate when a server action calls redirect().
+function isNextRedirectError(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest: unknown }).digest === "string" &&
+      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
+
 function getStoredInspectorCollapsed() {
   if (typeof window === "undefined") return true;
   const stored = window.localStorage.getItem(INSPECTOR_STORAGE_KEY);
@@ -510,6 +523,10 @@ function AgentDetailContent({
               );
               router.push("/agents");
             } catch (err) {
+              // Let Next.js redirect digests bubble — currentWorkspace() throws
+              // NEXT_REDIRECT for unauthenticated / incomplete-onboarding users
+              // and the framework needs to see it to navigate.
+              if (isNextRedirectError(err)) throw err;
               // Server actions can throw (e.g. non-admin requireAdmin guard);
               // surface as a toast instead of bubbling to the error boundary.
               setShowDeleteDialog(false);
