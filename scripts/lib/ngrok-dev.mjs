@@ -6,6 +6,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+const DEFAULT_LOCAL_WEB_PORT = "3000";
+
 export function ngrokConfigState() {
   const command = spawnSync("ngrok", ["version"], {
     encoding: "utf8",
@@ -63,7 +65,11 @@ export async function waitForNgrokUrl(targetPort, timeoutMs = 20_000) {
   return null;
 }
 
-export function updateLocalEnvForTunnel(publicUrl, path = ".env.local") {
+export function updateLocalEnvForTunnel(
+  publicUrl,
+  path = ".env.local",
+  { localPort = DEFAULT_LOCAL_WEB_PORT } = {},
+) {
   if (!existsSync(path)) {
     throw new Error(".env.local is missing. Run `bun run setup` before starting the tunnel.");
   }
@@ -72,7 +78,7 @@ export function updateLocalEnvForTunnel(publicUrl, path = ".env.local") {
   const allowedOrigins = appendCsvValue(current.RUNNER_ALLOWED_ORIGINS, publicUrl);
   const values = {
     NEXT_PUBLIC_APP_URL: publicUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: `${publicUrl}/auth/callback`,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: localWorkOSRedirectUri(localPort),
     RUNNER_ALLOWED_ORIGINS: allowedOrigins,
   };
   writeEnvValues(path, values);
@@ -84,6 +90,10 @@ export function valueFor(args, name) {
   const index = args.indexOf(name);
   if (index === -1) return null;
   return args[index + 1] && !args[index + 1].startsWith("--") ? args[index + 1] : null;
+}
+
+export function localWorkOSRedirectUri(localPort = DEFAULT_LOCAL_WEB_PORT) {
+  return `${localWebOrigin(localPort)}/auth/callback`;
 }
 
 function ngrokConfigPaths() {
@@ -109,6 +119,13 @@ function normalizeUrl(value) {
   if (!trimmed) return null;
   if (/^https?:\/\//.test(trimmed)) return trimmed.replace(/\/$/, "");
   return `https://${trimmed.replace(/\/$/, "")}`;
+}
+
+function localWebOrigin(port) {
+  const trimmed = String(port || DEFAULT_LOCAL_WEB_PORT).trim();
+  if (/^https?:\/\//.test(trimmed)) return new URL(trimmed).origin;
+  if (trimmed.includes(":")) return `http://${trimmed}`.replace(/\/$/, "");
+  return `http://localhost:${trimmed}`;
 }
 
 async function readNgrokUrl(targetPort) {

@@ -113,7 +113,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible.",
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When the agent has an explicit GitHub repository binding, shell commands get repo-scoped gh and git auth for that repository; run repository commands from ./work.",
     parameters: {
       type: "object",
       properties: {

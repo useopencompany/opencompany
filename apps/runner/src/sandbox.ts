@@ -292,26 +292,30 @@ export async function runSandboxTool(input: {
   workdir: string;
   name: string;
   args: unknown;
+  envs?: Record<string, string> | undefined;
+  redactOutput?: ((value: string) => string) | undefined;
   onOutput?: (stream: "stdout" | "stderr", delta: string) => Promise<void> | void;
 }) {
   const args = asRecord(input.args);
+  const redact = input.redactOutput ?? ((value: string) => value);
 
   if (input.name === "shell") {
     const command = readString(args, "command");
     const layout = sandboxLayout(input.workdir);
     const result = await input.sandbox.commands.run(command, {
       cwd: layout.workspaceRoot,
+      ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
       onStdout: async (data: string) => {
-        await input.onOutput?.("stdout", data);
+        await input.onOutput?.("stdout", redact(data));
       },
       onStderr: async (data: string) => {
-        await input.onOutput?.("stderr", data);
+        await input.onOutput?.("stderr", redact(data));
       },
     });
     return truncate({
-      stdout: String(result.stdout ?? ""),
-      stderr: String(result.stderr ?? ""),
+      stdout: redact(String(result.stdout ?? "")),
+      stderr: redact(String(result.stderr ?? "")),
       exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
     });
   }

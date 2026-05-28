@@ -1,4 +1,5 @@
 import {
+  type AgentConfig,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   type RuntimeToolDefinition,
 } from "@opencompany/agent-runtime";
@@ -40,6 +41,10 @@ const observabilityMocks = vi.hoisted(() => ({
   captureException: vi.fn(),
 }));
 
+const githubMocks = vi.hoisted(() => ({
+  getGitHubWorkInstallationToken: vi.fn(),
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
 }));
@@ -55,6 +60,14 @@ vi.mock("@opencompany/observability", async (importOriginal) => {
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
 }));
+
+vi.mock("./github", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./github")>();
+  return {
+    ...actual,
+    getGitHubWorkInstallationToken: githubMocks.getGitHubWorkInstallationToken,
+  };
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -607,6 +620,268 @@ describe("usage recording", () => {
         }),
       }),
     );
+  });
+
+  it("injects repo-scoped GitHub auth into bound shell commands and redacts it", async () => {
+    githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_123");
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubRows: [
+        {
+          integrationId: "wint_123",
+          fullName: "opencompany/web",
+          installationId: "install_123",
+          connectionLabel: "opencompany",
+          connectionStatus: "connected",
+          connectionStatusReason: null,
+          resourceStatus: "available",
+          resourceStatusReason: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => ({
+      sandboxId: "sbx_123",
+      commands: {
+        run: vi.fn(
+          async (
+            command: string,
+            options: {
+              envs?: Record<string, string>;
+              onStdout?: (data: string) => void;
+              onStderr?: (data: string) => void;
+            },
+          ) => {
+            if (command.includes("find brain")) return { stdout: "", stderr: "", exitCode: 0 };
+            options.onStdout?.(`stdout ${options.envs?.GH_TOKEN ?? "missing"}\n`);
+            options.onStderr?.(`stderr ${options.envs?.GIT_CONFIG_VALUE_0 ?? "missing"}\n`);
+            return {
+              stdout: `done ${options.envs?.GH_TOKEN ?? "missing"}`,
+              stderr: `err ${options.envs?.GIT_CONFIG_VALUE_0 ?? "missing"}`,
+              exitCode: 0,
+            };
+          },
+        ),
+      },
+    }));
+    const config = agentConfig({
+      tools: [
+        {
+          id: "amp",
+          type: "coding_agent",
+          provider: "amp",
+          label: "AMP",
+          description: "Delegate coding work to Amp inside an E2B sandbox.",
+          repository: "opencompany-web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [
+            {
+              id: "opencompany-web",
+              fullName: "opencompany/web",
+              defaultBranch: "main",
+              binding: {
+                provider: "github",
+                externalId: "repo_123",
+                resourceType: "repository",
+                displayName: "opencompany/web",
+                connection: {
+                  externalId: "install_123",
+                  label: "opencompany",
+                  accountName: "opencompany",
+                  accountType: "Organization",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: config,
+      toolCallId: "toolu/with spaces",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
+      args: { command: "cd work && gh pr list" },
+      getSandbox: getSandbox as never,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["shell"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    const shellRun = (await getSandbox.mock.results[0]?.value).commands.run.mock.calls.find(
+      ([command]: [string, unknown]) => command === "cd work && gh pr list",
+    );
+    expect(shellRun?.[1]).toMatchObject({
+      envs: {
+        GH_TOKEN: "github_token_123",
+        GH_PROMPT_DISABLED: "1",
+        GH_NO_UPDATE_NOTIFIER: "1",
+        GH_CONFIG_DIR: "/tmp/opencompany-gh-toolu-with-spaces",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+        GIT_CONFIG_VALUE_0: expect.stringMatching(/^Authorization: Basic /),
+      },
+    });
+    expect(githubMocks.getGitHubWorkInstallationToken).toHaveBeenCalledWith({
+      installationId: "install_123",
+      repositoryFullName: "opencompany/web",
+    });
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toEqual({
+      stdout: "done [redacted]",
+      stderr: "err [redacted]",
+      exitCode: 0,
+    });
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "command.output",
+        payload: expect.objectContaining({
+          delta: "stdout [redacted]\n",
+        }),
+      }),
+    );
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "command.output",
+        payload: expect.objectContaining({
+          delta: "stderr [redacted]\n",
+        }),
+      }),
+    );
+  });
+
+  it("leaves shell unauthenticated when no explicit repository binding exists", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const commands = {
+      run: vi.fn(async (command: string, options: { envs?: Record<string, string> }) => {
+        if (command.includes("find brain")) return { stdout: "", stderr: "", exitCode: 0 };
+        return {
+          stdout: options.envs?.GH_TOKEN ?? "no-token",
+          stderr: "",
+          exitCode: 0,
+        };
+      }),
+    };
+    const getSandbox = vi.fn(async () => ({ sandboxId: "sbx_123", commands }));
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: agentConfig(),
+      toolCallId: "call_shell",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
+      args: { command: "env" },
+      getSandbox: getSandbox as never,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["shell"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    const shellRun = commands.run.mock.calls.find(([command]) => command === "env");
+    expect(shellRun?.[1]).not.toHaveProperty("envs");
+    expect(githubMocks.getGitHubWorkInstallationToken).not.toHaveBeenCalled();
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toMatchObject({
+      stdout: "no-token",
+      exitCode: 0,
+    });
+  });
+
+  it("returns GitHub integration failures as recoverable shell results", async () => {
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubRows: [
+        {
+          integrationId: "wint_123",
+          fullName: "opencompany/web",
+          installationId: "install_123",
+          connectionLabel: "opencompany",
+          connectionStatus: "needs_reauth",
+          connectionStatusReason: "Installation token failed with 401.",
+          resourceStatus: "available",
+          resourceStatusReason: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const commands = {
+      run: vi.fn(async (command: string) =>
+        command.includes("find brain") ? { stdout: "", stderr: "", exitCode: 0 } : null,
+      ),
+    };
+    const getSandbox = vi.fn(async () => ({ sandboxId: "sbx_123", commands }));
+    const config = agentConfig({
+      tools: [
+        {
+          id: "amp",
+          type: "coding_agent",
+          provider: "amp",
+          label: "AMP",
+          description: "Delegate coding work to Amp inside an E2B sandbox.",
+          repository: "opencompany-web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [
+            { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+          ],
+        },
+      },
+    });
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        agentConfig: config,
+        toolCallId: "call_shell",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
+        args: { command: "gh pr list" },
+        getSandbox: getSandbox as never,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["shell"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        message:
+          "GitHub connection opencompany is needs reauth. Reconnect GitHub or update the agent repository mention. Installation token failed with 401.",
+        code: "tool_execution_failed",
+        recoverable: true,
+      }),
+    });
+
+    expect(commands.run.mock.calls.some(([command]) => command === "gh pr list")).toBe(false);
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "shell",
+      toolCallId: "call_shell",
+    });
   });
 
   it("keeps sandbox hydration failures fatal", async () => {
@@ -1177,6 +1452,7 @@ function createLeaseDb(input: {
   runLeaseId?: string | null;
   runLeaseExpiresAt?: Date | null;
   messages?: MessageState[];
+  githubRows?: unknown[];
 }) {
   const state = {
     session: {
@@ -1237,31 +1513,34 @@ function createLeaseDb(input: {
     select() {
       return {
         from(table: unknown) {
-          return {
+          const query = {
+            innerJoin() {
+              return query;
+            },
             where() {
-              return {
-                async limit() {
-                  if (table === agentSessions && state.session.runLeaseId === "run_123") {
-                    return [{ id: state.session.id }];
-                  }
-                  if (table === agentSessions && state.session.runLeaseId === "run_current") {
-                    return [];
-                  }
-                  if (table === agentSessions) return [{ id: state.session.id }];
-                  if (table === agentSessionMessages) {
-                    return state.messages
-                      .filter((message) => message.responseToMessageId)
-                      .map((message) => ({
-                        id: message.id,
-                        status: message.status ?? "running",
-                      }))
-                      .slice(0, 1);
-                  }
-                  return [];
-                },
-              };
+              return query;
+            },
+            async limit() {
+              if (table === agentSessions && state.session.runLeaseId === "run_123") {
+                return [{ id: state.session.id }];
+              }
+              if (table === agentSessions && state.session.runLeaseId === "run_current") {
+                return [];
+              }
+              if (table === agentSessions) return [{ id: state.session.id }];
+              if (table === agentSessionMessages) {
+                return state.messages
+                  .filter((message) => message.responseToMessageId)
+                  .map((message) => ({
+                    id: message.id,
+                    status: message.status ?? "running",
+                  }))
+                  .slice(0, 1);
+              }
+              return input.githubRows ?? [];
             },
           };
+          return query;
         },
       };
     },
@@ -1353,7 +1632,15 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   };
 }
 
-function agentConfig() {
+function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+  const base = baseAgentConfig();
+  return {
+    ...base,
+    ...overrides,
+  };
+}
+
+function baseAgentConfig(): AgentConfig {
   return {
     schemaVersion: "agent.v1" as const,
     title: "Test agent",
