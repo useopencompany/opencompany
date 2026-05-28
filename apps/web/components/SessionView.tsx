@@ -207,6 +207,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     lastVisibleMessage?.role === "user" &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
   const canAbort = ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
+  const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -258,6 +259,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   }, [stream.status, queryClient, streamCredentialKey]);
 
   const submit = () => {
+    if (isBusy) return;
     const content = input.trim();
     if (!content) return;
     setInput("");
@@ -369,6 +371,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    if (isBusy) return;
                     submit();
                   }
                 }}
@@ -377,7 +380,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 className="min-h-10 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
               />
               <button
-                disabled={isPending || !input.trim()}
+                disabled={isBusy || !input.trim()}
                 onClick={submit}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white disabled:opacity-40"
               >
