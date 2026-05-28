@@ -357,6 +357,64 @@ describe("AgentEditor", () => {
     });
   });
 
+  it("renders markdown headings and lists from initial body", async () => {
+    const { container } = render(
+      <AgentEditor
+        initialBody={
+          "### Notes\n\n- first\n- second\n\n1. step one\n2. step two\n\nA closing paragraph."
+        }
+        mentionItems={buildAgentMentionItems()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const heading = await screen.findByRole("heading", { level: 3, name: "Notes" });
+    expect(heading).toBeInTheDocument();
+
+    const bulletItems = container.querySelectorAll(".tiptap-agent ul li");
+    expect(bulletItems).toHaveLength(2);
+    expect(bulletItems[0]?.textContent).toBe("first");
+    expect(bulletItems[1]?.textContent).toBe("second");
+
+    const orderedItems = container.querySelectorAll(".tiptap-agent ol li");
+    expect(orderedItems).toHaveLength(2);
+    expect(orderedItems[0]?.textContent).toBe("step one");
+    expect(orderedItems[1]?.textContent).toBe("step two");
+
+    const paragraphs = container.querySelectorAll(".tiptap-agent > p");
+    expect(paragraphs[paragraphs.length - 1]?.textContent).toBe("A closing paragraph.");
+  });
+
+  it("preserves the start number of an ordered list when loading markdown", async () => {
+    const { container } = render(
+      <AgentEditor
+        initialBody={"3. step three\n4. step four"}
+        mentionItems={buildAgentMentionItems()}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const list = await screen.findByRole("list");
+    expect(list.tagName).toBe("OL");
+    expect(list.getAttribute("start")).toBe("3");
+    const items = container.querySelectorAll(".tiptap-agent ol li");
+    expect(items).toHaveLength(2);
+    expect(items[0]?.textContent).toBe("step three");
+    expect(items[1]?.textContent).toBe("step four");
+  });
+
+  it("re-renders an empty heading after a save → reload round-trip", async () => {
+    // `tiptapDocToBody` trims trailing whitespace, so an empty H2 persists as
+    // "##" rather than "## ". The parser must still treat that as a heading.
+    const { container } = render(
+      <AgentEditor initialBody={"##"} mentionItems={buildAgentMentionItems()} onChange={vi.fn()} />,
+    );
+
+    const heading = await screen.findByRole("heading", { level: 2 });
+    expect(heading).toBeInTheDocument();
+    expect(container.querySelector(".tiptap-agent h2")).toBeInTheDocument();
+  });
+
   it("replaces generic GitHub mentions when a repository is chosen", async () => {
     const ref = createRef<AgentEditorHandle>();
     const onChange = vi.fn();
