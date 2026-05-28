@@ -74,6 +74,11 @@ export type AgentBrainReference = {
   type: "file" | "folder";
 };
 
+export type AgentReference = {
+  path: string;
+  name: string;
+};
+
 export type AgentAfterSessionConfig = {
   enabled: boolean;
   prompt: string;
@@ -119,6 +124,7 @@ export type AgentConfig = {
   };
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  agents?: AgentReference[];
   afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {

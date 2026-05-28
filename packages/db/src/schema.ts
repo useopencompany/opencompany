@@ -130,7 +130,7 @@ export const agents = pgTable(
       .$type<AgentConfig>()
       .notNull()
       .default(
-        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
+        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"agents":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
       ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -241,8 +241,12 @@ export const agentSessions = pgTable(
       .references(() => agents.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled session"),
     status: text("status").notNull().default("created"),
+    source: text("source").$type<"user" | "agent">().notNull().default("user"),
     modelProvider: text("model_provider").notNull().default("vercel-ai-gateway"),
     modelName: text("model_name").notNull().default("openai/gpt-5.4-mini"),
+    parentSessionId: text("parent_session_id"),
+    parentMessageId: text("parent_message_id"),
+    parentToolCallId: text("parent_tool_call_id"),
     e2bSandboxId: text("e2b_sandbox_id"),
     workdir: text("workdir").notNull().default("/home/user/workspace"),
     runLeaseId: text("run_lease_id"),
@@ -260,6 +264,15 @@ export const agentSessions = pgTable(
   (table) => ({
     workspaceIdx: index("agent_sessions_workspace_idx").on(table.workspaceId),
     agentIdx: index("agent_sessions_agent_idx").on(table.agentId),
+    parentSessionIdx: index("agent_sessions_parent_session_idx").on(table.parentSessionId),
+    parentSessionWorkspaceUserIdx: index("agent_sessions_parent_workspace_user_idx").on(
+      table.parentSessionId,
+      table.workspaceId,
+      table.userId,
+      table.archivedAt,
+      table.updatedAt,
+    ),
+    sourceIdx: index("agent_sessions_source_idx").on(table.source),
     statusIdx: index("agent_sessions_status_idx").on(table.status),
     visibleWorkspaceUserUpdatedIdx: index("agent_sessions_visible_workspace_user_updated_idx").on(
       table.workspaceId,
@@ -267,6 +280,15 @@ export const agentSessions = pgTable(
       table.archivedAt,
       table.updatedAt,
     ),
+    visibleWorkspaceUserSourceUpdatedIdx: index(
+      "agent_sessions_visible_workspace_user_source_updated_idx",
+    ).on(table.workspaceId, table.userId, table.source, table.archivedAt, table.updatedAt),
+    parentSessionFk: foreignKey({
+      name: "agent_sessions_parent_session_fk",
+      columns: [table.parentSessionId],
+      foreignColumns: [table.id],
+    }).onDelete("set null"),
+    sourceCheck: check("agent_sessions_source_check", sql`${table.source} IN ('user', 'agent')`),
   }),
 );
 
@@ -1046,6 +1068,12 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
     fields: [agentSessions.agentId],
     references: [agents.id],
   }),
+  parentSession: one(agentSessions, {
+    fields: [agentSessions.parentSessionId],
+    references: [agentSessions.id],
+    relationName: "delegated_session_parent",
+  }),
+  childSessions: many(agentSessions, { relationName: "delegated_session_parent" }),
   messages: many(agentSessionMessages),
   events: many(agentSessionEvents),
   usage: many(agentSessionUsage),

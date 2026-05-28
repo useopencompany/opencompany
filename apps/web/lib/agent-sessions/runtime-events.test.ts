@@ -276,6 +276,58 @@ describe("applyRuntimeEventToState", () => {
       ],
     });
   });
+
+  it("adds delegated child usage rollups without touching parent message reasoning", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.delegated_usage", {
+        childSessionId: "ses_child",
+        parentToolCallId: "call_delegate",
+        usage: {
+          inputTokens: 100,
+          inputNoCacheTokens: 80,
+          inputCacheReadTokens: 10,
+          inputCacheWriteTokens: 10,
+          outputTokens: 25,
+          outputTextTokens: 20,
+          outputReasoningTokens: 5,
+          totalTokens: 125,
+        },
+        cost: {
+          providerCostUsdMicros: 1000,
+          platformFeeUsdMicros: 100,
+          totalCostUsdMicros: 1100,
+          modelCostUsdMicros: 770,
+          toolCostUsdMicros: 330,
+        },
+        toolUsage: {
+          totalCostUsdMicros: 300,
+          byProviderOperation: [
+            { provider: "exa", operation: "search", costUsdMicros: 300, calls: 1 },
+          ],
+        },
+      }),
+    );
+
+    expect(state.usage.totalTokens).toBe(125);
+    expect(state.cost.totalCostUsdMicros).toBe(1100);
+    expect(state.cost.modelCostUsdMicros).toBe(770);
+    expect(state.cost.toolCostUsdMicros).toBe(330);
+    expect(state.toolUsage.byProviderOperation).toEqual([
+      { provider: "exa", operation: "search", costUsdMicros: 300, calls: 1 },
+    ]);
+    expect(
+      state.messages.find((message) => message.id === "msg_assistant")?.outputReasoningTokens,
+    ).toBeUndefined();
+  });
 });
 
 describe("isInspectableRuntimeEvent", () => {
