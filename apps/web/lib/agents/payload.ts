@@ -37,13 +37,43 @@ export type AgentDetailPayload = AgentListItemPayload & {
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
 };
 
+type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & {
+  integrations?: {
+    github?: {
+      repositories?: AgentGitHubRepositoryConfig[];
+    };
+  };
+};
+
+export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
+  const persisted = config as PartialPersistedAgentConfig;
+
+  return {
+    ...config,
+    tools: Array.isArray(persisted.tools) ? persisted.tools : [],
+    brain: Array.isArray(persisted.brain) ? persisted.brain : [],
+    integrations: {
+      github: {
+        repositories: Array.isArray(persisted.integrations?.github?.repositories)
+          ? persisted.integrations.github.repositories
+          : [],
+      },
+    },
+    triggers: Array.isArray(persisted.triggers) ? persisted.triggers : [],
+  };
+}
+
+export function agentGitHubRepositories(config: AgentConfig): AgentGitHubRepositoryConfig[] {
+  return normalizeAgentConfig(config).integrations.github.repositories;
+}
+
 export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
   return {
     id: agent.id,
     workspaceId: agent.workspaceId,
     path: agent.path,
     name: agent.name,
-    config: agent.config,
+    config: normalizeAgentConfig(agent.config),
     githubSyncStatus: agent.githubSyncStatus,
     githubSyncError: agent.githubSyncError,
     createdAt: agent.createdAt.toISOString(),
@@ -57,9 +87,11 @@ export function serializeAgentDetail(
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
 ): AgentDetailPayload {
+  const config = normalizeAgentConfig(agent.config);
+
   return {
     ...serializeAgentListItem(agent),
-    body: agent.body || agent.config.instructions,
+    body: agent.body || config.instructions,
     content: agent.content,
     githubCommitSha: agent.githubCommitSha,
     githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,

@@ -191,7 +191,7 @@ describe("syncGitHubIntegrationRepositories", () => {
     expect(db.deleteTargets).not.toContain(workspaceIntegrations);
   });
 
-  it("persists the GitHub user OAuth token in the sync transaction", async () => {
+  it("persists the GitHub user OAuth token without using unsupported HTTP transactions", async () => {
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 1).toString("base64"));
 
     await syncGitHubIntegrationRepositories({
@@ -203,7 +203,7 @@ describe("syncGitHubIntegrationRepositories", () => {
       userOAuthToken: "ghu_secret",
     });
 
-    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(db.transaction).not.toHaveBeenCalled();
     expect(db.insertValues).toEqual(
       expect.arrayContaining([
         {

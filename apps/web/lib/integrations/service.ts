@@ -35,132 +35,130 @@ export async function syncGitHubIntegrationRepositories(input: {
     ...(input.connectedByUserId ? { connectedByUserId: input.connectedByUserId } : {}),
   };
 
-  await db.transaction(async (tx) => {
-    const [integration] = await tx
-      .insert(workspaceIntegrations)
-      .values({
-        id: newWorkspaceIntegrationId(),
-        workspaceId: input.workspaceId,
-        provider: GITHUB_INTEGRATION_PROVIDER,
-        externalId: input.installationId,
-        connectionLabel,
-        accountName: input.accountLogin,
-        accountEmail: null,
-        accountType: input.accountType,
-        connectedByUserId: input.connectedByUserId ?? null,
-        status: "connected",
-        statusReason: null,
-        lastSyncedAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [
-          workspaceIntegrations.workspaceId,
-          workspaceIntegrations.provider,
-          workspaceIntegrations.externalId,
-        ],
-        set: integrationUpdate,
-      })
-      .returning({ id: workspaceIntegrations.id });
+  const [integration] = await db
+    .insert(workspaceIntegrations)
+    .values({
+      id: newWorkspaceIntegrationId(),
+      workspaceId: input.workspaceId,
+      provider: GITHUB_INTEGRATION_PROVIDER,
+      externalId: input.installationId,
+      connectionLabel,
+      accountName: input.accountLogin,
+      accountEmail: null,
+      accountType: input.accountType,
+      connectedByUserId: input.connectedByUserId ?? null,
+      status: "connected",
+      statusReason: null,
+      lastSyncedAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        workspaceIntegrations.workspaceId,
+        workspaceIntegrations.provider,
+        workspaceIntegrations.externalId,
+      ],
+      set: integrationUpdate,
+    })
+    .returning({ id: workspaceIntegrations.id });
 
-    if (!integration) {
-      throw new Error("Could not persist GitHub integration.");
-    }
+  if (!integration) {
+    throw new Error("Could not persist GitHub integration.");
+  }
 
-    if (input.userOAuthToken) {
-      await saveIntegrationCredential({
-        workspaceId: input.workspaceId,
-        integrationId: integration.id,
-        provider: GITHUB_INTEGRATION_PROVIDER,
-        kind: "oauth_token",
-        payload: { accessToken: input.userOAuthToken },
-        db: tx,
-        now,
-      });
-    }
-
-    const resourceValues = input.repositories.map((repository) => ({
-      id: newWorkspaceIntegrationResourceId(),
+  if (input.userOAuthToken) {
+    await saveIntegrationCredential({
       workspaceId: input.workspaceId,
       integrationId: integration.id,
       provider: GITHUB_INTEGRATION_PROVIDER,
-      resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
-      externalId: repository.githubRepoId,
-      name: repository.fullName,
-      displayName: repository.fullName,
-      status: "available" as const,
-      statusReason: null,
-      lastSyncedAt: now,
-      metadata: {
-        defaultBranch: repository.defaultBranch,
-        private: repository.private,
-      },
-      updatedAt: now,
-    }));
+      kind: "oauth_token",
+      payload: { accessToken: input.userOAuthToken },
+      db,
+      now,
+    });
+  }
 
-    if (resourceValues.length > 0) {
-      await tx
-        .insert(workspaceIntegrationResources)
-        .values(resourceValues)
-        .onConflictDoUpdate({
-          target: [
-            workspaceIntegrationResources.integrationId,
-            workspaceIntegrationResources.resourceType,
+  const resourceValues = input.repositories.map((repository) => ({
+    id: newWorkspaceIntegrationResourceId(),
+    workspaceId: input.workspaceId,
+    integrationId: integration.id,
+    provider: GITHUB_INTEGRATION_PROVIDER,
+    resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
+    externalId: repository.githubRepoId,
+    name: repository.fullName,
+    displayName: repository.fullName,
+    status: "available" as const,
+    statusReason: null,
+    lastSyncedAt: now,
+    metadata: {
+      defaultBranch: repository.defaultBranch,
+      private: repository.private,
+    },
+    updatedAt: now,
+  }));
+
+  if (resourceValues.length > 0) {
+    await db
+      .insert(workspaceIntegrationResources)
+      .values(resourceValues)
+      .onConflictDoUpdate({
+        target: [
+          workspaceIntegrationResources.integrationId,
+          workspaceIntegrationResources.resourceType,
+          workspaceIntegrationResources.externalId,
+        ],
+        set: {
+          workspaceId: input.workspaceId,
+          integrationId: integration.id,
+          provider: GITHUB_INTEGRATION_PROVIDER,
+          resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
+          name: sql`excluded.name`,
+          displayName: sql`excluded.display_name`,
+          status: "available",
+          statusReason: null,
+          lastSyncedAt: now,
+          metadata: sql`excluded.metadata`,
+          updatedAt: now,
+        },
+      });
+  }
+
+  const staleResourceUpdate = {
+    status: "permission_lost" as const,
+    statusReason: "Repository is no longer visible to the GitHub installation.",
+    lastSyncedAt: now,
+    updatedAt: now,
+  };
+
+  if (input.repositories.length > 0) {
+    await db
+      .update(workspaceIntegrationResources)
+      .set(staleResourceUpdate)
+      .where(
+        and(
+          eq(workspaceIntegrationResources.integrationId, integration.id),
+          eq(workspaceIntegrationResources.workspaceId, input.workspaceId),
+          eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+          eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+          notInArray(
             workspaceIntegrationResources.externalId,
-          ],
-          set: {
-            workspaceId: input.workspaceId,
-            integrationId: integration.id,
-            provider: GITHUB_INTEGRATION_PROVIDER,
-            resourceType: GITHUB_REPOSITORY_RESOURCE_TYPE,
-            name: sql`excluded.name`,
-            displayName: sql`excluded.display_name`,
-            status: "available",
-            statusReason: null,
-            lastSyncedAt: now,
-            metadata: sql`excluded.metadata`,
-            updatedAt: now,
-          },
-        });
-    }
-
-    const staleResourceUpdate = {
-      status: "permission_lost" as const,
-      statusReason: "Repository is no longer visible to the GitHub installation.",
-      lastSyncedAt: now,
-      updatedAt: now,
-    };
-
-    if (input.repositories.length > 0) {
-      await tx
-        .update(workspaceIntegrationResources)
-        .set(staleResourceUpdate)
-        .where(
-          and(
-            eq(workspaceIntegrationResources.integrationId, integration.id),
-            eq(workspaceIntegrationResources.workspaceId, input.workspaceId),
-            eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
-            eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
-            notInArray(
-              workspaceIntegrationResources.externalId,
-              input.repositories.map((repository) => repository.githubRepoId),
-            ),
+            input.repositories.map((repository) => repository.githubRepoId),
           ),
-        );
-    } else {
-      await tx
-        .update(workspaceIntegrationResources)
-        .set(staleResourceUpdate)
-        .where(
-          and(
-            eq(workspaceIntegrationResources.integrationId, integration.id),
-            eq(workspaceIntegrationResources.workspaceId, input.workspaceId),
-            eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
-            eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
-          ),
-        );
-    }
-  });
+        ),
+      );
+  } else {
+    await db
+      .update(workspaceIntegrationResources)
+      .set(staleResourceUpdate)
+      .where(
+        and(
+          eq(workspaceIntegrationResources.integrationId, integration.id),
+          eq(workspaceIntegrationResources.workspaceId, input.workspaceId),
+          eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
+          eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
+        ),
+      );
+  }
 }
 
 export async function markGitHubIntegrationStatus(input: {
