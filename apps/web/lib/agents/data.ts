@@ -128,6 +128,7 @@ export async function loadAgentForWorkspace(
   return serializeAgentDetail(agent, brainPaths, derivationRepositories, usableRepositories, {
     mcpEnabled: mcpSettings.mcpEnabled,
     linearConfigured: mcpSettings.linear.configured,
+    slackConfigured: mcpSettings.slack.configured,
   });
 }
 

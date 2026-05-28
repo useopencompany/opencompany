@@ -44,13 +44,26 @@ describe("agent editor mention tools", () => {
     });
   });
 
-  test("only exposes Linear MCP when MCP tools are enabled for the workspace", () => {
+  test("only exposes configured MCP tools for the workspace", () => {
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:linear")).toBe(
       false,
     );
+    expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:slack")).toBe(
+      false,
+    );
     expect(
-      buildAgentMentionItems([], [], { includeMcpTools: true }).some(
+      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
         (item) => item.mentionId === "tool:linear",
+      ),
+    ).toBe(true);
+    expect(
+      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
+        (item) => item.mentionId === "tool:slack",
+      ),
+    ).toBe(false);
+    expect(
+      buildAgentMentionItems([], [], { enabledMcpToolIds: ["slack"] }).some(
+        (item) => item.mentionId === "tool:slack",
       ),
     ).toBe(true);
   });

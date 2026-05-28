@@ -160,11 +160,12 @@ export function toConfigTool(
     };
   }
 
-  if (tool.id === "linear") {
+  if (tool.type === "mcp") {
+    if (!tool.server) throw new Error(`MCP tool ${tool.id} is missing a server binding.`);
     return {
-      id: "linear",
+      id: tool.server,
       type: "mcp",
-      server: "linear",
+      server: tool.server,
       label: tool.label,
       description: tool.description,
     };

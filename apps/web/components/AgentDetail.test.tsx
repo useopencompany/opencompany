@@ -150,6 +150,7 @@ const detailAgent: AgentDetailPayload = {
   mcp: {
     mcpEnabled: false,
     linearConfigured: false,
+    slackConfigured: false,
   },
 };
 
