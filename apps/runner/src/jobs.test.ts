@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunnerEnv } from "./env";
-import { ToolStepLimitExceededError } from "./runner-errors";
 import {
   claimNextRunnerJob,
   type EnqueueRunnerJobInput,
@@ -13,6 +12,7 @@ import {
   runClaimedRunnerJob,
   startRunnerJobWorker,
 } from "./jobs";
+import { ToolStepLimitExceededError } from "./runner-errors";
 
 afterEach(() => {
   vi.useRealTimers();

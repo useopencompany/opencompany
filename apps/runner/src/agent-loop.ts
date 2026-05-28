@@ -93,6 +93,8 @@ export {
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
 } from "./lease-writes";
+export { collectAssistantStream } from "./model-stream-runner";
+export { ToolStepLimitExceededError } from "./runner-errors";
 export { abortSession, archiveSession, startSession } from "./session-lifecycle";
 export {
   normalizeReasoningSummary,
@@ -101,8 +103,6 @@ export {
 } from "./stream-helpers";
 export { createHostedToolBudget, executeRuntimeTool } from "./tool-dispatcher";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
-export { collectAssistantStream } from "./model-stream-runner";
-export { ToolStepLimitExceededError } from "./runner-errors";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 const MAX_AGENT_DELEGATION_DEPTH = 2;
