@@ -111,8 +111,10 @@ runner sandbox with an installation token minted from the workspace work integra
 not the managed workspace-state installation.
 
 AMP itself is modeled as an agent tool, not a workspace integration. Workspace-scoped provider
-credentials are not required for AMP; the runner uses the platform `AMP_API_KEY` only when the AMP
-tool runs.
+credentials are not required for AMP; the runner uses the platform `AMP_API_KEY` when the AMP tool
+runs. For GitHub-backed AMP runs, the runner also passes a short-lived, repository-scoped GitHub App
+installation token into that AMP process so `gh` and HTTPS Git operations use the same work
+integration identity as the clone.
 
 ## Agent Sessions
 

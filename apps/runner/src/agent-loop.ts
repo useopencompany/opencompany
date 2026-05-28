@@ -70,8 +70,11 @@ import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-
 
 export {
   buildAmpCommand,
+  buildAmpCommandEnv,
   createAmpActivityFormatter,
   createAmpStreamAccumulator,
+  createKnownSecretRedactor,
+  selectPublishBranch,
 } from "./amp-tool";
 export {
   acquireRunLease,

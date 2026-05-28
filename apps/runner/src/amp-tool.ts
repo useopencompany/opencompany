@@ -12,6 +12,8 @@ import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
+const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
+
 export async function runAmpCoderTool(input: {
   sandbox: SandboxHandle;
   workdir: string;
@@ -46,6 +48,22 @@ export async function runAmpCoderTool(input: {
   }
 
   const ampApiKey = loadPlatformAmpApiKey(input.env);
+  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+  const githubToken = await getGitHubWorkInstallationToken({
+    installationId: integrationRepository.installationId,
+    repositoryFullName: repository.fullName,
+  });
+  if (!githubToken) {
+    throw new Error("GitHub App credentials are required to run AMP in a GitHub work repository.");
+  }
+  const githubAuthHeader = gitAuthHeader(githubToken);
+  const ampEnv = buildAmpCommandEnv({
+    ampApiKey,
+    githubAuthHeader,
+    githubToken,
+    toolCallId: input.toolCallId,
+  });
+  const redactAmpOutput = createKnownSecretRedactor([ampApiKey, githubToken, githubAuthHeader]);
   const layout = sandboxLayout(input.workdir);
   await input.sandbox.commands.run(
     `git config --global --add safe.directory ${shellQuote(layout.workRoot)}`,
@@ -61,21 +79,25 @@ export async function runAmpCoderTool(input: {
   }
   const ampStream = createAmpStreamAccumulator();
   const ampActivity = createAmpActivityFormatter();
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(ampEnv.GH_CONFIG_DIR)}`, {
+    timeoutMs: 30_000,
+  });
   const result = await input.sandbox.commands.run(
     `cd ${shellQuote(layout.workRoot)} && ${buildAmpCommand({
       task,
       ampThreadId: requestedAmpThreadId,
     })}`,
     {
-      envs: { AMP_API_KEY: ampApiKey },
+      envs: ampEnv,
       timeoutMs: 600_000,
       onStdout: async (data: string) => {
-        ampStream.push(data);
-        const activity = ampActivity.push(data);
+        const redacted = redactAmpOutput(data);
+        ampStream.push(redacted);
+        const activity = ampActivity.push(redacted);
         if (activity) await input.onOutput?.(activity);
       },
       onStderr: async (data: string) => {
-        await input.onOutput?.(data);
+        await input.onOutput?.(redactAmpOutput(data));
       },
     },
   );
@@ -100,40 +122,53 @@ export async function runAmpCoderTool(input: {
     { timeoutMs: 60_000 },
   );
   const hasDiff = String(diffStatus.stdout ?? "").trim().length > 0;
+  const currentBranch = await readCurrentGitBranch(input.sandbox, layout.workRoot);
+  const localCommitCount = await readLocalCommitCount(
+    input.sandbox,
+    layout.workRoot,
+    repository.defaultBranch,
+  );
   let branchName: string | null = null;
   let pullRequestUrl: string | null = null;
 
-  if (args.createPullRequest === true && hasDiff) {
+  if (args.createPullRequest === true) {
     if (!ampTool.prCapable) {
       throw new Error("AMP is not configured for pull request creation.");
     }
-    const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+    const ampCreatedPrUrl = await readPullRequestUrlForBranch(
+      input.sandbox,
+      layout.workRoot,
+      currentBranch,
+      ampEnv,
+    );
+    if (ampCreatedPrUrl) {
+      branchName = currentBranch;
+      pullRequestUrl = ampCreatedPrUrl;
+    }
+  }
+
+  if (args.createPullRequest === true && !pullRequestUrl && (hasDiff || localCommitCount > 0)) {
     await requireLeaseWrite(
       isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
     );
-    const token = await getGitHubWorkInstallationToken({
-      installationId: integrationRepository.installationId,
-      repositoryFullName: repository.fullName,
+    branchName = selectPublishBranch({
+      currentBranch,
+      defaultBranch: repository.defaultBranch,
+      sessionId: input.sessionId,
+      now: Date.now(),
     });
-    if (!token) {
-      throw new Error("GitHub App credentials are required to push AMP changes.");
-    }
-    branchName = `opencompany/amp-${input.sessionId.slice(-8)}-${Date.now()}`;
     const commitMessage = normalizeCommitMessage(
       typeof args.pullRequestTitle === "string" ? args.pullRequestTitle : task,
     );
-    await input.sandbox.commands.run(
-      [
-        `cd ${shellQuote(layout.workRoot)}`,
-        `git config user.name ${shellQuote("OpenCompany Agent")}`,
-        `git config user.email ${shellQuote("agents@opencompany.ai")}`,
-        `git checkout -b ${shellQuote(branchName)}`,
-        "git add -A",
-        `git commit -m ${shellQuote(commitMessage)}`,
-        `git remote set-url origin ${shellQuote(githubRemoteUrl(repository.fullName))}`,
-      ].join(" && "),
-      { timeoutMs: 120_000 },
-    );
+    const prepareCommands = [
+      `cd ${shellQuote(layout.workRoot)}`,
+      `git config user.name ${shellQuote("OpenCompany Agent")}`,
+      `git config user.email ${shellQuote("agents@opencompany.ai")}`,
+      ...(branchName === currentBranch ? [] : [`git checkout -b ${shellQuote(branchName)}`]),
+      ...(hasDiff ? ["git add -A", `git commit -m ${shellQuote(commitMessage)}`] : []),
+      `git remote set-url origin ${shellQuote(githubRemoteUrl(repository.fullName))}`,
+    ];
+    await input.sandbox.commands.run(prepareCommands.join(" && "), { timeoutMs: 120_000 });
     await requireLeaseWrite(
       isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
     );
@@ -141,7 +176,7 @@ export async function runAmpCoderTool(input: {
       `cd ${shellQuote(layout.workRoot)} && git ${gitAuthExtraHeaderArg()} push origin ${shellQuote(
         branchName,
       )}`,
-      { envs: { GITHUB_TOKEN: token }, timeoutMs: 180_000 },
+      { envs: { [GITHUB_AUTH_HEADER_ENV]: githubAuthHeader }, timeoutMs: 180_000 },
     );
     await requireLeaseWrite(
       isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
@@ -152,7 +187,7 @@ export async function runAmpCoderTool(input: {
       title: commitMessage,
       head: branchName,
       base: repository.defaultBranch,
-      body: ["Created by OpenCompany AMP.", "", `Task: ${task}`].join("\n"),
+      body: ["Created by OpenCompany AMP.", "", `Task: ${redactAmpOutput(task)}`].join("\n"),
     });
     pullRequestUrl = pr.html_url ?? null;
   }
@@ -173,15 +208,18 @@ export async function runAmpCoderTool(input: {
       externalId: ampSummary.threadId,
       repositoryFullName: repository.fullName,
       branchName,
-      diffStat: truncateText(formatAmpDiffStat(diffStat.stdout, diffStatus.stdout), 4000),
-      diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
+      diffStat: truncateText(
+        redactAmpOutput(formatAmpDiffStat(diffStat.stdout, diffStatus.stdout)),
+        4000,
+      ),
+      diffPreview: truncateText(redactAmpOutput(String(diffPreview.stdout ?? "")), 24_000),
       metadata: {
         continuedFromAmpThreadId: requestedAmpThreadId,
         ampStatus: ampSummary.status,
-        ampError: ampSummary.error,
+        ampError: ampSummary.error ? redactAmpOutput(ampSummary.error) : null,
         ampDurationMs: ampSummary.durationMs,
         ampNumTurns: ampSummary.numTurns,
-        ampPermissionDenials: ampSummary.permissionDenials,
+        ampPermissionDenials: ampSummary.permissionDenials.map(redactAmpOutput),
         exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
       },
     });
@@ -191,14 +229,17 @@ export async function runAmpCoderTool(input: {
     ampThreadId: ampSummary.threadId,
     continuedFromAmpThreadId: requestedAmpThreadId,
     ampStatus: ampSummary.status,
-    ampResult: truncateText(ampSummary.result, 24_000),
-    ampError: ampSummary.error,
+    ampResult: truncateText(redactAmpOutput(ampSummary.result), 24_000),
+    ampError: ampSummary.error ? redactAmpOutput(ampSummary.error) : null,
     ampDurationMs: ampSummary.durationMs,
     ampNumTurns: ampSummary.numTurns,
-    ampPermissionDenials: ampSummary.permissionDenials,
+    ampPermissionDenials: ampSummary.permissionDenials.map(redactAmpOutput),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
-    diffStat: truncateText(formatAmpDiffStat(diffStat.stdout, diffStatus.stdout), 4000),
-    diffPreview: truncateText(String(diffPreview.stdout ?? ""), 24_000),
+    diffStat: truncateText(
+      redactAmpOutput(formatAmpDiffStat(diffStat.stdout, diffStatus.stdout)),
+      4000,
+    ),
+    diffPreview: truncateText(redactAmpOutput(String(diffPreview.stdout ?? "")), 24_000),
     branchName,
     pullRequestUrl,
   };
@@ -221,6 +262,61 @@ export function buildAmpCommand(input: { task: string; ampThreadId?: string | nu
   }
 
   return `amp --dangerously-allow-all --stream-json -x ${task}`;
+}
+
+export function buildAmpCommandEnv(input: {
+  ampApiKey: string;
+  githubAuthHeader: string;
+  githubToken: string;
+  toolCallId: string;
+}) {
+  return {
+    AMP_API_KEY: input.ampApiKey,
+    ...buildGitHubCommandEnv(input),
+  };
+}
+
+export function buildGitHubCommandEnv(input: {
+  githubAuthHeader: string;
+  githubToken: string;
+  toolCallId: string;
+}) {
+  return {
+    GH_TOKEN: input.githubToken,
+    GH_PROMPT_DISABLED: "1",
+    GH_NO_UPDATE_NOTIFIER: "1",
+    GH_CONFIG_DIR: `/tmp/opencompany-gh-${safePathSegment(input.toolCallId)}`,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_0: input.githubAuthHeader,
+  };
+}
+
+export function createKnownSecretRedactor(secrets: Array<string | null | undefined>) {
+  const patterns = [...new Set(secrets.filter((secret): secret is string => Boolean(secret)))]
+    .filter((secret) => secret.length >= 6)
+    .sort((a, b) => b.length - a.length);
+
+  return (value: string) => {
+    let output = value;
+    for (const secret of patterns) {
+      output = output.split(secret).join("[redacted]");
+    }
+    return output;
+  };
+}
+
+export function selectPublishBranch(input: {
+  currentBranch: string | null;
+  defaultBranch: string;
+  sessionId: string;
+  now: number;
+}) {
+  if (input.currentBranch && input.currentBranch !== input.defaultBranch) {
+    return input.currentBranch;
+  }
+
+  return `opencompany/amp-${input.sessionId.slice(-8)}-${input.now}`;
 }
 
 export async function loadGitHubWorkRepository(
@@ -604,6 +700,50 @@ function compactWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+async function readCurrentGitBranch(sandbox: SandboxHandle, workRoot: string) {
+  const result = await sandbox.commands.run(
+    `cd ${shellQuote(workRoot)} && git branch --show-current`,
+    { timeoutMs: 30_000 },
+  );
+  const branch = String(result.stdout ?? "").trim();
+  return branch || null;
+}
+
+async function readLocalCommitCount(
+  sandbox: SandboxHandle,
+  workRoot: string,
+  defaultBranch: string,
+) {
+  const result = await sandbox.commands.run(
+    `cd ${shellQuote(workRoot)} && git rev-list --count ${shellQuote(
+      `origin/${defaultBranch}..HEAD`,
+    )} 2>/dev/null || printf '0\\n'`,
+    { timeoutMs: 30_000 },
+  );
+  const count = Number.parseInt(String(result.stdout ?? "").trim(), 10);
+  return Number.isFinite(count) ? count : 0;
+}
+
+async function readPullRequestUrlForBranch(
+  sandbox: SandboxHandle,
+  workRoot: string,
+  branch: string | null,
+  envs: Record<string, string>,
+) {
+  if (!branch) return null;
+
+  const result = await sandbox.commands.run(
+    `cd ${shellQuote(workRoot)} && gh pr view ${shellQuote(
+      branch,
+    )} --json url --jq .url 2>/dev/null || true`,
+    { envs, timeoutMs: 60_000 },
+  );
+  const url = String(result.stdout ?? "").trim();
+  return /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/.test(url)
+    ? url
+    : null;
+}
+
 function normalizeCommitMessage(value: string) {
   const firstLine = value
     .split("\n")
@@ -622,7 +762,17 @@ function githubRemoteUrl(repositoryFullName: string) {
 }
 
 function gitAuthExtraHeaderArg() {
-  return '-c http.extraheader="Authorization: Bearer $GITHUB_TOKEN"';
+  return `-c http.extraheader="$${GITHUB_AUTH_HEADER_ENV}"`;
+}
+
+function gitAuthHeader(token: string) {
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64",
+  )}`;
+}
+
+function safePathSegment(value: string) {
+  return value.replace(/[^A-Za-z0-9_.-]/g, "-") || "amp";
 }
 
 export async function readSandboxBrainSnapshot(sandbox: SandboxHandle, workdir: string) {
