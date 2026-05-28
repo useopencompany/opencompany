@@ -294,11 +294,12 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     const id = setInterval(() => setTick((n) => n + 1), 1_000);
     return () => clearInterval(id);
   }, []);
+  const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
   const sessionFeedsLooksStale =
-    hasRunningAssistantMessage &&
+    awaitingAssistantWork &&
     lastRuntimeActivityMs !== null &&
     Date.now() - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
-  const showStaleBanner = hasRunningAssistantMessage && (stream.status === "stale" || sessionFeedsLooksStale);
+  const showStaleBanner = awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
     const el = textareaRef.current;
