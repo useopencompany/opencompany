@@ -263,6 +263,8 @@ function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfi
           prCapable: readBoolean(record.prCapable) ?? true,
         }),
       );
+    } else if (id === "linear") {
+      tools.push(toConfigTool(definition));
     } else {
       tools.push(toConfigTool(definition));
     }
@@ -281,6 +283,13 @@ function serializeTools(tools: AgentConfigTool[]) {
         provider: tool.provider,
         repository: tool.repository,
         prCapable: tool.prCapable,
+      };
+    }
+    if (tool.id === "linear") {
+      return {
+        id: tool.id,
+        type: tool.type,
+        server: tool.server,
       };
     }
 

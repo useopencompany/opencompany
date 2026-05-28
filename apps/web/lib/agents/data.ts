@@ -9,6 +9,7 @@ import { and, asc, desc, eq, or } from "drizzle-orm";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
+  agentGitHubRepositories,
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
   serializeAgentDetail,
@@ -18,6 +19,7 @@ import {
   GITHUB_INTEGRATION_PROVIDER,
   GITHUB_REPOSITORY_RESOURCE_TYPE,
 } from "@/lib/integrations/service";
+import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 
 async function loadBrainPathsForWorkspace(workspaceId: string): Promise<string[]> {
   const db = getDb();
@@ -100,7 +102,7 @@ export async function loadAgentForWorkspace(
   idOrPath: string,
 ): Promise<AgentDetailPayload | null> {
   const db = getDb();
-  const [[agent], brainPaths, githubIntegrationRepositories] = await Promise.all([
+  const [[agent], brainPaths, githubIntegrationRepositories, mcpSettings] = await Promise.all([
     db
       .select()
       .from(agents)
@@ -113,16 +115,20 @@ export async function loadAgentForWorkspace(
       .limit(1),
     loadBrainPathsForWorkspace(workspaceId),
     loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
+    loadWorkspaceMcpSettingsForWorkspace(workspaceId),
   ]);
 
   if (!agent) return null;
 
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubIntegrationRepositories,
-    savedRepositories: agent.config.integrations.github.repositories,
+    savedRepositories: agentGitHubRepositories(agent.config),
   });
 
-  return serializeAgentDetail(agent, brainPaths, derivationRepositories, usableRepositories);
+  return serializeAgentDetail(agent, brainPaths, derivationRepositories, usableRepositories, {
+    mcpEnabled: mcpSettings.mcpEnabled,
+    linearConfigured: mcpSettings.linear.configured,
+  });
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

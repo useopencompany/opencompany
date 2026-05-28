@@ -147,6 +147,10 @@ const detailAgent: AgentDetailPayload = {
       binding,
     },
   ],
+  mcp: {
+    mcpEnabled: false,
+    linearConfigured: false,
+  },
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);

@@ -1,4 +1,8 @@
-import { type AgentConfig, serializeAgentFile } from "@opencompany/agent-runtime";
+import {
+  type AgentConfig,
+  normalizeAgentConfig,
+  serializeAgentFile,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionAfterSessionRuns,
@@ -32,29 +36,30 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
   let sessionRepository: ReturnType<typeof resolveSessionRepository> = null;
+  const agentConfig = normalizeAgentConfig(row.agent.config);
   try {
     sandbox = await createOrConnectSandbox({
       sandboxId: row.session.e2bSandboxId,
-      template: resolveSandboxTemplate(row.agent.config, env),
+      template: resolveSandboxTemplate(agentConfig, env),
       envs: {
         E2B_API_KEY: env.e2bApiKey,
         VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
       },
       idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
     });
-    sessionRepository = resolveSessionRepository(row);
+    sessionRepository = resolveSessionRepository(agentConfig);
     const githubToken = await resolveGitHubToken(row, sessionRepository);
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
       agentFile: serializeAgentFile({
-        title: row.agent.config.title,
-        body: row.agent.config.instructions,
-        model: row.agent.config.model.name,
-        tools: row.agent.config.tools,
-        brain: row.agent.config.brain,
-        integrations: row.agent.config.integrations,
-        triggers: row.agent.config.triggers,
+        title: agentConfig.title,
+        body: agentConfig.instructions,
+        model: agentConfig.model.name,
+        tools: agentConfig.tools,
+        brain: agentConfig.brain,
+        integrations: agentConfig.integrations,
+        triggers: agentConfig.triggers,
       }),
       repositoryFullName: sessionRepository?.fullName,
       repositoryDefaultBranch: sessionRepository?.defaultBranch,
@@ -65,7 +70,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       sessionId: row.session.id,
       workspaceId: row.workspace.id,
       workdir: row.session.workdir,
-      references: row.agent.config.brain,
+      references: agentConfig.brain,
     });
     return sandbox;
   } catch (error) {
@@ -96,12 +101,11 @@ function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
     : env.e2bTemplate;
 }
 
-function resolveSessionRepository(row: LoadedSession) {
-  const config = row.agent.config as AgentConfig;
-  const ampTool = config.tools.find((tool) => tool.id === "amp");
+function resolveSessionRepository(agentConfig: AgentConfig) {
+  const ampTool = agentConfig.tools.find((tool) => tool.id === "amp");
   if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
   return (
-    config.integrations.github.repositories.find(
+    agentConfig.integrations.github.repositories.find(
       (repository) => repository.id === ampTool.repository,
     ) ?? null
   );

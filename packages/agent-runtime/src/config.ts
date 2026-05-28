@@ -1,6 +1,14 @@
 import { getAgentModelRuntimeOptions, type ModelProviderOptions } from "./models";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
-import type { AgentConfig } from "./types";
+import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
+
+type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & {
+  integrations?: {
+    github?: {
+      repositories?: AgentGitHubRepositoryConfig[];
+    };
+  };
+};
 
 export type ResolvedAgentRuntimeConfig = {
   systemPrompt: string;
@@ -12,6 +20,7 @@ export type ResolvedAgentRuntimeConfig = {
     exposeReasoningSummary: boolean;
   };
   tools: RuntimeToolName[];
+  mcpServers: AgentMcpToolConfig[];
 };
 
 export function resolveAgentRuntimeConfig(input: {
@@ -53,7 +62,30 @@ export function resolveAgentRuntimeConfig(input: {
       exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
     },
     tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
+    mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
+}
+
+export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
+  const persisted = config as PartialPersistedAgentConfig;
+
+  return {
+    ...config,
+    tools: Array.isArray(persisted.tools) ? persisted.tools : [],
+    brain: Array.isArray(persisted.brain) ? persisted.brain : [],
+    integrations: {
+      github: {
+        repositories: Array.isArray(persisted.integrations?.github?.repositories)
+          ? persisted.integrations.github.repositories
+          : [],
+      },
+    },
+    triggers: Array.isArray(persisted.triggers) ? persisted.triggers : [],
+  };
+}
+
+export function agentGitHubRepositories(config: AgentConfig): AgentGitHubRepositoryConfig[] {
+  return normalizeAgentConfig(config).integrations.github.repositories;
 }
 
 function formatBrainReferencePath(path: string) {

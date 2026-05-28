@@ -12,6 +12,7 @@ import {
   FileText,
   Folder,
   GitBranch,
+  ListTodo,
   type LucideIcon,
   Search,
 } from "lucide-react";
@@ -74,6 +75,7 @@ export type AgentMentionItem =
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   amp: Code2,
+  linear: ListTodo,
 };
 
 const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
@@ -138,6 +140,7 @@ export function buildAgentMentionItems(
     statusReason?: string | null;
   }> = [],
   brainPaths: string[] = [],
+  options: { includeMcpTools?: boolean } = {},
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
     id: "github",
@@ -168,7 +171,7 @@ export function buildAgentMentionItems(
 
   return [
     ...AGENT_MODELS,
-    ...AGENT_TOOLS,
+    ...AGENT_TOOLS.filter((tool) => tool.id !== "linear" || options.includeMcpTools),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),

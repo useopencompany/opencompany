@@ -4,6 +4,7 @@ import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { hashAgentSource } from "@/lib/agents/hash";
+import { normalizeAgentConfig } from "@/lib/agents/payload";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import { nextSyncRetryAt } from "@/lib/sync-outbox/retry";
 import {
@@ -65,14 +66,15 @@ export async function materializeAgentToGitHub(
     return { status: "deferred", nextRunAt: row.job.nextRunAt };
   }
 
+  const config = normalizeAgentConfig(row.agent.config);
   const source = serializeAgentFile({
     title: row.agent.name,
     body: row.agent.body,
-    model: row.agent.config.model.name,
-    tools: row.agent.config.tools,
-    brain: row.agent.config.brain,
-    integrations: row.agent.config.integrations,
-    triggers: row.agent.config.triggers,
+    model: config.model.name,
+    tools: config.tools,
+    brain: config.brain,
+    integrations: config.integrations,
+    triggers: config.triggers,
   });
   const contentHash = hashAgentSource(source);
   const pendingRename =
