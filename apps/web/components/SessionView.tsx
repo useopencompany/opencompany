@@ -218,6 +218,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   );
   const showWaitingForAssistant =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
+  const showStoppedAfterUser =
+    !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
   const canAbort = sessionCanGenerate;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
@@ -482,6 +484,10 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
                 <WorkingIndicator />
+              </div>
+            ) : showStoppedAfterUser ? (
+              <div className="flex justify-start">
+                <AssistantStoppedNotice />
               </div>
             ) : null}
 
