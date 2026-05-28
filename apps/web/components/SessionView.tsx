@@ -279,7 +279,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   // (wall-clock time) so we can show the stale banner even when SSE reconnects keep
   // flipping stream.status away from "stale" before the 10s timeout is reached.
   // Initialized from session.updatedAt so sessions with no events still get a baseline.
-  const STALE_THRESHOLD_MS = 15_000;
+  const STALE_THRESHOLD_MS = 45_000;
   const [lastRuntimeActivityMs, setLastRuntimeActivityMs] = useState<number>(() =>
     Date.parse(detail.session.updatedAt),
   );
