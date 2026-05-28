@@ -23,6 +23,7 @@ import {
   MessagesSquare,
   PanelRight,
   Play,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,6 +38,7 @@ import {
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,
@@ -51,7 +53,7 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { updateAgent } from "@/lib/agents/actions";
+import { deleteAgent, updateAgent } from "@/lib/agents/actions";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
@@ -155,6 +157,7 @@ function AgentDetailContent({
   const [, startTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -479,8 +482,28 @@ function AgentDetailContent({
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
+
+      <DeleteAgentDialog
+        agentName={agent.name}
+        isOpen={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={async () => {
+          const result = await deleteAgent(agent.id);
+          if (!result.ok) {
+            setShowDeleteDialog(false);
+            showError(result.error, "Could not delete agent");
+            return;
+          }
+          queryClient.setQueryData<AgentListItemPayload[]>(
+            agentQueryKeys.list(workspaceId),
+            (current) => (current ?? []).filter((item) => item.id !== agent.id),
+          );
+          router.push("/agents");
+        }}
+      />
 
       <button
         type="button"
@@ -535,6 +558,7 @@ function AgentInspector({
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  onDeleteClick,
 }: {
   name: string;
   path: string | null;
@@ -550,6 +574,7 @@ function AgentInspector({
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  onDeleteClick: () => void;
 }) {
   return (
     <div className="space-y-8">
@@ -669,6 +694,17 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+
+      <div className="border-t border-[#e4e4e0] pt-6">
+        <button
+          type="button"
+          onClick={onDeleteClick}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff0ed]"
+        >
+          <Trash2 size={13} strokeWidth={1.9} />
+          Delete agent
+        </button>
+      </div>
     </div>
   );
 }

@@ -51,6 +51,7 @@ import {
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
+  deleteWorkspaceFile,
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
   readWorkspaceFile,
@@ -396,6 +397,76 @@ export async function updateAgent(
   });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
+}
+
+export async function deleteAgent(
+  idOrPath: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trace = startTimingTrace("agents.delete");
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+  const decodedPath = decodeURIComponent(idOrPath);
+
+  const [agent] = await timeAsync(trace, "db.selectAgent", () =>
+    db
+      .select({
+        id: agents.id,
+        path: agents.path,
+        githubBlobSha: agents.githubBlobSha,
+      })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.workspaceId, workspace.id),
+          or(eq(agents.id, idOrPath), eq(agents.path, decodedPath)),
+        ),
+      )
+      .limit(1),
+  );
+
+  if (!agent) {
+    endTimingTrace(trace, { found: false });
+    return { ok: false, error: "Agent not found." };
+  }
+
+  try {
+    if (agent.path) {
+      const repository = await timeAsync(trace, "github.ensureRepository", () =>
+        ensureWorkspaceRepository({ db, workspace }),
+      );
+      await timeAsync(
+        trace,
+        "github.deleteWorkspaceFile",
+        () =>
+          deleteWorkspaceFile({
+            db,
+            repository,
+            path: agent.path!,
+            message: `Delete ${agent.path}`,
+            blobSha: agent.githubBlobSha,
+          }),
+        { path: agent.path },
+      );
+    }
+  } catch {
+    // GitHub file deletion is best-effort; proceed with DB deletion.
+  }
+
+  await timeAsync(trace, "db.deleteAgent", () =>
+    db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+  );
+
+  await captureServerEvent("agent_deleted", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+  });
+
+  revalidatePath("/agents");
+  if (agent.path) revalidatePath(`/agents/${agent.path}`);
+  revalidatePath(`/agents/${agent.id}`);
+  endTimingTrace(trace, { found: true, path: agent.path });
+  return { ok: true };
 }
 
 function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tiptapBody?: string }) {
