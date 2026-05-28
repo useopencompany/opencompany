@@ -1,4 +1,5 @@
 import {
+  type AgentConfig,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   type RuntimeToolDefinition,
 } from "@opencompany/agent-runtime";
@@ -40,6 +41,11 @@ const observabilityMocks = vi.hoisted(() => ({
   captureException: vi.fn(),
 }));
 
+const githubMocks = vi.hoisted(() => ({
+  createDraftPullRequest: vi.fn(),
+  getGitHubWorkInstallationToken: vi.fn(),
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
 }));
@@ -55,6 +61,15 @@ vi.mock("@opencompany/observability", async (importOriginal) => {
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
 }));
+
+vi.mock("./github", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./github")>();
+  return {
+    ...actual,
+    createDraftPullRequest: githubMocks.createDraftPullRequest,
+    getGitHubWorkInstallationToken: githubMocks.getGitHubWorkInstallationToken,
+  };
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -333,6 +348,157 @@ describe("usage recording", () => {
       toolName: "exa_search",
       toolCallId: "call_exa",
     });
+  });
+
+  it("records Amp usage streamed through the runtime tool dispatcher", async () => {
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubWorkRepositories: [
+        {
+          integrationId: "wint_123",
+          fullName: "opencompany/web",
+          installationId: "12345",
+          connectionLabel: "opencompany",
+          connectionStatus: "connected",
+          connectionStatusReason: null,
+          resourceStatus: "available",
+          resourceStatusReason: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_123");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ threadID: "T-amp-usage", usage: 0.00815 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    const sandboxRun = vi.fn(
+      async (command: string, options?: { onStdout?: (data: string) => void }) => {
+        if (command.includes("git rev-parse --is-inside-work-tree")) return { stdout: "true" };
+        if (command.includes("amp --dangerously-allow-all")) {
+          options?.onStdout?.(
+            `${JSON.stringify({
+              type: "assistant",
+              message: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "text", text: "working" }],
+                usage: { input_tokens: 100, output_tokens: 20 },
+              },
+              session_id: "T-amp-usage",
+            })}\n`,
+          );
+          options?.onStdout?.(
+            `${JSON.stringify({
+              type: "result",
+              subtype: "success",
+              duration_ms: 500,
+              is_error: false,
+              num_turns: 1,
+              result: "done",
+              session_id: "T-amp-usage",
+              usage: {
+                input_tokens: 1_000,
+                cache_creation_input_tokens: 25,
+                cache_read_input_tokens: 50,
+                output_tokens: 100,
+              },
+            })}\n`,
+          );
+          return { stdout: "", exitCode: 0 };
+        }
+        if (command.includes("git status --short")) return { stdout: "" };
+        if (command.includes("git diff HEAD --stat")) return { stdout: "" };
+        if (command.includes("git diff HEAD -- | head -400")) return { stdout: "" };
+        if (command.includes("git branch --show-current")) return { stdout: "main\n" };
+        if (command.includes("git rev-list --count")) return { stdout: "0\n" };
+        return { stdout: "" };
+      },
+    );
+    const ampAgentConfig = agentConfig();
+    ampAgentConfig.tools = [
+      {
+        id: "amp",
+        type: "coding_agent",
+        provider: "amp",
+        label: "Amp",
+        description: "Delegate coding work to Amp.",
+        repository: "opencompany-web",
+        prCapable: false,
+      },
+    ];
+    ampAgentConfig.integrations.github.repositories = [
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+      },
+    ];
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        agentConfig: ampAgentConfig,
+        toolCallId: "call_amp",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("amp_coder") as RuntimeToolDefinition,
+        args: { task: "implement the change" },
+        getSandbox: (async () => ({
+          sandboxId: "sbx_amp",
+          commands: { run: sandboxRun },
+        })) as never,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["amp_coder"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).resolves.toMatchObject({
+      ampThreadId: "T-amp-usage",
+      usage: {
+        provider: "amp",
+        operation: "session",
+        costUsdMicros: 8_150,
+        rawUsage: {
+          input_tokens: 1_000,
+          cache_creation_input_tokens: 25,
+          cache_read_input_tokens: 50,
+          output_tokens: 100,
+        },
+      },
+    });
+
+    expect(db.state.toolUsage).toEqual([
+      expect.objectContaining({
+        toolCallId: "call_amp",
+        toolName: "amp_coder",
+        provider: "amp",
+        operation: "session",
+        costUsdMicros: 8_150,
+      }),
+    ]);
+    expect(db.state.ledgerDebits).toBe(1);
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "session.tool_usage",
+        payload: expect.objectContaining({
+          toolCallId: "call_amp",
+          provider: "amp",
+          operation: "session",
+          costUsdMicros: 8_150,
+        }),
+      }),
+    );
   });
 
   it("reuses an incomplete assistant response for a retried user message", async () => {
@@ -1309,6 +1475,7 @@ function createLeaseDb(input: {
   runLeaseId?: string | null;
   runLeaseExpiresAt?: Date | null;
   messages?: MessageState[];
+  githubWorkRepositories?: unknown[];
 }) {
   const state = {
     session: {
@@ -1370,6 +1537,9 @@ function createLeaseDb(input: {
       return {
         from(table: unknown) {
           return {
+            innerJoin() {
+              return this;
+            },
             where() {
               return {
                 async limit() {
@@ -1389,6 +1559,7 @@ function createLeaseDb(input: {
                       }))
                       .slice(0, 1);
                   }
+                  if (input.githubWorkRepositories) return input.githubWorkRepositories;
                   return [];
                 },
               };
@@ -1485,7 +1656,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   };
 }
 
-function agentConfig() {
+function agentConfig(): AgentConfig {
   return {
     schemaVersion: "agent.v1" as const,
     title: "Test agent",

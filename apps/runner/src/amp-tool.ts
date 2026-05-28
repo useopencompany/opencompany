@@ -228,7 +228,7 @@ export async function runAmpCoderTool(input: {
 
   const ampUsage = ampSummary.usage;
   const costUsdMicros = ampSummary.threadId
-    ? (await fetchAmpThreadCost(ampSummary.threadId, ampApiKey)) ?? 0
+    ? ((await fetchAmpThreadCost(ampSummary.threadId, ampApiKey)) ?? 0)
     : 0;
 
   return {
