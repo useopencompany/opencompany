@@ -23,6 +23,27 @@ import {
 } from "@/lib/agents/payload";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const DRAFT_STORAGE_PREFIX = "opencompany-prompt-draft:";
+
+function readDraft(workspaceId: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(`${DRAFT_STORAGE_PREFIX}${workspaceId}`) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeDraft(workspaceId: string, value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const key = `${DRAFT_STORAGE_PREFIX}${workspaceId}`;
+    if (value.length === 0) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // ignore — localStorage may be disabled (private mode, quota, etc.)
+  }
+}
 
 type AgentOption = {
   id: string;
@@ -34,7 +55,10 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { showToast } = useToast();
-  const [input, setInput] = useState("");
+  // Restore any draft persisted from a previous mount — e.g. when the user
+  // typed a prompt, hit submit, was redirected through onboarding, and
+  // landed back here. Without this the typed content is silently lost.
+  const [input, setInput] = useState(() => readDraft(workspaceId));
   const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -43,15 +67,28 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
 
+  // Mirror the in-flight prompt to localStorage so navigations away (redirect
+  // to onboarding, auth callback, etc.) don't lose the user's draft.
+  useEffect(() => {
+    writeDraft(workspaceId, input);
+  }, [workspaceId, input]);
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    if (input.length === 0) {
-      el.style.height = "";
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    const resize = () => {
+      if (el.value.length === 0) {
+        el.style.height = "";
+        return;
+      }
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    };
+    resize();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(resize);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [input]);
 
   const submit = () => {
@@ -67,12 +104,17 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       const result = await createAgentSessionFromPrompt(selectedAgentId, content);
       if (!result.ok) {
         if ("redirectTo" in result) {
+          // Draft stays in localStorage so the user finds it when they return.
           router.push(result.redirectTo);
           return;
         }
         setError(result.error);
         return;
       }
+      // Session created — draft is now committed as the first user message, so
+      // we can safely clear the persisted draft before navigating.
+      setInput("");
+      writeDraft(workspaceId, "");
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(`/session/${result.session.id}`);
     });

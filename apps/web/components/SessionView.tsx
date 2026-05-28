@@ -264,12 +264,21 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    if (input.length === 0) {
-      el.style.height = "";
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    const resize = () => {
+      if (el.value.length === 0) {
+        el.style.height = "";
+        return;
+      }
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+    };
+    resize();
+    // Recompute when the textarea's box changes width (window resize, inspector
+    // panel toggle, column width tween) so the height tracks the real content.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(resize);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [input]);
 
   // Browsers don't always fire a final `dragleave` when the user drags out of
@@ -432,7 +441,14 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                       type="button"
                       onClick={() => {
                         setInput(chip);
-                        textareaRef.current?.focus();
+                        // Defer focus + caret-to-end so React has committed the
+                        // new value before we position the cursor.
+                        requestAnimationFrame(() => {
+                          const el = textareaRef.current;
+                          if (!el) return;
+                          el.focus();
+                          el.setSelectionRange(chip.length, chip.length);
+                        });
                       }}
                       className="rounded-full border border-[#e6e6e3] bg-white px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
                     >
@@ -468,7 +484,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                     ) : (
                       message.content
                     )}
-                    {canCopy && message.status !== "running" ? (
+                    {canCopy ? (
                       <CopyMessageButton
                         text={copyText}
                         align={message.role === "user" ? "right" : "left"}
