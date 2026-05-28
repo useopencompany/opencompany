@@ -1049,13 +1049,13 @@ describe("stream error handling", () => {
 describe("Amp stream parsing", () => {
   it("starts a new Amp thread when no prior thread id is provided", () => {
     expect(buildAmpCommand({ task: "implement the change" })).toBe(
-      "amp --dangerously-allow-all --mode smart --stream-json -x 'implement the change'",
+      "amp --dangerously-allow-all --mode smart -x 'implement the change'",
     );
   });
 
   it("allows Amp mode to be selected for harder tasks", () => {
-    expect(buildAmpCommand({ task: "implement the change", mode: "large" })).toBe(
-      "amp --dangerously-allow-all --mode large --stream-json -x 'implement the change'",
+    expect(buildAmpCommand({ task: "implement the change", mode: "deep" })).toBe(
+      "amp --dangerously-allow-all --mode deep -x 'implement the change'",
     );
   });
 
@@ -1067,7 +1067,7 @@ describe("Amp stream parsing", () => {
         mode: "rush",
       }),
     ).toBe(
-      "amp threads continue --dangerously-allow-all --mode rush --stream-json -x 'address the follow-up' 'T-2775dc92-90ed-4f85-8b73-8f9766029e83'",
+      "amp threads continue --dangerously-allow-all --mode rush -x 'address the follow-up' 'T-2775dc92-90ed-4f85-8b73-8f9766029e83'",
     );
   });
 
@@ -1323,6 +1323,20 @@ describe("Amp stream parsing", () => {
       threadId: "T-456",
       status: "success",
       result: "assistant fallback",
+      error: null,
+    });
+  });
+
+  it("captures plain Amp output when JSON streaming is not requested", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push("\u001b[?25hWorking on it...\n");
+    stream.push("Done with the implementation.\n");
+
+    expect(stream.summary({ exitCode: 0 })).toMatchObject({
+      threadId: null,
+      status: "success",
+      result: "Working on it...\nDone with the implementation.",
       error: null,
     });
   });

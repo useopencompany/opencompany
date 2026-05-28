@@ -263,9 +263,9 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         mode: {
           type: "string",
-          enum: ["smart", "large", "rush"],
+          enum: ["smart", "large", "rush", "deep"],
           description:
-            "Amp execution mode. Defaults to smart. Use large for harder long-running coding tasks, rush for latency-sensitive tasks. Do not use deep because Amp rejects deep mode with stream JSON output.",
+            "Amp execution mode. Defaults to smart. Use large or deep for harder long-running coding tasks, and rush for latency-sensitive tasks.",
           default: "smart",
         },
       },
