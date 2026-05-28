@@ -14,6 +14,8 @@ services:
         sync: false
       - key: RUNNER_STREAM_TOKEN_SECRET
         sync: false
+      - key: INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
+        sync: false
       - key: RUNNER_ALLOWED_ORIGINS
         sync: false
       - key: E2B_API_KEY

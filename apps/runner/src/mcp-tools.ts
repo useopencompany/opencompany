@@ -14,7 +14,7 @@ import {
   workspaceMcpCredentials,
   workspaceMcpServers,
 } from "@opencompany/db/schema";
-import { captureException } from "@opencompany/observability";
+import { captureException, createLogger } from "@opencompany/observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { and, eq } from "drizzle-orm";
 import {
@@ -36,6 +36,7 @@ const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 const ENCRYPTION_KEY_VERSION = 1;
 const ENCRYPTION_KEY_BYTE_LENGTH = 32;
 const IV_BYTE_LENGTH = 12;
+const logger = createLogger({ service: "opencompany-runner" });
 
 type McpToolContext = {
   sessionId: string;
@@ -67,7 +68,41 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   );
   if (!wantsLinear) return emptyMcpToolSet();
 
-  const linear = await loadLinearMcpConnection(input.workspaceId);
+  const linear = await loadLinearMcpConnection(input.workspaceId).catch((error: unknown) => {
+    const diagnostic = mcpConnectionErrorDiagnostic(error);
+    logger.error("Linear MCP connection setup failed", {
+      event: "opencompany.runner_mcp_connection_failed",
+      workspace_id: input.observabilityContext?.workspaceId ?? input.workspaceId,
+      user_id: input.observabilityContext?.userId,
+      agent_id: input.observabilityContext?.agentId,
+      session_id: input.sessionId,
+      message_id: input.assistantMessageId,
+      mcp_server: LINEAR_MCP_SERVER_KEY,
+      mcp_failure_reason: diagnostic.reason,
+      ...(diagnostic.credentialKind ? { mcp_credential_kind: diagnostic.credentialKind } : {}),
+      ...(diagnostic.encryptionKeyVersion
+        ? { mcp_credential_key_version: diagnostic.encryptionKeyVersion }
+        : {}),
+      ...(diagnostic.algorithm ? { mcp_credential_algorithm: diagnostic.algorithm } : {}),
+      error,
+    });
+    captureException(error, {
+      event: "opencompany.runner_mcp_connection_failed",
+      workspace_id: input.observabilityContext?.workspaceId ?? input.workspaceId,
+      user_id: input.observabilityContext?.userId,
+      agent_id: input.observabilityContext?.agentId,
+      session_id: input.sessionId,
+      message_id: input.assistantMessageId,
+      mcp_server: LINEAR_MCP_SERVER_KEY,
+      mcp_failure_reason: diagnostic.reason,
+      ...(diagnostic.credentialKind ? { mcp_credential_kind: diagnostic.credentialKind } : {}),
+      ...(diagnostic.encryptionKeyVersion
+        ? { mcp_credential_key_version: diagnostic.encryptionKeyVersion }
+        : {}),
+      ...(diagnostic.algorithm ? { mcp_credential_algorithm: diagnostic.algorithm } : {}),
+    });
+    throw error;
+  });
   const transport =
     linear.auth.type === "oauth"
       ? {
@@ -522,7 +557,14 @@ function decryptPayload(
     if (error instanceof Error && error.message.includes("Unsupported MCP credential")) {
       throw error;
     }
-    throw new Error("MCP credential could not be decrypted.");
+    if (isEncryptionKeyConfigurationError(error)) {
+      throw error;
+    }
+    throw new McpCredentialDecryptionError({
+      kind: context.kind,
+      keyVersion: context.keyVersion,
+      algorithm: encryptedPayload.algorithm,
+    });
   }
 }
 
@@ -574,6 +616,45 @@ function loadEncryptionKey() {
     throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
   }
   return key;
+}
+
+type McpConnectionErrorDiagnostic = {
+  reason: string;
+  credentialKind?: string;
+  encryptionKeyVersion?: number;
+  algorithm?: string;
+};
+
+function mcpConnectionErrorDiagnostic(error: unknown): McpConnectionErrorDiagnostic {
+  if (isEncryptionKeyConfigurationError(error)) {
+    return { reason: "encryption_key_configuration" };
+  }
+  if (error instanceof McpCredentialDecryptionError) {
+    return {
+      reason: "credential_decryption_failed",
+      credentialKind: error.context.kind,
+      encryptionKeyVersion: error.context.keyVersion,
+      algorithm: error.context.algorithm,
+    };
+  }
+  if (error instanceof Error && error.message.includes("Unsupported MCP credential")) {
+    return { reason: "unsupported_credential_encryption" };
+  }
+  return { reason: "connection_setup_failed" };
+}
+
+class McpCredentialDecryptionError extends Error {
+  context: { kind: string; keyVersion: number; algorithm: string };
+
+  constructor(context: { kind: string; keyVersion: number; algorithm: string }) {
+    super("MCP credential could not be decrypted.");
+    this.name = "McpCredentialDecryptionError";
+    this.context = context;
+  }
+}
+
+function isEncryptionKeyConfigurationError(error: unknown) {
+  return error instanceof Error && error.message.includes(ENCRYPTION_KEY_ENV);
 }
 
 function newWorkspaceMcpCredentialId() {
