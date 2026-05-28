@@ -55,6 +55,7 @@ import {
   RunAbortError,
   RunLeaseLostError,
 } from "./run-control";
+import { ToolStepLimitExceededError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
   abortSession,
@@ -100,9 +101,12 @@ export {
 } from "./stream-helpers";
 export { createHostedToolBudget, executeRuntimeTool } from "./tool-dispatcher";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
+export { collectAssistantStream } from "./model-stream-runner";
+export { ToolStepLimitExceededError } from "./runner-errors";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 const MAX_AGENT_DELEGATION_DEPTH = 2;
+export const MAX_MODEL_STEPS = 16;
 
 export async function runMessage(input: {
   sessionId: string;
@@ -293,23 +297,23 @@ export async function runMessage(input: {
       }),
     });
 
-    const { assistantContent, assistantReplayParts, reasoningSummary } =
-      await streamAssistantResponse({
-        ctx,
-        runtime,
-        system: runtime.systemPrompt,
-        messages,
-        tools,
-        mcpContext: {
-          workspaceId: row.workspace.id,
-          agentConfig: row.agent.config,
-          signal: ctx.controller.signal,
-          checkAbort,
-          observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
-        },
-        assistantMessageId,
+    const streamResult = await streamAssistantResponse({
+      ctx,
+      runtime,
+      system: runtime.systemPrompt,
+      messages,
+      tools,
+      mcpContext: {
+        workspaceId: row.workspace.id,
+        agentConfig: row.agent.config,
+        signal: ctx.controller.signal,
         checkAbort,
-      });
+        observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+      },
+      assistantMessageId,
+      checkAbort,
+    });
+    const { assistantContent, assistantReplayParts, reasoningSummary } = streamResult;
 
     if (sandboxAcquirer.current) {
       const activeSandbox = sandboxAcquirer.current;
@@ -325,9 +329,7 @@ export async function runMessage(input: {
     }
 
     await checkAbort();
-    if (!assistantContent && assistantReplayParts.length === 0) {
-      throw new Error("Model stream completed without text or tool calls.");
-    }
+    assertTurnComplete(streamResult);
 
     await persistAssistantCompletion({
       sessionId: input.sessionId,
@@ -478,6 +480,21 @@ export async function runMessage(input: {
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
     });
+  }
+}
+
+export function assertTurnComplete(
+  streamResult: Pick<
+    Awaited<ReturnType<typeof collectAssistantStream>>,
+    "assistantContent" | "assistantReplayParts" | "lastStepEndedWithToolCalls" | "stepCount"
+  >,
+) {
+  if (!streamResult.assistantContent && streamResult.assistantReplayParts.length === 0) {
+    throw new Error("Model stream completed without text or tool calls.");
+  }
+
+  if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
+    throw new ToolStepLimitExceededError();
   }
 }
 
@@ -1981,7 +1998,7 @@ async function streamAssistantResponse(input: {
         ...pickRuntimeTools(input.tools, input.runtime.tools),
         ...mcpToolSet.tools,
       },
-      stopWhen: stepCountIs(8),
+      stopWhen: stepCountIs(MAX_MODEL_STEPS),
       abortSignal: input.ctx.controller.signal,
       ...(input.runtime.model.providerOptions
         ? { providerOptions: input.runtime.model.providerOptions }

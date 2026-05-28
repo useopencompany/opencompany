@@ -1,4 +1,4 @@
-import type { TextStreamPart, ToolSet } from "ai";
+import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import { recordStepUsage } from "./usage-recorder";
@@ -22,6 +22,8 @@ export async function collectAssistantStream(input: {
   const assistantReplayParts: AssistantReplayPart[] = [];
   let reasoningSummary = "";
   let stepIndex = 0;
+  let lastFinishReason: FinishReason | undefined;
+  let lastRawFinishReason: string | undefined;
 
   const iterator = input.stream[Symbol.asyncIterator]();
   let next = input.readFirstPart ? await input.readFirstPart(iterator) : await iterator.next();
@@ -43,6 +45,8 @@ export async function collectAssistantStream(input: {
 
     if (part.type === "finish-step") {
       stepIndex += 1;
+      lastFinishReason = part.finishReason;
+      lastRawFinishReason = part.rawFinishReason;
       await recordStepUsage({
         sessionId: input.sessionId,
         assistantMessageId: input.assistantMessageId,
@@ -70,7 +74,15 @@ export async function collectAssistantStream(input: {
     next = await iterator.next();
   }
 
-  return { assistantContent, assistantReplayParts, reasoningSummary };
+  return {
+    assistantContent,
+    assistantReplayParts,
+    reasoningSummary,
+    stepCount: stepIndex,
+    lastFinishReason,
+    lastRawFinishReason,
+    lastStepEndedWithToolCalls: lastFinishReason === "tool-calls",
+  };
 }
 
 function throwIfAborted(signal: AbortSignal) {
