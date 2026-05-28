@@ -1,24 +1,23 @@
 "use client";
 
 import { Loader2, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 type Props = {
   agentName: string;
   isOpen: boolean;
+  isPending: boolean;
   onClose: () => void;
-  onConfirm: () => Promise<void>;
+  onConfirm: () => void;
 };
 
-export function DeleteAgentDialog({ agentName, isOpen, onClose, onConfirm }: Props) {
+export function DeleteAgentDialog({ agentName, isOpen, isPending, onClose, onConfirm }: Props) {
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const [isPending, setIsPending] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
 
     const frame = window.requestAnimationFrame(() => {
-      setIsPending(false);
       cancelRef.current?.focus();
     });
 
@@ -31,25 +30,21 @@ export function DeleteAgentDialog({ agentName, isOpen, onClose, onConfirm }: Pro
     if (!isOpen) return;
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        // Don't close while delete is in-flight — user thinks Escape cancelled
+        // but the server action continues regardless.
+        if (isPending) return;
+        onClose();
+      }
     }
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, isPending, onClose]);
 
   if (!isOpen) return null;
-
-  async function handleConfirm() {
-    setIsPending(true);
-    try {
-      await onConfirm();
-    } finally {
-      setIsPending(false);
-    }
-  }
 
   return (
     <div
@@ -88,7 +83,7 @@ export function DeleteAgentDialog({ agentName, isOpen, onClose, onConfirm }: Pro
           </button>
           <button
             type="button"
-            onClick={handleConfirm}
+            onClick={onConfirm}
             disabled={isPending}
             className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#efd0ca] bg-[#fff7f5] px-3 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff0ed] disabled:cursor-not-allowed disabled:opacity-65"
           >

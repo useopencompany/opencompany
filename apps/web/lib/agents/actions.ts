@@ -17,7 +17,9 @@ import {
   brainFiles,
   workspaceIntegrationResources,
   workspaceIntegrations,
+  workspaceRepositories,
 } from "@opencompany/db/schema";
+import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -57,6 +59,8 @@ import {
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export async function createAgent() {
   const trace = startTimingTrace("agents.create");
@@ -402,10 +406,21 @@ export async function updateAgent(
 export async function deleteAgent(
   idOrPath: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Require admin for destructive operations (matches codebase convention).
+  // Resolve the workspace before starting the timing trace so a non-admin
+  // throw doesn't leak an unclosed trace.
+  const { user, workspace } = await currentWorkspace({ requireAdmin: true });
   const trace = startTimingTrace("agents.delete");
-  const { user, workspace } = await currentWorkspace();
   const db = getDb();
-  const decodedPath = decodeURIComponent(idOrPath);
+
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(idOrPath);
+  } catch {
+    // Guard against malformed percent-encoded identifiers.
+    endTimingTrace(trace, { found: false });
+    return { ok: false, error: "Invalid agent identifier." };
+  }
 
   const [agent] = await timeAsync(trace, "db.selectAgent", () =>
     db
@@ -429,32 +444,72 @@ export async function deleteAgent(
     return { ok: false, error: "Agent not found." };
   }
 
-  try {
-    if (agent.path) {
-      const repository = await timeAsync(trace, "github.ensureRepository", () =>
-        ensureWorkspaceRepository({ db, workspace }),
-      );
-      await timeAsync(
-        trace,
-        "github.deleteWorkspaceFile",
-        () =>
-          deleteWorkspaceFile({
-            db,
-            repository,
-            path: agent.path!,
-            message: `Delete ${agent.path}`,
-            blobSha: agent.githubBlobSha,
-          }),
-        { path: agent.path },
-      );
-    }
-  } catch {
-    // GitHub file deletion is best-effort; proceed with DB deletion.
-  }
-
+  // Delete from DB first so the sync worker cannot resurrect the agent between
+  // our DB delete and the GitHub delete. The cascade on agentSyncJobs removes
+  // pending sync jobs atomically.
   await timeAsync(trace, "db.deleteAgent", () =>
     db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
   );
+
+  // Look up the repository without creating one; log GitHub failures instead
+  // of swallowing them silently.
+  if (agent.path) {
+    try {
+      const [repository] = await timeAsync(trace, "db.selectWorkspaceRepository", () =>
+        db
+          .select({
+            workspaceId: workspaceRepositories.workspaceId,
+            githubRepoId: workspaceRepositories.githubRepoId,
+            fullName: workspaceRepositories.fullName,
+            defaultBranch: workspaceRepositories.defaultBranch,
+            latestHeadSha: workspaceRepositories.latestHeadSha,
+            createdAt: workspaceRepositories.createdAt,
+            updatedAt: workspaceRepositories.updatedAt,
+          })
+          .from(workspaceRepositories)
+          .where(eq(workspaceRepositories.workspaceId, workspace.id))
+          .limit(1),
+      );
+
+      if (!repository) {
+        logger.warn("No workspace repository found; skipping GitHub file deletion", {
+          event: "opencompany.agent_delete_no_repository",
+          workspace_id: workspace.id,
+          agent_id: agent.id,
+          path: agent.path,
+        });
+      } else {
+        await timeAsync(
+          trace,
+          "github.deleteWorkspaceFile",
+          () =>
+            deleteWorkspaceFile({
+              db,
+              repository,
+              path: agent.path!,
+              message: `Delete ${agent.path}`,
+              blobSha: agent.githubBlobSha,
+            }),
+          { path: agent.path },
+        );
+      }
+    } catch (err) {
+      // GitHub file deletion is best-effort; the DB row is already gone.
+      captureException(err, {
+        event: "opencompany.agent_delete_github_failed",
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        path: agent.path,
+      });
+      logger.error("Failed to delete agent file from GitHub", {
+        event: "opencompany.agent_delete_github_failed",
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        path: agent.path,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   await captureServerEvent("agent_deleted", user.id, {
     user_id: user.id,

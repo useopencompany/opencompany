@@ -155,6 +155,7 @@ function AgentDetailContent({
   );
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -489,19 +490,35 @@ function AgentDetailContent({
       <DeleteAgentDialog
         agentName={agent.name}
         isOpen={showDeleteDialog}
+        isPending={isDeleting}
         onClose={() => setShowDeleteDialog(false)}
-        onConfirm={async () => {
-          const result = await deleteAgent(agent.id);
-          if (!result.ok) {
-            setShowDeleteDialog(false);
-            showError(result.error, "Could not delete agent");
-            return;
-          }
-          queryClient.setQueryData<AgentListItemPayload[]>(
-            agentQueryKeys.list(workspaceId),
-            (current) => (current ?? []).filter((item) => item.id !== agent.id),
-          );
-          router.push("/agents");
+        onConfirm={() => {
+          startDeleteTransition(async () => {
+            try {
+              const result = await deleteAgent(agent.id);
+              if (!result.ok) {
+                setShowDeleteDialog(false);
+                showError(result.error, "Could not delete agent");
+                return;
+              }
+              // Close the dialog before navigating so it doesn't stay open on
+              // the success path (mirrors the error branch above).
+              setShowDeleteDialog(false);
+              queryClient.setQueryData<AgentListItemPayload[]>(
+                agentQueryKeys.list(workspaceId),
+                (current) => (current ?? []).filter((item) => item.id !== agent.id),
+              );
+              router.push("/agents");
+            } catch (err) {
+              // Server actions can throw (e.g. non-admin requireAdmin guard);
+              // surface as a toast instead of bubbling to the error boundary.
+              setShowDeleteDialog(false);
+              showError(
+                err instanceof Error ? err.message : "Could not delete agent",
+                "Could not delete agent",
+              );
+            }
+          });
         }}
       />
 
