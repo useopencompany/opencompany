@@ -32,6 +32,7 @@ import {
   StaleRunLeaseError,
   updateSandboxForLease,
 } from "./lease-writes";
+import { createMcpToolSet } from "./mcp-tools";
 import {
   appendAssistantTextPart,
   buildAssistantModelMessage,
@@ -274,6 +275,13 @@ export async function runMessage(input: {
         system: runtime.systemPrompt,
         messages,
         tools,
+        mcpContext: {
+          workspaceId: row.workspace.id,
+          agentConfig: row.agent.config,
+          signal: ctx.controller.signal,
+          checkAbort,
+          observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+        },
         assistantMessageId,
         checkAbort,
       });
@@ -671,6 +679,14 @@ export async function runAfterSession(input: {
         system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
         messages,
         tools,
+        mcpContext: {
+          internalMessages: true,
+          workspaceId: row.workspace.id,
+          agentConfig: row.agent.config,
+          signal: ctx.controller.signal,
+          checkAbort,
+          observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+        },
         assistantMessageId,
         checkAbort,
       });
@@ -924,41 +940,69 @@ async function streamAssistantResponse(input: {
   system: string;
   messages: ModelMessage[];
   tools: ReturnType<typeof createToolSet>;
+  mcpContext: {
+    internalMessages?: boolean;
+    workspaceId: string;
+    agentConfig: LoadedSession["agent"]["config"];
+    signal: AbortSignal;
+    checkAbort: () => Promise<void>;
+    observabilityContext?: {
+      workspaceId?: string;
+      userId?: string;
+      agentId?: string;
+      modelProvider?: string;
+      modelName?: string;
+    };
+  };
   assistantMessageId: string;
   checkAbort: () => Promise<void>;
 }) {
   const gateway = createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
-  const result = streamText({
-    model: gateway(input.runtime.model.name),
-    system: buildCacheableSystemPrompt(input.system, input.runtime.model.name),
-    messages: input.messages,
-    tools: pickRuntimeTools(input.tools, input.runtime.tools),
-    stopWhen: stepCountIs(8),
-    abortSignal: input.ctx.controller.signal,
-    ...(input.runtime.model.providerOptions
-      ? { providerOptions: input.runtime.model.providerOptions }
-      : {}),
+  const mcpToolSet = await createMcpToolSet({
+    sessionId: input.ctx.sessionId,
+    assistantMessageId: input.assistantMessageId,
+    runLeaseId: input.ctx.leaseId,
+    runLeaseOwner: input.ctx.leaseOwner,
+    ...input.mcpContext,
   });
+  try {
+    const result = streamText({
+      model: gateway(input.runtime.model.name),
+      system: buildCacheableSystemPrompt(input.system, input.runtime.model.name),
+      messages: input.messages,
+      tools: {
+        ...pickRuntimeTools(input.tools, input.runtime.tools),
+        ...mcpToolSet.tools,
+      },
+      stopWhen: stepCountIs(8),
+      abortSignal: input.ctx.controller.signal,
+      ...(input.runtime.model.providerOptions
+        ? { providerOptions: input.runtime.model.providerOptions }
+        : {}),
+    });
 
-  return timeAsync(input.ctx.trace, "model_stream_total", () =>
-    collectAssistantStream({
-      stream: result.fullStream,
-      readFirstPart: (iterator) =>
-        timeAsync(input.ctx.trace, "model_first_stream_part", () => iterator.next(), {
-          model_provider: input.runtime.model.provider,
-          model_name: input.runtime.model.name,
-        }),
-      sessionId: input.ctx.sessionId,
-      assistantMessageId: input.assistantMessageId,
-      runLeaseId: input.ctx.leaseId,
-      runLeaseOwner: input.ctx.leaseOwner,
-      modelProvider: input.runtime.model.provider,
-      modelName: input.runtime.model.name,
-      exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
-      signal: input.ctx.controller.signal,
-      checkAbort: input.checkAbort,
-    }),
-  );
+    return await timeAsync(input.ctx.trace, "model_stream_total", () =>
+      collectAssistantStream({
+        stream: result.fullStream,
+        readFirstPart: (iterator) =>
+          timeAsync(input.ctx.trace, "model_first_stream_part", () => iterator.next(), {
+            model_provider: input.runtime.model.provider,
+            model_name: input.runtime.model.name,
+          }),
+        sessionId: input.ctx.sessionId,
+        assistantMessageId: input.assistantMessageId,
+        runLeaseId: input.ctx.leaseId,
+        runLeaseOwner: input.ctx.leaseOwner,
+        modelProvider: input.runtime.model.provider,
+        modelName: input.runtime.model.name,
+        exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
+        signal: input.ctx.controller.signal,
+        checkAbort: input.checkAbort,
+      }),
+    );
+  } finally {
+    await mcpToolSet.close();
+  }
 }
 
 async function persistAssistantCompletion(input: {

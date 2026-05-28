@@ -90,6 +90,7 @@ details are catalog data in code, not `.agent` file data.
 | ----- | ------------------------------------------------ |
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
+| `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
 
 ```yaml
 tools:
@@ -98,7 +99,13 @@ tools:
     provider: amp
     repository: opencompany-web
     prCapable: true
+  - id: linear
+    type: mcp
+    server: linear
 ```
+
+MCP tools are beta workspace tools. The `.agent` file only records the MCP server binding; tokens
+and endpoint setup live in workspace MCP settings and are never serialized into the agent file.
 
 ### `brain` — list of strings
 
@@ -349,11 +356,10 @@ editor consumes that catalog through `apps/web/lib/agents/config.ts` and
 the new ID are unaffected; clients that don't recognize a new ID will fall back
 gracefully.
 
-Tool availability is static for the MVP: every workspace can use every supported catalog tool. The
-catalog records each tool's default enabled state, platform env requirements, and required workspace
-resource type when applicable so future admin controls can add a small workspace settings resolver
-without changing `.agent` files. Missing workspace tool settings should use the catalog default,
-which is currently enabled.
+Tool availability is mostly static for the MVP. Beta MCP tools are gated by workspace experiments
+and workspace MCP server setup before they appear in the editor or run in the runner. The catalog
+records each tool's default enabled state, credential source, platform env requirements, and
+required workspace resource type when applicable.
 
 **How do I evolve the format?**
 Bump `schemaVersion` in `packages/db/src/schema.ts` and add a normalizer in `parseAgentFile`. Keep additions additive so existing files keep parsing as `agent.v1` until they're re-serialized.

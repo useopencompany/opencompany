@@ -35,6 +35,10 @@ export type AgentDetailPayload = AgentListItemPayload & {
   brainPaths: string[];
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
+  mcp: {
+    mcpEnabled: boolean;
+    linearConfigured: boolean;
+  };
 };
 
 export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
@@ -56,6 +60,7 @@ export function serializeAgentDetail(
   brainPaths: string[] = [],
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
+  mcp: AgentDetailPayload["mcp"] = { mcpEnabled: false, linearConfigured: false },
 ): AgentDetailPayload {
   return {
     ...serializeAgentListItem(agent),
@@ -66,6 +71,7 @@ export function serializeAgentDetail(
     brainPaths,
     githubIntegrationRepositories,
     usableGitHubIntegrationRepositories,
+    mcp,
   };
 }
 

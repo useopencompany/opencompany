@@ -107,6 +107,8 @@ V1 tools:
 - `list_files`
 - `git_diff`
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
+- `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
+  experiment on, and Linear MCP has a workspace bearer token configured
 
 `amp_coder` returns an `ampThreadId`. Later follow-up tasks can pass that id back as
 `ampThreadId` so the runner invokes `amp threads continue` instead of starting a fresh Amp thread.
@@ -164,6 +166,7 @@ Required environment variables:
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
+- `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:

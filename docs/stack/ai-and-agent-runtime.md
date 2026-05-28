@@ -148,15 +148,21 @@ Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
 
+Experimental MCP tools are enabled by workspace setup plus agent configuration:
+
+- `linear__*` tools when the workspace has the MCP beta on, Linear MCP is configured, and the
+  agent mentions `@linear`
+
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 
 The static agent tool catalog also records availability metadata for future workspace-level
 administration: the stable tool id, label, runtime tools it exposes, default enabled state,
 credential source, required platform env vars, and required workspace resource type when applicable.
-For the MVP, all workspaces can use every supported catalog tool. Missing workspace tool settings
-therefore mean "use the catalog default", which is currently enabled for every tool. Resource-bound
-tools still validate the concrete workspace connection or resource when the tool runs, and
-platform-backed tools fail with setup errors when required env vars are missing.
+For the MVP, all stable catalog tools are available to every workspace. Beta MCP tools are an
+exception: they require a workspace experiment row, a `workspace_mcp_servers` entry, and encrypted
+workspace MCP credentials. Resource-bound tools still validate the concrete workspace connection or
+resource when the tool runs, and platform-backed tools fail with setup errors when required env vars
+are missing.
 
 **Operational rule:** Adding a runtime tool changes product capability, safety posture, billing
 surface, and docs. Update this register, the agent file docs, and tests in the same change.

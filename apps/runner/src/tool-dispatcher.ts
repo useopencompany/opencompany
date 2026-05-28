@@ -134,7 +134,7 @@ export function createToolSet(input: {
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
         }),
-    });
+    }) as ToolSet[string];
   }
 
   return tools;
