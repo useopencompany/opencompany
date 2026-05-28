@@ -251,6 +251,13 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           description:
             "Existing ampThreadId from a previous amp_coder result to continue instead of starting a new Amp thread.",
         },
+        mode: {
+          type: "string",
+          enum: ["smart", "large", "rush"],
+          description:
+            "Amp execution mode. Defaults to smart. Use large for harder long-running coding tasks, rush for latency-sensitive tasks. Do not use deep because Amp rejects deep mode with stream JSON output.",
+          default: "smart",
+        },
       },
       required: ["task"],
       additionalProperties: false,

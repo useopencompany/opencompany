@@ -37,6 +37,7 @@ describe("calculateModelUsageCost", () => {
   });
 
   it.each([
+    ["openai/gpt-5.2-codex", 17_675],
     ["openai/gpt-5.4-nano", 1_670],
     ["anthropic/claude-opus-4.7", 36_750],
     ["google/gemini-3-flash", 4_050],

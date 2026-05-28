@@ -84,6 +84,14 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cacheWriteUsdMicrosPerMillion: 2_500_000,
     outputUsdMicrosPerMillion: 15_000_000,
   },
+  "openai/gpt-5.2-codex": {
+    model: "openai/gpt-5.2-codex",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 1_750_000,
+    cachedInputUsdMicrosPerMillion: 175_000,
+    cacheWriteUsdMicrosPerMillion: 1_750_000,
+    outputUsdMicrosPerMillion: 14_000_000,
+  },
   "anthropic/claude-haiku-4.5": {
     model: "anthropic/claude-haiku-4.5",
     provider: "anthropic",
