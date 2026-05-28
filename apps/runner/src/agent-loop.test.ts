@@ -1004,6 +1004,7 @@ describe("Amp stream parsing", () => {
       durationMs: 1200,
       numTurns: 1,
       permissionDenials: [],
+      usage: null,
     });
   });
 
@@ -1070,7 +1071,145 @@ describe("Amp stream parsing", () => {
       durationMs: 300,
       numTurns: 1,
       permissionDenials: ["Bash rm -rf"],
+      usage: null,
     });
+  });
+
+  it("accumulates usage from multiple assistant events", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "first" }],
+          usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 20 },
+        },
+        session_id: "T-usage-1",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "second" }],
+          usage: {
+            input_tokens: 200,
+            output_tokens: 80,
+            cache_creation_input_tokens: 30,
+            cache_read_input_tokens: 10,
+          },
+        },
+        session_id: "T-usage-1",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 500,
+        is_error: false,
+        num_turns: 2,
+        result: "done",
+        session_id: "T-usage-1",
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      threadId: "T-usage-1",
+      status: "success",
+      result: "done",
+      error: null,
+      durationMs: 500,
+      numTurns: 2,
+      permissionDenials: [],
+      usage: {
+        input_tokens: 300,
+        output_tokens: 130,
+        cache_creation_input_tokens: 30,
+        cache_read_input_tokens: 30,
+      },
+    });
+  });
+
+  it("prefers result event usage over accumulated sum", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "step" }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        session_id: "T-usage-2",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 400,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-2",
+        usage: { input_tokens: 500, output_tokens: 200, cache_read_input_tokens: 80 },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      threadId: "T-usage-2",
+      status: "success",
+      result: "done",
+      error: null,
+      durationMs: 400,
+      numTurns: 1,
+      permissionDenials: [],
+      usage: {
+        input_tokens: 500,
+        output_tokens: 200,
+        cache_read_input_tokens: 80,
+      },
+    });
+  });
+
+  it("returns usage null when no usage data is present", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "no usage" }],
+        },
+        session_id: "T-usage-3",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 100,
+        is_error: false,
+        num_turns: 1,
+        result: "ok",
+        session_id: "T-usage-3",
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toBeNull();
   });
 
   it("formats Amp stream activity without leaking partial JSON chunks", () => {

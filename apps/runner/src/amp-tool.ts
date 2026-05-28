@@ -9,6 +9,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
+import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
@@ -224,6 +225,8 @@ export async function runAmpCoderTool(input: {
       },
     });
 
+  const ampUsage = ampSummary.usage;
+
   return {
     repository: repository.fullName,
     ampThreadId: ampSummary.threadId,
@@ -242,6 +245,25 @@ export async function runAmpCoderTool(input: {
     diffPreview: truncateText(redactAmpOutput(String(diffPreview.stdout ?? "")), 24_000),
     branchName,
     pullRequestUrl,
+    ...(ampUsage
+      ? {
+          usage: {
+            provider: "amp",
+            operation: "session",
+            costUsdMicros: 0,
+            rawUsage: {
+              input_tokens: ampUsage.input_tokens,
+              output_tokens: ampUsage.output_tokens,
+              ...(ampUsage.cache_creation_input_tokens !== undefined
+                ? { cache_creation_input_tokens: ampUsage.cache_creation_input_tokens }
+                : {}),
+              ...(ampUsage.cache_read_input_tokens !== undefined
+                ? { cache_read_input_tokens: ampUsage.cache_read_input_tokens }
+                : {}),
+            },
+          } satisfies HostedToolUsage,
+        }
+      : {}),
   };
 }
 
@@ -465,6 +487,13 @@ function loadPlatformAmpApiKey(env: RunnerEnv) {
   return env.ampApiKey;
 }
 
+interface AmpUsage {
+  input_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output_tokens: number;
+}
+
 type AmpStreamSummary = {
   threadId: string | null;
   status: "success" | "error" | "unknown";
@@ -473,6 +502,7 @@ type AmpStreamSummary = {
   durationMs: number | null;
   numTurns: number | null;
   permissionDenials: string[];
+  usage: AmpUsage | null;
 };
 
 export function createAmpStreamAccumulator() {
@@ -485,6 +515,47 @@ export function createAmpStreamAccumulator() {
   let numTurns: number | null = null;
   let lastAssistantText = "";
   let permissionDenials: string[] = [];
+  let accumulatedUsage: AmpUsage = { input_tokens: 0, output_tokens: 0 };
+  let hasAccumulatedUsage = false;
+  let resultUsage: AmpUsage | null = null;
+
+  function accumulateMessageUsage(message: Record<string, unknown>) {
+    const messageUsage = isRecord(message.usage) ? message.usage : null;
+    if (!messageUsage) return;
+    const inputTokens = readOptionalFiniteNumber(messageUsage.input_tokens);
+    const outputTokens = readOptionalFiniteNumber(messageUsage.output_tokens);
+    if (inputTokens === null && outputTokens === null) return;
+    hasAccumulatedUsage = true;
+    accumulatedUsage.input_tokens += inputTokens ?? 0;
+    accumulatedUsage.output_tokens += outputTokens ?? 0;
+    const cacheCreation = readOptionalFiniteNumber(messageUsage.cache_creation_input_tokens);
+    if (cacheCreation !== null) {
+      accumulatedUsage.cache_creation_input_tokens =
+        (accumulatedUsage.cache_creation_input_tokens ?? 0) + cacheCreation;
+    }
+    const cacheRead = readOptionalFiniteNumber(messageUsage.cache_read_input_tokens);
+    if (cacheRead !== null) {
+      accumulatedUsage.cache_read_input_tokens =
+        (accumulatedUsage.cache_read_input_tokens ?? 0) + cacheRead;
+    }
+  }
+
+  function readEventUsage(event: Record<string, unknown>): AmpUsage | null {
+    const u = isRecord(event.usage) ? event.usage : null;
+    if (!u) return null;
+    const inputTokens = readOptionalFiniteNumber(u.input_tokens);
+    const outputTokens = readOptionalFiniteNumber(u.output_tokens);
+    if (inputTokens === null && outputTokens === null) return null;
+    const usage: AmpUsage = {
+      input_tokens: inputTokens ?? 0,
+      output_tokens: outputTokens ?? 0,
+    };
+    const cacheCreation = readOptionalFiniteNumber(u.cache_creation_input_tokens);
+    if (cacheCreation !== null) usage.cache_creation_input_tokens = cacheCreation;
+    const cacheRead = readOptionalFiniteNumber(u.cache_read_input_tokens);
+    if (cacheRead !== null) usage.cache_read_input_tokens = cacheRead;
+    return usage;
+  }
 
   function consumeLine(line: string) {
     const trimmed = line.trim();
@@ -504,6 +575,7 @@ export function createAmpStreamAccumulator() {
     if (event.type === "assistant") {
       const message = isRecord(event.message) ? event.message : {};
       lastAssistantText = readAmpAssistantText(message) || lastAssistantText;
+      accumulateMessageUsage(message);
       return;
     }
 
@@ -512,6 +584,7 @@ export function createAmpStreamAccumulator() {
     durationMs = readOptionalFiniteNumber(event.duration_ms) ?? durationMs;
     numTurns = readOptionalFiniteNumber(event.num_turns) ?? numTurns;
     permissionDenials = readStringArray(event.permission_denials);
+    resultUsage = readEventUsage(event);
 
     if (event.is_error === true || event.subtype !== "success") {
       status = "error";
@@ -537,6 +610,7 @@ export function createAmpStreamAccumulator() {
       buffer = "";
     },
     summary(): AmpStreamSummary {
+      const finalUsage = resultUsage ?? (hasAccumulatedUsage ? accumulatedUsage : null);
       return {
         threadId,
         status,
@@ -545,6 +619,7 @@ export function createAmpStreamAccumulator() {
         durationMs,
         numTurns,
         permissionDenials,
+        usage: finalUsage,
       };
     },
   };
