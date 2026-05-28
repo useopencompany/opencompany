@@ -17,6 +17,7 @@ import {
   serializeAgentSessionDetail,
   serializeSidebarSession,
 } from "@/lib/agent-sessions/payload";
+import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 import { getRunnerPublicUrl, getRunnerStreamTokenSecret } from "@/lib/agent-sessions/runner";
 
 export async function loadSidebarSessionsForWorkspace(
@@ -159,11 +160,25 @@ export async function loadAgentSessionDetailForWorkspace(
     current.outputReasoningTokens += row.outputReasoningTokens;
     usageByMessageId.set(row.messageId, current);
   }
-  const messagesWithUsage = messages.map((message) => ({
-    ...message,
-    outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
-    thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
+  const eventsWithCreatedAt = events.map((event) => ({
+    ...event,
+    createdAt: event.createdAt.toISOString(),
   }));
+  const messagesWithUsage = messages.map((message) => {
+    const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
+    // Build a SessionMessage-shaped object to call computeThinkingDurationSeconds.
+    const sessionMessage = {
+      ...message,
+      outputReasoningTokens,
+      createdAt: message.createdAt.toISOString(),
+      completedAt: message.completedAt?.toISOString() ?? null,
+    };
+    return {
+      ...message,
+      outputReasoningTokens,
+      thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
+    };
+  });
   const toolUsage = summarizeToolUsage(toolUsageRows);
   const cost = summarizeSessionCost(costRows);
   const runnerUrl = getRunnerPublicUrl();
@@ -171,7 +186,7 @@ export async function loadAgentSessionDetailForWorkspace(
   return serializeAgentSessionDetail({
     session,
     messages: messagesWithUsage,
-    events,
+    events: eventsWithCreatedAt,
     usage,
     toolUsage,
     cost,
@@ -215,11 +230,6 @@ export async function loadAgentSessionStreamCredentialForWorkspace(
       : null;
 
   return { runnerUrl, streamToken };
-}
-
-function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
-  if (!completedAt || completedAt < startedAt) return undefined;
-  return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
 }
 
 function summarizeToolUsage(

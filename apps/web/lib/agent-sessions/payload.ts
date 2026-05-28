@@ -218,7 +218,10 @@ export function applyRuntimeEventToSessionDetail(
   event: RuntimeEvent,
   updatedAt = new Date().toISOString(),
 ): AgentSessionDetailPayload {
-  const nextRuntime = applyRuntimeEventToState(toRuntimeState(detail), event);
+  const stampedEvent: RuntimeEvent = event.createdAt
+    ? event
+    : { ...event, createdAt: new Date().toISOString() };
+  const nextRuntime = applyRuntimeEventToState(toRuntimeState(detail), stampedEvent);
   let session: AgentSessionPayload = detail.session;
 
   if (event.type === "session.status") {
@@ -575,12 +578,17 @@ function parseSessionMessage(value: unknown): SessionMessage {
 
 function parseRuntimeEventPayload(value: unknown): RuntimeEvent {
   const record = assertRecord(value, "runtime event");
-  return {
+  const event: RuntimeEvent = {
     id: readNumberField(record, "id"),
     type: readStringField(record, "type"),
     messageId: readNullableStringField(record, "messageId"),
     payload: assertRecord(record.payload, "runtime event payload"),
   };
+  if ("createdAt" in record) {
+    const createdAt = readOptionalStringField(record, "createdAt");
+    if (createdAt !== undefined) event.createdAt = createdAt;
+  }
+  return event;
 }
 
 function parseUsageSummary(value: unknown): SessionUsageSummary {

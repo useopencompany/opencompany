@@ -311,32 +311,6 @@ body {
   border-top: 1px solid #deded9;
 }
 
-.thinking-shimmer {
-  color: transparent;
-  background: linear-gradient(90deg, #8b8b86 0%, #111111 42%, #8b8b86 58%, #8b8b86 100%);
-  background-size: 240% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: thinking-shimmer 1.7s ease-in-out infinite;
-}
-
-@keyframes thinking-shimmer {
-  0% {
-    background-position: 120% 0;
-  }
-  100% {
-    background-position: -120% 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thinking-shimmer {
-    animation: none;
-    color: var(--color-ink-muted);
-    -webkit-text-fill-color: currentColor;
-  }
-}
 
 .session-pulse circle {
   transform-origin: center;
