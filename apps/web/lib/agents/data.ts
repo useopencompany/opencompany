@@ -150,6 +150,7 @@ export async function loadAgentForWorkspace(
     {
       mcpEnabled: mcpSettings.mcpEnabled,
       linearConfigured: mcpSettings.linear.configured,
+      slackConfigured: mcpSettings.slack.configured,
     },
   );
 }

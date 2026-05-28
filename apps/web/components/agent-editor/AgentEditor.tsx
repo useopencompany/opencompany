@@ -41,8 +41,26 @@ export type AgentEditorHandle = {
 const plainTextKeysExtension = Extension.create({
   name: "plainTextKeys",
   addKeyboardShortcuts() {
+    const swallowInStructuredBlock = () => {
+      // Inside headings and list items, a hard break would survive locally
+      // but the markdown round-trip cannot represent it (list items would
+      // turn into "item line one\nitem line two", which the parser splits
+      // into separate blocks). Swallow the shortcut instead of inserting a
+      // hard break there.
+      if (this.editor.isActive("heading") || this.editor.isActive("listItem")) {
+        return true;
+      }
+      return this.editor.commands.setHardBreak();
+    };
     return {
-      Enter: () => this.editor.commands.setHardBreak(),
+      Enter: () => {
+        if (this.editor.isActive("heading") || this.editor.isActive("listItem")) {
+          return false;
+        }
+        return this.editor.commands.setHardBreak();
+      },
+      "Shift-Enter": swallowInStructuredBlock,
+      "Mod-Enter": swallowInStructuredBlock,
       Tab: () => this.editor.commands.insertContent("  "),
     };
   },
@@ -249,12 +267,9 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
     extensions: [
       StarterKit.configure({
         blockquote: false,
-        bulletList: false,
         codeBlock: false,
-        heading: false,
+        heading: { levels: [1, 2, 3] },
         horizontalRule: false,
-        listItem: false,
-        orderedList: false,
       }),
       mentionExtension,
       autoMentionExtension,
@@ -430,18 +445,103 @@ function stripEmptyMentions(node: JSONContent): JSONContent {
   return { ...node, content: next };
 }
 
+// Markers may appear without trailing content because `tiptapDocToBody` trims
+// trailing whitespace on save: an empty heading is persisted as "#" rather
+// than "# ", and likewise for "- " / "1. ". Allow the text portion to be
+// optional so an empty block survives a save → reload round-trip.
+const HEADING_PATTERN = /^(#{1,3})(?: +(.*))?$/;
+const BULLET_PATTERN = /^[-*](?: +(.*))?$/;
+const ORDERED_PATTERN = /^(\d+)\.(?: +(.*))?$/;
+
+function isBlockStarter(line: string) {
+  return HEADING_PATTERN.test(line) || BULLET_PATTERN.test(line) || ORDERED_PATTERN.test(line);
+}
+
 function bodyToTiptapDoc(body: string, mentionItems: AgentMentionItem[]): JSONContent {
   const normalized = body.replace(/\r\n/g, "\n");
   if (normalized.trim().length === 0) {
     return { type: "doc", content: [{ type: "paragraph" }] };
   }
 
+  const lines = normalized.split("\n");
+  const blocks: JSONContent[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+
+    if (line.trim() === "") {
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = HEADING_PATTERN.exec(line);
+    if (headingMatch) {
+      const hashes = headingMatch[1] ?? "#";
+      const headingText = headingMatch[2] ?? "";
+      blocks.push({
+        type: "heading",
+        attrs: { level: hashes.length },
+        content: parseMentionText(headingText, mentionItems),
+      });
+      index += 1;
+      continue;
+    }
+
+    if (BULLET_PATTERN.test(line) || ORDERED_PATTERN.test(line)) {
+      const ordered = ORDERED_PATTERN.test(line);
+      const pattern = ordered ? ORDERED_PATTERN : BULLET_PATTERN;
+      const items: JSONContent[] = [];
+      let startNumber = 1;
+      let firstItem = true;
+      while (index < lines.length) {
+        const current = lines[index] ?? "";
+        const match = pattern.exec(current);
+        if (!match) break;
+        // Ordered pattern captures the leading number in group 1; bullet
+        // pattern captures the item text in group 1. Item text is therefore
+        // group 2 for ordered, group 1 for bullet.
+        const itemText = ordered ? (match[2] ?? "") : (match[1] ?? "");
+        if (ordered && firstItem) {
+          startNumber = Number.parseInt(match[1] ?? "1", 10);
+          if (!Number.isFinite(startNumber) || startNumber < 1) startNumber = 1;
+        }
+        firstItem = false;
+        items.push({
+          type: "listItem",
+          content: [
+            {
+              type: "paragraph",
+              content: parseMentionText(itemText, mentionItems),
+            },
+          ],
+        });
+        index += 1;
+      }
+      blocks.push(
+        ordered
+          ? { type: "orderedList", attrs: { start: startNumber }, content: items }
+          : { type: "bulletList", content: items },
+      );
+      continue;
+    }
+
+    const paragraphLines: string[] = [];
+    while (index < lines.length) {
+      const current = lines[index] ?? "";
+      if (current.trim() === "" || isBlockStarter(current)) break;
+      paragraphLines.push(current);
+      index += 1;
+    }
+    blocks.push({
+      type: "paragraph",
+      content: parseInlineContent(paragraphLines.join("\n"), mentionItems),
+    });
+  }
+
   return {
     type: "doc",
-    content: normalized.split(/\n{2,}/).map((block) => ({
-      type: "paragraph",
-      content: parseInlineContent(block, mentionItems),
-    })),
+    content: blocks.length > 0 ? blocks : [{ type: "paragraph" }],
   };
 }
 
@@ -608,6 +708,27 @@ function nodeText(node: JSONContent): string {
         ? node.attrs.mentionSuggestionChar
         : "@";
     return displayText.length > 0 ? `${char}${displayText}` : "";
+  }
+  if (node.type === "heading") {
+    const rawLevel = typeof node.attrs?.level === "number" ? node.attrs.level : 1;
+    const level = Math.min(3, Math.max(1, Math.floor(rawLevel)));
+    const inner = (node.content ?? []).map(nodeText).join("");
+    return `${"#".repeat(level)} ${inner}`;
+  }
+  if (node.type === "bulletList" || node.type === "orderedList") {
+    const ordered = node.type === "orderedList";
+    const rawStart = ordered && typeof node.attrs?.start === "number" ? node.attrs.start : 1;
+    const start = Number.isFinite(rawStart) && rawStart >= 1 ? Math.floor(rawStart) : 1;
+    return (node.content ?? [])
+      .map((item, index) => {
+        const marker = ordered ? `${start + index}.` : "-";
+        const inner = (item.content ?? []).map(nodeText).join("\n");
+        return `${marker} ${inner}`;
+      })
+      .join("\n");
+  }
+  if (node.type === "listItem") {
+    return (node.content ?? []).map(nodeText).join("\n");
   }
 
   return (node.content ?? []).map((child) => nodeText(child)).join("");

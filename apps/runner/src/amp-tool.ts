@@ -13,6 +13,9 @@ import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
 const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
+const AMP_STREAM_JSON_MODES = ["smart", "large", "rush"] as const;
+const DEFAULT_AMP_STREAM_JSON_MODE = "smart";
+type AmpStreamJsonMode = (typeof AMP_STREAM_JSON_MODES)[number];
 
 export async function runAmpCoderTool(input: {
   sandbox: SandboxHandle;
@@ -35,6 +38,7 @@ export async function runAmpCoderTool(input: {
     typeof args.ampThreadId === "string" && args.ampThreadId.trim()
       ? args.ampThreadId.trim()
       : null;
+  const ampMode = readAmpStreamJsonMode(args.mode);
 
   const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
   if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) {
@@ -86,6 +90,7 @@ export async function runAmpCoderTool(input: {
     `cd ${shellQuote(layout.workRoot)} && ${buildAmpCommand({
       task,
       ampThreadId: requestedAmpThreadId,
+      mode: ampMode,
     })}`,
     {
       envs: ampEnv,
@@ -245,9 +250,14 @@ export async function runAmpCoderTool(input: {
   };
 }
 
-export function buildAmpCommand(input: { task: string; ampThreadId?: string | null }) {
+export function buildAmpCommand(input: {
+  task: string;
+  ampThreadId?: string | null;
+  mode?: AmpStreamJsonMode | null;
+}) {
   const task = shellQuote(input.task);
   const ampThreadId = input.ampThreadId?.trim();
+  const mode = input.mode ?? DEFAULT_AMP_STREAM_JSON_MODE;
   if (ampThreadId) {
     return [
       "amp",
@@ -255,7 +265,7 @@ export function buildAmpCommand(input: { task: string; ampThreadId?: string | nu
       "continue",
       "--dangerously-allow-all",
       "--mode",
-      "deep",
+      mode,
       "--stream-json",
       "-x",
       task,
@@ -263,7 +273,23 @@ export function buildAmpCommand(input: { task: string; ampThreadId?: string | nu
     ].join(" ");
   }
 
-  return `amp --dangerously-allow-all --mode deep --stream-json -x ${task}`;
+  return `amp --dangerously-allow-all --mode ${mode} --stream-json -x ${task}`;
+}
+
+function readAmpStreamJsonMode(value: unknown): AmpStreamJsonMode {
+  if (value == null || value === "") return DEFAULT_AMP_STREAM_JSON_MODE;
+  if (typeof value !== "string") {
+    throw new Error("AMP mode must be a string.");
+  }
+
+  const mode = value.trim();
+  if (AMP_STREAM_JSON_MODES.includes(mode as AmpStreamJsonMode)) return mode as AmpStreamJsonMode;
+
+  throw new Error(
+    `Unsupported AMP mode "${mode}". Supported stream JSON modes: ${AMP_STREAM_JSON_MODES.join(
+      ", ",
+    )}.`,
+  );
 }
 
 export function buildAmpCommandEnv(input: {

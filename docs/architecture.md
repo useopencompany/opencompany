@@ -188,7 +188,7 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 
 - `bun run dev` starts ngrok when authenticated, then starts the web app, local Inngest dev helper,
   Stripe webhook listener, and runner. ngrok is the expected local path for callback/webhook
-  integrations such as GitHub.
+  integrations such as GitHub; WorkOS sign-in still redirects to localhost in local development.
 - `bun run dev:web` runs only the web app.
 - `bun run dev:runner` runs only the runner.
 - `bun run db:generate` creates migrations from `packages/db/src/schema.ts`.

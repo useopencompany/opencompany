@@ -5,6 +5,7 @@ import type {
   AgentConfig,
   AgentModelId,
   AgentReference,
+  AgentToolId,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -202,20 +203,22 @@ function AgentDetailContent({
     : agent.githubSyncError;
   const githubCommitSha = agent.githubCommitSha;
   const githubSyncedAt = agent.githubSyncedAt;
-  const mentionItems: AgentMentionItem[] = useMemo(
-    () =>
-      buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
-        includeMcpTools: agent.mcp.mcpEnabled && agent.mcp.linearConfigured,
-        agents: agent.workspaceAgents,
-      }),
-    [
-      agent.brainPaths,
-      agent.mcp.linearConfigured,
-      agent.mcp.mcpEnabled,
-      agent.usableGitHubIntegrationRepositories,
-      agent.workspaceAgents,
-    ],
-  );
+  const mentionItems: AgentMentionItem[] = useMemo(() => {
+    const enabledMcpToolIds: AgentToolId[] = [];
+    if (agent.mcp.mcpEnabled && agent.mcp.linearConfigured) enabledMcpToolIds.push("linear");
+    if (agent.mcp.mcpEnabled && agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
+    return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
+      enabledMcpToolIds,
+      agents: agent.workspaceAgents,
+    });
+  }, [
+    agent.brainPaths,
+    agent.mcp.linearConfigured,
+    agent.mcp.mcpEnabled,
+    agent.mcp.slackConfigured,
+    agent.usableGitHubIntegrationRepositories,
+    agent.workspaceAgents,
+  ]);
 
   useEffect(() => {
     if (

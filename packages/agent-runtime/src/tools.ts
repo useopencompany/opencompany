@@ -93,6 +93,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "workspace",
   },
+  {
+    id: "slack",
+    type: "mcp",
+    server: "slack",
+    label: "slack",
+    description: "Use workspace-configured Slack MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
 ];
 
 export const AGENT_TOOL_DEFINITION_BY_ID = new Map(
@@ -104,7 +114,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible.",
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When the agent has an explicit GitHub repository binding, shell commands get repo-scoped gh and git auth for that repository; run repository commands from ./work.",
     parameters: {
       type: "object",
       properties: {
@@ -287,6 +297,13 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           description:
             "Existing ampThreadId from a previous amp_coder result to continue instead of starting a new Amp thread.",
+        },
+        mode: {
+          type: "string",
+          enum: ["smart", "large", "rush"],
+          description:
+            "Amp execution mode. Defaults to smart. Use large for harder long-running coding tasks, rush for latency-sensitive tasks. Do not use deep because Amp rejects deep mode with stream JSON output.",
+          default: "smart",
         },
       },
       required: ["task"],

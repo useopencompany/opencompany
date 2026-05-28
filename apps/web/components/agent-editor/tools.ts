@@ -15,6 +15,7 @@ import {
   GitBranch,
   ListTodo,
   type LucideIcon,
+  MessageSquare,
   MessagesSquare,
   Search,
 } from "lucide-react";
@@ -85,12 +86,14 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   amp: Code2,
   linear: ListTodo,
+  slack: MessageSquare,
 };
 
 const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
   "openai/gpt-5.4-mini": Bot,
   "openai/gpt-5.4": Brain,
   "openai/gpt-5.4-nano": Bot,
+  "openai/gpt-5.2-codex": Code2,
   "anthropic/claude-haiku-4.5": Bot,
   "anthropic/claude-sonnet-4.6": Brain,
   "anthropic/claude-opus-4.7": Brain,
@@ -149,7 +152,11 @@ export function buildAgentMentionItems(
     statusReason?: string | null;
   }> = [],
   brainPaths: string[] = [],
-  options: { includeMcpTools?: boolean; agents?: AgentReference[] } = {},
+  options: {
+    enabledMcpToolIds?: AgentToolId[];
+    includeMcpTools?: boolean;
+    agents?: AgentReference[];
+  } = {},
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
     id: "github",
@@ -180,7 +187,13 @@ export function buildAgentMentionItems(
 
   return [
     ...AGENT_MODELS,
-    ...AGENT_TOOLS.filter((tool) => tool.id !== "linear" || options.includeMcpTools),
+    ...AGENT_TOOLS.filter(
+      (tool) =>
+        tool.kind !== "tool" ||
+        !isMcpToolId(tool.id) ||
+        options.includeMcpTools ||
+        Boolean(options.enabledMcpToolIds?.includes(tool.id)),
+    ),
     ...buildWorkspaceAgentMentionItems(options.agents ?? []),
     githubItem,
     ...repositoryItems,
@@ -213,6 +226,10 @@ function agentMentionId(path: string) {
   const slug = normalized.slice("agents/".length, -".agent".length);
   if (!slug || slug.includes("/")) return null;
   return `agent/${slug}`;
+}
+
+function isMcpToolId(id: AgentToolId) {
+  return id === "linear" || id === "slack";
 }
 
 function repositoryMentionId(repository: {

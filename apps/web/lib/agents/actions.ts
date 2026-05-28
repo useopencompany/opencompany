@@ -379,6 +379,7 @@ export async function updateAgent(
           {
             mcpEnabled: mcpSettings.mcpEnabled,
             linearConfigured: mcpSettings.linear.configured,
+            slackConfigured: mcpSettings.slack.configured,
           },
         )
       : null,

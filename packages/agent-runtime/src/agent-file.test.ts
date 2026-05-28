@@ -98,6 +98,27 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Slack MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Slack research",
+      body: "Search workspace context with @slack.",
+    });
+
+    expect(source).toContain("id: slack");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: slack");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "slack",
+        type: "mcp",
+        server: "slack",
+        label: "slack",
+        description: "Use workspace-configured Slack MCP tools.",
+      },
+    ]);
+  });
+
   test("syncs the root Brain folder from markdown mentions", () => {
     const config = extractConfigFromMentions("Use all shared context in @brain/.");
 

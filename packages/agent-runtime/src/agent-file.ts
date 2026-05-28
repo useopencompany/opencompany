@@ -278,7 +278,7 @@ function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfi
           prCapable: readBoolean(record.prCapable) ?? true,
         }),
       );
-    } else if (id === "linear") {
+    } else if (definition.type === "mcp") {
       tools.push(toConfigTool(definition));
     } else {
       tools.push(toConfigTool(definition));
@@ -300,7 +300,7 @@ function serializeTools(tools: AgentConfigTool[]) {
         prCapable: tool.prCapable,
       };
     }
-    if (tool.id === "linear") {
+    if (tool.type === "mcp") {
       return {
         id: tool.id,
         type: tool.type,
