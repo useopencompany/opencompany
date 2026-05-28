@@ -278,4 +278,69 @@ describe(".agent files", () => {
       expect.objectContaining({ id: "opencompany-web-pr", repository: "opencompany-web" }),
     ]);
   });
+
+  test("round-trips optional GitHub repository connection binding", () => {
+    const binding = {
+      provider: "github" as const,
+      resourceType: "repository" as const,
+      externalId: "repo_123",
+      displayName: "opencompany/web",
+      connection: {
+        externalId: "install_123",
+        label: "OpenCompany",
+        accountName: "opencompany",
+        accountType: "Organization",
+      },
+    };
+    const source = serializeAgentFile({
+      title: "Code",
+      body: "Work in @opencompany/web with @amp.",
+      integrations: {
+        github: {
+          repositories: [
+            {
+              id: "opencompany-web",
+              fullName: "opencompany/web",
+              defaultBranch: "main",
+              binding,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parseAgentFile(source).config.integrations.github.repositories).toEqual([
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+        binding,
+      },
+    ]);
+  });
+
+  test("keeps legacy GitHub repository config valid without binding", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Code"',
+        "model: openai/gpt-5.4-mini",
+        "tools:",
+        "  - amp",
+        "integrations:",
+        "  github:",
+        "    repositories:",
+        "      - id: opencompany-web",
+        "        fullName: opencompany/web",
+        "        defaultBranch: main",
+        "---",
+        "",
+        "Work in @opencompany/web.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.integrations.github.repositories).toEqual([
+      { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+    ]);
+  });
 });

@@ -13,6 +13,7 @@ import type {
   AgentConfig,
   AgentConfigTool,
   AgentFile,
+  AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
   AgentToolId,
@@ -30,7 +31,6 @@ const GITHUB_PULL_REQUEST_EVENTS = new Set<AgentTriggerConfig["events"][number]>
 
 type Frontmatter = {
   schemaVersion?: unknown;
-  version?: unknown;
   title?: unknown;
   model?: unknown;
   tools?: unknown;
@@ -347,14 +347,48 @@ function normalizeGitHubRepositories(value: unknown): AgentGitHubRepositoryConfi
     const id = normalizeRepositoryId(readString(item.id) ?? repositoryIdForFullName(fullName));
     if (!id || seen.has(id)) continue;
     seen.add(id);
+    const binding = normalizeGitHubRepositoryBinding(item.binding);
     repositories.push({
       id,
       fullName,
       defaultBranch: normalizeBranch(readString(item.defaultBranch) ?? "main"),
+      ...(binding ? { binding } : {}),
     });
   }
 
   return repositories;
+}
+
+function normalizeGitHubRepositoryBinding(value: unknown): AgentGitHubRepositoryBinding | null {
+  if (!isRecord(value)) return null;
+  const provider = readString(value.provider);
+  const resourceType = readString(value.resourceType);
+  const externalId = readString(value.externalId);
+  const displayName = readString(value.displayName);
+  const connection = isRecord(value.connection) ? value.connection : null;
+  const connectionExternalId = readString(connection?.externalId);
+  if (
+    provider !== "github" ||
+    resourceType !== "repository" ||
+    !externalId ||
+    !displayName ||
+    !connectionExternalId
+  ) {
+    return null;
+  }
+
+  return {
+    provider,
+    resourceType,
+    externalId,
+    displayName,
+    connection: {
+      externalId: connectionExternalId,
+      label: readString(connection?.label) ?? connectionExternalId,
+      accountName: readString(connection?.accountName),
+      accountType: readString(connection?.accountType),
+    },
+  };
 }
 
 function normalizeTriggers(value: unknown, repositories: AgentGitHubRepositoryConfig[]) {

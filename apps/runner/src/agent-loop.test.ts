@@ -28,6 +28,7 @@ import {
   selectPublishBranch,
   throwIfStreamErrorPart,
 } from "./agent-loop";
+import { loadGitHubWorkRepository } from "./amp-tool";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 
@@ -788,6 +789,106 @@ describe("Amp stream parsing", () => {
     );
   });
 
+  it("rejects GitHub repositories whose parent connection needs reauthorization", async () => {
+    const db = createGitHubWorkRepositoryDb([
+      {
+        integrationId: "wint_123",
+        fullName: "opencompany/web",
+        installationId: "12345",
+        connectionLabel: "opencompany",
+        connectionStatus: "needs_reauth",
+        connectionStatusReason: "Installation token failed with 401.",
+        resourceStatus: "available",
+        resourceStatusReason: null,
+      },
+    ]);
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      loadGitHubWorkRepository("wks_123", {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+      }),
+    ).rejects.toThrow(
+      "GitHub connection opencompany is needs reauth. Reconnect GitHub or update the agent repository mention. Installation token failed with 401.",
+    );
+    expect(db.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "needs_reauth",
+        statusReason: "Installation token failed with 401.",
+      }),
+    );
+  });
+
+  it("rejects GitHub repositories with degraded resource status", async () => {
+    const db = createGitHubWorkRepositoryDb([
+      {
+        integrationId: "wint_123",
+        fullName: "opencompany/web",
+        installationId: "12345",
+        connectionLabel: "opencompany",
+        connectionStatus: "connected",
+        connectionStatusReason: null,
+        resourceStatus: "permission_lost",
+        resourceStatusReason: "Repository is no longer visible to the GitHub installation.",
+      },
+    ]);
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      loadGitHubWorkRepository("wks_123", {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+      }),
+    ).rejects.toThrow(
+      "GitHub repository opencompany/web is no longer available to this workspace. Reconnect GitHub or update the agent repository mention. Repository is no longer visible to the GitHub installation.",
+    );
+    expect(db.updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "sync_failed",
+        statusReason: "Repository is no longer visible to the GitHub installation.",
+      }),
+    );
+  });
+
+  it("rejects ambiguous unbound GitHub repositories across multiple usable connections", async () => {
+    const db = createGitHubWorkRepositoryDb([
+      {
+        integrationId: "wint_123",
+        fullName: "opencompany/web",
+        installationId: "12345",
+        connectionLabel: "opencompany",
+        connectionStatus: "connected",
+        connectionStatusReason: null,
+        resourceStatus: "available",
+        resourceStatusReason: null,
+      },
+      {
+        integrationId: "wint_456",
+        fullName: "opencompany/web",
+        installationId: "45678",
+        connectionLabel: "opencompany-eu",
+        connectionStatus: "connected",
+        connectionStatusReason: null,
+        resourceStatus: "available",
+        resourceStatusReason: null,
+      },
+    ]);
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      loadGitHubWorkRepository("wks_123", {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+      }),
+    ).rejects.toThrow(
+      "GitHub work repository opencompany/web matches multiple workspace connections. Re-save the agent with a concrete repository binding.",
+    );
+  });
+
   it("builds ephemeral GitHub auth env for Amp without putting tokens in the command", () => {
     const env = buildAmpCommandEnv({
       ampApiKey: "amp_secret_123",
@@ -1208,6 +1309,21 @@ function createLeaseDb(input: {
       state.ledgerDebits += 1;
       return { rows: [{ ledgerId: state.ledgerDebits, balanceUsdMicros: 100_000 }] };
     },
+  };
+}
+
+function createGitHubWorkRepositoryDb(rows: unknown[]) {
+  const query = {
+    from: vi.fn(() => query),
+    innerJoin: vi.fn(() => query),
+    where: vi.fn(() => query),
+    limit: vi.fn(async () => rows),
+  };
+  const updateSet = vi.fn(() => ({ where: vi.fn(async () => undefined) }));
+  return {
+    select: vi.fn(() => query),
+    update: vi.fn(() => ({ set: updateSet })),
+    updateSet,
   };
 }
 

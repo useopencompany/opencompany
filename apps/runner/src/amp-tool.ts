@@ -1,4 +1,5 @@
 import { type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
+import type { AgentGitHubRepositoryConfig } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionArtifacts,
@@ -47,10 +48,7 @@ export async function runAmpCoderTool(input: {
   }
 
   const ampApiKey = loadPlatformAmpApiKey(input.env);
-  const integrationRepository = await loadGitHubWorkRepository(
-    input.workspaceId,
-    repository.fullName,
-  );
+  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
   const githubToken = await getGitHubWorkInstallationToken({
     installationId: integrationRepository.installationId,
     repositoryFullName: repository.fullName,
@@ -321,32 +319,143 @@ export function selectPublishBranch(input: {
   return `opencompany/amp-${input.sessionId.slice(-8)}-${input.now}`;
 }
 
-export async function loadGitHubWorkRepository(workspaceId: string, fullName: string) {
-  const [repository] = await getDb()
+export async function loadGitHubWorkRepository(
+  workspaceId: string,
+  repository: AgentGitHubRepositoryConfig,
+) {
+  const db = getDb();
+  const baseQuery = db
     .select({
+      integrationId: workspaceIntegrations.id,
       fullName: workspaceIntegrationResources.name,
       installationId: workspaceIntegrations.externalId,
+      connectionLabel: workspaceIntegrations.connectionLabel,
+      connectionStatus: workspaceIntegrations.status,
+      connectionStatusReason: workspaceIntegrations.statusReason,
+      resourceStatus: workspaceIntegrationResources.status,
+      resourceStatusReason: workspaceIntegrationResources.statusReason,
     })
     .from(workspaceIntegrationResources)
     .innerJoin(
       workspaceIntegrations,
       eq(workspaceIntegrationResources.integrationId, workspaceIntegrations.id),
-    )
-    .where(
-      and(
-        eq(workspaceIntegrationResources.workspaceId, workspaceId),
-        eq(workspaceIntegrationResources.provider, "github"),
-        eq(workspaceIntegrationResources.resourceType, "repository"),
-        eq(workspaceIntegrationResources.name, fullName),
-      ),
-    )
-    .limit(1);
+    );
+  const rows = repository.binding
+    ? await baseQuery
+        .where(
+          and(
+            eq(workspaceIntegrationResources.workspaceId, workspaceId),
+            eq(workspaceIntegrationResources.provider, "github"),
+            eq(workspaceIntegrationResources.resourceType, "repository"),
+            eq(workspaceIntegrationResources.externalId, repository.binding.externalId),
+            eq(workspaceIntegrations.externalId, repository.binding.connection.externalId),
+          ),
+        )
+        .limit(1)
+    : await baseQuery
+        .where(
+          and(
+            eq(workspaceIntegrationResources.workspaceId, workspaceId),
+            eq(workspaceIntegrationResources.provider, "github"),
+            eq(workspaceIntegrationResources.resourceType, "repository"),
+            eq(workspaceIntegrationResources.name, repository.fullName),
+          ),
+        )
+        .limit(2);
 
-  if (!repository) {
-    throw new Error(`GitHub work repository ${fullName} is not available to this workspace.`);
+  const usableRows = rows.filter(
+    (row) => row.connectionStatus === "connected" && row.resourceStatus === "available",
+  );
+  if (!repository.binding && usableRows.length > 1) {
+    throw new Error(
+      `GitHub work repository ${repository.fullName} matches multiple workspace connections. Re-save the agent with a concrete repository binding.`,
+    );
+  }
+  const row = usableRows[0] ?? rows[0];
+  if (!row) {
+    throw new Error(
+      `GitHub work repository ${repository.fullName} is not available to this workspace.`,
+    );
+  }
+  assertGitHubWorkRepositoryUsable(row, repository.fullName);
+
+  return row;
+}
+
+function assertGitHubWorkRepositoryUsable(
+  row: {
+    integrationId: string;
+    connectionLabel: string | null;
+    connectionStatus: string;
+    connectionStatusReason: string | null;
+    resourceStatus: string;
+    resourceStatusReason: string | null;
+  },
+  repositoryFullName: string,
+) {
+  const connectionLabel = row.connectionLabel ?? "GitHub";
+  if (row.connectionStatus !== "connected") {
+    const repair =
+      row.connectionStatus === "needs_reauth"
+        ? "Reconnect GitHub or update the agent repository mention."
+        : "Refresh or reconnect GitHub before running this agent.";
+    markObservedGitHubIntegrationStatus({
+      integrationId: row.integrationId,
+      status: row.connectionStatus === "needs_reauth" ? "needs_reauth" : "sync_failed",
+      statusReason: row.connectionStatusReason ?? `GitHub connection ${connectionLabel} failed.`,
+    });
+    throw new Error(
+      appendStatusReason(
+        `GitHub connection ${connectionLabel} is ${formatStatus(row.connectionStatus)}. ${repair}`,
+        row.connectionStatusReason,
+      ),
+    );
   }
 
-  return repository;
+  if (row.resourceStatus !== "available") {
+    markObservedGitHubIntegrationStatus({
+      integrationId: row.integrationId,
+      status: "sync_failed",
+      statusReason:
+        row.resourceStatusReason ??
+        `GitHub repository ${repositoryFullName} is ${formatStatus(row.resourceStatus)}.`,
+    });
+    throw new Error(
+      appendStatusReason(
+        `GitHub repository ${repositoryFullName} is no longer available to this workspace. Reconnect GitHub or update the agent repository mention.`,
+        row.resourceStatusReason,
+      ),
+    );
+  }
+}
+
+function markObservedGitHubIntegrationStatus(input: {
+  integrationId: string;
+  status: "needs_reauth" | "sync_failed";
+  statusReason: string;
+}) {
+  void (async () => {
+    await getDb()
+      .update(workspaceIntegrations)
+      .set({
+        status: input.status,
+        statusReason: truncateText(
+          input.statusReason.replace(/\s+/g, " ").trim() ||
+            "GitHub integration health check failed.",
+          240,
+        ),
+        updatedAt: new Date(),
+      })
+      .where(eq(workspaceIntegrations.id, input.integrationId));
+  })().catch(() => undefined);
+}
+
+function appendStatusReason(message: string, reason: string | null) {
+  return reason?.trim() ? `${message} ${reason.trim()}` : message;
+}
+
+function formatStatus(status: string) {
+  return status.replace(/_/g, " ");
 }
 
 function loadPlatformAmpApiKey(env: RunnerEnv) {

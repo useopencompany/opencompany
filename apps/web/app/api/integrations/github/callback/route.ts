@@ -133,7 +133,9 @@ export async function GET(request: Request) {
       installationId,
       accountLogin: installation.account?.login ?? verifiedInstallation.account?.login ?? null,
       accountType: installation.account?.type ?? verifiedInstallation.account?.type ?? null,
+      connectedByUserId: current.user.id,
       repositories,
+      userOAuthToken: userToken,
     });
 
     return NextResponse.redirect(

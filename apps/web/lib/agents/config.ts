@@ -6,6 +6,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
+  AgentGitHubRepositoryBinding,
   AgentModelId,
   AgentTriggerConfig,
   TiptapDoc,
@@ -26,18 +27,62 @@ export function derivePreviewConfigFromTiptapDoc(input: {
   content: unknown;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
+  preferredRepositories?: AgentConfigDerivationRepository[];
   triggers?: AgentTriggerConfig[];
 }): { body: string; config: AgentConfig } {
   const content = sanitizeTiptapDoc(input.content);
   const body = extractPlainText(content);
+  const preferredRepositories = [
+    ...(input.preferredRepositories ?? []),
+    ...extractPreferredGitHubRepositoriesFromTiptapDoc(content, input.repositories),
+  ];
 
   return deriveAgentConfigFromBody({
     title: input.title,
     body,
     repositories: input.repositories,
+    preferredRepositories,
     ...(input.model ? { model: input.model } : {}),
     ...(input.triggers ? { triggers: input.triggers } : {}),
   });
+}
+
+export function extractPreferredGitHubRepositoriesFromTiptapDoc(
+  content: unknown,
+  repositories: AgentConfigDerivationRepository[],
+) {
+  const doc = sanitizeTiptapDoc(content);
+  const preferred = new Map<string, AgentConfigDerivationRepository>();
+
+  walkTiptapNodes(doc, (node) => {
+    if (node.type !== "mention") return;
+    const attrs = asRecord(node.attrs);
+    if (!attrs) return;
+    const id = typeof attrs.id === "string" ? attrs.id : "";
+    if (!id.startsWith("integration:github:")) return;
+
+    const binding = gitHubRepositoryBindingFromValue(attrs.binding);
+    if (!binding) return;
+
+    const matchingRepository = repositories.find(
+      (repository) =>
+        repository.binding &&
+        repository.binding.externalId === binding.externalId &&
+        repository.binding.connection.externalId === binding.connection.externalId,
+    );
+    const fullName =
+      matchingRepository?.fullName ??
+      stringValue(attrs.fullName) ??
+      stringValue(attrs.label) ??
+      binding.displayName;
+    const defaultBranch =
+      matchingRepository?.defaultBranch ?? stringValue(attrs.defaultBranch) ?? "main";
+    const repository = matchingRepository ?? { fullName, defaultBranch, binding };
+
+    preferred.set(gitHubRepositoryKey(repository), repository);
+  });
+
+  return Array.from(preferred.values());
 }
 
 function extractPlainText(doc: TiptapDoc) {
@@ -61,6 +106,13 @@ function nodeText(node: TiptapNode): string {
   return (node.content ?? []).map(nodeText).join("");
 }
 
+function walkTiptapNodes(node: TiptapNode | TiptapDoc, visit: (node: TiptapNode) => void) {
+  if ("type" in node && typeof node.type === "string") {
+    visit(node as TiptapNode);
+  }
+  node.content?.forEach((child) => walkTiptapNodes(child, visit));
+}
+
 function mentionDisplayText(attrs: Record<string, unknown> | null) {
   const id = typeof attrs?.id === "string" ? attrs.id.trim() : "";
   if (id.startsWith("tool:")) return id.slice("tool:".length);
@@ -78,4 +130,54 @@ function mentionDisplayText(attrs: Record<string, unknown> | null) {
   return (
     TOOL_ID_BY_LABEL.get(normalizedLabel) ?? MODEL_ID_BY_LABEL.get(normalizedLabel) ?? (label || id)
   );
+}
+
+function gitHubRepositoryBindingFromValue(value: unknown): AgentGitHubRepositoryBinding | null {
+  const binding = asRecord(value);
+  const connection = asRecord(binding?.connection);
+  if (!binding || !connection) return null;
+  if (
+    binding.provider !== "github" ||
+    binding.resourceType !== "repository" ||
+    typeof binding.externalId !== "string" ||
+    typeof binding.displayName !== "string" ||
+    typeof connection.externalId !== "string" ||
+    typeof connection.label !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    provider: "github",
+    resourceType: "repository",
+    externalId: binding.externalId,
+    displayName: binding.displayName,
+    connection: {
+      externalId: connection.externalId,
+      label: connection.label,
+      accountName:
+        typeof connection.accountName === "string" || connection.accountName === null
+          ? connection.accountName
+          : null,
+      accountType:
+        typeof connection.accountType === "string" || connection.accountType === null
+          ? connection.accountType
+          : null,
+    },
+  };
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function gitHubRepositoryKey(repository: AgentConfigDerivationRepository) {
+  if (!repository.binding) return repository.fullName.toLowerCase();
+
+  return [
+    repository.binding.provider,
+    repository.binding.resourceType,
+    repository.binding.externalId,
+    repository.binding.connection.externalId,
+  ].join(":");
 }

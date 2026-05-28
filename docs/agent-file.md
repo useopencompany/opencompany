@@ -124,9 +124,19 @@ integrations:
       - id: opencompany-web
         fullName: opencompany/web
         defaultBranch: main
+        binding:
+          provider: github
+          resourceType: repository
+          externalId: "123456789"
+          displayName: opencompany/web
+          connection:
+            externalId: "987654"
+            label: OpenCompany
+            accountName: opencompany
+            accountType: Organization
 ```
 
-`id` is the normalized repository ID used by tools and triggers. `fullName` is the GitHub `owner/repo` name shown in body mentions. Unknown or unauthorized repository mentions stay in the body but do not contribute to the compiled config.
+`id` is the normalized repository ID used by tools and triggers. `fullName` is the GitHub `owner/repo` name shown in body mentions. `binding` is optional normalized runtime data that identifies the concrete provider resource and parent connection without making opaque database IDs part of the human-authored reference. Unknown or unauthorized repository mentions stay in the body but do not contribute to the compiled config.
 
 ### `triggers` — list of trigger objects
 
@@ -338,6 +348,12 @@ editor consumes that catalog through `apps/web/lib/agents/config.ts` and
 `apps/web/components/agent-editor/tools.ts`. Older files that don't reference
 the new ID are unaffected; clients that don't recognize a new ID will fall back
 gracefully.
+
+Tool availability is static for the MVP: every workspace can use every supported catalog tool. The
+catalog records each tool's default enabled state, platform env requirements, and required workspace
+resource type when applicable so future admin controls can add a small workspace settings resolver
+without changing `.agent` files. Missing workspace tool settings should use the catalog default,
+which is currently enabled.
 
 **How do I evolve the format?**
 Bump `schemaVersion` in `packages/db/src/schema.ts` and add a normalizer in `parseAgentFile`. Keep additions additive so existing files keep parsing as `agent.v1` until they're re-serialized.

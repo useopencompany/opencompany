@@ -1,5 +1,9 @@
 import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-runtime";
-import type { AgentModelId, AgentToolId } from "@opencompany/agent-runtime/types";
+import type {
+  AgentGitHubRepositoryBinding,
+  AgentModelId,
+  AgentToolId,
+} from "@opencompany/agent-runtime/types";
 import {
   Bot,
   Brain,
@@ -46,6 +50,7 @@ export type AgentIntegration = Omit<
   provider: "github";
   fullName?: string;
   defaultBranch?: string;
+  binding?: AgentGitHubRepositoryBinding;
 };
 
 export type AgentBrainMention = BaseAgentMentionItem & {
@@ -125,7 +130,13 @@ export const AGENT_AFTER_SESSION_MENTION_ITEMS: AgentHookMention[] = [
 ];
 
 export function buildAgentMentionItems(
-  repositories: Array<{ fullName: string; defaultBranch: string }> = [],
+  repositories: Array<{
+    fullName: string;
+    defaultBranch: string;
+    binding?: AgentGitHubRepositoryBinding;
+    status?: "available" | "permission_lost" | "archived" | "sync_failed";
+    statusReason?: string | null;
+  }> = [],
   brainPaths: string[] = [],
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
@@ -142,15 +153,16 @@ export function buildAgentMentionItems(
     const repositoryId = repositoryIdForFullName(repository.fullName);
     return {
       id: repositoryId,
-      mentionId: `integration:github:${repositoryId}`,
+      mentionId: repositoryMentionId(repository),
       kind: "integration",
       provider: "github",
       label: repository.fullName,
       displayLabel: repository.fullName,
-      description: "GitHub repository",
+      description: repositoryDescription(repository),
       icon: GitBranch,
       fullName: repository.fullName,
       defaultBranch: repository.defaultBranch,
+      ...(repository.binding ? { binding: repository.binding } : {}),
     };
   });
 
@@ -161,6 +173,38 @@ export function buildAgentMentionItems(
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+function repositoryMentionId(repository: {
+  fullName: string;
+  binding?: AgentGitHubRepositoryBinding;
+}) {
+  const repositoryId = repositoryIdForFullName(repository.fullName);
+  if (!repository.binding) return `integration:github:${repositoryId}`;
+
+  return [
+    "integration",
+    "github",
+    repositoryId,
+    repository.binding.connection.externalId,
+    repository.binding.externalId,
+  ].join(":");
+}
+
+function repositoryDescription(repository: {
+  binding?: AgentGitHubRepositoryBinding;
+  status?: "available" | "permission_lost" | "archived" | "sync_failed";
+  statusReason?: string | null;
+}) {
+  if (!repository.status || repository.status === "available") {
+    return repository.binding?.connection.label
+      ? `GitHub repository in ${repository.binding.connection.label}`
+      : "GitHub repository";
+  }
+  if (repository.statusReason?.trim()) return `Unavailable: ${repository.statusReason.trim()}`;
+  if (repository.status === "permission_lost") return "Unavailable: permission lost";
+  if (repository.status === "archived") return "Unavailable: archived";
+  return "Unavailable: sync failed";
 }
 
 export function buildBrainMentionItems(paths: string[]): AgentBrainMention[] {

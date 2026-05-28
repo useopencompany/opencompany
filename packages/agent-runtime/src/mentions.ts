@@ -6,6 +6,7 @@ import type {
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
+  AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
   AgentToolId,
@@ -24,6 +25,7 @@ type AgentModelDefinition = {
 export type AgentConfigDerivationRepository = {
   fullName: string;
   defaultBranch: string;
+  binding?: AgentGitHubRepositoryBinding;
 };
 
 export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = AGENT_TOOL_CATALOG;
@@ -106,10 +108,11 @@ export function deriveAgentConfigFromBody(input: {
   body: string;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
+  preferredRepositories?: AgentConfigDerivationRepository[];
   triggers?: AgentTriggerConfig[];
 }): { body: string; config: AgentConfig } {
   const body = normalizeAgentBody(input.body);
-  const mentions = collectBodyMentions(body, input.repositories);
+  const mentions = collectBodyMentions(body, input.repositories, input.preferredRepositories ?? []);
   const afterSession = extractAfterSessionConfig(body);
   const model =
     MODEL_BY_ID.get(mentions.model ?? input.model ?? DEFAULT_MODEL_ID) ??
@@ -165,8 +168,12 @@ export function toConfigTool(
   };
 }
 
-function collectBodyMentions(body: string, repositories: AgentConfigDerivationRepository[]) {
-  const repositoryCatalog = repositoryCatalogForDerivation(repositories);
+function collectBodyMentions(
+  body: string,
+  repositories: AgentConfigDerivationRepository[],
+  preferredRepositories: AgentConfigDerivationRepository[] = [],
+) {
+  const repositoryCatalog = repositoryCatalogForDerivation(repositories, preferredRepositories);
   let model: AgentModelId | null = null;
   let activeRepository: AgentGitHubRepositoryConfig | null = null;
   const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
@@ -215,21 +222,63 @@ function collectBodyMentions(body: string, repositories: AgentConfigDerivationRe
   };
 }
 
-function repositoryCatalogForDerivation(repositories: AgentConfigDerivationRepository[]) {
+function repositoryCatalogForDerivation(
+  repositories: AgentConfigDerivationRepository[],
+  preferredRepositories: AgentConfigDerivationRepository[] = [],
+) {
   const byId = new Map<string, AgentGitHubRepositoryConfig>();
   const byFullName = new Map<string, AgentGitHubRepositoryConfig>();
+  const grouped = new Map<string, AgentGitHubRepositoryConfig[]>();
+  const preferredByFullName = new Map<string, AgentGitHubRepositoryConfig>();
 
   for (const repository of repositories) {
-    const config = {
-      id: repositoryIdForFullName(repository.fullName),
-      fullName: repository.fullName,
-      defaultBranch: normalizeBranch(repository.defaultBranch),
-    };
+    const config = repositoryConfigForDerivation(repository);
+    const key = config.fullName.toLowerCase();
+    grouped.set(key, [...(grouped.get(key) ?? []), config]);
+  }
+
+  for (const repository of preferredRepositories) {
+    const config = repositoryConfigForDerivation(repository);
+    preferredByFullName.set(config.fullName.toLowerCase(), config);
+  }
+
+  for (const [fullNameKey, configs] of grouped) {
+    const config = preferredByFullName.get(fullNameKey) ?? resolveRepositoryGroup(configs);
     byId.set(config.id, config);
     byFullName.set(config.fullName.toLowerCase(), config);
   }
 
   return { byId, byFullName };
+}
+
+function repositoryConfigForDerivation(
+  repository: AgentConfigDerivationRepository,
+): AgentGitHubRepositoryConfig {
+  return {
+    id: repositoryIdForFullName(repository.fullName),
+    fullName: repository.fullName,
+    defaultBranch: normalizeBranch(repository.defaultBranch),
+    ...(repository.binding ? { binding: repository.binding } : {}),
+  };
+}
+
+function resolveRepositoryGroup(
+  configs: AgentGitHubRepositoryConfig[],
+): AgentGitHubRepositoryConfig {
+  if (configs.length === 1) return configs[0]!;
+
+  const boundConfigs = configs.filter((config) => config.binding);
+  if (boundConfigs.length <= 1) return boundConfigs[0] ?? configs[0]!;
+
+  const unboundConfig = configs.find((config) => !config.binding);
+  if (unboundConfig) return unboundConfig;
+
+  const first = configs[0]!;
+  return {
+    id: first.id,
+    fullName: first.fullName,
+    defaultBranch: first.defaultBranch,
+  };
 }
 
 function bodyToolsToConfig(toolIds: AgentToolId[], repositoryId: string | null) {

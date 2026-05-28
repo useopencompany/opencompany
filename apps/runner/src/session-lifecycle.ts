@@ -113,10 +113,7 @@ async function resolveGitHubToken(
 ) {
   if (!sessionRepository) return null;
 
-  const integrationRepository = await loadGitHubWorkRepository(
-    row.workspace.id,
-    sessionRepository.fullName,
-  );
+  const integrationRepository = await loadGitHubWorkRepository(row.workspace.id, sessionRepository);
   return getGitHubWorkInstallationToken({
     installationId: integrationRepository.installationId,
     repositoryFullName: sessionRepository.fullName,

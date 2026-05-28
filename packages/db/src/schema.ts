@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -13,6 +14,31 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+
+export type WorkspaceIntegrationConnectionStatus =
+  | "connected"
+  | "needs_reauth"
+  | "sync_failed"
+  | "disconnected";
+
+export type WorkspaceIntegrationResourceStatus =
+  | "available"
+  | "permission_lost"
+  | "archived"
+  | "sync_failed";
+
+export type WorkspaceIntegrationCredentialKind =
+  | "oauth_token"
+  | "api_key"
+  | "webhook_secret"
+  | (string & {});
+
+export type WorkspaceIntegrationCredentialEncryptedPayload = {
+  algorithm: "aes-256-gcm";
+  iv: string;
+  ciphertext: string;
+  authTag: string;
+};
 
 export const users = pgTable(
   "users",
@@ -651,8 +677,20 @@ export const workspaceIntegrations = pgTable(
       .references(() => workspaces.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     externalId: text("external_id").notNull(),
+    connectionLabel: text("connection_label"),
     accountName: text("account_name"),
+    accountEmail: text("account_email"),
     accountType: text("account_type"),
+    connectedByUserId: text("connected_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    status: text("status")
+      .$type<WorkspaceIntegrationConnectionStatus>()
+      .notNull()
+      .default("connected"),
+    statusReason: text("status_reason"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     metadata: jsonb("metadata")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -668,6 +706,13 @@ export const workspaceIntegrations = pgTable(
     workspaceProviderExternalIdx: uniqueIndex(
       "workspace_integrations_workspace_provider_external_idx",
     ).on(table.workspaceId, table.provider, table.externalId),
+    integrationWorkspaceProviderIdx: uniqueIndex(
+      "workspace_integrations_id_workspace_provider_idx",
+    ).on(table.id, table.workspaceId, table.provider),
+    statusCheck: check(
+      "workspace_integrations_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth', 'sync_failed', 'disconnected')`,
+    ),
   }),
 );
 
@@ -678,14 +723,18 @@ export const workspaceIntegrationResources = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => workspaceIntegrations.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
     provider: text("provider").notNull(),
     resourceType: text("resource_type").notNull(),
     externalId: text("external_id").notNull(),
     name: text("name").notNull(),
     displayName: text("display_name"),
+    status: text("status")
+      .$type<WorkspaceIntegrationResourceStatus>()
+      .notNull()
+      .default("available"),
+    statusReason: text("status_reason"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     metadata: jsonb("metadata")
       .$type<Record<string, unknown>>()
       .notNull()
@@ -701,12 +750,65 @@ export const workspaceIntegrationResources = pgTable(
     integrationIdx: index("workspace_integration_resources_integration_idx").on(
       table.integrationId,
     ),
-    workspaceProviderTypeNameIdx: uniqueIndex(
-      "workspace_integration_resources_workspace_provider_type_name_idx",
-    ).on(table.workspaceId, table.provider, table.resourceType, table.name),
-    workspaceProviderTypeExternalIdx: uniqueIndex(
-      "workspace_integration_resources_workspace_provider_type_external_idx",
-    ).on(table.workspaceId, table.provider, table.resourceType, table.externalId),
+    integrationTypeExternalIdx: uniqueIndex(
+      "workspace_integration_resources_integration_type_external_idx",
+    ).on(table.integrationId, table.resourceType, table.externalId),
+    integrationWorkspaceProviderFk: foreignKey({
+      name: "workspace_integration_resources_integration_workspace_provider_fk",
+      columns: [table.integrationId, table.workspaceId, table.provider],
+      foreignColumns: [
+        workspaceIntegrations.id,
+        workspaceIntegrations.workspaceId,
+        workspaceIntegrations.provider,
+      ],
+    }).onDelete("cascade"),
+    statusCheck: check(
+      "workspace_integration_resources_status_check",
+      sql`${table.status} IN ('available', 'permission_lost', 'archived', 'sync_failed')`,
+    ),
+  }),
+);
+
+export const workspaceIntegrationCredentials = pgTable(
+  "workspace_integration_credentials",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id").notNull(),
+    provider: text("provider").notNull(),
+    kind: text("kind").$type<WorkspaceIntegrationCredentialKind>().notNull(),
+    encryptedPayload: jsonb("encrypted_payload")
+      .$type<WorkspaceIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderIdx: index("workspace_integration_credentials_workspace_provider_idx").on(
+      table.workspaceId,
+      table.provider,
+    ),
+    integrationIdx: index("workspace_integration_credentials_integration_idx").on(
+      table.integrationId,
+    ),
+    integrationKindIdx: uniqueIndex("workspace_integration_credentials_integration_kind_idx").on(
+      table.integrationId,
+      table.kind,
+    ),
+    integrationWorkspaceProviderFk: foreignKey({
+      name: "workspace_integration_credentials_integration_workspace_provider_fk",
+      columns: [table.integrationId, table.workspaceId, table.provider],
+      foreignColumns: [
+        workspaceIntegrations.id,
+        workspaceIntegrations.workspaceId,
+        workspaceIntegrations.provider,
+      ],
+    }).onDelete("cascade"),
   }),
 );
 
@@ -796,6 +898,7 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   }),
   integrations: many(workspaceIntegrations),
   integrationResources: many(workspaceIntegrationResources),
+  integrationCredentials: many(workspaceIntegrationCredentials),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
@@ -1007,7 +1110,12 @@ export const workspaceIntegrationsRelations = relations(workspaceIntegrations, (
     fields: [workspaceIntegrations.workspaceId],
     references: [workspaces.id],
   }),
+  connectedByUser: one(users, {
+    fields: [workspaceIntegrations.connectedByUserId],
+    references: [users.id],
+  }),
   resources: many(workspaceIntegrationResources),
+  credentials: many(workspaceIntegrationCredentials),
 }));
 
 export const workspaceIntegrationResourcesRelations = relations(
@@ -1019,6 +1127,20 @@ export const workspaceIntegrationResourcesRelations = relations(
     }),
     integration: one(workspaceIntegrations, {
       fields: [workspaceIntegrationResources.integrationId],
+      references: [workspaceIntegrations.id],
+    }),
+  }),
+);
+
+export const workspaceIntegrationCredentialsRelations = relations(
+  workspaceIntegrationCredentials,
+  ({ one }) => ({
+    workspace: one(workspaces, {
+      fields: [workspaceIntegrationCredentials.workspaceId],
+      references: [workspaces.id],
+    }),
+    integration: one(workspaceIntegrations, {
+      fields: [workspaceIntegrationCredentials.integrationId],
       references: [workspaceIntegrations.id],
     }),
   }),
@@ -1062,6 +1184,7 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type WorkspaceRepository = typeof workspaceRepositories.$inferSelect;
 export type WorkspaceIntegration = typeof workspaceIntegrations.$inferSelect;
 export type WorkspaceIntegrationResource = typeof workspaceIntegrationResources.$inferSelect;
+export type WorkspaceIntegrationCredential = typeof workspaceIntegrationCredentials.$inferSelect;
 export type WorkspaceCreditBalance = typeof workspaceCreditBalances.$inferSelect;
 export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSelect;
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
