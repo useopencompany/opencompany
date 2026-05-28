@@ -1,15 +1,17 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, Bot, Plus } from "lucide-react";
+import { AtSign, Bot, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 import {
   AGENT_MODELS,
   AGENT_TOOLS,
   type AgentMentionItem,
   findMentionItem,
 } from "@/components/agent-editor/tools";
+import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentsPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgent } from "@/lib/agents/actions";
@@ -119,17 +121,45 @@ function AgentRow({ agent, workspaceId }: { agent: AgentListItemPayload; workspa
   );
 }
 
+function isNextRedirectError(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest: unknown }).digest === "string" &&
+      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
+
 function NewAgentButton({ label = "New agent" }: { label?: string }) {
+  const { showError } = useToast();
+  const [isPending, startTransition] = useTransition();
+
+  function handleClick() {
+    startTransition(async () => {
+      try {
+        await createAgent();
+      } catch (err) {
+        if (isNextRedirectError(err)) throw err;
+        showError(err instanceof Error ? err.message : "Could not create agent", "Create failed");
+      }
+    });
+  }
+
   return (
-    <form action={createAgent} className="shrink-0">
-      <button
-        type="submit"
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-ink/10 bg-ink px-3 pr-3.5 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)] transition-colors duration-150 hover:bg-[#242424] focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15"
-      >
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={isPending}
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-ink/10 bg-ink px-3 pr-3.5 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)] transition-colors duration-150 hover:bg-[#242424] disabled:hover:bg-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {isPending ? (
+        <Loader2 size={13.5} strokeWidth={2} className="animate-spin" />
+      ) : (
         <Plus size={13.5} strokeWidth={2} />
-        <span>{label}</span>
-      </button>
-    </form>
+      )}
+      <span>{isPending ? "Creating…" : label}</span>
+    </button>
   );
 }
 
@@ -148,6 +178,8 @@ export default function AgentsView({ initialAgents }: { initialAgents?: AgentLis
     return <AgentsPageSkeleton />;
   }
 
+  const isEmpty = (agents ?? []).length === 0;
+
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[680px] px-6 pb-16 pt-10">
@@ -159,10 +191,10 @@ export default function AgentsView({ initialAgents }: { initialAgents?: AgentLis
               runs. {modelCount} models and {toolCount} tool available.
             </p>
           </div>
-          <NewAgentButton />
+          {!isEmpty && <NewAgentButton />}
         </div>
 
-        {(agents ?? []).length === 0 ? (
+        {isEmpty ? (
           <div className="mt-12 flex flex-col items-center justify-center rounded-lg border border-dashed border-[#e0e0db] bg-white/50 px-6 py-16 text-center">
             <Bot size={20} strokeWidth={1.7} className="text-ink-subtle" />
             <p className="mt-3 text-[13.5px] font-medium text-ink">No agents yet</p>
