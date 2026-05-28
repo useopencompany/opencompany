@@ -25,7 +25,7 @@ import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
-import { WorkingIndicator } from "@/components/WorkingIndicator";
+import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
@@ -222,6 +222,21 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
   const canAbort = sessionCanGenerate;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
+
+  const waitStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
+    if (waiting && waitStartedAtRef.current === null) {
+      waitStartedAtRef.current = Date.now();
+    } else if (!waiting && !showStoppedAfterUser) {
+      waitStartedAtRef.current = null;
+    }
+  }, [showWaitingForAssistant, hasRunningAssistantMessage, showStoppedAfterUser]);
+  const stoppedElapsedSeconds = useMemo(() => {
+    if (!showStoppedAfterUser || !waitStartedAtRef.current) return null;
+    return Math.max(Math.floor((Date.now() - waitStartedAtRef.current) / 1000), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showStoppedAfterUser]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -487,7 +502,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               </div>
             ) : showStoppedAfterUser ? (
               <div className="flex justify-start">
-                <AssistantStoppedNotice />
+                <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
               </div>
             ) : null}
 
@@ -804,11 +819,16 @@ export function AssistantMessageContent({
   );
 }
 
-function AssistantStoppedNotice() {
+function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
   return (
     <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-[#9f2f21]">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
+      {typeof elapsedSeconds === "number" ? (
+        <span className="text-[12px] font-normal tabular-nums text-[#9f2f21]/70">
+          {formatElapsed(elapsedSeconds)}
+        </span>
+      ) : null}
     </div>
   );
 }
