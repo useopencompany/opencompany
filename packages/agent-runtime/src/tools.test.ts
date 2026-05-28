@@ -45,7 +45,7 @@ describe("AGENT_TOOL_CATALOG", () => {
     );
   });
 
-  it("exposes stream-json-compatible Amp modes on amp_coder", () => {
+  it("exposes Amp modes on amp_coder", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("amp_coder");
     if (!definition) throw new Error("Expected amp_coder runtime tool definition to exist");
 
@@ -55,10 +55,10 @@ describe("AGENT_TOOL_CATALOG", () => {
     >;
 
     expect(properties.mode).toMatchObject({
-      enum: ["smart", "large", "rush"],
+      enum: ["smart", "large", "rush", "deep"],
       default: "smart",
     });
-    expect(properties.mode?.description).toContain("Do not use deep");
+    expect(properties.mode?.description).toContain("rush for latency-sensitive tasks");
   });
 
   it("documents platform-only credentials for Exa without workspace resource requirements", () => {
