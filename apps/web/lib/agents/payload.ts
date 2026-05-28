@@ -1,7 +1,19 @@
-import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { AgentConfigDerivationRepository } from "@opencompany/agent-runtime";
+import type {
+  AgentConfig,
+  AgentGitHubRepositoryConfig,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import type { Agent } from "@opencompany/db/schema";
 
 export const AGENTS_QUERY_STALE_TIME_MS = 30_000;
+
+export type GitHubIntegrationRepositoryPayload = AgentConfigDerivationRepository & {
+  status?: "available" | "permission_lost" | "archived" | "sync_failed";
+  statusReason?: string | null;
+  lastSyncedAt?: string | null;
+  connectionStatus?: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
+};
 
 export type AgentListItemPayload = {
   id: string;
@@ -21,7 +33,8 @@ export type AgentDetailPayload = AgentListItemPayload & {
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   brainPaths: string[];
-  githubIntegrationRepositories: Array<{ fullName: string; defaultBranch: string }>;
+  githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
+  usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
 };
 
 export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
@@ -41,7 +54,8 @@ export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
 export function serializeAgentDetail(
   agent: Agent,
   brainPaths: string[] = [],
-  githubIntegrationRepositories: Array<{ fullName: string; defaultBranch: string }> = [],
+  githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
+  usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
 ): AgentDetailPayload {
   return {
     ...serializeAgentListItem(agent),
@@ -51,7 +65,56 @@ export function serializeAgentDetail(
     githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,
     brainPaths,
     githubIntegrationRepositories,
+    usableGitHubIntegrationRepositories,
   };
+}
+
+export function buildGitHubRepositoryCatalogs(input: {
+  repositories: GitHubIntegrationRepositoryPayload[];
+  savedRepositories?: AgentGitHubRepositoryConfig[];
+}): {
+  derivationRepositories: GitHubIntegrationRepositoryPayload[];
+  usableRepositories: GitHubIntegrationRepositoryPayload[];
+} {
+  const usableRepositories = input.repositories.filter(
+    (repository) =>
+      repository.status === "available" && repository.connectionStatus === "connected",
+  );
+  const derivationByKey = new Map<string, GitHubIntegrationRepositoryPayload>();
+
+  for (const repository of usableRepositories) {
+    derivationByKey.set(gitHubRepositoryCatalogKey(repository), repository);
+  }
+
+  for (const repository of input.savedRepositories ?? []) {
+    const payload: GitHubIntegrationRepositoryPayload = {
+      fullName: repository.fullName,
+      defaultBranch: repository.defaultBranch,
+      ...(repository.binding ? { binding: repository.binding } : {}),
+    };
+    const key = gitHubRepositoryCatalogKey(payload);
+    if (!derivationByKey.has(key)) {
+      derivationByKey.set(key, payload);
+    }
+  }
+
+  return {
+    derivationRepositories: Array.from(derivationByKey.values()),
+    usableRepositories,
+  };
+}
+
+function gitHubRepositoryCatalogKey(repository: AgentConfigDerivationRepository) {
+  if (repository.binding) {
+    return [
+      repository.binding.provider,
+      repository.binding.resourceType,
+      repository.binding.externalId,
+      repository.binding.connection.externalId,
+    ].join(":");
+  }
+
+  return repository.fullName.toLowerCase();
 }
 
 export function agentDetailToListItem(agent: AgentDetailPayload): AgentListItemPayload {

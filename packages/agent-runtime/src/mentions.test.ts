@@ -5,6 +5,24 @@ const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },
   { fullName: "opencompany/runner", defaultBranch: "develop" },
 ];
+const boundRepositories = [
+  {
+    fullName: "opencompany/web",
+    defaultBranch: "main",
+    binding: {
+      provider: "github" as const,
+      resourceType: "repository" as const,
+      externalId: "repo_123",
+      displayName: "opencompany/web",
+      connection: {
+        externalId: "install_123",
+        label: "OpenCompany",
+        accountName: "opencompany",
+        accountType: "Organization",
+      },
+    },
+  },
+];
 
 describe("extractConfigFromMentions", () => {
   it("resolves model aliases and lets the last model win", () => {
@@ -70,6 +88,84 @@ describe("deriveAgentConfigFromBody", () => {
     ]);
     expect(config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+    ]);
+  });
+
+  it("preserves connection and resource binding from the repository catalog", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Code agent",
+      body: "Use @amp in @opencompany/web.",
+      repositories: boundRepositories,
+    });
+
+    expect(config.integrations.github.repositories).toEqual([
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+        binding: boundRepositories[0]!.binding,
+      },
+    ]);
+  });
+
+  it("keeps duplicate owner/repo mentions unbound without a concrete preferred binding", () => {
+    const secondBinding = {
+      ...boundRepositories[0]!.binding,
+      externalId: "repo_456",
+      connection: {
+        ...boundRepositories[0]!.binding.connection,
+        externalId: "install_456",
+        label: "OpenCompany EU",
+      },
+    };
+
+    const { config } = deriveAgentConfigFromBody({
+      title: "Code agent",
+      body: "Use @amp in @opencompany/web.",
+      repositories: [
+        boundRepositories[0]!,
+        {
+          fullName: "opencompany/web",
+          defaultBranch: "main",
+          binding: secondBinding,
+        },
+      ],
+    });
+
+    expect(config.integrations.github.repositories).toEqual([
+      { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+    ]);
+  });
+
+  it("uses a preferred binding to resolve duplicate owner/repo mentions", () => {
+    const secondRepository = {
+      fullName: "opencompany/web",
+      defaultBranch: "main",
+      binding: {
+        ...boundRepositories[0]!.binding,
+        externalId: "repo_456",
+        connection: {
+          ...boundRepositories[0]!.binding.connection,
+          externalId: "install_456",
+          label: "OpenCompany EU",
+        },
+      },
+    };
+
+    const { config } = deriveAgentConfigFromBody({
+      title: "Code agent",
+      body: "Use @amp in @opencompany/web.",
+      repositories: [boundRepositories[0]!, secondRepository],
+      preferredRepositories: [secondRepository],
+    });
+
+    expect(config.integrations.github.repositories).toEqual([
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+        binding: secondRepository.binding,
+      },
     ]);
   });
 

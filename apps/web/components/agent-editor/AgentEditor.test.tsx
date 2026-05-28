@@ -5,6 +5,19 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentEditor, type AgentEditorHandle } from "./AgentEditor";
 import { buildAgentMentionItems } from "./tools";
 
+const repositoryBinding = {
+  provider: "github" as const,
+  resourceType: "repository" as const,
+  externalId: "repo_123",
+  displayName: "opencompany/web",
+  connection: {
+    externalId: "install_123",
+    label: "OpenCompany",
+    accountName: "opencompany",
+    accountType: "Organization",
+  },
+};
+
 describe("AgentEditor", () => {
   it("persists selected mention attrs and body text", async () => {
     const user = userEvent.setup();
@@ -50,7 +63,7 @@ describe("AgentEditor", () => {
       <AgentEditor
         initialBody=""
         mentionItems={buildAgentMentionItems([
-          { fullName: "opencompany/web", defaultBranch: "main" },
+          { fullName: "opencompany/web", defaultBranch: "main", binding: repositoryBinding },
         ])}
         onChange={(body, content) =>
           captured.push({ body, content: JSON.parse(JSON.stringify(content)) })
@@ -73,8 +86,9 @@ describe("AgentEditor", () => {
     )?.content?.[0]?.content?.[0];
     expect(mention).toMatchObject({
       attrs: {
-        id: "integration:github:opencompany-web",
+        id: "integration:github:opencompany-web:install_123:repo_123",
         label: "opencompany/web",
+        binding: repositoryBinding,
       },
       type: "mention",
     });

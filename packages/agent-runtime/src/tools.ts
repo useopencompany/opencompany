@@ -31,6 +31,14 @@ export type RuntimeToolDefinition = {
   help?: string;
 };
 
+export type AgentToolCredentialSource = "platform" | "workspace" | "mixed" | "none";
+
+export type AgentToolWorkspaceResourceRequirement = {
+  provider: "github";
+  resourceType: "repository";
+  binding: "required";
+};
+
 export type AgentToolDefinition = {
   id: AgentToolId;
   type: AgentConfigTool["type"];
@@ -38,6 +46,10 @@ export type AgentToolDefinition = {
   label: string;
   description: string;
   runtimeTools: RuntimeToolName[];
+  defaultEnabled: true;
+  credentialSource: AgentToolCredentialSource;
+  requiredPlatformEnvVars?: string[];
+  requiredWorkspaceResource?: AgentToolWorkspaceResourceRequirement;
   prCapableDefault?: boolean;
 };
 
@@ -48,6 +60,9 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     label: "exa",
     description: "Web research with search, content extraction, people lookup, and cited answers.",
     runtimeTools: ["exa_search", "exa_contents", "exa_answer", "web_fetch"],
+    defaultEnabled: true,
+    credentialSource: "platform",
+    requiredPlatformEnvVars: ["EXA_API_KEY"],
   },
   {
     id: "amp",
@@ -56,6 +71,14 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     label: "AMP",
     description: "Delegate coding work to Amp inside an E2B sandbox.",
     runtimeTools: ["amp_coder"],
+    defaultEnabled: true,
+    credentialSource: "mixed",
+    requiredPlatformEnvVars: ["AMP_API_KEY"],
+    requiredWorkspaceResource: {
+      provider: "github",
+      resourceType: "repository",
+      binding: "required",
+    },
     prCapableDefault: true,
   },
 ];

@@ -16,11 +16,15 @@ import {
   agents,
   brainFiles,
   workspaceIntegrationResources,
+  workspaceIntegrations,
 } from "@opencompany/db/schema";
 import { and, asc, eq, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
+import {
+  derivePreviewConfigFromTiptapDoc,
+  extractPreferredGitHubRepositoriesFromTiptapDoc,
+} from "@/lib/agents/config";
 import {
   buildPendingAgent,
   logAgentSyncJobQueued,
@@ -31,7 +35,11 @@ import {
 } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
-import { serializeAgentDetail } from "@/lib/agents/payload";
+import {
+  buildGitHubRepositoryCatalogs,
+  type GitHubIntegrationRepositoryPayload,
+  serializeAgentDetail,
+} from "@/lib/agents/payload";
 import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
@@ -155,9 +163,23 @@ export async function updateAgent(
       db
         .select({
           fullName: workspaceIntegrationResources.name,
+          externalId: workspaceIntegrationResources.externalId,
+          displayName: workspaceIntegrationResources.displayName,
+          status: workspaceIntegrationResources.status,
+          statusReason: workspaceIntegrationResources.statusReason,
+          lastSyncedAt: workspaceIntegrationResources.lastSyncedAt,
           metadata: workspaceIntegrationResources.metadata,
+          connectionExternalId: workspaceIntegrations.externalId,
+          connectionLabel: workspaceIntegrations.connectionLabel,
+          accountName: workspaceIntegrations.accountName,
+          accountType: workspaceIntegrations.accountType,
+          connectionStatus: workspaceIntegrations.status,
         })
         .from(workspaceIntegrationResources)
+        .innerJoin(
+          workspaceIntegrations,
+          eq(workspaceIntegrationResources.integrationId, workspaceIntegrations.id),
+        )
         .where(
           and(
             eq(workspaceIntegrationResources.workspaceId, workspace.id),
@@ -167,16 +189,47 @@ export async function updateAgent(
         )
         .orderBy(asc(workspaceIntegrationResources.name)),
   );
-  const githubRepositories = githubIntegrationRepositories.map((repository) => ({
-    fullName: repository.fullName,
-    defaultBranch: readGitHubRepositoryDefaultBranch(repository.metadata),
-  }));
+  const githubRepositories: GitHubIntegrationRepositoryPayload[] =
+    githubIntegrationRepositories.map((repository) => ({
+      fullName: repository.fullName,
+      defaultBranch: readGitHubRepositoryDefaultBranch(repository.metadata),
+      status: repository.status,
+      statusReason: repository.statusReason,
+      lastSyncedAt: repository.lastSyncedAt?.toISOString() ?? null,
+      connectionStatus: repository.connectionStatus,
+      binding: {
+        provider: "github",
+        resourceType: "repository",
+        externalId: repository.externalId,
+        displayName: repository.displayName ?? repository.fullName,
+        connection: {
+          externalId: repository.connectionExternalId,
+          label: repository.connectionLabel ?? repository.accountName ?? "GitHub",
+          accountName: repository.accountName,
+          accountType: repository.accountType,
+        },
+      },
+    }));
+  const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
+    repositories: githubRepositories,
+    savedRepositories: agent.config.integrations.github.repositories,
+  });
+  const savedPreferredRepositories = agent.config.integrations.github.repositories.filter(
+    (repository) => repository.binding,
+  );
+  const preferredRepositories = [
+    ...savedPreferredRepositories,
+    ...(sanitizedContent
+      ? extractPreferredGitHubRepositoriesFromTiptapDoc(sanitizedContent, derivationRepositories)
+      : []),
+  ];
   const derivedFromTiptap = sanitizedContent
     ? derivePreviewConfigFromTiptapDoc({
         title,
         content: sanitizedContent,
         model: patch.model ?? agent.config.model.name,
-        repositories: githubRepositories,
+        repositories: derivationRepositories,
+        preferredRepositories: savedPreferredRepositories,
         triggers: agent.config.triggers,
       })
     : null;
@@ -189,7 +242,8 @@ export async function updateAgent(
           title,
           body: patch.body,
           model: patch.model ?? agent.config.model.name,
-          repositories: githubRepositories,
+          repositories: derivationRepositories,
+          preferredRepositories,
           triggers: agent.config.triggers,
         })
       : derivedFromTiptap;
@@ -296,7 +350,9 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
     pathChanged,
-    agent: updatedAgent ? serializeAgentDetail(updatedAgent, brainPaths, githubRepositories) : null,
+    agent: updatedAgent
+      ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories)
+      : null,
   };
 
   revalidatePath("/agents");

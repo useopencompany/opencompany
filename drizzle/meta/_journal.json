@@ -169,6 +169,20 @@
       "when": 1779876596391,
       "tag": "0023_wonderful_adam_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779885593865,
+      "tag": "0024_burly_galactus",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1779885879262,
+      "tag": "0025_adorable_sugar_man",
+      "breakpoints": true
     }
   ]
 }

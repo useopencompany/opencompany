@@ -17,19 +17,15 @@ import {
   disconnectGitHubIntegration,
   GITHUB_INTEGRATION_PROVIDER,
   GITHUB_REPOSITORY_RESOURCE_TYPE,
+  markGitHubIntegrationStatus,
   syncGitHubIntegrationRepositories,
 } from "@/lib/integrations/service";
-
-export type WorkspaceIntegrationStatus =
-  | "not_connected"
-  | "connected"
-  | "needs_repository_access"
-  | "error";
+import { githubStatus } from "@/lib/integrations/status";
 
 export async function loadWorkspaceIntegrationState() {
   const { workspace } = await currentWorkspace();
   const db = getDb();
-  const [installation, repositories] = await Promise.all([
+  const [connections, repositories] = await Promise.all([
     db
       .select()
       .from(workspaceIntegrations)
@@ -39,7 +35,7 @@ export async function loadWorkspaceIntegrationState() {
           eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
         ),
       )
-      .limit(1),
+      .orderBy(workspaceIntegrations.accountName, workspaceIntegrations.createdAt),
     db
       .select()
       .from(workspaceIntegrationResources)
@@ -51,34 +47,50 @@ export async function loadWorkspaceIntegrationState() {
         ),
       ),
   ]);
+  const repositoriesByIntegrationId = new Map<string, (typeof repositories)[number][]>();
+  for (const repository of repositories) {
+    const existing = repositoriesByIntegrationId.get(repository.integrationId) ?? [];
+    existing.push(repository);
+    repositoriesByIntegrationId.set(repository.integrationId, existing);
+  }
 
   return {
     github: {
       status: githubStatus({
         configured: isGitHubWorkIntegrationConfigured(),
-        hasInstallation: Boolean(installation[0]),
-        repositoryCount: repositories.length,
+        connectionStatuses: connections.map((connection) => connection.status),
+        availableRepositoryCount: repositories.filter(
+          (repository) => repository.status === "available",
+        ).length,
       }),
-      installation: installation[0]
-        ? {
-            installationId: installation[0].externalId,
-            accountLogin: installation[0].accountName,
-            accountType: installation[0].accountType,
-            updatedAt: installation[0].updatedAt.toISOString(),
-          }
-        : null,
-      repositories: repositories
-        .sort((left, right) => left.name.localeCompare(right.name))
-        .map((repository) => ({
-          fullName: repository.name,
-          defaultBranch: readGitHubRepositoryMetadata(repository.metadata).defaultBranch,
-          selectedAt: repository.selectedAt?.toISOString() ?? null,
-        })),
+      connections: connections.map((connection) => {
+        const connectionRepositories = repositoriesByIntegrationId.get(connection.id) ?? [];
+        return {
+          id: connection.id,
+          installationId: connection.externalId,
+          connectionLabel: connection.connectionLabel ?? connection.accountName ?? "GitHub",
+          accountLogin: connection.accountName,
+          accountType: connection.accountType,
+          status: connection.status,
+          statusReason: connection.statusReason,
+          updatedAt: (connection.lastSyncedAt ?? connection.updatedAt).toISOString(),
+          repositories: connectionRepositories
+            .sort((left, right) => left.name.localeCompare(right.name))
+            .map((repository) => ({
+              fullName: repository.name,
+              defaultBranch: readGitHubRepositoryMetadata(repository.metadata).defaultBranch,
+              status: repository.status,
+              statusReason: repository.statusReason,
+              lastSyncedAt: repository.lastSyncedAt?.toISOString() ?? null,
+              selectedAt: repository.selectedAt?.toISOString() ?? null,
+            })),
+        };
+      }),
     },
   };
 }
 
-export async function refreshGitHubRepositories() {
+export async function refreshGitHubRepositories(integrationId: string) {
   const { workspace } = await currentWorkspace({ requireAdmin: true });
   if (!isGitHubWorkIntegrationConfigured()) return;
 
@@ -90,6 +102,7 @@ export async function refreshGitHubRepositories() {
       and(
         eq(workspaceIntegrations.workspaceId, workspace.id),
         eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrations.id, integrationId),
       ),
     )
     .limit(1);
@@ -98,21 +111,33 @@ export async function refreshGitHubRepositories() {
     return;
   }
 
-  const installationId = existingInstallation.externalId;
-  const installation = await getGitHubWorkInstallation({ installationId });
-  const repositories = await listGitHubWorkInstallationRepositories({ installationId });
-  await syncGitHubIntegrationRepositories({
-    workspaceId: workspace.id,
-    installationId,
-    accountLogin: installation.account?.login ?? existingInstallation.accountName,
-    accountType: installation.account?.type ?? existingInstallation.accountType,
-    repositories,
-  });
+  try {
+    const installationId = existingInstallation.externalId;
+    const installation = await getGitHubWorkInstallation({ installationId });
+    const repositories = await listGitHubWorkInstallationRepositories({ installationId });
+    await syncGitHubIntegrationRepositories({
+      workspaceId: workspace.id,
+      installationId,
+      accountLogin: installation.account?.login ?? existingInstallation.accountName,
+      accountType: installation.account?.type ?? existingInstallation.accountType,
+      repositories,
+    });
+  } catch (error) {
+    await markGitHubIntegrationStatus({
+      workspaceId: workspace.id,
+      integrationId: existingInstallation.id,
+      status: classifyGitHubSyncFailure(error),
+      statusReason: error instanceof Error ? error.message : "GitHub refresh failed.",
+    });
+  }
 
   revalidateIntegrationPaths();
 }
 
-export async function markGitHubRepositorySelected(fullName: string) {
+export async function markGitHubRepositorySelected(input: {
+  integrationId: string;
+  fullName: string;
+}) {
   const { workspace } = await currentWorkspace({ requireAdmin: true });
   await getDb()
     .update(workspaceIntegrationResources)
@@ -120,9 +145,10 @@ export async function markGitHubRepositorySelected(fullName: string) {
     .where(
       and(
         eq(workspaceIntegrationResources.workspaceId, workspace.id),
+        eq(workspaceIntegrationResources.integrationId, input.integrationId),
         eq(workspaceIntegrationResources.provider, GITHUB_INTEGRATION_PROVIDER),
         eq(workspaceIntegrationResources.resourceType, GITHUB_REPOSITORY_RESOURCE_TYPE),
-        eq(workspaceIntegrationResources.name, fullName),
+        eq(workspaceIntegrationResources.name, input.fullName),
       ),
     );
 
@@ -135,7 +161,9 @@ export type DisconnectGitHubIntegrationResult = {
   message: string;
 };
 
-export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGitHubIntegrationResult> {
+export async function disconnectGitHubIntegrationAction(
+  integrationId: string,
+): Promise<DisconnectGitHubIntegrationResult> {
   const { workspace } = await currentWorkspace({ requireAdmin: true });
   const db = getDb();
   const [existingInstallation] = await db
@@ -145,6 +173,7 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
       and(
         eq(workspaceIntegrations.workspaceId, workspace.id),
         eq(workspaceIntegrations.provider, GITHUB_INTEGRATION_PROVIDER),
+        eq(workspaceIntegrations.id, integrationId),
       ),
     )
     .limit(1);
@@ -158,7 +187,7 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
   }
 
   if (!isGitHubWorkInstallationManagementConfigured()) {
-    await disconnectGitHubIntegration({ workspaceId: workspace.id });
+    await disconnectGitHubIntegration({ workspaceId: workspace.id, integrationId });
     revalidateIntegrationPaths();
     return {
       ok: true,
@@ -195,7 +224,7 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
     }
   }
 
-  await disconnectGitHubIntegration({ workspaceId: workspace.id });
+  await disconnectGitHubIntegration({ workspaceId: workspace.id, integrationId });
   revalidateIntegrationPaths();
 
   return {
@@ -207,15 +236,10 @@ export async function disconnectGitHubIntegrationAction(): Promise<DisconnectGit
   };
 }
 
-function githubStatus(input: {
-  configured: boolean;
-  hasInstallation: boolean;
-  repositoryCount: number;
-}): WorkspaceIntegrationStatus {
-  if (!input.configured) return "error";
-  if (!input.hasInstallation) return "not_connected";
-  if (input.repositoryCount === 0) return "needs_repository_access";
-  return "connected";
+function classifyGitHubSyncFailure(error: unknown): "needs_reauth" | "sync_failed" {
+  if (error instanceof GitHubInstallationNotFoundError) return "needs_reauth";
+  const message = error instanceof Error ? error.message : "";
+  return /\b(401|403|404)\b/.test(message) ? "needs_reauth" : "sync_failed";
 }
 
 function readGitHubRepositoryMetadata(metadata: Record<string, unknown>) {

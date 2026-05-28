@@ -115,9 +115,19 @@ integrations:
       - id: opencompany-web
         fullName: opencompany/web
         defaultBranch: main
+        binding:
+          provider: github
+          resourceType: repository
+          externalId: "123456789"
+          displayName: opencompany/web
+          connection:
+            externalId: "987654"
+            label: OpenCompany
+            accountName: opencompany
+            accountType: Organization
 ```
 
-Unknown or unauthorized repository mentions stay in the body as text, but they do not contribute to the saved config.
+`fullName` remains the readable reference shown in body mentions. `binding` is optional normalized runtime data that identifies the concrete provider resource and parent connection without making opaque database IDs part of the human-authored reference. Unknown or unauthorized repository mentions stay in the body as text, but they do not contribute to the saved config.
 
 ## The body
 
@@ -310,3 +320,5 @@ Yes, but the last save wins for now. We're working on something better. In the m
 
 **How do I add a new model or tool?**
 That requires a code change — we ship a curated catalog so every workspace knows the same set of models and tools work. Open a request and we'll prioritize.
+
+Tool availability is static for now: every workspace can use every supported catalog tool. The runtime catalog records each tool's default enabled state, platform env requirements, and required workspace resource type when applicable, so future admin controls can use catalog defaults without changing `.agent` files.
