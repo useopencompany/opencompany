@@ -82,6 +82,7 @@ const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
   "openai/gpt-5.4-mini": Bot,
   "openai/gpt-5.4": Brain,
   "openai/gpt-5.4-nano": Bot,
+  "openai/gpt-5.2-codex": Code2,
   "anthropic/claude-haiku-4.5": Bot,
   "anthropic/claude-sonnet-4.6": Brain,
   "anthropic/claude-opus-4.7": Brain,

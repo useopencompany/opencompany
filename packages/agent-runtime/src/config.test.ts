@@ -245,6 +245,37 @@ describe("resolveAgentRuntimeConfig", () => {
       exposeReasoningSummary: false,
     });
   });
+
+  it("applies OpenAI reasoning options to GPT 5.2 Codex", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Codex agent",
+      instructions: "Work on code.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.2-codex",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.model).toEqual({
+      provider: "vercel-ai-gateway",
+      name: "openai/gpt-5.2-codex",
+      supportsReasoning: true,
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposeReasoningSummary: true,
+    });
+  });
 });
 
 describe("normalizeAgentConfig", () => {

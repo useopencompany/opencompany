@@ -29,6 +29,7 @@ export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
   | "openai/gpt-5.4-nano"
+  | "openai/gpt-5.2-codex"
   | "anthropic/claude-haiku-4.5"
   | "anthropic/claude-sonnet-4.6"
   | "anthropic/claude-opus-4.7"
