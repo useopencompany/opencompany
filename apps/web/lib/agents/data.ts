@@ -9,6 +9,7 @@ import { and, asc, desc, eq, or } from "drizzle-orm";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
+  agentGitHubRepositories,
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
   serializeAgentDetail,
@@ -121,7 +122,7 @@ export async function loadAgentForWorkspace(
 
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubIntegrationRepositories,
-    savedRepositories: agent.config.integrations.github.repositories,
+    savedRepositories: agentGitHubRepositories(agent.config),
   });
 
   return serializeAgentDetail(agent, brainPaths, derivationRepositories, usableRepositories, {
