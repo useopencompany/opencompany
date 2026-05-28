@@ -55,6 +55,18 @@ describe("MCP credential storage", () => {
 
     expect(rows).toHaveLength(0);
   });
+
+  it("surfaces missing encryption key configuration instead of masking it as decrypt failure", async () => {
+    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey(1));
+    const { db } = createCredentialDb();
+
+    await saveMcpCredential({ ...credentialContext, bearerToken: "lin_api_secret", db });
+    vi.unstubAllEnvs();
+
+    await expect(loadMcpCredential({ ...credentialContext, db })).rejects.toThrow(
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+    );
+  });
 });
 
 type StoredCredentialRow = {
