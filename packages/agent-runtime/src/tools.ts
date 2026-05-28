@@ -5,7 +5,7 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
-import type { AgentConfigTool, AgentToolId } from "./types";
+import type { AgentConfigTool, AgentSkillId, AgentToolId } from "./types";
 
 export type RuntimeToolName =
   | "shell"
@@ -18,12 +18,17 @@ export type RuntimeToolName =
   | "exa_contents"
   | "exa_answer"
   | "web_fetch"
+  | "opencompany_list_workspace_config"
+  | "opencompany_read_workspace_config"
+  | "opencompany_validate_agent"
+  | "opencompany_propose_config_change"
   | "tool_help";
 
 export type RuntimeToolDefinition = {
   name: RuntimeToolName;
-  kind: "sandbox" | "hosted";
+  kind: "sandbox" | "hosted" | "workspace";
   configToolId?: AgentToolId;
+  configSkillId?: AgentSkillId;
   requiresRepositoryBinding?: boolean;
   description: string;
   parameters: JsonSchema;
@@ -68,7 +73,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible.",
+      "Run a shell command from the session workspace root, where ./work, ./brain, and ./skills are visible.",
     parameters: {
       type: "object",
       properties: {
@@ -82,11 +87,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "read_file",
     kind: "sandbox",
     description:
-      "Read a UTF-8 text file from ./work or ./brain. The path must start with work/ or brain/.",
+      "Read a UTF-8 text file from ./work, ./brain, or ./skills. The path must start with work/, brain/, or skills/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or skills/.",
+        },
       },
       required: ["path"],
       additionalProperties: false,
@@ -96,7 +104,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "write_file",
     kind: "sandbox",
     description:
-      "Write a UTF-8 text file inside ./work or ./brain. The path must start with work/ or brain/.",
+      "Write a UTF-8 text file inside ./work or ./brain. The path must start with work/ or brain/. Skill files are read-only.",
     parameters: {
       type: "object",
       properties: {
@@ -111,13 +119,13 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "list_files",
     kind: "sandbox",
     description:
-      "List files and directories below ./work or ./brain. The path must start with work/ or brain/.",
+      "List files and directories below ./work, ./brain, or ./skills. The path must start with work/, brain/, or skills/.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Relative path starting with work/ or brain/.",
+          description: "Relative path starting with work/, brain/, or skills/.",
           default: "work",
         },
         depth: { type: "number", description: "Maximum traversal depth.", default: 2 },
@@ -418,9 +426,105 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   },
 ];
 
+export const WORKSPACE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
+  {
+    name: "opencompany_list_workspace_config",
+    kind: "workspace",
+    configSkillId: "opencompany",
+    description:
+      "List OpenCompany workspace agents and Brain files that can be inspected before proposing configuration changes.",
+    parameters: {
+      type: "object",
+      properties: {
+        target: {
+          type: "string",
+          enum: ["all", "agents", "brain"],
+          description: "Which workspace configuration resources to list. Defaults to all.",
+          default: "all",
+        },
+      },
+      additionalProperties: false,
+    },
+    help: "Use before proposing agent or Brain changes so you can target the existing workspace state.",
+  },
+  {
+    name: "opencompany_read_workspace_config",
+    kind: "workspace",
+    configSkillId: "opencompany",
+    description:
+      "Read one OpenCompany agent file or Brain file from workspace state. Use this before proposing updates.",
+    parameters: {
+      type: "object",
+      properties: {
+        targetType: {
+          type: "string",
+          enum: ["agent", "brain"],
+          description: "The resource type to read.",
+        },
+        id: { type: "string", description: "Agent id when reading an agent." },
+        path: { type: "string", description: "Agent path or Brain path." },
+      },
+      required: ["targetType"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "opencompany_validate_agent",
+    kind: "workspace",
+    configSkillId: "opencompany",
+    description:
+      "Validate a full .agent source before proposing an OpenCompany agent create or update.",
+    parameters: {
+      type: "object",
+      properties: {
+        source: { type: "string", description: "Full .agent file source." },
+      },
+      required: ["source"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "opencompany_propose_config_change",
+    kind: "workspace",
+    configSkillId: "opencompany",
+    description:
+      "Create a pending OpenCompany workspace configuration proposal for user approval. This does not apply changes.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "Short user-facing summary of the proposal." },
+        changes: {
+          type: "array",
+          description: "Proposed agent or Brain changes.",
+          items: {
+            type: "object",
+            properties: {
+              targetType: { type: "string", enum: ["agent", "brain"] },
+              operation: { type: "string", enum: ["create", "update"] },
+              id: { type: "string", description: "Existing agent id for agent updates." },
+              path: { type: "string", description: "Agent or Brain path." },
+              title: { type: "string", description: "Agent title for display." },
+              source: { type: "string", description: "Full .agent source for agent changes." },
+              content: {
+                type: "string",
+                description: "Full Brain file content for Brain changes.",
+              },
+            },
+            required: ["targetType", "operation"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["summary", "changes"],
+      additionalProperties: false,
+    },
+  },
+];
+
 export const RUNTIME_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   ...CORE_TOOL_DEFINITIONS,
   ...HOSTED_TOOL_DEFINITIONS,
+  ...WORKSPACE_TOOL_DEFINITIONS,
 ];
 
 export const RUNTIME_TOOL_DEFINITION_BY_NAME = new Map(
@@ -429,6 +533,7 @@ export const RUNTIME_TOOL_DEFINITION_BY_NAME = new Map(
 
 export function resolveRuntimeToolNamesForConfigTools(
   tools: ReadonlyArray<{ id?: unknown }> | undefined,
+  skills: ReadonlyArray<string> | undefined = [],
 ) {
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
@@ -447,6 +552,13 @@ export function resolveRuntimeToolNamesForConfigTools(
       if (definition && isRuntimeToolEnabledByConfig(definition, tools, selectedToolIds)) {
         names.add(definition.name);
       }
+    }
+  }
+
+  const selectedSkillIds = new Set(skills ?? []);
+  for (const definition of WORKSPACE_TOOL_DEFINITIONS) {
+    if (definition.configSkillId && selectedSkillIds.has(definition.configSkillId)) {
+      names.add(definition.name);
     }
   }
 

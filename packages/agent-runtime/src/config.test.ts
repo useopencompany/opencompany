@@ -107,6 +107,61 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).not.toContain(": /.");
   });
 
+  it("exposes only compact skill metadata in the system prompt", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Config agent",
+      instructions: "Edit agent configuration.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      skills: ["opencompany"],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.systemPrompt).toContain("<available_skills>");
+    expect(resolved.systemPrompt).toContain('name="opencompany"');
+    expect(resolved.systemPrompt).toContain('path="skills/opencompany/SKILL.md"');
+    expect(resolved.systemPrompt).toContain("read that skill's SKILL.md with read_file");
+    expect(resolved.systemPrompt).not.toContain("Core Product Contract");
+    expect(resolved.tools).toEqual(
+      expect.arrayContaining([
+        "opencompany_list_workspace_config",
+        "opencompany_read_workspace_config",
+        "opencompany_validate_agent",
+        "opencompany_propose_config_change",
+      ]),
+    );
+  });
+
+  it("omits skill metadata when skills are explicitly disabled", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Direct agent",
+      instructions: "Do the work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      skills: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.systemPrompt).not.toContain("<available_skills>");
+    expect(resolved.tools).not.toContain("opencompany_propose_config_change");
+  });
+
   it("ignores stale unknown config tools", () => {
     const config = {
       schemaVersion: "agent.v1",

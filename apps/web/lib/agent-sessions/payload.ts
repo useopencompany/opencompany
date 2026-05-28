@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { OpenCompanyConfigProposal } from "@/lib/agent-sessions/config-proposals";
 import {
   applyRuntimeEventToState,
   type RuntimeEvent,
@@ -53,6 +54,7 @@ export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
   messages: SessionMessage[];
   events: RuntimeEvent[];
+  configProposals: OpenCompanyConfigProposal[];
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
@@ -82,6 +84,7 @@ export type AgentSessionDetailSerializable = {
     }
   >;
   events: RuntimeEvent[];
+  configProposals: OpenCompanyConfigProposal[];
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
@@ -121,6 +124,7 @@ export function serializeAgentSessionDetail(
       completedAt: message.completedAt?.toISOString() ?? null,
     })),
     events: detail.events,
+    configProposals: detail.configProposals,
     usage: detail.usage,
     toolUsage: detail.toolUsage,
     cost: detail.cost,
@@ -208,6 +212,7 @@ export function mergeAgentSessionDetail(
     session: mergeSession(current.session, replayed.session),
     messages: mergeMessages(current.messages, replayed.messages),
     events: mergeEvents(current.events, replayed.events),
+    configProposals: replayed.configProposals,
   };
 }
 
@@ -496,11 +501,73 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     session: parseAgentSessionPayload(record.session),
     messages: assertArray(record.messages, "messages").map(parseSessionMessage),
     events: assertArray(record.events, "events").map(parseRuntimeEventPayload),
+    configProposals: assertArray(record.configProposals ?? [], "configProposals").map(
+      parseConfigProposal,
+    ),
     usage: parseUsageSummary(record.usage),
     toolUsage: parseToolUsageSummary(record.toolUsage),
     cost: parseCostSummary(record.cost),
     runnerUrl: readNullableStringField(record, "runnerUrl"),
   };
+}
+
+function parseConfigProposal(value: unknown): OpenCompanyConfigProposal {
+  const record = assertRecord(value, "config proposal");
+  return {
+    id: readNumberField(record, "id"),
+    sessionId: readStringField(record, "sessionId"),
+    messageId: readNullableStringField(record, "messageId"),
+    toolCallId: readStringField(record, "toolCallId"),
+    title: readStringField(record, "title"),
+    status: parseConfigProposalStatus(readStringField(record, "status")),
+    summary: readStringField(record, "summary"),
+    changes: assertArray(record.changes, "config proposal changes").map(parseConfigProposalChange),
+    createdAt: readStringField(record, "createdAt"),
+    error: readNullableStringField(record, "error"),
+  };
+}
+
+function parseConfigProposalStatus(value: string) {
+  if (value === "applied" || value === "dismissed" || value === "failed") return value;
+  return "pending";
+}
+
+function parseConfigProposalChange(value: unknown): OpenCompanyConfigProposal["changes"][number] {
+  const record = assertRecord(value, "config proposal change");
+  const targetType = readStringField(record, "targetType");
+  const operation = parseConfigProposalOperation(readStringField(record, "operation"));
+  if (targetType === "agent") {
+    const warnings = Array.isArray(record.warnings)
+      ? record.warnings.flatMap((warning) => (typeof warning === "string" ? [warning] : []))
+      : [];
+    return {
+      targetType,
+      operation,
+      id: readNullableStringField(record, "id"),
+      path: readNullableStringField(record, "path"),
+      title: readStringField(record, "title"),
+      source: readStringField(record, "source"),
+      previousHash: readNullableStringField(record, "previousHash"),
+      previousVersion: readOptionalNullableNumberField(record, "previousVersion") ?? null,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    };
+  }
+  if (targetType === "brain") {
+    return {
+      targetType,
+      operation,
+      path: readStringField(record, "path"),
+      content: readStringField(record, "content"),
+      previousHash: readNullableStringField(record, "previousHash"),
+      contentHash: readStringField(record, "contentHash"),
+    };
+  }
+  throw new Error("Invalid config proposal change targetType.");
+}
+
+function parseConfigProposalOperation(value: string) {
+  if (value === "create" || value === "update") return value;
+  throw new Error("Invalid config proposal operation.");
 }
 
 function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
@@ -668,6 +735,13 @@ function readNumberField(record: Record<string, unknown>, field: string) {
 function readOptionalNumberField(record: Record<string, unknown>, field: string) {
   const value = record[field];
   if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readOptionalNullableNumberField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined || value === null) return value;
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
   return value;
 }

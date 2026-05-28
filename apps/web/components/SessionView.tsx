@@ -6,13 +6,16 @@ import {
   ArrowUp,
   Bot,
   Brain,
+  Check,
   ChevronRight,
   CircleStop,
   ExternalLink,
+  FilePenLine,
   LoaderCircle,
   PanelRight,
   TerminalSquare,
   Wrench,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -23,7 +26,16 @@ import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
-import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
+import {
+  abortAgentSession,
+  applyOpenCompanyConfigProposal,
+  dismissOpenCompanyConfigProposal,
+  submitAgentSessionMessage,
+} from "@/lib/agent-sessions/actions";
+import {
+  type OpenCompanyConfigProposal,
+  placeOpenCompanyConfigProposals,
+} from "@/lib/agent-sessions/config-proposals";
 import {
   type AgentSessionDetailPayload,
   addUserMessageToSessionDetail,
@@ -50,6 +62,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { agentQueryKeys } from "@/lib/agents/payload";
 
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
@@ -143,7 +156,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
-  const { showError } = useToast();
+  const { showError, showToast } = useToast();
   const session = detail.session;
   const { data: streamCredential } = useQuery({
     queryKey: streamCredentialKey,
@@ -179,12 +192,21 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     () => buildBackgroundActivityParts(runtime.events, runtime.messages).slice(-8),
     [runtime.events, runtime.messages],
   );
+  const configProposals = detail.configProposals ?? [];
   const visibleMessages = useMemo(
     () =>
       runtime.messages.filter(
         (message) => !message.internal && (message.role === "user" || message.role === "assistant"),
       ),
     [runtime.messages],
+  );
+  const proposalPlacement = useMemo(
+    () =>
+      placeOpenCompanyConfigProposals(
+        configProposals,
+        visibleMessages.map((message) => message.id),
+      ),
+    [configProposals, visibleMessages],
   );
   const assistantPartsByMessageId = useMemo(() => {
     const partsByMessageId = new Map<string, AssistantTurnPart[]>();
@@ -225,6 +247,40 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     });
   };
 
+  const refreshAfterProposalChange = () => {
+    void queryClient.invalidateQueries({ queryKey: detailKey });
+    void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
+    void queryClient.invalidateQueries({
+      queryKey: agentQueryKeys.detail(workspaceId, session.agentId),
+    });
+  };
+
+  const applyProposal = (proposalId: number) => {
+    startTransition(async () => {
+      const result = await applyOpenCompanyConfigProposal(proposalId);
+      if (!result.ok) {
+        showError(result.error, "Could not apply proposal");
+        refreshAfterProposalChange();
+        return;
+      }
+      showToast({ title: "Proposal applied" });
+      refreshAfterProposalChange();
+    });
+  };
+
+  const dismissProposal = (proposalId: number) => {
+    startTransition(async () => {
+      const result = await dismissOpenCompanyConfigProposal(proposalId);
+      if (!result.ok) {
+        showError(result.error, "Could not dismiss proposal");
+        refreshAfterProposalChange();
+        return;
+      }
+      showToast({ title: "Proposal dismissed" });
+      refreshAfterProposalChange();
+    });
+  };
+
   const applyRuntimeEvent = useCallback(
     (event: RuntimeEvent) => {
       const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
@@ -232,6 +288,12 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
       const next = applyRuntimeEventToSessionDetail(current, event);
       seedSessionQueries(queryClient, workspaceId, next);
       invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event);
+      if (
+        event.type === "tool.completed" &&
+        readString(event.payload.name) === "opencompany_propose_config_change"
+      ) {
+        void queryClient.invalidateQueries({ queryKey: detailKey });
+      }
     },
     [detailKey, queryClient, workspaceId, session.agentId],
   );
@@ -314,25 +376,33 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
             {visibleMessages.map((message) => {
               const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
+              const messageProposals = proposalPlacement.byMessageId.get(message.id) ?? [];
 
               return (
-                <div
-                  key={message.id}
-                  className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
-                >
+                <div key={message.id} className="space-y-2">
                   <div
-                    className={
-                      message.role === "user"
-                        ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
-                        : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
-                    }
+                    className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
                   >
-                    {message.role === "assistant" ? (
-                      <AssistantMessageContent message={message} parts={assistantParts} />
-                    ) : (
-                      message.content
-                    )}
+                    <div
+                      className={
+                        message.role === "user"
+                          ? "max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-6 text-ink"
+                          : "max-w-[86%] break-words text-[13px] leading-6 text-ink/90"
+                      }
+                    >
+                      {message.role === "assistant" ? (
+                        <AssistantMessageContent message={message} parts={assistantParts} />
+                      ) : (
+                        message.content
+                      )}
+                    </div>
                   </div>
+                  <OpenCompanyProposalCards
+                    proposals={messageProposals}
+                    isPending={isPending}
+                    onApply={applyProposal}
+                    onDismiss={dismissProposal}
+                  />
                 </div>
               );
             })}
@@ -342,6 +412,13 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                 <ThinkingShimmer />
               </div>
             ) : null}
+
+            <OpenCompanyProposalCards
+              proposals={proposalPlacement.orphaned}
+              isPending={isPending}
+              onApply={applyProposal}
+              onDismiss={dismissProposal}
+            />
 
             {backgroundParts.length > 0 ? (
               <div className="space-y-1.5">
@@ -617,6 +694,130 @@ function ToolCallPreview({ label, value }: { label: string; value: string }) {
       </pre>
     </div>
   );
+}
+
+function OpenCompanyProposalCards({
+  proposals,
+  isPending,
+  onApply,
+  onDismiss,
+}: {
+  proposals: OpenCompanyConfigProposal[];
+  isPending: boolean;
+  onApply: (proposalId: number) => void;
+  onDismiss: (proposalId: number) => void;
+}) {
+  if (proposals.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {proposals.map((proposal) => (
+        <OpenCompanyProposalCard
+          key={proposal.id}
+          proposal={proposal}
+          isPending={isPending}
+          onApply={onApply}
+          onDismiss={onDismiss}
+        />
+      ))}
+    </div>
+  );
+}
+
+function OpenCompanyProposalCard({
+  proposal,
+  isPending,
+  onApply,
+  onDismiss,
+}: {
+  proposal: OpenCompanyConfigProposal;
+  isPending: boolean;
+  onApply: (proposalId: number) => void;
+  onDismiss: (proposalId: number) => void;
+}) {
+  const pending = proposal.status === "pending";
+
+  return (
+    <div className="rounded-lg border border-[#e2e2de] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#e3e3df] bg-[#f7f7f4] text-ink-muted">
+          <FilePenLine size={14} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[13px] font-medium text-ink">Workspace change proposal</p>
+            <span className={proposalStatusClassName(proposal.status)}>
+              {proposalStatusLabel(proposal.status)}
+            </span>
+          </div>
+          <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">{proposal.summary}</p>
+          <div className="mt-3 space-y-1.5">
+            {proposal.changes.map((change, index) => (
+              <div
+                key={`${proposal.id}:${index}`}
+                className="rounded-md border border-[#ededeb] bg-[#fbfbf9] px-2.5 py-2 text-[11.5px] leading-4"
+              >
+                <div className="font-medium text-ink/80">
+                  {change.operation === "create" ? "Create" : "Update"}{" "}
+                  {change.targetType === "agent" ? "agent" : "Brain file"}
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[10.5px] text-ink-muted">
+                  {change.targetType === "agent"
+                    ? (change.path ?? change.title)
+                    : `brain/${change.path}`}
+                </div>
+                {change.targetType === "agent" && change.warnings?.length ? (
+                  <div className="mt-1 text-[10.5px] text-[#8a5a00]">
+                    {change.warnings.join(" ")}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {proposal.error ? (
+            <p className="mt-2 text-[11.5px] leading-4 text-[#9f1d1d]">{proposal.error}</p>
+          ) : null}
+          {pending ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => onApply(proposal.id)}
+                className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[11.5px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Check size={12} strokeWidth={2} />
+                Apply
+              </button>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => onDismiss(proposal.id)}
+                className="inline-flex h-7 items-center justify-center gap-1.5 rounded-md border border-[#e4e4e0] bg-white px-3 text-[11.5px] font-medium text-ink hover:bg-[#f7f7f4] disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <X size={12} strokeWidth={2} />
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function proposalStatusLabel(status: OpenCompanyConfigProposal["status"]) {
+  if (status === "applied") return "Applied";
+  if (status === "dismissed") return "Dismissed";
+  if (status === "failed") return "Failed";
+  return "Pending approval";
+}
+
+function proposalStatusClassName(status: OpenCompanyConfigProposal["status"]) {
+  const base = "inline-flex rounded-full border px-1.5 py-px text-[10.5px] font-medium leading-4";
+  if (status === "applied") return `${base} border-[#d7e4cf] bg-[#f3f8ef] text-[#4d6f35]`;
+  if (status === "failed") return `${base} border-[#f0d2d2] bg-[#fff6f6] text-[#9f1d1d]`;
+  if (status === "dismissed") return `${base} border-[#e3e3df] bg-[#f3f3f0] text-ink-muted`;
+  return `${base} border-[#ead9b8] bg-[#fffaf0] text-[#8a5a00]`;
 }
 
 function formatToolName(name: string) {

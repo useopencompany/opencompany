@@ -1,4 +1,8 @@
-import { type AgentConfig, serializeAgentFile } from "@opencompany/agent-runtime";
+import {
+  type AgentConfig,
+  resolveAgentSkillDefinitions,
+  serializeAgentFile,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionAfterSessionRuns,
@@ -51,12 +55,14 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
         model: row.agent.config.model.name,
         tools: row.agent.config.tools,
         brain: row.agent.config.brain,
+        skills: row.agent.config.skills,
         integrations: row.agent.config.integrations,
         triggers: row.agent.config.triggers,
       }),
       repositoryFullName: sessionRepository?.fullName,
       repositoryDefaultBranch: sessionRepository?.defaultBranch,
       githubToken,
+      skills: resolveAgentSkillDefinitions(row.agent.config.skills),
     });
     await materializeBrainForSession({
       sandbox,

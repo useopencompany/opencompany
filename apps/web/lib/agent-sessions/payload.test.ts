@@ -525,6 +525,74 @@ describe("session payload cache helpers", () => {
     });
   });
 
+  it("parses OpenCompany config proposals at the fetch boundary", () => {
+    const sessionDetail = {
+      ...detail(),
+      configProposals: [
+        {
+          id: 12,
+          sessionId: "ses_123",
+          messageId: "msg_2",
+          toolCallId: "call_1",
+          title: "Improve support agent",
+          status: "pending",
+          summary: "Improve support agent",
+          changes: [
+            {
+              targetType: "brain",
+              operation: "update",
+              path: "support/playbook.md",
+              content: "Updated",
+              previousHash: "old",
+              contentHash: "new",
+            },
+          ],
+          createdAt: "2026-05-24T10:00:00.000Z",
+          error: null,
+        },
+      ],
+    } satisfies AgentSessionDetailPayload;
+
+    expect(parseAgentSessionDetailResponse({ detail: sessionDetail })).toEqual({
+      detail: sessionDetail,
+    });
+  });
+
+  it("parses OpenCompany agent proposals with nullable version fields", () => {
+    const sessionDetail = {
+      ...detail(),
+      configProposals: [
+        {
+          id: 12,
+          sessionId: "ses_123",
+          messageId: "msg_2",
+          toolCallId: "call_1",
+          title: "Create product co-founder",
+          status: "pending",
+          summary: "Create product co-founder",
+          changes: [
+            {
+              targetType: "agent",
+              operation: "create",
+              id: null,
+              path: "agents/product-cofounder.agent",
+              title: "Product co-founder",
+              source: "---\ntitle: Product co-founder\n---\n\nHelp with product strategy.\n",
+              previousHash: null,
+              previousVersion: null,
+            },
+          ],
+          createdAt: "2026-05-24T10:00:00.000Z",
+          error: null,
+        },
+      ],
+    } satisfies AgentSessionDetailPayload;
+
+    expect(parseAgentSessionDetailResponse({ detail: sessionDetail })).toEqual({
+      detail: sessionDetail,
+    });
+  });
+
   it("rejects invalid session detail payloads", () => {
     expect(() => parseAgentSessionDetailResponse({ detail: { session: null } })).toThrow(
       "Invalid session.",
@@ -587,6 +655,7 @@ function detail(
     },
     messages: overrides.messages ?? [],
     events: overrides.events ?? [],
+    configProposals: [],
     usage: {
       inputTokens: 0,
       inputNoCacheTokens: 0,

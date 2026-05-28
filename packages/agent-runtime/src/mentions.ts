@@ -1,5 +1,6 @@
 import { extractAfterSessionConfig } from "./after-session";
 import { AGENT_MODEL_CATALOG } from "./models";
+import { AGENT_SKILL_DEFINITION_BY_ID } from "./skills";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import type {
   AgentBrainReference,
@@ -8,6 +9,7 @@ import type {
   AgentConfigTool,
   AgentGitHubRepositoryConfig,
   AgentModelId,
+  AgentSkillId,
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
@@ -80,6 +82,7 @@ export function extractConfigFromMentions(body: string): {
   model: AgentModelId;
   tools: AgentToolId[];
   brain: AgentBrainReference[];
+  skills: AgentSkillId[];
   afterSession?: AgentConfig["afterSession"];
 } {
   const mentions = collectBodyMentions(body, []);
@@ -88,6 +91,7 @@ export function extractConfigFromMentions(body: string): {
     model: mentions.model ?? DEFAULT_MODEL_ID,
     tools: mentions.tools,
     brain: mentions.brain,
+    skills: mentions.skills,
     ...(afterSession ? { afterSession } : {}),
   };
 }
@@ -128,6 +132,7 @@ export function deriveAgentConfigFromBody(input: {
       },
       tools,
       brain: mentions.brain,
+      skills: mentions.skills,
       ...(afterSession ? { afterSession } : {}),
       integrations: {
         github: {
@@ -171,9 +176,16 @@ function collectBodyMentions(body: string, repositories: AgentConfigDerivationRe
   let activeRepository: AgentGitHubRepositoryConfig | null = null;
   const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
   const tools = new Set<AgentToolId>();
+  const skills = new Set<AgentSkillId>();
   const brain = new Map<string, AgentBrainReference>();
 
   for (const rawId of extractMentionIds(body)) {
+    const skill = skillIdFromMention(rawId);
+    if (skill) {
+      skills.add(skill);
+      continue;
+    }
+
     const brainReference = brainReferenceFromMention(rawId);
     if (brainReference) {
       brain.set(brainReference.path, brainReference);
@@ -209,6 +221,7 @@ function collectBodyMentions(body: string, repositories: AgentConfigDerivationRe
   return {
     model,
     tools: Array.from(tools),
+    skills: Array.from(skills),
     brain: Array.from(brain.values()),
     repositories: Array.from(repositoriesById.values()),
     activeRepository,
@@ -276,6 +289,10 @@ function toolIdFromMention(id: string): AgentToolId | null {
   if (TOOL_BY_ID.has(id as AgentToolId)) return id as AgentToolId;
   const tool = TOOL_BY_LABEL.get(id.toLowerCase());
   return tool?.id ?? null;
+}
+
+function skillIdFromMention(id: string): AgentSkillId | null {
+  return AGENT_SKILL_DEFINITION_BY_ID.has(id as AgentSkillId) ? (id as AgentSkillId) : null;
 }
 
 function syncTriggersToRepository(

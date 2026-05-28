@@ -48,7 +48,7 @@ function screenHintFor(pathname: string) {
 export default async function proxy(request: NextRequest) {
   let refreshFailed = false;
   const { session, headers, authorizationUrl } = await authkit(request, {
-    redirectUri: getWorkOSRedirectUri(),
+    redirectUri: getWorkOSRedirectUri(request),
     screenHint: screenHintFor(request.nextUrl.pathname),
     onSessionRefreshError: () => {
       refreshFailed = true;

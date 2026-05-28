@@ -100,7 +100,7 @@ export const agents = pgTable(
       .$type<AgentConfig>()
       .notNull()
       .default(
-        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
+        sql`'{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"skills":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb`,
       ),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

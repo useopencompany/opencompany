@@ -169,6 +169,13 @@
       "when": 1779876596391,
       "tag": "0023_wonderful_adam_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779876597000,
+      "tag": "0024_opencompany_skill_explicit",
+      "breakpoints": true
     }
   ]
 }

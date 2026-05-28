@@ -60,11 +60,12 @@ describe(".agent files", () => {
 
   test("syncs config from markdown mentions", () => {
     const config = extractConfigFromMentions(
-      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",
+      "Use @opencompany and @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",
     );
 
     expect(config.model).toBe("openai/gpt-5.4");
     expect(config.tools).toEqual(["exa"]);
+    expect(config.skills).toEqual(["opencompany"]);
     expect(config.brain).toEqual([
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
@@ -92,7 +93,19 @@ describe(".agent files", () => {
     expect(agent.config.model.name).toBe("openai/gpt-5.4-mini");
     expect(agent.config.tools).toEqual([]);
     expect(agent.config.brain).toEqual([]);
+    expect(agent.config.skills).toEqual([]);
     expect(agent.config.afterSession).toBeUndefined();
+  });
+
+  test("serializes opencompany skills from body mentions", () => {
+    const source = serializeAgentFile({
+      title: "Config agent",
+      body: "Improve workspace agents with @opencompany.",
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("skills:\n  - opencompany");
+    expect(parsed.config.skills).toEqual(["opencompany"]);
   });
 
   test("extracts inline after-session prompt from the current paragraph", () => {
@@ -207,6 +220,64 @@ describe(".agent files", () => {
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
     ]);
+  });
+
+  test("round-trips configured skills through frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Skilled",
+      body: "Use the bundled runtime guidance.",
+      skills: ["opencompany"],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("skills:\n  - opencompany");
+    expect(parsed.config.skills).toEqual(["opencompany"]);
+  });
+
+  test("defaults missing skills to the bundled OpenCompany skill", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Legacy"',
+        "model: openai/gpt-5.4-mini",
+        "tools: []",
+        "---",
+        "",
+        "Older file without skills.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.skills).toEqual(["opencompany"]);
+  });
+
+  test("preserves explicit empty skills to disable bundled skills", () => {
+    const source = serializeAgentFile({
+      title: "No skills",
+      body: "Handle this directly.",
+      skills: [],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("skills: []");
+    expect(parsed.config.skills).toEqual([]);
+  });
+
+  test("drops unknown skill ids", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Unknown skills"',
+        "model: openai/gpt-5.4-mini",
+        "skills:",
+        "  - opencompany",
+        "  - unknown",
+        "---",
+        "",
+        "Ignore unknown skills.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.skills).toEqual(["opencompany"]);
   });
 
   test("serializes explicit model selection ahead of legacy model mentions", () => {

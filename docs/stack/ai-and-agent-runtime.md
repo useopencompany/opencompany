@@ -147,6 +147,14 @@ Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
 
+Workspace configuration tools are enabled by the `@opencompany` skill and create proposals rather
+than applying changes directly:
+
+- `opencompany_list_workspace_config`
+- `opencompany_read_workspace_config`
+- `opencompany_validate_agent`
+- `opencompany_propose_config_change`
+
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 
 **Operational rule:** Adding a runtime tool changes product capability, safety posture, billing

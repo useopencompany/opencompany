@@ -71,6 +71,7 @@ export async function materializeAgentToGitHub(
     model: row.agent.config.model.name,
     tools: row.agent.config.tools,
     brain: row.agent.config.brain,
+    skills: row.agent.config.skills,
     integrations: row.agent.config.integrations,
     triggers: row.agent.config.triggers,
   });
@@ -95,12 +96,24 @@ export async function materializeAgentToGitHub(
   };
 
   if (row.agent.githubSyncedHash === contentHash && !pendingRename) {
-    await timeAsync(trace, "db.deleteUnchangedSyncJob", () =>
-      db
-        .delete(agentSyncJobs)
-        .where(
-          and(eq(agentSyncJobs.agentId, row.agent.id), eq(agentSyncJobs.desiredHash, contentHash)),
-        ),
+    await timeAsync(trace, "db.markUnchangedSynced", () =>
+      db.batch([
+        db
+          .update(agents)
+          .set({
+            githubSyncStatus: "synced",
+            githubSyncError: null,
+          })
+          .where(and(eq(agents.id, row.agent.id), eq(agents.contentHash, contentHash))),
+        db
+          .delete(agentSyncJobs)
+          .where(
+            and(
+              eq(agentSyncJobs.agentId, row.agent.id),
+              eq(agentSyncJobs.desiredHash, contentHash),
+            ),
+          ),
+      ]),
     );
     endTimingTrace(trace, { status: "unchanged", path: row.agent.path });
     return { status: "unchanged" };

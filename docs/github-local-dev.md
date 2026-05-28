@@ -86,6 +86,8 @@ The tunnel helper writes these local values to `.env.local`:
 When using `bun run github:tunnel` separately, restart `bun run dev` after starting the tunnel so
 Next.js and the runner reload env vars. Then open the app through the ngrok URL, sign in through
 WorkOS, and start the GitHub integration from `/settings/integrations`.
+If you open the app through `localhost` or `127.0.0.1` instead, AuthKit sign-in and sign-up use the
+local `http://localhost:<port>/auth/callback` redirect so the session cookie stays on localhost.
 
 Set `OPENCOMPANY_NGROK_DISABLED=1` to skip ngrok for a dev session.
 

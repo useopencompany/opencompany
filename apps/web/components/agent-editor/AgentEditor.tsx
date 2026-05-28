@@ -459,6 +459,7 @@ function mentionIdDisplayText(id: string) {
   const trimmed = id.trim();
   if (trimmed.startsWith("tool:")) return trimmed.slice("tool:".length);
   if (trimmed.startsWith("model:")) return trimmed.slice("model:".length);
+  if (trimmed.startsWith("skill:")) return trimmed.slice("skill:".length);
   if (trimmed.startsWith("brain/")) return trimmed;
   if (trimmed === "integration:github") return "github";
   if (trimmed === "after-session") return "after-session";
@@ -480,6 +481,7 @@ function isMentionChar(char: string) {
 function mentionKindFromId(id: string) {
   if (id.startsWith("model:")) return "model";
   if (id.startsWith("tool:")) return "tool";
+  if (id.startsWith("skill:")) return "skill";
   if (id.startsWith("integration:")) return "integration";
   if (id.startsWith("brain/")) return "brain";
   return undefined;

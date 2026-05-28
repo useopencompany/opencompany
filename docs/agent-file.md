@@ -15,6 +15,8 @@ tools:
 brain:
   - docs/README.md
   - product/
+skills:
+  - opencompany
 ---
 
 Research investors with @exa. Use @deep for fund-thesis write-ups. Keep context from @brain/docs/README.md close.
@@ -112,6 +114,27 @@ brain:
 ```
 
 Use `/` to mount the whole Brain root. The runtime materializes mounted Brain files under `brain/` inside the session sandbox. Agents can read and edit only explicitly mentioned Brain files/folders. Edits are mirrored back to the app and synchronized to GitHub.
+
+### `skills` — list of strings
+
+Advanced runtime guidance mounted into the sandbox under `skills/`.
+Skills use the portable Agent Skills shape: a skill directory with a
+`SKILL.md` file whose frontmatter contains `name` and `description`. The
+runtime only discloses compact skill metadata in the system prompt; the agent
+must read `skills/<name>/SKILL.md` when the task matches the description.
+
+```yaml
+skills:
+  - opencompany
+```
+
+For v1, the only supported skill is the bundled `opencompany` skill. It lets
+agents inspect workspace agents and Brain files, validate proposed `.agent`
+source, and create pending workspace configuration proposals for user approval.
+It does not grant direct write access to `agents/` or broader workspace config.
+Unknown skills are silently dropped. Missing `skills` defaults to
+`opencompany` for older files; new editor saves derive skills from body mentions,
+so removing `@opencompany` serializes `skills: []`.
 
 ### `integrations.github.repositories` — list of repository objects
 
@@ -225,6 +248,8 @@ The parser is intentionally lenient. A hand-edited `.agent` file should never re
 | Title empty                      | Becomes `"Untitled agent"`                     |
 | Unknown model in `model:`        | Falls back to `openai/gpt-5.4-mini`            |
 | Unknown tool in `tools:`         | Dropped                                        |
+| Unknown skill in `skills:`       | Dropped                                        |
+| Missing `skills:`                | Defaults to `opencompany` for legacy files    |
 | Missing frontmatter              | Whole file treated as body, defaults applied  |
 | Unparseable frontmatter key      | Skipped; other keys still parsed              |
 | `\r\n` line endings              | Normalized to `\n`                             |

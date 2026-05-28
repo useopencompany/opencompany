@@ -1,5 +1,5 @@
 import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-runtime";
-import type { AgentModelId, AgentToolId } from "@opencompany/agent-runtime/types";
+import type { AgentModelId, AgentSkillId, AgentToolId } from "@opencompany/agent-runtime/types";
 import {
   Bot,
   Brain,
@@ -10,10 +10,11 @@ import {
   GitBranch,
   type LucideIcon,
   Search,
+  Settings2,
 } from "lucide-react";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
-type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook";
+type AgentMentionKind = "model" | "tool" | "skill" | "integration" | "brain" | "hook";
 
 type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -59,9 +60,15 @@ export type AgentHookMention = BaseAgentMentionItem & {
   kind: "hook";
 };
 
+export type AgentSkillMention = BaseAgentMentionItem & {
+  id: AgentSkillId;
+  kind: "skill";
+};
+
 export type AgentMentionItem =
   | AgentModel
   | AgentTool
+  | AgentSkillMention
   | AgentIntegration
   | AgentBrainMention
   | AgentHookMention;
@@ -110,7 +117,23 @@ export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({
   icon: TOOL_ICONS[tool.id],
 }));
 
-export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [...AGENT_MODELS, ...AGENT_TOOLS];
+export const AGENT_SKILLS: AgentSkillMention[] = [
+  {
+    id: "opencompany",
+    mentionId: "skill:opencompany",
+    kind: "skill",
+    label: "opencompany",
+    displayLabel: "opencompany",
+    description: "Propose OpenCompany agent and Brain configuration changes",
+    icon: Settings2,
+  },
+];
+
+export const AGENT_MENTION_ITEMS: AgentMentionItem[] = [
+  ...AGENT_MODELS,
+  ...AGENT_TOOLS,
+  ...AGENT_SKILLS,
+];
 export const AGENT_TOOL_MENTION_ITEMS: AgentMentionItem[] = AGENT_TOOLS;
 export const AGENT_AFTER_SESSION_MENTION_ITEMS: AgentHookMention[] = [
   {
@@ -157,6 +180,7 @@ export function buildAgentMentionItems(
   return [
     ...AGENT_MODELS,
     ...AGENT_TOOLS,
+    ...AGENT_SKILLS,
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),

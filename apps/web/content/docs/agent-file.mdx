@@ -16,6 +16,8 @@ tools:
 brain:
   - /
   - docs/README.md
+skills:
+  - opencompany
 integrations:
   github:
     repositories:
@@ -31,7 +33,7 @@ That's it. The `---` lines fence off the header. Everything below is what the AI
 
 ## The header
 
-The header is YAML — a simple `key: value` format. It has four fields.
+The header is YAML — a simple `key: value` format. It has a few fields.
 
 ### `title`
 
@@ -103,6 +105,17 @@ brain:
 ```
 
 These paths live under `brain/` in the workspace repo. Use `/` to mount the whole Brain root. File paths mount one file. Folder paths end in `/` and mount matching files below that folder.
+
+### `skills`
+
+Advanced runtime guidance mounted under `skills/` in the session sandbox. For now, opencompany supports one bundled skill:
+
+```yaml
+skills:
+  - opencompany
+```
+
+The runtime shows the agent a compact skill catalog, then the agent reads `skills/opencompany/SKILL.md` when the task matches it. `@opencompany` in the body enables tools for inspecting workspace agents and Brain files, validating proposed `.agent` source, and creating pending proposals that a user must approve before changes apply. Missing `skills` defaults to `opencompany` for older files. Unknown skills are ignored.
 
 ### `integrations.github.repositories`
 

@@ -8,6 +8,7 @@ import {
   SUPPORTED_AGENT_TOOLS,
   toConfigTool,
 } from "./mentions";
+import { resolveAgentSkillIds } from "./skills";
 import type {
   AgentBrainReference,
   AgentConfig,
@@ -15,6 +16,7 @@ import type {
   AgentFile,
   AgentGitHubRepositoryConfig,
   AgentModelId,
+  AgentSkillId,
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
@@ -35,6 +37,7 @@ type Frontmatter = {
   model?: unknown;
   tools?: unknown;
   brain?: unknown;
+  skills?: unknown;
   integrations?: unknown;
   triggers?: unknown;
 };
@@ -42,6 +45,7 @@ type Frontmatter = {
 export type AgentConfigPatch = {
   tools?: AgentConfigTool[];
   brain?: AgentBrainReference[];
+  skills?: AgentSkillId[] | undefined;
   integrations?: AgentConfig["integrations"];
   triggers?: AgentTriggerConfig[];
 };
@@ -51,6 +55,7 @@ export function parseAgentFile(source: string): AgentFile {
   const title = normalizeTitle(readString(frontmatter.title) ?? "Untitled agent");
   const model = normalizeModelId(readString(frontmatter.model) ?? DEFAULT_MODEL_ID);
   const brain = normalizeBrainReferences(frontmatter.brain);
+  const skills = normalizeSkills(frontmatter.skills, { defaultWhenMissing: true });
   const repositories = normalizeGitHubRepositories(frontmatter.integrations);
   const tools = normalizeTools(frontmatter.tools, repositories);
   const triggers = normalizeTriggers(frontmatter.triggers, repositories);
@@ -58,7 +63,7 @@ export function parseAgentFile(source: string): AgentFile {
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools, brain, repositories, triggers }),
+    config: buildAgentConfig({ title, body, model, tools, brain, skills, repositories, triggers }),
   };
 }
 
@@ -68,6 +73,7 @@ export function serializeAgentFile(input: {
   model?: AgentModelId;
   tools?: AgentConfigTool[];
   brain?: AgentBrainReference[];
+  skills?: AgentSkillId[] | undefined;
   integrations?: AgentConfig["integrations"];
   triggers?: AgentTriggerConfig[];
 }) {
@@ -77,6 +83,7 @@ export function serializeAgentFile(input: {
   const model = normalizeModelId(input.model ?? fromMentions.model);
   const brainInput = input.brain && input.brain.length > 0 ? input.brain : fromMentions.brain;
   const brain = normalizeBrainReferences(brainInput);
+  const skills = normalizeSkills(input.skills ?? fromMentions.skills);
   const repositories = normalizeGitHubRepositories(input.integrations);
   const toolInput = input.tools && input.tools.length > 0 ? input.tools : fromMentions.tools;
   const tools = normalizeTools(toolInput, repositories);
@@ -88,6 +95,7 @@ export function serializeAgentFile(input: {
       model,
       tools,
       brain,
+      skills,
       integrations: {
         github: {
           repositories,
@@ -105,6 +113,7 @@ export function serializeAgentFrontmatter(input: {
   model: AgentModelId;
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  skills?: AgentSkillId[] | undefined;
   integrations?: AgentConfig["integrations"];
   triggers?: AgentTriggerConfig[];
 }) {
@@ -113,6 +122,7 @@ export function serializeAgentFrontmatter(input: {
   const repositories = normalizeGitHubRepositories(input.integrations);
   const tools = normalizeTools(input.tools, repositories);
   const brain = normalizeBrainReferences(input.brain);
+  const skills = normalizeSkills(input.skills);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
   const frontmatter = {
     schemaVersion: "agent.v1",
@@ -120,6 +130,7 @@ export function serializeAgentFrontmatter(input: {
     model,
     tools: serializeTools(tools),
     brain: brain.map((reference) => reference.path),
+    skills,
     integrations: {
       github: {
         repositories,
@@ -142,6 +153,7 @@ export function buildAgentFile(input: {
   const mentioned = extractConfigFromMentions(body);
   const model = normalizeModelId(input.model ?? mentioned.model);
   const brain = normalizeBrainReferences(input.config?.brain ?? mentioned.brain);
+  const skills = normalizeSkills(input.config?.skills ?? mentioned.skills);
   const repositories = normalizeGitHubRepositories(input.config?.integrations);
   const tools = normalizeTools(input.config?.tools ?? mentioned.tools, repositories);
   const triggers = normalizeTriggers(input.config?.triggers ?? [], repositories);
@@ -149,7 +161,7 @@ export function buildAgentFile(input: {
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools, brain, repositories, triggers }),
+    config: buildAgentConfig({ title, body, model, tools, brain, skills, repositories, triggers }),
   };
 }
 
@@ -174,6 +186,7 @@ function buildAgentConfig(input: {
   model: AgentModelId;
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  skills: AgentSkillId[];
   repositories: AgentGitHubRepositoryConfig[];
   triggers: AgentTriggerConfig[];
 }): AgentConfig {
@@ -189,6 +202,7 @@ function buildAgentConfig(input: {
     },
     tools: input.tools,
     brain: input.brain,
+    skills: input.skills,
     ...(afterSession ? { afterSession } : {}),
     integrations: {
       github: {
@@ -328,6 +342,10 @@ function normalizeBrainReference(input: string): AgentBrainReference | null {
     path: normalized,
     type: normalized.endsWith("/") ? "folder" : "file",
   };
+}
+
+function normalizeSkills(value: unknown, options: { defaultWhenMissing?: boolean } = {}) {
+  return resolveAgentSkillIds(value, options);
 }
 
 function normalizeGitHubRepositories(value: unknown): AgentGitHubRepositoryConfig[] {

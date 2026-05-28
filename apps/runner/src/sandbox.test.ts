@@ -140,7 +140,7 @@ describe("prepareWorkspace", () => {
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       [
-        "mkdir -p '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
+        "mkdir -p '/home/user/workspace/brain' '/home/user/workspace/skills' '/home/user/workspace/work' '/home/user/.opencompany'",
         "chown -R user:user '/home/user/workspace'",
         "chown root:root '/home/user/.opencompany'",
         "chmod 700 '/home/user/.opencompany'",
@@ -151,6 +151,19 @@ describe("prepareWorkspace", () => {
       "/home/user/.opencompany/agent.agent",
       '---\ntitle: "Agent"\n---\n\nInstructions',
       { user: "root", requestTimeoutMs: 30_000 },
+    );
+    expect(sandbox.files.write).toHaveBeenCalledWith(
+      "/home/user/workspace/skills/opencompany/SKILL.md",
+      expect.stringContaining("name: opencompany"),
+      { user: "root", requestTimeoutMs: 30_000 },
+    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      [
+        "chown -R root:root '/home/user/workspace/skills'",
+        "find '/home/user/workspace/skills' -type d -exec chmod 755 {} +",
+        "find '/home/user/workspace/skills' -type f -exec chmod 644 {} +",
+      ].join(" && "),
+      { user: "root", timeoutMs: 30_000 },
     );
     expect(
       sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git clone")),
@@ -262,13 +275,24 @@ describe("prepareWorkspace", () => {
 });
 
 describe("resolveSandboxToolPath", () => {
-  it("allows work and brain paths", () => {
+  it("allows work, brain, and skills paths for read-like access", () => {
     expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
       "/home/user/workspace/work/foo.txt",
     );
     expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
       "/home/user/workspace/brain/foo.md",
     );
+    expect(resolveSandboxToolPath("/home/user/workspace", "skills/opencompany/SKILL.md")).toBe(
+      "/home/user/workspace/skills/opencompany/SKILL.md",
+    );
+  });
+
+  it("rejects skills paths for writable access", () => {
+    expect(() =>
+      resolveSandboxToolPath("/home/user/workspace", "skills/opencompany/SKILL.md", {
+        writable: true,
+      }),
+    ).toThrow(/writable work\/ or brain\//);
   });
 
   it("rejects paths outside configured tool roots", () => {
@@ -280,7 +304,7 @@ describe("resolveSandboxToolPath", () => {
       "agents/foo.agent",
     ]) {
       expect(() => resolveSandboxToolPath("/home/user/workspace", candidate)).toThrow(
-        /work\/ or brain\//,
+        /work\/, brain\/, or skills\//,
       );
     }
   });
@@ -334,6 +358,51 @@ describe("runSandboxTool", () => {
     );
   });
 
+  it("rejects writes to mounted skill files", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "write_file",
+        args: { path: "skills/opencompany/SKILL.md", content: "changed" },
+      }),
+    ).rejects.toThrow(/writable work\/ or brain\//);
+
+    expect(sandbox.files.write).not.toHaveBeenCalled();
+  });
+
+  it("reads mounted skill files", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("---\nname: opencompany\n---\n"),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "read_file",
+      args: { path: "skills/opencompany/SKILL.md" },
+    });
+
+    expect(sandbox.files.read).toHaveBeenCalledWith(
+      "/home/user/workspace/skills/opencompany/SKILL.md",
+    );
+    expect(result).toEqual({
+      path: "skills/opencompany/SKILL.md",
+      content: "---\nname: opencompany\n---\n",
+    });
+  });
+
   it("lists files from the requested tool root using the workspace cwd", async () => {
     const sandbox = {
       commands: {
@@ -353,6 +422,32 @@ describe("runSandboxTool", () => {
       { cwd: "/home/user/workspace", timeoutMs: 30_000 },
     );
     expect(result).toEqual({ path: "work", entries: ["work", "work/a.txt"] });
+  });
+
+  it("lists skill files from the read-only skills root", async () => {
+    const sandbox = {
+      commands: {
+        run: vi
+          .fn()
+          .mockResolvedValue({ stdout: "skills\nskills/opencompany/SKILL.md\n", stderr: "" }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "list_files",
+      args: { path: "skills", depth: 3 },
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "find 'skills' -maxdepth 3 -print | sort | head -200",
+      { cwd: "/home/user/workspace", timeoutMs: 30_000 },
+    );
+    expect(result).toEqual({
+      path: "skills",
+      entries: ["skills", "skills/opencompany/SKILL.md"],
+    });
   });
 
   it("returns the diff from the session work git repo including untracked files", async () => {

@@ -1,6 +1,15 @@
 "use client";
 
-import { BookOpenText, ChevronLeft, ChevronRight, Clock3, Cpu, Plug, Wrench } from "lucide-react";
+import {
+  BookOpenText,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Cpu,
+  Plug,
+  Settings2,
+  Wrench,
+} from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { AgentMentionItem } from "./tools";
 
@@ -38,6 +47,13 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       label: "Tools",
       description: `${items.filter((item) => item.kind === "tool").length} available`,
       icon: Wrench,
+    },
+    {
+      type: "category" as const,
+      kind: "skill" as const,
+      label: "Skills",
+      description: `${items.filter((item) => item.kind === "skill").length} available`,
+      icon: Settings2,
     },
     {
       type: "category" as const,
@@ -201,6 +217,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "model") return "Models";
   if (kind === "tool") return "Tools";
+  if (kind === "skill") return "Skills";
   if (kind === "integration") return "Work integrations";
   if (kind === "hook") return "Hooks";
   return "Brain";

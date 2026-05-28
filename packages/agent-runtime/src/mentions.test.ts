@@ -33,6 +33,12 @@ describe("extractConfigFromMentions", () => {
     expect(config.tools).toEqual(["exa", "amp"]);
   });
 
+  it("resolves skill mentions", () => {
+    const config = extractConfigFromMentions("Use @opencompany to propose agent changes.");
+
+    expect(config.skills).toEqual(["opencompany"]);
+  });
+
   it("normalizes Brain file and folder paths", () => {
     const config = extractConfigFromMentions(
       "Read @brain/docs/README.md and @brain/product//specs/.",
@@ -61,10 +67,11 @@ describe("deriveAgentConfigFromBody", () => {
   it("binds Amp to the mentioned GitHub repository", () => {
     const { config } = deriveAgentConfigFromBody({
       title: "Code agent",
-      body: "Use @amp in @opencompany/web.",
+      body: "Use @opencompany and @amp in @opencompany/web.",
       repositories,
     });
 
+    expect(config.skills).toEqual(["opencompany"]);
     expect(config.tools).toEqual([
       expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
     ]);

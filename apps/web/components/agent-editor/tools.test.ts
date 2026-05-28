@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { AGENT_MODELS, buildBrainMentionItems, findModel } from "./tools";
+import { AGENT_MODELS, buildAgentMentionItems, buildBrainMentionItems, findModel } from "./tools";
 
 describe("agent editor mention tools", () => {
   test("includes the root Brain folder before nested Brain paths", () => {
@@ -40,6 +40,17 @@ describe("agent editor mention tools", () => {
     expect(findModel("model:google/gemini-3-flash")).toMatchObject({
       id: "google/gemini-3-flash",
       displayLabel: "google/gemini-3-flash",
+    });
+  });
+
+  test("includes the OpenCompany skill mention", () => {
+    const item = buildAgentMentionItems().find(
+      (mention) => mention.mentionId === "skill:opencompany",
+    );
+
+    expect(item).toMatchObject({
+      kind: "skill",
+      displayLabel: "opencompany",
     });
   });
 });

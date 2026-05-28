@@ -28,6 +28,7 @@ In the WorkOS dashboard:
 
 - **Redirects** must include `http://localhost:3000/auth/callback` for local dev and the production callback URL for deploys.
 - If local development can run on different ports, add `http://localhost:*/auth/callback` as an allowed redirect URI too. Keep a concrete URI as the default.
+- Local requests to `localhost` or `127.0.0.1` derive the AuthKit redirect URI from the request origin and normalize it to `http://localhost:<port>/auth/callback`. This keeps normal local sign-in/sign-up on localhost even when `NEXT_PUBLIC_WORKOS_REDIRECT_URI` is set to an ngrok URL for integration testing.
 - AuthKit's hosted sign-in screen is enabled by default — no extra config needed.
 
 Infisical is the source of truth for shared development env vars. Use `bun run env:pull` to merge

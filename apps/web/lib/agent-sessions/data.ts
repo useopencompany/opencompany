@@ -1,6 +1,7 @@
 import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentSessionArtifacts,
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
@@ -10,6 +11,10 @@ import {
   workspaceCreditLedger,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import {
+  OPENCOMPANY_CONFIG_PROPOSAL_KIND,
+  parseOpenCompanyConfigProposal,
+} from "@/lib/agent-sessions/config-proposals";
 import {
   type AgentSessionDetailPayload,
   type SessionStreamCredentialPayload,
@@ -86,7 +91,7 @@ export async function loadAgentSessionDetailForWorkspace(
 
   if (!session) return null;
 
-  const [messages, events, usageRows, toolUsageRows, costRows] = await Promise.all([
+  const [messages, events, artifacts, usageRows, toolUsageRows, costRows] = await Promise.all([
     db
       .select()
       .from(agentSessionMessages)
@@ -98,6 +103,11 @@ export async function loadAgentSessionDetailForWorkspace(
       .where(eq(agentSessionEvents.sessionId, sessionId))
       .orderBy(asc(agentSessionEvents.id))
       .limit(300),
+    db
+      .select()
+      .from(agentSessionArtifacts)
+      .where(eq(agentSessionArtifacts.sessionId, sessionId))
+      .orderBy(asc(agentSessionArtifacts.createdAt)),
     db
       .select({
         messageId: agentSessionUsage.messageId,
@@ -172,6 +182,20 @@ export async function loadAgentSessionDetailForWorkspace(
     session,
     messages: messagesWithUsage,
     events,
+    configProposals: artifacts
+      .filter((artifact) => artifact.kind === OPENCOMPANY_CONFIG_PROPOSAL_KIND)
+      .flatMap((artifact) => {
+        const proposal = parseOpenCompanyConfigProposal({
+          id: artifact.id,
+          sessionId: artifact.sessionId,
+          messageId: artifact.messageId,
+          toolCallId: artifact.toolCallId,
+          title: artifact.title,
+          metadata: artifact.metadata ?? null,
+          createdAt: artifact.createdAt,
+        });
+        return proposal ? [proposal] : [];
+      }),
     usage,
     toolUsage,
     cost,

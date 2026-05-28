@@ -204,6 +204,7 @@ export async function updateAgent(
     derived?.config.integrations ?? patch.config?.integrations ?? agent.config.integrations;
   const nextTools = derived?.config.tools ?? patch.config?.tools ?? agent.config.tools;
   const nextBrain = derived?.config.brain ?? patch.config?.brain ?? agent.config.brain;
+  const nextSkills = derived?.config.skills ?? patch.config?.skills ?? agent.config.skills;
   const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? agent.config.triggers;
   const source = serializeAgentFile({
     title,
@@ -211,6 +212,7 @@ export async function updateAgent(
     model,
     tools: nextTools,
     brain: nextBrain,
+    skills: nextSkills,
     integrations: nextIntegrations,
     triggers: nextTriggers,
   });
@@ -362,6 +364,7 @@ export async function materializeLegacyAgentFiles() {
       model: agent.config.model.name,
       tools: agent.config.tools,
       brain: agent.config.brain,
+      skills: agent.config.skills,
       integrations: agent.config.integrations,
       triggers: agent.config.triggers,
     });
@@ -442,6 +445,7 @@ export async function syncAgentsFromWorkspaceRepository() {
         model: parsed.config.model.name,
         tools: parsed.config.tools,
         brain: parsed.config.brain,
+        skills: parsed.config.skills,
         integrations: parsed.config.integrations,
         triggers: parsed.config.triggers,
       }),

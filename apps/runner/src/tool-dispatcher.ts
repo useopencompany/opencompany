@@ -31,6 +31,7 @@ import {
 import { RunAbortError, RunLeaseLostError, withRunControlChecks } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
 import { recordToolUsage } from "./usage-recorder";
+import { executeWorkspaceConfigTool } from "./workspace-config-tools";
 
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
   exa_search: 8,
@@ -217,6 +218,18 @@ export async function executeRuntimeTool(input: {
         });
         usage = result.usage;
         return result.output;
+      }
+
+      if (input.definition.kind === "workspace") {
+        if (!input.workspaceId) throw new Error("Workspace tools require workspace context.");
+        return executeWorkspaceConfigTool({
+          name: input.definition.name,
+          args: input.args,
+          workspaceId: input.workspaceId,
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          toolCallId: input.toolCallId,
+        });
       }
 
       preflightSandboxToolArgs({

@@ -1,5 +1,10 @@
 import path from "node:path";
-import { resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
+import {
+  type AgentSkillDefinition,
+  resolveAgentSkillDefinitions,
+  resolveWorkspacePath,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { Sandbox } from "e2b";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
@@ -14,6 +19,7 @@ export function sandboxLayout(workdir: string) {
   return {
     workspaceRoot: workdir,
     brainRoot: `${workdir}/brain`,
+    skillsRoot: `${workdir}/skills`,
     workRoot: `${workdir}/work`,
     metadataRoot: METADATA_ROOT,
     agentFile: `${METADATA_ROOT}/agent.agent`,
@@ -102,12 +108,14 @@ export async function prepareWorkspace(input: {
   repositoryFullName?: string | null | undefined;
   repositoryDefaultBranch?: string | null | undefined;
   githubToken?: string | null | undefined;
+  skills?: readonly AgentSkillDefinition[] | undefined;
 }) {
   const layout = sandboxLayout(input.workdir);
+  const skills = input.skills ?? resolveAgentSkillDefinitions(undefined);
 
   await input.sandbox.commands.run(
     [
-      `mkdir -p ${shellQuote(layout.brainRoot)} ${shellQuote(layout.workRoot)} ${shellQuote(layout.metadataRoot)}`,
+      `mkdir -p ${shellQuote(layout.brainRoot)} ${shellQuote(layout.skillsRoot)} ${shellQuote(layout.workRoot)} ${shellQuote(layout.metadataRoot)}`,
       `chown -R ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(layout.workspaceRoot)}`,
       `chown root:root ${shellQuote(layout.metadataRoot)}`,
       `chmod 700 ${shellQuote(layout.metadataRoot)}`,
@@ -134,6 +142,50 @@ export async function prepareWorkspace(input: {
   });
   await input.sandbox.commands.run(
     `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
+    { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  );
+  await materializeSkills({ sandbox: input.sandbox, workdir: input.workdir, skills });
+}
+
+async function materializeSkills(input: {
+  sandbox: SandboxHandle;
+  workdir: string;
+  skills: readonly AgentSkillDefinition[];
+}) {
+  const layout = sandboxLayout(input.workdir);
+  await input.sandbox.commands.run(`rm -rf ${shellQuote(layout.skillsRoot)}`, {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
+  await input.sandbox.commands.run(`mkdir -p ${shellQuote(layout.skillsRoot)}`, {
+    user: SANDBOX_ROOT_USER,
+    timeoutMs: 30_000,
+  });
+
+  for (const skill of input.skills) {
+    for (const file of skill.files) {
+      const filePath = resolveWorkspacePath(input.workdir, file.path);
+      const relative = relativePath(input.workdir, filePath);
+      if (relative !== file.path || !relative.startsWith("skills/")) {
+        throw new Error(`Invalid skill sandbox path: ${file.path}`);
+      }
+      await input.sandbox.commands.run(`mkdir -p ${shellQuote(path.posix.dirname(filePath))}`, {
+        user: SANDBOX_ROOT_USER,
+        timeoutMs: 30_000,
+      });
+      await input.sandbox.files.write(filePath, file.content, {
+        user: SANDBOX_ROOT_USER,
+        requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
+      });
+    }
+  }
+
+  await input.sandbox.commands.run(
+    [
+      `chown -R root:root ${shellQuote(layout.skillsRoot)}`,
+      `find ${shellQuote(layout.skillsRoot)} -type d -exec chmod 755 {} +`,
+      `find ${shellQuote(layout.skillsRoot)} -type f -exec chmod 644 {} +`,
+    ].join(" && "),
     { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   );
 }
@@ -214,7 +266,9 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "write_file") {
-    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"), {
+      writable: true,
+    });
     const content = readString(args, "content");
     await input.sandbox.commands.run(`mkdir -p ${shellQuote(path.posix.dirname(filePath))}`, {
       timeoutMs: 30_000,
@@ -259,12 +313,20 @@ export async function runSandboxTool(input: {
   throw new Error(`Unknown tool: ${input.name}`);
 }
 
-export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
+export function resolveSandboxToolPath(
+  workdir: string,
+  inputPath = "work",
+  options: { writable?: boolean } = {},
+) {
   let resolved: string;
   try {
     resolved = resolveWorkspacePath(workdir, inputPath);
   } catch {
-    throw new Error("Path must be inside work/ or brain/ for this session.");
+    throw new Error(
+      options.writable
+        ? "Path must be inside writable work/ or brain/ for this session."
+        : "Path must be inside work/, brain/, or skills/ for this session.",
+    );
   }
   const relative = relativePath(workdir, resolved);
 
@@ -277,7 +339,15 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
     return resolved;
   }
 
-  throw new Error("Path must be inside work/ or brain/ for this session.");
+  if (!options.writable && (relative === "skills" || relative.startsWith("skills/"))) {
+    return resolved;
+  }
+
+  throw new Error(
+    options.writable
+      ? "Path must be inside writable work/ or brain/ for this session."
+      : "Path must be inside work/, brain/, or skills/ for this session.",
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

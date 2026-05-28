@@ -25,6 +25,7 @@ export type TiptapDoc = {
 };
 
 export type AgentToolId = "exa" | "amp";
+export type AgentSkillId = "opencompany";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -97,6 +98,7 @@ export type AgentConfig = {
   };
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  skills?: AgentSkillId[];
   afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {

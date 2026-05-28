@@ -1,0 +1,1 @@
+ALTER TABLE "agents" ALTER COLUMN "config" SET DEFAULT '{"schemaVersion":"agent.v1","title":"Untitled agent","instructions":"","model":{"provider":"vercel-ai-gateway","name":"openai/gpt-5.4-mini"},"tools":[],"brain":[],"skills":[],"integrations":{"github":{"repositories":[]}},"triggers":[]}'::jsonb;
