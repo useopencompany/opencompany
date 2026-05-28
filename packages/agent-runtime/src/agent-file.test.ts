@@ -77,6 +77,27 @@ describe(".agent files", () => {
     expect(config.tools).toEqual(["amp"]);
   });
 
+  test("round-trips Linear MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Linear triage",
+      body: "Triage issues with @linear.",
+    });
+
+    expect(source).toContain("id: linear");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: linear");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "linear",
+        type: "mcp",
+        server: "linear",
+        label: "linear",
+        description: "Use workspace-configured Linear MCP tools.",
+      },
+    ]);
+  });
+
   test("syncs the root Brain folder from markdown mentions", () => {
     const config = extractConfigFromMentions("Use all shared context in @brain/.");
 

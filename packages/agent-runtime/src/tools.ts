@@ -5,7 +5,7 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
-import type { AgentConfigTool, AgentToolId } from "./types";
+import type { AgentConfigTool, AgentMcpToolConfig, AgentToolId } from "./types";
 
 export type RuntimeToolName =
   | "shell"
@@ -43,6 +43,7 @@ export type AgentToolDefinition = {
   id: AgentToolId;
   type: AgentConfigTool["type"];
   provider?: "amp";
+  server?: AgentMcpToolConfig["server"];
   label: string;
   description: string;
   runtimeTools: RuntimeToolName[];
@@ -80,6 +81,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
       binding: "required",
     },
     prCapableDefault: true,
+  },
+  {
+    id: "linear",
+    type: "mcp",
+    server: "linear",
+    label: "linear",
+    description: "Use workspace-configured Linear MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
   },
 ];
 

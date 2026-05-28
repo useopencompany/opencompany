@@ -1,6 +1,6 @@
 import { getAgentModelRuntimeOptions, type ModelProviderOptions } from "./models";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
-import type { AgentConfig, AgentGitHubRepositoryConfig } from "./types";
+import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
 
 type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & {
   integrations?: {
@@ -20,6 +20,7 @@ export type ResolvedAgentRuntimeConfig = {
     exposeReasoningSummary: boolean;
   };
   tools: RuntimeToolName[];
+  mcpServers: AgentMcpToolConfig[];
 };
 
 export function resolveAgentRuntimeConfig(input: {
@@ -61,6 +62,7 @@ export function resolveAgentRuntimeConfig(input: {
       exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
     },
     tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools),
+    mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
 }
 

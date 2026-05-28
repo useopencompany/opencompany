@@ -33,6 +33,10 @@ export type WorkspaceIntegrationCredentialKind =
   | "webhook_secret"
   | (string & {});
 
+export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "disabled" | "error";
+
+export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
+
 export type WorkspaceIntegrationCredentialEncryptedPayload = {
   algorithm: "aes-256-gcm";
   iv: string;
@@ -812,6 +816,105 @@ export const workspaceIntegrationCredentials = pgTable(
   }),
 );
 
+export const workspaceExperiments = pgTable(
+  "workspace_experiments",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceKeyIdx: uniqueIndex("workspace_experiments_workspace_key_idx").on(
+      table.workspaceId,
+      table.key,
+    ),
+  }),
+);
+
+export const workspaceMcpServers = pgTable(
+  "workspace_mcp_servers",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    serverKey: text("server_key").notNull(),
+    displayName: text("display_name").notNull(),
+    endpointUrl: text("endpoint_url").notNull(),
+    status: text("status")
+      .$type<WorkspaceMcpServerStatus>()
+      .notNull()
+      .default("missing_credential"),
+    statusReason: text("status_reason"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceKeyIdx: uniqueIndex("workspace_mcp_servers_workspace_key_idx").on(
+      table.workspaceId,
+      table.serverKey,
+    ),
+    workspaceStatusIdx: index("workspace_mcp_servers_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    workspaceServerFk: uniqueIndex("workspace_mcp_servers_id_workspace_idx").on(
+      table.id,
+      table.workspaceId,
+    ),
+    statusCheck: check(
+      "workspace_mcp_servers_status_check",
+      sql`${table.status} IN ('configured', 'missing_credential', 'disabled', 'error')`,
+    ),
+  }),
+);
+
+export const workspaceMcpCredentials = pgTable(
+  "workspace_mcp_credentials",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    serverId: text("server_id").notNull(),
+    kind: text("kind").$type<WorkspaceMcpCredentialKind>().notNull(),
+    encryptedPayload: jsonb("encrypted_payload")
+      .$type<WorkspaceIntegrationCredentialEncryptedPayload>()
+      .notNull(),
+    encryptionKeyVersion: integer("encryption_key_version").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("workspace_mcp_credentials_workspace_idx").on(table.workspaceId),
+    serverIdx: index("workspace_mcp_credentials_server_idx").on(table.serverId),
+    serverKindIdx: uniqueIndex("workspace_mcp_credentials_server_kind_idx").on(
+      table.serverId,
+      table.kind,
+    ),
+    serverWorkspaceFk: foreignKey({
+      name: "workspace_mcp_credentials_server_workspace_fk",
+      columns: [table.serverId, table.workspaceId],
+      foreignColumns: [workspaceMcpServers.id, workspaceMcpServers.workspaceId],
+    }).onDelete("cascade"),
+  }),
+);
+
 export const agentSessionArtifacts = pgTable(
   "agent_session_artifacts",
   {
@@ -899,6 +1002,9 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   integrations: many(workspaceIntegrations),
   integrationResources: many(workspaceIntegrationResources),
   integrationCredentials: many(workspaceIntegrationCredentials),
+  experiments: many(workspaceExperiments),
+  mcpServers: many(workspaceMcpServers),
+  mcpCredentials: many(workspaceMcpCredentials),
 }));
 
 export const agentsRelations = relations(agents, ({ one, many }) => ({
@@ -1145,6 +1251,32 @@ export const workspaceIntegrationCredentialsRelations = relations(
     }),
   }),
 );
+
+export const workspaceExperimentsRelations = relations(workspaceExperiments, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceExperiments.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const workspaceMcpServersRelations = relations(workspaceMcpServers, ({ one, many }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceMcpServers.workspaceId],
+    references: [workspaces.id],
+  }),
+  credentials: many(workspaceMcpCredentials),
+}));
+
+export const workspaceMcpCredentialsRelations = relations(workspaceMcpCredentials, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [workspaceMcpCredentials.workspaceId],
+    references: [workspaces.id],
+  }),
+  server: one(workspaceMcpServers, {
+    fields: [workspaceMcpCredentials.serverId, workspaceMcpCredentials.workspaceId],
+    references: [workspaceMcpServers.id, workspaceMcpServers.workspaceId],
+  }),
+}));
 
 export const agentSessionArtifactsRelations = relations(agentSessionArtifacts, ({ one }) => ({
   session: one(agentSessions, {
