@@ -8,9 +8,16 @@ import {
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
-import { readSandboxBrainSnapshot, runAmpCoderTool } from "./amp-tool";
+import {
+  buildGitHubCommandEnv,
+  createKnownSecretRedactor,
+  loadGitHubWorkRepository,
+  readSandboxBrainSnapshot,
+  runAmpCoderTool,
+} from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
+import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
@@ -266,11 +273,22 @@ export async function executeRuntimeTool(input: {
         input.definition.name === "shell"
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
           : null;
+      const shellGitHubAuth =
+        input.definition.name === "shell"
+          ? await resolveShellGitHubAuth({
+              workspaceId: input.workspaceId,
+              agentConfig: input.agentConfig,
+              toolCallId: input.toolCallId,
+            })
+          : null;
       const sandboxOutput = await runSandboxTool({
         sandbox: activeSandbox,
         workdir: input.workdir,
         name: input.definition.name,
         args: input.args,
+        ...(shellGitHubAuth
+          ? { envs: shellGitHubAuth.env, redactOutput: shellGitHubAuth.redact }
+          : {}),
         onOutput: async (stream, delta) => {
           await input.checkAbort();
           await requireLeaseWrite(
@@ -442,6 +460,52 @@ export async function executeRuntimeTool(input: {
   }
 
   return output;
+}
+
+async function resolveShellGitHubAuth(input: {
+  workspaceId?: string | undefined;
+  agentConfig?: AgentConfig | undefined;
+  toolCallId: string;
+}) {
+  if (!input.workspaceId || !input.agentConfig) return null;
+
+  const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
+  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
+
+  const repository =
+    input.agentConfig.integrations.github.repositories.find(
+      (candidate) => candidate.id === ampTool.repository,
+    ) ?? null;
+  if (!repository) {
+    throw new Error(`GitHub repository binding ${ampTool.repository} was not found.`);
+  }
+
+  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+  const githubToken = await getGitHubWorkInstallationToken({
+    installationId: integrationRepository.installationId,
+    repositoryFullName: repository.fullName,
+  });
+  if (!githubToken) {
+    throw new Error(
+      "GitHub App credentials are required to run shell commands in a GitHub work repository.",
+    );
+  }
+
+  const githubAuthHeader = gitAuthHeader(githubToken);
+  return {
+    env: buildGitHubCommandEnv({
+      githubAuthHeader,
+      githubToken,
+      toolCallId: input.toolCallId,
+    }),
+    redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+  };
+}
+
+function gitAuthHeader(token: string) {
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64",
+  )}`;
 }
 
 function throwIfAborted(signal: AbortSignal) {
