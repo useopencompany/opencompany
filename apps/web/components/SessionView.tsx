@@ -792,7 +792,7 @@ export function AssistantMessageContent({
         return <ToolCallCard key={part.toolCall.id} toolCall={toolCall} />;
       })}
       {!hasParts && !isRunning && !isStopped ? "..." : null}
-      {!hasParts && isStopped ? <AssistantStoppedNotice /> : null}
+      {isStopped ? <AssistantStoppedNotice /> : null}
       {isRunning ? <WorkingIndicator /> : null}
     </div>
   );

@@ -40,11 +40,10 @@ describe("WorkingIndicator", () => {
     expect(el).toHaveAttribute("aria-live", "polite");
   });
 
-  it("shows 'Thinking' label and a pulsing dot", () => {
+  it("shows 'Thinking' label with no dot element", () => {
     render(<WorkingIndicator />);
     expect(screen.getByText("Thinking")).toBeInTheDocument();
-    const svg = document.querySelector("svg");
-    expect(svg).toBeInTheDocument();
+    expect(document.querySelector("svg")).not.toBeInTheDocument();
   });
 
   it("shows elapsed time starting at 0s", () => {

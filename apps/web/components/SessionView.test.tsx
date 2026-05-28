@@ -211,6 +211,54 @@ describe("AssistantMessageContent — completed message regression", () => {
   });
 });
 
+// ── Phase B-extra: AssistantStoppedNotice on abort ────────────────────────
+
+describe("AssistantMessageContent — abort: stopped notice renders regardless of parts", () => {
+  it("shows AssistantStoppedNotice when message is running but session cannot generate (no parts)", () => {
+    const message = makeMessage({ status: "running" });
+    render(<AssistantMessageContent message={message} parts={[]} sessionCanGenerate={false} />);
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+    // WorkingIndicator should NOT be shown
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows AssistantStoppedNotice when message is running but session cannot generate (has parts)", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [makeToolCallPart("running")];
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={false} />);
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+    // WorkingIndicator should NOT be shown — session cannot generate
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows AssistantStoppedNotice for a failed message (no parts)", () => {
+    const message = makeMessage({ status: "failed" });
+    render(<AssistantMessageContent message={message} parts={[]} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+  });
+
+  it("shows AssistantStoppedNotice for a failed message (has parts)", () => {
+    const message = makeMessage({ status: "failed" });
+    const parts = [makeTextPart("Partial output…")];
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+    expect(screen.getByText("Partial output…")).toBeInTheDocument();
+  });
+
+  it("does NOT show AssistantStoppedNotice when message is running and session can generate", () => {
+    const message = makeMessage({ status: "running" });
+    render(<AssistantMessageContent message={message} parts={[]} sessionCanGenerate={true} />);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    // WorkingIndicator is visible instead
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+});
+
 // ── Phase C: Stale-stream banner ───────────────────────────────────────────
 
 function makeSession(overrides: Partial<AgentSessionDetailPayload["session"]> = {}): AgentSessionDetailPayload["session"] {
