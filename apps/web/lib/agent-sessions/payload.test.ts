@@ -284,6 +284,75 @@ describe("session payload cache helpers", () => {
     expect(merged.session.updatedAt).toBe("2026-05-24T10:02:00.000Z");
   });
 
+  it("normalizes failed session payloads with stale running assistant messages", () => {
+    const sessionDetail = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "",
+          status: "running",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          completedAt: null,
+        },
+      ],
+    });
+    sessionDetail.session = {
+      ...sessionDetail.session,
+      status: "failed",
+      lastError: "Gateway down",
+      updatedAt: "2026-05-24T10:02:00.000Z",
+    };
+
+    const parsed = parseAgentSessionDetailResponse({ detail: sessionDetail });
+
+    expect(parsed.detail.messages[0]).toMatchObject({
+      status: "failed",
+      completedAt: "2026-05-24T10:02:00.000Z",
+    });
+  });
+
+  it("does not revive a failed assistant message when refetching a failed session", () => {
+    const current = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "",
+          status: "failed",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          completedAt: "2026-05-24T10:02:00.000Z",
+        },
+      ],
+    });
+    current.session = {
+      ...current.session,
+      status: "failed",
+      lastError: "Gateway down",
+      updatedAt: "2026-05-24T10:02:00.000Z",
+    };
+    const incoming = detail({
+      messages: [
+        {
+          id: "msg_1",
+          role: "assistant",
+          content: "",
+          status: "running",
+          createdAt: "2026-05-24T10:00:00.000Z",
+          completedAt: null,
+        },
+      ],
+    });
+    incoming.session = current.session;
+
+    const merged = mergeAgentSessionDetail(current, incoming);
+
+    expect(merged.messages[0]).toMatchObject({
+      status: "failed",
+      completedAt: "2026-05-24T10:02:00.000Z",
+    });
+  });
+
   it("treats completed-message reasoning tokens from the server as authoritative", () => {
     const current = detail({
       messages: [

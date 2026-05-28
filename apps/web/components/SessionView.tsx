@@ -209,15 +209,15 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     return partsByMessageId;
   }, [runtime.events, runtime.messages]);
   const lastVisibleMessage = visibleMessages.at(-1);
+  const sessionCanGenerate =
+    !runtime.lastError &&
+    ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
   const hasRunningAssistantMessage = visibleMessages.some(
-    (message) => message.role === "assistant" && message.status === "running",
+    (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
   const showWaitingForAssistant =
-    !runtime.lastError &&
-    !hasRunningAssistantMessage &&
-    lastVisibleMessage?.role === "user" &&
-    ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
-  const canAbort = ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
+    !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
+  const canAbort = sessionCanGenerate;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
@@ -459,7 +459,11 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                     }`}
                   >
                     {message.role === "assistant" ? (
-                      <AssistantMessageContent message={message} parts={assistantParts} />
+                      <AssistantMessageContent
+                        message={message}
+                        parts={assistantParts}
+                        sessionCanGenerate={sessionCanGenerate}
+                      />
                     ) : (
                       message.content
                     )}
@@ -730,28 +734,62 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
 function AssistantMessageContent({
   message,
   parts,
+  sessionCanGenerate,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
+  sessionCanGenerate: boolean;
 }) {
   const hasParts = parts.length > 0;
+  const isRunning = message.status === "running" && sessionCanGenerate;
+  const isStopped =
+    message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
 
   return (
     <div className="space-y-3">
-      {parts.map((part, index) =>
-        part.type === "text" ? (
-          <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />
-        ) : part.type === "reasoning" ? (
-          <ReasoningSummaryCard
-            key={`${index}:reasoning`}
-            text={part.text}
-            durationSeconds={part.durationSeconds}
-          />
+      {parts.map((part, index) => {
+        if (part.type === "text") {
+          return <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />;
+        }
+
+        if (part.type === "reasoning") {
+          return (
+            <ReasoningSummaryCard
+              key={`${index}:reasoning`}
+              text={part.text}
+              durationSeconds={part.durationSeconds}
+            />
+          );
+        }
+
+        const toolCall =
+          part.toolCall.status === "running" && !sessionCanGenerate
+            ? {
+                ...part.toolCall,
+                status: "failed" as const,
+                outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+              }
+            : part.toolCall;
+        return <ToolCallCard key={part.toolCall.id} toolCall={toolCall} />;
+      })}
+      {!hasParts ? (
+        isRunning ? (
+          <ThinkingShimmer />
+        ) : isStopped ? (
+          <AssistantStoppedNotice />
         ) : (
-          <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
-        ),
-      )}
-      {!hasParts ? message.status === "running" ? <ThinkingShimmer /> : "..." : null}
+          "..."
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function AssistantStoppedNotice() {
+  return (
+    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-[#9f2f21]">
+      <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
+      <span>Stopped before finishing</span>
     </div>
   );
 }
