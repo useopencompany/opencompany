@@ -181,8 +181,18 @@ describe("session payload cache helpers", () => {
     // that pre-dates incoming. The naive set-difference replay would double-count event 2.
     const incoming = detail();
     incoming.events = [
-      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
-      { id: 3, type: "session.status", messageId: null, payload: { status: "running" } },
+      {
+        id: 1,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "ready" },
+      },
+      {
+        id: 3,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "running" },
+      },
     ];
     incoming.usage = {
       inputTokens: 100,
@@ -197,7 +207,12 @@ describe("session payload cache helpers", () => {
 
     const current = detail();
     current.events = [
-      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+      {
+        id: 1,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "ready" },
+      },
       {
         id: 2,
         type: "session.usage",
@@ -213,7 +228,12 @@ describe("session payload cache helpers", () => {
           totalTokens: 150,
         },
       },
-      { id: 3, type: "session.status", messageId: null, payload: { status: "running" } },
+      {
+        id: 3,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "running" },
+      },
     ];
 
     const merged = mergeAgentSessionDetail(current, incoming);
@@ -226,12 +246,22 @@ describe("session payload cache helpers", () => {
   it("still replays truly newer local events past the highest incoming id", () => {
     const incoming = detail();
     incoming.events = [
-      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+      {
+        id: 1,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "ready" },
+      },
     ];
 
     const current = detail();
     current.events = [
-      { id: 1, type: "session.status", messageId: null, payload: { status: "ready" } },
+      {
+        id: 1,
+        type: "session.status",
+        messageId: null,
+        payload: { status: "ready" },
+      },
       {
         id: 2,
         type: "session.usage",
@@ -504,14 +534,25 @@ describe("session payload cache helpers", () => {
 
   it("parses session API payloads at the fetch boundary", () => {
     const sessionDetail = detail({
-      events: [{ id: 1, type: "session.status", messageId: null, payload: { status: "running" } }],
+      events: [
+        {
+          id: 1,
+          type: "session.status",
+          messageId: null,
+          payload: { status: "running" },
+        },
+      ],
       messages: [{ id: "msg_1", role: "user", content: "Ship it", status: "completed" }],
     });
 
     expect(parseAgentSessionDetailResponse({ detail: sessionDetail })).toEqual({
       detail: sessionDetail,
     });
-    expect(parseSidebarSessionsResponse({ sessions: [sidebarSession("ses_1", "One")] })).toEqual({
+    expect(
+      parseSidebarSessionsResponse({
+        sessions: [sidebarSession("ses_1", "One")],
+      }),
+    ).toEqual({
       sessions: [sidebarSession("ses_1", "One")],
     });
     expect(
@@ -523,6 +564,17 @@ describe("session payload cache helpers", () => {
       runnerUrl: "https://runner.example.com",
       streamToken: "token",
     });
+  });
+
+  it("defaults legacy session detail payloads to read-only mutation access", () => {
+    const sessionDetail = detail();
+    const { viewerCanMutate: _viewerCanMutate, ...legacySession } = sessionDetail.session;
+
+    expect(
+      parseAgentSessionDetailResponse({
+        detail: { ...sessionDetail, session: legacySession },
+      }).detail.session.viewerCanMutate,
+    ).toBe(false);
   });
 
   it("rejects invalid session detail payloads", () => {
@@ -570,6 +622,7 @@ function detail(
   return {
     session: {
       id: "ses_123",
+      userId: "usr_123",
       agentId: "agt_123",
       agentName: "Leo",
       agentPath: "agents/leo.agent",
@@ -582,6 +635,7 @@ function detail(
       runLeaseId: null,
       abortRequestedAt: null,
       lastError: null,
+      viewerCanMutate: true,
       createdAt: "2026-05-24T10:00:00.000Z",
       updatedAt: "2026-05-24T10:00:00.000Z",
     },

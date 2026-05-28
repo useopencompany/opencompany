@@ -26,6 +26,7 @@ export type SidebarSessionPayload = {
 
 export type AgentSessionPayload = {
   id: string;
+  userId: string;
   agentId: string;
   agentName: string;
   agentPath: string | null;
@@ -38,6 +39,7 @@ export type AgentSessionPayload = {
   runLeaseId: string | null;
   abortRequestedAt: string | null;
   lastError: string | null;
+  viewerCanMutate: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -320,8 +322,12 @@ export function invalidateRelatedCachesForSessionEvent(
   event: RuntimeEvent,
 ) {
   if (!event.type.startsWith("brain.")) return;
-  void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
-  void queryClient.invalidateQueries({ queryKey: agentQueryKeys.detail(workspaceId, agentId) });
+  void queryClient.invalidateQueries({
+    queryKey: agentQueryKeys.list(workspaceId),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: agentQueryKeys.detail(workspaceId, agentId),
+  });
 }
 
 export function seedSessionQueries(
@@ -508,6 +514,7 @@ function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
   return {
     id: readStringField(record, "id"),
     agentId: readStringField(record, "agentId"),
+    userId: readOptionalStringField(record, "userId") ?? "",
     agentName: readStringField(record, "agentName"),
     agentPath: readNullableStringField(record, "agentPath"),
     title: readStringField(record, "title"),
@@ -519,6 +526,7 @@ function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
     runLeaseId: readNullableStringField(record, "runLeaseId"),
     abortRequestedAt: readNullableStringField(record, "abortRequestedAt"),
     lastError: readNullableStringField(record, "lastError"),
+    viewerCanMutate: readOptionalBooleanField(record, "viewerCanMutate") ?? false,
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
   };

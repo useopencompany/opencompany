@@ -7,8 +7,13 @@ const SESSION_API_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { user, workspace } = await currentWorkspace();
-  const detail = await loadAgentSessionDetailForWorkspace(id, user.id, workspace.id);
+  const { user, workspace, role } = await currentWorkspace();
+  const detail = await loadAgentSessionDetailForWorkspace(
+    id,
+    user.id,
+    workspace.id,
+    role === "admin",
+  );
 
   if (!detail) {
     return NextResponse.json(

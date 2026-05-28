@@ -7,8 +7,11 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   const idOrPath = path.map(decodeURIComponent).join("/");
-  const { workspace } = await currentWorkspace();
-  const agent = await loadAgentForWorkspace(workspace.id, idOrPath);
+  const { user, workspace, role } = await currentWorkspace();
+  const agent = await loadAgentForWorkspace(workspace.id, idOrPath, {
+    userId: user.id,
+    canViewWorkspaceSessions: role === "admin",
+  });
 
   if (!agent) {
     return NextResponse.json({ error: "Agent not found." }, { status: 404 });

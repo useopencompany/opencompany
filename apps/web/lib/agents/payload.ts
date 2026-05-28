@@ -27,6 +27,20 @@ export type AgentListItemPayload = {
   updatedAt: string;
 };
 
+export type AgentSessionSummaryPayload = {
+  id: string;
+  title: string;
+  status: string;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+};
+
 export type AgentDetailPayload = AgentListItemPayload & {
   body: string;
   content: TiptapDoc;
@@ -35,6 +49,7 @@ export type AgentDetailPayload = AgentListItemPayload & {
   brainPaths: string[];
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
+  sessions: AgentSessionSummaryPayload[];
 };
 
 export function serializeAgentListItem(agent: Agent): AgentListItemPayload {
@@ -56,6 +71,7 @@ export function serializeAgentDetail(
   brainPaths: string[] = [],
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = [],
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[] = githubIntegrationRepositories,
+  sessions: AgentSessionSummaryPayload[] = [],
 ): AgentDetailPayload {
   return {
     ...serializeAgentListItem(agent),
@@ -66,6 +82,7 @@ export function serializeAgentDetail(
     brainPaths,
     githubIntegrationRepositories,
     usableGitHubIntegrationRepositories,
+    sessions,
   };
 }
 

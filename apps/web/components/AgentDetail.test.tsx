@@ -6,6 +6,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { acquireAgentEditLock } from "@/lib/agents/actions";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
@@ -35,6 +36,19 @@ vi.mock("next/link", () => ({
 }));
 
 vi.mock("@/lib/agents/actions", () => ({
+  acquireAgentEditLock: vi.fn().mockResolvedValue({
+    status: "acquired",
+    token: "lock_123",
+    expiresAt: "2026-05-24T10:02:00.000Z",
+    owner: { id: "usr_123", name: "Ada Lovelace", email: "ada@example.com" },
+  }),
+  refreshAgentEditLock: vi.fn().mockResolvedValue({
+    status: "acquired",
+    token: "lock_123",
+    expiresAt: "2026-05-24T10:02:00.000Z",
+    owner: { id: "usr_123", name: "Ada Lovelace", email: "ada@example.com" },
+  }),
+  releaseAgentEditLock: vi.fn().mockResolvedValue(undefined),
   updateAgent: vi.fn(),
 }));
 
@@ -147,9 +161,11 @@ const detailAgent: AgentDetailPayload = {
       binding,
     },
   ],
+  sessions: [],
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
+const acquireAgentEditLockMock = vi.mocked(acquireAgentEditLock);
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
@@ -218,5 +234,53 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
+  });
+
+  it("renders agent session summaries in the detail sidebar", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <AgentDetail
+        idOrPath="agents/leo.agent"
+        initialAgent={{
+          ...detailAgent,
+          sessions: [
+            {
+              id: "ses_123",
+              title: "Fix issue",
+              status: "completed",
+              lastError: null,
+              createdAt: "2026-05-24T10:00:00.000Z",
+              updatedAt: "2026-05-24T10:05:00.000Z",
+              user: {
+                id: "usr_owner",
+                name: "Grace Hopper",
+                email: "grace@example.com",
+              },
+            },
+          ],
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+
+    expect(await screen.findByText("Sessions")).toBeInTheDocument();
+    expect(screen.getByText("Fix issue")).toBeInTheDocument();
+    expect(screen.getByText(/Grace Hopper/)).toBeInTheDocument();
+  });
+
+  it("renders locked agents as read-only", async () => {
+    acquireAgentEditLockMock.mockResolvedValueOnce({
+      status: "locked",
+      expiresAt: "2026-05-24T10:02:00.000Z",
+      owner: { id: "usr_other", name: "Grace Hopper", email: "grace@example.com" },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+
+    expect(await screen.findByText("Grace Hopper is editing this agent.")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Leo")).toBeDisabled();
   });
 });

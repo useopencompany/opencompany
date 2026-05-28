@@ -54,7 +54,7 @@ WorkOS Organizations are the source of truth for organization identity, membersh
 `users.workos_user_id` has a unique index so we can dedupe on upsert.
 `workspaces.workos_organization_id` has a unique index so one WorkOS Organization maps to one app workspace.
 
-New sign-ups currently get one invisible default WorkOS Organization. Multi-workspace creation, organization switching, invitations, and member management are intentionally not exposed yet.
+New sign-ups currently get one invisible default WorkOS Organization. Workspace admins can invite members from Settings through WorkOS Invitations. Multi-workspace creation, organization switching, and full member management are intentionally not exposed yet.
 
 ## Sign-out
 

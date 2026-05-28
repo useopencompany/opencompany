@@ -9,7 +9,7 @@ import {
   useEditor,
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createMentionSuggestion } from "./mentionSuggestion";
 import {
   AGENT_AFTER_SESSION_MENTION_ITEMS,
@@ -22,6 +22,7 @@ import {
 type Props = {
   initialBody: string;
   initialContent?: JSONContent | null;
+  readOnly?: boolean;
   onChange: (body: string, content: JSONContent) => void;
   mentionItems?: AgentMentionItem[];
   onMentionSelect?: (item: AgentMentionItem) => void;
@@ -50,6 +51,7 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
   {
     initialBody,
     initialContent,
+    readOnly = false,
     onChange,
     mentionItems = buildAgentMentionItems(),
     onMentionSelect,
@@ -127,6 +129,7 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
       plainTextKeysExtension,
     ],
     content: initialEditorContent,
+    editable: !readOnly,
     editorProps: {
       attributes: {
         class: "tiptap-agent min-h-[320px] w-full text-[13.5px] leading-7 text-ink/90 outline-none",
@@ -142,11 +145,15 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
     },
   });
 
+  useEffect(() => {
+    editor?.setEditable(!readOnly);
+  }, [editor, readOnly]);
+
   useImperativeHandle(
     ref,
     () => ({
       selectRepositoryMention(repository) {
-        if (!editor) return;
+        if (!editor || readOnly) return;
         const item = findMentionItem(repository.fullName, buildAgentMentionItems([repository]));
         if (!item) return;
 
@@ -156,7 +163,7 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
         onChange(tiptapDocToBody(nextDoc), nextDoc);
       },
     }),
-    [editor, onChange],
+    [editor, onChange, readOnly],
   );
 
   return (

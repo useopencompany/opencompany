@@ -143,6 +143,7 @@ async function syncLocalMembership(input: { workspaceId: string; userId: string;
 export async function loadCurrentWorkspaceContextReadOnly(
   authUser: WorkOSUser,
   organizationId: string,
+  role?: string | null,
 ): Promise<CurrentWorkspaceContext | null> {
   const db = getDb();
   const [userRows, workspaceRows] = await Promise.all([
@@ -159,7 +160,10 @@ export async function loadCurrentWorkspaceContextReadOnly(
   if (!user || !workspace) return null;
 
   const [membership] = await db
-    .select({ userId: workspaceMemberships.userId, role: workspaceMemberships.role })
+    .select({
+      userId: workspaceMemberships.userId,
+      role: workspaceMemberships.role,
+    })
     .from(workspaceMemberships)
     .where(
       and(
@@ -171,11 +175,24 @@ export async function loadCurrentWorkspaceContextReadOnly(
 
   if (!membership) return null;
 
+  const normalizedRole = normalizeMembershipRole(role ?? membership.role);
+  if (
+    role !== undefined &&
+    role !== null &&
+    normalizeMembershipRole(membership.role) !== normalizedRole
+  ) {
+    await syncLocalMembership({
+      workspaceId: workspace.id,
+      userId: user.id,
+      role: normalizedRole,
+    });
+  }
+
   return {
     authUser,
     user,
     workspace,
-    role: normalizeMembershipRole(membership.role),
+    role: normalizedRole,
     isNewUser: false,
   };
 }
@@ -373,13 +390,14 @@ const resolveWorkspaceContext = cache(async () => {
     return null;
   }
 
+  const sessionRole = session.role ?? session.roles?.[0];
+
   return (
-    (await loadCurrentWorkspaceContextReadOnly(session.user, session.organizationId)) ??
-    (await syncUserAndWorkspace(
+    (await loadCurrentWorkspaceContextReadOnly(
       session.user,
       session.organizationId,
-      session.role ?? session.roles?.[0],
-    ))
+      sessionRole,
+    )) ?? (await syncUserAndWorkspace(session.user, session.organizationId, sessionRole))
   );
 });
 

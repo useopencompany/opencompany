@@ -6,6 +6,7 @@ import {
   workspaceIntegrations,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, or } from "drizzle-orm";
+import { loadAgentSessionSummariesForWorkspace } from "@/lib/agent-sessions/data";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
@@ -98,6 +99,7 @@ export async function loadAgentsForWorkspace(workspaceId: string): Promise<Agent
 export async function loadAgentForWorkspace(
   workspaceId: string,
   idOrPath: string,
+  options?: { userId?: string; canViewWorkspaceSessions?: boolean },
 ): Promise<AgentDetailPayload | null> {
   const db = getDb();
   const [[agent], brainPaths, githubIntegrationRepositories] = await Promise.all([
@@ -121,8 +123,22 @@ export async function loadAgentForWorkspace(
     repositories: githubIntegrationRepositories,
     savedRepositories: agent.config.integrations.github.repositories,
   });
+  const sessions = options?.userId
+    ? await loadAgentSessionSummariesForWorkspace({
+        agentId: agent.id,
+        userId: options.userId,
+        workspaceId,
+        canViewWorkspaceSessions: options.canViewWorkspaceSessions ?? false,
+      })
+    : [];
 
-  return serializeAgentDetail(agent, brainPaths, derivationRepositories, usableRepositories);
+  return serializeAgentDetail(
+    agent,
+    brainPaths,
+    derivationRepositories,
+    usableRepositories,
+    sessions,
+  );
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

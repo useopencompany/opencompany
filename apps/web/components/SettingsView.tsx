@@ -8,6 +8,7 @@ import {
   Gift,
   GitBranch,
   LogOut,
+  MailPlus,
   Plug,
   WalletCards,
 } from "lucide-react";
@@ -21,7 +22,7 @@ import {
   MIN_TOP_UP_AMOUNT_CENTS,
   TOP_UP_AMOUNTS_CENTS,
 } from "@/lib/billing/constants";
-import { updateWorkspaceName } from "@/lib/workspaces/actions";
+import { inviteWorkspaceMember, updateWorkspaceName } from "@/lib/workspaces/actions";
 
 type Props = {
   profile: {
@@ -33,6 +34,7 @@ type Props = {
   workspace: {
     name: string;
     createdAt: string;
+    canInviteMembers: boolean;
     repository: {
       updatedAt: string;
     } | null;
@@ -592,6 +594,84 @@ function WorkspaceNameForm({ initial }: { initial: string }) {
   );
 }
 
+function InviteMemberForm() {
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        setMessage(null);
+        const nextEmail = email.trim();
+        if (!nextEmail) {
+          setMessage({ type: "error", text: "Email cannot be empty." });
+          return;
+        }
+
+        startTransition(async () => {
+          try {
+            const result = await inviteWorkspaceMember(nextEmail);
+            if (result.ok) {
+              setEmail("");
+              setMessage({ type: "success", text: `Invitation sent to ${result.email}.` });
+              return;
+            }
+            setMessage({ type: "error", text: result.error });
+          } catch (error) {
+            setMessage({
+              type: "error",
+              text: error instanceof Error ? error.message : "Could not send invitation.",
+            });
+          }
+        });
+      }}
+      className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+          <MailPlus size={15} strokeWidth={1.8} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+            Invite a member
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setMessage(null);
+              }}
+              placeholder="teammate@example.com"
+              autoComplete="email"
+              className="h-8 min-w-0 flex-1 rounded-md border border-[#e6e6e3] bg-white px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
+            />
+            <button
+              type="submit"
+              disabled={isPending || !email.trim()}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isPending ? "Sending..." : "Send invite"}
+            </button>
+          </div>
+          {message && (
+            <div
+              className={`mt-2 text-[12px] ${
+                message.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+              }`}
+            >
+              {message.text}
+            </div>
+          )}
+        </div>
+      </div>
+    </form>
+  );
+}
+
 export default function SettingsView({ profile, workspace, billing }: Props) {
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
@@ -625,6 +705,12 @@ export default function SettingsView({ profile, workspace, billing }: Props) {
               <ReadOnly value={workspace.createdAt} />
             </Field>
           </Section>
+
+          {workspace.canInviteMembers ? (
+            <Section title="Members" description="Invite people to this workspace.">
+              <InviteMemberForm />
+            </Section>
+          ) : null}
 
           <Section
             title="Workspace state"

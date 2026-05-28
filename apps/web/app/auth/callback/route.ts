@@ -9,12 +9,33 @@ import {
 } from "@/lib/auth";
 import { dispatchSignupWelcomeEmailRequested } from "@/lib/email/events";
 
+function readJwtPayload(accessToken: string): Record<string, unknown> {
+  // AuthKit invokes this callback after the server-side token exchange. We only
+  // decode the already-trusted access token here to read WorkOS role claims.
+  try {
+    const payload = accessToken.split(".")[1];
+    if (!payload) return {};
+    const json = Buffer.from(payload, "base64url").toString("utf8");
+    const parsed = JSON.parse(json);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function workosRoleFromAccessToken(accessToken: string) {
+  const payload = readJwtPayload(accessToken);
+  if (typeof payload.role === "string") return payload.role;
+  if (Array.isArray(payload.roles) && typeof payload.roles[0] === "string") return payload.roles[0];
+  return undefined;
+}
+
 export const GET = handleAuth({
   returnPathname: "/onboarding",
-  onSuccess: async ({ user, organizationId }) => {
+  onSuccess: async ({ user, organizationId, accessToken }) => {
     try {
       const context = organizationId
-        ? await syncUserAndWorkspace(user, organizationId, "admin")
+        ? await syncUserAndWorkspace(user, organizationId, workosRoleFromAccessToken(accessToken))
         : await provisionDefaultOrganization(user);
 
       if (!organizationId) {

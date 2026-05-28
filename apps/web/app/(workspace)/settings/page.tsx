@@ -27,7 +27,7 @@ function formatDate(date: Date) {
 }
 
 export default async function SettingsPage() {
-  const { authUser, workspace } = await currentWorkspace();
+  const { authUser, workspace, role } = await currentWorkspace();
   const db = getDb();
   const [[repository], billing] = await Promise.all([
     db
@@ -55,6 +55,7 @@ export default async function SettingsPage() {
       workspace={{
         name: workspace.name,
         createdAt: formatDate(new Date(workspace.createdAt)),
+        canInviteMembers: role === "admin",
         repository: repository
           ? {
               updatedAt: formatDate(new Date(repository.updatedAt)),

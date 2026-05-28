@@ -68,6 +68,14 @@ function authOnSuccess() {
   return config.onSuccess;
 }
 
+function accessToken(payload: Record<string, unknown>) {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+    Buffer.from(JSON.stringify(payload)).toString("base64url"),
+    "signature",
+  ].join(".");
+}
+
 describe("auth callback welcome email dispatch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -79,7 +87,11 @@ describe("auth callback welcome email dispatch", () => {
   });
 
   it("dispatches the signup welcome email event for new users", async () => {
-    await authOnSuccess()({ user: authUser, organizationId: "org_123" } as never);
+    await authOnSuccess()({
+      user: authUser,
+      organizationId: "org_123",
+      accessToken: accessToken({ role: "admin" }),
+    } as never);
 
     expect(captureServerEventMock).toHaveBeenCalledWith("signup_completed", "usr_123", {
       user_id: "usr_123",
@@ -97,7 +109,11 @@ describe("auth callback welcome email dispatch", () => {
   it("does not dispatch the welcome email for existing users", async () => {
     syncUserAndWorkspaceMock.mockResolvedValue({ ...context, isNewUser: false } as never);
 
-    await authOnSuccess()({ user: authUser, organizationId: "org_123" } as never);
+    await authOnSuccess()({
+      user: authUser,
+      organizationId: "org_123",
+      accessToken: accessToken({ role: "admin" }),
+    } as never);
 
     expect(dispatchSignupWelcomeEmailRequestedMock).not.toHaveBeenCalled();
   });
@@ -107,7 +123,11 @@ describe("auth callback welcome email dispatch", () => {
     dispatchSignupWelcomeEmailRequestedMock.mockRejectedValue(error);
 
     await expect(
-      authOnSuccess()({ user: authUser, organizationId: "org_123" } as never),
+      authOnSuccess()({
+        user: authUser,
+        organizationId: "org_123",
+        accessToken: accessToken({ role: "admin" }),
+      } as never),
     ).resolves.toBeUndefined();
 
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
@@ -115,5 +135,25 @@ describe("auth callback welcome email dispatch", () => {
       user_id: "usr_123",
       workspace_id: "wks_123",
     });
+  });
+
+  it("syncs invited members with the WorkOS role from the access token", async () => {
+    await authOnSuccess()({
+      user: authUser,
+      organizationId: "org_123",
+      accessToken: accessToken({ role: "member" }),
+    } as never);
+
+    expect(syncUserAndWorkspaceMock).toHaveBeenCalledWith(authUser, "org_123", "member");
+  });
+
+  it("syncs admins with the WorkOS role from the access token", async () => {
+    await authOnSuccess()({
+      user: authUser,
+      organizationId: "org_123",
+      accessToken: accessToken({ role: "admin" }),
+    } as never);
+
+    expect(syncUserAndWorkspaceMock).toHaveBeenCalledWith(authUser, "org_123", "admin");
   });
 });

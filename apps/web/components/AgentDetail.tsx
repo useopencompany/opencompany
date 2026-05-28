@@ -13,7 +13,9 @@ import {
   FileCode2,
   GitBranch,
   Loader2,
+  LockKeyhole,
   type LucideIcon,
+  MessageSquare,
   PanelRight,
   Play,
 } from "lucide-react";
@@ -44,12 +46,18 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { updateAgent } from "@/lib/agents/actions";
+import {
+  acquireAgentEditLock,
+  refreshAgentEditLock,
+  releaseAgentEditLock,
+  updateAgent,
+} from "@/lib/agents/actions";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
   type AgentDetailPayload,
   type AgentListItemPayload,
+  type AgentSessionSummaryPayload,
   agentDetailToListItem,
   agentQueryKeys,
   fetchAgent,
@@ -63,6 +71,15 @@ type Props = {
 
 type SaveState = "idle" | "saving" | "saved";
 type SyncTone = "neutral" | "progress" | "success" | "danger";
+type EditLockState =
+  | { status: "checking" }
+  | { status: "acquired"; token: string; expiresAt: string }
+  | {
+      status: "locked";
+      expiresAt: string;
+      owner: { id: string; name: string; email: string };
+    }
+  | { status: "not_found" };
 type OptimisticGitHubSync = {
   status: string;
   error: string | null;
@@ -87,12 +104,21 @@ function updateAgentQueries(
   agent: AgentDetailPayload,
   previousIdOrPath: string,
 ) {
-  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, previousIdOrPath), agent);
-  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.id), agent);
+  const existing =
+    queryClient.getQueryData<AgentDetailPayload>(
+      agentQueryKeys.detail(workspaceId, previousIdOrPath),
+    ) ?? queryClient.getQueryData<AgentDetailPayload>(agentQueryKeys.detail(workspaceId, agent.id));
+  const nextAgent =
+    agent.sessions.length === 0 && existing?.sessions.length
+      ? { ...agent, sessions: existing.sessions }
+      : agent;
+
+  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, previousIdOrPath), nextAgent);
+  queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.id), nextAgent);
   if (agent.path) {
-    queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), agent);
+    queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), nextAgent);
   }
-  const listItem = agentDetailToListItem(agent);
+  const listItem = agentDetailToListItem(nextAgent);
   queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
     if (!agents) return [listItem];
 
@@ -123,7 +149,14 @@ export default function AgentDetail({ initialAgent, idOrPath }: Props) {
     return <AgentDetailSkeleton />;
   }
 
-  return <AgentDetailContent agent={agent} idOrPath={idOrPath} workspaceId={workspaceId} />;
+  return (
+    <AgentDetailContent
+      key={agent.id}
+      agent={agent}
+      idOrPath={idOrPath}
+      workspaceId={workspaceId}
+    />
+  );
 }
 
 function AgentDetailContent({
@@ -147,6 +180,9 @@ function AgentDetailContent({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [editLock, setEditLock] = useState<EditLockState>({
+    status: "checking",
+  });
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
@@ -198,6 +234,73 @@ function AgentDetailContent({
     () => buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths),
     [agent.brainPaths, agent.usableGitHubIntegrationRepositories],
   );
+  const editLockToken = editLock.status === "acquired" ? editLock.token : null;
+  const editorReadOnly = editLock.status !== "acquired";
+
+  useEffect(() => {
+    let disposed = false;
+    let acquiredToken: string | null = null;
+
+    startTransition(async () => {
+      try {
+        const result = await acquireAgentEditLock(agent.id);
+        if (disposed) {
+          if (result.status === "acquired") {
+            await releaseAgentEditLock(agent.id, result.token);
+          }
+          return;
+        }
+        if (result.status === "acquired") {
+          acquiredToken = result.token;
+          setEditLock({
+            status: "acquired",
+            token: result.token,
+            expiresAt: result.expiresAt,
+          });
+          return;
+        }
+        setEditLock(result);
+      } catch (error) {
+        if (!disposed) {
+          setEditLock({ status: "not_found" });
+          showError(error instanceof Error ? error.message : "Could not acquire edit lock.");
+        }
+      }
+    });
+
+    return () => {
+      disposed = true;
+      if (acquiredToken) {
+        void releaseAgentEditLock(agent.id, acquiredToken);
+      }
+    };
+  }, [agent.id, showError, startTransition]);
+
+  useEffect(() => {
+    if (!editLockToken) return;
+    const token = editLockToken;
+    const interval = window.setInterval(() => {
+      startTransition(async () => {
+        try {
+          const result = await refreshAgentEditLock(agent.id, token);
+          if (result.status === "acquired") {
+            setEditLock({
+              status: "acquired",
+              token: result.token,
+              expiresAt: result.expiresAt,
+            });
+            return;
+          }
+          setEditLock(result);
+        } catch (error) {
+          setEditLock({ status: "not_found" });
+          showError(error instanceof Error ? error.message : "Could not refresh edit lock.");
+        }
+      });
+    }, 30_000);
+
+    return () => window.clearInterval(interval);
+  }, [agent.id, editLockToken, showError, startTransition]);
 
   useEffect(() => {
     if (
@@ -239,6 +342,18 @@ function AgentDetailContent({
     }
     pendingRef.current = {};
     submittedPatchRef.current = patch;
+    if (!editLockToken) {
+      pendingRef.current = patch;
+      submittedPatchRef.current = null;
+      if (editLock.status === "checking") {
+        showError("Still checking whether this agent is available for editing. Try again shortly.");
+      } else if (editLock.status === "not_found") {
+        showError("Could not confirm this agent is available for editing. Refresh and try again.");
+      } else {
+        showError("This agent is locked for editing. Refresh when the lock is available.");
+      }
+      return;
+    }
     setSaveState("saving");
     setOptimisticGitHubSync({
       status: "pending",
@@ -251,9 +366,15 @@ function AgentDetailContent({
     startTransition(async () => {
       try {
         await Promise.all([
-          queryClient.cancelQueries({ queryKey: agentQueryKeys.list(workspaceId) }),
-          queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, idOrPath) }),
-          queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, agent.id) }),
+          queryClient.cancelQueries({
+            queryKey: agentQueryKeys.list(workspaceId),
+          }),
+          queryClient.cancelQueries({
+            queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
+          }),
+          queryClient.cancelQueries({
+            queryKey: agentQueryKeys.detail(workspaceId, agent.id),
+          }),
           agent.path
             ? queryClient.cancelQueries({
                 queryKey: agentQueryKeys.detail(workspaceId, agent.path),
@@ -261,7 +382,7 @@ function AgentDetailContent({
             : Promise.resolve(),
         ]);
 
-        const result = await updateAgent(agent.id, patch);
+        const result = await updateAgent(agent.id, { ...patch, editLockToken });
         if (!result?.agent) {
           throw new Error("Agent save did not return an updated agent.");
         }
@@ -337,6 +458,19 @@ function AgentDetailContent({
                       return;
                     }
                     seedSessionQueries(queryClient, workspaceId, result.detail);
+                    void Promise.all([
+                      queryClient.invalidateQueries({
+                        queryKey: agentQueryKeys.detail(workspaceId, idOrPath),
+                      }),
+                      queryClient.invalidateQueries({
+                        queryKey: agentQueryKeys.detail(workspaceId, agent.id),
+                      }),
+                      agent.path
+                        ? queryClient.invalidateQueries({
+                            queryKey: agentQueryKeys.detail(workspaceId, agent.path),
+                          })
+                        : Promise.resolve(),
+                    ]);
                     router.push(`/session/${result.session.id}`);
                   });
                 }}
@@ -350,7 +484,9 @@ function AgentDetailContent({
 
           <input
             value={name}
+            disabled={editorReadOnly}
             onChange={(e) => {
+              if (editorReadOnly) return;
               const next = e.target.value;
               setName(next);
               pendingRef.current.name = next;
@@ -361,13 +497,15 @@ function AgentDetailContent({
               flush();
             }}
             placeholder="Untitled agent"
-            className="mt-6 w-full bg-transparent text-[24px] font-semibold tracking-[-0.01em] text-ink outline-none placeholder:text-ink-subtle/60"
+            className="mt-6 w-full bg-transparent text-[24px] font-semibold tracking-[-0.01em] text-ink outline-none placeholder:text-ink-subtle/60 disabled:text-ink/60"
           />
 
           <div className="mt-2 flex items-center">
             <Select
               value={selectedModelId}
+              disabled={editorReadOnly}
               onValueChange={(value) => {
+                if (editorReadOnly) return;
                 const next = findModel(value)?.id;
                 if (!next) return;
                 setSelectedModelId(next);
@@ -409,8 +547,10 @@ function AgentDetailContent({
               key={agent.id}
               initialBody={initialBody}
               initialContent={agent.content}
+              readOnly={editorReadOnly}
               mentionItems={mentionItems}
               onChange={(body, content) => {
+                if (editorReadOnly) return;
                 const nextContent = content as TiptapDoc;
                 setContent(nextContent);
                 setHasEditorDraft(true);
@@ -457,6 +597,8 @@ function AgentDetailContent({
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          editLock={editLock}
+          sessions={agent.sessions}
         />
       </aside>
 
@@ -512,6 +654,8 @@ function AgentInspector({
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  editLock,
+  sessions,
 }: {
   name: string;
   path: string | null;
@@ -526,6 +670,8 @@ function AgentInspector({
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  editLock: EditLockState;
+  sessions: AgentSessionSummaryPayload[];
 }) {
   return (
     <div className="space-y-8">
@@ -539,6 +685,8 @@ function AgentInspector({
           {path ? <InspectorField label="Path" value={path} mono /> : null}
         </div>
       </div>
+
+      <EditLockPanel editLock={editLock} />
 
       <div>
         <InspectorHeader label="Model" countLabel={modelIsExplicit ? "selected" : "default"} />
@@ -621,6 +769,85 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+
+      <AgentSessionsPanel sessions={sessions} />
+    </div>
+  );
+}
+
+function EditLockPanel({ editLock }: { editLock: EditLockState }) {
+  const lockedBy = editLock.status === "locked" ? editLock.owner.name : null;
+  const description =
+    editLock.status === "checking"
+      ? "Checking edit access..."
+      : editLock.status === "acquired"
+        ? "You can edit this agent."
+        : editLock.status === "locked"
+          ? `${lockedBy} is editing this agent.`
+          : "Agent edit access is unavailable.";
+
+  return (
+    <div>
+      <InspectorHeader
+        label="Edit lock"
+        countLabel={editLock.status === "acquired" ? "yours" : "read-only"}
+      />
+      <div className="rounded-lg border border-[#e2e2de] bg-white/60 px-3 py-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+            <LockKeyhole size={14} strokeWidth={1.9} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-medium text-ink">
+              {editLock.status === "acquired" ? "Editable" : "Read-only"}
+            </div>
+            <div className="mt-0.5 break-words text-[11.5px] leading-4 text-ink-muted">
+              {description}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AgentSessionsPanel({ sessions }: { sessions: AgentSessionSummaryPayload[] }) {
+  return (
+    <div>
+      <InspectorHeader
+        label="Sessions"
+        countLabel={`${sessions.length} ${sessions.length === 1 ? "session" : "sessions"}`}
+      />
+      {sessions.length > 0 ? (
+        <div className="space-y-2">
+          {sessions.map((session) => (
+            <Link
+              key={session.id}
+              href={`/session/${session.id}`}
+              className="block rounded-lg border border-[#e2e2de] bg-white/60 px-3 py-3 transition-colors hover:bg-white"
+            >
+              <div className="flex min-w-0 items-start gap-2">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+                  <MessageSquare size={14} strokeWidth={1.9} />
+                </span>
+                <div className="min-w-0">
+                  <div className="truncate text-[12.5px] font-medium text-ink">{session.title}</div>
+                  <div className="mt-0.5 truncate text-[11.5px] leading-4 text-ink-muted">
+                    {session.user.name} · {formatSessionDate(session.updatedAt)}
+                  </div>
+                  <div className="mt-1 text-[10.5px] font-medium uppercase text-ink-subtle">
+                    {session.status}
+                  </div>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          No sessions yet
+        </div>
+      )}
     </div>
   );
 }
@@ -775,7 +1002,11 @@ function FullConfigPanel({ value }: { value: string }) {
 
 function SyncTrack({ saveState, status }: { saveState: SaveState; status: string }) {
   const steps = [
-    { id: "local", label: "Saved locally", state: saveState === "saving" ? "active" : "done" },
+    {
+      id: "local",
+      label: "Saved locally",
+      state: saveState === "saving" ? "active" : "done",
+    },
     {
       id: "queued",
       label: "Queued",
@@ -962,4 +1193,8 @@ function formatSyncDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatSessionDate(value: string) {
+  return formatSyncDate(value);
 }

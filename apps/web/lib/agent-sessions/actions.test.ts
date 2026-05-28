@@ -88,6 +88,7 @@ function fakeDetail(): AgentSessionDetailPayload {
   return {
     session: {
       id: "ses_123",
+      userId: "usr_123",
       agentId: "agt_123",
       agentName: "Leo",
       agentPath: "agents/leo.agent",
@@ -100,6 +101,7 @@ function fakeDetail(): AgentSessionDetailPayload {
       runLeaseId: null,
       abortRequestedAt: null,
       lastError: null,
+      viewerCanMutate: true,
       createdAt: "2026-05-24T10:00:00.000Z",
       updatedAt: "2026-05-24T10:00:00.000Z",
     },

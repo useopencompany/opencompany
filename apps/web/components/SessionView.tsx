@@ -145,10 +145,11 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
   const { showError } = useToast();
   const session = detail.session;
+  const viewerCanMutate = session.viewerCanMutate;
   const { data: streamCredential } = useQuery({
     queryKey: streamCredentialKey,
     queryFn: () => fetchSessionStreamCredential(session.id),
-    enabled: Boolean(detail.runnerUrl),
+    enabled: viewerCanMutate && Boolean(detail.runnerUrl),
     staleTime: 55 * 60 * 1000,
   });
   const runnerUrl = streamCredential?.runnerUrl ?? detail.runnerUrl;
@@ -206,7 +207,9 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     !hasRunningAssistantMessage &&
     lastVisibleMessage?.role === "user" &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
-  const canAbort = ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
+  const canAbort =
+    viewerCanMutate &&
+    ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
@@ -259,6 +262,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   }, [stream.status, queryClient, streamCredentialKey]);
 
   const submit = () => {
+    if (!viewerCanMutate) return;
     if (isBusy) return;
     const content = input.trim();
     if (!content) return;
@@ -364,29 +368,35 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         <div className="bg-canvas px-8 py-4">
           <div className="mx-auto max-w-[760px]">
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
-            <div className="flex items-end gap-2 rounded-xl border border-[#e4e4e0] bg-white px-3 py-2">
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    if (isBusy) return;
-                    submit();
-                  }
-                }}
-                placeholder="Ask this agent to do something"
-                rows={2}
-                className="min-h-10 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-              />
-              <button
-                disabled={isBusy || !input.trim()}
-                onClick={submit}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white disabled:opacity-40"
-              >
-                <ArrowUp size={14} strokeWidth={2.2} />
-              </button>
-            </div>
+            {viewerCanMutate ? (
+              <div className="flex items-end gap-2 rounded-xl border border-[#e4e4e0] bg-white px-3 py-2">
+                <textarea
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      if (isBusy) return;
+                      submit();
+                    }
+                  }}
+                  placeholder="Ask this agent to do something"
+                  rows={2}
+                  className="min-h-10 flex-1 resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                />
+                <button
+                  disabled={isBusy || !input.trim()}
+                  onClick={submit}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[#111] text-white disabled:opacity-40"
+                >
+                  <ArrowUp size={14} strokeWidth={2.2} />
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-[#e4e4e0] bg-white/60 px-3 py-3 text-[12.5px] text-ink-muted">
+                This session is read-only.
+              </div>
+            )}
           </div>
         </div>
       </div>

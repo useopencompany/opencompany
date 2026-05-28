@@ -137,6 +137,30 @@ export const agents = pgTable(
   }),
 );
 
+export const agentEditLocks = pgTable(
+  "agent_edit_locks",
+  {
+    agentId: text("agent_id")
+      .primaryKey()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    token: text("token").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agent_edit_locks_workspace_idx").on(table.workspaceId),
+    userIdx: index("agent_edit_locks_user_idx").on(table.userId),
+    expiresAtIdx: index("agent_edit_locks_expires_at_idx").on(table.expiresAt),
+  }),
+);
+
 export const agentSyncJobs = pgTable(
   "agent_sync_jobs",
   {

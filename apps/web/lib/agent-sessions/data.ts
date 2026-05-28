@@ -7,6 +7,7 @@ import {
   agentSessionToolUsage,
   agentSessionUsage,
   agents,
+  users,
   workspaceCreditLedger,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
@@ -52,11 +53,13 @@ export async function loadAgentSessionDetailForWorkspace(
   sessionId: string,
   userId: string,
   workspaceId: string,
+  canViewWorkspaceSessions = false,
 ): Promise<AgentSessionDetailPayload | null> {
   const db = getDb();
   const [session] = await db
     .select({
       id: agentSessions.id,
+      userId: agentSessions.userId,
       agentId: agents.id,
       agentName: agents.name,
       agentPath: agents.path,
@@ -78,7 +81,7 @@ export async function loadAgentSessionDetailForWorkspace(
       and(
         eq(agentSessions.id, sessionId),
         eq(agentSessions.workspaceId, workspaceId),
-        eq(agentSessions.userId, userId),
+        canViewWorkspaceSessions ? undefined : eq(agentSessions.userId, userId),
         isNull(agentSessions.archivedAt),
       ),
     )
@@ -166,10 +169,11 @@ export async function loadAgentSessionDetailForWorkspace(
   }));
   const toolUsage = summarizeToolUsage(toolUsageRows);
   const cost = summarizeSessionCost(costRows);
-  const runnerUrl = getRunnerPublicUrl();
+  const viewerCanMutate = session.userId === userId;
+  const runnerUrl = viewerCanMutate ? getRunnerPublicUrl() : null;
 
   return serializeAgentSessionDetail({
-    session,
+    session: { ...session, viewerCanMutate },
     messages: messagesWithUsage,
     events,
     usage,
@@ -217,9 +221,80 @@ export async function loadAgentSessionStreamCredentialForWorkspace(
   return { runnerUrl, streamToken };
 }
 
+export type AgentSessionSummaryPayload = {
+  id: string;
+  title: string;
+  status: string;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+};
+
+export async function loadAgentSessionSummariesForWorkspace(input: {
+  agentId: string;
+  userId: string;
+  workspaceId: string;
+  canViewWorkspaceSessions: boolean;
+  limit?: number;
+}): Promise<AgentSessionSummaryPayload[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: agentSessions.id,
+      title: agentSessions.title,
+      status: agentSessions.status,
+      lastError: agentSessions.lastError,
+      createdAt: agentSessions.createdAt,
+      updatedAt: agentSessions.updatedAt,
+      userId: users.id,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      email: users.email,
+    })
+    .from(agentSessions)
+    .innerJoin(users, eq(agentSessions.userId, users.id))
+    .where(
+      and(
+        eq(agentSessions.workspaceId, input.workspaceId),
+        eq(agentSessions.agentId, input.agentId),
+        input.canViewWorkspaceSessions ? undefined : eq(agentSessions.userId, input.userId),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .orderBy(desc(agentSessions.updatedAt))
+    .limit(input.limit ?? 8);
+
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    lastError: row.lastError,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    user: {
+      id: row.userId,
+      name: displayUserName(row),
+      email: row.email,
+    },
+  }));
+}
+
 function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
   if (!completedAt || completedAt < startedAt) return undefined;
   return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
+}
+
+function displayUserName(user: {
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+}) {
+  return [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || user.email;
 }
 
 function summarizeToolUsage(

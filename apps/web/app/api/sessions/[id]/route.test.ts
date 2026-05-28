@@ -20,6 +20,7 @@ describe("session detail API route", () => {
     currentWorkspaceMock.mockResolvedValue({
       user: { id: "usr_123" },
       workspace: { id: "wks_123" },
+      role: "member",
     } as never);
   });
 
@@ -27,6 +28,7 @@ describe("session detail API route", () => {
     loadAgentSessionDetailForWorkspaceMock.mockResolvedValue({
       session: {
         id: "ses_123",
+        userId: "usr_123",
         agentId: "agt_123",
         agentName: "Leo",
         agentPath: "agents/leo.agent",
@@ -39,6 +41,7 @@ describe("session detail API route", () => {
         runLeaseId: null,
         abortRequestedAt: null,
         lastError: null,
+        viewerCanMutate: true,
         createdAt: "2026-05-24T10:00:00.000Z",
         updatedAt: "2026-05-24T10:01:00.000Z",
       },
@@ -80,6 +83,69 @@ describe("session detail API route", () => {
       "ses_123",
       "usr_123",
       "wks_123",
+      false,
+    );
+  });
+
+  it("allows admins to load workspace sessions", async () => {
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_admin" },
+      workspace: { id: "wks_123" },
+      role: "admin",
+    } as never);
+    loadAgentSessionDetailForWorkspaceMock.mockResolvedValue({
+      session: {
+        id: "ses_123",
+        userId: "usr_owner",
+        agentId: "agt_123",
+        agentName: "Leo",
+        agentPath: "agents/leo.agent",
+        title: "Fix issue",
+        status: "completed",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+        e2bSandboxId: null,
+        workdir: "/workspace",
+        runLeaseId: null,
+        abortRequestedAt: null,
+        lastError: null,
+        viewerCanMutate: false,
+        createdAt: "2026-05-24T10:00:00.000Z",
+        updatedAt: "2026-05-24T10:01:00.000Z",
+      },
+      messages: [],
+      events: [],
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+      },
+      runnerUrl: null,
+    });
+
+    const response = await GET(new Request("https://app.example.com/api/sessions/ses_123"), {
+      params: Promise.resolve({ id: "ses_123" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(loadAgentSessionDetailForWorkspaceMock).toHaveBeenCalledWith(
+      "ses_123",
+      "usr_admin",
+      "wks_123",
+      true,
     );
   });
 

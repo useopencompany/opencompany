@@ -33,6 +33,13 @@ import {
   prepareAgentSyncJobUpsert,
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
+import {
+  type AgentEditLockResult,
+  acquireAgentEditLockForWorkspace,
+  assertValidAgentEditLock,
+  refreshAgentEditLockForWorkspace,
+  releaseAgentEditLockForWorkspace,
+} from "@/lib/agents/edit-locks";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
 import {
@@ -101,6 +108,7 @@ export async function updateAgent(
     content?: TiptapDoc;
     model?: AgentModelId;
     config?: AgentConfigPatch;
+    editLockToken?: string;
   },
 ) {
   const trace = startTimingTrace("agents.update", {
@@ -145,6 +153,12 @@ export async function updateAgent(
     endTimingTrace(trace, { found: false });
     return null;
   }
+  await assertValidAgentEditLock({
+    agentId: agent.id,
+    workspaceId: workspace.id,
+    userId: user.id,
+    token: patch.editLockToken,
+  });
 
   const title = patch.name ?? agent.name;
   const path =
@@ -366,6 +380,34 @@ export async function updateAgent(
   });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
+}
+
+export async function acquireAgentEditLock(agentId: string): Promise<AgentEditLockResult> {
+  const { user, workspace } = await currentWorkspace();
+  return acquireAgentEditLockForWorkspace({ agentId, workspaceId: workspace.id, userId: user.id });
+}
+
+export async function refreshAgentEditLock(
+  agentId: string,
+  token: string,
+): Promise<AgentEditLockResult> {
+  const { user, workspace } = await currentWorkspace();
+  return refreshAgentEditLockForWorkspace({
+    agentId,
+    workspaceId: workspace.id,
+    userId: user.id,
+    token,
+  });
+}
+
+export async function releaseAgentEditLock(agentId: string, token: string) {
+  const { user, workspace } = await currentWorkspace();
+  await releaseAgentEditLockForWorkspace({
+    agentId,
+    workspaceId: workspace.id,
+    userId: user.id,
+    token,
+  });
 }
 
 function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tiptapBody?: string }) {

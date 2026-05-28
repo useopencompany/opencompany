@@ -72,9 +72,9 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturningResult
   const selectResults = [...input.selectResults];
   const insertReturningResults = [...input.insertReturningResults];
   const insertedValues: unknown[] = [];
-  const execute = vi
-    .fn()
-    .mockResolvedValue({ rows: [{ ledgerId: 1, amountCents: 300, balanceCents: 300 }] });
+  const execute = vi.fn().mockResolvedValue({
+    rows: [{ ledgerId: 1, amountCents: 300, balanceCents: 300 }],
+  });
 
   const limit = vi.fn(async () => selectResults.shift() ?? []);
   const where = vi.fn(() => ({ limit }));
@@ -140,6 +140,25 @@ describe("workspace organization auth sync", () => {
     );
   });
 
+  it("preserves a member WorkOS role while syncing local membership", async () => {
+    const { db, insertedValues } = createDbMock({
+      selectResults: [[{ id: appUser.id }], [workspace]],
+      insertReturningResults: [[appUser]],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    const result = await syncUserAndWorkspace(authUser as never, "org_123", "member");
+
+    expect(result.role).toBe("member");
+    expect(insertedValues).toContainEqual(
+      expect.objectContaining({
+        workspaceId: "wks_123",
+        userId: "usr_user_123",
+        role: "member",
+      }),
+    );
+  });
+
   it("loads an existing workspace read-only without upserting route auth state", async () => {
     const { db, insertedValues, execute } = createDbMock({
       selectResults: [[appUser], [workspace], [{ userId: appUser.id }]],
@@ -154,6 +173,29 @@ describe("workspace organization auth sync", () => {
     expect(result?.isNewUser).toBe(false);
     expect(insertedValues).toEqual([]);
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("uses the WorkOS session role over a stale local membership role", async () => {
+    const { db, insertedValues } = createDbMock({
+      selectResults: [[appUser], [workspace], [{ userId: appUser.id, role: "admin" }]],
+      insertReturningResults: [],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    const result = await loadCurrentWorkspaceContextReadOnly(
+      authUser as never,
+      "org_123",
+      "member",
+    );
+
+    expect(result?.role).toBe("member");
+    expect(insertedValues).toContainEqual(
+      expect.objectContaining({
+        workspaceId: "wks_123",
+        userId: "usr_user_123",
+        role: "member",
+      }),
+    );
   });
 
   it("creates a default WorkOS Organization and local workspace for first sign-in", async () => {
