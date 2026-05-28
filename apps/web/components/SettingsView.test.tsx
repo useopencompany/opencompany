@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: vi.fn(),
   }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("next/link", () => ({
@@ -55,6 +56,15 @@ function settingsProps(canInviteMembers: boolean) {
       spendLast30UsdMicros: 0,
       recentSessionCharges: [],
       ledger: [],
+    },
+    mcp: {
+      mcpEnabled: false,
+      linear: {
+        configured: false,
+        status: null,
+        statusReason: null,
+        updatedAt: null,
+      },
     },
   };
 }

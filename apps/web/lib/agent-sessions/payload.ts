@@ -110,7 +110,7 @@ export function serializeSidebarSession(
 export function serializeAgentSessionDetail(
   detail: AgentSessionDetailSerializable,
 ): AgentSessionDetailPayload {
-  return {
+  return normalizeAgentSessionDetail({
     session: {
       ...detail.session,
       abortRequestedAt: detail.session.abortRequestedAt?.toISOString() ?? null,
@@ -127,7 +127,7 @@ export function serializeAgentSessionDetail(
     toolUsage: detail.toolUsage,
     cost: detail.cost,
     runnerUrl: detail.runnerUrl,
-  };
+  });
 }
 
 export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): SidebarSessionPayload {
@@ -201,16 +201,18 @@ export function mergeAgentSessionDetail(
   current: AgentSessionDetailPayload | undefined,
   incoming: AgentSessionDetailPayload,
 ): AgentSessionDetailPayload {
-  if (!current || current.session.id !== incoming.session.id) return incoming;
+  if (!current || current.session.id !== incoming.session.id) {
+    return normalizeAgentSessionDetail(incoming);
+  }
 
   const replayed = replayMissingCurrentEvents(current, incoming);
 
-  return {
+  return normalizeAgentSessionDetail({
     ...replayed,
     session: mergeSession(current.session, replayed.session),
     messages: mergeMessages(current.messages, replayed.messages),
     events: mergeEvents(current.events, replayed.events),
-  };
+  });
 }
 
 export function applyRuntimeEventToSessionDetail(
@@ -243,7 +245,7 @@ export function applyRuntimeEventToSessionDetail(
     if (title) session = { ...session, title, updatedAt };
   }
 
-  return {
+  return normalizeAgentSessionDetail({
     ...detail,
     session,
     events: nextRuntime.events,
@@ -251,7 +253,7 @@ export function applyRuntimeEventToSessionDetail(
     usage: nextRuntime.usage,
     toolUsage: nextRuntime.toolUsage,
     cost: nextRuntime.cost,
-  };
+  });
 }
 
 export function addUserMessageToSessionDetail(
@@ -498,7 +500,7 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
 
 export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDetailPayload {
   const record = assertRecord(value, "session detail");
-  return {
+  return normalizeAgentSessionDetail({
     session: parseAgentSessionPayload(record.session),
     messages: assertArray(record.messages, "messages").map(parseSessionMessage),
     events: assertArray(record.events, "events").map(parseRuntimeEventPayload),
@@ -506,7 +508,24 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     toolUsage: parseToolUsageSummary(record.toolUsage),
     cost: parseCostSummary(record.cost),
     runnerUrl: readNullableStringField(record, "runnerUrl"),
-  };
+  });
+}
+
+function normalizeAgentSessionDetail(detail: AgentSessionDetailPayload): AgentSessionDetailPayload {
+  if (detail.session.status !== "failed") return detail;
+
+  let changed = false;
+  const messages = detail.messages.map((message) => {
+    if (message.role !== "assistant" || message.status !== "running") return message;
+    changed = true;
+    return {
+      ...message,
+      status: "failed",
+      completedAt: message.completedAt ?? detail.session.updatedAt,
+    };
+  });
+
+  return changed ? { ...detail, messages } : detail;
 }
 
 function parseAgentSessionPayload(value: unknown): AgentSessionPayload {

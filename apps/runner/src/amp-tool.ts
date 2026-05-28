@@ -254,6 +254,8 @@ export function buildAmpCommand(input: { task: string; ampThreadId?: string | nu
       "threads",
       "continue",
       "--dangerously-allow-all",
+      "--mode",
+      "deep",
       "--stream-json",
       "-x",
       task,
@@ -261,7 +263,7 @@ export function buildAmpCommand(input: { task: string; ampThreadId?: string | nu
     ].join(" ");
   }
 
-  return `amp --dangerously-allow-all --stream-json -x ${task}`;
+  return `amp --dangerously-allow-all --mode deep --stream-json -x ${task}`;
 }
 
 export function buildAmpCommandEnv(input: {

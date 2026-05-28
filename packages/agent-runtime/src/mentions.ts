@@ -160,6 +160,16 @@ export function toConfigTool(
     };
   }
 
+  if (tool.id === "linear") {
+    return {
+      id: "linear",
+      type: "mcp",
+      server: "linear",
+      label: tool.label,
+      description: tool.description,
+    };
+  }
+
   return {
     id: "exa",
     type: "hosted_tool",

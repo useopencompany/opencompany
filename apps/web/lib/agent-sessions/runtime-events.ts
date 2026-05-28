@@ -94,6 +94,7 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
+        messages: status === "failed" ? stopRunningAssistantMessages(next.messages) : next.messages,
       };
     }
   }
@@ -104,6 +105,7 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
+      messages: stopRunningAssistantMessages(next.messages),
     };
   }
 
@@ -229,6 +231,22 @@ export function applyRuntimeEventToState(
   }
 
   return next;
+}
+
+function stopRunningAssistantMessages(messages: SessionMessage[]) {
+  const completedAt = new Date().toISOString();
+  return messages.map((message) =>
+    message.role === "assistant" && message.status === "running"
+      ? {
+          ...message,
+          status: "failed",
+          completedAt: message.completedAt ?? completedAt,
+          thinkingDurationSeconds:
+            message.thinkingDurationSeconds ??
+            readThinkingDurationSeconds({ ...message, completedAt }),
+        }
+      : message,
+  );
 }
 
 function readBoolean(value: unknown) {

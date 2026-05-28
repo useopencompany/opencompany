@@ -5,16 +5,20 @@ import {
   ChevronRight,
   CreditCard,
   ExternalLink,
+  FlaskConical,
   Gift,
   GitBranch,
+  KeyRound,
   LogOut,
   MailPlus,
   Plug,
+  Trash2,
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
+import { Toggle } from "@/components/ui/toggle";
 import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
   isValidTopUpAmountCents,
@@ -22,7 +26,16 @@ import {
   MIN_TOP_UP_AMOUNT_CENTS,
   TOP_UP_AMOUNTS_CENTS,
 } from "@/lib/billing/constants";
+import {
+  removeLinearMcpToken,
+  saveLinearMcpToken,
+  setWorkspaceMcpExperimentEnabled,
+} from "@/lib/mcp/actions";
 import { inviteWorkspaceMember, updateWorkspaceName } from "@/lib/workspaces/actions";
+
+const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
+const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
+const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
 
 type Props = {
   profile: {
@@ -66,6 +79,15 @@ type Props = {
       costBasis: Record<string, unknown>;
       metadata: Record<string, unknown>;
     }>;
+  };
+  mcp: {
+    mcpEnabled: boolean;
+    linear: {
+      configured: boolean;
+      status: "configured" | "missing_credential" | "disabled" | "error" | null;
+      statusReason: string | null;
+      updatedAt: string | null;
+    };
   };
 };
 
@@ -514,6 +536,263 @@ function WorkspaceState({ repository }: { repository: Props["workspace"]["reposi
   );
 }
 
+function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [enabled, setEnabled] = useState(mcp.mcpEnabled);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const linearSetupStatus = searchParams.get("mcp") === "linear" ? searchParams.get("setup") : null;
+  const normalizedLinearSetupStatus =
+    linearSetupStatus === "connected" || linearSetupStatus === "error" ? linearSetupStatus : null;
+  const linearSetupReason =
+    searchParams.get("mcp") === "linear" ? searchParams.get("reason") : null;
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+              <FlaskConical size={15} strokeWidth={1.8} />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">MCP beta</div>
+              <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+                Try workspace-scoped MCP servers in agent configs.
+              </p>
+            </div>
+          </div>
+          <Toggle
+            pressed={enabled}
+            disabled={isPending}
+            aria-label={`${enabled ? "Disable" : "Enable"} MCP beta`}
+            onPressedChange={(next) => {
+              setEnabled(next);
+              setMessage(null);
+              startTransition(async () => {
+                const result = await setWorkspaceMcpExperimentEnabled(next);
+                if (result.ok) {
+                  router.refresh();
+                  return;
+                }
+                setEnabled(!next);
+                setMessage({ type: "error", text: "Could not update MCP beta." });
+              });
+            }}
+            className="w-[74px]"
+          >
+            {enabled ? "On" : "Off"}
+          </Toggle>
+        </div>
+        {message && (
+          <div
+            className={`mt-3 text-[12px] ${
+              message.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+            }`}
+          >
+            {message.text}
+          </div>
+        )}
+      </div>
+
+      {enabled ? (
+        <LinearMcpCard
+          linear={mcp.linear}
+          setupStatus={normalizedLinearSetupStatus}
+          setupReason={linearSetupReason}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function LinearMcpCard({
+  linear,
+  setupStatus,
+  setupReason,
+}: {
+  linear: Props["mcp"]["linear"];
+  setupStatus: "connected" | "error" | null;
+  setupReason: string | null;
+}) {
+  const router = useRouter();
+  const [token, setToken] = useState("");
+  const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
+    null,
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const configured = linear.configured;
+  const setupMessage =
+    setupStatus && setupStatus !== dismissedSetupStatus
+      ? {
+          type: setupStatus === "connected" ? ("success" as const) : ("error" as const),
+          text:
+            setupStatus === "connected"
+              ? "Linear connected."
+              : linearMcpSetupErrorMessage(setupReason),
+        }
+      : null;
+  const visibleMessage = message ?? setupMessage;
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        setMessage(null);
+        setDismissedSetupStatus(setupStatus);
+        startTransition(async () => {
+          const result = await saveLinearMcpToken(token);
+          if (result.ok) {
+            setToken("");
+            setMessage({ type: "success", text: "Linear MCP token saved." });
+            router.refresh();
+            return;
+          }
+          setMessage({ type: "error", text: result.error });
+        });
+      }}
+      className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+            <KeyRound size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Linear MCP</div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
+                  configured
+                    ? "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]"
+                    : "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]"
+                }`}
+              >
+                {configured ? "Configured" : "Not connected"}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+              Agents can opt in with @linear after Linear is connected.
+            </p>
+            {linear.statusReason ? (
+              <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">{linear.statusReason}</p>
+            ) : null}
+          </div>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => {
+              setMessage(null);
+              setDismissedSetupStatus(setupStatus);
+              startTransition(async () => {
+                const result = await removeLinearMcpToken();
+                if (result.ok) {
+                  setMessage({ type: "success", text: "Linear MCP token removed." });
+                  router.refresh();
+                }
+              });
+            }}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 border-t border-[#ecece8] pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={LINEAR_MCP_START_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {configured ? "Reconnect Linear" : "Connect Linear"}
+          </a>
+          <a
+            href={LINEAR_MCP_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-[#f5f5f1] hover:text-ink"
+          >
+            MCP docs
+            <ExternalLink size={12} strokeWidth={1.9} />
+          </a>
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer list-none text-[12px] font-medium text-ink-muted transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
+            Use a Linear API key instead
+          </summary>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <a
+              href={LINEAR_API_KEYS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"
+            >
+              <ExternalLink size={13} strokeWidth={1.9} />
+              Create Linear API key
+            </a>
+            <div className="flex min-w-[240px] flex-1 items-center gap-2">
+              <input
+                value={token}
+                onChange={(event) => {
+                  setToken(event.target.value);
+                  setMessage(null);
+                  setDismissedSetupStatus(setupStatus);
+                }}
+                placeholder={
+                  configured ? "Paste a new token to replace it" : "Linear API key or OAuth token"
+                }
+                type="password"
+                className="h-8 min-w-0 flex-1 rounded-md border border-[#e6e6e3] bg-white px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
+              />
+              <button
+                type="submit"
+                disabled={isPending || !token.trim()}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isPending ? "Saving..." : configured ? "Replace" : "Save"}
+              </button>
+            </div>
+          </div>
+        </details>
+      </div>
+      {visibleMessage && (
+        <div
+          className={`mt-2 text-[12px] ${
+            visibleMessage.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+          }`}
+        >
+          {visibleMessage.text}
+        </div>
+      )}
+    </form>
+  );
+}
+
+function linearMcpSetupErrorMessage(reason: string | null) {
+  switch (reason) {
+    case "invalid_state":
+      return "Linear connection expired or was started in another browser tab. Try reconnecting Linear.";
+    case "session_mismatch":
+      return "Linear returned to a different OpenCompany session. Sign in to the same workspace and try again.";
+    case "linear_denied":
+      return "Linear did not authorize the connection.";
+    case "missing_code":
+      return "Linear did not return an authorization code. Try reconnecting Linear.";
+    case "token_exchange_failed":
+      return "Linear authorized the connection, but token exchange failed. Check the server logs and try again.";
+    case "start_failed":
+      return "Could not start Linear authorization. Check the server logs and try again.";
+    default:
+      return "Linear connection failed. Try reconnecting Linear.";
+  }
+}
+
 function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
   if (avatarUrl) {
     return (
@@ -672,7 +951,7 @@ function InviteMemberForm() {
   );
 }
 
-export default function SettingsView({ profile, workspace, billing }: Props) {
+export default function SettingsView({ profile, workspace, billing, mcp }: Props) {
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-8 pb-24 pt-10">
@@ -744,6 +1023,10 @@ export default function SettingsView({ profile, workspace, billing }: Props) {
               <LogOut size={13} strokeWidth={1.9} />
               Log out
             </a>
+          </Section>
+
+          <Section title="Experiments" description="Beta capabilities for this workspace.">
+            <ExperimentsSection mcp={mcp} />
           </Section>
         </div>
       </div>

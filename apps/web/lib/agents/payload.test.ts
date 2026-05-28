@@ -3,8 +3,10 @@ import type { Agent } from "@opencompany/db/schema";
 import { describe, expect, it } from "vitest";
 import {
   agentDetailToListItem,
+  agentGitHubRepositories,
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
+  normalizeAgentConfig,
   serializeAgentDetail,
   serializeAgentListItem,
 } from "./payload";
@@ -91,6 +93,29 @@ describe("agent payload serializers", () => {
       githubIntegrationRepositories: [repository],
       usableGitHubIntegrationRepositories: [repository],
     });
+  });
+
+  it("normalizes legacy persisted configs without GitHub integration fields", () => {
+    const legacyAgent = {
+      ...agent,
+      body: "",
+      config: {
+        schemaVersion: "agent.v1",
+        title: "Legacy",
+        instructions: "Legacy instructions",
+        model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+        tools: [],
+        brain: [],
+        triggers: [],
+      },
+    } as unknown as Agent;
+
+    const payload = serializeAgentDetail(legacyAgent);
+
+    expect(payload.body).toBe("Legacy instructions");
+    expect(payload.config.integrations.github.repositories).toEqual([]);
+    expect(agentGitHubRepositories(legacyAgent.config)).toEqual([]);
+    expect(normalizeAgentConfig(legacyAgent.config).integrations.github.repositories).toEqual([]);
   });
 
   it("projects detail payloads back to list payloads without carrying editor fields", () => {

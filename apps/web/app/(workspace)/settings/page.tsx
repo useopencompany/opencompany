@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
+import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 
 function initialsFor(name: string, email: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -29,7 +30,7 @@ function formatDate(date: Date) {
 export default async function SettingsPage() {
   const { authUser, workspace, role } = await currentWorkspace();
   const db = getDb();
-  const [[repository], billing] = await Promise.all([
+  const [[repository], billing, mcp] = await Promise.all([
     db
       .select({
         updatedAt: workspaceRepositories.updatedAt,
@@ -38,6 +39,7 @@ export default async function SettingsPage() {
       .where(eq(workspaceRepositories.workspaceId, workspace.id))
       .limit(1),
     loadBillingOverview(workspace.id),
+    loadWorkspaceMcpSettingsForWorkspace(workspace.id),
   ]);
   const displayName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
@@ -75,6 +77,7 @@ export default async function SettingsPage() {
           createdAt: entry.createdAt.toISOString(),
         })),
       }}
+      mcp={mcp}
     />
   );
 }
