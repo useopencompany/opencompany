@@ -25,6 +25,7 @@ import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
+import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
@@ -145,7 +146,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
 }
 
-function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
+export function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
@@ -219,8 +220,27 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   );
   const showWaitingForAssistant =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
+  const showStoppedAfterUser =
+    !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
   const canAbort = sessionCanGenerate;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
+
+  const waitStartedAtRef = useRef<number | null>(null);
+  const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
+  useEffect(() => {
+    const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
+    if (waiting && waitStartedAtRef.current === null) {
+      waitStartedAtRef.current = Date.now();
+    }
+    if (showStoppedAfterUser && waitStartedAtRef.current !== null) {
+      setStoppedElapsedSeconds(
+        Math.max(Math.floor((Date.now() - waitStartedAtRef.current) / 1000), 0),
+      );
+    } else if (!waiting && !showStoppedAfterUser) {
+      waitStartedAtRef.current = null;
+      setStoppedElapsedSeconds(null);
+    }
+  }, [showWaitingForAssistant, hasRunningAssistantMessage, showStoppedAfterUser]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -260,6 +280,26 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     knownEventIds,
     onEvent: applyRuntimeEvent,
   });
+
+  // Data-freshness staleness detection: derive the timestamp of the last runtime event
+  // from runtime.events and compare against a ticked `now` so the stale banner triggers
+  // even when SSE reconnects keep flipping stream.status away from "stale".
+  const STALE_THRESHOLD_MS = 45_000;
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, []);
+  const lastRuntimeActivityMs = useMemo(() => {
+    const last = runtime.events.at(-1);
+    if (last?.createdAt) return Date.parse(last.createdAt);
+    return Date.parse(detail.session.updatedAt);
+  }, [runtime.events, detail.session.updatedAt]);
+  const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
+  const sessionFeedsLooksStale =
+    awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
+  const showStaleBanner =
+    awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -490,7 +530,11 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
-                <ThinkingShimmer />
+                <WorkingIndicator />
+              </div>
+            ) : showStoppedAfterUser ? (
+              <div className="flex justify-start">
+                <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
               </div>
             ) : null}
 
@@ -512,6 +556,25 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
         <div className="bg-canvas px-8 lg:px-12 py-4">
           <div className="group/composer mx-auto max-w-[960px]">
+            {showStaleBanner ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-3 flex items-center justify-between gap-3 rounded-md border border-[#e4d9a8] bg-[#fdfbf0] px-3 py-2 text-[12.5px] text-[#7a6120]"
+              >
+                <span>Connection idle — waiting for updates…</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+                    void queryClient.invalidateQueries({ queryKey: detailKey });
+                  }}
+                  className="shrink-0 rounded border border-[#d4c47c] bg-white px-2.5 py-1 text-[11.5px] font-medium text-[#7a6120] hover:bg-[#fdf8e1]"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
             {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
             <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               <div ref={attachMenuRef} className="relative">
@@ -742,7 +805,7 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
   );
 }
 
-function AssistantMessageContent({
+export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
@@ -783,24 +846,23 @@ function AssistantMessageContent({
             : part.toolCall;
         return <ToolCallCard key={part.toolCall.id} toolCall={toolCall} />;
       })}
-      {!hasParts ? (
-        isRunning ? (
-          <ThinkingShimmer />
-        ) : isStopped ? (
-          <AssistantStoppedNotice />
-        ) : (
-          "..."
-        )
-      ) : null}
+      {!hasParts && !isRunning && !isStopped ? "..." : null}
+      {isStopped ? <AssistantStoppedNotice /> : null}
+      {isRunning ? <WorkingIndicator /> : null}
     </div>
   );
 }
 
-function AssistantStoppedNotice() {
+function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
   return (
     <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-[#9f2f21]">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
+      {typeof elapsedSeconds === "number" ? (
+        <span className="text-[12px] font-normal tabular-nums text-[#9f2f21]/70">
+          {formatElapsed(elapsedSeconds)}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -950,18 +1012,6 @@ function formatToolName(name: string) {
   const normalized = name.replace(/[_-]+/g, " ").trim();
   if (!normalized) return "Tool call";
   return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
-}
-
-function ThinkingShimmer() {
-  return (
-    <div
-      className="thinking-shimmer inline-flex items-center text-[13px] font-medium leading-6"
-      role="status"
-      aria-live="polite"
-    >
-      Thinking...
-    </div>
-  );
 }
 
 function SessionInspector({

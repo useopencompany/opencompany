@@ -18,6 +18,7 @@ export type RuntimeEvent = {
   type: string;
   messageId: string | null;
   payload: Record<string, unknown>;
+  createdAt?: string;
 };
 
 export type SessionUsageSummary = {
@@ -94,7 +95,10 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
-        messages: status === "failed" ? stopRunningAssistantMessages(next.messages) : next.messages,
+        messages:
+          status === "failed"
+            ? stopRunningAssistantMessages(next.messages, next.events)
+            : next.messages,
       };
     }
   }
@@ -105,7 +109,7 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
-      messages: stopRunningAssistantMessages(next.messages),
+      messages: stopRunningAssistantMessages(next.messages, next.events),
     };
   }
 
@@ -230,10 +234,13 @@ export function applyRuntimeEventToState(
                 status: "completed",
                 content: content ?? message.content,
                 completedAt,
-                thinkingDurationSeconds: readThinkingDurationSeconds({
-                  ...message,
-                  completedAt,
-                }),
+                thinkingDurationSeconds: readThinkingDurationSeconds(
+                  {
+                    ...message,
+                    completedAt,
+                  },
+                  next.events,
+                ),
                 ...(modelMessage ? { modelMessage } : {}),
               }
             : message,
@@ -245,7 +252,7 @@ export function applyRuntimeEventToState(
   return next;
 }
 
-function stopRunningAssistantMessages(messages: SessionMessage[]) {
+function stopRunningAssistantMessages(messages: SessionMessage[], events: RuntimeEvent[]) {
   const completedAt = new Date().toISOString();
   return messages.map((message) =>
     message.role === "assistant" && message.status === "running"
@@ -255,7 +262,7 @@ function stopRunningAssistantMessages(messages: SessionMessage[]) {
           completedAt: message.completedAt ?? completedAt,
           thinkingDurationSeconds:
             message.thinkingDurationSeconds ??
-            readThinkingDurationSeconds({ ...message, completedAt }),
+            readThinkingDurationSeconds({ ...message, completedAt }, events),
         }
       : message,
   );
@@ -401,7 +408,7 @@ export function buildAssistantTurnParts(
   const reasoningSummary = readReasoningSummary(events, message.id);
   const reasoningTokenCount = message.outputReasoningTokens ?? 0;
   const thinkingDurationSeconds =
-    message.thinkingDurationSeconds ?? readThinkingDurationSeconds(message);
+    message.thinkingDurationSeconds ?? readThinkingDurationSeconds(message, events);
   const reasoningParts: AssistantTurnPart[] =
     reasoningSummary || reasoningTokenCount > 0
       ? [
@@ -859,12 +866,51 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .join("\n\n");
 }
 
-function readThinkingDurationSeconds(message: SessionMessage) {
+export function computeThinkingDurationSeconds(
+  message: SessionMessage,
+  events: RuntimeEvent[],
+): number {
   const startedAt = readTimestamp(message.createdAt);
   const completedAt = readTimestamp(message.completedAt);
   if (!startedAt || !completedAt || completedAt < startedAt) return 1;
-  const durationSeconds = Math.round((completedAt - startedAt) / 1000);
-  return Math.max(durationSeconds, 1);
+
+  const totalMs = completedAt - startedAt;
+
+  // Pair tool.started with tool.completed/tool.failed for the same messageId+toolCallId,
+  // using event.createdAt timestamps. Unpaired tool.started events are ignored.
+  const startedByToolCallId = new Map<string, number>();
+  let toolMs = 0;
+
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, message.id)) continue;
+
+    if (event.type === "tool.started") {
+      const toolCallId = readString(event.payload.toolCallId);
+      const ts = readTimestamp(event.createdAt);
+      if (toolCallId && ts !== null) {
+        startedByToolCallId.set(toolCallId, ts);
+      }
+    }
+
+    if (event.type === "tool.completed" || event.type === "tool.failed") {
+      const toolCallId = readString(event.payload.toolCallId);
+      const ts = readTimestamp(event.createdAt);
+      if (toolCallId && ts !== null) {
+        const startTs = startedByToolCallId.get(toolCallId);
+        if (startTs !== undefined) {
+          toolMs += Math.max(ts - startTs, 0);
+          startedByToolCallId.delete(toolCallId);
+        }
+      }
+    }
+  }
+
+  const thinkingMs = Math.max(totalMs - toolMs, 0);
+  return Math.max(Math.round(thinkingMs / 1000), 1);
+}
+
+function readThinkingDurationSeconds(message: SessionMessage, events: RuntimeEvent[]) {
+  return computeThinkingDurationSeconds(message, events);
 }
 
 function readTimestamp(value: string | null | undefined) {

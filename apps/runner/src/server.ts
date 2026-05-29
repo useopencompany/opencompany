@@ -278,6 +278,7 @@ function toRuntimeEventPayload(event: PersistedRuntimeEvent) {
     type: event.type,
     payload: event.payload,
     messageId: event.messageId,
+    createdAt: event.createdAt.toISOString(),
   };
 }
 
