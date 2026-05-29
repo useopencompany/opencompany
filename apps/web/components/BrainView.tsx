@@ -417,6 +417,15 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     });
   }
 
+  function autoExpandFolderPath(path: string) {
+    setExpandedPaths((current) => {
+      if (current.has(path)) return current;
+      const next = new Set(current);
+      next.add(path);
+      return next;
+    });
+  }
+
   function collapseFolderPath(path: string) {
     setSelectedContextPath(path);
     setExpandedPaths((current) => {
@@ -926,6 +935,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         onDropFileToFolder={moveFileToFolder}
         onDropFolderToFolder={moveFolderToFolder}
         onDropTargetChange={setDropTargetPath}
+        onAutoExpandFolder={autoExpandFolderPath}
         onContextMenu={openContextMenu}
       />
 
@@ -1044,6 +1054,7 @@ function BrainSidebar({
   onDropFileToFolder,
   onDropFolderToFolder,
   onDropTargetChange,
+  onAutoExpandFolder,
   onContextMenu,
 }: {
   files: BrainFile[];
@@ -1081,6 +1092,7 @@ function BrainSidebar({
   onDropFileToFolder: (filePath: string, folderPath: string) => void;
   onDropFolderToFolder: (folderPath: string, folderPathTarget: string) => void;
   onDropTargetChange: (path: string | null) => void;
+  onAutoExpandFolder: (path: string) => void;
   onContextMenu: (event: React.MouseEvent, target: BrainTreeTarget) => void;
 }) {
   const canDropOnRoot = canDropItemOnFolder(draggingItem, "");
@@ -1192,6 +1204,7 @@ function BrainSidebar({
                 onDropFileToFolder={onDropFileToFolder}
                 onDropFolderToFolder={onDropFolderToFolder}
                 onDropTargetChange={onDropTargetChange}
+                onAutoExpandFolder={onAutoExpandFolder}
                 onContextMenu={onContextMenu}
               />
             ))}
@@ -1234,6 +1247,7 @@ function TreeItem({
   onDropFileToFolder,
   onDropFolderToFolder,
   onDropTargetChange,
+  onAutoExpandFolder,
   onContextMenu,
 }: {
   node: BrainTreeNode<BrainFile>;
@@ -1263,6 +1277,7 @@ function TreeItem({
   onDropFileToFolder: (filePath: string, folderPath: string) => void;
   onDropFolderToFolder: (folderPath: string, folderPathTarget: string) => void;
   onDropTargetChange: (path: string | null) => void;
+  onAutoExpandFolder: (path: string) => void;
   onContextMenu: (event: React.MouseEvent, target: BrainTreeTarget) => void;
 }) {
   const active = node.type === "file" && node.path === selectedPath;
@@ -1271,10 +1286,29 @@ function TreeItem({
   const expanded = node.type === "folder" && expandedPaths.has(node.path);
   const showChildren = isSearching || expanded;
   const isRenaming = node.path === renamingPath && Boolean(renamingType);
-  const canDropOnFolder = node.type === "folder" && canDropItemOnFolder(draggingItem, node.path);
-  const dropActive = canDropOnFolder && dropTargetPath === node.path;
+  const dropFolder = dropFolderForNode(node);
+  const canDropHere = canDropItemOnFolder(draggingItem, dropFolder);
+  const dropActive = canDropHere && dropTargetPath === node.path;
   const renameInputRef = useRef<HTMLInputElement>(null);
   const skipBlurCommitRef = useRef(false);
+  const autoExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAutoExpand = () => {
+    if (autoExpandTimerRef.current) {
+      clearTimeout(autoExpandTimerRef.current);
+      autoExpandTimerRef.current = null;
+    }
+  };
+
+  const scheduleAutoExpand = (path: string) => {
+    if (autoExpandTimerRef.current) return;
+    autoExpandTimerRef.current = setTimeout(() => {
+      autoExpandTimerRef.current = null;
+      onAutoExpandFolder(path);
+    }, 600);
+  };
+
+  useEffect(() => clearAutoExpand, []);
 
   useEffect(() => {
     if (!isRenaming) return;
@@ -1376,9 +1410,12 @@ function TreeItem({
             event.dataTransfer.setData("text/plain", node.path);
             onDragStartItem(item);
           }}
-          onDragEnd={onDragEndItem}
+          onDragEnd={() => {
+            clearAutoExpand();
+            onDragEndItem();
+          }}
           onDragOver={(event) => {
-            if (!canDropOnFolder) {
+            if (!canDropHere) {
               if (draggingItem) onDropTargetChange(null);
               return;
             }
@@ -1386,15 +1423,19 @@ function TreeItem({
             event.stopPropagation();
             event.dataTransfer.dropEffect = "move";
             onDropTargetChange(node.path);
+            if (node.type === "folder" && !expanded) scheduleAutoExpand(node.path);
+            else clearAutoExpand();
           }}
           onDrop={(event) => {
-            if (!canDropOnFolder) return;
+            if (!canDropHere) return;
             event.preventDefault();
             event.stopPropagation();
+            clearAutoExpand();
             const item = draggedBrainItem(event);
-            if (item?.type === "file") onDropFileToFolder(item.path, node.path);
-            if (item?.type === "folder") onDropFolderToFolder(item.path, node.path);
+            if (item?.type === "file") onDropFileToFolder(item.path, dropFolder);
+            if (item?.type === "folder") onDropFolderToFolder(item.path, dropFolder);
           }}
+          onDragLeave={() => clearAutoExpand()}
           className={rowClassName}
           style={paddingStyle}
         >
@@ -1446,6 +1487,7 @@ function TreeItem({
               onDropFileToFolder={onDropFileToFolder}
               onDropFolderToFolder={onDropFolderToFolder}
               onDropTargetChange={onDropTargetChange}
+              onAutoExpandFolder={onAutoExpandFolder}
               onContextMenu={onContextMenu}
             />
           ))
@@ -1831,6 +1873,10 @@ function draggedBrainItem(event: React.DragEvent): BrainDragItem | null {
 
   const path = event.dataTransfer.getData("text/plain");
   return path ? { type: "file", path } : null;
+}
+
+function dropFolderForNode(node: BrainTreeNode<BrainFile>) {
+  return node.type === "folder" ? node.path : parentFolderPath(node.path);
 }
 
 function canDropItemOnFolder(item: BrainDragItem | null, folderPath: string) {
