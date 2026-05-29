@@ -1509,6 +1509,24 @@ function MarkdownBrainEditor({
 }) {
   const [isEmpty, setIsEmpty] = useState(content.trim().length === 0);
   const [, refreshToolbar] = useState(0);
+  // Capture the initial content once via useState's lazy initialiser so that
+  // re-renders caused by the parent storing the editor's own output back into
+  // state don't pass a changed `content` value into useEditor on every
+  // keystroke.
+  //
+  // In Tiptap v3 with deps=[], onRender() runs after every React render and
+  // calls editor.setOptions() whenever *any* option reference differs from
+  // the editor's current options — including `content`. That setOptions call
+  // triggers view.updateState() which can interrupt the browser's input
+  // composition and cause typed characters (e.g. a colon in a heading) to
+  // flicker away momentarily before the editor state catches up.
+  //
+  // Freezing `initialContent` ensures compareOptions() always sees the same
+  // `content` value, so setOptions() is not called during normal typing.
+  // The editor manages its own document state after initialization; the
+  // parent receives updates via onUpdate → onChange and does not need to push
+  // content back in (file switches are handled by `key={selected.path}`).
+  const [initialContent] = useState(() => content);
   const editor = useEditor(
     {
       immediatelyRender: false,
@@ -1519,7 +1537,7 @@ function MarkdownBrainEditor({
           markedOptions: { gfm: true, breaks: false },
         }),
       ],
-      content,
+      content: initialContent,
       contentType: "markdown",
       editorProps: {
         attributes: {
