@@ -196,12 +196,9 @@ describe("AssistantMessageContent — completed message regression", () => {
     const parts = [makeToolCallPart("completed")];
     render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
 
-    expect(screen.getByText("Search files")).toBeInTheDocument();
-    // Completed tool call has no "running" badge
+    expect(screen.getByText("1 step")).toBeInTheDocument();
     expect(screen.queryByText("running")).not.toBeInTheDocument();
-    // No WorkingIndicator
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    // No placeholder dots
     expect(screen.queryByText("...")).not.toBeInTheDocument();
   });
 
@@ -210,8 +207,9 @@ describe("AssistantMessageContent — completed message regression", () => {
     const parts = [makeTextPart("Done."), makeToolCallPart("completed")];
     render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
 
-    expect(screen.getByText("Done.")).toBeInTheDocument();
-    expect(screen.getByText("Search files")).toBeInTheDocument();
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+    expect(screen.queryByText("Done.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Search files")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 

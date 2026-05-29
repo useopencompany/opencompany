@@ -25,6 +25,14 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "message.delta";
+      payload: { messageId: string; delta: string };
+    }
+  | {
+      type: "message.reasoning_delta";
+      payload: { messageId: string; delta: string };
+    }
+  | {
       type: "message.completed";
       payload: {
         messageId: string;

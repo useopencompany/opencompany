@@ -167,12 +167,14 @@ function parseRuntimeEvent(data: string): RuntimeEvent | null {
     const record = value as Record<string, unknown>;
     if (typeof record.id !== "number" || typeof record.type !== "string") return null;
     if (!record.payload || typeof record.payload !== "object") return null;
-    return {
+    const event: RuntimeEvent = {
       id: record.id,
       type: record.type,
       messageId: typeof record.messageId === "string" ? record.messageId : null,
       payload: record.payload as Record<string, unknown>,
     };
+    if (typeof record.createdAt === "string") event.createdAt = record.createdAt;
+    return event;
   } catch {
     return null;
   }

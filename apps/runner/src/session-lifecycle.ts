@@ -15,7 +15,8 @@ import {
   workspaces,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { loadGitHubWorkRepository } from "./amp-tool";
 import { materializeBrainForSession } from "./brain";
@@ -178,7 +179,7 @@ export type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
 
 export async function loadUserMessage(sessionId: string, messageId: string) {
   const [message] = await getDb()
-    .select({ id: agentSessionMessages.id })
+    .select({ id: agentSessionMessages.id, createdAt: agentSessionMessages.createdAt })
     .from(agentSessionMessages)
     .where(
       and(
@@ -188,6 +189,43 @@ export async function loadUserMessage(sessionId: string, messageId: string) {
         eq(agentSessionMessages.internal, false),
       ),
     )
+    .limit(1);
+
+  return message ?? null;
+}
+
+// The oldest non-internal user message created after `afterCreatedAt` that no
+// assistant message has responded to yet. This is how a turn detects a steering
+// message the user sent while a run was already in flight. See
+// docs/agent-turn-vocabulary.md.
+export async function loadNextSteerMessage(input: { sessionId: string; afterCreatedAt: Date }) {
+  const responses = alias(agentSessionMessages, "steer_responses");
+  const [message] = await getDb()
+    .select({
+      id: agentSessionMessages.id,
+      createdAt: agentSessionMessages.createdAt,
+    })
+    .from(agentSessionMessages)
+    .where(
+      and(
+        eq(agentSessionMessages.sessionId, input.sessionId),
+        eq(agentSessionMessages.role, "user"),
+        eq(agentSessionMessages.internal, false),
+        gt(agentSessionMessages.createdAt, input.afterCreatedAt),
+        notExists(
+          getDb()
+            .select({ value: sql`1` })
+            .from(responses)
+            .where(
+              and(
+                eq(responses.sessionId, input.sessionId),
+                eq(responses.responseToMessageId, agentSessionMessages.id),
+              ),
+            ),
+        ),
+      ),
+    )
+    .orderBy(asc(agentSessionMessages.createdAt))
     .limit(1);
 
   return message ?? null;

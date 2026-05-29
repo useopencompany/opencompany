@@ -105,11 +105,15 @@ export type AgentSessionDetailSerializable = {
       completedAt: Date | null;
     }
   >;
-  events: RuntimeEvent[];
+  events: RuntimeEventSerializable[];
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
   runnerUrl: string | null;
+};
+
+type RuntimeEventSerializable = Omit<RuntimeEvent, "createdAt"> & {
+  createdAt?: Date | string | null;
 };
 
 export type RelatedSessionSerializable = Omit<RelatedSessionPayload, "createdAt" | "updatedAt"> & {
@@ -153,7 +157,7 @@ export function serializeAgentSessionDetail(
       createdAt: message.createdAt.toISOString(),
       completedAt: message.completedAt?.toISOString() ?? null,
     })),
-    events: detail.events,
+    events: detail.events.map(serializeRuntimeEvent),
     usage: detail.usage,
     toolUsage: detail.toolUsage,
     cost: detail.cost,
@@ -167,6 +171,20 @@ function serializeRelatedSession(session: RelatedSessionSerializable): RelatedSe
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString(),
   };
+}
+
+function serializeRuntimeEvent(event: RuntimeEventSerializable): RuntimeEvent {
+  return {
+    id: event.id,
+    type: event.type,
+    messageId: event.messageId,
+    payload: event.payload,
+    ...(event.createdAt ? { createdAt: serializeDateValue(event.createdAt) } : {}),
+  };
+}
+
+function serializeDateValue(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): SidebarSessionPayload {

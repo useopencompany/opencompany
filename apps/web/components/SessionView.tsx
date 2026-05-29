@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -47,6 +48,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   isInspectableRuntimeEvent,
+  isReasoningInProgress,
   type RuntimeEvent,
   type RuntimeToolCall,
   readString,
@@ -57,6 +59,7 @@ import {
 } from "@/lib/agent-sessions/runtime-events";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
@@ -513,6 +516,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         message={message}
                         parts={assistantParts}
                         sessionCanGenerate={sessionCanGenerate}
+                        reasoningActive={isReasoningInProgress(message, runtime.events)}
                       />
                     ) : (
                       message.content
@@ -530,7 +534,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
 
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
-                <WorkingIndicator />
+                <WorkingIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
               </div>
             ) : showStoppedAfterUser ? (
               <div className="flex justify-start">
@@ -743,14 +747,76 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   );
 }
 
-function AssistantMarkdown({ content }: { content: string }) {
+function AssistantMarkdown({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
+  const ref = useStreamingMarkdownAppendAnimation(content, streaming);
+
   return (
-    <div className="session-markdown">
+    <div ref={ref} className="session-markdown" data-streaming={streaming ? "true" : undefined}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
   );
+}
+
+function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const previousContentRef = useRef("");
+  const lastAnimationAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const animationRef = useRef<Animation | null>(null);
+
+  useEffect(() => {
+    const previousContent = previousContentRef.current;
+    previousContentRef.current = content;
+
+    if (!streaming || !shouldAnimateStreamingAppend(previousContent, content)) return;
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    const now = performance.now();
+    if (now - lastAnimationAtRef.current < STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS) return;
+
+    const element = ref.current;
+    if (!element || typeof element.animate !== "function") return;
+    const animatedElement =
+      element.lastElementChild instanceof HTMLElement ? element.lastElementChild : element;
+
+    lastAnimationAtRef.current = now;
+    animationRef.current?.cancel();
+    const animation = animatedElement.animate(
+      [
+        { opacity: 0.9, filter: "blur(0.2px)" },
+        { opacity: 1, filter: "blur(0)" },
+      ],
+      {
+        duration: 160,
+        easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+      },
+    );
+    animationRef.current = animation;
+    animation.onfinish = () => {
+      if (animationRef.current === animation) animationRef.current = null;
+    };
+  }, [content, streaming]);
+
+  useEffect(
+    () => () => {
+      animationRef.current?.cancel();
+    },
+    [],
+  );
+
+  return ref;
 }
 
 // Copy only the user-visible answer text — reasoning is hidden by default in
@@ -809,48 +875,218 @@ export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
+  reasoningActive = false,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
+  reasoningActive?: boolean;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
   const isStopped =
     message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
+  const isCompleted = message.status === "completed";
+  const runDurationSeconds = runDurationForMessage(message);
+
+  // A still-running tool call on a stopped session reads as failed — it never returned.
+  const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
+    part.type === "tool-call" && part.toolCall.status === "running" && !sessionCanGenerate
+      ? {
+          type: "tool-call",
+          toolCall: {
+            ...part.toolCall,
+            status: "failed" as const,
+            outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+          },
+        }
+      : part,
+  );
+
+  // A completed turn reads as a deliverable: the trailing text is the headline, and the work
+  // that produced it — the intermediate narration plus the tool steps — collapses into one
+  // "N steps" summary. Reasoning keeps its own card. While the turn is still running nothing
+  // collapses, so the live narration and steps stay visible (tool calls grouped while
+  // consecutive, text inline).
+  type RenderGroup =
+    | { kind: "part"; part: AssistantTurnPart; key: string }
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
+    | { kind: "process"; parts: AssistantTurnPart[]; key: string };
+
+  const deliverableStart = isCompleted
+    ? deliverableStartIndex(normalizedParts)
+    : normalizedParts.length;
+  const collapseWork =
+    isCompleted &&
+    normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
+
+  const groups: RenderGroup[] = [];
+  normalizedParts.forEach((part, index) => {
+    // Completed turn: fold the intermediate narration + tool steps into one collapsed group.
+    if (collapseWork && index < deliverableStart && part.type !== "reasoning") {
+      const last = groups.at(-1);
+      if (last?.kind === "process") last.parts.push(part);
+      else groups.push({ kind: "process", parts: [part], key: `process:${index}` });
+      return;
+    }
+
+    if (part.type === "tool-call") {
+      const last = groups.at(-1);
+      if (last?.kind === "tools") last.toolCalls.push(part.toolCall);
+      else groups.push({ kind: "tools", toolCalls: [part.toolCall], key: `tools:${index}` });
+      return;
+    }
+
+    groups.push({ kind: "part", part, key: `${index}` });
+  });
+  const streamingTextGroupKey = isRunning ? findLatestTextGroupKey(groups) : null;
 
   return (
     <div className="space-y-3">
-      {parts.map((part, index) => {
-        if (part.type === "text") {
-          return <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />;
+      {groups.map((group) => {
+        if (group.kind === "part") {
+          const part = group.part;
+          if (part.type === "text") {
+            return (
+              <AssistantMarkdown
+                key={group.key}
+                content={part.text}
+                streaming={group.key === streamingTextGroupKey}
+              />
+            );
+          }
+          if (part.type === "reasoning") {
+            return (
+              <ReasoningSummaryCard
+                key={group.key}
+                text={part.text}
+                durationSeconds={part.durationSeconds}
+              />
+            );
+          }
+          return null;
         }
 
-        if (part.type === "reasoning") {
+        if (group.kind === "process") {
           return (
-            <ReasoningSummaryCard
-              key={`${index}:reasoning`}
-              text={part.text}
-              durationSeconds={part.durationSeconds}
+            <CompletedStepGroup
+              key={group.key}
+              parts={group.parts}
+              durationSeconds={runDurationSeconds}
             />
           );
         }
 
-        const toolCall =
-          part.toolCall.status === "running" && !sessionCanGenerate
-            ? {
-                ...part.toolCall,
-                status: "failed" as const,
-                outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
-              }
-            : part.toolCall;
-        return <ToolCallCard key={part.toolCall.id} toolCall={toolCall} />;
+        return (
+          <div key={group.key} className="space-y-1.5">
+            {group.toolCalls.map((toolCall) => (
+              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+            ))}
+          </div>
+        );
       })}
-      {!hasParts && !isRunning && !isStopped ? "..." : null}
-      {isStopped ? <AssistantStoppedNotice /> : null}
-      {isRunning ? <WorkingIndicator /> : null}
+      {!hasParts ? (
+        isRunning ? (
+          <WorkingIndicator startedAt={message.createdAt} thinking={reasoningActive} />
+        ) : isStopped ? (
+          <AssistantStoppedNotice />
+        ) : (
+          "..."
+        )
+      ) : isRunning ? (
+        // Keep a live indicator at the tail so the UI never goes silent between a tool
+        // result and the model's next output (thinking phases included).
+        <WorkingIndicator startedAt={message.createdAt} thinking={reasoningActive} />
+      ) : null}
+      {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
     </div>
   );
+}
+
+function findLatestTextGroupKey(
+  groups: Array<
+    | { kind: "part"; part: AssistantTurnPart; key: string }
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
+    | { kind: "process"; parts: AssistantTurnPart[]; key: string }
+  >,
+) {
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group?.kind === "part" && group.part.type === "text") return group.key;
+  }
+  return null;
+}
+
+// The trailing run of text parts is the deliverable headline; everything before it is the
+// work that produced it. Returns the index where that trailing text run begins (the length
+// when the turn does not end in text, e.g. it ended on a tool call).
+function deliverableStartIndex(parts: AssistantTurnPart[]) {
+  let start = parts.length;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    if (parts[index]?.type !== "text") break;
+    start = index;
+  }
+  return start;
+}
+
+function CompletedStepGroup({
+  parts,
+  durationSeconds,
+}: {
+  parts: AssistantTurnPart[];
+  durationSeconds: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const count = parts.reduce((total, part) => (part.type === "tool-call" ? total + 1 : total), 0);
+  const durationLabel = durationSeconds > 0 ? ` · ${formatStepDuration(durationSeconds)}` : "";
+  const summary = `${count} ${count === 1 ? "step" : "steps"}${durationLabel}`;
+
+  return (
+    <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-[#efefeb]/65 hover:text-ink/75"
+      >
+        <ChevronRight
+          size={11}
+          strokeWidth={1.9}
+          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          <Wrench size={11} strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 truncate font-medium text-ink/65">{summary}</span>
+      </button>
+      {expanded ? (
+        <div className="ml-2 mt-1 space-y-1.5 border-l border-[#e3e3df] pl-3">
+          {parts.map((part, index) =>
+            part.type === "tool-call" ? (
+              <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
+            ) : part.type === "text" ? (
+              <AssistantMarkdown key={`text:${index}`} content={part.text} />
+            ) : null,
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function runDurationForMessage(message: SessionMessage) {
+  if (!message.completedAt || !message.createdAt) return 0;
+  const start = new Date(message.createdAt).getTime();
+  const end = new Date(message.completedAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
+  return (end - start) / 1000;
+}
+
+function formatStepDuration(seconds: number) {
+  const total = Math.max(Math.round(seconds), 1);
+  if (total < 60) return `${total}s`;
+  const minutes = Math.round(total / 60);
+  return `${minutes} min`;
 }
 
 function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
@@ -872,7 +1108,7 @@ function ReasoningSummaryCard({
   durationSeconds,
 }: {
   text: string | undefined;
-  durationSeconds: number;
+  durationSeconds: number | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasSummary = Boolean(text);
@@ -934,8 +1170,8 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
           <Wrench size={11} strokeWidth={1.75} />
         </span>
-        <span className="min-w-0 truncate font-medium text-ink/65">
-          {formatToolName(toolCall.name)}
+        <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
+          {toolCall.label || formatToolName(toolCall.name)}
         </span>
         {toolCall.brainPath ? (
           <span
@@ -1385,7 +1621,8 @@ function formatTokenCount(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
-function formatThinkingDuration(seconds: number) {
+function formatThinkingDuration(seconds: number | undefined) {
+  if (seconds === undefined) return "Thought";
   const duration = Math.max(Math.round(seconds), 1);
   return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
 }

@@ -11,20 +11,52 @@ export function formatElapsed(seconds: number): string {
   return `${minutes}m ${secs}s`;
 }
 
-export function WorkingIndicator() {
-  const [elapsed, setElapsed] = useState(0);
+export function WorkingIndicator({
+  startedAt,
+  thinking = true,
+}: {
+  startedAt?: string | undefined;
+  thinking?: boolean;
+}) {
+  return (
+    <WorkingIndicatorTimer key={startedAt ?? "local"} startedAt={startedAt} thinking={thinking} />
+  );
+}
+
+function WorkingIndicatorTimer({
+  startedAt,
+  thinking,
+}: {
+  startedAt?: string | undefined;
+  thinking: boolean;
+}) {
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setElapsed((prev) => prev + 1);
+      setNow(Date.now());
     }, 1000);
     return () => clearInterval(interval);
   }, []);
 
+  const elapsed =
+    startedAt === undefined ? elapsedBetween(mountedAt, now) : elapsedSince(startedAt, now);
+
   return (
     <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5">
-      <span className="thinking-shimmer text-[13px] font-medium">Thinking</span>
+      {thinking ? <span className="thinking-shimmer text-[13px] font-medium">Thinking</span> : null}
       <span className="text-[12px] tabular-nums text-ink-subtle">{formatElapsed(elapsed)}</span>
     </div>
   );
+}
+
+function elapsedSince(startedAt: string | undefined, now: number) {
+  const startMs = startedAt ? new Date(startedAt).getTime() : Number.NaN;
+  if (!Number.isFinite(startMs)) return 0;
+  return elapsedBetween(startMs, now);
+}
+
+function elapsedBetween(startMs: number, endMs: number) {
+  return Math.max(0, Math.floor((endMs - startMs) / 1000));
 }

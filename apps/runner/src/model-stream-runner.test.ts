@@ -1,6 +1,7 @@
 import type { TextStreamPart, ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { collectAssistantStream } from "./model-stream-runner";
+import { createToolStartCoordinator } from "./tool-start-coordinator";
 
 const usageRecorder = vi.hoisted(() => ({
   recordStepUsage: vi.fn(async () => {}),
@@ -104,6 +105,7 @@ function collect(
     exposeReasoningSummary: false,
     signal: new AbortController().signal,
     checkAbort: async () => {},
+    toolStartCoordinator: createToolStartCoordinator(),
     ...overrides,
   });
 }

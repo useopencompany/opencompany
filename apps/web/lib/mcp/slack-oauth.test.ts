@@ -17,7 +17,7 @@ vi.mock("@/lib/mcp/credential-storage", () => ({
 }));
 
 vi.mock("@ai-sdk/mcp", () => ({
-  auth: vi.fn(async (provider, options) => {
+  auth: vi.fn(async (provider) => {
     observed.clientInformation = provider.clientInformation?.();
     await provider.saveCodeVerifier?.("verifier");
     await provider.saveState?.(provider.state?.() ?? "state");

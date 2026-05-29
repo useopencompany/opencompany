@@ -32,7 +32,7 @@ import {
   traceBraintrust,
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
@@ -79,6 +79,7 @@ import {
   type LoadedSession,
   loadAssistantResponseForMessage,
   loadLatestUserMessage,
+  loadNextSteerMessage,
   loadSession,
   loadUserMessage,
   optionalUserName,
@@ -88,6 +89,7 @@ import {
 } from "./session-lifecycle";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-dispatcher";
+import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
 
 export {
   buildAmpCommand,
@@ -112,6 +114,7 @@ export {
   throwIfStreamErrorPart,
 } from "./stream-helpers";
 export { createHostedToolBudget, executeRuntimeTool } from "./tool-dispatcher";
+export { createToolStartCoordinator } from "./tool-start-coordinator";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
@@ -125,6 +128,24 @@ export async function runMessage(input: {
   externalSignal?: AbortSignal;
   delegationDepth?: number;
 }) {
+  // Each turn answers one user message under its own lease. A steer message sent
+  // while a run was in flight is answered as the next turn, so every turn stays a
+  // complete, idempotent pass through the existing path. See
+  // docs/agent-turn-vocabulary.md.
+  let messageId: string | undefined = input.messageId;
+  while (messageId) {
+    const result = await runMessageTurn({ ...input, messageId });
+    messageId = result?.nextSteerMessageId;
+  }
+}
+
+async function runMessageTurn(input: {
+  sessionId: string;
+  messageId: string;
+  env: RunnerEnv;
+  externalSignal?: AbortSignal;
+  delegationDepth?: number;
+}): Promise<{ nextSteerMessageId?: string | undefined } | void> {
   const ctx = createRunContext("runner.run_message", input);
   try {
     return await traceBraintrust(
@@ -172,6 +193,7 @@ async function runMessageWithContext(
   const sandboxRef: { id: string | undefined } = { id: undefined };
   let outcome = "unknown";
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
+  let nextSteerMessageId: string | undefined;
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
@@ -331,6 +353,7 @@ async function runMessageWithContext(
       },
     });
 
+    const toolStartCoordinator = createToolStartCoordinator();
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -345,6 +368,7 @@ async function runMessageWithContext(
       repository: row.repository,
       signal: ctx.controller.signal,
       checkAbort,
+      toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
       delegateToAgent: createAgentDelegationHandler({
@@ -376,7 +400,19 @@ async function runMessageWithContext(
         observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       },
       assistantMessageId,
+      toolStartCoordinator,
       checkAbort,
+      // Stop at the next model-step boundary if the user steered this run with a new
+      // message. In-flight tool calls in the current step still finish and persist.
+      extraStopConditions: [
+        async () =>
+          Boolean(
+            await loadNextSteerMessage({
+              sessionId: input.sessionId,
+              afterCreatedAt: userMessage.createdAt,
+            }),
+          ),
+      ],
     });
     const { assistantContent, assistantReplayParts, reasoningSummary } = streamResult;
 
@@ -421,6 +457,14 @@ async function runMessageWithContext(
       releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
     );
     outcome = "completed";
+    // If the user steered mid-run, answer that message as the next turn. The lease
+    // is already released, so the next turn acquires its own. See
+    // docs/agent-turn-vocabulary.md.
+    const steer = await loadNextSteerMessage({
+      sessionId: input.sessionId,
+      afterCreatedAt: userMessage.createdAt,
+    });
+    nextSteerMessageId = steer?.id;
     logger.info("Runner session completed", {
       event: "opencompany.runner_session_completed",
       workspace_id: workspaceId,
@@ -562,6 +606,8 @@ async function runMessageWithContext(
       sandbox: sandboxAcquirer?.current ?? null,
     });
   }
+
+  return { nextSteerMessageId };
 }
 
 export function assertTurnComplete(
@@ -820,6 +866,7 @@ async function runAfterSessionWithContext(
       },
     });
 
+    const toolStartCoordinator = createToolStartCoordinator();
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -835,6 +882,7 @@ async function runAfterSessionWithContext(
       repository: row.repository,
       signal: ctx.controller.signal,
       checkAbort,
+      toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
     });
@@ -858,6 +906,7 @@ async function runAfterSessionWithContext(
           observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
         },
         assistantMessageId,
+        toolStartCoordinator,
         checkAbort,
       });
 
@@ -2172,7 +2221,9 @@ async function streamAssistantResponse(input: {
     };
   };
   assistantMessageId: string;
+  toolStartCoordinator: ToolStartCoordinator;
   checkAbort: () => Promise<void>;
+  extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
   const mcpToolSet = await observeRunStep(input.ctx, "create_mcp_tool_set", () =>
@@ -2182,6 +2233,7 @@ async function streamAssistantResponse(input: {
       runLeaseId: input.ctx.leaseId,
       runLeaseOwner: input.ctx.leaseOwner,
       ...input.mcpContext,
+      toolStartCoordinator: input.toolStartCoordinator,
     }),
   );
   const modelSystem = buildCacheableSystemPrompt(input.system, input.runtime.model.name);
@@ -2211,7 +2263,7 @@ async function streamAssistantResponse(input: {
           system: modelSystem,
           messages: input.messages,
           tools: selectedTools,
-          stopWhen: ai.stepCountIs(MAX_MODEL_STEPS),
+          stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           abortSignal: input.ctx.controller.signal,
           ...(input.runtime.model.providerOptions
             ? { providerOptions: input.runtime.model.providerOptions }
@@ -2238,6 +2290,7 @@ async function streamAssistantResponse(input: {
           exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
           signal: input.ctx.controller.signal,
           checkAbort: input.checkAbort,
+          toolStartCoordinator: input.toolStartCoordinator,
         });
         // Log on the explicit span object (not `currentSpan()`): the AI SDK stream consumption can
         // run outside this span's async-context, which would silently drop a `currentSpan()` log

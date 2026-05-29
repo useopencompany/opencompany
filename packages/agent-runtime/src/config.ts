@@ -35,6 +35,7 @@ export function resolveAgentRuntimeConfig(input: {
     "Use tools when you need to inspect or change files, run commands, or verify work.",
     "Avoid launching more than eight tool calls in one batch; inspect results before deciding whether more calls are useful.",
     "Keep command output concise and explain material changes to the user.",
+    "When a request will take more than a few tool calls or roughly twenty seconds, open your reply with one or two plain-language sentences before any tool call: what you are about to do, a rough time estimate, what you will deliver, and what you will save to the Brain. Offer a useful optional add-on when it fits. For quick replies, skip this and answer directly.",
     "The sandbox workspace root contains exactly two visible file roots: ./work for session-local files and scratch work, and ./brain for mounted Brain context.",
     "File tools require paths prefixed with work/ or brain/. Bare paths like README.md are invalid; use work/README.md or brain/README.md.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",

@@ -41,6 +41,7 @@ import {
 } from "./model-messages";
 import { RunAbortError, RunLeaseLostError, withRunControlChecks } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
@@ -103,6 +104,7 @@ export function createToolSet(input: {
   repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
+  toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
@@ -115,24 +117,15 @@ export function createToolSet(input: {
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
       onInputAvailable: async ({ input: toolInput, toolCallId }) => {
         await input.checkAbort();
-        await requireLeaseWrite(
-          appendRuntimeEventForLease({
-            sessionId: input.sessionId,
-            messageId: input.assistantMessageId,
-            leaseId: input.runLeaseId,
-            leaseOwner: input.runLeaseOwner,
-            type: "tool.started",
-            payload: {
-              messageId: input.assistantMessageId,
-              toolCallId,
-              name: definition.name,
-              input: toolInput,
-            },
-          }),
-        );
+        input.toolStartCoordinator.record({
+          toolCallId,
+          name: definition.name,
+          input: toolInput,
+        });
       },
-      execute: async (toolInput, options) =>
-        executeRuntimeTool({
+      execute: async (toolInput, options) => {
+        await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+        return executeRuntimeTool({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
@@ -153,7 +146,8 @@ export function createToolSet(input: {
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
           delegateToAgent: input.delegateToAgent,
-        }),
+        });
+      },
     }) as ToolSet[string];
   }
 
