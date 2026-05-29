@@ -31,8 +31,8 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
-import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { formatRuntimePreview } from "./tool-dispatcher";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
 const LINEAR_MCP_SERVER_KEY = "linear";

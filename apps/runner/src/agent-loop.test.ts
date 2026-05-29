@@ -1828,7 +1828,9 @@ describe("stream error handling", () => {
       toolStartCoordinator,
     });
 
-    const transientEvents = vi.mocked(publishTransientRuntimeEvent).mock.calls.map((call) => call[0]);
+    const transientEvents = vi
+      .mocked(publishTransientRuntimeEvent)
+      .mock.calls.map((call) => call[0]);
     const durableEvents = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
     expect(transientEvents.map((event) => event.type)).toEqual(["message.delta", "message.delta"]);
     expect(durableEvents.map((event) => event.type)).toEqual(["tool.started"]);

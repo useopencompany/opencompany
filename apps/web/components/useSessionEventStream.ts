@@ -134,7 +134,6 @@ export function useSessionEventStream({
     };
     // Connect once per token/session. EventSource owns reconnects; session detail is refetched
     // on open because the runner stream is live-only and does not replay missed DB events.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runnerUrl, streamToken, sessionId]);
 
   useEffect(() => {
@@ -173,10 +172,7 @@ function parseRuntimeEvent(data: string): RuntimeEvent | null {
     const value = JSON.parse(data) as unknown;
     if (!value || typeof value !== "object") return null;
     const record = value as Record<string, unknown>;
-    if (
-      !(typeof record.id === "number" || record.id === null) ||
-      typeof record.type !== "string"
-    ) {
+    if (!(typeof record.id === "number" || record.id === null) || typeof record.type !== "string") {
       return null;
     }
     if (!record.payload || typeof record.payload !== "object") return null;
