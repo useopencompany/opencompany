@@ -2,8 +2,10 @@ import { AuthKitProvider } from "@workos-inc/authkit-nextjs/components";
 import type { Metadata } from "next";
 import "./globals.css";
 
+const isLocalDev = process.env.NODE_ENV === "development" && !process.env.VERCEL_ENV;
+
 export const metadata: Metadata = {
-  title: "opencompany",
+  title: isLocalDev ? "opencompany (local)" : "opencompany",
   description: "Company workspace for agents, inbox, and shared context.",
 };
 
