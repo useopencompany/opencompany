@@ -12,7 +12,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     h2: ({ children, id, ...props }) => (
       <h2
         id={id ?? slugFromChildren(children)}
-        className="mt-10 scroll-mt-16 border-t border-[#ececea] pt-8 text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink first:mt-0 first:border-t-0 first:pt-0"
+        className="mb-3 mt-12 scroll-mt-20 text-[20px] font-semibold leading-snug tracking-[-0.015em] text-ink first:mt-0"
         {...props}
       >
         {children}
@@ -21,32 +21,48 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     h3: ({ children, id, ...props }) => (
       <h3
         id={id ?? slugFromChildren(children)}
-        className="mt-7 scroll-mt-16 text-[15px] font-semibold leading-6 tracking-[-0.005em] text-ink"
+        className="mb-2 mt-8 scroll-mt-20 text-[15.5px] font-semibold leading-snug tracking-[-0.01em] text-ink"
         {...props}
       >
         {children}
       </h3>
     ),
+    h4: ({ children, id, ...props }) => (
+      <h4
+        id={id ?? slugFromChildren(children)}
+        className="mb-2 mt-6 scroll-mt-20 text-[14px] font-semibold leading-snug tracking-[-0.005em] text-ink"
+        {...props}
+      >
+        {children}
+      </h4>
+    ),
     p: ({ children, ...props }) => (
-      <p className="mt-3 text-[14px] leading-7 tracking-[-0.005em] text-ink-muted" {...props}>
+      <p
+        className="mt-4 text-[14px] leading-[1.75] tracking-[-0.003em] text-ink-muted first:mt-0"
+        {...props}
+      >
         {children}
       </p>
     ),
     ul: ({ children, ...props }) => (
-      <ul className="mt-3 space-y-2 pl-5 text-[14px] leading-7 text-ink-muted" {...props}>
+      <ul
+        className="mt-4 space-y-1.5 pl-5 text-[14px] leading-[1.75] text-ink-muted [&>li]:relative [&>li]:pl-1"
+        style={{ listStyleType: "disc" }}
+        {...props}
+      >
         {children}
       </ul>
     ),
     ol: ({ children, ...props }) => (
       <ol
-        className="mt-3 list-decimal space-y-2 pl-5 text-[14px] leading-7 text-ink-muted"
+        className="mt-4 list-decimal space-y-1.5 pl-5 text-[14px] leading-[1.75] text-ink-muted [&>li]:pl-1"
         {...props}
       >
         {children}
       </ol>
     ),
     li: ({ children, ...props }) => (
-      <li className="pl-1 marker:text-ink-subtle" {...props}>
+      <li className="marker:text-ink-subtle" {...props}>
         {children}
       </li>
     ),
@@ -55,22 +71,30 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
         {children}
       </strong>
     ),
+    em: ({ children, ...props }) => (
+      <em className="italic text-ink-muted" {...props}>
+        {children}
+      </em>
+    ),
     a: ({ children, ...props }) => (
       <a
-        className="font-medium text-ink underline decoration-[#d2d2cd] underline-offset-2 transition-colors hover:decoration-ink/60"
+        className="font-medium text-ink underline decoration-[#c8c8c2] underline-offset-[3px] transition-colors hover:decoration-ink"
         {...props}
       >
         {children}
       </a>
     ),
     code: ({ children, ...props }) => (
-      <code className="rounded bg-[#ececea] px-1 py-0.5 font-mono text-[12px] text-ink" {...props}>
+      <code
+        className="rounded-[4px] border border-[#e6e6e3] bg-[#f0f0ed] px-[5px] py-[2px] font-mono text-[12px] leading-none text-ink"
+        {...props}
+      >
         {children}
       </code>
     ),
     pre: ({ children, ...props }) => (
       <pre
-        className="mt-4 overflow-x-auto rounded-lg border border-[#e6e6e3] bg-[#fbfbfa] p-4 text-[12.5px] leading-6 text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+        className="mt-5 overflow-x-auto rounded-xl border border-[#e2e2de] bg-[#f5f5f2] px-5 py-4 text-[12.5px] leading-[1.65] text-ink shadow-[0_1px_3px_rgba(0,0,0,0.04),0_1px_0_rgba(0,0,0,0.02)]"
         {...props}
       >
         {children}
@@ -78,12 +102,48 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     ),
     blockquote: ({ children, ...props }) => (
       <blockquote
-        className="mt-4 border-l-2 border-[#d8d8d3] pl-4 text-[14px] leading-7 text-ink-muted"
+        className="mt-5 rounded-r-lg border-l-[3px] border-[#c8c8c2] bg-[#f5f5f2] px-5 py-3 text-[13.5px] leading-[1.7] text-ink-muted"
         {...props}
       >
         {children}
       </blockquote>
     ),
+    table: ({ children, ...props }) => (
+      <div className="mt-5 overflow-x-auto rounded-xl border border-[#e2e2de]">
+        <table className="w-full border-collapse text-[13px]" {...props}>
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children, ...props }) => (
+      <thead className="border-b border-[#e2e2de] bg-[#f0f0ed]" {...props}>
+        {children}
+      </thead>
+    ),
+    tbody: ({ children, ...props }) => (
+      <tbody className="divide-y divide-[#ececea]" {...props}>
+        {children}
+      </tbody>
+    ),
+    tr: ({ children, ...props }) => (
+      <tr className="transition-colors hover:bg-[#fafaf8]" {...props}>
+        {children}
+      </tr>
+    ),
+    th: ({ children, ...props }) => (
+      <th
+        className="px-4 py-2.5 text-left text-[11.5px] font-semibold uppercase tracking-[0.06em] text-ink-muted"
+        {...props}
+      >
+        {children}
+      </th>
+    ),
+    td: ({ children, ...props }) => (
+      <td className="px-4 py-2.5 text-[13px] leading-relaxed text-ink-muted" {...props}>
+        {children}
+      </td>
+    ),
+    hr: ({ ...props }) => <hr className="my-8 border-[#e6e6e3]" {...props} />,
     ...components,
   };
 }
