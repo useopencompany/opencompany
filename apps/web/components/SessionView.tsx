@@ -399,13 +399,20 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   }, [pendingScrollMessageId, visibleMessages]);
 
   // Auto-scroll to bottom during streaming — only if the user is pinned at the bottom.
+  // Skip while a snap-to-top scroll is still pending to avoid fighting it.
   useEffect(() => {
+    if (pendingScrollMessageId) return;
     if (!hasRunningAssistantMessage && !showWaitingForAssistant) return;
     if (!isPinnedAtBottomRef.current) return;
     const container = scrollContainerRef.current;
     if (!container || typeof container.scrollTo !== "function") return;
     container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
-  }, [visibleMessages, hasRunningAssistantMessage, showWaitingForAssistant]);
+  }, [
+    pendingScrollMessageId,
+    visibleMessages,
+    hasRunningAssistantMessage,
+    showWaitingForAssistant,
+  ]);
 
   const submit = () => {
     if (isBusy) return;
