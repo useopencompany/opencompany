@@ -14,7 +14,6 @@ import {
   ListFilter,
   LogOut,
   MessageSquarePlus,
-  MoreHorizontal,
   PanelLeft,
   ScrollText,
   Search,
@@ -542,7 +541,9 @@ export default function Sidebar({
               aria-label="Open account menu"
               aria-expanded={accountMenuOpen}
               onClick={() => setAccountMenuOpen((open) => !open)}
-              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-0 py-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              className={`-mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors duration-150 hover:bg-[#ebebe8] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                accountMenuOpen ? "bg-[#e3e3df]" : ""
+              }`}
             >
               <div
                 aria-hidden
@@ -564,17 +565,6 @@ export default function Sidebar({
               </div>
             </button>
             <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
-              <button
-                type="button"
-                aria-label="More account options"
-                aria-expanded={accountMenuOpen}
-                className={`rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                  accountMenuOpen ? "bg-[#e3e3df] text-ink" : ""
-                }`}
-                onClick={() => setAccountMenuOpen((open) => !open)}
-              >
-                <MoreHorizontal size={14} strokeWidth={1.75} />
-              </button>
               <button
                 type="button"
                 aria-label="Filter sessions"
