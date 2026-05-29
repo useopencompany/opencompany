@@ -6,8 +6,6 @@ import type {
   AgentToolId,
 } from "@opencompany/agent-runtime/types";
 import {
-  Bot,
-  Brain,
   Clock3,
   Code2,
   FileText,
@@ -18,7 +16,17 @@ import {
   MessageSquare,
   MessagesSquare,
   Search,
+  Sparkles,
 } from "lucide-react";
+import {
+  AnthropicIcon,
+  DeepSeekIcon,
+  GeminiIcon,
+  MistralIcon,
+  MoonshotIcon,
+  OpenAIIcon,
+  ZaiIcon,
+} from "@/components/icons/model-provider-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
 type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent";
@@ -89,23 +97,26 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   slack: MessageSquare,
 };
 
-const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
-  "openai/gpt-5.4-mini": Bot,
-  "openai/gpt-5.4": Brain,
-  "openai/gpt-5.4-nano": Bot,
-  "openai/gpt-5.2-codex": Code2,
-  "anthropic/claude-haiku-4.5": Bot,
-  "anthropic/claude-sonnet-4.6": Brain,
-  "anthropic/claude-opus-4.7": Brain,
-  "google/gemini-3-flash": Bot,
-  "google/gemini-3.1-flash-lite-preview": Bot,
-  "deepseek/deepseek-v4-flash": Bot,
-  "mistral/mistral-medium-3.5": Brain,
-  "moonshotai/kimi-k2.6": Brain,
-  "zai/glm-5.1": Brain,
-  "zai/glm-5-turbo": Bot,
-  "zai/glm-5v-turbo": Brain,
+// Real brand logos keyed by the provider prefix of the model id (the part
+// before the first "/"). Providers without a shipped logo fall back to a
+// neutral model icon. Resolving by provider keeps new models working without
+// touching this file as long as their provider is already listed.
+const FALLBACK_MODEL_ICON: LucideIcon = Sparkles;
+
+const PROVIDER_ICONS: Record<string, LucideIcon> = {
+  openai: OpenAIIcon,
+  anthropic: AnthropicIcon,
+  google: GeminiIcon,
+  deepseek: DeepSeekIcon,
+  mistral: MistralIcon,
+  moonshotai: MoonshotIcon,
+  zai: ZaiIcon,
 };
+
+function modelIconFor(id: AgentModelId): LucideIcon {
+  const provider = id.split("/")[0] ?? "";
+  return PROVIDER_ICONS[provider] ?? FALLBACK_MODEL_ICON;
+}
 
 export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => ({
   id: model.id,
@@ -116,7 +127,7 @@ export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => 
   description: model.description,
   category: model.category,
   supportsReasoning: model.supportsReasoning,
-  icon: MODEL_ICONS[model.id],
+  icon: modelIconFor(model.id),
 }));
 
 export const AGENT_TOOLS: AgentTool[] = SUPPORTED_AGENT_TOOLS.map((tool) => ({

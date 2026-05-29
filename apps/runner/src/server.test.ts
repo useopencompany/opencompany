@@ -235,6 +235,24 @@ describe("SSE formatting", () => {
     );
   });
 
+  it("includes createdAt as an ISO string in the SSE payload so web clients can compute thinking duration", () => {
+    const createdAt = new Date("2026-05-28T12:00:01.500Z");
+    const event: PersistedRuntimeEvent = {
+      id: 7,
+      sessionId: "ses_abc",
+      messageId: "msg_abc",
+      type: "tool.started",
+      payload: { toolCallId: "call_1", name: "read_file", input: {} },
+      createdAt,
+    };
+
+    const raw = formatSseEvent(event);
+    const dataLine = raw.split("\ndata: ")[1];
+    expect(dataLine).toBeDefined();
+    const data = JSON.parse(dataLine!.trim());
+    expect(data.createdAt).toBe(createdAt.toISOString());
+  });
+
   it("formats stream errors as named SSE events", () => {
     expect(formatStreamError("Event stream failed.")).toBe(
       'event: session.error\ndata: {"message":"Event stream failed."}\n\n',

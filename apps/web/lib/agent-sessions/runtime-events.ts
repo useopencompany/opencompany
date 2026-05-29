@@ -18,7 +18,7 @@ export type RuntimeEvent = {
   type: string;
   messageId: string | null;
   payload: Record<string, unknown>;
-  createdAt?: string | undefined;
+  createdAt?: string;
 };
 
 export type SessionUsageSummary = {
@@ -96,7 +96,10 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
-        messages: status === "failed" ? stopRunningAssistantMessages(next.messages) : next.messages,
+        messages:
+          status === "failed"
+            ? stopRunningAssistantMessages(next.messages, next.events)
+            : next.messages,
       };
     }
   }
@@ -107,7 +110,7 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
-      messages: stopRunningAssistantMessages(next.messages),
+      messages: stopRunningAssistantMessages(next.messages, next.events),
     };
   }
 
@@ -223,11 +226,6 @@ export function applyRuntimeEventToState(
     const modelMessage = isRecord(event.payload.modelMessage) ? event.payload.modelMessage : null;
     if (messageId) {
       const completedAt = event.createdAt ?? new Date().toISOString();
-      const thinkingDurationSeconds = readThinkingDurationSeconds(
-        next.events,
-        messageId,
-        completedAt,
-      );
       next = {
         ...next,
         messages: next.messages.map((message) =>
@@ -237,7 +235,13 @@ export function applyRuntimeEventToState(
                 status: "completed",
                 content: content ?? message.content,
                 completedAt,
-                thinkingDurationSeconds,
+                thinkingDurationSeconds: computeThinkingDurationSeconds(
+                  {
+                    ...message,
+                    completedAt,
+                  },
+                  next.events,
+                ),
                 ...(modelMessage ? { modelMessage } : {}),
               }
             : message,
@@ -249,7 +253,7 @@ export function applyRuntimeEventToState(
   return next;
 }
 
-function stopRunningAssistantMessages(messages: SessionMessage[]) {
+function stopRunningAssistantMessages(messages: SessionMessage[], events: RuntimeEvent[]) {
   const completedAt = new Date().toISOString();
   return messages.map((message) =>
     message.role === "assistant" && message.status === "running"
@@ -257,6 +261,9 @@ function stopRunningAssistantMessages(messages: SessionMessage[]) {
           ...message,
           status: "failed",
           completedAt: message.completedAt ?? completedAt,
+          thinkingDurationSeconds:
+            message.thinkingDurationSeconds ??
+            computeThinkingDurationSeconds({ ...message, completedAt }, events),
         }
       : message,
   );
@@ -416,8 +423,7 @@ export function buildAssistantTurnParts(
   const reasoningSummary = readReasoningSummary(events, message.id);
   const reasoningTokenCount = message.outputReasoningTokens ?? 0;
   const thinkingDurationSeconds =
-    message.thinkingDurationSeconds ??
-    readThinkingDurationSeconds(events, message.id, message.completedAt);
+    message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const reasoningParts: AssistantTurnPart[] =
     reasoningSummary || reasoningTokenCount > 0
       ? [
@@ -922,16 +928,12 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .join("\n\n");
 }
 
-function readThinkingDurationSeconds(
-  events: RuntimeEvent[],
-  messageId: string,
-  completedAtValue: string | null | undefined,
-) {
+function readReasoningWindowDurationSeconds(message: SessionMessage, events: RuntimeEvent[]) {
   let durationMs = 0;
   let reasoningStartedAt: number | null = null;
 
   for (const event of events) {
-    if (!eventBelongsToMessage(event, messageId)) continue;
+    if (!eventBelongsToMessage(event, message.id)) continue;
 
     const eventAt = readTimestamp(event.createdAt);
     if (!eventAt) continue;
@@ -948,7 +950,7 @@ function readThinkingDurationSeconds(
   }
 
   if (reasoningStartedAt !== null) {
-    const completedAt = readTimestamp(completedAtValue);
+    const completedAt = readTimestamp(message.completedAt);
     if (completedAt && completedAt > reasoningStartedAt) {
       durationMs += completedAt - reasoningStartedAt;
     }
@@ -956,6 +958,52 @@ function readThinkingDurationSeconds(
 
   if (durationMs <= 0) return undefined;
   return Math.max(Math.round(durationMs / 1000), 1);
+}
+
+export function computeThinkingDurationSeconds(
+  message: SessionMessage,
+  events: RuntimeEvent[],
+): number {
+  const reasoningDurationSeconds = readReasoningWindowDurationSeconds(message, events);
+  if (reasoningDurationSeconds !== undefined) return reasoningDurationSeconds;
+
+  const startedAt = readTimestamp(message.createdAt);
+  const completedAt = readTimestamp(message.completedAt);
+  if (!startedAt || !completedAt || completedAt < startedAt) return 1;
+
+  const totalMs = completedAt - startedAt;
+
+  // Pair tool.started with tool.completed/tool.failed for the same messageId+toolCallId,
+  // using event.createdAt timestamps. Unpaired tool.started events are ignored.
+  const startedByToolCallId = new Map<string, number>();
+  let toolMs = 0;
+
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, message.id)) continue;
+
+    if (event.type === "tool.started") {
+      const toolCallId = readString(event.payload.toolCallId);
+      const ts = readTimestamp(event.createdAt);
+      if (toolCallId && ts !== null) {
+        startedByToolCallId.set(toolCallId, ts);
+      }
+    }
+
+    if (event.type === "tool.completed" || event.type === "tool.failed") {
+      const toolCallId = readString(event.payload.toolCallId);
+      const ts = readTimestamp(event.createdAt);
+      if (toolCallId && ts !== null) {
+        const startTs = startedByToolCallId.get(toolCallId);
+        if (startTs !== undefined) {
+          toolMs += Math.max(ts - startTs, 0);
+          startedByToolCallId.delete(toolCallId);
+        }
+      }
+    }
+  }
+
+  const thinkingMs = Math.max(totalMs - toolMs, 0);
+  return Math.max(Math.round(thinkingMs / 1000), 1);
 }
 
 function readTimestamp(value: string | null | undefined) {

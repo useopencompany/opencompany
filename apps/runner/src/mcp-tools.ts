@@ -15,6 +15,10 @@ import {
   workspaceMcpServers,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
+import {
+  logBraintrustCurrentSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { and, eq } from "drizzle-orm";
 import {
@@ -295,6 +299,26 @@ async function executeMcpTool(
     args: unknown;
   },
 ) {
+  return traceBraintrustStep(
+    `tool.${input.toolName}`,
+    () => executeMcpToolWithTracing(input),
+    mcpToolTraceMetadata(input),
+    { type: "tool", input: input.args },
+  );
+}
+
+async function executeMcpToolWithTracing(
+  input: McpToolContext & {
+    mcpServer: McpProviderKey;
+    toolCallId: string;
+    toolName: string;
+    rawToolName: string;
+    execute:
+      | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
+      | undefined;
+    args: unknown;
+  },
+) {
   let output: unknown;
   let failed = false;
 
@@ -305,6 +329,19 @@ async function executeMcpTool(
     output = await input.execute(input.args, { toolCallId: input.toolCallId });
   } catch (error) {
     failed = true;
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: {
+        session_id: input.sessionId,
+        message_id: input.assistantMessageId,
+        tool_call_id: input.toolCallId,
+        tool_name: input.toolName,
+        mcp_server: input.mcpServer,
+        mcp_tool_name: input.rawToolName,
+        model_provider: input.observabilityContext?.modelProvider,
+        model_name: input.observabilityContext?.modelName,
+      },
+    });
     captureException(error, {
       event: "opencompany.runner_mcp_tool_failed",
       workspace_id: input.observabilityContext?.workspaceId,
@@ -379,7 +416,36 @@ async function executeMcpTool(
     );
   }
 
+  logBraintrustCurrentSpan({
+    output,
+    metadata: {
+      ...mcpToolTraceMetadata(input),
+      tool_message_id: toolMessageId,
+      failed,
+    },
+  });
+
   return output;
+}
+
+function mcpToolTraceMetadata(
+  input: McpToolContext & {
+    mcpServer: McpProviderKey;
+    toolCallId: string;
+    toolName: string;
+    rawToolName: string;
+  },
+) {
+  return {
+    session_id: input.sessionId,
+    message_id: input.assistantMessageId,
+    tool_call_id: input.toolCallId,
+    tool_name: input.toolName,
+    mcp_server: input.mcpServer,
+    mcp_tool_name: input.rawToolName,
+    model_provider: input.observabilityContext?.modelProvider,
+    model_name: input.observabilityContext?.modelName,
+  };
 }
 
 function buildMcpFailedToolOutput(error: unknown) {
@@ -391,6 +457,17 @@ function buildMcpFailedToolOutput(error: unknown) {
       recoverable: true,
     },
   };
+}
+
+function braintrustError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return { message: String(error) };
 }
 
 function isMcpFailedToolOutput(

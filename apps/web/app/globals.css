@@ -315,21 +315,18 @@ body {
 }
 
 .thinking-shimmer {
-  color: transparent;
-  background: linear-gradient(90deg, #8b8b86 0%, #111111 42%, #8b8b86 58%, #8b8b86 100%);
-  background-size: 240% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: thinking-shimmer 1.7s ease-in-out infinite;
+  color: var(--color-ink);
+  animation: thinking-shimmer 1.4s ease-in-out infinite;
+  will-change: opacity;
 }
 
 @keyframes thinking-shimmer {
-  0% {
-    background-position: 120% 0;
-  }
+  0%,
   100% {
-    background-position: -120% 0;
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
   }
 }
 
@@ -341,7 +338,7 @@ body {
   .thinking-shimmer {
     animation: none;
     color: var(--color-ink-muted);
-    -webkit-text-fill-color: currentColor;
+    opacity: 1;
   }
 }
 

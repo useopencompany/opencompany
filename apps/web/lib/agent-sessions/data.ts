@@ -16,6 +16,7 @@ import {
   serializeSidebarSession,
 } from "@/lib/agent-sessions/payload";
 import { getRunnerPublicUrl, getRunnerStreamTokenSecret } from "@/lib/agent-sessions/runner";
+import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 
 export async function loadSidebarSessionsForWorkspace(
   userId: string,
@@ -263,10 +264,24 @@ export async function loadAgentSessionDetailForWorkspace(
     current.outputReasoningTokens += row.outputReasoningTokens;
     usageByMessageId.set(row.messageId, current);
   }
-  const messagesWithUsage = messages.map((message) => ({
-    ...message,
-    outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
+  const eventsWithCreatedAt = events.map((event) => ({
+    ...event,
+    createdAt: event.createdAt.toISOString(),
   }));
+  const messagesWithUsage = messages.map((message) => {
+    const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
+    const sessionMessage = {
+      ...message,
+      outputReasoningTokens,
+      createdAt: message.createdAt.toISOString(),
+      completedAt: message.completedAt?.toISOString() ?? null,
+    };
+    return {
+      ...message,
+      outputReasoningTokens,
+      thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
+    };
+  });
   const toolUsage = rollup.toolUsage;
   const cost = rollup.cost;
   const runnerUrl = getRunnerPublicUrl();
@@ -282,7 +297,7 @@ export async function loadAgentSessionDetailForWorkspace(
       children,
     },
     messages: messagesWithUsage,
-    events,
+    events: eventsWithCreatedAt,
     usage,
     toolUsage,
     cost,

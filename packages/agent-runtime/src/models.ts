@@ -125,6 +125,22 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     },
   },
   {
+    id: "anthropic/claude-opus-4.8",
+    type: "model",
+    label: "Claude Opus 4.8",
+    description: "Latest highest-capability Claude model for demanding agent workflows.",
+    category: "Deep",
+    supportsReasoning: true,
+    reasoning: {
+      providerOptions: {
+        anthropic: {
+          thinkingBudget: 0.001,
+        },
+      },
+      exposeSummary: false,
+    },
+  },
+  {
     id: "google/gemini-3-flash",
     type: "model",
     label: "Gemini 3 Flash",

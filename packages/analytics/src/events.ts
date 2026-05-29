@@ -30,6 +30,11 @@ export type AnalyticsEventPropertiesByName = {
     agent_id: string;
     changed_fields: Array<"name" | "body" | "model" | "config">;
   };
+  agent_deleted: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string;
+  };
   session_started: {
     user_id: string;
     workspace_id: string;
@@ -121,6 +126,11 @@ export const analyticsEvents = {
     name: "agent_saved",
     description: "A user saved changes to an agent.",
     safeProperties: ["user_id", "workspace_id", "agent_id", "changed_fields"],
+  },
+  agent_deleted: {
+    name: "agent_deleted",
+    description: "A user deleted an agent.",
+    safeProperties: ["user_id", "workspace_id", "agent_id"],
   },
   session_started: {
     name: "session_started",

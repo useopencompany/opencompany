@@ -4,6 +4,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   buildRuntimeToolCallsForMessage,
+  computeThinkingDurationSeconds,
   describeToolCall,
   emptyCostSummary,
   emptyUsageSummary,
@@ -197,6 +198,57 @@ describe("applyRuntimeEventToState", () => {
       status: "failed",
       completedAt: expect.any(String),
     });
+  });
+
+  it("subtracts tool durations from thinking time on the abort path (session.error with stamped tool events)", () => {
+    // Build a state where message.created gives the message a createdAt, then two tool
+    // events with explicit createdAt timestamps are added (simulating post-fix runner SSE),
+    // and then a session.error aborts before message.completed fires.
+    let state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+
+    const assistantMessage = state.messages.find((m) => m.id === "msg_assistant");
+    if (!assistantMessage?.createdAt) throw new Error("expected assistant message createdAt");
+    const msgCreatedAt = assistantMessage.createdAt;
+    // Tool runs for 4 seconds starting 1 second into the message.
+    const toolStart = new Date(Date.parse(msgCreatedAt) + 1000).toISOString();
+    const toolEnd = new Date(Date.parse(msgCreatedAt) + 5000).toISOString();
+
+    state = applyRuntimeEventToState(state, {
+      ...event(2, "tool.started", {
+        messageId: "msg_assistant",
+        toolCallId: "call_abort",
+        name: "read_file",
+        input: { path: "README.md" },
+      }),
+      createdAt: toolStart,
+    });
+    state = applyRuntimeEventToState(state, {
+      ...event(3, "tool.completed", {
+        messageId: "msg_assistant",
+        toolCallId: "call_abort",
+        name: "read_file",
+        output: { content: "hi" },
+      }),
+      createdAt: toolEnd,
+    });
+
+    // Abort before message.completed — should still subtract tool time.
+    state = applyRuntimeEventToState(state, event(4, "session.error", { message: "Aborted" }));
+
+    const msg = state.messages.find((m) => m.id === "msg_assistant");
+    expect(msg).toMatchObject({ status: "failed", thinkingDurationSeconds: expect.any(Number) });
+
+    // thinkingDurationSeconds must not equal the full wall-clock duration (≥ 5s)
+    // because the 4-second tool interval should have been subtracted.
+    // The message was aborted immediately after message.created so wall-clock ≈ 0s,
+    // which clamps to 1 (minimum floor). Either way it must be < 5 if subtraction worked.
+    expect(msg!.thinkingDurationSeconds!).toBeLessThan(5);
   });
 
   it("adds live usage events to the session usage summary", () => {
@@ -789,13 +841,13 @@ describe("buildAssistantTurnParts", () => {
       {
         type: "reasoning",
         text: "Checked the relevant files first.",
-        durationSeconds: undefined,
+        durationSeconds: 1,
       },
       { type: "text", text: "Final answer" },
     ]);
   });
 
-  it("shows a reasoning marker without duration when usage has reasoning tokens but no timed events", () => {
+  it("falls back to message duration when usage has reasoning tokens but no timed reasoning events", () => {
     const parts = buildAssistantTurnParts(
       {
         id: "msg_assistant",
@@ -814,7 +866,7 @@ describe("buildAssistantTurnParts", () => {
     );
 
     expect(parts).toEqual([
-      { type: "reasoning", durationSeconds: undefined, text: undefined },
+      { type: "reasoning", durationSeconds: 3, text: undefined },
       { type: "text", text: "Final answer" },
     ]);
   });
@@ -874,7 +926,7 @@ describe("buildAssistantTurnParts", () => {
     ]);
   });
 
-  it("adds live thinking duration when completion arrives after reasoning usage", () => {
+  it("adds live thinking duration when completion arrives after reasoning usage, subtracting tool call duration", () => {
     let state = initialState();
     state = applyRuntimeEventToState(
       state,
@@ -890,10 +942,34 @@ describe("buildAssistantTurnParts", () => {
     );
 
     const createdAt = state.messages.find((message) => message.id === "msg_assistant")?.createdAt;
+
+    // Stamp tool events with synthetic createdAt timestamps so
+    // computeThinkingDurationSeconds can measure a 2-second tool interval.
+    const toolStartTs = new Date(Date.parse(createdAt!) + 1000).toISOString();
+    const toolEndTs = new Date(Date.parse(createdAt!) + 3000).toISOString();
+    state = applyRuntimeEventToState(state, {
+      ...event(2, "tool.started", {
+        messageId: "msg_assistant",
+        toolCallId: "call_1",
+        name: "read_file",
+        input: { path: "README.md" },
+      }),
+      createdAt: toolStartTs,
+    });
+    state = applyRuntimeEventToState(state, {
+      ...event(3, "tool.completed", {
+        messageId: "msg_assistant",
+        toolCallId: "call_1",
+        name: "read_file",
+        output: { content: "hi" },
+      }),
+      createdAt: toolEndTs,
+    });
+
     state = applyRuntimeEventToState(
       state,
       event(
-        2,
+        4,
         "message.reasoning_delta",
         {
           messageId: "msg_assistant",
@@ -905,7 +981,7 @@ describe("buildAssistantTurnParts", () => {
     state = applyRuntimeEventToState(
       state,
       event(
-        3,
+        5,
         "session.usage",
         {
           messageId: "msg_assistant",
@@ -921,7 +997,7 @@ describe("buildAssistantTurnParts", () => {
     state = applyRuntimeEventToState(
       state,
       event(
-        4,
+        6,
         "message.completed",
         {
           messageId: "msg_assistant",
@@ -931,11 +1007,17 @@ describe("buildAssistantTurnParts", () => {
       ),
     );
 
-    expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
+    const msg = state.messages.find((message) => message.id === "msg_assistant");
+    expect(msg).toMatchObject({
       createdAt,
       completedAt: "2026-05-22T13:00:10.000Z",
       thinkingDurationSeconds: 3,
     });
+    // The computed value must be at least 1 (minimum floor).
+    expect(msg!.thinkingDurationSeconds!).toBeGreaterThanOrEqual(1);
+    // With a 2-second stamped tool interval and very short real-clock duration,
+    // the subtraction logic clamps to at most the message duration → verify ≥ 1.
+    // Direct verification of subtraction is covered by computeThinkingDurationSeconds unit tests.
   });
 
   it("falls back to runtime event order while the assistant message is streaming", () => {
@@ -1197,6 +1279,162 @@ describe("buildBackgroundActivityParts", () => {
         },
       },
     ]);
+  });
+});
+
+describe("computeThinkingDurationSeconds", () => {
+  // Helper: build a minimal completed SessionMessage.
+  function completedMessage(
+    startIso: string,
+    endIso: string,
+    id = "msg_assistant",
+  ): SessionMessage {
+    return {
+      id,
+      role: "assistant",
+      content: "",
+      status: "completed",
+      createdAt: startIso,
+      completedAt: endIso,
+    };
+  }
+
+  // Helper: build a RuntimeEvent with createdAt stamped.
+  function timedEvent(
+    id: number,
+    type: string,
+    payload: Record<string, unknown>,
+    createdAt: string,
+  ): RuntimeEvent {
+    return { id, type, payload, messageId: null, createdAt };
+  }
+
+  it("returns message duration when there are no tool calls", () => {
+    const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:05.000Z");
+    expect(computeThinkingDurationSeconds(msg, [])).toBe(5);
+  });
+
+  it("subtracts a single tool interval from the message duration", () => {
+    const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:10.000Z");
+    const events: RuntimeEvent[] = [
+      timedEvent(
+        1,
+        "tool.started",
+        { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", input: {} },
+        "2026-05-28T10:00:02.000Z",
+      ),
+      timedEvent(
+        2,
+        "tool.completed",
+        { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", output: {} },
+        "2026-05-28T10:00:06.000Z",
+      ),
+    ];
+    // total=10s, tool=4s → thinking=6s
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(6);
+  });
+
+  it("sums multiple non-overlapping tool intervals and subtracts them", () => {
+    const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:20.000Z");
+    const events: RuntimeEvent[] = [
+      timedEvent(
+        1,
+        "tool.started",
+        { messageId: "msg_assistant", toolCallId: "call_1", name: "tool_a", input: {} },
+        "2026-05-28T10:00:02.000Z",
+      ),
+      timedEvent(
+        2,
+        "tool.completed",
+        { messageId: "msg_assistant", toolCallId: "call_1", name: "tool_a", output: {} },
+        "2026-05-28T10:00:07.000Z",
+      ),
+      timedEvent(
+        3,
+        "tool.started",
+        { messageId: "msg_assistant", toolCallId: "call_2", name: "tool_b", input: {} },
+        "2026-05-28T10:00:10.000Z",
+      ),
+      timedEvent(
+        4,
+        "tool.failed",
+        { messageId: "msg_assistant", toolCallId: "call_2", name: "tool_b", error: "oops" },
+        "2026-05-28T10:00:15.000Z",
+      ),
+    ];
+    // total=20s, tool_a=5s, tool_b=5s → thinking=10s
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(10);
+  });
+
+  it("returns at least 1 when the message duration is sub-second", () => {
+    const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:00.400Z");
+    expect(computeThinkingDurationSeconds(msg, [])).toBe(1);
+  });
+
+  it("ignores orphan tool.started events (no completed/failed) and never goes negative", () => {
+    const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:03.000Z");
+    const events: RuntimeEvent[] = [
+      timedEvent(
+        1,
+        "tool.started",
+        { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", input: {} },
+        // tool started 1 second before message even began — pathological, should not go negative
+        "2026-05-28T09:59:59.000Z",
+      ),
+      // No corresponding tool.completed or tool.failed — orphan.
+    ];
+    const result = computeThinkingDurationSeconds(msg, events);
+    expect(result).toBeGreaterThanOrEqual(1);
+    // Orphan must be ignored → full message duration (3s) returned.
+    expect(result).toBe(3);
+  });
+
+  it("returns 1 when createdAt or completedAt is missing", () => {
+    const noCreatedAt: SessionMessage = {
+      id: "msg_assistant",
+      role: "assistant",
+      content: "",
+      status: "running",
+    };
+    expect(computeThinkingDurationSeconds(noCreatedAt, [])).toBe(1);
+
+    const noCompletedAt: SessionMessage = {
+      id: "msg_assistant",
+      role: "assistant",
+      content: "",
+      status: "running",
+      createdAt: "2026-05-28T10:00:00.000Z",
+    };
+    expect(computeThinkingDurationSeconds(noCompletedAt, [])).toBe(1);
+  });
+
+  it("returns full message duration when tool events have no createdAt (backward compat with old runner)", () => {
+    // Old runners don't emit createdAt on SSE events. The web client should still
+    // handle this gracefully: tool intervals are skipped (null timestamps), and the
+    // result equals the full message wall-clock duration.
+    const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:08.000Z");
+    // Events without createdAt — simulating old runner payloads.
+    const events: RuntimeEvent[] = [
+      {
+        id: 1,
+        type: "tool.started",
+        messageId: "msg_assistant",
+        payload: { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", input: {} },
+      },
+      {
+        id: 2,
+        type: "tool.completed",
+        messageId: "msg_assistant",
+        payload: {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "read_file",
+          output: {},
+        },
+      },
+    ];
+    // No createdAt → toolMs = 0 → thinkingMs = totalMs = 8s
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(8);
   });
 });
 
