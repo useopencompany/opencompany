@@ -42,6 +42,7 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
+    expect(resolved.systemPrompt).toMatch(/Current date: \w+, \w+ \d{1,2}, \d{4}/);
     expect(resolved.tools).toContain("shell");
     expect(resolved.tools).toContain("edit_file");
     expect(resolved.tools).toContain("git_diff");
