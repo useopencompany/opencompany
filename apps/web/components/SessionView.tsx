@@ -530,6 +530,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         parts={assistantParts}
                         sessionCanGenerate={sessionCanGenerate}
                         reasoningActive={isReasoningInProgress(message, runtime.events)}
+                        activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
                       />
                     ) : (
                       message.content
@@ -889,11 +890,13 @@ export function AssistantMessageContent({
   parts,
   sessionCanGenerate,
   reasoningActive = false,
+  activeStartedAt,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
   reasoningActive?: boolean;
+  activeStartedAt?: string | undefined;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
@@ -1000,7 +1003,10 @@ export function AssistantMessageContent({
       })}
       {!hasParts ? (
         isRunning ? (
-          <WorkingIndicator startedAt={message.createdAt} thinking={reasoningActive} />
+          <WorkingIndicator
+            startedAt={activeStartedAt ?? message.createdAt}
+            thinking={reasoningActive}
+          />
         ) : isStopped ? (
           <AssistantStoppedNotice />
         ) : (
@@ -1009,11 +1015,37 @@ export function AssistantMessageContent({
       ) : isRunning ? (
         // Keep a live indicator at the tail so the UI never goes silent between a tool
         // result and the model's next output (thinking phases included).
-        <WorkingIndicator startedAt={message.createdAt} thinking={reasoningActive} />
+        <WorkingIndicator
+          startedAt={activeStartedAt ?? message.createdAt}
+          thinking={reasoningActive}
+        />
       ) : null}
       {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
     </div>
   );
+}
+
+function activeStartForAssistantMessage(
+  message: SessionMessage,
+  visibleMessages: SessionMessage[],
+) {
+  if (message.role !== "assistant" || message.status !== "running") return undefined;
+  if (message.responseToMessageId) {
+    const responseToMessage = visibleMessages.find(
+      (item) => item.id === message.responseToMessageId,
+    );
+    if (responseToMessage?.createdAt) return responseToMessage.createdAt;
+  }
+
+  const messageIndex = visibleMessages.findIndex((item) => item.id === message.id);
+  if (messageIndex > 0) {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const previous = visibleMessages[index];
+      if (previous?.role === "user" && previous.createdAt) return previous.createdAt;
+    }
+  }
+
+  return message.createdAt;
 }
 
 function findLatestTextGroupKey(
@@ -1670,6 +1702,8 @@ function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "after_session.failed") {
     return `After-session failed: ${readString(event.payload.message)}`;
   }
+  if (event.type === "message.reasoning_started") return "Thinking started";
+  if (event.type === "message.reasoning_completed") return "Thinking completed";
   if (event.type === "message.reasoning_summary") return "Thinking summary";
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;

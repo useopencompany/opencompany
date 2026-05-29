@@ -63,6 +63,37 @@ export async function collectAssistantStream(input: {
       payload: { messageId: input.assistantMessageId, delta },
     });
   };
+  let reasoningPhaseOpen = false;
+
+  const startReasoningPhase = async () => {
+    if (reasoningPhaseOpen) return;
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.runLeaseId,
+        leaseOwner: input.runLeaseOwner,
+        type: "message.reasoning_started",
+        payload: { messageId: input.assistantMessageId },
+      }),
+    );
+    reasoningPhaseOpen = true;
+  };
+
+  const completeReasoningPhase = async () => {
+    if (!reasoningPhaseOpen) return;
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.runLeaseId,
+        leaseOwner: input.runLeaseOwner,
+        type: "message.reasoning_completed",
+        payload: { messageId: input.assistantMessageId },
+      }),
+    );
+    reasoningPhaseOpen = false;
+  };
 
   const iterator = input.stream[Symbol.asyncIterator]();
   let completedNaturally = false;
@@ -81,21 +112,25 @@ export async function collectAssistantStream(input: {
         input.onFirstOutputPart?.();
       }
 
+      const reasoningDelta = readReasoningTextDelta(part);
+
       if (part.type === "text-delta") {
+        await completeReasoningPhase();
         assistantContent += part.text;
         appendAssistantTextPart(assistantReplayParts, part.text);
         publishTextDelta(part.text);
       }
 
-      if (input.exposeReasoningSummary) {
-        const reasoningDelta = readReasoningTextDelta(part);
-        if (reasoningDelta) {
+      if (reasoningDelta) {
+        await startReasoningPhase();
+        if (input.exposeReasoningSummary) {
           reasoningSummary += reasoningDelta;
           publishReasoningDelta(reasoningDelta);
         }
       }
 
       if (part.type === "finish-step") {
+        await completeReasoningPhase();
         stepIndex += 1;
         lastFinishReason = part.finishReason;
         lastRawFinishReason = part.rawFinishReason;
@@ -122,6 +157,7 @@ export async function collectAssistantStream(input: {
       }
 
       if (part.type === "tool-call") {
+        await completeReasoningPhase();
         const toolStart = input.toolStartCoordinator.read(part.toolCallId) ?? {
           toolCallId: part.toolCallId,
           name: part.toolName,
@@ -154,6 +190,7 @@ export async function collectAssistantStream(input: {
       next = await iterator.next();
     }
 
+    await completeReasoningPhase();
     completedNaturally = true;
   } finally {
     if (!completedNaturally) {

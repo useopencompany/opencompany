@@ -9,9 +9,14 @@ const usageRecorder = vi.hoisted(() => ({
 const eventMocks = vi.hoisted(() => ({
   publishTransientRuntimeEvent: vi.fn(),
 }));
+const leaseWrites = vi.hoisted(() => ({
+  appendRuntimeEventForLease: vi.fn(async () => true),
+  requireLeaseWrite: vi.fn(async (value: unknown) => value),
+}));
 
 vi.mock("./usage-recorder", () => usageRecorder);
 vi.mock("./events", () => eventMocks);
+vi.mock("./lease-writes", () => leaseWrites);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -134,6 +139,55 @@ describe("collectAssistantStream", () => {
       messageId: "msg_assistant",
       type: "message.reasoning_delta",
       payload: { messageId: "msg_assistant", delta: "..." },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_started",
+      payload: { messageId: "msg_assistant" },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_completed",
+      payload: { messageId: "msg_assistant" },
+    });
+  });
+
+  it("persists reasoning phase boundaries without exposing deltas when summaries are hidden", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Hidden thinking" }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await collect(stream, { exposeReasoningSummary: false });
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledTimes(1);
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Visible answer" },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_started",
+      payload: { messageId: "msg_assistant" },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_completed",
+      payload: { messageId: "msg_assistant" },
     });
   });
 });

@@ -40,10 +40,10 @@ describe("WorkingIndicator", () => {
     expect(el).toHaveAttribute("aria-live", "polite");
   });
 
-  it("shows 'Thinking' label with no dot element", () => {
+  it("shows 'Thinking' label with a spinner", () => {
     render(<WorkingIndicator />);
     expect(screen.getByText("Thinking")).toBeInTheDocument();
-    expect(document.querySelector("svg")).not.toBeInTheDocument();
+    expect(document.querySelector("svg")).toBeInTheDocument();
   });
 
   it("shows elapsed time starting at 0s", () => {
@@ -77,5 +77,38 @@ describe("WorkingIndicator", () => {
     unmount();
     render(<WorkingIndicator />);
     expect(screen.getByText("0s")).toBeInTheDocument();
+  });
+
+  it("does not reset elapsed time when startedAt changes to a later timestamp", () => {
+    const start = new Date("2026-05-28T10:00:00.000Z");
+    vi.setSystemTime(start);
+    const { rerender } = render(<WorkingIndicator startedAt={start.toISOString()} />);
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByText("5s")).toBeInTheDocument();
+
+    rerender(<WorkingIndicator startedAt={new Date(start.getTime() + 4000).toISOString()} />);
+
+    expect(screen.getByText("5s")).toBeInTheDocument();
+  });
+
+  it("corrects elapsed time earlier when a server timestamp is older than the local start", () => {
+    const mountedAt = new Date("2026-05-28T10:00:10.000Z");
+    vi.setSystemTime(mountedAt);
+    const { rerender } = render(<WorkingIndicator />);
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByText("5s")).toBeInTheDocument();
+
+    rerender(<WorkingIndicator startedAt={new Date(mountedAt.getTime() - 5000).toISOString()} />);
+
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(screen.getByText("10s")).toBeInTheDocument();
   });
 });

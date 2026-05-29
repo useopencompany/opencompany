@@ -1,5 +1,6 @@
 "use client";
 
+import { LoaderCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 export function formatElapsed(seconds: number): string {
@@ -18,9 +19,7 @@ export function WorkingIndicator({
   startedAt?: string | undefined;
   thinking?: boolean;
 }) {
-  return (
-    <WorkingIndicatorTimer key={startedAt ?? "local"} startedAt={startedAt} thinking={thinking} />
-  );
+  return <WorkingIndicatorTimer startedAt={startedAt} thinking={thinking} />;
 }
 
 function WorkingIndicatorTimer({
@@ -30,7 +29,11 @@ function WorkingIndicatorTimer({
   startedAt?: string | undefined;
   thinking: boolean;
 }) {
-  const [mountedAt] = useState(() => Date.now());
+  const [startedAtMs] = useState(() => {
+    const parsed = parseTimestamp(startedAt);
+    return parsed ?? Date.now();
+  });
+  const [earliestStartedAtMs, setEarliestStartedAtMs] = useState(startedAtMs);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -40,21 +43,32 @@ function WorkingIndicatorTimer({
     return () => clearInterval(interval);
   }, []);
 
-  const elapsed =
-    startedAt === undefined ? elapsedBetween(mountedAt, now) : elapsedSince(startedAt, now);
+  useEffect(() => {
+    const parsed = parseTimestamp(startedAt);
+    if (parsed === null) return;
+    setEarliestStartedAtMs((current) => Math.min(current, parsed));
+  }, [startedAt]);
+
+  const elapsed = elapsedBetween(earliestStartedAtMs, now);
 
   return (
     <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5">
       {thinking ? <span className="thinking-shimmer text-[13px] font-medium">Thinking</span> : null}
+      <LoaderCircle
+        aria-hidden="true"
+        size={13}
+        strokeWidth={1.9}
+        className="shrink-0 text-ink-subtle motion-safe:animate-spin"
+      />
       <span className="text-[12px] tabular-nums text-ink-subtle">{formatElapsed(elapsed)}</span>
     </div>
   );
 }
 
-function elapsedSince(startedAt: string | undefined, now: number) {
-  const startMs = startedAt ? new Date(startedAt).getTime() : Number.NaN;
-  if (!Number.isFinite(startMs)) return 0;
-  return elapsedBetween(startMs, now);
+function parseTimestamp(value: string | undefined) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function elapsedBetween(startMs: number, endMs: number) {
