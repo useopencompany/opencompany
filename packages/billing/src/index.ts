@@ -116,6 +116,14 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cacheWriteUsdMicrosPerMillion: 6_250_000,
     outputUsdMicrosPerMillion: 25_000_000,
   },
+  "anthropic/claude-opus-4.8": {
+    model: "anthropic/claude-opus-4.8",
+    provider: "anthropic",
+    inputUsdMicrosPerMillion: 5_000_000,
+    cachedInputUsdMicrosPerMillion: 500_000,
+    cacheWriteUsdMicrosPerMillion: 6_250_000,
+    outputUsdMicrosPerMillion: 25_000_000,
+  },
   "google/gemini-3-flash": {
     model: "google/gemini-3-flash",
     provider: "google",
