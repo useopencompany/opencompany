@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -57,6 +58,7 @@ import {
 } from "@/lib/agent-sessions/runtime-events";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
@@ -682,14 +684,76 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   );
 }
 
-function AssistantMarkdown({ content }: { content: string }) {
+function AssistantMarkdown({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
+  const ref = useStreamingMarkdownAppendAnimation(content, streaming);
+
   return (
-    <div className="session-markdown">
+    <div ref={ref} className="session-markdown" data-streaming={streaming ? "true" : undefined}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
   );
+}
+
+function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const previousContentRef = useRef("");
+  const lastAnimationAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const animationRef = useRef<Animation | null>(null);
+
+  useEffect(() => {
+    const previousContent = previousContentRef.current;
+    previousContentRef.current = content;
+
+    if (!streaming || !shouldAnimateStreamingAppend(previousContent, content)) return;
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    const now = performance.now();
+    if (now - lastAnimationAtRef.current < STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS) return;
+
+    const element = ref.current;
+    if (!element || typeof element.animate !== "function") return;
+    const animatedElement =
+      element.lastElementChild instanceof HTMLElement ? element.lastElementChild : element;
+
+    lastAnimationAtRef.current = now;
+    animationRef.current?.cancel();
+    const animation = animatedElement.animate(
+      [
+        { opacity: 0.9, filter: "blur(0.2px)" },
+        { opacity: 1, filter: "blur(0)" },
+      ],
+      {
+        duration: 160,
+        easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+      },
+    );
+    animationRef.current = animation;
+    animation.onfinish = () => {
+      if (animationRef.current === animation) animationRef.current = null;
+    };
+  }, [content, streaming]);
+
+  useEffect(
+    () => () => {
+      animationRef.current?.cancel();
+    },
+    [],
+  );
+
+  return ref;
 }
 
 // Copy only the user-visible answer text — reasoning is hidden by default in
@@ -764,9 +828,7 @@ function AssistantMessageContent({
 
   // A still-running tool call on a stopped session reads as failed — it never returned.
   const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
-    part.type === "tool-call" &&
-    part.toolCall.status === "running" &&
-    !sessionCanGenerate
+    part.type === "tool-call" && part.toolCall.status === "running" && !sessionCanGenerate
       ? {
           type: "tool-call",
           toolCall: {
@@ -793,9 +855,7 @@ function AssistantMessageContent({
     : normalizedParts.length;
   const collapseWork =
     isCompleted &&
-    normalizedParts
-      .slice(0, deliverableStart)
-      .some((part) => part.type === "tool-call");
+    normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
 
   const groups: RenderGroup[] = [];
   normalizedParts.forEach((part, index) => {
@@ -816,6 +876,7 @@ function AssistantMessageContent({
 
     groups.push({ kind: "part", part, key: `${index}` });
   });
+  const streamingTextGroupKey = isRunning ? findLatestTextGroupKey(groups) : null;
 
   return (
     <div className="space-y-3">
@@ -823,7 +884,13 @@ function AssistantMessageContent({
         if (group.kind === "part") {
           const part = group.part;
           if (part.type === "text") {
-            return <AssistantMarkdown key={group.key} content={part.text} />;
+            return (
+              <AssistantMarkdown
+                key={group.key}
+                content={part.text}
+                streaming={group.key === streamingTextGroupKey}
+              />
+            );
           }
           if (part.type === "reasoning") {
             return (
@@ -870,6 +937,20 @@ function AssistantMessageContent({
       ) : null}
     </div>
   );
+}
+
+function findLatestTextGroupKey(
+  groups: Array<
+    | { kind: "part"; part: AssistantTurnPart; key: string }
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
+    | { kind: "process"; parts: AssistantTurnPart[]; key: string }
+  >,
+) {
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group?.kind === "part" && group.part.type === "text") return group.key;
+  }
+  return null;
 }
 
 // The trailing run of text parts is the deliverable headline; everything before it is the
@@ -958,7 +1039,7 @@ function ReasoningSummaryCard({
   durationSeconds,
 }: {
   text: string | undefined;
-  durationSeconds: number;
+  durationSeconds: number | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasSummary = Boolean(text);
@@ -1524,7 +1605,8 @@ function formatTokenCount(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
-function formatThinkingDuration(seconds: number) {
+function formatThinkingDuration(seconds: number | undefined) {
+  if (seconds === undefined) return "Thought";
   const duration = Math.max(Math.round(seconds), 1);
   return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
 }

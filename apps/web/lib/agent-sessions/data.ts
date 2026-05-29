@@ -266,7 +266,6 @@ export async function loadAgentSessionDetailForWorkspace(
   const messagesWithUsage = messages.map((message) => ({
     ...message,
     outputReasoningTokens: usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0,
-    thinkingDurationSeconds: readMessageDurationSeconds(message.createdAt, message.completedAt),
   }));
   const toolUsage = rollup.toolUsage;
   const cost = rollup.cost;
@@ -327,11 +326,6 @@ export async function loadAgentSessionStreamCredentialForWorkspace(
       : null;
 
   return { runnerUrl, streamToken };
-}
-
-function readMessageDurationSeconds(startedAt: Date, completedAt: Date | null) {
-  if (!completedAt || completedAt < startedAt) return undefined;
-  return Math.max(Math.round((completedAt.getTime() - startedAt.getTime()) / 1000), 1);
 }
 
 function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {

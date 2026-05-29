@@ -13,6 +13,7 @@ import {
   removeSidebarSession,
   type SidebarSessionPayload,
   seedSessionQueries,
+  serializeAgentSessionDetail,
   sessionQueryKeys,
   upsertSidebarSession,
 } from "@/lib/agent-sessions/payload";
@@ -618,7 +619,15 @@ describe("session payload cache helpers", () => {
 
   it("parses session API payloads at the fetch boundary", () => {
     const sessionDetail = detail({
-      events: [{ id: 1, type: "session.status", messageId: null, payload: { status: "running" } }],
+      events: [
+        {
+          id: 1,
+          type: "session.status",
+          messageId: null,
+          payload: { status: "running" },
+          createdAt: "2026-05-24T10:00:01.000Z",
+        },
+      ],
       messages: [{ id: "msg_1", role: "user", content: "Ship it", status: "completed" }],
     });
 
@@ -636,6 +645,38 @@ describe("session payload cache helpers", () => {
     ).toEqual({
       runnerUrl: "https://runner.example.com",
       streamToken: "token",
+    });
+  });
+
+  it("serializes runtime event timestamps in session details", () => {
+    const base = detail();
+    const serialized = serializeAgentSessionDetail({
+      usage: base.usage,
+      toolUsage: base.toolUsage,
+      cost: base.cost,
+      runnerUrl: base.runnerUrl,
+      related: { parent: null, children: [] },
+      session: {
+        ...base.session,
+        abortRequestedAt: null,
+        createdAt: new Date("2026-05-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-24T10:00:02.000Z"),
+      },
+      messages: [],
+      events: [
+        {
+          id: 1,
+          type: "message.reasoning_delta",
+          messageId: "msg_1",
+          payload: { messageId: "msg_1", delta: "Thinking" },
+          createdAt: new Date("2026-05-24T10:00:01.000Z"),
+        },
+      ],
+    });
+
+    expect(serialized.events[0]).toMatchObject({
+      id: 1,
+      createdAt: "2026-05-24T10:00:01.000Z",
     });
   });
 

@@ -86,6 +86,7 @@ import {
 } from "./session-lifecycle";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-dispatcher";
+import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
 
 export {
   buildAmpCommand,
@@ -110,6 +111,7 @@ export {
   throwIfStreamErrorPart,
 } from "./stream-helpers";
 export { createHostedToolBudget, executeRuntimeTool } from "./tool-dispatcher";
+export { createToolStartCoordinator } from "./tool-start-coordinator";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
@@ -293,6 +295,7 @@ async function runMessageTurn(input: {
       },
     });
 
+    const toolStartCoordinator = createToolStartCoordinator();
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -307,6 +310,7 @@ async function runMessageTurn(input: {
       repository: row.repository,
       signal: ctx.controller.signal,
       checkAbort,
+      toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
       delegateToAgent: createAgentDelegationHandler({
@@ -338,6 +342,7 @@ async function runMessageTurn(input: {
         observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       },
       assistantMessageId,
+      toolStartCoordinator,
       checkAbort,
       // Stop at the next model-step boundary if the user steered this run with a new
       // message. In-flight tool calls in the current step still finish and persist.
@@ -744,6 +749,7 @@ export async function runAfterSession(input: {
       },
     });
 
+    const toolStartCoordinator = createToolStartCoordinator();
     const tools = createToolSet({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -759,6 +765,7 @@ export async function runAfterSession(input: {
       repository: row.repository,
       signal: ctx.controller.signal,
       checkAbort,
+      toolStartCoordinator,
       observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
       toolBudget: createHostedToolBudget(),
     });
@@ -782,6 +789,7 @@ export async function runAfterSession(input: {
           observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
         },
         assistantMessageId,
+        toolStartCoordinator,
         checkAbort,
       });
 
@@ -2027,6 +2035,7 @@ async function streamAssistantResponse(input: {
     };
   };
   assistantMessageId: string;
+  toolStartCoordinator: ToolStartCoordinator;
   checkAbort: () => Promise<void>;
   extraStopConditions?: StopCondition<ToolSet>[];
 }) {
@@ -2037,6 +2046,7 @@ async function streamAssistantResponse(input: {
     runLeaseId: input.ctx.leaseId,
     runLeaseOwner: input.ctx.leaseOwner,
     ...input.mcpContext,
+    toolStartCoordinator: input.toolStartCoordinator,
   });
   try {
     const result = streamText({
@@ -2071,6 +2081,7 @@ async function streamAssistantResponse(input: {
         exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
         signal: input.ctx.controller.signal,
         checkAbort: input.checkAbort,
+        toolStartCoordinator: input.toolStartCoordinator,
       }),
     );
   } finally {

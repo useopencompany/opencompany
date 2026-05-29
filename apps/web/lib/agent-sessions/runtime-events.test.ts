@@ -196,7 +196,6 @@ describe("applyRuntimeEventToState", () => {
     expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
       status: "failed",
       completedAt: expect.any(String),
-      thinkingDurationSeconds: expect.any(Number),
     });
   });
 
@@ -787,12 +786,16 @@ describe("buildAssistantTurnParts", () => {
     );
 
     expect(parts).toEqual([
-      { type: "reasoning", text: "Checked the relevant files first.", durationSeconds: 1 },
+      {
+        type: "reasoning",
+        text: "Checked the relevant files first.",
+        durationSeconds: undefined,
+      },
       { type: "text", text: "Final answer" },
     ]);
   });
 
-  it("shows a reasoning marker with turn duration when usage has reasoning tokens but no summary", () => {
+  it("shows a reasoning marker without duration when usage has reasoning tokens but no timed events", () => {
     const parts = buildAssistantTurnParts(
       {
         id: "msg_assistant",
@@ -811,7 +814,62 @@ describe("buildAssistantTurnParts", () => {
     );
 
     expect(parts).toEqual([
-      { type: "reasoning", durationSeconds: 3, text: undefined },
+      { type: "reasoning", durationSeconds: undefined, text: undefined },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("sums timed reasoning windows without counting tool or text time", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        outputReasoningTokens: 74,
+        createdAt: "2026-05-22T13:00:00.000Z",
+        completedAt: "2026-05-22T13:00:20.000Z",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Final answer" }],
+        },
+      },
+      [
+        event(
+          1,
+          "message.reasoning_delta",
+          { messageId: "msg_assistant", delta: "Think 1" },
+          "2026-05-22T13:00:01.000Z",
+        ),
+        event(
+          2,
+          "tool.started",
+          { messageId: "msg_assistant", toolCallId: "call_1" },
+          "2026-05-22T13:00:04.000Z",
+        ),
+        event(
+          3,
+          "tool.completed",
+          { messageId: "msg_assistant", toolCallId: "call_1" },
+          "2026-05-22T13:00:14.000Z",
+        ),
+        event(
+          4,
+          "message.reasoning_delta",
+          { messageId: "msg_assistant", delta: "Think 2" },
+          "2026-05-22T13:00:15.000Z",
+        ),
+        event(
+          5,
+          "message.delta",
+          { messageId: "msg_assistant", delta: "Final answer" },
+          "2026-05-22T13:00:17.000Z",
+        ),
+      ],
+    );
+
+    expect(parts).toEqual([
+      { type: "reasoning", durationSeconds: 5, text: undefined },
       { type: "text", text: "Final answer" },
     ]);
   });
@@ -820,36 +878,63 @@ describe("buildAssistantTurnParts", () => {
     let state = initialState();
     state = applyRuntimeEventToState(
       state,
-      event(1, "message.created", {
-        messageId: "msg_assistant",
-        role: "assistant",
-      }),
+      event(
+        1,
+        "message.created",
+        {
+          messageId: "msg_assistant",
+          role: "assistant",
+        },
+        "2026-05-22T13:00:00.000Z",
+      ),
     );
 
     const createdAt = state.messages.find((message) => message.id === "msg_assistant")?.createdAt;
     state = applyRuntimeEventToState(
       state,
-      event(2, "session.usage", {
-        messageId: "msg_assistant",
-        inputTokens: 100,
-        outputTokens: 25,
-        outputTextTokens: 20,
-        outputReasoningTokens: 5,
-        totalTokens: 125,
-      }),
+      event(
+        2,
+        "message.reasoning_delta",
+        {
+          messageId: "msg_assistant",
+          delta: "Thinking",
+        },
+        "2026-05-22T13:00:01.000Z",
+      ),
     );
     state = applyRuntimeEventToState(
       state,
-      event(3, "message.completed", {
-        messageId: "msg_assistant",
-        content: "Done",
-      }),
+      event(
+        3,
+        "session.usage",
+        {
+          messageId: "msg_assistant",
+          inputTokens: 100,
+          outputTokens: 25,
+          outputTextTokens: 20,
+          outputReasoningTokens: 5,
+          totalTokens: 125,
+        },
+        "2026-05-22T13:00:04.000Z",
+      ),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(
+        4,
+        "message.completed",
+        {
+          messageId: "msg_assistant",
+          content: "Done",
+        },
+        "2026-05-22T13:00:10.000Z",
+      ),
     );
 
     expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
       createdAt,
-      completedAt: expect.any(String),
-      thinkingDurationSeconds: expect.any(Number),
+      completedAt: "2026-05-22T13:00:10.000Z",
+      thinkingDurationSeconds: 3,
     });
   });
 
@@ -1115,6 +1200,11 @@ describe("buildBackgroundActivityParts", () => {
   });
 });
 
-function event(id: number, type: string, payload: Record<string, unknown>): RuntimeEvent {
-  return { id, type, payload, messageId: null };
+function event(
+  id: number,
+  type: string,
+  payload: Record<string, unknown>,
+  createdAt?: string,
+): RuntimeEvent {
+  return { id, type, payload, messageId: null, ...(createdAt ? { createdAt } : {}) };
 }

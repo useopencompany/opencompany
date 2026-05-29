@@ -310,6 +310,9 @@ body {
   border: 0;
   border-top: 1px solid #deded9;
 }
+.session-markdown[data-streaming="true"] {
+  will-change: opacity, filter;
+}
 
 .thinking-shimmer {
   color: transparent;
@@ -331,6 +334,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .session-markdown[data-streaming="true"] {
+    will-change: auto;
+  }
+
   .thinking-shimmer {
     animation: none;
     color: var(--color-ink-muted);

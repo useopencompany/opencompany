@@ -1,7 +1,8 @@
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
-import { appendRuntimeEventForLease } from "./lease-writes";
+import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
 import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordStepUsage } from "./usage-recorder";
 
 // Live assistant text is streamed to the UI as throttled `message.delta` events.
@@ -24,6 +25,7 @@ export async function collectAssistantStream(input: {
   exposeReasoningSummary: boolean;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
+  toolStartCoordinator: ToolStartCoordinator;
 }) {
   let assistantContent = "";
   const assistantReplayParts: AssistantReplayPart[] = [];
@@ -105,6 +107,27 @@ export async function collectAssistantStream(input: {
     if (part.type === "tool-call") {
       await flushReasoningDelta(true);
       await flushTextDelta(true);
+      const toolStart = input.toolStartCoordinator.read(part.toolCallId) ?? {
+        toolCallId: part.toolCallId,
+        name: part.toolName,
+        input: part.input,
+      };
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          leaseId: input.runLeaseId,
+          leaseOwner: input.runLeaseOwner,
+          type: "tool.started",
+          payload: {
+            messageId: input.assistantMessageId,
+            toolCallId: part.toolCallId,
+            name: toolStart.name,
+            input: toolStart.input,
+          },
+        }),
+      );
+      input.toolStartCoordinator.markStarted(part.toolCallId);
     }
 
     if (part.type === "finish-step") {

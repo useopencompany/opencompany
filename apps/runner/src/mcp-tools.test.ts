@@ -4,6 +4,7 @@ import type { AgentConfig } from "@opencompany/agent-runtime";
 import { jsonSchema, type ToolSet } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpToolSet } from "./mcp-tools";
+import { createToolStartCoordinator } from "./tool-start-coordinator";
 
 const db = vi.hoisted(() => ({
   queryResults: [] as unknown[][],
@@ -159,7 +160,8 @@ describe("createMcpToolSet", () => {
       },
     });
 
-    const mcpTools = await createMcpToolSet(baseInput());
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
     const linearTool = (mcpTools.tools as ToolSet).linear__create_issue;
     await linearTool?.onInputAvailable?.({
       input: { title: "Fix login" },
@@ -167,6 +169,12 @@ describe("createMcpToolSet", () => {
       messages: [],
       abortSignal: new AbortController().signal,
     });
+    expect(toolStartCoordinator.read("call_123")).toEqual({
+      toolCallId: "call_123",
+      name: "linear__create_issue",
+      input: { title: "Fix login" },
+    });
+    toolStartCoordinator.markStarted("call_123");
     const output = await linearTool?.execute?.(
       { title: "Fix login" },
       {
@@ -178,7 +186,7 @@ describe("createMcpToolSet", () => {
 
     expect(output).toEqual({ identifier: "OC-123" });
     expect(execute).toHaveBeenCalledWith({ title: "Fix login" }, { toolCallId: "call_123" });
-    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+    expect(leaseWrites.appendRuntimeEventForLease).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "tool.started" }),
     );
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
@@ -239,8 +247,16 @@ describe("createMcpToolSet", () => {
       },
     });
 
-    const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig));
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig, toolStartCoordinator));
     const slackTool = (mcpTools.tools as ToolSet).slack__search;
+    await slackTool?.onInputAvailable?.({
+      input: { query: "launch" },
+      toolCallId: "call_slack",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_slack");
     const output = await slackTool?.execute?.(
       { query: "launch" },
       {
@@ -290,7 +306,10 @@ describe("createMcpToolSet", () => {
   });
 });
 
-function baseInput(config: AgentConfig = agentConfig) {
+function baseInput(
+  config: AgentConfig = agentConfig,
+  toolStartCoordinator = createToolStartCoordinator(),
+) {
   return {
     sessionId: "ses_123",
     assistantMessageId: "msg_123",
@@ -300,6 +319,7 @@ function baseInput(config: AgentConfig = agentConfig) {
     agentConfig: config,
     signal: new AbortController().signal,
     checkAbort: async () => {},
+    toolStartCoordinator,
   };
 }
 

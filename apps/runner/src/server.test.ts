@@ -231,7 +231,7 @@ describe("SSE formatting", () => {
     };
 
     expect(formatSseEvent(event)).toBe(
-      'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123"}\n\n',
+      'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123","createdAt":"2026-05-22T00:00:00.000Z"}\n\n',
     );
   });
 

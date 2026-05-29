@@ -26,6 +26,7 @@ import {
   createAssistantMessageForLease,
   createHostedToolBudget,
   createKnownSecretRedactor,
+  createToolStartCoordinator,
   executeRuntimeTool,
   MAX_MODEL_STEPS,
   normalizeReasoningSummary,
@@ -1591,6 +1592,7 @@ describe("stream error handling", () => {
       exposeReasoningSummary: false,
       signal: new AbortController().signal,
       checkAbort: async () => {},
+      toolStartCoordinator: createToolStartCoordinator(),
     });
 
     expect(result).toMatchObject({
@@ -1599,6 +1601,59 @@ describe("stream error handling", () => {
       lastFinishReason: "tool-calls",
       lastRawFinishReason: "tool_calls",
       lastStepEndedWithToolCalls: true,
+    });
+  });
+
+  it("persists pending text before tool starts even when tool input arrives first", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const toolStartCoordinator = createToolStartCoordinator();
+    toolStartCoordinator.record({
+      toolCallId: "call_search",
+      name: "exa_search",
+      input: { query: "YC agent discussion" },
+    });
+
+    async function* stream() {
+      yield { type: "text-delta", text: "I'll search, then distill the" } as never;
+      yield {
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "exa_search",
+        input: { query: "fallback input" },
+      } as never;
+      yield { type: "text-delta", text: " themes." } as never;
+    }
+
+    await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      exposeReasoningSummary: false,
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      toolStartCoordinator,
+    });
+
+    const events = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
+    expect(events.map((event) => event.type)).toEqual([
+      "message.delta",
+      "tool.started",
+      "message.delta",
+    ]);
+    expect(events[0]).toMatchObject({
+      payload: { delta: "I'll search, then distill the" },
+    });
+    expect(events[1]).toMatchObject({
+      payload: {
+        toolCallId: "call_search",
+        name: "exa_search",
+        input: { query: "YC agent discussion" },
+      },
     });
   });
 

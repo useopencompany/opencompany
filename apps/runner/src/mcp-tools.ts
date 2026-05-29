@@ -27,6 +27,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
 const LINEAR_MCP_SERVER_KEY = "linear";
@@ -103,6 +104,7 @@ type McpToolContext = {
   agentConfig: AgentConfig;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
+  toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: {
     workspaceId?: string;
     userId?: string;
@@ -169,24 +171,15 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
             toolCallId: string;
           }) => {
             await input.checkAbort();
-            await requireLeaseWrite(
-              appendRuntimeEventForLease({
-                sessionId: input.sessionId,
-                messageId: input.assistantMessageId,
-                leaseId: input.runLeaseId,
-                leaseOwner: input.runLeaseOwner,
-                type: "tool.started",
-                payload: {
-                  messageId: input.assistantMessageId,
-                  toolCallId,
-                  name: prefixedName,
-                  input: toolInput,
-                },
-              }),
-            );
+            input.toolStartCoordinator.record({
+              toolCallId,
+              name: prefixedName,
+              input: toolInput,
+            });
           },
-          execute: async (toolInput: unknown, options: { toolCallId: string }) =>
-            executeMcpTool({
+          execute: async (toolInput: unknown, options: { toolCallId: string }) => {
+            await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+            return executeMcpTool({
               ...input,
               mcpServer: provider.key,
               toolCallId: options.toolCallId,
@@ -194,7 +187,8 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
               rawToolName: rawName,
               execute: mcpTool.execute,
               args: toolInput,
-            }),
+            });
+          },
         } as never) as ToolSet[string];
       }
     }
