@@ -1,6 +1,6 @@
 import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PersistedRuntimeEvent } from "./events";
+import type { PersistedRuntimeEvent, RuntimeEventForStream } from "./events";
 import { enqueueRunnerJob } from "./jobs";
 import {
   createServer,
@@ -251,6 +251,22 @@ describe("SSE formatting", () => {
     expect(dataLine).toBeDefined();
     const data = JSON.parse(dataLine!.trim());
     expect(data.createdAt).toBe(createdAt.toISOString());
+  });
+
+  it("formats transient runtime events without advancing Last-Event-ID", () => {
+    const event: RuntimeEventForStream = {
+      id: null,
+      sessionId: "ses_abc",
+      messageId: "msg_abc",
+      type: "message.delta",
+      payload: { messageId: "msg_abc", delta: "hello" },
+      createdAt: new Date("2026-05-28T12:00:01.500Z"),
+      transient: true,
+    };
+
+    expect(formatSseEvent(event)).toBe(
+      'data: {"id":null,"type":"message.delta","payload":{"messageId":"msg_abc","delta":"hello"},"messageId":"msg_abc","createdAt":"2026-05-28T12:00:01.500Z","transient":true}\n\n',
+    );
   });
 
   it("formats stream errors as named SSE events", () => {

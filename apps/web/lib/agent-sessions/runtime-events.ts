@@ -14,11 +14,12 @@ export type SessionMessage = {
 };
 
 export type RuntimeEvent = {
-  id: number;
+  id: number | null;
   type: string;
   messageId: string | null;
   payload: Record<string, unknown>;
   createdAt?: string;
+  transient?: boolean;
 };
 
 export type SessionUsageSummary = {
@@ -82,7 +83,9 @@ export function applyRuntimeEventToState(
   state: SessionRuntimeState,
   event: RuntimeEvent,
 ): SessionRuntimeState {
-  if (state.events.some((item) => item.id === event.id)) return state;
+  if (typeof event.id === "number" && state.events.some((item) => item.id === event.id)) {
+    return state;
+  }
 
   let next: SessionRuntimeState = {
     ...state,
@@ -399,7 +402,7 @@ export function isReasoningInProgress(message: SessionMessage, events: RuntimeEv
   let latest: RuntimeEvent | null = null;
   for (const event of events) {
     if (!eventBelongsToMessage(event, message.id)) continue;
-    if (!latest || event.id > latest.id) latest = event;
+    if (!latest || eventOrderValue(event) > eventOrderValue(latest)) latest = event;
   }
   return latest?.type === "message.reasoning_delta";
 }
@@ -599,17 +602,17 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
     const call = getCall({ runId, messageId });
     if (event.type === "after_session.started") {
       call.status = "running";
-      call.startedEventId = event.id;
+      call.startedEventId = event.id ?? null;
     }
     if (event.type === "after_session.completed") {
       call.status = "completed";
       call.outputPreview = "Completed";
-      call.completedEventId = event.id;
+      call.completedEventId = event.id ?? null;
     }
     if (event.type === "after_session.failed") {
       call.status = "failed";
       call.outputPreview = readString(event.payload.message) || "After-session run failed.";
-      call.completedEventId = event.id;
+      call.completedEventId = event.id ?? null;
     }
   }
 
@@ -624,7 +627,11 @@ function readEventKey(value: unknown) {
 
 function eventOrderForMessage(events: RuntimeEvent[], messageId: string) {
   const event = events.find((item) => item.messageId === messageId);
-  return event?.id;
+  return event?.id ?? undefined;
+}
+
+function eventOrderValue(event: RuntimeEvent) {
+  return event.id ?? Number.MAX_SAFE_INTEGER;
 }
 
 export function buildRuntimeToolCallsForMessage(
@@ -696,7 +703,7 @@ export function buildRuntimeToolCallsForMessage(
       if (brainPath) {
         call.brainPath = brainPath;
       }
-      call.startedEventId = event.id;
+      call.startedEventId = event.id ?? null;
     }
 
     if (event.type === "tool.completed" || event.type === "tool.failed") {
@@ -705,13 +712,15 @@ export function buildRuntimeToolCallsForMessage(
       call.status = event.type === "tool.failed" ? "failed" : "completed";
       call.outputPreview =
         event.type === "tool.failed"
-          ? formatRuntimePreview(event.payload.error || event.payload.output)
-          : formatRuntimePreview(event.payload.output);
+          ? formatRuntimePreview(
+              event.payload.outputPreview || event.payload.error || event.payload.output,
+            )
+          : formatRuntimePreview(event.payload.outputPreview || event.payload.output);
       const brainPath = brainPathForToolPayload(call.name, event.payload.output);
       if (brainPath) {
         call.brainPath = brainPath;
       }
-      call.completedEventId = event.id;
+      call.completedEventId = event.id ?? null;
     }
   }
 
@@ -720,14 +729,16 @@ export function buildRuntimeToolCallsForMessage(
     const latestRunningCall = [...calls]
       .reverse()
       .find(
-        (call) => call.status === "running" && (call.startedEventId ?? 0) < latestSessionError.id,
+        (call) =>
+          call.status === "running" &&
+          (call.startedEventId ?? 0) < (latestSessionError.id ?? Number.MAX_SAFE_INTEGER),
       );
     if (latestRunningCall) {
       latestRunningCall.status = "failed";
       latestRunningCall.outputPreview =
         formatRuntimePreview({ message: readString(latestSessionError.payload.message) }) ||
         "The session failed before this tool returned a result.";
-      latestRunningCall.completedEventId = latestSessionError.id;
+      latestRunningCall.completedEventId = latestSessionError.id ?? null;
     }
   }
 
@@ -795,13 +806,13 @@ function latestSessionErrorAfter(events: RuntimeEvent[], messageId: string) {
 
   for (const event of events) {
     if (eventBelongsToMessage(event, messageId) && event.type === "tool.started") {
-      latestToolEventId = Math.max(latestToolEventId, event.id);
+      latestToolEventId = Math.max(latestToolEventId, event.id ?? 0);
     }
   }
 
   let latestError: RuntimeEvent | null = null;
   for (const event of events) {
-    if (event.type === "session.error" && event.id > latestToolEventId) {
+    if (event.type === "session.error" && (event.id ?? 0) > latestToolEventId) {
       latestError = event;
     }
   }

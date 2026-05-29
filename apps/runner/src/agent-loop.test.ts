@@ -39,7 +39,7 @@ import {
 } from "./agent-loop";
 import { loadGitHubWorkRepository } from "./amp-tool";
 import type { RunnerEnv } from "./env";
-import { appendRuntimeEvent } from "./events";
+import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 
 const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
@@ -89,6 +89,7 @@ vi.mock("@opencompany/observability/braintrust", () => braintrustMocks);
 
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
+  publishTransientRuntimeEvent: vi.fn((event) => ({ ...event, id: null, transient: true })),
 }));
 
 vi.mock("./github", async (importOriginal) => {
@@ -1467,8 +1468,7 @@ describe("usage recording", () => {
       stderr: "err [redacted]",
       exitCode: 0,
     });
-    expect(appendRuntimeEvent).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(publishTransientRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "command.output",
         payload: expect.objectContaining({
@@ -1476,8 +1476,7 @@ describe("usage recording", () => {
         }),
       }),
     );
-    expect(appendRuntimeEvent).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(publishTransientRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "command.output",
         payload: expect.objectContaining({
@@ -1829,16 +1828,14 @@ describe("stream error handling", () => {
       toolStartCoordinator,
     });
 
-    const events = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
-    expect(events.map((event) => event.type)).toEqual([
-      "message.delta",
-      "tool.started",
-      "message.delta",
-    ]);
-    expect(events[0]).toMatchObject({
+    const transientEvents = vi.mocked(publishTransientRuntimeEvent).mock.calls.map((call) => call[0]);
+    const durableEvents = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
+    expect(transientEvents.map((event) => event.type)).toEqual(["message.delta", "message.delta"]);
+    expect(durableEvents.map((event) => event.type)).toEqual(["tool.started"]);
+    expect(transientEvents[0]).toMatchObject({
       payload: { delta: "I'll search, then distill the" },
     });
-    expect(events[1]).toMatchObject({
+    expect(durableEvents[0]).toMatchObject({
       payload: {
         toolCallId: "call_search",
         name: "exa_search",

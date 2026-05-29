@@ -3,7 +3,8 @@
 The runner is the long-lived data plane for agent sessions. The web app remains the
 authenticated control plane: it creates session/message rows, emits Inngest events, and renders
 the session UI. The runner receives internal start/message/abort calls, owns the model loop, uses
-E2B for sandbox execution, and writes typed events to Postgres for SSE replay.
+E2B for sandbox execution, writes durable turn boundaries to Postgres, and publishes live-only
+deltas to active SSE clients.
 
 This page is the quickest orientation point for resuming runner work.
 
@@ -21,7 +22,7 @@ The V1 loop is intentionally custom and narrow:
 - Start or reconnect an E2B sandbox for the session.
 - Stream model output through Vercel AI Gateway with AI SDK Core.
 - Execute only the approved local tools inside the session workdir.
-- Append every meaningful state change to Postgres so the browser can replay from `Last-Event-ID`.
+- Persist durable state changes to Postgres while keeping high-frequency stream deltas live-only.
 
 ## Package map
 
@@ -71,7 +72,7 @@ Important details:
 - Runtime tools are created from `CORE_TOOL_DEFINITIONS` and then filtered by the agent's allowed
   tool names.
 - Complete validated tool input emits `tool.started`; streamed partial tool input is not persisted.
-- Tool execution calls `runSandboxTool()` and emits `command.output`, `file.changed`,
+- Tool execution calls `runSandboxTool()` and publishes transient `command.output`, emits `file.changed`,
   `tool.completed`, and recoverable `tool.failed` results.
 - `edit_file` applies ordered exact-string replacements atomically to existing files. It is the
   preferred tool for targeted file changes; `write_file` remains for creates and intentional
@@ -124,9 +125,11 @@ Keep path validation in the runtime/sandbox layer rather than relying on model b
 
 ## Event model
 
-`agent_session_events` is the durable stream. Events are append-only and have monotonic numeric ids.
-The browser reconnects with `after`/`Last-Event-ID` semantics and the runner replays any missed
-events before waiting for new ones.
+`agent_session_events` stores durable session boundaries and audit-worthy runtime facts. Events are
+append-only and have monotonic numeric ids. High-frequency assistant text, reasoning, and command
+output deltas are transient SSE messages with `id: null`; they are not inserted into Postgres and
+are not replayed after reconnect. On reconnect/open, the browser refetches session detail from the
+web app to catch durable state it missed while disconnected.
 
 The SSE endpoint intentionally sends default `message` events with a JSON body that includes the
 runtime `type`. Do not send custom SSE event names unless the client is updated too; the current UI
@@ -138,11 +141,16 @@ Common event types:
 - `message.created`
 - `message.completed`
 - `tool.started`
-- `command.output`
 - `file.changed`
 - `tool.completed`
 - `tool.failed`
 - `session.error`
+
+Common transient-only event types:
+
+- `message.delta`
+- `message.reasoning_delta`
+- `command.output`
 
 ## Database tables
 
@@ -151,7 +159,8 @@ Runner state is stored in these tables:
 - `agent_sessions`: ownership, status, model, sandbox id, workdir, lease id, abort flag, and last
   error.
 - `agent_session_messages`: durable user, assistant, and tool messages.
-- `agent_session_events`: append-only event log for replayable streaming.
+- `agent_session_events`: append-only durable event log for status, message/tool boundaries, usage,
+  errors, file changes, and archive/after-session lifecycle.
 
 The schema is in `packages/db/src/schema.ts`. Use `bun run db:generate` for schema changes and
 `bun run db:migrate` to apply them to `DATABASE_URL`.
@@ -275,7 +284,7 @@ without fighting request-duration limits.
   process. A multi-instance deployment should enforce leases in Postgres before running messages.
 - Abort is process-local for active streams and persisted as a session flag, but deeper cooperative
   cancellation inside long sandbox commands is still minimal.
-- The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. This is intentional for V1
-  because durable replay from Postgres is the product-critical stream contract.
+- The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. Live deltas are ephemeral;
+  final transcript state is recovered from persisted messages and durable boundary events.
 - E2B workspace hydration is capability-scoped. Full workspace repo cloning is intentionally not
   part of V1; add explicit file mounts later if agents need broader project access.

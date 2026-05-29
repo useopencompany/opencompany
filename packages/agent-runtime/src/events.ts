@@ -51,7 +51,13 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "tool.completed";
-      payload: { messageId: string; toolCallId: string; name: string; output: unknown };
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        name: string;
+        outputPreview?: string;
+        output?: unknown;
+      };
     }
   | {
       type: "tool.failed";
@@ -59,6 +65,7 @@ export type AgentRuntimeEvent =
         messageId: string;
         toolCallId: string;
         name: string;
+        outputPreview?: string;
         output?: unknown;
         error: { message: string; code: string; recoverable: boolean };
       };

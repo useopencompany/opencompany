@@ -9,24 +9,25 @@ type Input = {
   runnerUrl: string | null;
   streamToken: string | null;
   sessionId: string;
-  afterId: number;
   knownEventIds: number[];
   onEvent: (event: RuntimeEvent) => void;
+  onOpen?: () => void;
 };
 
 export function useSessionEventStream({
   runnerUrl,
   streamToken,
   sessionId,
-  afterId,
   knownEventIds,
   onEvent,
+  onOpen,
 }: Input) {
   const [status, setStatus] = useState<SessionEventStreamStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPageVisible, setIsPageVisible] = useState(readPageVisible);
   const [isOnline, setIsOnline] = useState(readOnline);
   const onEventRef = useRef(onEvent);
+  const onOpenRef = useRef(onOpen);
   const processedEventIds = useRef(new Set(knownEventIds));
   const sourceRef = useRef<EventSource | null>(null);
   const pageVisibleRef = useRef(isPageVisible);
@@ -35,6 +36,10 @@ export function useSessionEventStream({
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
+
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  }, [onOpen]);
 
   useEffect(() => {
     pageVisibleRef.current = isPageVisible;
@@ -83,7 +88,6 @@ export function useSessionEventStream({
 
     const url = new URL(`${runnerUrl}/sessions/${sessionId}/events`);
     url.searchParams.set("token", streamToken);
-    if (afterId > 0) url.searchParams.set("after", String(afterId));
 
     const source = new EventSource(url);
     sourceRef.current = source;
@@ -91,6 +95,7 @@ export function useSessionEventStream({
     source.onopen = () => {
       setStatus("open");
       setErrorMessage(null);
+      onOpenRef.current?.();
     };
 
     source.onmessage = (message) => {
@@ -100,8 +105,10 @@ export function useSessionEventStream({
         setErrorMessage("The live session stream sent an unreadable event.");
         return;
       }
-      if (processedEventIds.current.has(event.id)) return;
-      processedEventIds.current.add(event.id);
+      if (typeof event.id === "number") {
+        if (processedEventIds.current.has(event.id)) return;
+        processedEventIds.current.add(event.id);
+      }
       onEventRef.current(event);
     };
 
@@ -125,7 +132,8 @@ export function useSessionEventStream({
       if (sourceRef.current === source) sourceRef.current = null;
       source.close();
     };
-    // Connect once per token/session. The initial afterId is encoded in the URL for replay.
+    // Connect once per token/session. EventSource owns reconnects; session detail is refetched
+    // on open because the runner stream is live-only and does not replay missed DB events.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runnerUrl, streamToken, sessionId]);
 
@@ -165,7 +173,12 @@ function parseRuntimeEvent(data: string): RuntimeEvent | null {
     const value = JSON.parse(data) as unknown;
     if (!value || typeof value !== "object") return null;
     const record = value as Record<string, unknown>;
-    if (typeof record.id !== "number" || typeof record.type !== "string") return null;
+    if (
+      !(typeof record.id === "number" || record.id === null) ||
+      typeof record.type !== "string"
+    ) {
+      return null;
+    }
     if (!record.payload || typeof record.payload !== "object") return null;
     const event: RuntimeEvent = {
       id: record.id,
@@ -173,6 +186,7 @@ function parseRuntimeEvent(data: string): RuntimeEvent | null {
       messageId: typeof record.messageId === "string" ? record.messageId : null,
       payload: record.payload as Record<string, unknown>,
     };
+    if (record.transient === true) event.transient = true;
     if (typeof record.createdAt === "string") event.createdAt = record.createdAt;
     return event;
   } catch {

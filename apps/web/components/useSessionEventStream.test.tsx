@@ -50,7 +50,6 @@ describe("useSessionEventStream", () => {
         runnerUrl: "http://localhost:3040",
         streamToken: "token",
         sessionId: "ses_123",
-        afterId: 10,
         knownEventIds: [],
         onEvent: vi.fn(),
       }),
@@ -87,7 +86,6 @@ describe("useSessionEventStream", () => {
         runnerUrl: "http://localhost:3040",
         streamToken: "token",
         sessionId: "ses_123",
-        afterId: 10,
         knownEventIds: [],
         onEvent: vi.fn(),
       }),
@@ -105,6 +103,77 @@ describe("useSessionEventStream", () => {
     });
 
     expect(result.current.status).toBe("stale");
+  });
+
+  it("applies idless transient events without deduping them", () => {
+    const onEvent = vi.fn();
+    renderHook(() =>
+      useSessionEventStream({
+        runnerUrl: "http://localhost:3040",
+        streamToken: "token",
+        sessionId: "ses_123",
+        knownEventIds: [],
+        onEvent,
+      }),
+    );
+
+    const message = new MessageEvent("message", {
+      data: JSON.stringify({
+        id: null,
+        type: "message.delta",
+        messageId: "msg_123",
+        payload: { messageId: "msg_123", delta: "hi" },
+        transient: true,
+      }),
+    });
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.(message);
+      MockEventSource.instances[0]?.onmessage?.(message);
+    });
+
+    expect(onEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes only persisted numeric events", () => {
+    const onEvent = vi.fn();
+    renderHook(() =>
+      useSessionEventStream({
+        runnerUrl: "http://localhost:3040",
+        streamToken: "token",
+        sessionId: "ses_123",
+        knownEventIds: [7],
+        onEvent,
+      }),
+    );
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({
+            id: 7,
+            type: "message.completed",
+            messageId: "msg_123",
+            payload: { messageId: "msg_123" },
+          }),
+        }),
+      );
+      MockEventSource.instances[0]?.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({
+            id: 8,
+            type: "message.completed",
+            messageId: "msg_456",
+            payload: { messageId: "msg_456" },
+          }),
+        }),
+      );
+    });
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 8, type: "message.completed" }),
+    );
   });
 });
 
