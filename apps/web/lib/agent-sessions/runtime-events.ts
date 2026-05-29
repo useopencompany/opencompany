@@ -18,6 +18,7 @@ export type RuntimeEvent = {
   type: string;
   messageId: string | null;
   payload: Record<string, unknown>;
+  createdAt?: string;
 };
 
 export type SessionUsageSummary = {
@@ -62,6 +63,7 @@ export type SessionRuntimeState = {
 export type RuntimeToolCall = {
   id: string;
   name: string;
+  label?: string | undefined;
   status: "running" | "completed" | "failed";
   inputPreview: string;
   activityPreview: string;
@@ -73,7 +75,7 @@ export type RuntimeToolCall = {
 
 export type AssistantTurnPart =
   | { type: "text"; text: string }
-  | { type: "reasoning"; text: string | undefined; durationSeconds: number }
+  | { type: "reasoning"; text: string | undefined; durationSeconds?: number | undefined }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -94,7 +96,10 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
-        messages: status === "failed" ? stopRunningAssistantMessages(next.messages) : next.messages,
+        messages:
+          status === "failed"
+            ? stopRunningAssistantMessages(next.messages, next.events)
+            : next.messages,
       };
     }
   }
@@ -105,7 +110,7 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
-      messages: stopRunningAssistantMessages(next.messages),
+      messages: stopRunningAssistantMessages(next.messages, next.events),
     };
   }
 
@@ -165,6 +170,18 @@ export function applyRuntimeEventToState(
     }
   }
 
+  if (event.type === "session.delegated_usage") {
+    const usage = isRecord(event.payload.usage) ? event.payload.usage : {};
+    const cost = isRecord(event.payload.cost) ? event.payload.cost : {};
+    const toolUsage = isRecord(event.payload.toolUsage) ? event.payload.toolUsage : {};
+    next = {
+      ...next,
+      usage: addUsageSummary(next.usage, usage),
+      cost: addCostRollup(next.cost, cost),
+      toolUsage: addToolUsageRollup(next.toolUsage, toolUsage),
+    };
+  }
+
   if (event.type === "message.created") {
     const messageId = readString(event.payload.messageId);
     const role = readString(event.payload.role);
@@ -181,7 +198,7 @@ export function applyRuntimeEventToState(
             content: optionalString(event.payload.content) ?? "",
             status,
             internal: readBoolean(event.payload.internal),
-            createdAt: new Date().toISOString(),
+            createdAt: event.createdAt ?? new Date().toISOString(),
           },
         ],
       };
@@ -208,7 +225,7 @@ export function applyRuntimeEventToState(
     const content = optionalString(event.payload.content);
     const modelMessage = isRecord(event.payload.modelMessage) ? event.payload.modelMessage : null;
     if (messageId) {
-      const completedAt = new Date().toISOString();
+      const completedAt = event.createdAt ?? new Date().toISOString();
       next = {
         ...next,
         messages: next.messages.map((message) =>
@@ -218,10 +235,13 @@ export function applyRuntimeEventToState(
                 status: "completed",
                 content: content ?? message.content,
                 completedAt,
-                thinkingDurationSeconds: readThinkingDurationSeconds({
-                  ...message,
-                  completedAt,
-                }),
+                thinkingDurationSeconds: computeThinkingDurationSeconds(
+                  {
+                    ...message,
+                    completedAt,
+                  },
+                  next.events,
+                ),
                 ...(modelMessage ? { modelMessage } : {}),
               }
             : message,
@@ -233,7 +253,7 @@ export function applyRuntimeEventToState(
   return next;
 }
 
-function stopRunningAssistantMessages(messages: SessionMessage[]) {
+function stopRunningAssistantMessages(messages: SessionMessage[], events: RuntimeEvent[]) {
   const completedAt = new Date().toISOString();
   return messages.map((message) =>
     message.role === "assistant" && message.status === "running"
@@ -243,7 +263,7 @@ function stopRunningAssistantMessages(messages: SessionMessage[]) {
           completedAt: message.completedAt ?? completedAt,
           thinkingDurationSeconds:
             message.thinkingDurationSeconds ??
-            readThinkingDurationSeconds({ ...message, completedAt }),
+            computeThinkingDurationSeconds({ ...message, completedAt }, events),
         }
       : message,
   );
@@ -314,8 +334,74 @@ function addCostSummary(
   };
 }
 
+function addCostRollup(
+  totals: SessionCostSummary,
+  payload: Partial<Record<keyof SessionCostSummary, unknown>>,
+): SessionCostSummary {
+  const providerCostUsdMicros = readNumber(payload.providerCostUsdMicros);
+  const platformFeeUsdMicros = readNumber(payload.platformFeeUsdMicros);
+  const totalCostUsdMicros = readNumber(
+    payload.totalCostUsdMicros ?? providerCostUsdMicros + platformFeeUsdMicros,
+  );
+  return {
+    providerCostUsdMicros: totals.providerCostUsdMicros + providerCostUsdMicros,
+    platformFeeUsdMicros: totals.platformFeeUsdMicros + platformFeeUsdMicros,
+    totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
+    modelCostUsdMicros: totals.modelCostUsdMicros + readNumber(payload.modelCostUsdMicros),
+    toolCostUsdMicros: totals.toolCostUsdMicros + readNumber(payload.toolCostUsdMicros),
+  };
+}
+
+function addToolUsageRollup(
+  totals: SessionToolUsageSummary,
+  payload: Record<string, unknown>,
+): SessionToolUsageSummary {
+  const rows = Array.isArray(payload.byProviderOperation) ? payload.byProviderOperation : [];
+  const byProviderOperation = new Map(
+    totals.byProviderOperation.map((item) => [`${item.provider}:${item.operation}`, { ...item }]),
+  );
+
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const provider = readString(row.provider);
+    const operation = readString(row.operation);
+    if (!provider || !operation) continue;
+    const key = `${provider}:${operation}`;
+    const current = byProviderOperation.get(key) ?? {
+      provider,
+      operation,
+      costUsdMicros: 0,
+      calls: 0,
+    };
+    current.costUsdMicros += readNumber(row.costUsdMicros);
+    current.calls += readNumber(row.calls);
+    byProviderOperation.set(key, current);
+  }
+
+  return {
+    totalCostUsdMicros: totals.totalCostUsdMicros + readNumber(payload.totalCostUsdMicros),
+    byProviderOperation: Array.from(byProviderOperation.values()).sort((left, right) =>
+      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
+    ),
+  };
+}
+
 export function isInspectableRuntimeEvent(event: RuntimeEvent) {
-  return event.type !== "message.delta";
+  return event.type !== "message.delta" && event.type !== "message.reasoning_delta";
+}
+
+// Reasoning is the model's current phase when the most recent event for a still-running
+// message is a reasoning delta. Visible text, tool, usage, or completion events arrive
+// afterward and flip this off; a later reasoning round (after a tool result) flips it back
+// on. `RuntimeEvent.id` is a monotonic ordinal, so "latest event" is well-defined.
+export function isReasoningInProgress(message: SessionMessage, events: RuntimeEvent[]): boolean {
+  if (message.status !== "running") return false;
+  let latest: RuntimeEvent | null = null;
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, message.id)) continue;
+    if (!latest || event.id > latest.id) latest = event;
+  }
+  return latest?.type === "message.reasoning_delta";
 }
 
 export function buildAssistantTurnParts(
@@ -337,7 +423,7 @@ export function buildAssistantTurnParts(
   const reasoningSummary = readReasoningSummary(events, message.id);
   const reasoningTokenCount = message.outputReasoningTokens ?? 0;
   const thinkingDurationSeconds =
-    message.thinkingDurationSeconds ?? readThinkingDurationSeconds(message);
+    message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const reasoningParts: AssistantTurnPart[] =
     reasoningSummary || reasoningTokenCount > 0
       ? [
@@ -365,12 +451,15 @@ export function buildAssistantTurnParts(
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
       const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
+      const toolName = readString(part.toolName) || "Tool call";
+      const label = matchingToolCall?.label ?? describeToolCall(toolName, part.input ?? part.args);
 
       turnParts.push({
         type: "tool-call",
         toolCall: {
           id: toolCallId,
-          name: readString(part.toolName) || "Tool call",
+          name: toolName,
+          ...(label ? { label } : {}),
           status: matchingToolCall?.status ?? "completed",
           inputPreview:
             formatRuntimePreview(part.input) ||
@@ -387,16 +476,51 @@ export function buildAssistantTurnParts(
       });
     }
 
-    return turnParts;
+    return normalizeAssistantTurnParts(turnParts);
   }
 
   const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById);
-  if (eventParts.length > 0) return [...reasoningParts, ...eventParts];
+  if (eventParts.length > 0) return normalizeAssistantTurnParts([...reasoningParts, ...eventParts]);
   if (reasoningParts.length > 0 && message.content) {
     return [...reasoningParts, { type: "text", text: message.content }];
   }
   if (reasoningParts.length > 0) return reasoningParts;
   return message.content ? [{ type: "text", text: message.content }] : [];
+}
+
+// Assistant text streams in across model steps, which produces two artifacts: a chunk
+// that begins with the previous sentence's closing punctuation ("…used" then
+// ". Might take…"), and short utterances that can read as run-ons. Move leading
+// continuation punctuation back onto the previous text part and drop parts left empty.
+const LEADING_CONTINUATION_PUNCTUATION = /^\s*([.,;:!?)\]}'"]+)/;
+
+function normalizeAssistantTurnParts(parts: AssistantTurnPart[]): AssistantTurnPart[] {
+  const result: AssistantTurnPart[] = [];
+  let lastTextIndex = -1;
+
+  for (const part of parts) {
+    if (part.type !== "text") {
+      result.push(part);
+      continue;
+    }
+
+    let text = part.text;
+    if (lastTextIndex >= 0) {
+      const match = text.match(LEADING_CONTINUATION_PUNCTUATION);
+      const previous = result[lastTextIndex];
+      if (match && previous?.type === "text") {
+        result[lastTextIndex] = { ...previous, text: `${previous.text}${match[1]}` };
+        text = text.slice(match[0].length);
+      }
+    }
+    text = text.replace(/^\s+/, "");
+    if (!text) continue;
+
+    result.push({ type: "text", text });
+    lastTextIndex = result.length - 1;
+  }
+
+  return result;
 }
 
 export function buildBackgroundActivityParts(
@@ -566,6 +690,7 @@ export function buildRuntimeToolCallsForMessage(
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
+      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
       call.inputPreview = formatRuntimePreview(event.payload.input) || call.inputPreview;
       const brainPath = brainPathForToolPayload(call.name, event.payload.input);
       if (brainPath) {
@@ -633,6 +758,14 @@ function buildEventAssistantTurnParts(
 
     if (event.type === "message.delta") {
       text += readString(event.payload.delta);
+      continue;
+    }
+
+    // A model step ends with a usage event. Treat it as an utterance boundary so the
+    // streaming view splits per-step text into separate blocks, matching the final
+    // (modelMessage-based) view instead of merging two utterances into one paragraph.
+    if (event.type === "session.usage") {
+      flushText();
       continue;
     }
 
@@ -795,12 +928,82 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .join("\n\n");
 }
 
-function readThinkingDurationSeconds(message: SessionMessage) {
+function readReasoningWindowDurationSeconds(message: SessionMessage, events: RuntimeEvent[]) {
+  let durationMs = 0;
+  let reasoningStartedAt: number | null = null;
+
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, message.id)) continue;
+
+    const eventAt = readTimestamp(event.createdAt);
+    if (!eventAt) continue;
+
+    if (event.type === "message.reasoning_delta") {
+      reasoningStartedAt ??= eventAt;
+      continue;
+    }
+
+    if (reasoningStartedAt !== null) {
+      if (eventAt > reasoningStartedAt) durationMs += eventAt - reasoningStartedAt;
+      reasoningStartedAt = null;
+    }
+  }
+
+  if (reasoningStartedAt !== null) {
+    const completedAt = readTimestamp(message.completedAt);
+    if (completedAt && completedAt > reasoningStartedAt) {
+      durationMs += completedAt - reasoningStartedAt;
+    }
+  }
+
+  if (durationMs <= 0) return undefined;
+  return Math.max(Math.round(durationMs / 1000), 1);
+}
+
+export function computeThinkingDurationSeconds(
+  message: SessionMessage,
+  events: RuntimeEvent[],
+): number {
+  const reasoningDurationSeconds = readReasoningWindowDurationSeconds(message, events);
+  if (reasoningDurationSeconds !== undefined) return reasoningDurationSeconds;
+
   const startedAt = readTimestamp(message.createdAt);
   const completedAt = readTimestamp(message.completedAt);
   if (!startedAt || !completedAt || completedAt < startedAt) return 1;
-  const durationSeconds = Math.round((completedAt - startedAt) / 1000);
-  return Math.max(durationSeconds, 1);
+
+  const totalMs = completedAt - startedAt;
+
+  // Pair tool.started with tool.completed/tool.failed for the same messageId+toolCallId,
+  // using event.createdAt timestamps. Unpaired tool.started events are ignored.
+  const startedByToolCallId = new Map<string, number>();
+  let toolMs = 0;
+
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, message.id)) continue;
+
+    if (event.type === "tool.started") {
+      const toolCallId = readString(event.payload.toolCallId);
+      const ts = readTimestamp(event.createdAt);
+      if (toolCallId && ts !== null) {
+        startedByToolCallId.set(toolCallId, ts);
+      }
+    }
+
+    if (event.type === "tool.completed" || event.type === "tool.failed") {
+      const toolCallId = readString(event.payload.toolCallId);
+      const ts = readTimestamp(event.createdAt);
+      if (toolCallId && ts !== null) {
+        const startTs = startedByToolCallId.get(toolCallId);
+        if (startTs !== undefined) {
+          toolMs += Math.max(ts - startTs, 0);
+          startedByToolCallId.delete(toolCallId);
+        }
+      }
+    }
+  }
+
+  const thinkingMs = Math.max(totalMs - toolMs, 0);
+  return Math.max(Math.round(thinkingMs / 1000), 1);
 }
 
 function readTimestamp(value: string | null | undefined) {
@@ -815,6 +1018,75 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function eventBelongsToMessage(event: RuntimeEvent, messageId: string) {
   return event.messageId === messageId || readString(event.payload.messageId) === messageId;
+}
+
+// Translate a raw tool name + input into a human one-liner ("Searching the web for …").
+// The raw tool name stays available on hover and in the expanded Input section.
+export function describeToolCall(name: string, input: unknown): string | undefined {
+  const record = isRecord(input) ? input : {};
+  const field = (key: string) => readString(record[key]).trim();
+
+  switch (name) {
+    case "exa_search":
+    case "exa_answer": {
+      const query = field("query");
+      return query ? `Searching the web for “${truncateLabelText(query)}”` : "Searching the web";
+    }
+    case "exa_contents":
+      return "Reading web sources";
+    case "web_fetch": {
+      const host = hostFromUrl(field("url"));
+      return host ? `Fetching ${host}` : "Fetching a web page";
+    }
+    case "read_file": {
+      const path = field("path");
+      return path ? `Reading ${path}` : "Reading a file";
+    }
+    case "list_files": {
+      const path = field("path");
+      return path ? `Listing ${path}` : "Listing files";
+    }
+    case "write_file": {
+      const path = field("path");
+      return path ? `Writing ${path}` : "Writing a file";
+    }
+    case "edit_file": {
+      const path = field("path");
+      return path ? `Editing ${path}` : "Editing a file";
+    }
+    case "git_diff":
+      return "Reviewing changes";
+    case "shell": {
+      const command = field("command");
+      return command ? `Running ${truncateLabelText(command)}` : "Running a command";
+    }
+    case "amp_coder":
+      return "Coding with Amp";
+    case "tool_help":
+      return "Checking tool help";
+    case "delegate_to_agent": {
+      const agent = field("agent");
+      return agent ? `Delegating to ${agent}` : "Delegating to an agent";
+    }
+    default:
+      return undefined;
+  }
+}
+
+function truncateLabelText(value: string) {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  const maxLength = 80;
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, maxLength - 1)}…`;
+}
+
+function hostFromUrl(url: string) {
+  if (!url) return "";
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
 }
 
 function formatRuntimePreview(value: unknown) {

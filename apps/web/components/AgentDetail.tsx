@@ -1,7 +1,13 @@
 "use client";
 
 import { serializeAgentFrontmatter } from "@opencompany/agent-runtime";
-import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentModelId,
+  AgentReference,
+  AgentToolId,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
@@ -14,8 +20,10 @@ import {
   GitBranch,
   Loader2,
   type LucideIcon,
+  MessagesSquare,
   PanelRight,
   Play,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -30,6 +38,7 @@ import {
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,
@@ -44,7 +53,7 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { updateAgent } from "@/lib/agents/actions";
+import { deleteAgent, updateAgent } from "@/lib/agents/actions";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
@@ -74,6 +83,19 @@ type OptimisticGitHubSync = {
 
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+
+// Duplicated from AgentsView.tsx — extracting to a shared module is tracked
+// as a follow-up cleanup. Without this re-throw, Next.js never gets to
+// navigate when a server action calls redirect().
+function isNextRedirectError(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest: unknown }).digest === "string" &&
+      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
 
 function getStoredInspectorCollapsed() {
   if (typeof window === "undefined") return true;
@@ -146,8 +168,10 @@ function AgentDetailContent({
   );
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -167,12 +191,14 @@ function AgentDetailContent({
         fallback: agent.config,
         selectedModelId,
         repositories: agent.githubIntegrationRepositories,
+        agents: agent.workspaceAgents,
         triggers: agent.config.triggers,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
       }),
     [
       agent.config,
       agent.githubIntegrationRepositories,
+      agent.workspaceAgents,
       content,
       hasEditorDraft,
       name,
@@ -180,6 +206,7 @@ function AgentDetailContent({
     ],
   );
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
+  const SelectedModelIcon = selectedModel.icon;
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
     agent.githubSyncStatus === optimisticGitHubSync.baseStatus &&
@@ -194,18 +221,22 @@ function AgentDetailContent({
     : agent.githubSyncError;
   const githubCommitSha = agent.githubCommitSha;
   const githubSyncedAt = agent.githubSyncedAt;
-  const mentionItems: AgentMentionItem[] = useMemo(
-    () =>
-      buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
-        includeMcpTools: agent.mcp.mcpEnabled && agent.mcp.linearConfigured,
-      }),
-    [
-      agent.brainPaths,
-      agent.mcp.linearConfigured,
-      agent.mcp.mcpEnabled,
-      agent.usableGitHubIntegrationRepositories,
-    ],
-  );
+  const mentionItems: AgentMentionItem[] = useMemo(() => {
+    const enabledMcpToolIds: AgentToolId[] = [];
+    if (agent.mcp.mcpEnabled && agent.mcp.linearConfigured) enabledMcpToolIds.push("linear");
+    if (agent.mcp.mcpEnabled && agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
+    return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
+      enabledMcpToolIds,
+      agents: agent.workspaceAgents,
+    });
+  }, [
+    agent.brainPaths,
+    agent.mcp.linearConfigured,
+    agent.mcp.mcpEnabled,
+    agent.mcp.slackConfigured,
+    agent.usableGitHubIntegrationRepositories,
+    agent.workspaceAgents,
+  ]);
 
   useEffect(() => {
     if (
@@ -385,7 +416,7 @@ function AgentDetailContent({
             >
               <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-[#ececea]/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <Brain size={12} strokeWidth={1.9} className="shrink-0" />
+                  <SelectedModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
                   <span className="truncate">{selectedModel.displayLabel}</span>
                 </span>
               </SelectTrigger>
@@ -399,11 +430,21 @@ function AgentDetailContent({
                   return (
                     <SelectGroup key={group}>
                       <SelectLabel>{group}</SelectLabel>
-                      {models.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.displayLabel}
-                        </SelectItem>
-                      ))}
+                      {models.map((model) => {
+                        const ModelIcon = model.icon;
+                        return (
+                          <SelectItem key={model.id} value={model.id}>
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <ModelIcon
+                                size={12.5}
+                                strokeWidth={1.85}
+                                className="shrink-0 text-ink-muted"
+                              />
+                              <span className="truncate">{model.displayLabel}</span>
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                       {index === 0 ? <SelectSeparator /> : null}
                     </SelectGroup>
                   );
@@ -458,6 +499,7 @@ function AgentDetailContent({
           modelIsExplicit={configPreview.modelIsExplicit}
           tools={configPreview.tools}
           brain={configPreview.brain}
+          agents={configPreview.agents}
           afterSession={configPreview.config.afterSession}
           saveState={saveState}
           githubStatus={githubSyncStatus}
@@ -465,8 +507,48 @@ function AgentDetailContent({
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
+
+      <DeleteAgentDialog
+        agentName={agent.name}
+        isOpen={showDeleteDialog}
+        isPending={isDeleting}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={() => {
+          startDeleteTransition(async () => {
+            try {
+              const result = await deleteAgent(agent.id);
+              if (!result.ok) {
+                setShowDeleteDialog(false);
+                showError(result.error, "Could not delete agent");
+                return;
+              }
+              // Close the dialog before navigating so it doesn't stay open on
+              // the success path (mirrors the error branch above).
+              setShowDeleteDialog(false);
+              queryClient.setQueryData<AgentListItemPayload[]>(
+                agentQueryKeys.list(workspaceId),
+                (current) => (current ?? []).filter((item) => item.id !== agent.id),
+              );
+              router.push("/agents");
+            } catch (err) {
+              // Let Next.js redirect digests bubble — currentWorkspace() throws
+              // NEXT_REDIRECT for unauthenticated / incomplete-onboarding users
+              // and the framework needs to see it to navigate.
+              if (isNextRedirectError(err)) throw err;
+              // Server actions can throw (e.g. non-admin requireAdmin guard);
+              // surface as a toast instead of bubbling to the error boundary.
+              setShowDeleteDialog(false);
+              showError(
+                err instanceof Error ? err.message : "Could not delete agent",
+                "Could not delete agent",
+              );
+            }
+          });
+        }}
+      />
 
       <button
         type="button"
@@ -513,6 +595,7 @@ function AgentInspector({
   modelIsExplicit,
   tools,
   brain,
+  agents,
   afterSession,
   saveState,
   githubStatus,
@@ -520,6 +603,7 @@ function AgentInspector({
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  onDeleteClick,
 }: {
   name: string;
   path: string | null;
@@ -527,6 +611,7 @@ function AgentInspector({
   modelIsExplicit: boolean;
   tools: AgentTool[];
   brain: Array<{ path: string; type: "file" | "folder" }>;
+  agents: AgentReference[];
   afterSession: AgentConfig["afterSession"];
   saveState: SaveState;
   githubStatus: string;
@@ -534,6 +619,7 @@ function AgentInspector({
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  onDeleteClick: () => void;
 }) {
   return (
     <div className="space-y-8">
@@ -578,6 +664,30 @@ function AgentInspector({
         ) : (
           <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
             No brain paths mounted
+          </div>
+        )}
+      </div>
+
+      <div>
+        <InspectorHeader
+          label="Agents"
+          countLabel={`${agents.length} ${agents.length === 1 ? "agent" : "agents"}`}
+        />
+        {agents.length > 0 ? (
+          <div className="space-y-2">
+            {agents.map((agent) => (
+              <ConfigItem
+                key={agent.path}
+                icon={MessagesSquare}
+                label={agent.name}
+                description={agent.path}
+                tone="tool"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+            No agents selected
           </div>
         )}
       </div>
@@ -629,6 +739,17 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+
+      <div className="border-t border-[#e4e4e0] pt-6">
+        <button
+          type="button"
+          onClick={onDeleteClick}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff0ed]"
+        >
+          <Trash2 size={13} strokeWidth={1.9} />
+          Delete agent
+        </button>
+      </div>
     </div>
   );
 }
@@ -843,6 +964,7 @@ function buildConfigPreview({
   fallback,
   selectedModelId,
   repositories,
+  agents,
   triggers,
   useDerivedConfig,
 }: {
@@ -851,6 +973,7 @@ function buildConfigPreview({
   fallback: AgentConfig;
   selectedModelId: AgentModelId;
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
+  agents: AgentReference[];
   triggers: AgentConfig["triggers"];
   useDerivedConfig: boolean;
 }) {
@@ -860,6 +983,7 @@ function buildConfigPreview({
         content,
         model: selectedModelId,
         repositories,
+        agents,
         preferredRepositories: fallback.integrations.github.repositories.filter(
           (repository) => repository.binding,
         ),
@@ -885,12 +1009,14 @@ function buildConfigPreview({
     modelIsExplicit: config.model.name !== DEFAULT_MODEL_ID,
     tools,
     brain: config.brain,
+    agents: config.agents ?? [],
     config,
     fullConfig: serializeAgentFrontmatter({
       title: config.title,
       model: config.model.name,
       tools: config.tools,
       brain: config.brain,
+      agents: config.agents ?? [],
       integrations: config.integrations,
       triggers: config.triggers,
     }),

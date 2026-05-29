@@ -40,6 +40,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Vercel web envs | Integration GitHub App OAuth client secret. |
 | `GITHUB_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign GitHub integration OAuth state. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel web envs | Base64-encoded 32-byte key used to encrypt workspace provider credentials stored in Neon. |
+| `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
 ## Vercel Web
@@ -65,6 +66,8 @@ Set these in Vercel Production.
 | `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Yes | Integration app OAuth client secret. |
 | `GITHUB_INTEGRATION_STATE_SECRET` | Yes | Dedicated secret used to sign setup state. Generate a separate 32+ character value. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte key used to encrypt workspace provider and MCP credentials in Neon. Generate with `openssl rand -base64 32`. |
+| `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Callback URL: `${NEXT_PUBLIC_APP_URL}/api/mcp/slack/callback`. |
+| `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Stored only in env, not in Neon. |
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |
@@ -89,6 +92,10 @@ Set these in Vercel Production.
 | `OBSERVABILITY_LOG_LEVEL` | No | Structured logger level. |
 | `OBSERVABILITY_TIMING` | No | Verbose timing logs. |
 | `OPENCOMPANY_TIMING` | No | Legacy timing alias. |
+| `BRAINTRUST_ENABLED` | No | Enables Braintrust runner tracing when set to `true`, `1`, `on`, or `yes`. |
+| `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
+| `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
+| `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENV` | No | Browser observability environment. |
@@ -113,6 +120,8 @@ Set these in the Render `opencompany-runner` service.
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | MCP only | Decrypts workspace MCP bearer tokens for dynamic MCP tools. Must match Vercel. |
+| `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
+| `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
 | `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |
@@ -126,6 +135,10 @@ Set these in the Render `opencompany-runner` service.
 | `OBSERVABILITY_RELEASE` | No | Manual runner release override. Render git SHA wins when available. |
 | `OBSERVABILITY_LOG_LEVEL` | No | Runner log level. |
 | `OBSERVABILITY_TIMING` | No | Verbose timing logs. |
+| `BRAINTRUST_ENABLED` | No | Enables Braintrust runner tracing when set to `true`, `1`, `on`, or `yes`. |
+| `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
+| `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
+| `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
 
 Render also injects `PORT` and `RENDER_GIT_COMMIT`; do not set them manually unless debugging.
 
@@ -216,9 +229,10 @@ Useful local-only vars:
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 
 For local GitHub integration testing, `bun run dev` starts ngrok automatically when the local ngrok
-CLI is authenticated. It sets `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_WORKOS_REDIRECT_URI`, and appends
-the tunnel origin to `RUNNER_ALLOWED_ORIGINS` in `.env.local` before starting the app. Use a stable
-ngrok domain so the GitHub App and WorkOS dashboard settings do not need to change on every run.
+CLI is authenticated. It sets `NEXT_PUBLIC_APP_URL` and appends the tunnel origin to
+`RUNNER_ALLOWED_ORIGINS` in `.env.local` before starting the app. Local WorkOS redirects stay on
+`http://localhost:3000/auth/callback`; use a stable ngrok domain for the GitHub App callback so that
+setting does not need to change on every run.
 
 ## Checks
 

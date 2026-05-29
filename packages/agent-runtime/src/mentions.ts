@@ -9,6 +9,7 @@ import type {
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
+  AgentReference,
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
@@ -26,6 +27,11 @@ export type AgentConfigDerivationRepository = {
   fullName: string;
   defaultBranch: string;
   binding?: AgentGitHubRepositoryBinding;
+};
+
+export type AgentConfigDerivationAgent = {
+  path: string;
+  name: string;
 };
 
 export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = AGENT_TOOL_CATALOG;
@@ -60,6 +66,12 @@ export function repositoryIdForFullName(fullName: string) {
   return normalizeRepositoryId(fullName);
 }
 
+export function agentMentionIdForPath(path: string) {
+  const normalized = normalizeAgentPath(path);
+  if (!normalized) return null;
+  return `agent/${normalized.slice("agents/".length, -".agent".length)}`;
+}
+
 export function extractMentionIds(body: string) {
   const ids: string[] = [];
 
@@ -82,14 +94,16 @@ export function extractConfigFromMentions(body: string): {
   model: AgentModelId;
   tools: AgentToolId[];
   brain: AgentBrainReference[];
+  agents: AgentReference[];
   afterSession?: AgentConfig["afterSession"];
 } {
-  const mentions = collectBodyMentions(body, []);
+  const mentions = collectBodyMentions(body, [], [], []);
   const afterSession = extractAfterSessionConfig(body);
   return {
     model: mentions.model ?? DEFAULT_MODEL_ID,
     tools: mentions.tools,
     brain: mentions.brain,
+    agents: mentions.agents,
     ...(afterSession ? { afterSession } : {}),
   };
 }
@@ -108,11 +122,17 @@ export function deriveAgentConfigFromBody(input: {
   body: string;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
+  agents?: AgentConfigDerivationAgent[];
   preferredRepositories?: AgentConfigDerivationRepository[];
   triggers?: AgentTriggerConfig[];
 }): { body: string; config: AgentConfig } {
   const body = normalizeAgentBody(input.body);
-  const mentions = collectBodyMentions(body, input.repositories, input.preferredRepositories ?? []);
+  const mentions = collectBodyMentions(
+    body,
+    input.repositories,
+    input.preferredRepositories ?? [],
+    input.agents ?? [],
+  );
   const afterSession = extractAfterSessionConfig(body);
   const model =
     MODEL_BY_ID.get(mentions.model ?? input.model ?? DEFAULT_MODEL_ID) ??
@@ -131,6 +151,7 @@ export function deriveAgentConfigFromBody(input: {
       },
       tools,
       brain: mentions.brain,
+      agents: mentions.agents,
       ...(afterSession ? { afterSession } : {}),
       integrations: {
         github: {
@@ -160,11 +181,12 @@ export function toConfigTool(
     };
   }
 
-  if (tool.id === "linear") {
+  if (tool.type === "mcp") {
+    if (!tool.server) throw new Error(`MCP tool ${tool.id} is missing a server binding.`);
     return {
-      id: "linear",
+      id: tool.server,
       type: "mcp",
-      server: "linear",
+      server: tool.server,
       label: tool.label,
       description: tool.description,
     };
@@ -182,15 +204,24 @@ function collectBodyMentions(
   body: string,
   repositories: AgentConfigDerivationRepository[],
   preferredRepositories: AgentConfigDerivationRepository[] = [],
+  agents: AgentConfigDerivationAgent[] = [],
 ) {
   const repositoryCatalog = repositoryCatalogForDerivation(repositories, preferredRepositories);
+  const agentCatalog = agentCatalogForDerivation(agents);
   let model: AgentModelId | null = null;
   let activeRepository: AgentGitHubRepositoryConfig | null = null;
   const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
   const tools = new Set<AgentToolId>();
   const brain = new Map<string, AgentBrainReference>();
+  const agentReferences = new Map<string, AgentReference>();
 
   for (const rawId of extractMentionIds(body)) {
+    const agentReference = agentCatalog.byMentionId.get(normalizeAgentMentionId(rawId));
+    if (agentReference) {
+      agentReferences.set(agentReference.path, agentReference);
+      continue;
+    }
+
     const brainReference = brainReferenceFromMention(rawId);
     if (brainReference) {
       brain.set(brainReference.path, brainReference);
@@ -227,9 +258,27 @@ function collectBodyMentions(
     model,
     tools: Array.from(tools),
     brain: Array.from(brain.values()),
+    agents: Array.from(agentReferences.values()),
     repositories: Array.from(repositoriesById.values()),
     activeRepository,
   };
+}
+
+function agentCatalogForDerivation(agents: AgentConfigDerivationAgent[]) {
+  const byMentionId = new Map<string, AgentReference>();
+
+  for (const agent of agents) {
+    const path = normalizeAgentPath(agent.path);
+    if (!path) continue;
+    const mentionId = agentMentionIdForPath(path);
+    if (!mentionId) continue;
+    byMentionId.set(normalizeAgentMentionId(mentionId), {
+      path,
+      name: normalizeAgentName(agent.name),
+    });
+  }
+
+  return { byMentionId };
 }
 
 function repositoryCatalogForDerivation(
@@ -351,6 +400,39 @@ function syncTriggersToRepository(
 
 function normalizeTitle(title: string) {
   const trimmed = title.trim();
+  return trimmed.length > 0 ? trimmed : "Untitled agent";
+}
+
+function normalizeAgentMentionId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\.agent$/i, "");
+}
+
+function normalizeAgentPath(value: string) {
+  const trimmed = value.trim().replace(/^\/+/, "");
+  const path = trimmed.startsWith("agents/") ? trimmed : `agents/${trimmed}`;
+  const withExtension = path.endsWith(".agent") ? path : `${path}.agent`;
+  const normalized = withExtension.replace(/\/{2,}/g, "/");
+  const slug = normalized.slice("agents/".length, -".agent".length);
+
+  if (
+    !normalized.startsWith("agents/") ||
+    !normalized.endsWith(".agent") ||
+    !slug ||
+    slug.includes("/") ||
+    slug.includes("..") ||
+    slug.startsWith(".")
+  ) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function normalizeAgentName(value: string) {
+  const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : "Untitled agent";
 }
 

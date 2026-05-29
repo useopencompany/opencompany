@@ -7,10 +7,21 @@ import {
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
+import {
+  logBraintrustCurrentSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
-import { readSandboxBrainSnapshot, runAmpCoderTool } from "./amp-tool";
+import {
+  buildGitHubCommandEnv,
+  createKnownSecretRedactor,
+  loadGitHubWorkRepository,
+  readSandboxBrainSnapshot,
+  runAmpCoderTool,
+} from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
+import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
@@ -30,6 +41,7 @@ import {
 } from "./model-messages";
 import { RunAbortError, RunLeaseLostError, withRunControlChecks } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
@@ -60,6 +72,13 @@ type FailedToolOutput = {
   };
 };
 
+type DelegateToAgent = (input: {
+  agent?: string;
+  sessionId?: string;
+  prompt: string;
+  toolCallId: string;
+}) => Promise<unknown>;
+
 class RecoverableToolError extends Error {
   code: string;
 
@@ -85,8 +104,10 @@ export function createToolSet(input: {
   repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
   checkAbort: () => Promise<void>;
+  toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
 }) {
   const tools: ToolSet = {};
 
@@ -96,24 +117,15 @@ export function createToolSet(input: {
       inputSchema: jsonSchema(definition.parameters as Parameters<typeof jsonSchema>[0]),
       onInputAvailable: async ({ input: toolInput, toolCallId }) => {
         await input.checkAbort();
-        await requireLeaseWrite(
-          appendRuntimeEventForLease({
-            sessionId: input.sessionId,
-            messageId: input.assistantMessageId,
-            leaseId: input.runLeaseId,
-            leaseOwner: input.runLeaseOwner,
-            type: "tool.started",
-            payload: {
-              messageId: input.assistantMessageId,
-              toolCallId,
-              name: definition.name,
-              input: toolInput,
-            },
-          }),
-        );
+        input.toolStartCoordinator.record({
+          toolCallId,
+          name: definition.name,
+          input: toolInput,
+        });
       },
-      execute: async (toolInput, options) =>
-        executeRuntimeTool({
+      execute: async (toolInput, options) => {
+        await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+        return executeRuntimeTool({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
@@ -133,7 +145,9 @@ export function createToolSet(input: {
           checkAbort: input.checkAbort,
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
-        }),
+          delegateToAgent: input.delegateToAgent,
+        });
+      },
     }) as ToolSet[string];
   }
 
@@ -196,6 +210,37 @@ export async function executeRuntimeTool(input: {
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
+}) {
+  return traceBraintrustStep(
+    `tool.${input.definition.name}`,
+    () => executeRuntimeToolWithTracing(input),
+    toolTraceMetadata(input),
+    { type: "tool", input: input.args },
+  );
+}
+
+async function executeRuntimeToolWithTracing(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean;
+  workspaceId?: string;
+  agentConfig?: AgentConfig;
+  toolCallId: string;
+  definition: RuntimeToolDefinition;
+  args: unknown;
+  getSandbox: () => Promise<SandboxHandle>;
+  workdir: string;
+  env: RunnerEnv;
+  enabledTools: RuntimeToolName[];
+  repository?: WorkspaceRepository | null | undefined;
+  signal: AbortSignal;
+  checkAbort: () => Promise<void>;
+  observabilityContext?: ToolObservabilityContext | undefined;
+  toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
 }) {
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
@@ -218,6 +263,19 @@ export async function executeRuntimeTool(input: {
         usage = result.usage;
         return result.output;
       }
+      if (input.definition.kind === "internal") {
+        if (input.definition.name !== "delegate_to_agent") {
+          throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
+        }
+        const args = readDelegateToAgentArgs(input.args);
+        if (!input.delegateToAgent) {
+          throw new RecoverableToolError(
+            "Agent delegation is not available in this run.",
+            "agent_delegation_unavailable",
+          );
+        }
+        return input.delegateToAgent({ ...args, toolCallId: input.toolCallId });
+      }
 
       preflightSandboxToolArgs({
         name: input.definition.name,
@@ -230,7 +288,7 @@ export async function executeRuntimeTool(input: {
         if (!input.workspaceId || !input.agentConfig) {
           throw new Error("AMP requires workspace and agent configuration context.");
         }
-        return runAmpCoderTool({
+        const ampResult = await runAmpCoderTool({
           sandbox: activeSandbox,
           workdir: input.workdir,
           args: input.args,
@@ -261,16 +319,31 @@ export async function executeRuntimeTool(input: {
             );
           },
         });
+        if (ampResult.usage) {
+          usage = ampResult.usage;
+        }
+        return ampResult;
       }
       const brainSnapshotBefore =
         input.definition.name === "shell"
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
+          : null;
+      const shellGitHubAuth =
+        input.definition.name === "shell"
+          ? await resolveShellGitHubAuth({
+              workspaceId: input.workspaceId,
+              agentConfig: input.agentConfig,
+              toolCallId: input.toolCallId,
+            })
           : null;
       const sandboxOutput = await runSandboxTool({
         sandbox: activeSandbox,
         workdir: input.workdir,
         name: input.definition.name,
         args: input.args,
+        ...(shellGitHubAuth
+          ? { envs: shellGitHubAuth.env, redactOutput: shellGitHubAuth.redact }
+          : {}),
         onOutput: async (stream, delta) => {
           await input.checkAbort();
           await requireLeaseWrite(
@@ -304,6 +377,19 @@ export async function executeRuntimeTool(input: {
       throw error;
     }
 
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: {
+        session_id: input.sessionId,
+        message_id: input.assistantMessageId,
+        tool_call_id: input.toolCallId,
+        tool_name: input.definition.name,
+        tool_kind: input.definition.kind,
+        sandbox_id: sandboxIdForCapture,
+        model_provider: input.observabilityContext?.modelProvider,
+        model_name: input.observabilityContext?.modelName,
+      },
+    });
     captureException(error, {
       event: "opencompany.runner_tool_failed",
       workspace_id: input.observabilityContext?.workspaceId,
@@ -441,7 +527,80 @@ export async function executeRuntimeTool(input: {
     );
   }
 
+  logBraintrustCurrentSpan({
+    output,
+    metadata: {
+      ...toolTraceMetadata(input),
+      tool_message_id: toolMessageId,
+      failed: Boolean(failedOutput),
+    },
+  });
+
   return output;
+}
+
+function toolTraceMetadata(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  toolCallId: string;
+  definition: RuntimeToolDefinition;
+  observabilityContext?: ToolObservabilityContext | undefined;
+}) {
+  return {
+    session_id: input.sessionId,
+    message_id: input.assistantMessageId,
+    tool_call_id: input.toolCallId,
+    tool_name: input.definition.name,
+    tool_kind: input.definition.kind,
+    model_provider: input.observabilityContext?.modelProvider,
+    model_name: input.observabilityContext?.modelName,
+  };
+}
+
+async function resolveShellGitHubAuth(input: {
+  workspaceId?: string | undefined;
+  agentConfig?: AgentConfig | undefined;
+  toolCallId: string;
+}) {
+  if (!input.workspaceId || !input.agentConfig) return null;
+
+  const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
+  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
+
+  const repository =
+    input.agentConfig.integrations.github.repositories.find(
+      (candidate) => candidate.id === ampTool.repository,
+    ) ?? null;
+  if (!repository) {
+    throw new Error(`GitHub repository binding ${ampTool.repository} was not found.`);
+  }
+
+  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+  const githubToken = await getGitHubWorkInstallationToken({
+    installationId: integrationRepository.installationId,
+    repositoryFullName: repository.fullName,
+  });
+  if (!githubToken) {
+    throw new Error(
+      "GitHub App credentials are required to run shell commands in a GitHub work repository.",
+    );
+  }
+
+  const githubAuthHeader = gitAuthHeader(githubToken);
+  return {
+    env: buildGitHubCommandEnv({
+      githubAuthHeader,
+      githubToken,
+      toolCallId: input.toolCallId,
+    }),
+    redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+  };
+}
+
+function gitAuthHeader(token: string) {
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64",
+  )}`;
 }
 
 function throwIfAborted(signal: AbortSignal) {
@@ -512,6 +671,43 @@ function buildFailedToolOutput(error: unknown): FailedToolOutput {
       code: error instanceof RecoverableToolError ? error.code : "tool_execution_failed",
       recoverable: true,
     },
+  };
+}
+
+function braintrustError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return { message: String(error) };
+}
+
+function readDelegateToAgentArgs(args: unknown) {
+  const record = isRecord(args) ? args : {};
+  const agent = typeof record.agent === "string" ? record.agent.trim() : "";
+  const sessionId = typeof record.sessionId === "string" ? record.sessionId.trim() : "";
+  const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+
+  if (Boolean(agent) === Boolean(sessionId)) {
+    throw new RecoverableToolError(
+      "Pass exactly one of agent or sessionId to delegate_to_agent.",
+      "invalid_tool_input",
+    );
+  }
+  if (!prompt) {
+    throw new RecoverableToolError(
+      "Tool argument prompt must be a non-empty string.",
+      "invalid_tool_input",
+    );
+  }
+
+  return {
+    ...(agent ? { agent } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    prompt,
   };
 }
 

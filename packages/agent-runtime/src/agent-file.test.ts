@@ -98,6 +98,27 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Slack MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Slack research",
+      body: "Search workspace context with @slack.",
+    });
+
+    expect(source).toContain("id: slack");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: slack");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "slack",
+        type: "mcp",
+        server: "slack",
+        label: "slack",
+        description: "Use workspace-configured Slack MCP tools.",
+      },
+    ]);
+  });
+
   test("syncs the root Brain folder from markdown mentions", () => {
     const config = extractConfigFromMentions("Use all shared context in @brain/.");
 
@@ -228,6 +249,46 @@ describe(".agent files", () => {
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
     ]);
+  });
+
+  test("round-trips delegated agent frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Coordinator",
+      body: "Delegate research to @agent/research.",
+      agents: [{ path: "agents/research.agent", name: "Research" }],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("agents:\n  - path: agents/research.agent\n    name: Research");
+    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+  });
+
+  test("drops invalid delegated agent frontmatter entries", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Coordinator"',
+        "agents:",
+        "  - path: agents/research.agent",
+        "    name: Research",
+        "  - path: ../secret.agent",
+        "    name: Missing",
+        "---",
+        "",
+        "Delegate work.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+  });
+
+  test("does not derive unknown delegated agent mentions without a catalog", () => {
+    const source = serializeAgentFile({
+      title: "Coordinator",
+      body: "Delegate research to @agent/research.",
+    });
+
+    expect(parseAgentFile(source).config.agents).toEqual([]);
   });
 
   test("serializes explicit model selection ahead of legacy model mentions", () => {

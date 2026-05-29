@@ -4,6 +4,7 @@ import {
   isObservabilityEnabled,
   setExceptionReporter,
 } from "@opencompany/observability";
+import { flushBraintrust } from "@opencompany/observability/braintrust";
 import * as Sentry from "@sentry/bun";
 import { loadEnv } from "./env";
 import { startRunnerJobWorker } from "./jobs";
@@ -18,7 +19,7 @@ const jobWorker = startRunnerJobWorker(env);
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     void Promise.allSettled([jobWorker.stop(), server.close()])
-      .then(() => flushObservability())
+      .then(() => Promise.allSettled([flushObservability(), flushBraintrust()]))
       .finally(() => process.exit(0));
   });
 }

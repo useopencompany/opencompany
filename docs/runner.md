@@ -106,9 +106,14 @@ V1 tools:
 - `write_file`
 - `list_files`
 - `git_diff`
+- `delegate_to_agent` when the saved agent references other workspace agents; pass `agent` to
+  start an inspectable child session hidden from sidebar history, or pass a returned
+  `childSessionId` as `sessionId` to continue that child session
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
-  experiment on, and Linear MCP has a workspace bearer token configured
+  experiment on, and Linear MCP has workspace OAuth or bearer-token credentials configured
+- `slack__*` dynamic tools when the saved agent enables `@slack`, the workspace has the `mcp`
+  experiment on, and Slack MCP has workspace OAuth credentials configured
 
 `amp_coder` returns an `ampThreadId`. Later follow-up tasks can pass that id back as
 `ampThreadId` so the runner invokes `amp threads continue` instead of starting a fresh Amp thread.

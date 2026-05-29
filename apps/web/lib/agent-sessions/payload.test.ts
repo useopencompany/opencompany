@@ -13,6 +13,7 @@ import {
   removeSidebarSession,
   type SidebarSessionPayload,
   seedSessionQueries,
+  serializeAgentSessionDetail,
   sessionQueryKeys,
   upsertSidebarSession,
 } from "@/lib/agent-sessions/payload";
@@ -52,6 +53,24 @@ describe("session payload cache helpers", () => {
         [sidebarSession("ses_keep", "Keep"), sidebarSession("ses_archive", "Archive")],
         "ses_archive",
       ),
+    ).toEqual([sidebarSession("ses_keep", "Keep")]);
+  });
+
+  it("does not add agent-generated sessions to the sidebar cache", () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    const childDetail = detail();
+    childDetail.session.source = "agent";
+
+    queryClient.setQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId), [
+      sidebarSession(childDetail.session.id, "Generated child"),
+      sidebarSession("ses_keep", "Keep"),
+    ]);
+
+    seedSessionQueries(queryClient, workspaceId, childDetail);
+
+    expect(
+      queryClient.getQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId)),
     ).toEqual([sidebarSession("ses_keep", "Keep")]);
   });
 
@@ -542,6 +561,33 @@ describe("session payload cache helpers", () => {
     expect(invalidations).toBe(0);
   });
 
+  it("invalidates the current session detail when delegated sessions change", () => {
+    const queryClient = new QueryClient();
+    const invalidated: unknown[][] = [];
+    queryClient.invalidateQueries = (filters) => {
+      invalidated.push((filters as { queryKey: unknown[] }).queryKey);
+      return Promise.resolve();
+    };
+
+    invalidateRelatedCachesForSessionEvent(
+      queryClient,
+      "wks_123",
+      "agt_123",
+      {
+        id: 1,
+        type: "tool.completed",
+        messageId: "msg_1",
+        payload: {
+          name: "delegate_to_agent",
+          output: { childSessionId: "ses_child" },
+        },
+      },
+      { sessionId: "ses_parent" },
+    );
+
+    expect(invalidated).toEqual([sessionQueryKeys.detail("wks_123", "ses_parent")]);
+  });
+
   it("applies runtime status, error, and title updates to detail", () => {
     let current = detail();
 
@@ -573,7 +619,15 @@ describe("session payload cache helpers", () => {
 
   it("parses session API payloads at the fetch boundary", () => {
     const sessionDetail = detail({
-      events: [{ id: 1, type: "session.status", messageId: null, payload: { status: "running" } }],
+      events: [
+        {
+          id: 1,
+          type: "session.status",
+          messageId: null,
+          payload: { status: "running" },
+          createdAt: "2026-05-24T10:00:01.000Z",
+        },
+      ],
       messages: [{ id: "msg_1", role: "user", content: "Ship it", status: "completed" }],
     });
 
@@ -591,6 +645,38 @@ describe("session payload cache helpers", () => {
     ).toEqual({
       runnerUrl: "https://runner.example.com",
       streamToken: "token",
+    });
+  });
+
+  it("serializes runtime event timestamps in session details", () => {
+    const base = detail();
+    const serialized = serializeAgentSessionDetail({
+      usage: base.usage,
+      toolUsage: base.toolUsage,
+      cost: base.cost,
+      runnerUrl: base.runnerUrl,
+      related: { parent: null, children: [] },
+      session: {
+        ...base.session,
+        abortRequestedAt: null,
+        createdAt: new Date("2026-05-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-24T10:00:02.000Z"),
+      },
+      messages: [],
+      events: [
+        {
+          id: 1,
+          type: "message.reasoning_delta",
+          messageId: "msg_1",
+          payload: { messageId: "msg_1", delta: "Thinking" },
+          createdAt: new Date("2026-05-24T10:00:01.000Z"),
+        },
+      ],
+    });
+
+    expect(serialized.events[0]).toMatchObject({
+      id: 1,
+      createdAt: "2026-05-24T10:00:01.000Z",
     });
   });
 
@@ -619,6 +705,57 @@ describe("session payload cache helpers", () => {
       }),
     ).toThrow("Invalid modelName.");
   });
+
+  it("parses related parent and child sessions", () => {
+    const parsed = parseAgentSessionDetailResponse({
+      detail: {
+        ...detail(),
+        related: {
+          parent: {
+            id: "ses_parent",
+            title: "Parent",
+            status: "completed",
+            agentName: "Leo",
+            agentPath: "agents/leo.agent",
+            parentMessageId: null,
+            parentToolCallId: null,
+            createdAt: "2026-05-24T09:00:00.000Z",
+            updatedAt: "2026-05-24T09:30:00.000Z",
+          },
+          children: [
+            {
+              id: "ses_child",
+              title: "Child",
+              status: "running",
+              agentName: "Research",
+              agentPath: "agents/research.agent",
+              parentMessageId: "msg_parent",
+              parentToolCallId: "call_delegate",
+              createdAt: "2026-05-24T10:00:00.000Z",
+              updatedAt: "2026-05-24T10:01:00.000Z",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(parsed.detail.related.parent?.id).toBe("ses_parent");
+    expect(parsed.detail.related.children[0]?.parentToolCallId).toBe("call_delegate");
+  });
+
+  it("rejects malformed related sessions", () => {
+    expect(() =>
+      parseAgentSessionDetailResponse({
+        detail: {
+          ...detail(),
+          related: {
+            parent: null,
+            children: [{ id: "ses_child", title: "Child" }],
+          },
+        },
+      }),
+    ).toThrow("Invalid status.");
+  });
 });
 
 function sidebarSession(id: string, title: string) {
@@ -644,8 +781,12 @@ function detail(
       agentPath: "agents/leo.agent",
       title: "Original",
       status: "created",
+      source: "user",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
+      parentSessionId: null,
+      parentMessageId: null,
+      parentToolCallId: null,
       e2bSandboxId: null,
       workdir: "/workspace",
       runLeaseId: null,
@@ -654,6 +795,7 @@ function detail(
       createdAt: "2026-05-24T10:00:00.000Z",
       updatedAt: "2026-05-24T10:00:00.000Z",
     },
+    related: { parent: null, children: [] },
     messages: overrides.messages ?? [],
     events: overrides.events ?? [],
     usage: {
