@@ -211,7 +211,9 @@ describe("applyRuntimeEventToState", () => {
       }),
     );
 
-    const msgCreatedAt = state.messages.find((m) => m.id === "msg_assistant")?.createdAt!;
+    const assistantMessage = state.messages.find((m) => m.id === "msg_assistant");
+    if (!assistantMessage?.createdAt) throw new Error("expected assistant message createdAt");
+    const msgCreatedAt = assistantMessage.createdAt;
     // Tool runs for 4 seconds starting 1 second into the message.
     const toolStart = new Date(Date.parse(msgCreatedAt) + 1000).toISOString();
     const toolEnd = new Date(Date.parse(msgCreatedAt) + 5000).toISOString();

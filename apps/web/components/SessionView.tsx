@@ -281,30 +281,23 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     onEvent: applyRuntimeEvent,
   });
 
-  // Data-freshness staleness detection: track when the last runtime event arrived
-  // (wall-clock time) so we can show the stale banner even when SSE reconnects keep
-  // flipping stream.status away from "stale" before the 10s timeout is reached.
-  // Initialized from session.updatedAt so sessions with no events still get a baseline.
+  // Data-freshness staleness detection: derive the timestamp of the last runtime event
+  // from runtime.events and compare against a ticked `now` so the stale banner triggers
+  // even when SSE reconnects keep flipping stream.status away from "stale".
   const STALE_THRESHOLD_MS = 45_000;
-  const [lastRuntimeActivityMs, setLastRuntimeActivityMs] = useState<number>(() =>
-    Date.parse(detail.session.updatedAt),
-  );
-  // Whenever a new event lands (lastEventId grows), reset the activity clock.
+  const [now, setNow] = useState<number>(() => Date.now());
   useEffect(() => {
-    if (lastEventId === 0) return;
-    setLastRuntimeActivityMs(Date.now());
-  }, [lastEventId]);
-  // 1-second tick to keep the staleness check current without tying to re-renders.
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 1_000);
+    const id = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(id);
   }, []);
+  const lastRuntimeActivityMs = useMemo(() => {
+    const last = runtime.events.at(-1);
+    if (last?.createdAt) return Date.parse(last.createdAt);
+    return Date.parse(detail.session.updatedAt);
+  }, [runtime.events, detail.session.updatedAt]);
   const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
   const sessionFeedsLooksStale =
-    awaitingAssistantWork &&
-    lastRuntimeActivityMs !== null &&
-    Date.now() - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
+    awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
   const showStaleBanner =
     awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
