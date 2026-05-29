@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { AGENT_MODELS, buildAgentMentionItems, buildBrainMentionItems, findModel } from "./tools";
+import {
+  AGENT_MODELS,
+  buildAgentMentionItems,
+  buildBrainMentionItems,
+  buildWorkspaceAgentMentionItems,
+  findModel,
+} from "./tools";
 
 describe("agent editor mention tools", () => {
   test("includes the root Brain folder before nested Brain paths", () => {
@@ -44,14 +50,49 @@ describe("agent editor mention tools", () => {
     });
   });
 
-  test("only exposes Linear MCP when MCP tools are enabled for the workspace", () => {
+  test("only exposes configured MCP tools for the workspace", () => {
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:linear")).toBe(
       false,
     );
+    expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:slack")).toBe(
+      false,
+    );
     expect(
-      buildAgentMentionItems([], [], { includeMcpTools: true }).some(
+      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
         (item) => item.mentionId === "tool:linear",
       ),
+    ).toBe(true);
+    expect(
+      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
+        (item) => item.mentionId === "tool:slack",
+      ),
+    ).toBe(false);
+    expect(
+      buildAgentMentionItems([], [], { enabledMcpToolIds: ["slack"] }).some(
+        (item) => item.mentionId === "tool:slack",
+      ),
+    ).toBe(true);
+  });
+
+  test("exposes workspace agents as stable agent slug mentions", () => {
+    const items = buildWorkspaceAgentMentionItems([
+      { path: "agents/research.agent", name: "Research" },
+    ]);
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: "agent/research",
+        mentionId: "agent/research",
+        kind: "agent",
+        label: "agent/research",
+        displayLabel: "Research",
+        description: "agents/research.agent",
+      }),
+    ]);
+    expect(
+      buildAgentMentionItems([], [], {
+        agents: [{ path: "agents/research.agent", name: "Research" }],
+      }).some((item) => item.mentionId === "agent/research"),
     ).toBe(true);
   });
 });

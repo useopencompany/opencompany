@@ -24,7 +24,7 @@ export type TiptapDoc = {
   content?: TiptapNode[];
 };
 
-export type AgentToolId = "exa" | "amp" | "linear";
+export type AgentToolId = "exa" | "amp" | "linear" | "slack";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -60,9 +60,9 @@ export type AgentCodingToolConfig = {
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear";
+  id: "linear" | "slack";
   type: "mcp";
-  server: "linear";
+  server: "linear" | "slack";
   label: string;
   description: string;
 };
@@ -72,6 +72,11 @@ export type AgentConfigTool = AgentHostedToolConfig | AgentCodingToolConfig | Ag
 export type AgentBrainReference = {
   path: string;
   type: "file" | "folder";
+};
+
+export type AgentReference = {
+  path: string;
+  name: string;
 };
 
 export type AgentAfterSessionConfig = {
@@ -119,6 +124,7 @@ export type AgentConfig = {
   };
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
+  agents?: AgentReference[];
   afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {

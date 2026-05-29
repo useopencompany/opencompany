@@ -2,6 +2,7 @@ import "./load-env.mjs";
 import { existsSync } from "node:fs";
 import { exit } from "node:process";
 import {
+  localWorkOSRedirectUri,
   requestedNgrokUrl,
   startNgrok,
   updateLocalEnvForTunnel,
@@ -71,12 +72,12 @@ if (!publicUrl) {
 }
 
 if (!NO_ENV) {
-  updateLocalEnvForTunnel(publicUrl);
+  updateLocalEnvForTunnel(publicUrl, ".env.local", { localPort: port });
 }
 
 console.log(`\nGitHub local tunnel is ready: ${publicUrl}`);
 console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
-console.log(`WorkOS redirect URI: ${publicUrl}/auth/callback`);
+console.log(`WorkOS redirect URI: ${localWorkOSRedirectUri(port)}`);
 if (!NO_ENV) {
   console.log(
     "Updated .env.local. Restart `bun run dev` so Next.js and the runner reload env vars.",

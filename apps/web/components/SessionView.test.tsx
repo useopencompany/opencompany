@@ -303,6 +303,7 @@ function makeRunningAssistantMessage(overrides: Partial<SessionMessage> = {}): S
 function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSessionDetailPayload {
   return {
     session: makeSession(),
+    related: { parent: null, children: [] },
     messages: [],
     events: [],
     usage: { totalTokens: 0, inputTokens: 0, outputTokens: 0, inputNoCacheTokens: 0, inputCacheReadTokens: 0, inputCacheWriteTokens: 0, outputTextTokens: 0, outputReasoningTokens: 0 },
@@ -458,7 +459,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     vi.setSystemTime(now);
 
     // updatedAt is 20s in the past — stale by the time the first tick fires.
-    const staleUpdatedAt = new Date(now - 20_000).toISOString();
+    const staleUpdatedAt = new Date(now - 50_000).toISOString();
     const detail = makeDetail({
       session: makeSession({ updatedAt: staleUpdatedAt }),
       messages: [makeRunningAssistantMessage()],
@@ -484,7 +485,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     const now = new Date("2000-01-01T00:02:00.000Z").getTime();
     vi.setSystemTime(now);
 
-    const staleUpdatedAt = new Date(now - 20_000).toISOString();
+    const staleUpdatedAt = new Date(now - 50_000).toISOString();
     const detailStale = makeDetail({
       session: makeSession({ updatedAt: staleUpdatedAt }),
       messages: [makeRunningAssistantMessage()],

@@ -4,6 +4,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { runAfterSession, runMessage, startSession } from "./agent-loop";
 import type { RunnerEnv } from "./env";
+import { isNonRetryableRunnerError } from "./runner-errors";
 import { generateSessionTitleForMessage } from "./session-title";
 
 // Runner has two lease layers that work together:
@@ -440,7 +441,8 @@ async function failRunnerJob(input: {
   store: RunnerJobStore;
 }) {
   const now = new Date();
-  const terminal = input.job.attempts >= RUNNER_JOB_MAX_ATTEMPTS;
+  const terminal =
+    input.job.attempts >= RUNNER_JOB_MAX_ATTEMPTS || isNonRetryableRunnerError(input.error);
   await input.store.fail({
     id: input.job.id,
     leaseId: input.leaseId,

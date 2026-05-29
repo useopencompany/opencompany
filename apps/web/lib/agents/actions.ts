@@ -213,6 +213,18 @@ export async function updateAgent(
         },
       },
     }));
+  const workspaceAgentReferences = (
+    await timeAsync(trace, "db.selectAgentReferences", () =>
+      db
+        .select({ path: agents.path, name: agents.name })
+        .from(agents)
+        .where(eq(agents.workspaceId, workspace.id))
+        .orderBy(asc(agents.name)),
+    )
+  ).flatMap((row) => {
+    if (!row.path || row.path === agent.path) return [];
+    return [{ path: row.path, name: row.name }];
+  });
   const savedRepositories = currentConfig.integrations.github.repositories;
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubRepositories,
@@ -231,6 +243,7 @@ export async function updateAgent(
         content: sanitizedContent,
         model: patch.model ?? currentConfig.model.name,
         repositories: derivationRepositories,
+        agents: workspaceAgentReferences,
         preferredRepositories: savedPreferredRepositories,
         triggers: currentConfig.triggers,
       })
@@ -245,6 +258,7 @@ export async function updateAgent(
           body: patch.body,
           model: patch.model ?? currentConfig.model.name,
           repositories: derivationRepositories,
+          agents: workspaceAgentReferences,
           preferredRepositories,
           triggers: currentConfig.triggers,
         })
@@ -260,6 +274,7 @@ export async function updateAgent(
     derived?.config.integrations ?? patch.config?.integrations ?? currentConfig.integrations;
   const nextTools = derived?.config.tools ?? patch.config?.tools ?? currentConfig.tools;
   const nextBrain = derived?.config.brain ?? patch.config?.brain ?? currentConfig.brain;
+  const nextAgents = derived?.config.agents ?? patch.config?.agents ?? currentConfig.agents;
   const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? currentConfig.triggers;
   const source = serializeAgentFile({
     title,
@@ -267,6 +282,7 @@ export async function updateAgent(
     model,
     tools: nextTools,
     brain: nextBrain,
+    agents: nextAgents ?? [],
     integrations: nextIntegrations,
     triggers: nextTriggers,
   });
@@ -354,10 +370,18 @@ export async function updateAgent(
     path,
     pathChanged,
     agent: updatedAgent
-      ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories, {
-          mcpEnabled: mcpSettings.mcpEnabled,
-          linearConfigured: mcpSettings.linear.configured,
-        })
+      ? serializeAgentDetail(
+          updatedAgent,
+          brainPaths,
+          derivationRepositories,
+          usableRepositories,
+          workspaceAgentReferences,
+          {
+            mcpEnabled: mcpSettings.mcpEnabled,
+            linearConfigured: mcpSettings.linear.configured,
+            slackConfigured: mcpSettings.slack.configured,
+          },
+        )
       : null,
   };
 

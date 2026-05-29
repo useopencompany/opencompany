@@ -4,12 +4,10 @@ import {
   agentSessionEvents,
   agentSessionMessages,
   agentSessions,
-  agentSessionToolUsage,
   agentSessionUsage,
   agents,
-  workspaceCreditLedger,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
   type SessionStreamCredentialPayload,
@@ -40,6 +38,7 @@ export async function loadSidebarSessionsForWorkspace(
       and(
         eq(agentSessions.workspaceId, workspaceId),
         eq(agentSessions.userId, userId),
+        eq(agentSessions.source, "user"),
         isNull(agentSessions.archivedAt),
       ),
     )
@@ -63,8 +62,12 @@ export async function loadAgentSessionDetailForWorkspace(
       agentPath: agents.path,
       title: agentSessions.title,
       status: agentSessions.status,
+      source: agentSessions.source,
       modelProvider: agentSessions.modelProvider,
       modelName: agentSessions.modelName,
+      parentSessionId: agentSessions.parentSessionId,
+      parentMessageId: agentSessions.parentMessageId,
+      parentToolCallId: agentSessions.parentToolCallId,
       e2bSandboxId: agentSessions.e2bSandboxId,
       workdir: agentSessions.workdir,
       runLeaseId: agentSessions.runLeaseId,
@@ -87,7 +90,57 @@ export async function loadAgentSessionDetailForWorkspace(
 
   if (!session) return null;
 
-  const [messages, events, usageRows, toolUsageRows, costRows] = await Promise.all([
+  const [parentRows, children, messages, events, usageRows, rollupRows] = await Promise.all([
+    session.parentSessionId
+      ? db
+          .select({
+            id: agentSessions.id,
+            title: agentSessions.title,
+            status: agentSessions.status,
+            agentName: agents.name,
+            agentPath: agents.path,
+            parentMessageId: agentSessions.parentMessageId,
+            parentToolCallId: agentSessions.parentToolCallId,
+            createdAt: agentSessions.createdAt,
+            updatedAt: agentSessions.updatedAt,
+          })
+          .from(agentSessions)
+          .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+          .where(
+            and(
+              eq(agentSessions.id, session.parentSessionId),
+              eq(agentSessions.workspaceId, workspaceId),
+              eq(agentSessions.userId, userId),
+              isNull(agentSessions.archivedAt),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
+    db
+      .select({
+        id: agentSessions.id,
+        title: agentSessions.title,
+        status: agentSessions.status,
+        agentName: agents.name,
+        agentPath: agents.path,
+        parentMessageId: agentSessions.parentMessageId,
+        parentToolCallId: agentSessions.parentToolCallId,
+        createdAt: agentSessions.createdAt,
+        updatedAt: agentSessions.updatedAt,
+      })
+      .from(agentSessions)
+      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+      .where(
+        and(
+          eq(agentSessions.parentSessionId, sessionId),
+          eq(agentSessions.workspaceId, workspaceId),
+          eq(agentSessions.userId, userId),
+          eq(agentSessions.source, "agent"),
+          isNull(agentSessions.archivedAt),
+        ),
+      )
+      .orderBy(desc(agentSessions.updatedAt))
+      .limit(25),
     db
       .select()
       .from(agentSessionMessages)
@@ -113,46 +166,97 @@ export async function loadAgentSessionDetailForWorkspace(
       })
       .from(agentSessionUsage)
       .where(eq(agentSessionUsage.sessionId, sessionId)),
-    db
-      .select({
-        provider: agentSessionToolUsage.provider,
-        operation: agentSessionToolUsage.operation,
-        costUsdMicros: agentSessionToolUsage.costUsdMicros,
-      })
-      .from(agentSessionToolUsage)
-      .where(eq(agentSessionToolUsage.sessionId, sessionId)),
-    db
-      .select({
-        source: workspaceCreditLedger.source,
-        amountUsdMicros: workspaceCreditLedger.amountUsdMicros,
-        providerCostUsdMicros: workspaceCreditLedger.providerCostUsdMicros,
-        platformFeeUsdMicros: workspaceCreditLedger.platformFeeUsdMicros,
-      })
-      .from(workspaceCreditLedger)
-      .where(eq(workspaceCreditLedger.sessionId, sessionId)),
+    db.execute(sql`
+      WITH RECURSIVE session_tree(id, path) AS (
+        SELECT id, ARRAY[id]::text[]
+        FROM agent_sessions
+        WHERE id = ${sessionId}
+          AND workspace_id = ${workspaceId}
+          AND user_id = ${userId}
+          AND archived_at IS NULL
+        UNION ALL
+        SELECT child.id, session_tree.path || child.id
+        FROM agent_sessions child
+        INNER JOIN session_tree ON child.parent_session_id = session_tree.id
+        WHERE child.workspace_id = ${workspaceId}
+          AND child.user_id = ${userId}
+          AND child.archived_at IS NULL
+          AND NOT child.id = ANY(session_tree.path)
+      ),
+      usage_totals AS (
+        SELECT
+          COALESCE(SUM(input_tokens), 0) AS input_tokens,
+          COALESCE(SUM(input_no_cache_tokens), 0) AS input_no_cache_tokens,
+          COALESCE(SUM(input_cache_read_tokens), 0) AS input_cache_read_tokens,
+          COALESCE(SUM(input_cache_write_tokens), 0) AS input_cache_write_tokens,
+          COALESCE(SUM(output_tokens), 0) AS output_tokens,
+          COALESCE(SUM(output_text_tokens), 0) AS output_text_tokens,
+          COALESCE(SUM(output_reasoning_tokens), 0) AS output_reasoning_tokens,
+          COALESCE(SUM(total_tokens), 0) AS total_tokens
+        FROM agent_session_usage
+        WHERE session_id IN (SELECT id FROM session_tree)
+      ),
+      cost_totals AS (
+        SELECT
+          COALESCE(SUM(provider_cost_usd_micros), 0) AS provider_cost_usd_micros,
+          COALESCE(SUM(platform_fee_usd_micros), 0) AS platform_fee_usd_micros,
+          COALESCE(SUM(-amount_usd_micros), 0) AS total_cost_usd_micros,
+          COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'model_usage'), 0) AS model_cost_usd_micros,
+          COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'tool_usage'), 0) AS tool_cost_usd_micros
+        FROM workspace_credit_ledger
+        WHERE session_id IN (SELECT id FROM session_tree)
+          AND amount_usd_micros < 0
+      ),
+      tool_usage_rows AS (
+        SELECT
+          provider,
+          operation,
+          COALESCE(SUM(cost_usd_micros), 0) AS cost_usd_micros,
+          COUNT(*)::int AS calls
+        FROM agent_session_tool_usage
+        WHERE session_id IN (SELECT id FROM session_tree)
+        GROUP BY provider, operation
+      ),
+      tool_totals AS (
+        SELECT
+          COALESCE(SUM(cost_usd_micros), 0) AS tool_usage_cost_usd_micros,
+          COALESCE(
+            jsonb_agg(
+              jsonb_build_object(
+                'provider', provider,
+                'operation', operation,
+                'costUsdMicros', cost_usd_micros,
+                'calls', calls
+              )
+              ORDER BY provider, operation
+            ),
+            '[]'::jsonb
+          ) AS tool_usage_by_provider_operation
+        FROM tool_usage_rows
+      )
+      SELECT
+        usage_totals.input_tokens AS "inputTokens",
+        usage_totals.input_no_cache_tokens AS "inputNoCacheTokens",
+        usage_totals.input_cache_read_tokens AS "inputCacheReadTokens",
+        usage_totals.input_cache_write_tokens AS "inputCacheWriteTokens",
+        usage_totals.output_tokens AS "outputTokens",
+        usage_totals.output_text_tokens AS "outputTextTokens",
+        usage_totals.output_reasoning_tokens AS "outputReasoningTokens",
+        usage_totals.total_tokens AS "totalTokens",
+        cost_totals.provider_cost_usd_micros AS "providerCostUsdMicros",
+        cost_totals.platform_fee_usd_micros AS "platformFeeUsdMicros",
+        cost_totals.total_cost_usd_micros AS "totalCostUsdMicros",
+        cost_totals.model_cost_usd_micros AS "modelCostUsdMicros",
+        cost_totals.tool_cost_usd_micros AS "toolCostUsdMicros",
+        tool_totals.tool_usage_cost_usd_micros AS "toolUsageTotalCostUsdMicros",
+        tool_totals.tool_usage_by_provider_operation AS "toolUsageByProviderOperation"
+      FROM usage_totals
+      CROSS JOIN cost_totals
+      CROSS JOIN tool_totals
+    `),
   ]);
-  const usage = usageRows.reduce(
-    (totals, row) => ({
-      inputTokens: totals.inputTokens + row.inputTokens,
-      inputNoCacheTokens: totals.inputNoCacheTokens + row.inputNoCacheTokens,
-      inputCacheReadTokens: totals.inputCacheReadTokens + row.inputCacheReadTokens,
-      inputCacheWriteTokens: totals.inputCacheWriteTokens + row.inputCacheWriteTokens,
-      outputTokens: totals.outputTokens + row.outputTokens,
-      outputTextTokens: totals.outputTextTokens + row.outputTextTokens,
-      outputReasoningTokens: totals.outputReasoningTokens + row.outputReasoningTokens,
-      totalTokens: totals.totalTokens + row.totalTokens,
-    }),
-    {
-      inputTokens: 0,
-      inputNoCacheTokens: 0,
-      inputCacheReadTokens: 0,
-      inputCacheWriteTokens: 0,
-      outputTokens: 0,
-      outputTextTokens: 0,
-      outputReasoningTokens: 0,
-      totalTokens: 0,
-    },
-  );
+  const rollup = parseSessionTreeRollup(rowsFromExecute<Record<string, unknown>>(rollupRows)[0]);
+  const usage = rollup.usage;
   const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
   for (const row of usageRows) {
     if (!row.messageId) continue;
@@ -166,7 +270,6 @@ export async function loadAgentSessionDetailForWorkspace(
   }));
   const messagesWithUsage = messages.map((message) => {
     const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
-    // Build a SessionMessage-shaped object to call computeThinkingDurationSeconds.
     const sessionMessage = {
       ...message,
       outputReasoningTokens,
@@ -179,12 +282,20 @@ export async function loadAgentSessionDetailForWorkspace(
       thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
     };
   });
-  const toolUsage = summarizeToolUsage(toolUsageRows);
-  const cost = summarizeSessionCost(costRows);
+  const toolUsage = rollup.toolUsage;
+  const cost = rollup.cost;
   const runnerUrl = getRunnerPublicUrl();
+  const serializedSession = {
+    ...session,
+    source: session.source === "agent" ? ("agent" as const) : ("user" as const),
+  };
 
   return serializeAgentSessionDetail({
-    session,
+    session: serializedSession,
+    related: {
+      parent: parentRows[0] ?? null,
+      children,
+    },
     messages: messagesWithUsage,
     events: eventsWithCreatedAt,
     usage,
@@ -232,62 +343,70 @@ export async function loadAgentSessionStreamCredentialForWorkspace(
   return { runnerUrl, streamToken };
 }
 
-function summarizeToolUsage(
-  rows: Array<{ provider: string; operation: string; costUsdMicros: number }>,
-) {
-  const byProviderOperation = new Map<
-    string,
-    { provider: string; operation: string; costUsdMicros: number; calls: number }
-  >();
-
-  for (const row of rows) {
-    const key = `${row.provider}:${row.operation}`;
-    const current = byProviderOperation.get(key) ?? {
-      provider: row.provider,
-      operation: row.operation,
-      costUsdMicros: 0,
-      calls: 0,
-    };
-    current.costUsdMicros += row.costUsdMicros;
-    current.calls += 1;
-    byProviderOperation.set(key, current);
-  }
-
+function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {
   return {
-    totalCostUsdMicros: rows.reduce((total, row) => total + row.costUsdMicros, 0),
-    byProviderOperation: Array.from(byProviderOperation.values()).sort((left, right) =>
-      `${left.provider}:${left.operation}`.localeCompare(`${right.provider}:${right.operation}`),
-    ),
+    usage: {
+      inputTokens: readNumber(row?.inputTokens),
+      inputNoCacheTokens: readNumber(row?.inputNoCacheTokens),
+      inputCacheReadTokens: readNumber(row?.inputCacheReadTokens),
+      inputCacheWriteTokens: readNumber(row?.inputCacheWriteTokens),
+      outputTokens: readNumber(row?.outputTokens),
+      outputTextTokens: readNumber(row?.outputTextTokens),
+      outputReasoningTokens: readNumber(row?.outputReasoningTokens),
+      totalTokens: readNumber(row?.totalTokens),
+    },
+    toolUsage: {
+      totalCostUsdMicros: readNumber(row?.toolUsageTotalCostUsdMicros),
+      byProviderOperation: readToolUsageOperations(row?.toolUsageByProviderOperation),
+    },
+    cost: {
+      providerCostUsdMicros: readNumber(row?.providerCostUsdMicros),
+      platformFeeUsdMicros: readNumber(row?.platformFeeUsdMicros),
+      totalCostUsdMicros: readNumber(row?.totalCostUsdMicros),
+      modelCostUsdMicros: readNumber(row?.modelCostUsdMicros),
+      toolCostUsdMicros: readNumber(row?.toolCostUsdMicros),
+    },
   };
 }
 
-function summarizeSessionCost(
-  rows: Array<{
-    source: string;
-    amountUsdMicros: number;
-    providerCostUsdMicros: number;
-    platformFeeUsdMicros: number;
-  }>,
-) {
-  return rows.reduce(
-    (totals, row) => {
-      const totalCostUsdMicros = Math.max(-row.amountUsdMicros, 0);
-      return {
-        providerCostUsdMicros: totals.providerCostUsdMicros + row.providerCostUsdMicros,
-        platformFeeUsdMicros: totals.platformFeeUsdMicros + row.platformFeeUsdMicros,
-        totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
-        modelCostUsdMicros:
-          totals.modelCostUsdMicros + (row.source === "model_usage" ? totalCostUsdMicros : 0),
-        toolCostUsdMicros:
-          totals.toolCostUsdMicros + (row.source === "tool_usage" ? totalCostUsdMicros : 0),
-      };
-    },
-    {
-      providerCostUsdMicros: 0,
-      platformFeeUsdMicros: 0,
-      totalCostUsdMicros: 0,
-      modelCostUsdMicros: 0,
-      toolCostUsdMicros: 0,
-    },
-  );
+function readToolUsageOperations(value: unknown) {
+  const rows = readJsonArray(value);
+  return rows
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
+    .map((row) => ({
+      provider: typeof row.provider === "string" ? row.provider : "",
+      operation: typeof row.operation === "string" ? row.operation : "",
+      costUsdMicros: readNumber(row.costUsdMicros),
+      calls: readNumber(row.calls),
+    }))
+    .filter((row) => row.provider && row.operation);
+}
+
+function readJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function rowsFromExecute<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  if (result && typeof result === "object" && "rows" in result) {
+    const rows = (result as { rows?: unknown }).rows;
+    if (Array.isArray(rows)) return rows as T[];
+  }
+  return [];
+}
+
+function readNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
 }

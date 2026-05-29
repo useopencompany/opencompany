@@ -103,9 +103,10 @@ async function startDefaultTunnel(targetPort) {
   }
 
   try {
-    tunnelEnv = updateLocalEnvForTunnel(publicUrl);
+    tunnelEnv = updateLocalEnvForTunnel(publicUrl, ".env.local", { localPort: targetPort });
     console.log(`\nngrok tunnel ready: ${publicUrl}`);
     console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
+    console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
     console.log("Updated .env.local before starting dev.\n");
   } catch (error) {
     child.kill("SIGTERM");

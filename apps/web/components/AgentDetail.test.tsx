@@ -147,9 +147,11 @@ const detailAgent: AgentDetailPayload = {
       binding,
     },
   ],
+  workspaceAgents: [{ path: "agents/research.agent", name: "Research" }],
   mcp: {
     mcpEnabled: false,
     linearConfigured: false,
+    slackConfigured: false,
   },
 };
 

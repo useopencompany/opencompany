@@ -8,9 +8,16 @@ import {
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
-import { readSandboxBrainSnapshot, runAmpCoderTool } from "./amp-tool";
+import {
+  buildGitHubCommandEnv,
+  createKnownSecretRedactor,
+  loadGitHubWorkRepository,
+  readSandboxBrainSnapshot,
+  runAmpCoderTool,
+} from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
+import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
   getHostedToolFailureContext,
@@ -60,6 +67,13 @@ type FailedToolOutput = {
   };
 };
 
+type DelegateToAgent = (input: {
+  agent?: string;
+  sessionId?: string;
+  prompt: string;
+  toolCallId: string;
+}) => Promise<unknown>;
+
 class RecoverableToolError extends Error {
   code: string;
 
@@ -87,6 +101,7 @@ export function createToolSet(input: {
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
 }) {
   const tools: ToolSet = {};
 
@@ -133,6 +148,7 @@ export function createToolSet(input: {
           checkAbort: input.checkAbort,
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
+          delegateToAgent: input.delegateToAgent,
         }),
     }) as ToolSet[string];
   }
@@ -196,6 +212,7 @@ export async function executeRuntimeTool(input: {
   checkAbort: () => Promise<void>;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
 }) {
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
@@ -217,6 +234,19 @@ export async function executeRuntimeTool(input: {
         });
         usage = result.usage;
         return result.output;
+      }
+      if (input.definition.kind === "internal") {
+        if (input.definition.name !== "delegate_to_agent") {
+          throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
+        }
+        const args = readDelegateToAgentArgs(input.args);
+        if (!input.delegateToAgent) {
+          throw new RecoverableToolError(
+            "Agent delegation is not available in this run.",
+            "agent_delegation_unavailable",
+          );
+        }
+        return input.delegateToAgent({ ...args, toolCallId: input.toolCallId });
       }
 
       preflightSandboxToolArgs({
@@ -266,11 +296,22 @@ export async function executeRuntimeTool(input: {
         input.definition.name === "shell"
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
           : null;
+      const shellGitHubAuth =
+        input.definition.name === "shell"
+          ? await resolveShellGitHubAuth({
+              workspaceId: input.workspaceId,
+              agentConfig: input.agentConfig,
+              toolCallId: input.toolCallId,
+            })
+          : null;
       const sandboxOutput = await runSandboxTool({
         sandbox: activeSandbox,
         workdir: input.workdir,
         name: input.definition.name,
         args: input.args,
+        ...(shellGitHubAuth
+          ? { envs: shellGitHubAuth.env, redactOutput: shellGitHubAuth.redact }
+          : {}),
         onOutput: async (stream, delta) => {
           await input.checkAbort();
           await requireLeaseWrite(
@@ -444,6 +485,52 @@ export async function executeRuntimeTool(input: {
   return output;
 }
 
+async function resolveShellGitHubAuth(input: {
+  workspaceId?: string | undefined;
+  agentConfig?: AgentConfig | undefined;
+  toolCallId: string;
+}) {
+  if (!input.workspaceId || !input.agentConfig) return null;
+
+  const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
+  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
+
+  const repository =
+    input.agentConfig.integrations.github.repositories.find(
+      (candidate) => candidate.id === ampTool.repository,
+    ) ?? null;
+  if (!repository) {
+    throw new Error(`GitHub repository binding ${ampTool.repository} was not found.`);
+  }
+
+  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+  const githubToken = await getGitHubWorkInstallationToken({
+    installationId: integrationRepository.installationId,
+    repositoryFullName: repository.fullName,
+  });
+  if (!githubToken) {
+    throw new Error(
+      "GitHub App credentials are required to run shell commands in a GitHub work repository.",
+    );
+  }
+
+  const githubAuthHeader = gitAuthHeader(githubToken);
+  return {
+    env: buildGitHubCommandEnv({
+      githubAuthHeader,
+      githubToken,
+      toolCallId: input.toolCallId,
+    }),
+    redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
+  };
+}
+
+function gitAuthHeader(token: string) {
+  return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
+    "base64",
+  )}`;
+}
+
 function throwIfAborted(signal: AbortSignal) {
   if (signal.aborted) {
     throw new Error("Run aborted.");
@@ -512,6 +599,32 @@ function buildFailedToolOutput(error: unknown): FailedToolOutput {
       code: error instanceof RecoverableToolError ? error.code : "tool_execution_failed",
       recoverable: true,
     },
+  };
+}
+
+function readDelegateToAgentArgs(args: unknown) {
+  const record = isRecord(args) ? args : {};
+  const agent = typeof record.agent === "string" ? record.agent.trim() : "";
+  const sessionId = typeof record.sessionId === "string" ? record.sessionId.trim() : "";
+  const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+
+  if (Boolean(agent) === Boolean(sessionId)) {
+    throw new RecoverableToolError(
+      "Pass exactly one of agent or sessionId to delegate_to_agent.",
+      "invalid_tool_input",
+    );
+  }
+  if (!prompt) {
+    throw new RecoverableToolError(
+      "Tool argument prompt must be a non-empty string.",
+      "invalid_tool_input",
+    );
+  }
+
+  return {
+    ...(agent ? { agent } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    prompt,
   };
 }
 
