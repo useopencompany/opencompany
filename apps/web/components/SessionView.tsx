@@ -226,19 +226,21 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   const waitStartedAtRef = useRef<number | null>(null);
+  const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
   useEffect(() => {
     const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
     if (waiting && waitStartedAtRef.current === null) {
       waitStartedAtRef.current = Date.now();
+    }
+    if (showStoppedAfterUser && waitStartedAtRef.current !== null) {
+      setStoppedElapsedSeconds(
+        Math.max(Math.floor((Date.now() - waitStartedAtRef.current) / 1000), 0),
+      );
     } else if (!waiting && !showStoppedAfterUser) {
       waitStartedAtRef.current = null;
+      setStoppedElapsedSeconds(null);
     }
   }, [showWaitingForAssistant, hasRunningAssistantMessage, showStoppedAfterUser]);
-  const stoppedElapsedSeconds = useMemo(() => {
-    if (!showStoppedAfterUser || !waitStartedAtRef.current) return null;
-    return Math.max(Math.floor((Date.now() - waitStartedAtRef.current) / 1000), 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showStoppedAfterUser]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);

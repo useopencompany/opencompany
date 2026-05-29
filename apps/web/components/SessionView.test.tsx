@@ -429,8 +429,6 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
 // runtime event for > STALE_THRESHOLD_MS) regardless of SSE stream.status.
 // Uses vi.useFakeTimers() so setInterval ticks and Date.now() are controllable.
 
-const STALE_THRESHOLD_MS = 15_000;
-
 function makeEventFixture(id: number): RuntimeEvent {
   return { id, type: "message.delta", messageId: "msg_running", payload: {} };
 }
