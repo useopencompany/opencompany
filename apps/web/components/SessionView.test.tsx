@@ -175,7 +175,11 @@ describe("AssistantMessageContent — Phase B: running with parts renders all pa
 
   it("renders all parts (text + tool-call + reasoning) while message is running", () => {
     const message = makeMessage({ status: "running" });
-    const parts = [makeTextPart("Here are the results:"), makeToolCallPart("running"), makeReasoningPart()];
+    const parts = [
+      makeTextPart("Here are the results:"),
+      makeToolCallPart("running"),
+      makeReasoningPart(),
+    ];
     render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
 
     expect(screen.getByText("Here are the results:")).toBeInTheDocument();
