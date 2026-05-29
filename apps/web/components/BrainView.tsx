@@ -26,7 +26,15 @@ import {
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import {
   createBrainFile,
   deleteBrainFile,
@@ -40,6 +48,7 @@ import {
   fileNameFromPath,
   resolveBrainFileRenameName,
 } from "@/lib/brain/file-names";
+import { formatBrainDate, formatRelativeBrainDate } from "@/lib/brain/format-date";
 import {
   ancestorFolderPaths,
   type BrainTreeNode,
@@ -63,23 +72,6 @@ type BrainFile = {
   updatedAt: string;
 };
 
-function formatRelativeBrainDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const diffMs = date.getTime() - Date.now();
-  const diffSec = Math.round(diffMs / 1000);
-  const abs = Math.abs(diffSec);
-
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-
-  if (abs < 60) return rtf.format(diffSec, "second");
-  if (abs < 3600) return rtf.format(Math.round(diffSec / 60), "minute");
-  if (abs < 86400) return rtf.format(Math.round(diffSec / 3600), "hour");
-  if (abs < 2592000) return rtf.format(Math.round(diffSec / 86400), "day");
-  if (abs < 31536000) return rtf.format(Math.round(diffSec / 2592000), "month");
-  return rtf.format(Math.round(diffSec / 31536000), "year");
-}
-
 type AutoSaveState = "idle" | "dirty" | "saving" | "error";
 type BrainTreeTarget =
   | { type: "root"; path: "" }
@@ -101,6 +93,28 @@ type BrainViewSnapshot = {
 
 const AUTO_SAVE_DELAY_MS = 800;
 const BRAIN_TREE_DRAG_MIME = "application/x-opencompany-brain-tree-item";
+
+const noopSubscribe = () => () => {};
+
+// Renders the absolute formatted date during SSR and the first client paint,
+// then swaps to the relative label after mount. This keeps server and client
+// markup identical (no hydration mismatch from Date.now() near rounding
+// boundaries) while still showing a meaningful label before hydration.
+// useSyncExternalStore gives a hydration-safe `false` on the server snapshot
+// and `true` once mounted on the client.
+function BrainDate({ value, className }: { value: string; className?: string }) {
+  const mounted = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+
+  return (
+    <span title={formatBrainDate(value)} className={className}>
+      {mounted ? formatRelativeBrainDate(value) : formatBrainDate(value)}
+    </span>
+  );
+}
 
 export default function BrainView({ files: serverFiles }: { files: BrainFile[] }) {
   const router = useRouter();
@@ -969,12 +983,10 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
                 <span title={selected.path} className="min-w-0 truncate font-medium text-ink">
                   {fileNameFromPath(selected.path)}
                 </span>
-                <span
-                  title={formatBrainDate(selected.updatedAt)}
+                <BrainDate
+                  value={selected.updatedAt}
                   className="ml-1 shrink-0 text-[11px] text-ink-subtle"
-                >
-                  {formatRelativeBrainDate(selected.updatedAt)}
-                </span>
+                />
               </div>
               <div ref={fileMenuRef} className="relative ml-auto shrink-0">
                 <button
@@ -1482,12 +1494,10 @@ function TreeItem({
           )}
           <span className="min-w-0 truncate tracking-[-0.005em]">{node.name}</span>
           {node.type === "file" && node.file ? (
-            <span
-              title={formatBrainDate(node.file.updatedAt)}
+            <BrainDate
+              value={node.file.updatedAt}
               className="ml-auto shrink-0 pl-1.5 text-[10.5px] text-ink-subtle opacity-0 transition-opacity duration-100 group-hover:opacity-100"
-            >
-              {formatRelativeBrainDate(node.file.updatedAt)}
-            </span>
+            />
           ) : null}
         </button>
       )}
@@ -2063,16 +2073,4 @@ function syncStatus(status: string) {
     icon: CheckCircle2,
     className: "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]",
   };
-}
-
-function formatBrainDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }
