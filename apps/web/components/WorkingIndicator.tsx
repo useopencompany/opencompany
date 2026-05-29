@@ -18,15 +18,30 @@ export function WorkingIndicator({
   startedAt?: string | undefined;
   thinking?: boolean;
 }) {
-  const [elapsed, setElapsed] = useState(() => elapsedSince(startedAt));
+  return (
+    <WorkingIndicatorTimer key={startedAt ?? "local"} startedAt={startedAt} thinking={thinking} />
+  );
+}
+
+function WorkingIndicatorTimer({
+  startedAt,
+  thinking,
+}: {
+  startedAt?: string | undefined;
+  thinking: boolean;
+}) {
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    setElapsed(elapsedSince(startedAt));
     const interval = setInterval(() => {
-      setElapsed((previous) => (startedAt === undefined ? previous + 1 : elapsedSince(startedAt)));
+      setNow(Date.now());
     }, 1000);
     return () => clearInterval(interval);
-  }, [startedAt]);
+  }, []);
+
+  const elapsed =
+    startedAt === undefined ? elapsedBetween(mountedAt, now) : elapsedSince(startedAt, now);
 
   return (
     <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5">
@@ -36,8 +51,12 @@ export function WorkingIndicator({
   );
 }
 
-function elapsedSince(startedAt: string | undefined) {
+function elapsedSince(startedAt: string | undefined, now: number) {
   const startMs = startedAt ? new Date(startedAt).getTime() : Number.NaN;
   if (!Number.isFinite(startMs)) return 0;
-  return Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  return elapsedBetween(startMs, now);
+}
+
+function elapsedBetween(startMs: number, endMs: number) {
+  return Math.max(0, Math.floor((endMs - startMs) / 1000));
 }
