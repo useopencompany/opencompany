@@ -581,23 +581,18 @@ export function createAmpStreamAccumulator() {
   let resultUsage: AmpUsage | null = null;
 
   function accumulateMessageUsage(message: Record<string, unknown>) {
-    const messageUsage = isRecord(message.usage) ? message.usage : null;
-    if (!messageUsage) return;
-    const inputTokens = readOptionalFiniteNumber(messageUsage.input_tokens);
-    const outputTokens = readOptionalFiniteNumber(messageUsage.output_tokens);
-    if (inputTokens === null && outputTokens === null) return;
+    const parsed = readEventUsage({ usage: message.usage });
+    if (!parsed) return;
     hasAccumulatedUsage = true;
-    accumulatedUsage.input_tokens += inputTokens ?? 0;
-    accumulatedUsage.output_tokens += outputTokens ?? 0;
-    const cacheCreation = readOptionalFiniteNumber(messageUsage.cache_creation_input_tokens);
-    if (cacheCreation !== null) {
+    accumulatedUsage.input_tokens += parsed.input_tokens;
+    accumulatedUsage.output_tokens += parsed.output_tokens;
+    if (parsed.cache_creation_input_tokens !== undefined) {
       accumulatedUsage.cache_creation_input_tokens =
-        (accumulatedUsage.cache_creation_input_tokens ?? 0) + cacheCreation;
+        (accumulatedUsage.cache_creation_input_tokens ?? 0) + parsed.cache_creation_input_tokens;
     }
-    const cacheRead = readOptionalFiniteNumber(messageUsage.cache_read_input_tokens);
-    if (cacheRead !== null) {
+    if (parsed.cache_read_input_tokens !== undefined) {
       accumulatedUsage.cache_read_input_tokens =
-        (accumulatedUsage.cache_read_input_tokens ?? 0) + cacheRead;
+        (accumulatedUsage.cache_read_input_tokens ?? 0) + parsed.cache_read_input_tokens;
     }
   }
 

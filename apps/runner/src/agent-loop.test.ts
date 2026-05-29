@@ -2400,6 +2400,29 @@ describe("Amp stream parsing", () => {
     });
   });
 
+  it("accumulates assistant events whose usage carries only cache fields", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "cached step" }],
+          usage: { cache_read_input_tokens: 1234 },
+        },
+        session_id: "T-usage-assistant-cache-only",
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 1234,
+    });
+  });
+
   it("formats Amp stream activity without leaking partial JSON chunks", () => {
     const formatter = createAmpActivityFormatter();
     const assistantEvent = JSON.stringify({
