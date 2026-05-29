@@ -23,6 +23,7 @@ import {
   MessagesSquare,
   PanelRight,
   Play,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,6 +38,7 @@ import {
   findModel,
   findTool,
 } from "@/components/agent-editor/tools";
+import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,
@@ -51,7 +53,7 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { updateAgent } from "@/lib/agents/actions";
+import { deleteAgent, updateAgent } from "@/lib/agents/actions";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
@@ -81,6 +83,19 @@ type OptimisticGitHubSync = {
 
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+
+// Duplicated from AgentsView.tsx — extracting to a shared module is tracked
+// as a follow-up cleanup. Without this re-throw, Next.js never gets to
+// navigate when a server action calls redirect().
+function isNextRedirectError(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest: unknown }).digest === "string" &&
+      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
 
 function getStoredInspectorCollapsed() {
   if (typeof window === "undefined") return true;
@@ -153,8 +168,10 @@ function AgentDetailContent({
   );
   const router = useRouter();
   const [, startTransition] = useTransition();
+  const [isDeleting, startDeleteTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -479,8 +496,48 @@ function AgentDetailContent({
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
+
+      <DeleteAgentDialog
+        agentName={agent.name}
+        isOpen={showDeleteDialog}
+        isPending={isDeleting}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={() => {
+          startDeleteTransition(async () => {
+            try {
+              const result = await deleteAgent(agent.id);
+              if (!result.ok) {
+                setShowDeleteDialog(false);
+                showError(result.error, "Could not delete agent");
+                return;
+              }
+              // Close the dialog before navigating so it doesn't stay open on
+              // the success path (mirrors the error branch above).
+              setShowDeleteDialog(false);
+              queryClient.setQueryData<AgentListItemPayload[]>(
+                agentQueryKeys.list(workspaceId),
+                (current) => (current ?? []).filter((item) => item.id !== agent.id),
+              );
+              router.push("/agents");
+            } catch (err) {
+              // Let Next.js redirect digests bubble — currentWorkspace() throws
+              // NEXT_REDIRECT for unauthenticated / incomplete-onboarding users
+              // and the framework needs to see it to navigate.
+              if (isNextRedirectError(err)) throw err;
+              // Server actions can throw (e.g. non-admin requireAdmin guard);
+              // surface as a toast instead of bubbling to the error boundary.
+              setShowDeleteDialog(false);
+              showError(
+                err instanceof Error ? err.message : "Could not delete agent",
+                "Could not delete agent",
+              );
+            }
+          });
+        }}
+      />
 
       <button
         type="button"
@@ -535,6 +592,7 @@ function AgentInspector({
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  onDeleteClick,
 }: {
   name: string;
   path: string | null;
@@ -550,6 +608,7 @@ function AgentInspector({
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  onDeleteClick: () => void;
 }) {
   return (
     <div className="space-y-8">
@@ -669,6 +728,17 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+
+      <div className="border-t border-[#e4e4e0] pt-6">
+        <button
+          type="button"
+          onClick={onDeleteClick}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff0ed]"
+        >
+          <Trash2 size={13} strokeWidth={1.9} />
+          Delete agent
+        </button>
+      </div>
     </div>
   );
 }
