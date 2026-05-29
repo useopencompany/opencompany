@@ -4,6 +4,7 @@ import { getDb } from "@opencompany/db/client";
 import {
   agentSessionBrainMounts,
   brainFiles,
+  brainSyncJobs,
   type WorkspaceRepository,
 } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -14,6 +15,7 @@ import { type SandboxHandle, sandboxLayout } from "./sandbox";
 const MAX_BRAIN_FILE_BYTES = 256 * 1024;
 const MAX_BRAIN_MOUNT_FILES = 80;
 const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
+const BRAIN_SYNC_DELAY_MS = 10_000;
 
 type BrainFileRow = typeof brainFiles.$inferSelect;
 
@@ -291,7 +293,52 @@ async function upsertBrainFileFromRunner(input: {
 }) {
   const db = getDb();
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
-  const github = await writeBrainFileToGitHub(input.repository, input.path, input.content);
+  let github = { commitSha: null as string | null, blobSha: null as string | null };
+  let shouldQueueSync = false;
+
+  try {
+    github = await writeBrainFileToGitHub(input.repository, input.path, input.content);
+    shouldQueueSync = !github.commitSha;
+  } catch {
+    shouldQueueSync = true;
+  }
+
+  const now = new Date();
+  if (github.commitSha) {
+    await db
+      .insert(brainFiles)
+      .values({
+        workspaceId: input.workspaceId,
+        path: input.path,
+        content: input.content,
+        contentHash: input.contentHash,
+        sizeBytes,
+        githubBlobSha: github.blobSha,
+        githubCommitSha: github.commitSha,
+        githubSyncedHash: input.contentHash,
+        githubSyncedAt: now,
+        githubSyncStatus: "synced",
+        githubSyncError: null,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [brainFiles.workspaceId, brainFiles.path],
+        set: {
+          content: input.content,
+          contentHash: input.contentHash,
+          sizeBytes,
+          githubBlobSha: github.blobSha,
+          githubCommitSha: github.commitSha,
+          githubSyncedHash: input.contentHash,
+          githubSyncedAt: now,
+          githubSyncStatus: "synced",
+          githubSyncError: null,
+          updatedAt: now,
+        },
+      });
+    return;
+  }
+
   await db
     .insert(brainFiles)
     .values({
@@ -300,13 +347,9 @@ async function upsertBrainFileFromRunner(input: {
       content: input.content,
       contentHash: input.contentHash,
       sizeBytes,
-      githubBlobSha: github.blobSha,
-      githubCommitSha: github.commitSha,
-      githubSyncedHash: github.commitSha ? input.contentHash : null,
-      githubSyncedAt: github.commitSha ? new Date() : null,
-      githubSyncStatus: github.commitSha ? "synced" : "pending",
+      githubSyncStatus: "pending",
       githubSyncError: null,
-      updatedAt: new Date(),
+      updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [brainFiles.workspaceId, brainFiles.path],
@@ -314,15 +357,20 @@ async function upsertBrainFileFromRunner(input: {
         content: input.content,
         contentHash: input.contentHash,
         sizeBytes,
-        githubBlobSha: github.blobSha,
-        githubCommitSha: github.commitSha,
-        githubSyncedHash: github.commitSha ? input.contentHash : null,
-        githubSyncedAt: github.commitSha ? new Date() : null,
-        githubSyncStatus: github.commitSha ? "synced" : "pending",
+        githubSyncStatus: "pending",
         githubSyncError: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       },
     });
+
+  if (shouldQueueSync) {
+    await upsertBrainSyncJob({
+      workspaceId: input.workspaceId,
+      path: input.path,
+      operation: "upsert",
+      desiredHash: input.contentHash,
+    });
+  }
 }
 
 async function writeBrainFileToGitHub(
@@ -374,6 +422,43 @@ async function deleteBrainFileFromGitHub(
       sha: current.sha,
     },
   });
+}
+
+async function upsertBrainSyncJob(input: {
+  workspaceId: string;
+  path: string;
+  operation: "upsert" | "delete";
+  desiredHash: string | null;
+  previousPath?: string | null;
+  previousBlobSha?: string | null;
+}) {
+  const now = new Date();
+  const nextRunAt = new Date(now.getTime() + BRAIN_SYNC_DELAY_MS);
+  await getDb()
+    .insert(brainSyncJobs)
+    .values({
+      workspaceId: input.workspaceId,
+      path: input.path,
+      operation: input.operation,
+      desiredHash: input.desiredHash,
+      previousPath: input.previousPath ?? null,
+      previousBlobSha: input.previousBlobSha ?? null,
+      nextRunAt,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [brainSyncJobs.workspaceId, brainSyncJobs.path],
+      set: {
+        operation: input.operation,
+        desiredHash: input.desiredHash,
+        previousPath: input.previousPath ?? null,
+        previousBlobSha: input.previousBlobSha ?? null,
+        status: "pending",
+        nextRunAt,
+        lastError: null,
+        updatedAt: now,
+      },
+    });
 }
 
 async function getGitHubFile(token: string, repository: WorkspaceRepository, path: string) {
