@@ -13,9 +13,9 @@ import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
 const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
-const AMP_STREAM_JSON_MODES = ["smart", "large", "rush"] as const;
-const DEFAULT_AMP_STREAM_JSON_MODE = "smart";
-type AmpStreamJsonMode = (typeof AMP_STREAM_JSON_MODES)[number];
+const AMP_MODES = ["smart", "large", "rush", "deep"] as const;
+const DEFAULT_AMP_MODE = "smart";
+type AmpMode = (typeof AMP_MODES)[number];
 
 export async function runAmpCoderTool(input: {
   sandbox: SandboxHandle;
@@ -38,7 +38,7 @@ export async function runAmpCoderTool(input: {
     typeof args.ampThreadId === "string" && args.ampThreadId.trim()
       ? args.ampThreadId.trim()
       : null;
-  const ampMode = readAmpStreamJsonMode(args.mode);
+  const ampMode = readAmpMode(args.mode);
 
   const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
   if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) {
@@ -109,7 +109,11 @@ export async function runAmpCoderTool(input: {
   const remainingActivity = ampActivity.finish();
   if (remainingActivity) await input.onOutput?.(remainingActivity);
   ampStream.finish();
-  const ampSummary = ampStream.summary();
+  const ampSummary = ampStream.summary({
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+    stdout: redactAmpOutput(String(result.stdout ?? "")),
+    stderr: redactAmpOutput(String(result.stderr ?? "")),
+  });
 
   await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
     timeoutMs: 60_000,
@@ -253,11 +257,11 @@ export async function runAmpCoderTool(input: {
 export function buildAmpCommand(input: {
   task: string;
   ampThreadId?: string | null;
-  mode?: AmpStreamJsonMode | null;
+  mode?: AmpMode | null;
 }) {
   const task = shellQuote(input.task);
   const ampThreadId = input.ampThreadId?.trim();
-  const mode = input.mode ?? DEFAULT_AMP_STREAM_JSON_MODE;
+  const mode = input.mode ?? DEFAULT_AMP_MODE;
   if (ampThreadId) {
     return [
       "amp",
@@ -266,30 +270,25 @@ export function buildAmpCommand(input: {
       "--dangerously-allow-all",
       "--mode",
       mode,
-      "--stream-json",
       "-x",
       task,
       shellQuote(ampThreadId),
     ].join(" ");
   }
 
-  return `amp --dangerously-allow-all --mode ${mode} --stream-json -x ${task}`;
+  return `amp --dangerously-allow-all --mode ${mode} -x ${task}`;
 }
 
-function readAmpStreamJsonMode(value: unknown): AmpStreamJsonMode {
-  if (value == null || value === "") return DEFAULT_AMP_STREAM_JSON_MODE;
+function readAmpMode(value: unknown): AmpMode {
+  if (value == null || value === "") return DEFAULT_AMP_MODE;
   if (typeof value !== "string") {
     throw new Error("AMP mode must be a string.");
   }
 
   const mode = value.trim();
-  if (AMP_STREAM_JSON_MODES.includes(mode as AmpStreamJsonMode)) return mode as AmpStreamJsonMode;
+  if (AMP_MODES.includes(mode as AmpMode)) return mode as AmpMode;
 
-  throw new Error(
-    `Unsupported AMP mode "${mode}". Supported stream JSON modes: ${AMP_STREAM_JSON_MODES.join(
-      ", ",
-    )}.`,
-  );
+  throw new Error(`Unsupported AMP mode "${mode}". Supported AMP modes: ${AMP_MODES.join(", ")}.`);
 }
 
 export function buildAmpCommandEnv(input: {
@@ -509,6 +508,7 @@ export function createAmpStreamAccumulator() {
   let status: AmpStreamSummary["status"] = "unknown";
   let result = "";
   let error: string | null = null;
+  let plainOutput = "";
   let durationMs: number | null = null;
   let numTurns: number | null = null;
   let lastAssistantText = "";
@@ -522,6 +522,7 @@ export function createAmpStreamAccumulator() {
     try {
       event = JSON.parse(trimmed);
     } catch {
+      plainOutput = appendAmpPlainOutput(plainOutput, line);
       return;
     }
     if (!isRecord(event)) return;
@@ -564,18 +565,57 @@ export function createAmpStreamAccumulator() {
       if (buffer.trim()) consumeLine(buffer);
       buffer = "";
     },
-    summary(): AmpStreamSummary {
+    summary(input?: {
+      exitCode?: number | null;
+      stdout?: string;
+      stderr?: string;
+    }): AmpStreamSummary {
+      const fallbackResult =
+        result ||
+        lastAssistantText ||
+        compactAmpPlainOutput(plainOutput) ||
+        compactAmpPlainOutput(input?.stdout) ||
+        compactAmpPlainOutput(input?.stderr);
+      const exitCode = input?.exitCode;
+      const resolvedStatus =
+        status !== "unknown" || typeof exitCode !== "number"
+          ? status
+          : exitCode === 0
+            ? "success"
+            : "error";
+      const resolvedError =
+        error ??
+        (resolvedStatus === "error"
+          ? fallbackResult || `Amp exited with code ${exitCode ?? "unknown"}.`
+          : null);
+
       return {
         threadId,
-        status,
-        result: result || lastAssistantText,
-        error,
+        status: resolvedStatus,
+        result: resolvedStatus === "error" ? result || lastAssistantText : fallbackResult,
+        error: resolvedError,
         durationMs,
         numTurns,
         permissionDenials,
       };
     },
   };
+}
+
+function appendAmpPlainOutput(current: string, line: string) {
+  const next = `${current}${line}\n`;
+  return next.length > 24_000 ? next.slice(-24_000) : next;
+}
+
+function compactAmpPlainOutput(value: string | null | undefined) {
+  return sanitizeAmpPlainOutput(value ?? "").trim();
+}
+
+function sanitizeAmpPlainOutput(value: string) {
+  return value
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
+    .replace(/\r/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 export function createAmpActivityFormatter() {
