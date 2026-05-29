@@ -41,10 +41,11 @@ describe("flattenVisibleTree", () => {
 
   it("reveals children of expanded folders in DFS order with depth", () => {
     const flat = flattenVisibleTree(tree, new Set(["docs"]));
+    // sortTreeNodes orders folders before files, so docs/product precedes docs/README.md.
     expect(flat.map((n) => n.path)).toEqual([
       "docs",
-      "docs/README.md",
       "docs/product",
+      "docs/README.md",
       "notes",
       "CHANGELOG.md",
     ]);
@@ -164,9 +165,10 @@ describe("resolveBrainTreeKeyNav", () => {
       type: "expand",
       path: "docs",
     });
+    // folders sort before files, so the first child of docs is docs/product.
     expect(resolveBrainTreeKeyNav("ArrowRight", state("docs", ["docs"]))).toEqual({
       type: "focus",
-      path: "docs/README.md",
+      path: "docs/product",
     });
   });
 
