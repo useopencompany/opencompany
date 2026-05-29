@@ -97,6 +97,7 @@ const MODEL_ICONS: Record<AgentModelId, LucideIcon> = {
   "anthropic/claude-haiku-4.5": Bot,
   "anthropic/claude-sonnet-4.6": Brain,
   "anthropic/claude-opus-4.7": Brain,
+  "anthropic/claude-opus-4.8": Brain,
   "google/gemini-3-flash": Bot,
   "google/gemini-3.1-flash-lite-preview": Bot,
   "deepseek/deepseek-v4-flash": Bot,

@@ -1,4 +1,4 @@
-import type { TextStreamPart, ToolSet } from "ai";
+import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import { recordStepUsage } from "./usage-recorder";
@@ -31,6 +31,8 @@ export async function collectAssistantStream(input: {
     usage: unknown;
     response: unknown;
   }> = [];
+  let lastFinishReason: FinishReason | undefined;
+  let lastRawFinishReason: string | undefined;
 
   const iterator = input.stream[Symbol.asyncIterator]();
   let completedNaturally = false;
@@ -60,6 +62,8 @@ export async function collectAssistantStream(input: {
 
       if (part.type === "finish-step") {
         stepIndex += 1;
+        lastFinishReason = part.finishReason;
+        lastRawFinishReason = part.rawFinishReason;
         modelSteps.push({
           stepIndex,
           finishReason: part.finishReason,
@@ -105,7 +109,16 @@ export async function collectAssistantStream(input: {
     }
   }
 
-  return { assistantContent, assistantReplayParts, reasoningSummary, modelSteps };
+  return {
+    assistantContent,
+    assistantReplayParts,
+    reasoningSummary,
+    modelSteps,
+    stepCount: stepIndex,
+    lastFinishReason,
+    lastRawFinishReason,
+    lastStepEndedWithToolCalls: lastFinishReason === "tool-calls",
+  };
 }
 
 function isModelOutputPart(part: TextStreamPart<ToolSet>) {

@@ -15,3 +15,5 @@ test-results
 !.vercel/project.json
 .env*.local
 .source
+.claude/
+*.profraw
