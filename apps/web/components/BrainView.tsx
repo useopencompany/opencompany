@@ -823,6 +823,22 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     if (!file) return;
     setFileMenuOpen(false);
     setError(null);
+
+    const parentFolder = parentFolderPath(file.path);
+    if (parentFolder) {
+      const siblingsInFolder = files.filter(
+        (candidate) =>
+          candidate.path !== file.path && candidate.path.startsWith(`${parentFolder}/`),
+      );
+      if (siblingsInFolder.length === 0) {
+        const folderName = fileNameFromPath(parentFolder);
+        const confirmed = window.confirm(
+          `"${folderName}" will be empty after deleting this file and the folder will be removed too. Delete anyway?`,
+        );
+        if (!confirmed) return;
+      }
+    }
+
     const snapshot = captureBrainViewSnapshot();
     beginOptimisticMutation();
     deletedPathsRef.current.add(file.path);
