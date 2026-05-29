@@ -24,7 +24,11 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
-import type { AssistantTurnPart, RuntimeEvent, SessionMessage } from "@/lib/agent-sessions/runtime-events";
+import type {
+  AssistantTurnPart,
+  RuntimeEvent,
+  SessionMessage,
+} from "@/lib/agent-sessions/runtime-events";
 import { AssistantMessageContent, SessionViewContent } from "./SessionView";
 
 // ── Module mocks ────────────────────────────────────────────────────────────

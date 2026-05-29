@@ -303,7 +303,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     awaitingAssistantWork &&
     lastRuntimeActivityMs !== null &&
     Date.now() - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
-  const showStaleBanner = awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
+  const showStaleBanner =
+    awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
     const el = textareaRef.current;

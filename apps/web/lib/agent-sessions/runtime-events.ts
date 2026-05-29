@@ -96,9 +96,9 @@ export function applyRuntimeEventToState(
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
         messages:
-        status === "failed"
-          ? stopRunningAssistantMessages(next.messages, next.events)
-          : next.messages,
+          status === "failed"
+            ? stopRunningAssistantMessages(next.messages, next.events)
+            : next.messages,
       };
     }
   }

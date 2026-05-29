@@ -3,20 +3,20 @@ import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
   agentSessionMessages,
-  agentSessions,
   agentSessionUsage,
+  agentSessions,
   agents,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
-  type SessionStreamCredentialPayload,
-  type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
+  type SessionStreamCredentialPayload,
+  type SidebarSessionPayload,
 } from "@/lib/agent-sessions/payload";
-import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 import { getRunnerPublicUrl, getRunnerStreamTokenSecret } from "@/lib/agent-sessions/runner";
+import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 
 export async function loadSidebarSessionsForWorkspace(
   userId: string,
