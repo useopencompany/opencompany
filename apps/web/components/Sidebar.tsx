@@ -19,12 +19,21 @@ import {
   ScrollText,
   Search,
   Settings,
+  Star,
   X,
   // Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
@@ -37,6 +46,13 @@ import {
   type SidebarSessionPayload,
   sessionQueryKeys,
 } from "@/lib/agent-sessions/payload";
+import {
+  getStarredSessionsServerSnapshot,
+  getStarredSessionsSnapshot,
+  starSession,
+  subscribeStarredSessions,
+  unstarSession,
+} from "@/lib/agent-sessions/starred";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -111,10 +127,14 @@ function SessionHistoryItem({
   session,
   active,
   workspaceId,
+  starred,
+  onToggleStar,
 }: {
   session: SidebarSession;
   active?: boolean;
   workspaceId: string;
+  starred?: boolean;
+  onToggleStar?: (sessionId: string) => void;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -163,6 +183,26 @@ function SessionHistoryItem({
         ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
+      {onToggleStar && (
+        <button
+          type="button"
+          title={starred ? "Unstar session" : "Star session"}
+          aria-label={starred ? `Unstar ${session.title}` : `Star ${session.title}`}
+          aria-pressed={starred}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleStar(session.id);
+          }}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-opacity duration-150 hover:bg-[#dededa] focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            starred
+              ? "text-amber-500 opacity-100"
+              : "text-ink-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+          }`}
+        >
+          <Star size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+        </button>
+      )}
       <button
         type="button"
         title="Archive session"
@@ -377,6 +417,12 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
+  // starredMap: { [sessionId]: starredAtIso } — synced from localStorage via useSyncExternalStore.
+  const starredMap = useSyncExternalStore(
+    subscribeStarredSessions,
+    getStarredSessionsSnapshot,
+    getStarredSessionsServerSnapshot,
+  );
   const footerRef = useRef<HTMLDivElement>(null);
   const { data: queriedSessions, isPending } = useQuery({
     queryKey: sessionQueryKeys.list(workspaceId),
@@ -389,11 +435,42 @@ export default function Sidebar({
   const showSessionsLoading = sessionsLoading || (isPending && sessions.length === 0);
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+
+  const handleToggleStar = useCallback(
+    (sessionId: string) => {
+      const isStarred = sessionId in starredMap;
+      if (isStarred) {
+        unstarSession(sessionId);
+      } else {
+        starSession(sessionId);
+      }
+    },
+    [starredMap],
+  );
+
   const filteredSessions = useMemo(
     () => filterSessions(sessions, sessionQuery),
     [sessions, sessionQuery],
   );
-  const groupedSessions = useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
+
+  // Partition into starred (ordered by most-recently-starred) and unstarred (ordered by recency).
+  const { starredSessions, unstarredSessions } = useMemo(() => {
+    const starred: SidebarSession[] = [];
+    const unstarred: SidebarSession[] = [];
+    for (const session of filteredSessions) {
+      if (session.id in starredMap) {
+        starred.push(session);
+      } else {
+        unstarred.push(session);
+      }
+    }
+    starred.sort(
+      (a, b) => Date.parse(starredMap[b.id] ?? "0") - Date.parse(starredMap[a.id] ?? "0"),
+    );
+    return { starredSessions: starred, unstarredSessions: unstarred };
+  }, [filteredSessions, starredMap]);
+
+  const groupedSessions = useMemo(() => groupSessions(unstarredSessions), [unstarredSessions]);
 
   function updateCollapsed(nextCollapsed: boolean) {
     setCollapsed(nextCollapsed);
@@ -504,23 +581,57 @@ export default function Sidebar({
                 No sessions match this filter.
               </div>
             ) : (
-              groupedSessions.map((group, index) => (
-                <div key={group.label} className={index === 0 ? "" : "pt-3"}>
-                  <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-                    {group.label}
-                  </div>
-                  <div className="flex flex-col gap-px">
-                    {group.sessions.map((session) => (
-                      <SessionHistoryItem
-                        key={session.id}
-                        session={session}
-                        workspaceId={workspaceId}
-                        active={pathname === `/session/${session.id}`}
+              <>
+                {starredSessions.length > 0 && (
+                  <div className="pb-3">
+                    <div className="flex items-center gap-1 px-2 pb-1">
+                      <Star
+                        size={9}
+                        strokeWidth={2}
+                        fill="currentColor"
+                        className="text-amber-500"
                       />
-                    ))}
+                      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                        Starred
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-px">
+                      {starredSessions.map((session) => (
+                        <SessionHistoryItem
+                          key={session.id}
+                          session={session}
+                          workspaceId={workspaceId}
+                          active={pathname === `/session/${session.id}`}
+                          starred
+                          onToggleStar={handleToggleStar}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                )}
+                {groupedSessions.map((group, index) => (
+                  <div
+                    key={group.label}
+                    className={index === 0 && starredSessions.length === 0 ? "" : "pt-3"}
+                  >
+                    <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                      {group.label}
+                    </div>
+                    <div className="flex flex-col gap-px">
+                      {group.sessions.map((session) => (
+                        <SessionHistoryItem
+                          key={session.id}
+                          session={session}
+                          workspaceId={workspaceId}
+                          active={pathname === `/session/${session.id}`}
+                          starred={false}
+                          onToggleStar={handleToggleStar}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
             )}
           </div>
 
