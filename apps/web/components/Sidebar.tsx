@@ -14,7 +14,6 @@ import {
   ListFilter,
   LogOut,
   MessageSquarePlus,
-  MoreHorizontal,
   PanelLeft,
   ScrollText,
   Search,
@@ -537,36 +536,35 @@ export default function Sidebar({
                 onFeedbackOpen={() => setFeedbackOpen(true)}
               />
             )}
-            <div
-              aria-hidden
-              className="h-6 w-6 shrink-0 rounded-full ring-1 ring-black/[0.06]"
-              style={{
-                background:
-                  "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
-                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
-              }}
-            />
-            <div className="flex min-w-0 flex-col leading-tight">
-              <span
-                title={userEmail}
-                className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
-              >
-                {userName}
-              </span>
-              <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
-            </div>
+            <button
+              type="button"
+              aria-label="Open account menu"
+              aria-expanded={accountMenuOpen}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              className={`-mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors duration-150 hover:bg-[#ebebe8] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                accountMenuOpen ? "bg-[#e3e3df]" : ""
+              }`}
+            >
+              <div
+                aria-hidden
+                className="h-6 w-6 shrink-0 rounded-full ring-1 ring-black/[0.06]"
+                style={{
+                  background:
+                    "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
+                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
+                }}
+              />
+              <div className="flex min-w-0 flex-col leading-tight text-left">
+                <span
+                  title={userEmail}
+                  className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
+                >
+                  {userName}
+                </span>
+                <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
+              </div>
+            </button>
             <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
-              <button
-                type="button"
-                aria-label="Open account menu"
-                aria-expanded={accountMenuOpen}
-                className={`rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                  accountMenuOpen ? "bg-[#e3e3df] text-ink" : ""
-                }`}
-                onClick={() => setAccountMenuOpen((open) => !open)}
-              >
-                <MoreHorizontal size={14} strokeWidth={1.75} />
-              </button>
               <button
                 type="button"
                 aria-label="Filter sessions"
