@@ -521,6 +521,7 @@ export async function fetchAmpThreadCost(
   }
 }
 
+// AMP stream-json uses Anthropic-style snake_case token field names.
 interface AmpUsage {
   input_tokens: number;
   cache_creation_input_tokens?: number;
@@ -579,14 +580,18 @@ export function createAmpStreamAccumulator() {
     if (!u) return null;
     const inputTokens = readOptionalFiniteNumber(u.input_tokens);
     const outputTokens = readOptionalFiniteNumber(u.output_tokens);
-    if (inputTokens === null && outputTokens === null) return null;
+    const cacheCreation = readOptionalFiniteNumber(u.cache_creation_input_tokens);
+    const cacheRead = readOptionalFiniteNumber(u.cache_read_input_tokens);
+    // Reject usage that conveys nothing billable: no positive in/out tokens AND no cache fields.
+    // Cache-only events (no input/output keys) and zero-with-cache events are kept.
+    const hasTokens = (inputTokens ?? 0) > 0 || (outputTokens ?? 0) > 0;
+    const hasCache = cacheCreation !== null || cacheRead !== null;
+    if (!hasTokens && !hasCache) return null;
     const usage: AmpUsage = {
       input_tokens: inputTokens ?? 0,
       output_tokens: outputTokens ?? 0,
     };
-    const cacheCreation = readOptionalFiniteNumber(u.cache_creation_input_tokens);
     if (cacheCreation !== null) usage.cache_creation_input_tokens = cacheCreation;
-    const cacheRead = readOptionalFiniteNumber(u.cache_read_input_tokens);
     if (cacheRead !== null) usage.cache_read_input_tokens = cacheRead;
     return usage;
   }

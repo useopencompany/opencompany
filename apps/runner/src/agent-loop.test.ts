@@ -1378,6 +1378,104 @@ describe("Amp stream parsing", () => {
     expect(stream.summary().usage).toBeNull();
   });
 
+  it("falls back to accumulated usage when the result event reports zero tokens", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "step" }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        session_id: "T-usage-zero-result",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 200,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-zero-result",
+        usage: { input_tokens: 0, output_tokens: 0 },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 50,
+    });
+  });
+
+  it("preserves cache token counts when result event reports zero tokens but has cache fields", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "step" }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        session_id: "T-usage-cache-zero",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 200,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-cache-zero",
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_input_tokens: 5000,
+          cache_creation_input_tokens: 200,
+        },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 5000,
+      cache_creation_input_tokens: 200,
+    });
+  });
+
+  it("accepts result event whose usage carries only cache fields", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 150,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-cache-only",
+        usage: { cache_read_input_tokens: 800 },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 800,
+    });
+  });
+
   it("formats Amp stream activity without leaking partial JSON chunks", () => {
     const formatter = createAmpActivityFormatter();
     const assistantEvent = JSON.stringify({
