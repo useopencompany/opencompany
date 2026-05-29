@@ -37,6 +37,15 @@ export function useBrainTreeKeyboard(options: BrainTreeKeyboardOptions) {
 
   return useCallback(
     (event: React.KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       const action = resolveBrainTreeKeyNav(event.key, { nodes, focusedPath, expandedPaths });
       if (action) {
         event.preventDefault();

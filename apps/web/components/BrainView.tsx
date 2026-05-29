@@ -98,6 +98,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     () => new Set(serverFiles[0] ? ancestorFolderPaths(serverFiles[0].path) : []),
   );
   const [focusedPath, setFocusedPath] = useState(serverFiles[0]?.path ?? "");
+  const [treeHasFocus, setTreeHasFocus] = useState(false);
   const treeScrollRef = useRef<HTMLDivElement>(null);
   const [draftContent, setDraftContent] = useState(serverFiles[0]?.content ?? "");
   const [renamingPath, setRenamingPath] = useState("");
@@ -882,8 +883,10 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         selectedContextPath={selectedContextPath}
         expandedPaths={visibleExpandedPaths}
         focusedPath={focusedPath}
+        treeHasFocus={treeHasFocus}
         onFocusItem={focusBrainNode}
         onTreeKeyDown={handleTreeKeyDown}
+        onTreeFocusChange={setTreeHasFocus}
         treeScrollRef={treeScrollRef}
         isSearching={Boolean(query.trim())}
         onCreateFile={createFile}
@@ -998,8 +1001,10 @@ function BrainSidebar({
   selectedContextPath,
   expandedPaths,
   focusedPath,
+  treeHasFocus,
   onFocusItem,
   onTreeKeyDown,
+  onTreeFocusChange,
   treeScrollRef,
   isSearching,
   onCreateFile,
@@ -1033,8 +1038,10 @@ function BrainSidebar({
   selectedContextPath: string;
   expandedPaths: Set<string>;
   focusedPath: string;
+  treeHasFocus: boolean;
   onFocusItem: (path: string) => void;
   onTreeKeyDown: (event: React.KeyboardEvent) => void;
+  onTreeFocusChange: (hasFocus: boolean) => void;
   treeScrollRef: React.RefObject<HTMLDivElement | null>;
   isSearching: boolean;
   onCreateFile: () => void;
@@ -1108,8 +1115,12 @@ function BrainSidebar({
         ref={treeScrollRef}
         role="tree"
         tabIndex={0}
-        aria-activedescendant={focusedPath ? `brain-row-${focusedPath}` : undefined}
+        aria-activedescendant={
+          focusedPath && !renamingPath ? `brain-row-${focusedPath}` : undefined
+        }
         onKeyDown={onTreeKeyDown}
+        onFocus={() => onTreeFocusChange(true)}
+        onBlur={() => onTreeFocusChange(false)}
         className={`flex-1 overflow-y-auto px-2 py-3 transition-colors duration-150 focus:outline-none ${
           dropTargetPath === "" ? "bg-[#ededeb]" : ""
         }`}
@@ -1145,6 +1156,7 @@ function BrainSidebar({
                 selectedContextPath={selectedContextPath}
                 expandedPaths={expandedPaths}
                 focusedPath={focusedPath}
+                treeHasFocus={treeHasFocus}
                 onFocusItem={onFocusItem}
                 isSearching={isSearching}
                 renamingPath={renamingPath}
@@ -1186,6 +1198,7 @@ function TreeItem({
   selectedContextPath,
   expandedPaths,
   focusedPath,
+  treeHasFocus,
   onFocusItem,
   isSearching,
   renamingPath,
@@ -1214,6 +1227,7 @@ function TreeItem({
   selectedContextPath: string;
   expandedPaths: Set<string>;
   focusedPath: string;
+  treeHasFocus: boolean;
   onFocusItem: (path: string) => void;
   isSearching: boolean;
   renamingPath: string;
@@ -1237,7 +1251,7 @@ function TreeItem({
   onContextMenu: (event: React.MouseEvent, target: BrainTreeTarget) => void;
 }) {
   const active = node.type === "file" && node.path === selectedPath;
-  const focused = node.path === focusedPath;
+  const focused = node.path === focusedPath && treeHasFocus;
   const contextActive = node.type === "folder" && node.path === selectedContextPath;
   const expanded = node.type === "folder" && expandedPaths.has(node.path);
   const showChildren = isSearching || expanded;
@@ -1300,6 +1314,7 @@ function TreeItem({
               else if (node.file) onCommitRename(node.file);
             }}
             onKeyDown={(event) => {
+              event.stopPropagation();
               if (event.key === "Enter") {
                 event.preventDefault();
                 if (node.type === "folder") onCommitRenameFolder(node.path);
@@ -1395,6 +1410,7 @@ function TreeItem({
               selectedContextPath={selectedContextPath}
               expandedPaths={expandedPaths}
               focusedPath={focusedPath}
+              treeHasFocus={treeHasFocus}
               onFocusItem={onFocusItem}
               isSearching={isSearching}
               renamingPath={renamingPath}
