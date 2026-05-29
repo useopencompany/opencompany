@@ -478,6 +478,9 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setSelectedContextPath(parentFolderPath(path));
     setDraftContent(content);
     expandAncestors(path);
+    setRenamingPath(path);
+    setRenamingName(fileNameFromPath(path));
+    setRenamingType("file");
     startTransition(async () => {
       try {
         const result = await createBrainFile(path, content);
@@ -491,6 +494,8 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           updateSelectedPath(result.path);
           setSelectedContextPath(parentFolderPath(result.path));
           expandAncestors(result.path);
+          setRenamingPath((current) => (current === path ? result.path : current));
+          setRenamingName(fileNameFromPath(result.path));
         }
         router.refresh();
       } catch (error) {
@@ -516,6 +521,9 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setSelectedContextPath(folderPath);
     setDraftContent(content);
     expandAncestors(path);
+    setRenamingPath(folderPath);
+    setRenamingName(fileNameFromPath(folderPath));
+    setRenamingType("folder");
     startTransition(async () => {
       try {
         const result = await createBrainFile(path, content);
@@ -529,6 +537,9 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           updateSelectedPath(result.path);
           setSelectedContextPath(parentFolderPath(result.path));
           expandAncestors(result.path);
+          const resolvedFolder = parentFolderPath(result.path);
+          setRenamingPath((current) => (current === folderPath ? resolvedFolder : current));
+          setRenamingName(fileNameFromPath(resolvedFolder));
         }
         router.refresh();
       } catch (error) {
