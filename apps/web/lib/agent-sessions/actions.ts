@@ -13,10 +13,10 @@ import {
 } from "@opencompany/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
+import { triggerAgentSessionAbort } from "@/lib/agent-sessions/abort-runner";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import {
   dispatchAgentAfterSessionCheck,
-  dispatchAgentSessionAbortRequested,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
@@ -204,7 +204,7 @@ export async function abortAgentSession(sessionId: string) {
     .where(eq(agentSessions.id, sessionId));
 
   after(async () => {
-    await dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id });
+    await triggerAgentSessionAbort({ sessionId, workspaceId: workspace.id });
   });
 
   return { ok: true } as const;

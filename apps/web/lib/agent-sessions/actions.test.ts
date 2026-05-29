@@ -51,7 +51,10 @@ vi.mock("@/lib/agent-sessions/data", () => ({
 vi.mock("@/lib/agent-sessions/events", () => ({
   dispatchAgentAfterSessionCheck: vi.fn().mockResolvedValue(undefined),
   dispatchAgentSessionStarted: vi.fn().mockResolvedValue(undefined),
-  dispatchAgentSessionAbortRequested: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/agent-sessions/abort-runner", () => ({
+  triggerAgentSessionAbort: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/agent-sessions/message-runner", () => ({
