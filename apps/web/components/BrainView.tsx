@@ -118,6 +118,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   const optimisticMutationCountRef = useRef(0);
   const deletedPathsRef = useRef(new Set<string>());
   const selectedPathRef = useRef(selectedPath);
+  const pendingCreatesRef = useRef(new Map<string, Promise<string | null>>());
 
   const selected = files.find((file) => file.path === selectedPath) ?? null;
   const tree = useMemo(() => buildBrainTree(files, query), [files, query]);
@@ -494,6 +495,11 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setRenamingPath(path);
     setRenamingName(fileNameFromPath(path));
     setRenamingType("file");
+    let resolveCreate!: (finalPath: string | null) => void;
+    const createPromise = new Promise<string | null>((resolve) => {
+      resolveCreate = resolve;
+    });
+    pendingCreatesRef.current.set(path, createPromise);
     startTransition(async () => {
       try {
         const result = await createBrainFile(path, content);
@@ -501,6 +507,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           restoreBrainViewSnapshot(snapshot);
           cancelRenameFile();
           setError(result.error);
+          resolveCreate(null);
           return;
         }
         if (result.path !== path) {
@@ -511,12 +518,15 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           setRenamingPath((current) => (current === path ? result.path : current));
           setRenamingName(fileNameFromPath(result.path));
         }
+        resolveCreate(result.path);
         router.refresh();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         cancelRenameFile();
         handleBrainActionError(error, "Create failed.");
+        resolveCreate(null);
       } finally {
+        pendingCreatesRef.current.delete(path);
         finishOptimisticMutation();
       }
     });
@@ -625,6 +635,18 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         if (selected?.path === file.path && dirty) {
           const saved = await saveDraft(file.path, draftContent);
           if (!saved) {
+            restoreBrainViewSnapshot(snapshot);
+            return;
+          }
+        }
+
+        // If the file was just created and the server create is still in-flight,
+        // wait for it to complete before renaming so the file actually exists.
+        const pendingCreate = pendingCreatesRef.current.get(file.path);
+        if (pendingCreate !== undefined) {
+          const resolvedSourcePath = await pendingCreate;
+          // null means create failed — nothing to rename.
+          if (resolvedSourcePath === null) {
             restoreBrainViewSnapshot(snapshot);
             return;
           }
