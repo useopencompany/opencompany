@@ -9,9 +9,17 @@ const eventMocks = vi.hoisted(() => ({
 const githubMocks = vi.hoisted(() => ({
   getGitHubInstallationToken: vi.fn(async () => "ghs_test"),
 }));
+const observabilityMocks = vi.hoisted(() => ({
+  logger: {
+    warn: vi.fn(),
+  },
+}));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
+}));
+vi.mock("@opencompany/observability", () => ({
+  createLogger: vi.fn(() => observabilityMocks.logger),
 }));
 vi.mock("./events", () => eventMocks);
 vi.mock("./github", () => githubMocks);
@@ -180,6 +188,14 @@ describe("syncBrainFromSandbox", () => {
       expect.objectContaining({
         sessionId: "ses_123",
         type: "brain.file_changed",
+      }),
+    );
+    expect(observabilityMocks.logger.warn).toHaveBeenCalledWith(
+      "Queued Brain GitHub sync after immediate write failed",
+      expect.objectContaining({
+        brain_path: "README.md",
+        error: expect.any(Error),
+        workspace_id: "wsp_123",
       }),
     );
   });

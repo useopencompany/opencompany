@@ -114,6 +114,28 @@ describe("collectAssistantStream", () => {
       payload: { messageId: "msg_assistant", delta: " world" },
     });
   });
+
+  it("publishes reasoning deltas as transient runtime events as they arrive", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", delta: "..." }),
+    ]);
+
+    await collect(stream, { exposeReasoningSummary: true });
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Thinking" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "..." },
+    });
+  });
 });
 
 function collect(

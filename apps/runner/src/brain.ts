@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { type AgentBrainReference, shellQuote } from "@opencompany/agent-runtime";
+import {
+  type AgentBrainReference,
+  BRAIN_SYNC_DELAY_MS,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionBrainMounts,
@@ -7,6 +11,7 @@ import {
   brainSyncJobs,
   type WorkspaceRepository,
 } from "@opencompany/db/schema";
+import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
@@ -15,7 +20,7 @@ import { type SandboxHandle, sandboxLayout } from "./sandbox";
 const MAX_BRAIN_FILE_BYTES = 256 * 1024;
 const MAX_BRAIN_MOUNT_FILES = 80;
 const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
-const BRAIN_SYNC_DELAY_MS = 10_000;
+const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 type BrainFileRow = typeof brainFiles.$inferSelect;
 
@@ -299,7 +304,12 @@ async function upsertBrainFileFromRunner(input: {
   try {
     github = await writeBrainFileToGitHub(input.repository, input.path, input.content);
     shouldQueueSync = !github.commitSha;
-  } catch {
+  } catch (error) {
+    logger.warn("Queued Brain GitHub sync after immediate write failed", {
+      error,
+      workspace_id: input.workspaceId,
+      brain_path: input.path,
+    });
     shouldQueueSync = true;
   }
 

@@ -396,13 +396,14 @@ export function isInspectableRuntimeEvent(event: RuntimeEvent) {
 // Reasoning is the model's current phase when the most recent event for a still-running
 // message is a reasoning delta. Visible text, tool, usage, or completion events arrive
 // afterward and flip this off; a later reasoning round (after a tool result) flips it back
-// on. `RuntimeEvent.id` is a monotonic ordinal, so "latest event" is well-defined.
+// on. Persisted `RuntimeEvent.id` values are monotonic; transient null-id events
+// are ordered by arrival and win ties.
 export function isReasoningInProgress(message: SessionMessage, events: RuntimeEvent[]): boolean {
   if (message.status !== "running") return false;
   let latest: RuntimeEvent | null = null;
   for (const event of events) {
     if (!eventBelongsToMessage(event, message.id)) continue;
-    if (!latest || eventOrderValue(event) > eventOrderValue(latest)) latest = event;
+    if (!latest || isEventAtLeastAsRecent(event, latest)) latest = event;
   }
   return latest?.type === "message.reasoning_delta";
 }
@@ -632,6 +633,14 @@ function eventOrderForMessage(events: RuntimeEvent[], messageId: string) {
 
 function eventOrderValue(event: RuntimeEvent) {
   return event.id ?? Number.MAX_SAFE_INTEGER;
+}
+
+function isEventAtLeastAsRecent(event: RuntimeEvent, latest: RuntimeEvent) {
+  const order = eventOrderValue(event);
+  const latestOrder = eventOrderValue(latest);
+  if (order > latestOrder) return true;
+  if (order < latestOrder) return false;
+  return event.id === null;
 }
 
 export function buildRuntimeToolCallsForMessage(

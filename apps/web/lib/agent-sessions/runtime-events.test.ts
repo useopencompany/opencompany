@@ -451,6 +451,18 @@ describe("isReasoningInProgress", () => {
     expect(isReasoningInProgress(runningMessage, withTool)).toBe(false);
   });
 
+  it("uses arrival order for repeated transient reasoning and text deltas", () => {
+    const events = [
+      event(null, "message.reasoning_delta", {
+        messageId: "msg_assistant",
+        delta: "Weighing…",
+      }),
+      event(null, "message.delta", { messageId: "msg_assistant", delta: "Here is" }),
+    ];
+
+    expect(isReasoningInProgress(runningMessage, events)).toBe(false);
+  });
+
   it("is false when the message is no longer running", () => {
     const events = [
       event(1, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Weighing…" }),

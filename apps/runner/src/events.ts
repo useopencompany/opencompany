@@ -5,12 +5,16 @@ import { agentSessionEvents } from "@opencompany/db/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
 
 type Db = ReturnType<typeof getDb>;
+type TransientPublishableRuntimeEvent = Extract<
+  AgentRuntimeEvent,
+  { type: "message.delta" | "message.reasoning_delta" | "command.output" }
+>;
 export type PersistedRuntimeEvent = Awaited<ReturnType<typeof listSessionEvents>>[number];
 export type TransientRuntimeEvent = {
   id: null;
   sessionId: string;
   messageId: string | null;
-  type: AgentRuntimeEvent["type"];
+  type: TransientPublishableRuntimeEvent["type"];
   payload: AgentRuntimeEventPayload;
   createdAt: Date;
   transient: true;
@@ -49,7 +53,7 @@ export function publishTransientRuntimeEvent(
   input: {
     sessionId: string;
     messageId?: string | null;
-  } & AgentRuntimeEvent,
+  } & TransientPublishableRuntimeEvent,
 ) {
   const event: TransientRuntimeEvent = {
     id: null,
