@@ -311,7 +311,6 @@ body {
   border-top: 1px solid #deded9;
 }
 
-
 .thinking-shimmer {
   color: var(--color-ink);
   animation: thinking-shimmer 1.4s ease-in-out infinite;

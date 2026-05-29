@@ -18,10 +18,10 @@
  * SSE reconnects keep flipping stream.status away from "stale".
  */
 
-import type { ComponentProps } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import type { AssistantTurnPart, RuntimeEvent, SessionMessage } from "@/lib/agent-sessions/runtime-events";
