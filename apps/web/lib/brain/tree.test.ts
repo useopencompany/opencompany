@@ -4,6 +4,8 @@ import {
   buildBrainTree,
   collectFolderPaths,
   flattenVisibleTree,
+  hasOtherFilesInFolder,
+  isFolderEmptyAfterRemoving,
   parentFolderPath,
   uniqueNewBrainPath,
 } from "./tree";
@@ -57,6 +59,49 @@ describe("brain tree helpers", () => {
     );
     expect(uniqueNewBrainPath(files, "docs/product")).toBe("docs/product/new-note.md");
     expect(uniqueNewBrainPath(files, "docs/README.md")).toBe("docs/new-note.md");
+  });
+
+  it("hides placeholder files but keeps the (empty) folder node", () => {
+    const tree = buildBrainTree([{ path: "notes/new-folder/.gitkeep" }]);
+
+    expect(tree.children.map((node) => `${node.type}:${node.path}`)).toEqual(["folder:notes"]);
+    expect(tree.children[0]?.children.map((node) => `${node.type}:${node.path}`)).toEqual([
+      "folder:notes/new-folder",
+    ]);
+    // The placeholder leaf itself is never rendered.
+    expect(tree.children[0]?.children[0]?.children).toEqual([]);
+  });
+});
+
+describe("folder emptiness helpers", () => {
+  const files = [
+    { path: "notes/todo.md" },
+    { path: "notes/done.md" },
+    { path: "notes-archive/old.md" },
+    { path: "empty/.gitkeep" },
+  ];
+
+  it("detects when a folder still has other real files", () => {
+    expect(hasOtherFilesInFolder(files, "notes", "notes/todo.md")).toBe(true);
+    expect(hasOtherFilesInFolder(files, "notes", "notes/done.md")).toBe(true);
+  });
+
+  it("does not count prefix-colliding sibling folders", () => {
+    // "notes-archive/old.md" must not be treated as a member of "notes".
+    expect(hasOtherFilesInFolder([{ path: "notes-archive/old.md" }], "notes", "notes/x.md")).toBe(
+      false,
+    );
+  });
+
+  it("ignores placeholder files when measuring emptiness", () => {
+    expect(hasOtherFilesInFolder(files, "empty", "empty/x.md")).toBe(false);
+  });
+
+  it("reports a folder as empty after removing its last real file", () => {
+    expect(isFolderEmptyAfterRemoving([{ path: "notes/todo.md" }], "notes/todo.md")).toBe(true);
+    expect(isFolderEmptyAfterRemoving(files, "notes/todo.md")).toBe(false);
+    // Root-level files have no parent folder to keep alive.
+    expect(isFolderEmptyAfterRemoving([{ path: "CHANGELOG.md" }], "CHANGELOG.md")).toBe(false);
   });
 });
 

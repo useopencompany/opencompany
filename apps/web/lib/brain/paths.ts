@@ -3,6 +3,20 @@ export const MAX_BRAIN_FILE_BYTES = 256 * 1024;
 export const MAX_BRAIN_MOUNT_FILES = 80;
 export const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
 
+// Folders in Brain are virtual (derived from file paths), so an empty folder
+// cannot exist on its own. We persist a hidden placeholder file inside a folder
+// to keep it alive when it has no real files, mirroring the `.gitkeep` convention.
+export const BRAIN_FOLDER_PLACEHOLDER = ".gitkeep";
+
+export function folderPlaceholderPath(folderPath: string) {
+  const normalized = folderPath.replace(/^\/+|\/+$/g, "");
+  return normalized ? `${normalized}/${BRAIN_FOLDER_PLACEHOLDER}` : BRAIN_FOLDER_PLACEHOLDER;
+}
+
+export function isBrainFolderPlaceholder(path: string) {
+  return path === BRAIN_FOLDER_PLACEHOLDER || path.endsWith(`/${BRAIN_FOLDER_PLACEHOLDER}`);
+}
+
 export function normalizeBrainPath(input: string, options: { allowFolder?: boolean } = {}) {
   const raw = input
     .trim()

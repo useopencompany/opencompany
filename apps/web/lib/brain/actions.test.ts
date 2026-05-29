@@ -2,7 +2,7 @@ import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace } from "@/lib/auth";
 import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
-import { deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
+import { deleteBrainFile, deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
@@ -288,5 +288,82 @@ describe("renameBrainFile", () => {
       workspaceId: "wks_123",
       path: "docs/deep/b.md",
     });
+  });
+});
+
+describe("deleteBrainFile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  it("writes a placeholder to keep a folder alive when deleting its last real file", async () => {
+    const { db, insertedValues } = createDbMock({
+      selectResults: [[{ path: "notes/new-folder/note.md", githubBlobSha: "blob-note" }]],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(deleteBrainFile("notes/new-folder/note.md")).resolves.toEqual({
+      ok: true,
+      path: "notes/new-folder/note.md",
+    });
+
+    expect(insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          workspaceId: "wks_123",
+          path: "notes/new-folder/.gitkeep",
+          githubSyncStatus: "pending",
+        }),
+        expect.objectContaining({
+          path: "notes/new-folder/.gitkeep",
+          operation: "upsert",
+        }),
+      ]),
+    );
+    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
+      workspaceId: "wks_123",
+      path: "notes/new-folder/.gitkeep",
+    });
+  });
+
+  it("does not write a placeholder when other files remain in the folder", async () => {
+    const { db, insertedValues } = createDbMock({
+      selectResults: [
+        [
+          { path: "notes/a.md", githubBlobSha: "blob-a" },
+          { path: "notes/b.md", githubBlobSha: "blob-b" },
+        ],
+      ],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(deleteBrainFile("notes/a.md")).resolves.toEqual({
+      ok: true,
+      path: "notes/a.md",
+    });
+
+    expect(insertedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: "notes/.gitkeep" })]),
+    );
+  });
+
+  it("does not write a placeholder for a root-level file", async () => {
+    const { db, insertedValues } = createDbMock({
+      selectResults: [[{ path: "CHANGELOG.md", githubBlobSha: "blob-c" }]],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(deleteBrainFile("CHANGELOG.md")).resolves.toEqual({
+      ok: true,
+      path: "CHANGELOG.md",
+    });
+
+    // Only the delete sync job is inserted; no placeholder upsert.
+    expect(insertedValues).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ githubSyncStatus: "pending" })]),
+    );
   });
 });

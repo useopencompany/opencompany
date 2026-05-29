@@ -7,13 +7,32 @@ import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { brainSyncJobUpsert, resolveBrainSyncRename } from "@/lib/brain/jobs";
-import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
+import {
+  folderPlaceholderPath,
+  isBrainTextFile,
+  MAX_BRAIN_FILE_BYTES,
+  normalizeBrainPath,
+} from "@/lib/brain/paths";
 import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
+import { hasOtherFilesInFolder, parentFolderPath } from "@/lib/brain/tree";
 
 type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
 
 export async function createBrainFile(path: string, content = ""): Promise<BrainActionResult> {
   return upsertBrainFile({ path, content, createOnly: true });
+}
+
+/**
+ * Persists an otherwise-empty folder by writing a hidden placeholder file
+ * (e.g. `<folder>/.gitkeep`). Folders are virtual, so without a file inside
+ * them they cannot exist. The placeholder is filtered out of the Brain tree UI.
+ */
+export async function createBrainFolder(folderPath: string): Promise<BrainActionResult> {
+  return upsertBrainFile({
+    path: folderPlaceholderPath(folderPath),
+    content: "",
+    createOnly: true,
+  });
 }
 
 export async function updateBrainFile(path: string, content: string): Promise<BrainActionResult> {
@@ -205,11 +224,41 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
 
   try {
     const normalized = normalizeBrainPath(path);
-    const [existing] = await db
-      .select({ githubBlobSha: brainFiles.githubBlobSha })
+    const files = await db
+      .select({ path: brainFiles.path, githubBlobSha: brainFiles.githubBlobSha })
       .from(brainFiles)
-      .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, normalized)))
-      .limit(1);
+      .where(eq(brainFiles.workspaceId, workspace.id));
+    const existing = files.find((file) => file.path === normalized);
+
+    // Keep a freshly-emptied folder alive by writing a hidden placeholder, so a
+    // user who deletes the auto-created file can still add a subfolder (PRO-65).
+    const folderPath = parentFolderPath(normalized);
+    const keepFolder = Boolean(folderPath) && !hasOtherFilesInFolder(files, folderPath, normalized);
+    const placeholderPath = keepFolder ? folderPlaceholderPath(folderPath) : "";
+    const placeholderExists = keepFolder && files.some((file) => file.path === placeholderPath);
+
+    const now = new Date();
+    const placeholderQueries =
+      keepFolder && !placeholderExists
+        ? [
+            db.insert(brainFiles).values({
+              workspaceId: workspace.id,
+              path: placeholderPath,
+              content: "",
+              contentHash: hashBrainContent(""),
+              sizeBytes: brainContentSize(""),
+              githubSyncStatus: "pending",
+              githubSyncError: null,
+              updatedAt: now,
+            }),
+            brainSyncJobUpsert(db, {
+              workspaceId: workspace.id,
+              path: placeholderPath,
+              operation: "upsert",
+              desiredHash: hashBrainContent(""),
+            }),
+          ]
+        : [];
 
     await db.batch([
       db
@@ -222,9 +271,13 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
         desiredHash: null,
         previousBlobSha: existing?.githubBlobSha ?? null,
       }),
+      ...placeholderQueries,
     ]);
 
     scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: normalized });
+    if (placeholderQueries.length > 0) {
+      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: placeholderPath });
+    }
     revalidatePath("/brain");
     return { ok: true, path: normalized };
   } catch (error) {

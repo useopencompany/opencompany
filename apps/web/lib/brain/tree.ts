@@ -1,3 +1,5 @@
+import { isBrainFolderPlaceholder } from "./paths";
+
 export type BrainTreeFile = {
   path: string;
 };
@@ -47,10 +49,17 @@ export function buildBrainTree<TFile extends BrainTreeFile>(
     : files;
 
   for (const file of visible) {
+    // Placeholder files keep an otherwise-empty folder alive but must not appear
+    // as a row in the tree, so we build their ancestor folders and drop the leaf.
+    const isPlaceholder = isBrainFolderPlaceholder(file.path);
     const parts = file.path.split("/").filter(Boolean);
+    const lastIndex = isPlaceholder ? parts.length - 2 : parts.length - 1;
+    if (lastIndex < 0) continue;
     let current = root;
 
-    parts.forEach((part, index) => {
+    for (let index = 0; index <= lastIndex; index += 1) {
+      const part = parts[index];
+      if (part === undefined) break;
       const path = parts.slice(0, index + 1).join("/");
       let child = current.children.find((item) => item.path === path);
 
@@ -58,19 +67,19 @@ export function buildBrainTree<TFile extends BrainTreeFile>(
         child = {
           name: part,
           path,
-          type: index === parts.length - 1 ? "file" : "folder",
+          type: index === lastIndex && !isPlaceholder ? "file" : "folder",
           children: [],
         };
         current.children.push(child);
         sortTreeNodes(current.children);
       }
 
-      if (index === parts.length - 1) {
+      if (index === lastIndex && !isPlaceholder) {
         child.file = file;
       }
 
       current = child;
-    });
+    }
   }
 
   return root;
@@ -97,6 +106,39 @@ export function ancestorFolderPaths(path: string) {
 export function parentFolderPath(path: string) {
   const folders = ancestorFolderPaths(path);
   return folders.at(-1) ?? "";
+}
+
+/**
+ * Whether `folderPath` still contains a real (non-placeholder) file other than
+ * `excludePath`. Uses an exact `folder/` prefix so sibling folders that merely
+ * share a name prefix ("notes" vs "notes-archive/x.md") do not count.
+ */
+export function hasOtherFilesInFolder<TFile extends BrainTreeFile>(
+  files: TFile[],
+  folderPath: string,
+  excludePath: string,
+) {
+  if (!folderPath) return false;
+  const prefix = `${folderPath}/`;
+  return files.some(
+    (file) =>
+      file.path !== excludePath &&
+      file.path.startsWith(prefix) &&
+      !isBrainFolderPlaceholder(file.path),
+  );
+}
+
+/**
+ * Whether removing `removedPath` would leave the folder it lives in with no
+ * remaining real files (placeholders ignored). Returns false at the root.
+ */
+export function isFolderEmptyAfterRemoving<TFile extends BrainTreeFile>(
+  files: TFile[],
+  removedPath: string,
+) {
+  const folderPath = parentFolderPath(removedPath);
+  if (!folderPath) return false;
+  return !hasOtherFilesInFolder(files, folderPath, removedPath);
 }
 
 export function uniqueNewBrainPath(files: BrainTreeFile[], contextPath = "") {

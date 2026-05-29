@@ -29,6 +29,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   createBrainFile,
+  createBrainFolder,
   deleteBrainFile,
   deleteBrainFolder,
   renameBrainFile,
@@ -40,6 +41,7 @@ import {
   fileNameFromPath,
   resolveBrainFileRenameName,
 } from "@/lib/brain/file-names";
+import { folderPlaceholderPath } from "@/lib/brain/paths";
 import {
   ancestorFolderPaths,
   type BrainTreeNode,
@@ -47,6 +49,7 @@ import {
   collectFolderPaths,
   type FlatBrainNode,
   flattenVisibleTree,
+  isFolderEmptyAfterRemoving,
   parentFolderPath,
 } from "@/lib/brain/tree";
 import { useBrainTreeKeyboard } from "./use-brain-tree-keyboard";
@@ -548,15 +551,19 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           setError(result.error);
           return;
         }
+        let resolvedFolder = folderPath;
         if (result.path !== path) {
           setFiles((currentFiles) => optimisticRenameBrainFile(currentFiles, path, result.path));
           updateSelectedPath(result.path);
           setSelectedContextPath(parentFolderPath(result.path));
           expandAncestors(result.path);
-          const resolvedFolder = parentFolderPath(result.path);
+          resolvedFolder = parentFolderPath(result.path);
           setRenamingPath((current) => (current === folderPath ? resolvedFolder : current));
           setRenamingName(fileNameFromPath(resolvedFolder));
         }
+        // Persist the folder itself so it survives deleting the auto-created
+        // note (PRO-65). The placeholder is hidden from the tree.
+        await createBrainFolder(resolvedFolder);
         router.refresh();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
@@ -824,26 +831,29 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setFileMenuOpen(false);
     setError(null);
 
-    const parentFolder = parentFolderPath(file.path);
-    if (parentFolder) {
-      const siblingsInFolder = files.filter(
-        (candidate) =>
-          candidate.path !== file.path && candidate.path.startsWith(`${parentFolder}/`),
-      );
-      if (siblingsInFolder.length === 0) {
-        const folderName = fileNameFromPath(parentFolder);
-        const confirmed = window.confirm(
-          `"${folderName}" will be empty after deleting this file and the folder will be removed too. Delete anyway?`,
-        );
-        if (!confirmed) return;
-      }
-    }
+    // Deleting the last real file in a folder keeps the (now empty) folder alive
+    // via a hidden placeholder, so we optimistically retain the folder node here
+    // to match the server (PRO-65).
+    const keepEmptyFolder = isFolderEmptyAfterRemoving(files, file.path);
+    const placeholderPath = keepEmptyFolder
+      ? folderPlaceholderPath(parentFolderPath(file.path))
+      : "";
 
     const snapshot = captureBrainViewSnapshot();
     beginOptimisticMutation();
     deletedPathsRef.current.add(file.path);
     pendingSavesRef.current.delete(file.path);
-    setFiles((currentFiles) => currentFiles.filter((candidate) => candidate.path !== file.path));
+    setFiles((currentFiles) => {
+      const withoutDeleted = currentFiles.filter((candidate) => candidate.path !== file.path);
+      if (
+        placeholderPath &&
+        !withoutDeleted.some((candidate) => candidate.path === placeholderPath)
+      ) {
+        return sortBrainFiles([...withoutDeleted, createOptimisticBrainFile(placeholderPath, "")]);
+      }
+      return withoutDeleted;
+    });
+    if (placeholderPath) deletedPathsRef.current.delete(placeholderPath);
     if (selected?.path === file.path) {
       updateSelectedPath("");
       setDraftContent("");
