@@ -275,7 +275,9 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
 
 // ── Phase C: Stale-stream banner ───────────────────────────────────────────
 
-function makeSession(overrides: Partial<AgentSessionDetailPayload["session"]> = {}): AgentSessionDetailPayload["session"] {
+function makeSession(
+  overrides: Partial<AgentSessionDetailPayload["session"]> = {},
+): AgentSessionDetailPayload["session"] {
   // Use a fresh updatedAt by default so the data-freshness stale check does not
   // trigger in tests that don't explicitly set fake timers or a stale timestamp.
   return {
@@ -314,18 +316,30 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
     related: { parent: null, children: [] },
     messages: [],
     events: [],
-    usage: { totalTokens: 0, inputTokens: 0, outputTokens: 0, inputNoCacheTokens: 0, inputCacheReadTokens: 0, inputCacheWriteTokens: 0, outputTextTokens: 0, outputReasoningTokens: 0 },
+    usage: {
+      totalTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      inputNoCacheTokens: 0,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTextTokens: 0,
+      outputReasoningTokens: 0,
+    },
     toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
-    cost: { totalCostUsdMicros: 0, modelCostUsdMicros: 0, toolCostUsdMicros: 0, providerCostUsdMicros: 0, platformFeeUsdMicros: 0 },
+    cost: {
+      totalCostUsdMicros: 0,
+      modelCostUsdMicros: 0,
+      toolCostUsdMicros: 0,
+      providerCostUsdMicros: 0,
+      platformFeeUsdMicros: 0,
+    },
     runnerUrl: "https://runner.example.com",
     ...overrides,
   };
 }
 
-function renderSessionViewContent(
-  detail: AgentSessionDetailPayload,
-  streamStatus = "idle",
-) {
+function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatus = "idle") {
   mockStreamStatus.value = streamStatus;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -351,9 +365,7 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     // There may be multiple role="status" elements (WorkingIndicator also uses it).
     // Identify the banner by its unique text content.
     const allStatusEls = screen.getAllByRole("status");
-    const banner = allStatusEls.find((el) =>
-      el.textContent?.includes("Connection idle"),
-    );
+    const banner = allStatusEls.find((el) => el.textContent?.includes("Connection idle"));
     expect(banner).toBeDefined();
     expect(banner).toHaveAttribute("aria-live", "polite");
     expect(banner).toHaveTextContent("Connection idle — waiting for updates…");
