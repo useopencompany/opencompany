@@ -21,11 +21,13 @@ export function resolveBrainTreeKeyNav(
   switch (key) {
     case "ArrowDown": {
       const next = index < 0 ? 0 : Math.min(index + 1, nodes.length - 1);
-      return next === index ? null : { type: "focus", path: nodes[next].path };
+      const target = nodes[next];
+      return next === index || !target ? null : { type: "focus", path: target.path };
     }
     case "ArrowUp": {
       const prev = index < 0 ? 0 : Math.max(index - 1, 0);
-      return prev === index ? null : { type: "focus", path: nodes[prev].path };
+      const target = nodes[prev];
+      return prev === index || !target ? null : { type: "focus", path: target.path };
     }
     case "ArrowRight": {
       if (!current || current.type !== "folder") return null;
@@ -73,7 +75,7 @@ export function findTypeAheadMatch(
   const start = fromIndex < 0 ? 0 : fromIndex;
   for (let offset = 1; offset <= count; offset += 1) {
     const node = nodes[(start + offset) % count];
-    if (node.name.toLowerCase().startsWith(needle)) return node.path;
+    if (node && node.name.toLowerCase().startsWith(needle)) return node.path;
   }
   return null;
 }
