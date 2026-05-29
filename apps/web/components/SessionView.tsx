@@ -61,6 +61,11 @@ import {
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
+// How far from the bottom (in px) before we consider the user "pinned".
+const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+// Padding above the snapped user message (matches py-6 = 24px of the scroll container).
+const SCROLL_TO_TOP_PADDING_PX = 24;
+
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
@@ -173,7 +178,12 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+  // ID of the user message we should snap to the top of the viewport after render.
+  const [pendingScrollMessageId, setPendingScrollMessageId] = useState<string | null>(null);
+  // Whether the user is "pinned" at the bottom of the scroll container.
+  const isPinnedAtBottomRef = useRef(true);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -370,6 +380,33 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
   }, [relatedSessionCount]);
 
+  // Snap the just-sent user message to the top of the scroll viewport.
+  // Runs whenever visibleMessages changes so we catch the render that adds the new message.
+  useEffect(() => {
+    if (!pendingScrollMessageId) return;
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    const msgEl = container.querySelector<HTMLElement>(
+      `[data-message-id="${pendingScrollMessageId}"]`,
+    );
+    if (!msgEl) return;
+    // Snap to top: subtract the container's own top offset plus a small padding.
+    const targetScrollTop = msgEl.offsetTop - SCROLL_TO_TOP_PADDING_PX;
+    container.scrollTo({ top: targetScrollTop, behavior: "smooth" });
+    setPendingScrollMessageId(null);
+    // Mark as pinned so the streaming auto-scroll kicks in from here.
+    isPinnedAtBottomRef.current = true;
+  }, [pendingScrollMessageId, visibleMessages]);
+
+  // Auto-scroll to bottom during streaming — only if the user is pinned at the bottom.
+  useEffect(() => {
+    if (!hasRunningAssistantMessage && !showWaitingForAssistant) return;
+    if (!isPinnedAtBottomRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, [visibleMessages, hasRunningAssistantMessage, showWaitingForAssistant]);
+
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
@@ -389,6 +426,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
           );
           seedSessionQueries(queryClient, workspaceId, next);
         }
+        // Schedule a scroll so the just-sent message snaps to the top of the viewport.
+        setPendingScrollMessageId(result.messageId);
         return;
       }
       setFormError(result.error);
@@ -410,7 +449,13 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         </div>
 
         <div
+          ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto px-8 lg:px-12 py-6"
+          onScroll={(event) => {
+            const el = event.currentTarget;
+            const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+          }}
           onDragEnter={(event) => {
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
@@ -502,6 +547,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               return (
                 <div
                   key={message.id}
+                  data-message-id={message.id}
                   className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
                 >
                   <div
@@ -554,6 +600,13 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   ) : null,
                 )}
               </div>
+            ) : null}
+
+            {/* Whitespace reserved below the user message so the streaming response
+                renders into a clean, visible area without the user needing to scroll.
+                Sized to ~100vh so there is always room for the first wave of output. */}
+            {hasRunningAssistantMessage || showWaitingForAssistant ? (
+              <div aria-hidden="true" className="h-[100svh] shrink-0" />
             ) : null}
           </div>
         </div>
