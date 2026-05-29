@@ -7,6 +7,10 @@ import {
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
+import {
+  logBraintrustCurrentSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import {
   buildGitHubCommandEnv,
@@ -214,6 +218,36 @@ export async function executeRuntimeTool(input: {
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
 }) {
+  return traceBraintrustStep(
+    `tool.${input.definition.name}`,
+    () => executeRuntimeToolWithTracing(input),
+    toolTraceMetadata(input),
+    { type: "tool", input: input.args },
+  );
+}
+
+async function executeRuntimeToolWithTracing(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean;
+  workspaceId?: string;
+  agentConfig?: AgentConfig;
+  toolCallId: string;
+  definition: RuntimeToolDefinition;
+  args: unknown;
+  getSandbox: () => Promise<SandboxHandle>;
+  workdir: string;
+  env: RunnerEnv;
+  enabledTools: RuntimeToolName[];
+  repository?: WorkspaceRepository | null | undefined;
+  signal: AbortSignal;
+  checkAbort: () => Promise<void>;
+  observabilityContext?: ToolObservabilityContext | undefined;
+  toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
+}) {
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
   let usage: HostedToolUsage | undefined;
@@ -345,6 +379,19 @@ export async function executeRuntimeTool(input: {
       throw error;
     }
 
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: {
+        session_id: input.sessionId,
+        message_id: input.assistantMessageId,
+        tool_call_id: input.toolCallId,
+        tool_name: input.definition.name,
+        tool_kind: input.definition.kind,
+        sandbox_id: sandboxIdForCapture,
+        model_provider: input.observabilityContext?.modelProvider,
+        model_name: input.observabilityContext?.modelName,
+      },
+    });
     captureException(error, {
       event: "opencompany.runner_tool_failed",
       workspace_id: input.observabilityContext?.workspaceId,
@@ -482,7 +529,34 @@ export async function executeRuntimeTool(input: {
     );
   }
 
+  logBraintrustCurrentSpan({
+    output,
+    metadata: {
+      ...toolTraceMetadata(input),
+      tool_message_id: toolMessageId,
+      failed: Boolean(failedOutput),
+    },
+  });
+
   return output;
+}
+
+function toolTraceMetadata(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  toolCallId: string;
+  definition: RuntimeToolDefinition;
+  observabilityContext?: ToolObservabilityContext | undefined;
+}) {
+  return {
+    session_id: input.sessionId,
+    message_id: input.assistantMessageId,
+    tool_call_id: input.toolCallId,
+    tool_name: input.definition.name,
+    tool_kind: input.definition.kind,
+    model_provider: input.observabilityContext?.modelProvider,
+    model_name: input.observabilityContext?.modelName,
+  };
 }
 
 async function resolveShellGitHubAuth(input: {
@@ -600,6 +674,17 @@ function buildFailedToolOutput(error: unknown): FailedToolOutput {
       recoverable: true,
     },
   };
+}
+
+function braintrustError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return { message: String(error) };
 }
 
 function readDelegateToAgentArgs(args: unknown) {
