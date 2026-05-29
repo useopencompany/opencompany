@@ -755,33 +755,70 @@ function AssistantMessageContent({
   const isRunning = message.status === "running" && sessionCanGenerate;
   const isStopped =
     message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
+  const isCompleted = message.status === "completed";
+  const runDurationSeconds = runDurationForMessage(message);
+
+  // Group consecutive tool-call parts so a completed run can collapse its steps into a
+  // one-line summary while text stays the headline. During a run the steps stay expanded.
+  type RenderGroup =
+    | { kind: "part"; part: AssistantTurnPart; key: string }
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string };
+  const groups: RenderGroup[] = [];
+  parts.forEach((part, index) => {
+    if (part.type === "tool-call") {
+      const toolCall =
+        part.toolCall.status === "running" && !sessionCanGenerate
+          ? {
+              ...part.toolCall,
+              status: "failed" as const,
+              outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+            }
+          : part.toolCall;
+      const last = groups.at(-1);
+      if (last?.kind === "tools") last.toolCalls.push(toolCall);
+      else groups.push({ kind: "tools", toolCalls: [toolCall], key: `tools:${index}` });
+      return;
+    }
+    groups.push({ kind: "part", part, key: `${index}` });
+  });
 
   return (
     <div className="space-y-3">
-      {parts.map((part, index) => {
-        if (part.type === "text") {
-          return <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />;
+      {groups.map((group) => {
+        if (group.kind === "part") {
+          const part = group.part;
+          if (part.type === "text") {
+            return <AssistantMarkdown key={group.key} content={part.text} />;
+          }
+          if (part.type === "reasoning") {
+            return (
+              <ReasoningSummaryCard
+                key={group.key}
+                text={part.text}
+                durationSeconds={part.durationSeconds}
+              />
+            );
+          }
+          return null;
         }
 
-        if (part.type === "reasoning") {
+        if (isCompleted) {
           return (
-            <ReasoningSummaryCard
-              key={`${index}:reasoning`}
-              text={part.text}
-              durationSeconds={part.durationSeconds}
+            <CompletedStepGroup
+              key={group.key}
+              toolCalls={group.toolCalls}
+              durationSeconds={runDurationSeconds}
             />
           );
         }
 
-        const toolCall =
-          part.toolCall.status === "running" && !sessionCanGenerate
-            ? {
-                ...part.toolCall,
-                status: "failed" as const,
-                outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
-              }
-            : part.toolCall;
-        return <ToolCallCard key={part.toolCall.id} toolCall={toolCall} />;
+        return (
+          <div key={group.key} className="space-y-1.5">
+            {group.toolCalls.map((toolCall) => (
+              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+            ))}
+          </div>
+        );
       })}
       {!hasParts ? (
         isRunning ? (
@@ -791,9 +828,69 @@ function AssistantMessageContent({
         ) : (
           "..."
         )
+      ) : isRunning ? (
+        // Keep a live indicator at the tail so the UI never goes silent between a tool
+        // result and the model's next output (thinking phases included).
+        <ThinkingShimmer />
       ) : null}
     </div>
   );
+}
+
+function CompletedStepGroup({
+  toolCalls,
+  durationSeconds,
+}: {
+  toolCalls: RuntimeToolCall[];
+  durationSeconds: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const count = toolCalls.length;
+  const durationLabel = durationSeconds > 0 ? ` · ${formatStepDuration(durationSeconds)}` : "";
+  const summary = `${count} ${count === 1 ? "step" : "steps"}${durationLabel}`;
+
+  return (
+    <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-[#efefeb]/65 hover:text-ink/75"
+      >
+        <ChevronRight
+          size={11}
+          strokeWidth={1.9}
+          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          <Wrench size={11} strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 truncate font-medium text-ink/65">{summary}</span>
+      </button>
+      {expanded ? (
+        <div className="ml-2 mt-1 space-y-1.5 border-l border-[#e3e3df] pl-3">
+          {toolCalls.map((toolCall) => (
+            <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function runDurationForMessage(message: SessionMessage) {
+  if (!message.completedAt || !message.createdAt) return 0;
+  const start = new Date(message.createdAt).getTime();
+  const end = new Date(message.completedAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
+  return (end - start) / 1000;
+}
+
+function formatStepDuration(seconds: number) {
+  const total = Math.max(Math.round(seconds), 1);
+  if (total < 60) return `${total}s`;
+  const minutes = Math.round(total / 60);
+  return `${minutes} min`;
 }
 
 function AssistantStoppedNotice() {
@@ -872,8 +969,8 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
           <Wrench size={11} strokeWidth={1.75} />
         </span>
-        <span className="min-w-0 truncate font-medium text-ink/65">
-          {formatToolName(toolCall.name)}
+        <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
+          {toolCall.label || formatToolName(toolCall.name)}
         </span>
         {toolCall.brainPath ? (
           <span

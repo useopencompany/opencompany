@@ -23,7 +23,14 @@ import {
   startTimingTrace,
   timeAsync,
 } from "@opencompany/observability";
-import { createGateway, type ModelMessage, stepCountIs, streamText } from "ai";
+import {
+  createGateway,
+  type ModelMessage,
+  type StopCondition,
+  stepCountIs,
+  streamText,
+  type ToolSet,
+} from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
 import { syncBrainFromSandbox } from "./brain";
@@ -69,6 +76,7 @@ import {
   type LoadedSession,
   loadAssistantResponseForMessage,
   loadLatestUserMessage,
+  loadNextSteerMessage,
   loadSession,
   loadUserMessage,
   optionalUserName,
@@ -115,6 +123,24 @@ export async function runMessage(input: {
   externalSignal?: AbortSignal;
   delegationDepth?: number;
 }) {
+  // Each turn answers one user message under its own lease. A steer message sent
+  // while a run was in flight is answered as the next turn, so every turn stays a
+  // complete, idempotent pass through the existing path. See
+  // docs/agent-turn-vocabulary.md.
+  let messageId: string | undefined = input.messageId;
+  while (messageId) {
+    const result = await runMessageTurn({ ...input, messageId });
+    messageId = result?.nextSteerMessageId;
+  }
+}
+
+async function runMessageTurn(input: {
+  sessionId: string;
+  messageId: string;
+  env: RunnerEnv;
+  externalSignal?: AbortSignal;
+  delegationDepth?: number;
+}): Promise<{ nextSteerMessageId?: string | undefined } | void> {
   const ctx = createRunContext("runner.run_message", input);
   let assistantMessageId = newAgentSessionMessageId();
   let leaseAcquired = false;
@@ -126,6 +152,7 @@ export async function runMessage(input: {
   const sandboxRef: { id: string | undefined } = { id: undefined };
   let outcome = "unknown";
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
+  let nextSteerMessageId: string | undefined;
 
   try {
     const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
@@ -312,6 +339,17 @@ export async function runMessage(input: {
       },
       assistantMessageId,
       checkAbort,
+      // Stop at the next model-step boundary if the user steered this run with a new
+      // message. In-flight tool calls in the current step still finish and persist.
+      extraStopConditions: [
+        async () =>
+          Boolean(
+            await loadNextSteerMessage({
+              sessionId: input.sessionId,
+              afterCreatedAt: userMessage.createdAt,
+            }),
+          ),
+      ],
     });
     const { assistantContent, assistantReplayParts, reasoningSummary } = streamResult;
 
@@ -356,6 +394,14 @@ export async function runMessage(input: {
       releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
     );
     outcome = "completed";
+    // If the user steered mid-run, answer that message as the next turn. The lease
+    // is already released, so the next turn acquires its own. See
+    // docs/agent-turn-vocabulary.md.
+    const steer = await loadNextSteerMessage({
+      sessionId: input.sessionId,
+      afterCreatedAt: userMessage.createdAt,
+    });
+    nextSteerMessageId = steer?.id;
     logger.info("Runner session completed", {
       event: "opencompany.runner_session_completed",
       workspace_id: workspaceId,
@@ -481,6 +527,8 @@ export async function runMessage(input: {
       sandbox: sandboxAcquirer?.current ?? null,
     });
   }
+
+  return { nextSteerMessageId };
 }
 
 export function assertTurnComplete(
@@ -1980,6 +2028,7 @@ async function streamAssistantResponse(input: {
   };
   assistantMessageId: string;
   checkAbort: () => Promise<void>;
+  extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
   const mcpToolSet = await createMcpToolSet({
@@ -1998,7 +2047,7 @@ async function streamAssistantResponse(input: {
         ...pickRuntimeTools(input.tools, input.runtime.tools),
         ...mcpToolSet.tools,
       },
-      stopWhen: stepCountIs(MAX_MODEL_STEPS),
+      stopWhen: [stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
       abortSignal: input.ctx.controller.signal,
       ...(input.runtime.model.providerOptions
         ? { providerOptions: input.runtime.model.providerOptions }

@@ -62,6 +62,7 @@ export type SessionRuntimeState = {
 export type RuntimeToolCall = {
   id: string;
   name: string;
+  label?: string | undefined;
   status: "running" | "completed" | "failed";
   inputPreview: string;
   activityPreview: string;
@@ -429,12 +430,15 @@ export function buildAssistantTurnParts(
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
       const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
+      const toolName = readString(part.toolName) || "Tool call";
+      const label = matchingToolCall?.label ?? describeToolCall(toolName, part.input ?? part.args);
 
       turnParts.push({
         type: "tool-call",
         toolCall: {
           id: toolCallId,
-          name: readString(part.toolName) || "Tool call",
+          name: toolName,
+          ...(label ? { label } : {}),
           status: matchingToolCall?.status ?? "completed",
           inputPreview:
             formatRuntimePreview(part.input) ||
@@ -451,16 +455,51 @@ export function buildAssistantTurnParts(
       });
     }
 
-    return turnParts;
+    return normalizeAssistantTurnParts(turnParts);
   }
 
   const eventParts = buildEventAssistantTurnParts(events, message.id, toolCallsById);
-  if (eventParts.length > 0) return [...reasoningParts, ...eventParts];
+  if (eventParts.length > 0) return normalizeAssistantTurnParts([...reasoningParts, ...eventParts]);
   if (reasoningParts.length > 0 && message.content) {
     return [...reasoningParts, { type: "text", text: message.content }];
   }
   if (reasoningParts.length > 0) return reasoningParts;
   return message.content ? [{ type: "text", text: message.content }] : [];
+}
+
+// Assistant text streams in across model steps, which produces two artifacts: a chunk
+// that begins with the previous sentence's closing punctuation ("…used" then
+// ". Might take…"), and short utterances that can read as run-ons. Move leading
+// continuation punctuation back onto the previous text part and drop parts left empty.
+const LEADING_CONTINUATION_PUNCTUATION = /^\s*([.,;:!?)\]}'"]+)/;
+
+function normalizeAssistantTurnParts(parts: AssistantTurnPart[]): AssistantTurnPart[] {
+  const result: AssistantTurnPart[] = [];
+  let lastTextIndex = -1;
+
+  for (const part of parts) {
+    if (part.type !== "text") {
+      result.push(part);
+      continue;
+    }
+
+    let text = part.text;
+    if (lastTextIndex >= 0) {
+      const match = text.match(LEADING_CONTINUATION_PUNCTUATION);
+      const previous = result[lastTextIndex];
+      if (match && previous?.type === "text") {
+        result[lastTextIndex] = { ...previous, text: `${previous.text}${match[1]}` };
+        text = text.slice(match[0].length);
+      }
+    }
+    text = text.replace(/^\s+/, "");
+    if (!text) continue;
+
+    result.push({ type: "text", text });
+    lastTextIndex = result.length - 1;
+  }
+
+  return result;
 }
 
 export function buildBackgroundActivityParts(
@@ -630,6 +669,7 @@ export function buildRuntimeToolCallsForMessage(
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
+      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
       call.inputPreview = formatRuntimePreview(event.payload.input) || call.inputPreview;
       const brainPath = brainPathForToolPayload(call.name, event.payload.input);
       if (brainPath) {
@@ -697,6 +737,14 @@ function buildEventAssistantTurnParts(
 
     if (event.type === "message.delta") {
       text += readString(event.payload.delta);
+      continue;
+    }
+
+    // A model step ends with a usage event. Treat it as an utterance boundary so the
+    // streaming view splits per-step text into separate blocks, matching the final
+    // (modelMessage-based) view instead of merging two utterances into one paragraph.
+    if (event.type === "session.usage") {
+      flushText();
       continue;
     }
 
@@ -879,6 +927,75 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function eventBelongsToMessage(event: RuntimeEvent, messageId: string) {
   return event.messageId === messageId || readString(event.payload.messageId) === messageId;
+}
+
+// Translate a raw tool name + input into a human one-liner ("Searching the web for …").
+// The raw tool name stays available on hover and in the expanded Input section.
+export function describeToolCall(name: string, input: unknown): string | undefined {
+  const record = isRecord(input) ? input : {};
+  const field = (key: string) => readString(record[key]).trim();
+
+  switch (name) {
+    case "exa_search":
+    case "exa_answer": {
+      const query = field("query");
+      return query ? `Searching the web for “${truncateLabelText(query)}”` : "Searching the web";
+    }
+    case "exa_contents":
+      return "Reading web sources";
+    case "web_fetch": {
+      const host = hostFromUrl(field("url"));
+      return host ? `Fetching ${host}` : "Fetching a web page";
+    }
+    case "read_file": {
+      const path = field("path");
+      return path ? `Reading ${path}` : "Reading a file";
+    }
+    case "list_files": {
+      const path = field("path");
+      return path ? `Listing ${path}` : "Listing files";
+    }
+    case "write_file": {
+      const path = field("path");
+      return path ? `Writing ${path}` : "Writing a file";
+    }
+    case "edit_file": {
+      const path = field("path");
+      return path ? `Editing ${path}` : "Editing a file";
+    }
+    case "git_diff":
+      return "Reviewing changes";
+    case "shell": {
+      const command = field("command");
+      return command ? `Running ${truncateLabelText(command)}` : "Running a command";
+    }
+    case "amp_coder":
+      return "Coding with Amp";
+    case "tool_help":
+      return "Checking tool help";
+    case "delegate_to_agent": {
+      const agent = field("agent");
+      return agent ? `Delegating to ${agent}` : "Delegating to an agent";
+    }
+    default:
+      return undefined;
+  }
+}
+
+function truncateLabelText(value: string) {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  const maxLength = 80;
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, maxLength - 1)}…`;
+}
+
+function hostFromUrl(url: string) {
+  if (!url) return "";
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
 }
 
 function formatRuntimePreview(value: unknown) {

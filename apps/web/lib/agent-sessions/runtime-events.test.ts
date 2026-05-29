@@ -4,6 +4,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   buildRuntimeToolCallsForMessage,
+  describeToolCall,
   emptyCostSummary,
   emptyUsageSummary,
   isInspectableRuntimeEvent,
@@ -373,6 +374,7 @@ describe("buildRuntimeToolCallsForMessage", () => {
       {
         id: "call_1",
         name: "read_file",
+        label: "Reading README.md",
         status: "completed",
         inputPreview: '{\n  "path": "README.md"\n}',
         activityPreview: "",
@@ -564,6 +566,33 @@ describe("buildRuntimeToolCallsForMessage", () => {
   });
 });
 
+describe("describeToolCall", () => {
+  it("derives a contextual one-liner from the tool and its primary input", () => {
+    expect(describeToolCall("exa_search", { query: "competitors in fintech" })).toBe(
+      "Searching the web for “competitors in fintech”",
+    );
+    expect(describeToolCall("web_fetch", { url: "https://example.com/pricing" })).toBe(
+      "Fetching example.com",
+    );
+    expect(describeToolCall("write_file", { path: "work/report.md" })).toBe(
+      "Writing work/report.md",
+    );
+    expect(describeToolCall("shell", { command: "ls -la" })).toBe("Running ls -la");
+    expect(describeToolCall("delegate_to_agent", { agent: "research" })).toBe(
+      "Delegating to research",
+    );
+  });
+
+  it("falls back to a generic phrase when the primary input is missing", () => {
+    expect(describeToolCall("exa_search", {})).toBe("Searching the web");
+    expect(describeToolCall("web_fetch", { url: "not a url" })).toBe("Fetching a web page");
+  });
+
+  it("returns undefined for unknown tools so the raw name is used", () => {
+    expect(describeToolCall("some_custom_tool", { foo: "bar" })).toBeUndefined();
+  });
+});
+
 describe("buildAssistantTurnParts", () => {
   it("uses AI SDK assistant content parts to place tool calls in the turn", () => {
     const parts = buildAssistantTurnParts(
@@ -603,6 +632,7 @@ describe("buildAssistantTurnParts", () => {
         toolCall: {
           id: "call_1",
           name: "read_file",
+          label: "Reading README.md",
           status: "completed",
           inputPreview: '{\n  "path": "README.md"\n}',
           activityPreview: "",
@@ -612,6 +642,76 @@ describe("buildAssistantTurnParts", () => {
         },
       },
       { type: "text", text: "After" },
+    ]);
+  });
+
+  it("splits streamed text at step boundaries and repositions leading punctuation", () => {
+    const parts = buildAssistantTurnParts(
+      { id: "msg_assistant", role: "assistant", content: "", status: "running" },
+      [
+        event(1, "message.delta", {
+          messageId: "msg_assistant",
+          delta: "I'll research and cite the sources I used",
+        }),
+        event(2, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "exa_search",
+          input: { query: "meaning of life" },
+        }),
+        event(3, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "exa_search",
+          output: { ok: true },
+        }),
+        event(4, "message.delta", {
+          messageId: "msg_assistant",
+          delta: ". Might take a minute or two if you want.",
+        }),
+        event(5, "session.usage", { messageId: "msg_assistant", stepIndex: 1 }),
+        event(6, "message.delta", {
+          messageId: "msg_assistant",
+          delta: "The first pass came up empty, so I'll continue.",
+        }),
+      ],
+    );
+
+    expect(parts.map((part) => part.type)).toEqual(["text", "tool-call", "text", "text"]);
+    expect(parts.flatMap((part) => (part.type === "text" ? [part.text] : []))).toEqual([
+      "I'll research and cite the sources I used.",
+      "Might take a minute or two if you want.",
+      "The first pass came up empty, so I'll continue.",
+    ]);
+  });
+
+  it("repositions leading punctuation across tool calls in the completed turn", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me check the sources I used" },
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "exa_search",
+              input: { query: "x" },
+            },
+            { type: "text", text: ". Done summarizing." },
+          ],
+        },
+      },
+      [],
+    );
+
+    expect(parts.flatMap((part) => (part.type === "text" ? [part.text] : []))).toEqual([
+      "Let me check the sources I used.",
+      "Done summarizing.",
     ]);
   });
 
