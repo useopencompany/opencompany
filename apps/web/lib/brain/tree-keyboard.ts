@@ -21,13 +21,13 @@ export function resolveBrainTreeKeyNav(
   switch (key) {
     case "ArrowDown": {
       const next = index < 0 ? 0 : Math.min(index + 1, nodes.length - 1);
-      const target = nodes[next];
-      return next === index || !target ? null : { type: "focus", path: target.path };
+      if (next === index) return null;
+      return { type: "focus", path: nodes[next]!.path }; // bounds checked above
     }
     case "ArrowUp": {
       const prev = index < 0 ? 0 : Math.max(index - 1, 0);
-      const target = nodes[prev];
-      return prev === index || !target ? null : { type: "focus", path: target.path };
+      if (prev === index) return null;
+      return { type: "focus", path: nodes[prev]!.path }; // bounds checked above
     }
     case "ArrowRight": {
       if (!current || current.type !== "folder") return null;

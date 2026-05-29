@@ -19,6 +19,7 @@ type BrainTreeKeyboardOptions = {
 
 export function useBrainTreeKeyboard(options: BrainTreeKeyboardOptions) {
   const bufferRef = useRef("");
+  // 0 ensures the first keystroke always starts a fresh type-ahead buffer
   const lastKeyAtRef = useRef(0);
 
   const {

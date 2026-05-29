@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildBrainTree, flattenVisibleTree } from "./tree";
-import { resolveBrainTreeKeyNav } from "./tree-keyboard";
+import { findTypeAheadMatch, resolveBrainTreeKeyNav } from "./tree-keyboard";
 
 const tree = buildBrainTree([
   { path: "docs/README.md" },
@@ -90,9 +90,31 @@ describe("resolveBrainTreeKeyNav", () => {
   it("returns null for unhandled keys", () => {
     expect(resolveBrainTreeKeyNav("a", state("docs", []))).toBeNull();
   });
-});
 
-import { findTypeAheadMatch } from "./tree-keyboard";
+  it("returns null for any key when the tree is empty", () => {
+    const s = { nodes: [], focusedPath: "", expandedPaths: new Set<string>() };
+    expect(resolveBrainTreeKeyNav("ArrowDown", s)).toBeNull();
+    expect(resolveBrainTreeKeyNav("ArrowUp", s)).toBeNull();
+  });
+
+  it("focuses the first node on ArrowDown when focusedPath is not in nodes", () => {
+    expect(resolveBrainTreeKeyNav("ArrowDown", state("ghost", []))).toEqual({
+      type: "focus",
+      path: "docs",
+    });
+  });
+
+  it("returns null on ArrowLeft for a root-level file", () => {
+    const nodes = flattenVisibleTree(buildBrainTree([{ path: "root-file.md" }]), new Set());
+    expect(
+      resolveBrainTreeKeyNav("ArrowLeft", {
+        nodes,
+        focusedPath: "root-file.md",
+        expandedPaths: new Set(),
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("findTypeAheadMatch", () => {
   const nodes = flattenVisibleTree(
