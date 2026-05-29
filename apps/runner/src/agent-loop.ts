@@ -2244,7 +2244,11 @@ async function streamAssistantResponse(input: {
         // to a no-op span — leaving the span with no output/usage and stuck "in progress".
         logBraintrustSpan(span, {
           output: collected.reasoningSummary
-            ? { role: "assistant", content: collected.assistantContent, reasoning: collected.reasoningSummary }
+            ? {
+                role: "assistant",
+                content: collected.assistantContent,
+                reasoning: collected.reasoningSummary,
+              }
             : { role: "assistant", content: collected.assistantContent },
           metrics: modelStreamMetrics(collected.modelSteps, streamStartedAt, firstStreamPartAt),
           metadata: {
