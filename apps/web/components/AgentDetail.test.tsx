@@ -6,6 +6,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { updateAgent } from "@/lib/agents/actions";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
@@ -156,6 +157,7 @@ const detailAgent: AgentDetailPayload = {
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
+const updateAgentMock = vi.mocked(updateAgent);
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
@@ -224,5 +226,81 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
+  });
+});
+
+describe("AgentDetail – rename behaviour", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Provide a minimal localStorage stub — the jsdom environment used in this
+    // project does not ship with a working localStorage implementation.
+    const store: Record<string, string> = {};
+    Object.defineProperty(window, "localStorage", {
+      value: {
+        getItem: (key: string) => store[key] ?? null,
+        setItem: (key: string, value: string) => {
+          store[key] = value;
+        },
+        removeItem: (key: string) => {
+          delete store[key];
+        },
+        clear: () => {
+          for (const key of Object.keys(store)) delete store[key];
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  it("does not save an empty name when the name field is cleared mid-rename", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    const nameInput = await screen.findByPlaceholderText("Untitled agent");
+
+    // Clear the field — mimics the user clearing the field before typing the new name.
+    await user.clear(nameInput);
+
+    expect(nameInput).toHaveValue("");
+
+    // Blur triggers flush; the server should not receive an empty name.
+    await user.tab();
+
+    // updateAgent should not have been called with an empty/whitespace name.
+    for (const [, patch] of updateAgentMock.mock.calls) {
+      const name = (patch as { name?: string }).name;
+      if (name !== undefined) {
+        expect(name.trim()).not.toBe("");
+      }
+    }
+  });
+
+  it("saves the new name when the user renames an agent", async () => {
+    const user = userEvent.setup({ delay: null });
+    updateAgentMock.mockResolvedValue({
+      id: "agt_123",
+      workspaceId: "wks_123",
+      path: "agents/louis.agent",
+      pathChanged: true,
+      agent: {
+        ...detailAgent,
+        name: "louis",
+        path: "agents/louis.agent",
+        config: { ...detailAgent.config, title: "louis" },
+      },
+    });
+
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    const nameInput = await screen.findByPlaceholderText("Untitled agent");
+
+    await user.clear(nameInput);
+    await user.type(nameInput, "louis");
+    await user.tab();
+
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
+    const [, patch] = updateAgentMock.mock.calls[0]!;
+    expect((patch as { name?: string }).name).toBe("louis");
   });
 });
