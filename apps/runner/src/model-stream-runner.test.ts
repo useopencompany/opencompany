@@ -6,8 +6,12 @@ import { createToolStartCoordinator } from "./tool-start-coordinator";
 const usageRecorder = vi.hoisted(() => ({
   recordStepUsage: vi.fn(async () => {}),
 }));
+const eventMocks = vi.hoisted(() => ({
+  publishTransientRuntimeEvent: vi.fn(),
+}));
 
 vi.mock("./usage-recorder", () => usageRecorder);
+vi.mock("./events", () => eventMocks);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -87,6 +91,50 @@ describe("collectAssistantStream", () => {
       rawFinishReason: "stop",
     });
     expect(stream.return).not.toHaveBeenCalled();
+  });
+
+  it("publishes text deltas as transient runtime events as they arrive", async () => {
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "Hello" }),
+      streamPart({ type: "text-delta", text: " world" }),
+    ]);
+
+    await collect(stream);
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Hello" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: " world" },
+    });
+  });
+
+  it("publishes reasoning deltas as transient runtime events as they arrive", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", delta: "..." }),
+    ]);
+
+    await collect(stream, { exposeReasoningSummary: true });
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Thinking" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "..." },
+    });
   });
 });
 

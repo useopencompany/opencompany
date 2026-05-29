@@ -3,15 +3,32 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
 }));
+const eventMocks = vi.hoisted(() => ({
+  appendRuntimeEvent: vi.fn(async () => {}),
+}));
+const githubMocks = vi.hoisted(() => ({
+  getGitHubInstallationToken: vi.fn(async () => "ghs_test"),
+}));
+const observabilityMocks = vi.hoisted(() => ({
+  logger: {
+    warn: vi.fn(),
+  },
+}));
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: dbMocks.getDb,
 }));
+vi.mock("@opencompany/observability", () => ({
+  createLogger: vi.fn(() => observabilityMocks.logger),
+}));
+vi.mock("./events", () => eventMocks);
+vi.mock("./github", () => githubMocks);
 
-import { materializeBrainForSession } from "./brain";
+import { materializeBrainForSession, syncBrainFromSandbox } from "./brain";
 
 afterEach(() => {
   vi.resetAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("materializeBrainForSession", () => {
@@ -100,6 +117,90 @@ describe("materializeBrainForSession", () => {
   });
 });
 
+describe("syncBrainFromSandbox", () => {
+  it("keeps the runner turn alive and queues GitHub sync when immediate GitHub write conflicts", async () => {
+    const db = createSyncDb({
+      mounts: [
+        {
+          sessionId: "ses_123",
+          workspaceId: "wsp_123",
+          requestedPath: "/",
+          path: "/",
+          referenceType: "folder",
+          baseHash: null,
+          lastSyncedHash: null,
+        },
+      ],
+      currentFiles: [],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ sha: "blob_old" }) })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 409,
+          text: async () => "conflict",
+        }),
+    );
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "brain/README.md\n", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        read: vi.fn().mockResolvedValue("# Brain"),
+      },
+    };
+
+    await expect(
+      syncBrainFromSandbox({
+        sandbox: sandbox as never,
+        sessionId: "ses_123",
+        workspaceId: "wsp_123",
+        workdir: "/home/user/workspace",
+        repository: {
+          fullName: "opencompany/test",
+          defaultBranch: "main",
+        } as never,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(db.insertedValues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          workspaceId: "wsp_123",
+          path: "README.md",
+          content: "# Brain",
+          githubSyncStatus: "pending",
+        }),
+        expect.objectContaining({
+          workspaceId: "wsp_123",
+          path: "README.md",
+          operation: "upsert",
+          desiredHash: expect.any(String),
+        }),
+      ]),
+    );
+    expect(eventMocks.appendRuntimeEvent).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        sessionId: "ses_123",
+        type: "brain.file_changed",
+      }),
+    );
+    expect(observabilityMocks.logger.warn).toHaveBeenCalledWith(
+      "Queued Brain GitHub sync after immediate write failed",
+      expect.objectContaining({
+        brain_path: "README.md",
+        error: expect.any(Error),
+        workspace_id: "wsp_123",
+      }),
+    );
+  });
+});
+
 function createBrainDb(rows: Array<Record<string, unknown>>) {
   return {
     select: vi.fn(() => ({
@@ -113,4 +214,36 @@ function createBrainDb(rows: Array<Record<string, unknown>>) {
       })),
     })),
   };
+}
+
+function createSyncDb(input: {
+  mounts: Array<Record<string, unknown>>;
+  currentFiles: Array<Record<string, unknown>>;
+}) {
+  const whereResults = [input.mounts];
+  const limitResults = [input.currentFiles];
+  const insertedValues: Array<Record<string, unknown>> = [];
+  const db = {
+    insertedValues,
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => {
+          const result = whereResults.shift() ?? [];
+          return {
+            then: (resolve: (value: unknown[]) => void) => resolve(result),
+            limit: vi.fn(async () => limitResults.shift() ?? []),
+          };
+        }),
+      })),
+    })),
+    insert: vi.fn(() => ({
+      values: vi.fn((value: Record<string, unknown>) => {
+        insertedValues.push(value);
+        return {
+          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+        };
+      }),
+    })),
+  };
+  return db;
 }

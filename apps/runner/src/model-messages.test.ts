@@ -148,6 +148,47 @@ describe("buildModelMessages", () => {
       { role: "assistant", content: "Hello" },
     ]);
   });
+
+  it("drops orphan persisted tool results that are not paired with assistant tool calls", () => {
+    const tool = buildToolModelMessage({
+      toolCallId: "call_orphan",
+      toolName: "list_files",
+      output: { entries: [] },
+    });
+
+    expect(
+      buildModelMessages([
+        {
+          id: "msg_user_1",
+          role: "user",
+          content: "List files.",
+          modelMessage: { role: "user", content: "List files." },
+        },
+        {
+          id: "msg_assistant_failed",
+          role: "assistant",
+          content: "",
+          modelMessage: null,
+        },
+        {
+          id: "msg_tool_orphan",
+          role: "tool",
+          content: JSON.stringify({ entries: [] }),
+          modelMessage: toPersistedModelMessage(tool),
+        },
+        {
+          id: "msg_user_2",
+          role: "user",
+          content: "Continue.",
+          modelMessage: { role: "user", content: "Continue." },
+        },
+      ]),
+    ).toEqual([
+      { role: "user", content: "List files." },
+      { role: "assistant", content: "" },
+      { role: "user", content: "Continue." },
+    ]);
+  });
 });
 
 describe("buildAssistantModelMessage", () => {

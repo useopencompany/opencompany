@@ -5,7 +5,21 @@ import { agentSessionEvents } from "@opencompany/db/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
 
 type Db = ReturnType<typeof getDb>;
+type TransientPublishableRuntimeEvent = Extract<
+  AgentRuntimeEvent,
+  { type: "message.delta" | "message.reasoning_delta" | "command.output" }
+>;
 export type PersistedRuntimeEvent = Awaited<ReturnType<typeof listSessionEvents>>[number];
+export type TransientRuntimeEvent = {
+  id: null;
+  sessionId: string;
+  messageId: string | null;
+  type: TransientPublishableRuntimeEvent["type"];
+  payload: AgentRuntimeEventPayload;
+  createdAt: Date;
+  transient: true;
+};
+export type RuntimeEventForStream = PersistedRuntimeEvent | TransientRuntimeEvent;
 
 const sessionEventBroker = new EventEmitter();
 sessionEventBroker.setMaxListeners(0);
@@ -35,6 +49,26 @@ export async function appendRuntimeEvent(
   return event;
 }
 
+export function publishTransientRuntimeEvent(
+  input: {
+    sessionId: string;
+    messageId?: string | null;
+  } & TransientPublishableRuntimeEvent,
+) {
+  const event: TransientRuntimeEvent = {
+    id: null,
+    sessionId: input.sessionId,
+    messageId: input.messageId ?? null,
+    type: input.type,
+    payload: input.payload as AgentRuntimeEventPayload,
+    createdAt: new Date(),
+    transient: true,
+  };
+
+  publishRuntimeEvent(input.sessionId, event);
+  return event;
+}
+
 export async function listSessionEvents(input: {
   sessionId: string;
   afterId: number;
@@ -56,7 +90,7 @@ export async function listSessionEvents(input: {
 
 export function subscribeSessionEvents(
   sessionId: string,
-  listener: (event: PersistedRuntimeEvent) => void,
+  listener: (event: RuntimeEventForStream) => void,
 ) {
   const eventName = brokerEventName(sessionId);
   sessionEventBroker.on(eventName, listener);
@@ -65,7 +99,7 @@ export function subscribeSessionEvents(
   };
 }
 
-function publishRuntimeEvent(sessionId: string, event: PersistedRuntimeEvent) {
+function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
   sessionEventBroker.emit(brokerEventName(sessionId), event);
 }
 
