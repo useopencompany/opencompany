@@ -642,6 +642,9 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
 
         // If the file was just created and the server create is still in-flight,
         // wait for it to complete before renaming so the file actually exists.
+        // Use the server-assigned path as the rename source in case the server
+        // normalised the original path (e.g. due to a collision).
+        let sourcePath = file.path;
         const pendingCreate = pendingCreatesRef.current.get(file.path);
         if (pendingCreate !== undefined) {
           const resolvedSourcePath = await pendingCreate;
@@ -650,9 +653,10 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
             restoreBrainViewSnapshot(snapshot);
             return;
           }
+          sourcePath = resolvedSourcePath;
         }
 
-        const result = await renameBrainFile(file.path, nextPath);
+        const result = await renameBrainFile(sourcePath, nextPath);
         if (!result.ok) {
           restoreBrainViewSnapshot(snapshot);
           setError(result.error);
