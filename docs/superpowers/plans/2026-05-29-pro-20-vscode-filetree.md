@@ -146,10 +146,8 @@ describe("resolveBrainTreeKeyNav", () => {
       type: "focus",
       path: "notes",
     });
-    expect(resolveBrainTreeKeyNav("ArrowDown", state("notes", []))).toEqual({
-      type: "focus",
-      path: "notes",
-    });
+    // already at the bottom: clamping returns null (symmetric with ArrowUp at the top).
+    expect(resolveBrainTreeKeyNav("ArrowDown", state("notes", []))).toBeNull();
   });
 
   it("moves focus up and clamps at the top", () => {
