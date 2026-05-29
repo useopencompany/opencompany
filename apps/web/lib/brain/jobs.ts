@@ -1,9 +1,10 @@
+import { BRAIN_SYNC_DELAY_MS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { brainSyncJobs } from "@opencompany/db/schema";
 
 type Db = ReturnType<typeof getDb>;
 
-export const BRAIN_SYNC_DELAY_MS = 10_000;
+export { BRAIN_SYNC_DELAY_MS };
 
 export function resolveBrainSyncRename(input: {
   existingPreviousPath?: string | null | undefined;

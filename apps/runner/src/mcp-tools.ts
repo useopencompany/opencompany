@@ -31,6 +31,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import { formatRuntimePreview } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
@@ -394,7 +395,7 @@ async function executeMcpToolWithTracing(
           error: isMcpFailedToolOutput(output)
             ? output.error
             : buildMcpFailedToolOutput(new Error("MCP tool failed.")).error,
-          output,
+          outputPreview: formatRuntimePreview(output),
         },
       }),
     );
@@ -410,7 +411,7 @@ async function executeMcpToolWithTracing(
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
           name: input.toolName,
-          output,
+          outputPreview: formatRuntimePreview(output),
         },
       }),
     );

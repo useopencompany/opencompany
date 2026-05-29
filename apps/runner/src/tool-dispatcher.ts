@@ -21,6 +21,7 @@ import {
 } from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
+import { publishTransientRuntimeEvent } from "./events";
 import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
@@ -50,6 +51,8 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   exa_answer: 4,
   web_fetch: 12,
 };
+const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
+const COMMAND_OUTPUT_FLUSH_CHARS = 1024;
 
 type ToolObservabilityContext = {
   workspaceId?: string;
@@ -247,6 +250,12 @@ async function executeRuntimeToolWithTracing(input: {
   let usage: HostedToolUsage | undefined;
   let sandboxIdForCapture: string | undefined;
   let releaseToolBudget: (() => void) | undefined;
+  const commandOutput = createCommandOutputPublisher({
+    sessionId: input.sessionId,
+    assistantMessageId: input.assistantMessageId,
+    toolCallId: input.toolCallId,
+    command: input.definition.name,
+  });
   try {
     releaseToolBudget = input.toolBudget?.reserve(input.definition);
     output = await withRunControlChecks(input.checkAbort, async () => {
@@ -302,21 +311,7 @@ async function executeRuntimeToolWithTracing(input: {
           runLeaseOwner: input.runLeaseOwner,
           onOutput: async (delta) => {
             await input.checkAbort();
-            await requireLeaseWrite(
-              appendRuntimeEventForLease({
-                sessionId: input.sessionId,
-                messageId: input.assistantMessageId,
-                leaseId: input.runLeaseId,
-                leaseOwner: input.runLeaseOwner,
-                type: "command.output",
-                payload: {
-                  command: input.definition.name,
-                  toolCallId: input.toolCallId,
-                  stream: "stdout",
-                  delta,
-                },
-              }),
-            );
+            commandOutput.push("stdout", delta);
           },
         });
         if (ampResult.usage) {
@@ -346,21 +341,7 @@ async function executeRuntimeToolWithTracing(input: {
           : {}),
         onOutput: async (stream, delta) => {
           await input.checkAbort();
-          await requireLeaseWrite(
-            appendRuntimeEventForLease({
-              sessionId: input.sessionId,
-              messageId: input.assistantMessageId,
-              leaseId: input.runLeaseId,
-              leaseOwner: input.runLeaseOwner,
-              type: "command.output",
-              payload: {
-                command: input.definition.name,
-                toolCallId: input.toolCallId,
-                stream,
-                delta,
-              },
-            }),
-          );
+          commandOutput.push(stream, delta);
         },
       });
       if (
@@ -414,6 +395,7 @@ async function executeRuntimeToolWithTracing(input: {
     failedOutput = buildFailedToolOutput(error);
     output = failedOutput;
   } finally {
+    commandOutput.flush();
     releaseToolBudget?.();
   }
 
@@ -505,7 +487,7 @@ async function executeRuntimeToolWithTracing(input: {
           toolCallId: input.toolCallId,
           name: input.definition.name,
           error: failedOutput.error,
-          output,
+          outputPreview: formatRuntimePreview(output),
         },
       }),
     );
@@ -521,7 +503,7 @@ async function executeRuntimeToolWithTracing(input: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
           name: input.definition.name,
-          output,
+          outputPreview: formatRuntimePreview(output),
         },
       }),
     );
@@ -537,6 +519,68 @@ async function executeRuntimeToolWithTracing(input: {
   });
 
   return output;
+}
+
+function createCommandOutputPublisher(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  toolCallId: string;
+  command: string;
+}) {
+  let pending = "";
+  let pendingStream: "stdout" | "stderr" = "stdout";
+  let lastFlushAt = Date.now();
+  let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const flush = () => {
+    if (!pending) return;
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = undefined;
+    }
+    const delta = pending;
+    const stream = pendingStream;
+    pending = "";
+    lastFlushAt = Date.now();
+    publishTransientRuntimeEvent({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      type: "command.output",
+      payload: {
+        command: input.command,
+        toolCallId: input.toolCallId,
+        stream,
+        delta,
+      },
+    });
+  };
+
+  const scheduleFlush = () => {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = undefined;
+      flush();
+    }, COMMAND_OUTPUT_FLUSH_INTERVAL_MS);
+    flushTimer.unref?.();
+  };
+
+  return {
+    push(stream: "stdout" | "stderr", delta: string) {
+      if (!delta) return;
+      if (pending && stream !== pendingStream) flush();
+      pendingStream = stream;
+      pending += delta;
+      if (
+        pending.length >= COMMAND_OUTPUT_FLUSH_CHARS ||
+        Date.now() - lastFlushAt >= COMMAND_OUTPUT_FLUSH_INTERVAL_MS
+      ) {
+        flush();
+      } else {
+        scheduleFlush();
+      }
+    },
+    flush,
+  };
 }
 
 function toolTraceMetadata(input: {
@@ -672,6 +716,26 @@ function buildFailedToolOutput(error: unknown): FailedToolOutput {
       recoverable: true,
     },
   };
+}
+
+export function formatRuntimePreview(value: unknown) {
+  let text: string;
+  if (value === undefined || value === null) {
+    text = "";
+  } else if (typeof value === "string") {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2);
+    } catch {
+      text = String(value);
+    }
+  }
+
+  const trimmed = text.trim();
+  const maxLength = 900;
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 1)}...`;
 }
 
 function braintrustError(error: unknown) {

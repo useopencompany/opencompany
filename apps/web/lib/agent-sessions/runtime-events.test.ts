@@ -132,6 +132,26 @@ describe("applyRuntimeEventToState", () => {
     );
   });
 
+  it("applies repeated transient message deltas with null ids", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    const delta = event(null, "message.delta", {
+      messageId: "msg_assistant",
+      delta: "ha",
+    });
+
+    state = applyRuntimeEventToState(state, delta);
+    state = applyRuntimeEventToState(state, delta);
+
+    expect(state.messages.find((message) => message.id === "msg_assistant")?.content).toBe("haha");
+  });
+
   it("uses content and completed status from user message created events", () => {
     const state = applyRuntimeEventToState(
       initialState(),
@@ -429,6 +449,18 @@ describe("isReasoningInProgress", () => {
       event(2, "tool.started", { messageId: "msg_assistant", toolCallId: "call_1" }),
     ];
     expect(isReasoningInProgress(runningMessage, withTool)).toBe(false);
+  });
+
+  it("uses arrival order for repeated transient reasoning and text deltas", () => {
+    const events = [
+      event(null, "message.reasoning_delta", {
+        messageId: "msg_assistant",
+        delta: "Weighing…",
+      }),
+      event(null, "message.delta", { messageId: "msg_assistant", delta: "Here is" }),
+    ];
+
+    expect(isReasoningInProgress(runningMessage, events)).toBe(false);
   });
 
   it("is false when the message is no longer running", () => {
@@ -1439,7 +1471,7 @@ describe("computeThinkingDurationSeconds", () => {
 });
 
 function event(
-  id: number,
+  id: number | null,
   type: string,
   payload: Record<string, unknown>,
   createdAt?: string,

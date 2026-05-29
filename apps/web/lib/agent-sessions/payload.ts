@@ -474,10 +474,13 @@ function replayMissingCurrentEvents(
   current: AgentSessionDetailPayload,
   incoming: AgentSessionDetailPayload,
 ) {
-  const maxIncomingEventId = incoming.events.reduce((max, event) => Math.max(max, event.id), 0);
+  const maxIncomingEventId = incoming.events.reduce(
+    (max, event) => Math.max(max, event.id ?? 0),
+    0,
+  );
   return current.events
-    .filter((event) => event.id > maxIncomingEventId)
-    .toSorted((left, right) => left.id - right.id)
+    .filter((event) => typeof event.id === "number" && event.id > maxIncomingEventId)
+    .toSorted((left, right) => (left.id ?? 0) - (right.id ?? 0))
     .reduce(
       (detail, event) => applyRuntimeEventToSessionDetail(detail, event, current.session.updatedAt),
       incoming,
@@ -486,9 +489,29 @@ function replayMissingCurrentEvents(
 
 function mergeEvents(current: RuntimeEvent[], incoming: RuntimeEvent[]) {
   const events = new Map<number, RuntimeEvent>();
-  for (const event of current) events.set(event.id, event);
-  for (const event of incoming) events.set(event.id, event);
-  return Array.from(events.values()).toSorted((left, right) => left.id - right.id);
+  for (const event of incoming) {
+    if (typeof event.id === "number") events.set(event.id, event);
+  }
+
+  const result: RuntimeEvent[] = [];
+  const seen = new Set<number>();
+  for (const event of current) {
+    if (typeof event.id !== "number") {
+      result.push(event);
+      continue;
+    }
+    const replacement = events.get(event.id) ?? event;
+    result.push(replacement);
+    seen.add(event.id);
+  }
+
+  for (const event of incoming) {
+    if (typeof event.id !== "number" || seen.has(event.id)) continue;
+    result.push(event);
+    seen.add(event.id);
+  }
+
+  return result;
 }
 
 function mergeMessages(current: SessionMessage[], incoming: SessionMessage[]) {
