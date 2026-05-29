@@ -91,3 +91,28 @@ describe("resolveBrainTreeKeyNav", () => {
     expect(resolveBrainTreeKeyNav("a", state("docs", []))).toBeNull();
   });
 });
+
+import { findTypeAheadMatch } from "./tree-keyboard";
+
+describe("findTypeAheadMatch", () => {
+  const nodes = flattenVisibleTree(
+    buildBrainTree([{ path: "alpha.md" }, { path: "beta.md" }, { path: "bravo.md" }]),
+    new Set(),
+  );
+
+  it("matches the next node by case-insensitive prefix", () => {
+    expect(findTypeAheadMatch(nodes, "b", 0)).toBe("beta.md");
+    expect(findTypeAheadMatch(nodes, "BR", 0)).toBe("bravo.md");
+  });
+
+  it("cycles past the current index and wraps around", () => {
+    // nodes order: alpha.md(0), beta.md(1), bravo.md(2)
+    expect(findTypeAheadMatch(nodes, "b", 1)).toBe("bravo.md");
+    expect(findTypeAheadMatch(nodes, "a", 2)).toBe("alpha.md");
+  });
+
+  it("returns null when nothing matches or buffer is empty", () => {
+    expect(findTypeAheadMatch(nodes, "z", 0)).toBeNull();
+    expect(findTypeAheadMatch(nodes, "", 0)).toBeNull();
+  });
+});

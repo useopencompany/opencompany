@@ -61,3 +61,19 @@ export function resolveBrainTreeKeyNav(
       return null;
   }
 }
+
+export function findTypeAheadMatch(
+  nodes: FlatBrainNode[],
+  buffer: string,
+  fromIndex: number,
+): string | null {
+  if (!buffer || nodes.length === 0) return null;
+  const needle = buffer.toLowerCase();
+  const count = nodes.length;
+  const start = fromIndex < 0 ? 0 : fromIndex;
+  for (let offset = 1; offset <= count; offset += 1) {
+    const node = nodes[(start + offset) % count];
+    if (node.name.toLowerCase().startsWith(needle)) return node.path;
+  }
+  return null;
+}
