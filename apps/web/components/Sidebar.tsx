@@ -25,34 +25,20 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  useTransition,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import FeedbackDialog from "@/components/FeedbackDialog";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
-import { archiveAgentSession } from "@/lib/agent-sessions/actions";
+import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
 import {
   fetchSidebarSessions,
   removeSidebarSession,
   SESSIONS_QUERY_STALE_TIME_MS,
   type SidebarSessionPayload,
   sessionQueryKeys,
+  setSidebarSessionStar,
 } from "@/lib/agent-sessions/payload";
-import {
-  getStarredSessionsServerSnapshot,
-  getStarredSessionsSnapshot,
-  starSession,
-  subscribeStarredSessions,
-  unstarSession,
-} from "@/lib/agent-sessions/starred";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -417,12 +403,8 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
-  // starredMap: { [sessionId]: starredAtIso } — synced from localStorage via useSyncExternalStore.
-  const starredMap = useSyncExternalStore(
-    subscribeStarredSessions,
-    getStarredSessionsSnapshot,
-    getStarredSessionsServerSnapshot,
-  );
+  const queryClient = useQueryClient();
+  const { showError } = useToast();
   const footerRef = useRef<HTMLDivElement>(null);
   const { data: queriedSessions, isPending } = useQuery({
     queryKey: sessionQueryKeys.list(workspaceId),
@@ -436,16 +418,41 @@ export default function Sidebar({
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
+  // Star state is server-truth (per user, persisted, cross-device) and lives on
+  // the session payload. Toggling writes through a server action with an
+  // optimistic cache update so the UI reflects the change immediately.
   const handleToggleStar = useCallback(
     (sessionId: string) => {
-      const isStarred = sessionId in starredMap;
-      if (isStarred) {
-        unstarSession(sessionId);
-      } else {
-        starSession(sessionId);
-      }
+      const queryKey = sessionQueryKeys.list(workspaceId);
+      const current = queryClient.getQueryData<SidebarSession[]>(queryKey);
+      const previousStarredAt =
+        current?.find((session) => session.id === sessionId)?.starredAt ?? null;
+      const nextStarred = previousStarredAt === null;
+      const optimisticStarredAt = nextStarred ? new Date().toISOString() : null;
+
+      queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+        setSidebarSessionStar(entries, sessionId, optimisticStarredAt),
+      );
+
+      void (async () => {
+        const result = await setSessionStar(sessionId, nextStarred);
+        if (!result.ok) {
+          // Roll back to the server-truth value we captured before the toggle.
+          queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+            setSidebarSessionStar(entries, sessionId, previousStarredAt),
+          );
+          showError(
+            result.error,
+            nextStarred ? "Could not star session" : "Could not unstar session",
+          );
+          return;
+        }
+        queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+          setSidebarSessionStar(entries, sessionId, result.starredAt),
+        );
+      })();
     },
-    [starredMap],
+    [queryClient, showError, workspaceId],
   );
 
   const filteredSessions = useMemo(
@@ -458,17 +465,15 @@ export default function Sidebar({
     const starred: SidebarSession[] = [];
     const unstarred: SidebarSession[] = [];
     for (const session of filteredSessions) {
-      if (session.id in starredMap) {
+      if (session.starredAt) {
         starred.push(session);
       } else {
         unstarred.push(session);
       }
     }
-    starred.sort(
-      (a, b) => Date.parse(starredMap[b.id] ?? "0") - Date.parse(starredMap[a.id] ?? "0"),
-    );
+    starred.sort((a, b) => Date.parse(b.starredAt ?? "0") - Date.parse(a.starredAt ?? "0"));
     return { starredSessions: starred, unstarredSessions: unstarred };
-  }, [filteredSessions, starredMap]);
+  }, [filteredSessions]);
 
   const groupedSessions = useMemo(() => groupSessions(unstarredSessions), [unstarredSessions]);
 
