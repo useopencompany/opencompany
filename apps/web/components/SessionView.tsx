@@ -67,7 +67,7 @@ const MARKDOWN_COMPONENTS: Components = {
     <a
       href={href}
       target="_blank"
-      rel="noreferrer"
+      rel="noopener noreferrer"
       className="font-medium text-ink underline decoration-[#c7c7c2] underline-offset-2 transition-colors hover:decoration-ink/70"
     >
       {children}

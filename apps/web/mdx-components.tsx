@@ -59,6 +59,8 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
       <a
         className="font-medium text-ink underline decoration-[#d2d2cd] underline-offset-2 transition-colors hover:decoration-ink/60"
         {...props}
+        target="_blank"
+        rel="noopener noreferrer"
       >
         {children}
       </a>

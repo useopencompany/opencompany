@@ -112,6 +112,8 @@ function InlineTokenView({ token }: { token: InlineToken }) {
       return (
         <a
           href={token.href}
+          target="_blank"
+          rel="noopener noreferrer"
           className="text-ink underline decoration-[#d2d2cd] underline-offset-2 transition-colors hover:decoration-ink/60"
         >
           {token.text}
@@ -183,6 +185,8 @@ function ReleaseCard({ release }: { release: Release }) {
         {release.link && (
           <a
             href={release.link}
+            target="_blank"
+            rel="noopener noreferrer"
             className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
           >
             Compare
@@ -238,7 +242,7 @@ function TopBar() {
         <a
           href="https://keepachangelog.com/en/1.1.0/"
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
         >
           Keep a Changelog 1.1.0
