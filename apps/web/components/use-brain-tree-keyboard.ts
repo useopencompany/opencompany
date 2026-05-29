@@ -40,9 +40,7 @@ export function useBrainTreeKeyboard(options: BrainTreeKeyboardOptions) {
       const target = event.target as HTMLElement | null;
       if (
         target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
       ) {
         return;
       }
@@ -90,6 +88,17 @@ export function useBrainTreeKeyboard(options: BrainTreeKeyboardOptions) {
         onFocus(match);
       }
     },
-    [nodes, focusedPath, expandedPaths, onFocus, onExpand, onCollapse, onOpen, onToggle, onRename, onDelete],
+    [
+      nodes,
+      focusedPath,
+      expandedPaths,
+      onFocus,
+      onExpand,
+      onCollapse,
+      onOpen,
+      onToggle,
+      onRename,
+      onDelete,
+    ],
   );
 }
