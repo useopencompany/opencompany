@@ -287,6 +287,7 @@ function makeSession(
     agentPath: null,
     title: "Test Session",
     status: "running",
+    source: "user",
     modelProvider: "anthropic",
     modelName: "claude-3-5-sonnet",
     e2bSandboxId: null,
