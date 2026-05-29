@@ -186,8 +186,10 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     }),
     [detail],
   );
-  const lastEventId = useMemo(() => runtime.events.at(-1)?.id ?? 0, [runtime.events]);
-  const knownEventIds = useMemo(() => runtime.events.map((event) => event.id), [runtime.events]);
+  const knownEventIds = useMemo(
+    () => runtime.events.flatMap((event) => (typeof event.id === "number" ? [event.id] : [])),
+    [runtime.events],
+  );
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -271,17 +273,28 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
       invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event, {
         sessionId: session.id,
       });
+      if (
+        event.type === "message.completed" ||
+        event.type === "tool.completed" ||
+        event.type === "tool.failed"
+      ) {
+        void queryClient.invalidateQueries({ queryKey: detailKey });
+      }
     },
     [detailKey, queryClient, workspaceId, session.agentId, session.id],
   );
+
+  const refetchSessionDetail = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: detailKey });
+  }, [detailKey, queryClient]);
 
   const stream = useSessionEventStream({
     runnerUrl,
     streamToken,
     sessionId: session.id,
-    afterId: lastEventId,
     knownEventIds,
     onEvent: applyRuntimeEvent,
+    onOpen: refetchSessionDetail,
   });
 
   // Data-freshness staleness detection: derive the timestamp of the last runtime event
@@ -1444,9 +1457,9 @@ function SessionInspector({
         <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
         {recentEvents.length > 0 ? (
           <div className="space-y-1.5">
-            {recentEvents.map((event) => (
+            {recentEvents.map((event, index) => (
               <div
-                key={event.id}
+                key={event.id ?? `transient-${index}`}
                 className="rounded-md border border-[#e5e5e1] bg-white/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
               >
                 <div className="flex min-w-0 items-center gap-2">

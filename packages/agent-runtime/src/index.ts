@@ -1,5 +1,6 @@
 export * from "./after-session";
 export * from "./agent-file";
+export * from "./brain";
 export * from "./config";
 export * from "./events";
 export * from "./ids";
