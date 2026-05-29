@@ -45,8 +45,11 @@ import {
   type BrainTreeNode,
   buildBrainTree,
   collectFolderPaths,
+  type FlatBrainNode,
+  flattenVisibleTree,
   parentFolderPath,
 } from "@/lib/brain/tree";
+import { useBrainTreeKeyboard } from "./use-brain-tree-keyboard";
 
 type BrainFile = {
   path: string;
@@ -94,6 +97,8 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
     () => new Set(serverFiles[0] ? ancestorFolderPaths(serverFiles[0].path) : []),
   );
+  const [focusedPath, setFocusedPath] = useState(serverFiles[0]?.path ?? "");
+  const treeScrollRef = useRef<HTMLDivElement>(null);
   const [draftContent, setDraftContent] = useState(serverFiles[0]?.content ?? "");
   const [renamingPath, setRenamingPath] = useState("");
   const [renamingName, setRenamingName] = useState("");
@@ -119,12 +124,24 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     if (query.trim()) return new Set(collectFolderPaths(tree));
     return expandedPaths;
   }, [expandedPaths, query, tree]);
+  const flatNodes = useMemo<FlatBrainNode[]>(
+    () => flattenVisibleTree(tree, visibleExpandedPaths),
+    [tree, visibleExpandedPaths],
+  );
   const dirty = selected ? draftContent !== selected.content : false;
   const markdownFile = selected ? isMarkdownPath(selected.path) : false;
 
   useEffect(() => {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
+
+  useEffect(() => {
+    if (!focusedPath) return;
+    const container = treeScrollRef.current;
+    if (!container) return;
+    const row = container.querySelector(`[data-brain-path="${CSS.escape(focusedPath)}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+  }, [focusedPath]);
 
   useEffect(() => {
     if (optimisticMutationCountRef.current > 0) return;
@@ -286,6 +303,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           if (selectedPathRef.current === path) {
             selectedPathRef.current = updateResult.path;
             setSelectedPath(updateResult.path);
+            setFocusedPath(updateResult.path);
             setSelectedContextPath(parentFolderPath(updateResult.path));
             expandAncestors(updateResult.path);
           }
@@ -329,6 +347,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   function updateSelectedPath(path: string) {
     selectedPathRef.current = path;
     setSelectedPath(path);
+    if (path) setFocusedPath(path);
   }
 
   function beginOptimisticMutation() {
@@ -381,6 +400,69 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
       return next;
     });
   }
+
+  function focusBrainNode(path: string) {
+    setFocusedPath(path);
+    treeScrollRef.current?.focus();
+  }
+
+  function expandFolderPath(path: string) {
+    setSelectedContextPath(path);
+    setExpandedPaths((current) => {
+      if (current.has(path)) return current;
+      const next = new Set(current);
+      next.add(path);
+      return next;
+    });
+  }
+
+  function collapseFolderPath(path: string) {
+    setSelectedContextPath(path);
+    setExpandedPaths((current) => {
+      if (!current.has(path)) return current;
+      const next = new Set(current);
+      next.delete(path);
+      return next;
+    });
+  }
+
+  function openBrainPath(path: string) {
+    const file = files.find((candidate) => candidate.path === path);
+    if (file) selectFile(file);
+  }
+
+  function renameBrainPath(path: string) {
+    const node = flatNodes.find((candidate) => candidate.path === path);
+    if (!node) return;
+    if (node.type === "folder") startRenameFolder(path);
+    else {
+      const file = files.find((candidate) => candidate.path === path);
+      if (file) startRenameFile(file);
+    }
+  }
+
+  function deleteBrainPath(path: string) {
+    const node = flatNodes.find((candidate) => candidate.path === path);
+    if (!node) return;
+    if (node.type === "folder") removeFolder(path);
+    else {
+      const file = files.find((candidate) => candidate.path === path);
+      if (file) removeFile(file);
+    }
+  }
+
+  const handleTreeKeyDown = useBrainTreeKeyboard({
+    nodes: flatNodes,
+    focusedPath,
+    expandedPaths: visibleExpandedPaths,
+    onFocus: focusBrainNode,
+    onExpand: expandFolderPath,
+    onCollapse: collapseFolderPath,
+    onOpen: openBrainPath,
+    onToggle: toggleFolder,
+    onRename: renameBrainPath,
+    onDelete: deleteBrainPath,
+  });
 
   function createFile(contextPath = selectedContextPath) {
     setError(null);
@@ -799,6 +881,10 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         selectedPath={selected?.path ?? ""}
         selectedContextPath={selectedContextPath}
         expandedPaths={visibleExpandedPaths}
+        focusedPath={focusedPath}
+        onFocusItem={focusBrainNode}
+        onTreeKeyDown={handleTreeKeyDown}
+        treeScrollRef={treeScrollRef}
         isSearching={Boolean(query.trim())}
         onCreateFile={createFile}
         onCreateFolder={createFolder}
@@ -911,6 +997,10 @@ function BrainSidebar({
   selectedPath,
   selectedContextPath,
   expandedPaths,
+  focusedPath,
+  onFocusItem,
+  onTreeKeyDown,
+  treeScrollRef,
   isSearching,
   onCreateFile,
   onCreateFolder,
@@ -942,6 +1032,10 @@ function BrainSidebar({
   selectedPath: string;
   selectedContextPath: string;
   expandedPaths: Set<string>;
+  focusedPath: string;
+  onFocusItem: (path: string) => void;
+  onTreeKeyDown: (event: React.KeyboardEvent) => void;
+  treeScrollRef: React.RefObject<HTMLDivElement | null>;
   isSearching: boolean;
   onCreateFile: () => void;
   onCreateFolder: () => void;
@@ -1011,7 +1105,12 @@ function BrainSidebar({
       </div>
 
       <div
-        className={`flex-1 overflow-y-auto px-2 py-3 transition-colors duration-150 ${
+        ref={treeScrollRef}
+        role="tree"
+        tabIndex={0}
+        aria-activedescendant={focusedPath ? `brain-row-${focusedPath}` : undefined}
+        onKeyDown={onTreeKeyDown}
+        className={`flex-1 overflow-y-auto px-2 py-3 transition-colors duration-150 focus:outline-none ${
           dropTargetPath === "" ? "bg-[#ededeb]" : ""
         }`}
         onClick={(event) => {
@@ -1045,6 +1144,8 @@ function BrainSidebar({
                 selectedPath={selectedPath}
                 selectedContextPath={selectedContextPath}
                 expandedPaths={expandedPaths}
+                focusedPath={focusedPath}
+                onFocusItem={onFocusItem}
                 isSearching={isSearching}
                 renamingPath={renamingPath}
                 renamingName={renamingName}
@@ -1084,6 +1185,8 @@ function TreeItem({
   selectedPath,
   selectedContextPath,
   expandedPaths,
+  focusedPath,
+  onFocusItem,
   isSearching,
   renamingPath,
   renamingName,
@@ -1110,6 +1213,8 @@ function TreeItem({
   selectedPath: string;
   selectedContextPath: string;
   expandedPaths: Set<string>;
+  focusedPath: string;
+  onFocusItem: (path: string) => void;
   isSearching: boolean;
   renamingPath: string;
   renamingName: string;
@@ -1132,6 +1237,7 @@ function TreeItem({
   onContextMenu: (event: React.MouseEvent, target: BrainTreeTarget) => void;
 }) {
   const active = node.type === "file" && node.path === selectedPath;
+  const focused = node.path === focusedPath;
   const contextActive = node.type === "folder" && node.path === selectedContextPath;
   const expanded = node.type === "folder" && expandedPaths.has(node.path);
   const showChildren = isSearching || expanded;
@@ -1154,16 +1260,23 @@ function TreeItem({
       ? "bg-[#d9d9d4] text-ink ring-1 ring-[#b9b9b1]"
       : active
         ? "bg-[#dfdfda] text-ink"
-        : contextActive
-          ? "bg-[#ebebe7] text-ink"
-          : "text-ink/85 hover:bg-[#ececea] hover:text-ink"
+        : focused
+          ? "bg-[#ececea] text-ink ring-1 ring-[#cfcfc8]"
+          : contextActive
+            ? "bg-[#ebebe7] text-ink"
+            : "text-ink/85 hover:bg-[#ececea] hover:text-ink"
   }`;
   const paddingStyle = { paddingLeft: `${6 + depth * 14}px` };
 
   return (
     <div>
       {isRenaming ? (
-        <div className={rowClassName} style={paddingStyle}>
+        <div
+          id={`brain-row-${node.path}`}
+          data-brain-path={node.path}
+          className={rowClassName}
+          style={paddingStyle}
+        >
           {node.type === "folder" ? (
             <ChevronDown size={13} strokeWidth={1.75} className="shrink-0 text-ink-muted" />
           ) : (
@@ -1206,8 +1319,14 @@ function TreeItem({
         <button
           type="button"
           draggable
+          id={`brain-row-${node.path}`}
+          data-brain-path={node.path}
+          role="treeitem"
+          tabIndex={-1}
+          aria-selected={active}
           aria-expanded={node.type === "folder" ? expanded : undefined}
           onClick={() => {
+            onFocusItem(node.path);
             if (node.type === "folder") onToggleFolder(node.path);
             else if (node.file) onSelect(node.file);
           }}
@@ -1275,6 +1394,8 @@ function TreeItem({
               selectedPath={selectedPath}
               selectedContextPath={selectedContextPath}
               expandedPaths={expandedPaths}
+              focusedPath={focusedPath}
+              onFocusItem={onFocusItem}
               isSearching={isSearching}
               renamingPath={renamingPath}
               renamingName={renamingName}
