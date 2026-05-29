@@ -44,6 +44,25 @@ const observabilityMocks = vi.hoisted(() => ({
   captureException: vi.fn(),
 }));
 
+const braintrustMocks = vi.hoisted(() => ({
+  getBraintrustAISDK: vi.fn((aiSDK: object) => aiSDK),
+  flushBraintrust: vi.fn(async () => {}),
+  logBraintrustCurrentSpan: vi.fn(),
+  logBraintrustSpan: vi.fn(),
+  traceBraintrust: vi.fn(
+    async (
+      _input: unknown,
+      run: (span: { log: (fields: unknown) => void } | undefined) => Promise<unknown>,
+    ) => run({ log: vi.fn() }),
+  ),
+  traceBraintrustStep: vi.fn(
+    async (
+      _name: string,
+      run: (span: { log: (fields: unknown) => void } | undefined) => Promise<unknown>,
+    ) => run({ log: vi.fn() }),
+  ),
+}));
+
 const githubMocks = vi.hoisted(() => ({
   getGitHubWorkInstallationToken: vi.fn(),
 }));
@@ -59,6 +78,8 @@ vi.mock("@opencompany/observability", async (importOriginal) => {
     captureException: observabilityMocks.captureException,
   };
 });
+
+vi.mock("@opencompany/observability/braintrust", () => braintrustMocks);
 
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
@@ -1050,6 +1071,22 @@ describe("usage recording", () => {
         tool_call_id: "call_read",
         tool_name: "read_file",
         tool_kind: "sandbox",
+      }),
+    );
+    expect(braintrustMocks.logBraintrustCurrentSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          name: "RecoverableToolError",
+          message: expect.stringContaining("Use paths prefixed with work/"),
+        }),
+        metadata: expect.objectContaining({
+          session_id: "ses_123",
+          message_id: "msg_assistant",
+          tool_call_id: "call_read",
+          tool_name: "read_file",
+          tool_kind: "sandbox",
+          model_name: "openai/gpt-5.4-mini",
+        }),
       }),
     );
   });

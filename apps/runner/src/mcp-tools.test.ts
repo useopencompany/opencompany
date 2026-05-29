@@ -32,6 +32,16 @@ const observability = vi.hoisted(() => ({
   },
 }));
 
+const braintrust = vi.hoisted(() => ({
+  logBraintrustCurrentSpan: vi.fn(),
+  traceBraintrustStep: vi.fn(
+    async (
+      _name: string,
+      run: (span: { log: (fields: unknown) => void } | undefined) => Promise<unknown>,
+    ) => run({ log: vi.fn() }),
+  ),
+}));
+
 vi.mock("@opencompany/db/client", () => ({
   getDb: () => db,
 }));
@@ -44,6 +54,8 @@ vi.mock("@opencompany/observability", () => ({
   captureException: observability.captureException,
   createLogger: vi.fn(() => observability.logger),
 }));
+
+vi.mock("@opencompany/observability/braintrust", () => braintrust);
 
 vi.mock("./lease-writes", () => leaseWrites);
 
@@ -190,6 +202,54 @@ describe("createMcpToolSet", () => {
 
     await mcpTools.close();
     expect(mcpClient.close).toHaveBeenCalled();
+  });
+
+  it("logs handled MCP tool failures to Braintrust", async () => {
+    const execute = vi.fn(async () => {
+      throw new Error("Linear unavailable");
+    });
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      create_issue: {
+        description: "Create a Linear issue",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        }),
+        execute,
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput());
+    const linearTool = (mcpTools.tools as ToolSet).linear__create_issue;
+    const output = await linearTool?.execute?.(
+      { title: "Fix login" },
+      {
+        toolCallId: "call_123",
+        messages: [],
+        abortSignal: new AbortController().signal,
+      },
+    );
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: { code: "mcp_tool_execution_failed", recoverable: true },
+    });
+    expect(braintrust.logBraintrustCurrentSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ name: "Error", message: "Linear unavailable" }),
+        metadata: expect.objectContaining({
+          session_id: "ses_123",
+          message_id: "msg_123",
+          tool_call_id: "call_123",
+          tool_name: "linear__create_issue",
+          mcp_server: "linear",
+          mcp_tool_name: "create_issue",
+        }),
+      }),
+    );
   });
 
   it("prefers stored Linear MCP OAuth credentials over bearer tokens", async () => {
