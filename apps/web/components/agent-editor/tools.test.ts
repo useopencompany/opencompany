@@ -35,6 +35,7 @@ describe("agent editor mention tools", () => {
       "anthropic/claude-haiku-4.5",
       "anthropic/claude-sonnet-4.6",
       "anthropic/claude-opus-4.7",
+      "anthropic/claude-opus-4.8",
       "google/gemini-3-flash",
       "google/gemini-3.1-flash-lite-preview",
       "deepseek/deepseek-v4-flash",
