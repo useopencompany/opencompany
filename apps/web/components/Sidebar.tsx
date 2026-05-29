@@ -566,7 +566,7 @@ export default function Sidebar({
             <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
               <button
                 type="button"
-                aria-label="Open account menu"
+                aria-label="More account options"
                 aria-expanded={accountMenuOpen}
                 className={`rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
                   accountMenuOpen ? "bg-[#e3e3df] text-ink" : ""
