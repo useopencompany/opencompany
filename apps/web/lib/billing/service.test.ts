@@ -14,10 +14,19 @@ vi.mock("@opencompany/db/client", () => ({
 
 const getDbMock = vi.mocked(getDb);
 
-function mockDb(input: { executeRows?: unknown[]; selectRows?: unknown[][] }) {
+function mockDb(input: {
+  executeRows?: unknown[];
+  executeRowSets?: unknown[][];
+  selectRows?: unknown[][];
+}) {
   const selectRows = [...(input.selectRows ?? [])];
+  const executeRowSets = input.executeRowSets
+    ? [...input.executeRowSets]
+    : input.executeRows
+      ? [input.executeRows]
+      : [];
   const db = {
-    execute: vi.fn().mockResolvedValue({ rows: input.executeRows ?? [] }),
+    execute: vi.fn(async () => ({ rows: executeRowSets.shift() ?? [] })),
     select: vi.fn(() => {
       const rows = selectRows.shift() ?? [];
       const chain = {
@@ -42,7 +51,22 @@ describe("loadBillingOverview", () => {
 
   it("normalizes timestamp strings from aggregate billing queries", async () => {
     mockDb({
-      executeRows: [{ spendLast7UsdMicros: "1250000", spendLast30UsdMicros: "2500000" }],
+      executeRowSets: [
+        [{ spendLast7UsdMicros: "1250000", spendLast30UsdMicros: "2500000" }],
+        [
+          {
+            sessionId: "ses_123",
+            title: "Billing test",
+            agentName: "Research agent",
+            totalUsdMicros: "12500",
+            modelCostUsdMicros: "10000",
+            toolCostUsdMicros: "2500",
+            providerCostUsdMicros: "10000",
+            platformFeeUsdMicros: "2500",
+            createdAt: "2026-05-22T13:00:00.000Z",
+          },
+        ],
+      ],
       selectRows: [
         [{ balanceCents: 1000, balanceUsdMicros: 10_000_000 }],
         [
@@ -59,19 +83,6 @@ describe("loadBillingOverview", () => {
             metadata: {},
           },
         ],
-        [
-          {
-            sessionId: "ses_123",
-            title: "Billing test",
-            agentName: "Research agent",
-            totalUsdMicros: "12500",
-            modelCostUsdMicros: "10000",
-            toolCostUsdMicros: "2500",
-            providerCostUsdMicros: "10000",
-            platformFeeUsdMicros: "2500",
-            createdAt: "2026-05-22T13:00:00.000Z",
-          },
-        ],
       ],
     });
 
@@ -86,6 +97,40 @@ describe("loadBillingOverview", () => {
     expect(result.recentSessionCharges[0]?.toolCostUsdMicros).toBe(2_500);
     expect(result.ledger[0]?.createdAt).toBeInstanceOf(Date);
     expect(result.ledger[0]?.createdAt.toISOString()).toBe("2026-05-22T13:00:00.000Z");
+  });
+
+  it("maps delegated child spend to the grouped parent session charge row", async () => {
+    mockDb({
+      executeRowSets: [
+        [{ spendLast7UsdMicros: "1200", spendLast30UsdMicros: "1200" }],
+        [
+          {
+            sessionId: "ses_parent",
+            title: "Parent run",
+            agentName: "Manager",
+            totalUsdMicros: "1200",
+            modelCostUsdMicros: "900",
+            toolCostUsdMicros: "300",
+            providerCostUsdMicros: "1000",
+            platformFeeUsdMicros: "200",
+            createdAt: "2026-05-22T14:00:00.000Z",
+          },
+        ],
+      ],
+      selectRows: [[{ balanceCents: 1000, balanceUsdMicros: 10_000_000 }], []],
+    });
+
+    const result = await loadBillingOverview("wks_123");
+
+    expect(result.recentSessionCharges).toEqual([
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        title: "Parent run",
+        totalUsdMicros: 1200,
+        modelCostUsdMicros: 900,
+        toolCostUsdMicros: 300,
+      }),
+    ]);
   });
 });
 

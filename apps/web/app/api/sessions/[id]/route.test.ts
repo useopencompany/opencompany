@@ -32,8 +32,12 @@ describe("session detail API route", () => {
         agentPath: "agents/leo.agent",
         title: "Fix issue",
         status: "running",
+        source: "user",
         modelProvider: "vercel-ai-gateway",
         modelName: "openai/gpt-5.4-mini",
+        parentSessionId: null,
+        parentMessageId: null,
+        parentToolCallId: null,
         e2bSandboxId: null,
         workdir: "/workspace",
         runLeaseId: null,
@@ -41,6 +45,22 @@ describe("session detail API route", () => {
         lastError: null,
         createdAt: "2026-05-24T10:00:00.000Z",
         updatedAt: "2026-05-24T10:01:00.000Z",
+      },
+      related: {
+        parent: null,
+        children: [
+          {
+            id: "ses_child",
+            title: "Research",
+            status: "completed",
+            agentName: "Research",
+            agentPath: "agents/research.agent",
+            parentMessageId: "msg_parent",
+            parentToolCallId: "call_delegate",
+            createdAt: "2026-05-24T10:02:00.000Z",
+            updatedAt: "2026-05-24T10:03:00.000Z",
+          },
+        ],
       },
       messages: [],
       events: [],
@@ -74,6 +94,9 @@ describe("session detail API route", () => {
     await expect(response.json()).resolves.toEqual({
       detail: expect.objectContaining({
         session: expect.objectContaining({ id: "ses_123", agentName: "Leo" }),
+        related: expect.objectContaining({
+          children: [expect.objectContaining({ id: "ses_child" })],
+        }),
       }),
     });
     expect(loadAgentSessionDetailForWorkspaceMock).toHaveBeenCalledWith(

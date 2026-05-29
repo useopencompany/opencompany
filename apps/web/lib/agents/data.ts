@@ -86,6 +86,20 @@ async function loadGitHubIntegrationRepositoriesForWorkspace(
   }));
 }
 
+async function loadAgentReferencesForWorkspace(workspaceId: string) {
+  const db = getDb();
+  const rows = await db
+    .select({ path: agents.path, name: agents.name })
+    .from(agents)
+    .where(eq(agents.workspaceId, workspaceId))
+    .orderBy(asc(agents.name));
+
+  return rows.flatMap((row) => {
+    if (!row.path) return [];
+    return [{ path: row.path, name: row.name }];
+  });
+}
+
 export async function loadAgentsForWorkspace(workspaceId: string): Promise<AgentListItemPayload[]> {
   const db = getDb();
   const rows = await db
@@ -102,21 +116,23 @@ export async function loadAgentForWorkspace(
   idOrPath: string,
 ): Promise<AgentDetailPayload | null> {
   const db = getDb();
-  const [[agent], brainPaths, githubIntegrationRepositories, mcpSettings] = await Promise.all([
-    db
-      .select()
-      .from(agents)
-      .where(
-        and(
-          eq(agents.workspaceId, workspaceId),
-          or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
-        ),
-      )
-      .limit(1),
-    loadBrainPathsForWorkspace(workspaceId),
-    loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
-    loadWorkspaceMcpSettingsForWorkspace(workspaceId),
-  ]);
+  const [[agent], brainPaths, githubIntegrationRepositories, agentReferences, mcpSettings] =
+    await Promise.all([
+      db
+        .select()
+        .from(agents)
+        .where(
+          and(
+            eq(agents.workspaceId, workspaceId),
+            or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
+          ),
+        )
+        .limit(1),
+      loadBrainPathsForWorkspace(workspaceId),
+      loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
+      loadAgentReferencesForWorkspace(workspaceId),
+      loadWorkspaceMcpSettingsForWorkspace(workspaceId),
+    ]);
 
   if (!agent) return null;
 
@@ -125,10 +141,18 @@ export async function loadAgentForWorkspace(
     savedRepositories: agentGitHubRepositories(agent.config),
   });
 
-  return serializeAgentDetail(agent, brainPaths, derivationRepositories, usableRepositories, {
-    mcpEnabled: mcpSettings.mcpEnabled,
-    linearConfigured: mcpSettings.linear.configured,
-  });
+  return serializeAgentDetail(
+    agent,
+    brainPaths,
+    derivationRepositories,
+    usableRepositories,
+    agentReferences.filter((reference) => reference.path !== agent.path),
+    {
+      mcpEnabled: mcpSettings.mcpEnabled,
+      linearConfigured: mcpSettings.linear.configured,
+      slackConfigured: mcpSettings.slack.configured,
+    },
+  );
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

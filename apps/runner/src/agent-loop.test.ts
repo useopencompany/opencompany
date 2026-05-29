@@ -4,29 +4,36 @@ import {
   type RuntimeToolDefinition,
 } from "@opencompany/agent-runtime";
 import {
+  agentSessionEvents,
   agentSessionMessages,
   agentSessions,
   agentSessionToolUsage,
   agentSessionUsage,
+  agents,
 } from "@opencompany/db/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   acquireRunLease,
   appendRuntimeEventForLease,
+  assertTurnComplete,
   buildAmpCommand,
   buildAmpCommandEnv,
+  collectAssistantStream,
   completeAssistantMessageForLease,
+  createAgentDelegationHandler,
   createAmpActivityFormatter,
   createAmpStreamAccumulator,
   createAssistantMessageForLease,
   createHostedToolBudget,
   createKnownSecretRedactor,
   executeRuntimeTool,
+  MAX_MODEL_STEPS,
   normalizeReasoningSummary,
   readReasoningTextDelta,
   recordStepUsage,
   recordToolUsage,
   selectPublishBranch,
+  ToolStepLimitExceededError,
   throwIfStreamErrorPart,
 } from "./agent-loop";
 import { loadGitHubWorkRepository } from "./amp-tool";
@@ -353,7 +360,7 @@ describe("usage recording", () => {
   it("records Amp usage streamed through the runtime tool dispatcher", async () => {
     const db = createLeaseDb({
       runLeaseId: "run_123",
-      githubWorkRepositories: [
+      githubRows: [
         {
           integrationId: "wint_123",
           fullName: "opencompany/web",
@@ -499,6 +506,533 @@ describe("usage recording", () => {
         }),
       }),
     );
+  });
+
+  it("executes agent delegation as an internal tool without hydrating the sandbox", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => {
+      throw new Error("sandbox should not hydrate");
+    });
+    const delegateToAgent = vi.fn(async () => ({
+      ok: true,
+      status: "completed",
+      childSessionId: "ses_child",
+      answer: "Research complete.",
+    }));
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: agentConfig(),
+      toolCallId: "call_delegate",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("delegate_to_agent") as RuntimeToolDefinition,
+      args: { agent: "agent/research", prompt: "Summarize the market." },
+      getSandbox,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["tool_help", "delegate_to_agent"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      delegateToAgent,
+    });
+
+    expect(getSandbox).not.toHaveBeenCalled();
+    expect(delegateToAgent).toHaveBeenCalledWith({
+      agent: "agent/research",
+      prompt: "Summarize the market.",
+      toolCallId: "call_delegate",
+    });
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "delegate_to_agent",
+      toolCallId: "call_delegate",
+      content: expect.stringContaining("Research complete."),
+    });
+  });
+
+  it("creates delegated child sessions with durable parent linkage", async () => {
+    const db = createDelegationDb();
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Research complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    const result = await delegate({
+      agent: "agent/research",
+      prompt: "Summarize the market.",
+      toolCallId: "call_delegate",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: "completed",
+      agentName: "Research",
+      agentPath: "agents/research.agent",
+      answer: "Research complete.",
+    });
+    expect(db.state.sessions[0]).toMatchObject({
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      agentId: "agt_research",
+      source: "agent",
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentToolCallId: "call_delegate",
+    });
+    expect(runChildMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: db.state.sessions[0]?.id,
+        depth: 0,
+      }),
+    );
+  });
+
+  it("emits delegated usage rollups on the parent session", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_parent",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_parent",
+          status: "running",
+          parentSessionId: null,
+          runLeaseId: "run_parent",
+          archivedAt: null,
+        },
+      ],
+      rollupRow: {
+        inputTokens: 100,
+        inputNoCacheTokens: 80,
+        inputCacheReadTokens: 10,
+        inputCacheWriteTokens: 10,
+        outputTokens: 25,
+        outputTextTokens: 20,
+        outputReasoningTokens: 5,
+        totalTokens: 125,
+        providerCostUsdMicros: 1000,
+        platformFeeUsdMicros: 100,
+        totalCostUsdMicros: 1100,
+        modelCostUsdMicros: 770,
+        toolCostUsdMicros: 330,
+        toolUsageTotalCostUsdMicros: 300,
+        toolUsageByProviderOperation: [
+          { provider: "exa", operation: "search", costUsdMicros: 300, calls: 1 },
+        ],
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Research complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await delegate({
+      agent: "agent/research",
+      prompt: "Summarize the market.",
+      toolCallId: "call_delegate",
+    });
+
+    const childSession = db.state.sessions.find(
+      (session) => session.parentSessionId === "ses_parent",
+    );
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        messageId: "msg_parent_assistant",
+        type: "session.delegated_usage",
+        payload: expect.objectContaining({
+          childSessionId: childSession?.id,
+          parentToolCallId: "call_delegate",
+          usage: expect.objectContaining({ totalTokens: 125 }),
+          cost: expect.objectContaining({ totalCostUsdMicros: 1100 }),
+          toolUsage: expect.objectContaining({ totalCostUsdMicros: 300 }),
+        }),
+      }),
+    );
+  });
+
+  it("emits only delegated usage deltas when resuming a child session", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_parent",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+      rollupRow: {
+        inputTokens: 100,
+        inputNoCacheTokens: 100,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 25,
+        outputTextTokens: 25,
+        outputReasoningTokens: 0,
+        totalTokens: 125,
+        providerCostUsdMicros: 1000,
+        platformFeeUsdMicros: 100,
+        totalCostUsdMicros: 1100,
+        modelCostUsdMicros: 1100,
+        toolCostUsdMicros: 0,
+        toolUsageTotalCostUsdMicros: 0,
+        toolUsageByProviderOperation: [],
+      },
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: `msg_child_answer_${messageId}`,
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Done.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await delegate({
+      sessionId: "ses_child",
+      prompt: "First pass.",
+      toolCallId: "call_delegate_first",
+    });
+    const firstEvent = vi.mocked(appendRuntimeEvent).mock.calls.at(-1)?.[1];
+    db.state.events.push({
+      sessionId: "ses_parent",
+      type: "session.delegated_usage",
+      payload: firstEvent?.payload,
+    });
+    db.state.rollupRow = {
+      inputTokens: 150,
+      inputNoCacheTokens: 150,
+      inputCacheReadTokens: 0,
+      inputCacheWriteTokens: 0,
+      outputTokens: 40,
+      outputTextTokens: 40,
+      outputReasoningTokens: 0,
+      totalTokens: 190,
+      providerCostUsdMicros: 1500,
+      platformFeeUsdMicros: 150,
+      totalCostUsdMicros: 1650,
+      modelCostUsdMicros: 1650,
+      toolCostUsdMicros: 0,
+      toolUsageTotalCostUsdMicros: 0,
+      toolUsageByProviderOperation: [],
+    };
+
+    await delegate({
+      sessionId: "ses_child",
+      prompt: "Follow up.",
+      toolCallId: "call_delegate_second",
+    });
+
+    expect(appendRuntimeEvent).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_parent",
+        type: "session.delegated_usage",
+        payload: expect.objectContaining({
+          childSessionId: "ses_child",
+          parentToolCallId: "call_delegate_second",
+          usage: expect.objectContaining({ totalTokens: 65 }),
+          cost: expect.objectContaining({ totalCostUsdMicros: 550 }),
+        }),
+      }),
+    );
+  });
+
+  it("resumes an existing delegated child session with a new user message", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_parent",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId }) => {
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Follow-up complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    const result = await delegate({
+      sessionId: "ses_child",
+      prompt: "Continue with pricing.",
+      toolCallId: "call_delegate_resume",
+    });
+
+    const resumedUserMessage = db.state.messages.find(
+      (message) => message.role === "user" && message.content === "Continue with pricing.",
+    );
+    expect(resumedUserMessage).toBeTruthy();
+    expect(result).toMatchObject({
+      ok: true,
+      status: "completed",
+      resumed: true,
+      childSessionId: "ses_child",
+      messageId: resumedUserMessage?.id,
+      agentName: "Research",
+      agentPath: "agents/research.agent",
+      answer: "Follow-up complete.",
+    });
+    expect(runChildMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "ses_child",
+        messageId: resumedUserMessage?.id,
+      }),
+    );
+  });
+
+  it("rejects resume for sessions outside the current parent session", async () => {
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_other",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async () => null);
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await expect(
+      delegate({
+        sessionId: "ses_child",
+        prompt: "Continue.",
+        toolCallId: "call_delegate_resume",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      status: "failed",
+      childSessionId: "ses_child",
+      error: expect.stringContaining("not a child session"),
+    });
+    expect(runChildMessage).not.toHaveBeenCalled();
+    expect(db.state.messages).toHaveLength(0);
+  });
+
+  it("rejects resume for archived or active child sessions", async () => {
+    for (const child of [
+      { id: "ses_archived", status: "completed", runLeaseId: null, archivedAt: new Date() },
+      { id: "ses_running", status: "running", runLeaseId: "run_child", archivedAt: null },
+    ]) {
+      const db = createDelegationDb({
+        sessions: [
+          {
+            ...child,
+            workspaceId: "wsp_123",
+            userId: "usr_123",
+            agentId: "agt_research",
+            parentSessionId: "ses_parent",
+          },
+        ],
+      });
+      dbMocks.getDb.mockReturnValue(db);
+      const runChildMessage = vi.fn(async () => null);
+      const delegate = createAgentDelegationHandler({
+        parentSessionId: "ses_parent",
+        parentMessageId: "msg_parent_assistant",
+        parentRunLeaseId: "run_parent",
+        parentRunLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        userId: "usr_123",
+        env: env(),
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+        depth: 0,
+        agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+        runChildMessage,
+      });
+
+      await expect(
+        delegate({
+          sessionId: child.id,
+          prompt: "Continue.",
+          toolCallId: "call_delegate_resume",
+        }),
+      ).resolves.toMatchObject({
+        ok: false,
+        status: "failed",
+        childSessionId: child.id,
+      });
+      expect(runChildMessage).not.toHaveBeenCalled();
+      expect(db.state.messages).toHaveLength(0);
+    }
+  });
+
+  it("passes the parent abort signal into resumed child runs", async () => {
+    const controller = new AbortController();
+    const db = createDelegationDb({
+      sessions: [
+        {
+          id: "ses_child",
+          workspaceId: "wsp_123",
+          userId: "usr_123",
+          agentId: "agt_research",
+          status: "completed",
+          parentSessionId: "ses_parent",
+          runLeaseId: null,
+          archivedAt: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const runChildMessage = vi.fn(async ({ sessionId, messageId, signal }) => {
+      expect(signal).toBe(controller.signal);
+      db.state.messages.push({
+        id: "msg_child_answer",
+        sessionId,
+        role: "assistant",
+        status: "completed",
+        content: "Follow-up complete.",
+        responseToMessageId: messageId,
+      });
+      return null;
+    });
+
+    const delegate = createAgentDelegationHandler({
+      parentSessionId: "ses_parent",
+      parentMessageId: "msg_parent_assistant",
+      parentRunLeaseId: "run_parent",
+      parentRunLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      userId: "usr_123",
+      env: env(),
+      signal: controller.signal,
+      checkAbort: async () => {},
+      depth: 0,
+      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      runChildMessage,
+    });
+
+    await delegate({
+      sessionId: "ses_child",
+      prompt: "Continue.",
+      toolCallId: "call_delegate_resume",
+    });
+
+    expect(runChildMessage).toHaveBeenCalledOnce();
   });
 
   it("reuses an incomplete assistant response for a retried user message", async () => {
@@ -775,6 +1309,268 @@ describe("usage recording", () => {
     );
   });
 
+  it("injects repo-scoped GitHub auth into bound shell commands and redacts it", async () => {
+    githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_123");
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubRows: [
+        {
+          integrationId: "wint_123",
+          fullName: "opencompany/web",
+          installationId: "install_123",
+          connectionLabel: "opencompany",
+          connectionStatus: "connected",
+          connectionStatusReason: null,
+          resourceStatus: "available",
+          resourceStatusReason: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const getSandbox = vi.fn(async () => ({
+      sandboxId: "sbx_123",
+      commands: {
+        run: vi.fn(
+          async (
+            command: string,
+            options: {
+              envs?: Record<string, string>;
+              onStdout?: (data: string) => void;
+              onStderr?: (data: string) => void;
+            },
+          ) => {
+            if (command.includes("find brain")) return { stdout: "", stderr: "", exitCode: 0 };
+            options.onStdout?.(`stdout ${options.envs?.GH_TOKEN ?? "missing"}\n`);
+            options.onStderr?.(`stderr ${options.envs?.GIT_CONFIG_VALUE_0 ?? "missing"}\n`);
+            return {
+              stdout: `done ${options.envs?.GH_TOKEN ?? "missing"}`,
+              stderr: `err ${options.envs?.GIT_CONFIG_VALUE_0 ?? "missing"}`,
+              exitCode: 0,
+            };
+          },
+        ),
+      },
+    }));
+    const config = agentConfig({
+      tools: [
+        {
+          id: "amp",
+          type: "coding_agent",
+          provider: "amp",
+          label: "AMP",
+          description: "Delegate coding work to Amp inside an E2B sandbox.",
+          repository: "opencompany-web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [
+            {
+              id: "opencompany-web",
+              fullName: "opencompany/web",
+              defaultBranch: "main",
+              binding: {
+                provider: "github",
+                externalId: "repo_123",
+                resourceType: "repository",
+                displayName: "opencompany/web",
+                connection: {
+                  externalId: "install_123",
+                  label: "opencompany",
+                  accountName: "opencompany",
+                  accountType: "Organization",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: config,
+      toolCallId: "toolu/with spaces",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
+      args: { command: "cd work && gh pr list" },
+      getSandbox: getSandbox as never,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["shell"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    const shellRun = (await getSandbox.mock.results[0]?.value).commands.run.mock.calls.find(
+      ([command]: [string, unknown]) => command === "cd work && gh pr list",
+    );
+    expect(shellRun?.[1]).toMatchObject({
+      envs: {
+        GH_TOKEN: "github_token_123",
+        GH_PROMPT_DISABLED: "1",
+        GH_NO_UPDATE_NOTIFIER: "1",
+        GH_CONFIG_DIR: "/tmp/opencompany-gh-toolu-with-spaces",
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+        GIT_CONFIG_VALUE_0: expect.stringMatching(/^Authorization: Basic /),
+      },
+    });
+    expect(githubMocks.getGitHubWorkInstallationToken).toHaveBeenCalledWith({
+      installationId: "install_123",
+      repositoryFullName: "opencompany/web",
+    });
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toEqual({
+      stdout: "done [redacted]",
+      stderr: "err [redacted]",
+      exitCode: 0,
+    });
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "command.output",
+        payload: expect.objectContaining({
+          delta: "stdout [redacted]\n",
+        }),
+      }),
+    );
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "command.output",
+        payload: expect.objectContaining({
+          delta: "stderr [redacted]\n",
+        }),
+      }),
+    );
+  });
+
+  it("leaves shell unauthenticated when no explicit repository binding exists", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const commands = {
+      run: vi.fn(async (command: string, options: { envs?: Record<string, string> }) => {
+        if (command.includes("find brain")) return { stdout: "", stderr: "", exitCode: 0 };
+        return {
+          stdout: options.envs?.GH_TOKEN ?? "no-token",
+          stderr: "",
+          exitCode: 0,
+        };
+      }),
+    };
+    const getSandbox = vi.fn(async () => ({ sandboxId: "sbx_123", commands }));
+
+    await executeRuntimeTool({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      workspaceId: "wsp_123",
+      agentConfig: agentConfig(),
+      toolCallId: "call_shell",
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
+      args: { command: "env" },
+      getSandbox: getSandbox as never,
+      workdir: "/home/user/workspace",
+      env: env(),
+      enabledTools: ["shell"],
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    const shellRun = commands.run.mock.calls.find(([command]) => command === "env");
+    expect(shellRun?.[1]).not.toHaveProperty("envs");
+    expect(githubMocks.getGitHubWorkInstallationToken).not.toHaveBeenCalled();
+    expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toMatchObject({
+      stdout: "no-token",
+      exitCode: 0,
+    });
+  });
+
+  it("returns GitHub integration failures as recoverable shell results", async () => {
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubRows: [
+        {
+          integrationId: "wint_123",
+          fullName: "opencompany/web",
+          installationId: "install_123",
+          connectionLabel: "opencompany",
+          connectionStatus: "needs_reauth",
+          connectionStatusReason: "Installation token failed with 401.",
+          resourceStatus: "available",
+          resourceStatusReason: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    const commands = {
+      run: vi.fn(async (command: string) =>
+        command.includes("find brain") ? { stdout: "", stderr: "", exitCode: 0 } : null,
+      ),
+    };
+    const getSandbox = vi.fn(async () => ({ sandboxId: "sbx_123", commands }));
+    const config = agentConfig({
+      tools: [
+        {
+          id: "amp",
+          type: "coding_agent",
+          provider: "amp",
+          label: "AMP",
+          description: "Delegate coding work to Amp inside an E2B sandbox.",
+          repository: "opencompany-web",
+          prCapable: true,
+        },
+      ],
+      integrations: {
+        github: {
+          repositories: [
+            { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+          ],
+        },
+      },
+    });
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        agentConfig: config,
+        toolCallId: "call_shell",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
+        args: { command: "gh pr list" },
+        getSandbox: getSandbox as never,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["shell"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        message:
+          "GitHub connection opencompany is needs reauth. Reconnect GitHub or update the agent repository mention. Installation token failed with 401.",
+        code: "tool_execution_failed",
+        recoverable: true,
+      }),
+    });
+
+    expect(commands.run.mock.calls.some(([command]) => command === "gh pr list")).toBe(false);
+    expect(db.state.messages.at(-1)).toMatchObject({
+      role: "tool",
+      toolName: "shell",
+      toolCallId: "call_shell",
+    });
+  });
+
   it("keeps sandbox hydration failures fatal", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);
@@ -918,6 +1714,76 @@ describe("usage recording", () => {
 });
 
 describe("stream error handling", () => {
+  it("records terminal stream metadata from finish-step parts", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    async function* stream() {
+      yield { type: "text-delta", text: "Working" } as never;
+      yield {
+        type: "finish-step",
+        finishReason: "tool-calls",
+        rawFinishReason: "tool_calls",
+        response: {
+          id: "response_123",
+          timestamp: new Date("2026-05-22T12:00:00.000Z"),
+          modelId: "openai/gpt-5.4-mini",
+        },
+        usage: usage(100, 20),
+      } as never;
+    }
+
+    const result = await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      exposeReasoningSummary: false,
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+    });
+
+    expect(result).toMatchObject({
+      assistantContent: "Working",
+      stepCount: 1,
+      lastFinishReason: "tool-calls",
+      lastRawFinishReason: "tool_calls",
+      lastStepEndedWithToolCalls: true,
+    });
+  });
+
+  it("rejects turn completion when the model is still requesting tools at the step cap", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Partial progress.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "list_files",
+            input: {},
+          },
+        ],
+        lastStepEndedWithToolCalls: true,
+        stepCount: MAX_MODEL_STEPS,
+      }),
+    ).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("allows normal turns that end with final assistant text", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Done.",
+        assistantReplayParts: [{ type: "text", text: "Done." }],
+        lastStepEndedWithToolCalls: false,
+        stepCount: 2,
+      }),
+    ).not.toThrow();
+  });
+
   it("throws model stream errors instead of allowing blank completions", () => {
     expect(() =>
       throwIfStreamErrorPart({ type: "error", error: new Error("gateway failed") } as never),
@@ -940,7 +1806,13 @@ describe("stream error handling", () => {
 describe("Amp stream parsing", () => {
   it("starts a new Amp thread when no prior thread id is provided", () => {
     expect(buildAmpCommand({ task: "implement the change" })).toBe(
-      "amp --dangerously-allow-all --mode deep --stream-json -x 'implement the change'",
+      "amp --dangerously-allow-all --mode smart -x 'implement the change'",
+    );
+  });
+
+  it("allows Amp mode to be selected for harder tasks", () => {
+    expect(buildAmpCommand({ task: "implement the change", mode: "deep" })).toBe(
+      "amp --dangerously-allow-all --mode deep -x 'implement the change'",
     );
   });
 
@@ -949,9 +1821,10 @@ describe("Amp stream parsing", () => {
       buildAmpCommand({
         task: "address the follow-up",
         ampThreadId: "T-2775dc92-90ed-4f85-8b73-8f9766029e83",
+        mode: "rush",
       }),
     ).toBe(
-      "amp threads continue --dangerously-allow-all --mode deep --stream-json -x 'address the follow-up' 'T-2775dc92-90ed-4f85-8b73-8f9766029e83'",
+      "amp threads continue --dangerously-allow-all --mode rush -x 'address the follow-up' 'T-2775dc92-90ed-4f85-8b73-8f9766029e83'",
     );
   });
 
@@ -1208,6 +2081,20 @@ describe("Amp stream parsing", () => {
       threadId: "T-456",
       status: "success",
       result: "assistant fallback",
+      error: null,
+    });
+  });
+
+  it("captures plain Amp output when JSON streaming is not requested", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push("\u001b[?25hWorking on it...\n");
+    stream.push("Done with the implementation.\n");
+
+    expect(stream.summary({ exitCode: 0 })).toMatchObject({
+      threadId: null,
+      status: "success",
+      result: "Working on it...\nDone with the implementation.",
       error: null,
     });
   });
@@ -1569,11 +2456,25 @@ type ToolUsageState = {
   costUsdMicros: number;
 };
 
+type DelegationSessionState = {
+  id: string;
+  workspaceId: string;
+  userId: string;
+  agentId: string;
+  status: string;
+  source?: string;
+  parentSessionId?: string | null;
+  parentMessageId?: string | null;
+  parentToolCallId?: string | null;
+  runLeaseId?: string | null;
+  archivedAt?: Date | null;
+};
+
 function createLeaseDb(input: {
   runLeaseId?: string | null;
   runLeaseExpiresAt?: Date | null;
   messages?: MessageState[];
-  githubWorkRepositories?: unknown[];
+  githubRows?: unknown[];
 }) {
   const state = {
     session: {
@@ -1634,35 +2535,34 @@ function createLeaseDb(input: {
     select() {
       return {
         from(table: unknown) {
-          return {
+          const query = {
             innerJoin() {
-              return this;
+              return query;
             },
             where() {
-              return {
-                async limit() {
-                  if (table === agentSessions && state.session.runLeaseId === "run_123") {
-                    return [{ id: state.session.id }];
-                  }
-                  if (table === agentSessions && state.session.runLeaseId === "run_current") {
-                    return [];
-                  }
-                  if (table === agentSessions) return [{ id: state.session.id }];
-                  if (table === agentSessionMessages) {
-                    return state.messages
-                      .filter((message) => message.responseToMessageId)
-                      .map((message) => ({
-                        id: message.id,
-                        status: message.status ?? "running",
-                      }))
-                      .slice(0, 1);
-                  }
-                  if (input.githubWorkRepositories) return input.githubWorkRepositories;
-                  return [];
-                },
-              };
+              return query;
+            },
+            async limit() {
+              if (table === agentSessions && state.session.runLeaseId === "run_123") {
+                return [{ id: state.session.id }];
+              }
+              if (table === agentSessions && state.session.runLeaseId === "run_current") {
+                return [];
+              }
+              if (table === agentSessions) return [{ id: state.session.id }];
+              if (table === agentSessionMessages) {
+                return state.messages
+                  .filter((message) => message.responseToMessageId)
+                  .map((message) => ({
+                    id: message.id,
+                    status: message.status ?? "running",
+                  }))
+                  .slice(0, 1);
+              }
+              return input.githubRows ?? [];
             },
           };
+          return query;
         },
       };
     },
@@ -1720,6 +2620,151 @@ function createLeaseDb(input: {
   };
 }
 
+function createDelegationDb(
+  input: { sessions?: DelegationSessionState[]; rollupRow?: Record<string, unknown> } = {},
+) {
+  const state = {
+    agent: {
+      id: "agt_research",
+      name: "Research",
+      path: "agents/research.agent",
+      config: {
+        ...agentConfig(),
+        title: "Research",
+        agents: [],
+      },
+    },
+    sessions: [...(input.sessions ?? [])],
+    messages: [] as MessageState[],
+    events: [] as Array<{ sessionId?: string; type?: string; payload?: unknown }>,
+    rollupRow: input.rollupRow ?? defaultDelegationRollupRow(),
+  };
+  let executeCount = 0;
+
+  const db = {
+    state,
+    select() {
+      const query = {
+        table: undefined as unknown,
+        from(table: unknown) {
+          query.table = table;
+          return query;
+        },
+        innerJoin() {
+          return query;
+        },
+        where() {
+          return query;
+        },
+        async limit() {
+          if (query.table === agents) {
+            return [state.agent];
+          }
+          if (query.table === agentSessions) {
+            const session =
+              state.sessions.find((item) => item.runLeaseId === "run_parent") ??
+              state.sessions.at(0);
+            if (!session) return [];
+            return [
+              {
+                ...session,
+                agentName: state.agent.name,
+                agentPath: state.agent.path,
+                source: session.source ?? "agent",
+              },
+            ];
+          }
+          if (query.table === agentSessionMessages) {
+            const assistant = [...state.messages]
+              .reverse()
+              .find((message) => message.role === "assistant" && message.responseToMessageId);
+            return assistant
+              ? [
+                  {
+                    id: assistant.id,
+                    status: assistant.status ?? "completed",
+                    content: assistant.content ?? "",
+                  },
+                ]
+              : [];
+          }
+          return [];
+        },
+      };
+      return query;
+    },
+    insert(table: unknown) {
+      return {
+        values(values: Record<string, unknown>) {
+          if (table === agentSessions) {
+            state.sessions.push({
+              id: values.id as string,
+              workspaceId: values.workspaceId as string,
+              userId: values.userId as string,
+              agentId: values.agentId as string,
+              status: (values.status as string | undefined) ?? "created",
+              source: (values.source as string | undefined) ?? "user",
+              parentSessionId: (values.parentSessionId as string | null | undefined) ?? null,
+              parentMessageId: (values.parentMessageId as string | null | undefined) ?? null,
+              parentToolCallId: (values.parentToolCallId as string | null | undefined) ?? null,
+              runLeaseId: null,
+              archivedAt: null,
+            });
+          }
+          if (table === agentSessionMessages) {
+            state.messages.push(values as MessageState);
+          }
+          if (table === agentSessionEvents) {
+            state.events.push(values);
+          }
+          return {};
+        },
+      };
+    },
+    async batch(statements: unknown[]) {
+      return statements;
+    },
+    async execute() {
+      executeCount += 1;
+      if (executeCount % 2 === 0) {
+        return {
+          rows: state.events
+            .filter(
+              (event) =>
+                event.sessionId === "ses_parent" && event.type === "session.delegated_usage",
+            )
+            .map((event) => ({ payload: event.payload })),
+        };
+      }
+      return {
+        rows: [state.rollupRow],
+      };
+    },
+  };
+
+  return db;
+}
+
+function defaultDelegationRollupRow() {
+  return {
+    inputTokens: 0,
+    inputNoCacheTokens: 0,
+    inputCacheReadTokens: 0,
+    inputCacheWriteTokens: 0,
+    outputTokens: 0,
+    outputTextTokens: 0,
+    outputReasoningTokens: 0,
+    totalTokens: 0,
+    providerCostUsdMicros: 0,
+    platformFeeUsdMicros: 0,
+    totalCostUsdMicros: 0,
+    modelCostUsdMicros: 0,
+    toolCostUsdMicros: 0,
+    toolUsageTotalCostUsdMicros: 0,
+    toolUsageByProviderOperation: [],
+  };
+}
+
 function createGitHubWorkRepositoryDb(rows: unknown[]) {
   const query = {
     from: vi.fn(() => query),
@@ -1754,7 +2799,15 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
   };
 }
 
-function agentConfig(): AgentConfig {
+function agentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+  const base = baseAgentConfig();
+  return {
+    ...base,
+    ...overrides,
+  };
+}
+
+function baseAgentConfig(): AgentConfig {
   return {
     schemaVersion: "agent.v1" as const,
     title: "Test agent",

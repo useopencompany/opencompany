@@ -212,7 +212,11 @@ export async function loadLatestUserMessage(sessionId: string) {
 
 export async function loadAssistantResponseForMessage(sessionId: string, messageId: string) {
   const [message] = await getDb()
-    .select({ id: agentSessionMessages.id, status: agentSessionMessages.status })
+    .select({
+      id: agentSessionMessages.id,
+      status: agentSessionMessages.status,
+      content: agentSessionMessages.content,
+    })
     .from(agentSessionMessages)
     .where(
       and(

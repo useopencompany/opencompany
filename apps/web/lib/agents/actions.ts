@@ -12,15 +12,19 @@ import type { AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentSessions,
   agentSyncJobs,
   agents,
   brainFiles,
   workspaceIntegrationResources,
   workspaceIntegrations,
+  workspaceRepositories,
 } from "@opencompany/db/schema";
-import { and, asc, eq, or } from "drizzle-orm";
+import { captureException, createLogger } from "@opencompany/observability";
+import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import {
   derivePreviewConfigFromTiptapDoc,
   extractPreferredGitHubRepositoriesFromTiptapDoc,
@@ -51,11 +55,27 @@ import {
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
 import {
+  deleteWorkspaceFile,
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
+
+// Local copy of the helper used in AgentsView.tsx / AgentDetail.tsx — duplicated
+// intentionally to avoid pulling client code into the server module. The shared
+// extraction is tracked as a follow-up cleanup.
+function isNextRedirectError(err: unknown): boolean {
+  return Boolean(
+    err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      typeof (err as { digest: unknown }).digest === "string" &&
+      (err as { digest: string }).digest.startsWith("NEXT_REDIRECT"),
+  );
+}
 
 export async function createAgent() {
   const trace = startTimingTrace("agents.create");
@@ -213,6 +233,18 @@ export async function updateAgent(
         },
       },
     }));
+  const workspaceAgentReferences = (
+    await timeAsync(trace, "db.selectAgentReferences", () =>
+      db
+        .select({ path: agents.path, name: agents.name })
+        .from(agents)
+        .where(eq(agents.workspaceId, workspace.id))
+        .orderBy(asc(agents.name)),
+    )
+  ).flatMap((row) => {
+    if (!row.path || row.path === agent.path) return [];
+    return [{ path: row.path, name: row.name }];
+  });
   const savedRepositories = currentConfig.integrations.github.repositories;
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubRepositories,
@@ -231,6 +263,7 @@ export async function updateAgent(
         content: sanitizedContent,
         model: patch.model ?? currentConfig.model.name,
         repositories: derivationRepositories,
+        agents: workspaceAgentReferences,
         preferredRepositories: savedPreferredRepositories,
         triggers: currentConfig.triggers,
       })
@@ -245,6 +278,7 @@ export async function updateAgent(
           body: patch.body,
           model: patch.model ?? currentConfig.model.name,
           repositories: derivationRepositories,
+          agents: workspaceAgentReferences,
           preferredRepositories,
           triggers: currentConfig.triggers,
         })
@@ -260,6 +294,7 @@ export async function updateAgent(
     derived?.config.integrations ?? patch.config?.integrations ?? currentConfig.integrations;
   const nextTools = derived?.config.tools ?? patch.config?.tools ?? currentConfig.tools;
   const nextBrain = derived?.config.brain ?? patch.config?.brain ?? currentConfig.brain;
+  const nextAgents = derived?.config.agents ?? patch.config?.agents ?? currentConfig.agents;
   const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? currentConfig.triggers;
   const source = serializeAgentFile({
     title,
@@ -267,6 +302,7 @@ export async function updateAgent(
     model,
     tools: nextTools,
     brain: nextBrain,
+    agents: nextAgents ?? [],
     integrations: nextIntegrations,
     triggers: nextTriggers,
   });
@@ -354,10 +390,18 @@ export async function updateAgent(
     path,
     pathChanged,
     agent: updatedAgent
-      ? serializeAgentDetail(updatedAgent, brainPaths, derivationRepositories, usableRepositories, {
-          mcpEnabled: mcpSettings.mcpEnabled,
-          linearConfigured: mcpSettings.linear.configured,
-        })
+      ? serializeAgentDetail(
+          updatedAgent,
+          brainPaths,
+          derivationRepositories,
+          usableRepositories,
+          workspaceAgentReferences,
+          {
+            mcpEnabled: mcpSettings.mcpEnabled,
+            linearConfigured: mcpSettings.linear.configured,
+            slackConfigured: mcpSettings.slack.configured,
+          },
+        )
       : null,
   };
 
@@ -372,6 +416,201 @@ export async function updateAgent(
   });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
+}
+
+export async function deleteAgent(
+  idOrPath: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Require admin for destructive operations (matches codebase convention).
+  // Route the requireAdmin error through the result shape so Next.js production
+  // server-action error masking doesn't replace the message with a generic
+  // "Server Components" digest string. NEXT_REDIRECT must still bubble.
+  let auth: Awaited<ReturnType<typeof currentWorkspace>>;
+  try {
+    auth = await currentWorkspace({ requireAdmin: true });
+  } catch (err) {
+    if (isNextRedirectError(err)) throw err;
+    return {
+      ok: false,
+      error:
+        err instanceof Error && err.message
+          ? err.message
+          : "Only workspace admins can delete agents.",
+    } as const;
+  }
+  const { user, workspace } = auth;
+  const trace = startTimingTrace("agents.delete");
+  const db = getDb();
+
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(idOrPath);
+  } catch {
+    // Guard against malformed percent-encoded identifiers.
+    endTimingTrace(trace, { found: false });
+    return { ok: false, error: "Invalid agent identifier." };
+  }
+
+  const [agent] = await timeAsync(trace, "db.selectAgent", () =>
+    db
+      .select({
+        id: agents.id,
+        path: agents.path,
+        githubBlobSha: agents.githubBlobSha,
+      })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.workspaceId, workspace.id),
+          or(eq(agents.id, idOrPath), eq(agents.path, decodedPath)),
+        ),
+      )
+      .limit(1),
+  );
+
+  if (!agent) {
+    endTimingTrace(trace, { found: false });
+    return { ok: false, error: "Agent not found." };
+  }
+
+  // GitHub delete first so a transient failure leaves the agent intact rather
+  // than orphaning the .agent file (which the next sync would re-import as a
+  // fresh agent). `deleteWorkspaceFile` swallows 404s, so a retry after a
+  // partial success is idempotent.
+  if (agent.path) {
+    const [repository] = await timeAsync(trace, "db.selectWorkspaceRepository", () =>
+      db
+        .select({
+          workspaceId: workspaceRepositories.workspaceId,
+          githubRepoId: workspaceRepositories.githubRepoId,
+          fullName: workspaceRepositories.fullName,
+          defaultBranch: workspaceRepositories.defaultBranch,
+          latestHeadSha: workspaceRepositories.latestHeadSha,
+          createdAt: workspaceRepositories.createdAt,
+          updatedAt: workspaceRepositories.updatedAt,
+        })
+        .from(workspaceRepositories)
+        .where(eq(workspaceRepositories.workspaceId, workspace.id))
+        .limit(1),
+    );
+
+    if (!repository) {
+      logger.warn("No workspace repository found; skipping GitHub file deletion", {
+        event: "opencompany.agent_delete_no_repository",
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        path: agent.path,
+      });
+    } else {
+      try {
+        await timeAsync(
+          trace,
+          "github.deleteWorkspaceFile",
+          () =>
+            deleteWorkspaceFile({
+              db,
+              repository,
+              path: agent.path!,
+              message: `Delete ${agent.path}`,
+              blobSha: agent.githubBlobSha,
+            }),
+          { path: agent.path },
+        );
+      } catch (err) {
+        captureException(err, {
+          event: "opencompany.agent_delete_github_failed",
+          workspace_id: workspace.id,
+          agent_id: agent.id,
+          path: agent.path,
+        });
+        logger.error("Failed to delete agent file from GitHub", {
+          event: "opencompany.agent_delete_github_failed",
+          workspace_id: workspace.id,
+          agent_id: agent.id,
+          path: agent.path,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        endTimingTrace(trace, { found: true, path: agent.path, githubDeleted: false });
+        return {
+          ok: false,
+          error:
+            "Could not delete the agent from the connected GitHub repository. Please try again.",
+        } as const;
+      }
+    }
+  }
+
+  // Archive any live e2b sandboxes for this agent before the cascade removes
+  // the session rows. The FK on agent_sessions is ON DELETE CASCADE so the
+  // rows go away with the agent — but the external sandboxes keep running
+  // (and billing) until E2B's idle TTL. Best-effort: don't block the delete
+  // on a stuck sandbox; the TTL is the safety net.
+  const liveSessions = await timeAsync(trace, "db.selectLiveSessions", () =>
+    db
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.agentId, agent.id),
+          eq(agentSessions.workspaceId, workspace.id),
+          isNotNull(agentSessions.e2bSandboxId),
+          notInArray(agentSessions.status, ["archived", "errored"]),
+        ),
+      ),
+  );
+
+  if (liveSessions.length > 0) {
+    const runnerConfigured = Boolean(getRunnerPublicUrl() && process.env.RUNNER_INTERNAL_TOKEN);
+    for (const session of liveSessions) {
+      if (!runnerConfigured) {
+        logger.warn("Skipping sandbox archive on agent delete: runner not configured", {
+          event: "opencompany.agent_delete_sandbox_skipped",
+          workspace_id: workspace.id,
+          agent_id: agent.id,
+          session_id: session.id,
+          reason: "runner_not_configured",
+        });
+        continue;
+      }
+      try {
+        await callRunner(`/internal/sessions/${session.id}/archive`, {
+          workspace_id: workspace.id,
+          session_id: session.id,
+          event: "opencompany.agent_delete_archive_session",
+        });
+      } catch (err) {
+        captureException(err, {
+          event: "opencompany.agent_delete_archive_session_failed",
+          workspace_id: workspace.id,
+          agent_id: agent.id,
+          session_id: session.id,
+        });
+        logger.error("Failed to archive live sandbox during agent delete", {
+          event: "opencompany.agent_delete_archive_session_failed",
+          workspace_id: workspace.id,
+          agent_id: agent.id,
+          session_id: session.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  await timeAsync(trace, "db.deleteAgent", () =>
+    db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+  );
+
+  await captureServerEvent("agent_deleted", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+  });
+
+  revalidatePath("/agents");
+  if (agent.path) revalidatePath(`/agents/${agent.path}`);
+  revalidatePath(`/agents/${agent.id}`);
+  endTimingTrace(trace, { found: true, path: agent.path });
+  return { ok: true };
 }
 
 function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tiptapBody?: string }) {

@@ -84,6 +84,14 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cacheWriteUsdMicrosPerMillion: 2_500_000,
     outputUsdMicrosPerMillion: 15_000_000,
   },
+  "openai/gpt-5.2-codex": {
+    model: "openai/gpt-5.2-codex",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 1_750_000,
+    cachedInputUsdMicrosPerMillion: 175_000,
+    cacheWriteUsdMicrosPerMillion: 1_750_000,
+    outputUsdMicrosPerMillion: 14_000_000,
+  },
   "anthropic/claude-haiku-4.5": {
     model: "anthropic/claude-haiku-4.5",
     provider: "anthropic",
@@ -102,6 +110,14 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
   },
   "anthropic/claude-opus-4.7": {
     model: "anthropic/claude-opus-4.7",
+    provider: "anthropic",
+    inputUsdMicrosPerMillion: 5_000_000,
+    cachedInputUsdMicrosPerMillion: 500_000,
+    cacheWriteUsdMicrosPerMillion: 6_250_000,
+    outputUsdMicrosPerMillion: 25_000_000,
+  },
+  "anthropic/claude-opus-4.8": {
+    model: "anthropic/claude-opus-4.8",
     provider: "anthropic",
     inputUsdMicrosPerMillion: 5_000_000,
     cachedInputUsdMicrosPerMillion: 500_000,

@@ -144,6 +144,11 @@ Hosted tools are enabled by agent configuration:
 - `exa_answer`
 - `web_fetch`
 
+Internal delegation tools are enabled by agent configuration:
+
+- `delegate_to_agent` when the agent references other workspace agents; it can start an inspectable
+  child session hidden from sidebar history or continue one of its own prior child sessions by `sessionId`
+
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
@@ -152,6 +157,8 @@ Experimental MCP tools are enabled by workspace setup plus agent configuration:
 
 - `linear__*` tools when the workspace has the MCP beta on, Linear MCP is configured, and the
   agent mentions `@linear`
+- `slack__*` tools when the workspace has the MCP beta on, Slack MCP is configured, and the agent
+  mentions `@slack`
 
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 

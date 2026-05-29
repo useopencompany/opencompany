@@ -367,6 +367,42 @@ describe("runSandboxTool", () => {
     );
   });
 
+  it("passes shell envs and redacts streamed and returned shell output", async () => {
+    const onOutput = vi.fn();
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStdout?: (data: string) => void }) => {
+          options.onStdout?.("token=github_token_123\n");
+          return { stdout: "done github_token_123", stderr: "err github_token_123", exitCode: 0 };
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "shell",
+      args: { command: "gh auth status" },
+      envs: { GH_TOKEN: "github_token_123" },
+      redactOutput: (value) => value.replaceAll("github_token_123", "[redacted]"),
+      onOutput,
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "gh auth status",
+      expect.objectContaining({
+        cwd: sandboxLayout("/home/user/workspace").workspaceRoot,
+        envs: { GH_TOKEN: "github_token_123" },
+      }),
+    );
+    expect(onOutput).toHaveBeenCalledWith("stdout", "token=[redacted]\n");
+    expect(result).toEqual({
+      stdout: "done [redacted]",
+      stderr: "err [redacted]",
+      exitCode: 0,
+    });
+  });
+
   it("creates parent directories before writing nested files", async () => {
     const sandbox = {
       commands: {

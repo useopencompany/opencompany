@@ -45,6 +45,22 @@ describe("AGENT_TOOL_CATALOG", () => {
     );
   });
 
+  it("exposes Amp modes on amp_coder", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("amp_coder");
+    if (!definition) throw new Error("Expected amp_coder runtime tool definition to exist");
+
+    const properties = definition.parameters.properties as Record<
+      string,
+      { enum?: string[]; default?: string; description?: string }
+    >;
+
+    expect(properties.mode).toMatchObject({
+      enum: ["smart", "large", "rush", "deep"],
+      default: "smart",
+    });
+    expect(properties.mode?.description).toContain("rush for latency-sensitive tasks");
+  });
+
   it("documents platform-only credentials for Exa without workspace resource requirements", () => {
     const exa = AGENT_TOOL_DEFINITION_BY_ID.get("exa");
 
@@ -55,6 +71,20 @@ describe("AGENT_TOOL_CATALOG", () => {
 });
 
 describe("runtime tool definitions", () => {
+  it("lets delegate_to_agent continue prior child sessions by session id", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("delegate_to_agent");
+
+    if (!definition) {
+      throw new Error("Expected delegate_to_agent runtime tool definition to exist");
+    }
+
+    expect(definition.parameters.required).toEqual(["prompt"]);
+    expect(definition.parameters.properties).toHaveProperty("agent");
+    expect(definition.parameters.properties).toHaveProperty("sessionId");
+    expect(definition.description).toContain("continue a prior delegated child session");
+    expect(definition.help).toContain("childSessionId");
+  });
+
   it("keeps Exa category compatibility guidance in the visible search schema", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search");
 

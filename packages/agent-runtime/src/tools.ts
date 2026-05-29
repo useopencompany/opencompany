@@ -14,6 +14,7 @@ export type RuntimeToolName =
   | "write_file"
   | "list_files"
   | "git_diff"
+  | "delegate_to_agent"
   | "amp_coder"
   | "exa_search"
   | "exa_contents"
@@ -23,7 +24,7 @@ export type RuntimeToolName =
 
 export type RuntimeToolDefinition = {
   name: RuntimeToolName;
-  kind: "sandbox" | "hosted";
+  kind: "sandbox" | "hosted" | "internal";
   configToolId?: AgentToolId;
   requiresRepositoryBinding?: boolean;
   description: string;
@@ -92,6 +93,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "workspace",
   },
+  {
+    id: "slack",
+    type: "mcp",
+    server: "slack",
+    label: "slack",
+    description: "Use workspace-configured Slack MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
 ];
 
 export const AGENT_TOOL_DEFINITION_BY_ID = new Map(
@@ -103,7 +114,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible.",
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When the agent has an explicit GitHub repository binding, shell commands get repo-scoped gh and git auth for that repository; run repository commands from ./work.",
     parameters: {
       type: "object",
       properties: {
@@ -223,6 +234,42 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
   },
   {
+    name: "delegate_to_agent",
+    kind: "internal",
+    description:
+      "Delegate a focused task to another workspace agent referenced in this agent's instructions, or continue a prior delegated child session by sessionId. The delegated agent runs in an inspectable child session that is hidden from sidebar history, and this tool returns its final answer.",
+    parameters: {
+      type: "object",
+      properties: {
+        agent: {
+          type: "string",
+          description:
+            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research.agent. Omit when continuing a prior child session by sessionId.",
+        },
+        sessionId: {
+          type: "string",
+          description:
+            "Existing child session id returned by an earlier delegate_to_agent call. Use this instead of agent when continuing that delegated session.",
+        },
+        prompt: {
+          type: "string",
+          description:
+            "Specific task for the target agent. Include the relevant context and the output shape you need back.",
+        },
+      },
+      required: ["prompt"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use delegate_to_agent when another configured workspace agent is better suited to a focused subtask.",
+      "To start a new delegated session, pass one target agent from the configured agent references and a self-contained prompt.",
+      "To continue a prior delegated child session, pass its childSessionId back as sessionId with the next prompt, and omit agent.",
+      "The tool blocks until the child session completes or fails, then returns the child answer and session id.",
+      "Resume a child session only when continuity matters; start a new delegated session for independent subtasks.",
+      "Keep delegated prompts bounded; do not delegate recursively unless the user's task clearly requires it.",
+    ].join("\n"),
+  },
+  {
     name: "amp_coder",
     kind: "sandbox",
     configToolId: "amp",
@@ -250,6 +297,13 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           description:
             "Existing ampThreadId from a previous amp_coder result to continue instead of starting a new Amp thread.",
+        },
+        mode: {
+          type: "string",
+          enum: ["smart", "large", "rush", "deep"],
+          description:
+            "Amp execution mode. Defaults to smart. Use large or deep for harder long-running coding tasks, and rush for latency-sensitive tasks.",
+          default: "smart",
         },
       },
       required: ["task"],
@@ -521,9 +575,11 @@ export const RUNTIME_TOOL_DEFINITION_BY_NAME = new Map(
 
 export function resolveRuntimeToolNamesForConfigTools(
   tools: ReadonlyArray<{ id?: unknown }> | undefined,
+  agents: ReadonlyArray<unknown> | undefined = [],
 ) {
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
+    if (tool.name === "delegate_to_agent") continue;
     if (!tool.configToolId) names.add(tool.name);
   }
   names.add("tool_help");
@@ -540,6 +596,10 @@ export function resolveRuntimeToolNamesForConfigTools(
         names.add(definition.name);
       }
     }
+  }
+
+  if ((agents ?? []).length > 0) {
+    names.add("delegate_to_agent");
   }
 
   return Array.from(names);

@@ -2,8 +2,6 @@ import { randomUUID } from "node:crypto";
 import { centsToUsdMicros, USD_MICROS_PER_CENT, usdMicrosToCents } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import {
-  agentSessions,
-  agents,
   creditCodeRedemptions,
   creditCodes,
   stripeCheckoutSessions,
@@ -99,30 +97,46 @@ export async function loadBillingOverview(workspaceId: string) {
       FROM workspace_credit_ledger
       WHERE workspace_id = ${workspaceId}
     `),
-    db
-      .select({
-        sessionId: workspaceCreditLedger.sessionId,
-        title: agentSessions.title,
-        agentName: agents.name,
-        totalUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}), 0)`,
-        modelCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'model_usage'), 0)`,
-        toolCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'tool_usage'), 0)`,
-        providerCostUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.providerCostUsdMicros}), 0)`,
-        platformFeeUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.platformFeeUsdMicros}), 0)`,
-        createdAt: sql<Date>`MAX(${workspaceCreditLedger.createdAt})`,
-      })
-      .from(workspaceCreditLedger)
-      .innerJoin(agentSessions, eq(workspaceCreditLedger.sessionId, agentSessions.id))
-      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-      .where(
-        and(
-          eq(workspaceCreditLedger.workspaceId, workspaceId),
-          sql`${workspaceCreditLedger.amountUsdMicros} < 0`,
-        ),
+    db.execute(sql`
+      WITH RECURSIVE session_tree(id, root_id, path) AS (
+        SELECT id, id AS root_id, ARRAY[id]::text[]
+        FROM agent_sessions
+        WHERE workspace_id = ${workspaceId}
+          AND parent_session_id IS NULL
+        UNION ALL
+        SELECT child.id, session_tree.root_id, session_tree.path || child.id
+        FROM agent_sessions child
+        INNER JOIN session_tree ON child.parent_session_id = session_tree.id
+        WHERE child.workspace_id = ${workspaceId}
+          AND NOT child.id = ANY(session_tree.path)
+      ),
+      ledger_with_root AS (
+        SELECT
+          ledger.*,
+          COALESCE(session_tree.root_id, ledger.session_id) AS root_session_id
+        FROM workspace_credit_ledger ledger
+        LEFT JOIN session_tree ON session_tree.id = ledger.session_id
+        WHERE ledger.workspace_id = ${workspaceId}
+          AND ledger.amount_usd_micros < 0
+          AND ledger.session_id IS NOT NULL
       )
-      .groupBy(workspaceCreditLedger.sessionId, agentSessions.title, agents.name)
-      .orderBy(sql`MAX(${workspaceCreditLedger.createdAt}) DESC`)
-      .limit(5),
+      SELECT
+        root_session_id AS "sessionId",
+        root_session.title AS "title",
+        root_agent.name AS "agentName",
+        COALESCE(SUM(-ledger_with_root.amount_usd_micros), 0) AS "totalUsdMicros",
+        COALESCE(SUM(-ledger_with_root.amount_usd_micros) FILTER (WHERE ledger_with_root.source = 'model_usage'), 0) AS "modelCostUsdMicros",
+        COALESCE(SUM(-ledger_with_root.amount_usd_micros) FILTER (WHERE ledger_with_root.source = 'tool_usage'), 0) AS "toolCostUsdMicros",
+        COALESCE(SUM(ledger_with_root.provider_cost_usd_micros), 0) AS "providerCostUsdMicros",
+        COALESCE(SUM(ledger_with_root.platform_fee_usd_micros), 0) AS "platformFeeUsdMicros",
+        MAX(ledger_with_root.created_at) AS "createdAt"
+      FROM ledger_with_root
+      INNER JOIN agent_sessions root_session ON root_session.id = ledger_with_root.root_session_id
+      INNER JOIN agents root_agent ON root_agent.id = root_session.agent_id
+      GROUP BY root_session_id, root_session.title, root_agent.name
+      ORDER BY MAX(ledger_with_root.created_at) DESC
+      LIMIT 5
+    `),
   ]);
   const balanceUsdMicros =
     balanceRow[0]?.balanceUsdMicros ?? centsToUsdMicros(balanceRow[0]?.balanceCents ?? 0);
@@ -136,7 +150,7 @@ export async function loadBillingOverview(workspaceId: string) {
     balanceCents: usdMicrosToCents(balanceUsdMicros),
     spendLast7UsdMicros: readMicros(spend?.spendLast7UsdMicros),
     spendLast30UsdMicros: readMicros(spend?.spendLast30UsdMicros),
-    recentSessionCharges: sessionChargeRows
+    recentSessionCharges: rowsFromExecute<BillingSessionChargeSummary>(sessionChargeRows)
       .filter((row): row is typeof row & { sessionId: string } => Boolean(row.sessionId))
       .map((row) => ({
         sessionId: row.sessionId,

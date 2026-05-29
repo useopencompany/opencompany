@@ -5,6 +5,10 @@ const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },
   { fullName: "opencompany/runner", defaultBranch: "develop" },
 ];
+const agents = [
+  { path: "agents/research.agent", name: "Research" },
+  { path: "agents/writer.agent", name: "Writer" },
+];
 const boundRepositories = [
   {
     fullName: "opencompany/web",
@@ -46,9 +50,11 @@ describe("extractConfigFromMentions", () => {
   });
 
   it("resolves tool ids and labels", () => {
-    const config = extractConfigFromMentions("Research with @exa and implement with @AMP.");
+    const config = extractConfigFromMentions(
+      "Research with @exa, @slack, and implement with @AMP.",
+    );
 
-    expect(config.tools).toEqual(["exa", "amp"]);
+    expect(config.tools).toEqual(["exa", "slack", "amp"]);
   });
 
   it("normalizes Brain file and folder paths", () => {
@@ -60,6 +66,12 @@ describe("extractConfigFromMentions", () => {
       { path: "docs/README.md", type: "file" },
       { path: "product/specs/", type: "folder" },
     ]);
+  });
+
+  it("ignores agent mentions without a workspace agent catalog", () => {
+    const config = extractConfigFromMentions("Ask @agent/research to summarize the findings.");
+
+    expect(config.agents).toEqual([]);
   });
 });
 
@@ -196,5 +208,30 @@ describe("deriveAgentConfigFromBody", () => {
         repository: "useopencompany-agent-engineering-radar",
       }),
     ]);
+  });
+
+  it("binds known workspace agent mentions and dedupes repeats", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Coordinator",
+      body: "Ask @agent/research first, then @agent/writer. Ask @agent/research again.",
+      repositories: [],
+      agents,
+    });
+
+    expect(config.agents).toEqual([
+      { path: "agents/research.agent", name: "Research" },
+      { path: "agents/writer.agent", name: "Writer" },
+    ]);
+  });
+
+  it("ignores unknown workspace agent mentions", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Coordinator",
+      body: "Ask @agent/missing first, then @agent/research.",
+      repositories: [],
+      agents,
+    });
+
+    expect(config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
   });
 });

@@ -72,9 +72,26 @@ const agentConfig: AgentConfig = {
   triggers: [],
 };
 
+const slackAgentConfig: AgentConfig = {
+  ...agentConfig,
+  title: "Slack",
+  instructions: "Use @slack.",
+  tools: [
+    {
+      id: "slack",
+      type: "mcp",
+      server: "slack",
+      label: "slack",
+      description: "Use workspace-configured Slack MCP tools.",
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey());
+  vi.stubEnv("SLACK_MCP_CLIENT_ID", "slack_client");
+  vi.stubEnv("SLACK_MCP_CLIENT_SECRET", "slack_secret");
   db.queryResults = [];
   db.select.mockImplementation(() => ({
     from: vi.fn(() => ({
@@ -205,16 +222,82 @@ describe("createMcpToolSet", () => {
       client_id: "linear_client",
     });
   });
+
+  it("loads Slack MCP OAuth tools with static env-backed client credentials", async () => {
+    const execute = vi.fn(async () => ({ messages: [{ text: "hello" }] }));
+    db.queryResults = [[{ enabled: true }], [slackServerRow()], [slackOAuthConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      search: {
+        description: "Search Slack",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        }),
+        execute,
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig));
+    const slackTool = (mcpTools.tools as ToolSet).slack__search;
+    const output = await slackTool?.execute?.(
+      { query: "launch" },
+      {
+        toolCallId: "call_slack",
+        messages: [],
+        abortSignal: new AbortController().signal,
+      },
+    );
+
+    expect(output).toEqual({ messages: [{ text: "hello" }] });
+    expect(execute).toHaveBeenCalledWith({ query: "launch" }, { toolCallId: "call_slack" });
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "slack__search", toolCallId: "call_slack" }),
+    );
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          type: "http",
+          url: "https://mcp.slack.com/mcp",
+          authProvider: expect.any(Object),
+        }),
+      }),
+    );
+    const call = vi.mocked(createMCPClient).mock.calls.at(-1)?.[0] as {
+      transport?: {
+        authProvider?: {
+          tokens: () => unknown;
+          clientInformation: () => unknown;
+          clientMetadata: { scope?: string };
+        };
+      };
+    };
+    expect(call.transport?.authProvider?.tokens()).toEqual({
+      access_token: "slack_access",
+      refresh_token: "slack_refresh",
+      token_type: "Bearer",
+    });
+    expect(call.transport?.authProvider?.clientInformation()).toEqual({
+      client_id: "slack_client",
+      client_secret: "slack_secret",
+    });
+    expect(call.transport?.authProvider?.clientMetadata.scope).toContain("search:read.public");
+    expect(call.transport?.authProvider?.clientMetadata.scope).toContain("channels:history");
+
+    await mcpTools.close();
+    expect(mcpClient.close).toHaveBeenCalled();
+  });
 });
 
-function baseInput() {
+function baseInput(config: AgentConfig = agentConfig) {
   return {
     sessionId: "ses_123",
     assistantMessageId: "msg_123",
     runLeaseId: "lease_123",
     runLeaseOwner: "runner_123",
     workspaceId: "wks_123",
-    agentConfig,
+    agentConfig: config,
     signal: new AbortController().signal,
     checkAbort: async () => {},
   };
@@ -256,14 +339,41 @@ function linearOAuthConnectionRow() {
   };
 }
 
-function encryptPayload(payload: Record<string, unknown>, kind: string) {
+function slackServerRow() {
+  return {
+    id: "wmcps_slack",
+    endpointUrl: "https://mcp.slack.com/mcp",
+    status: "configured",
+  };
+}
+
+function slackOAuthConnectionRow() {
+  return {
+    serverId: "wmcps_slack",
+    credentialKind: "oauth",
+    encryptionKeyVersion: 1,
+    encryptedPayload: encryptPayload(
+      {
+        tokens: {
+          access_token: "slack_access",
+          refresh_token: "slack_refresh",
+          token_type: "Bearer",
+        },
+      },
+      "oauth",
+      "wmcps_slack",
+    ),
+  };
+}
+
+function encryptPayload(payload: Record<string, unknown>, kind: string, serverId = "wmcps_123") {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", Buffer.from(credentialKey(), "base64"), iv);
   cipher.setAAD(
     Buffer.from(
       JSON.stringify({
         workspaceId: "wks_123",
-        serverId: "wmcps_123",
+        serverId,
         kind,
         keyVersion: 1,
       }),

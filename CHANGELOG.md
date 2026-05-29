@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [0.4.0] - 2026-05-28
+
+### Added
+- Workspace integration resource bindings with encrypted credential storage, multi-connection GitHub repository binding, and runtime validation for bound resources.
+- Linear and Slack MCP support, including workspace setup flows, agent editor tool gating, runner-side MCP execution, and `.agent` file configuration.
+- Delegated agent sessions through `@agent/<slug>` mentions and a `delegate_to_agent` tool, with child-session tracking and parent usage rollups.
+- Repo-scoped GitHub auth for agent shell commands and AMP runs, with ephemeral credentials and output redaction.
+- GPT 5.2 Codex support and configurable AMP execution modes.
+- Agent editor support for markdown headings, ordered and unordered lists, and automatic conversion of typed or pasted `@`/`#` mentions into pills.
+- A richer chat composer with quick-start chips, auto-resize, stop controls, copy-message actions, drag-and-drop and paste handling shells, and improved keyboard hints.
+
+### Changed
+- Local setup now keeps WorkOS authentication redirects on `localhost:3000` while continuing to use ngrok for GitHub and other public integration callbacks.
+- Production web deploys now rely on the GitHub Actions release workflow instead of Vercel Git-triggered deployments.
+- AMP command handling now avoids rejected stream-JSON mode combinations and falls back to sanitized plain output when structured results are unavailable.
+
+### Fixed
+- GitHub integration sync in production now avoids unsupported Neon HTTP transactions and normalizes legacy agent configs.
+- Sandbox repository clones, AMP publishing, and authenticated shell commands now handle GitHub App credentials more reliably.
+- Session chat no longer allows duplicate submissions while an assistant is responding and no longer leaves failed sessions stuck in a thinking state.
+- The New agent button now shows immediate pending feedback, blocks double-click creation, and surfaces creation failures.
+- Linear MCP credential setup now reports missing encryption-key configuration with clearer diagnostics.
+
 ## [0.3.0] - 2026-05-27
 
 ### Added

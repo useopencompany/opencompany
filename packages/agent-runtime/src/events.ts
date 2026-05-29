@@ -129,6 +129,39 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "session.delegated_usage";
+      payload: {
+        childSessionId: string;
+        parentToolCallId: string;
+        usage: {
+          inputTokens: number;
+          inputNoCacheTokens: number;
+          inputCacheReadTokens: number;
+          inputCacheWriteTokens: number;
+          outputTokens: number;
+          outputTextTokens: number;
+          outputReasoningTokens: number;
+          totalTokens: number;
+        };
+        toolUsage: {
+          totalCostUsdMicros: number;
+          byProviderOperation: Array<{
+            provider: string;
+            operation: string;
+            costUsdMicros: number;
+            calls: number;
+          }>;
+        };
+        cost: {
+          providerCostUsdMicros: number;
+          platformFeeUsdMicros: number;
+          totalCostUsdMicros: number;
+          modelCostUsdMicros: number;
+          toolCostUsdMicros: number;
+        };
+      };
+    }
+  | {
       type: "session.archived";
       payload: {
         sandboxId: string | null;

@@ -68,6 +68,23 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     },
   },
   {
+    id: "openai/gpt-5.2-codex",
+    type: "model",
+    label: "GPT 5.2 Codex",
+    description: "OpenAI coding model optimized for long-horizon agentic engineering tasks.",
+    category: "Deep",
+    supportsReasoning: true,
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposeSummary: true,
+    },
+  },
+  {
     id: "anthropic/claude-haiku-4.5",
     type: "model",
     label: "Claude Haiku 4.5",
@@ -96,6 +113,22 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     type: "model",
     label: "Claude Opus 4.7",
     description: "Highest-capability Claude model for demanding agent workflows.",
+    category: "Deep",
+    supportsReasoning: true,
+    reasoning: {
+      providerOptions: {
+        anthropic: {
+          thinkingBudget: 0.001,
+        },
+      },
+      exposeSummary: false,
+    },
+  },
+  {
+    id: "anthropic/claude-opus-4.8",
+    type: "model",
+    label: "Claude Opus 4.8",
+    description: "Latest highest-capability Claude model for demanding agent workflows.",
     category: "Deep",
     supportsReasoning: true,
     reasoning: {

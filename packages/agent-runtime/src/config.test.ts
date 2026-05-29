@@ -118,6 +118,50 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.mcpServers).toEqual([config.tools[0]]);
   });
 
+  it("enables agent delegation when workspace agent references are configured", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Coordinator",
+      instructions: "Delegate focused work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      agents: [{ path: "agents/research.agent", name: "Research" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("delegate_to_agent");
+    expect(resolved.systemPrompt).toContain("Delegatable workspace agents: Research");
+    expect(resolved.systemPrompt).toContain("childSessionId");
+    expect(resolved.systemPrompt).toContain("continue the same delegated session");
+  });
+
+  it("does not enable agent delegation without configured agent references", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Solo",
+      instructions: "Work alone.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).not.toContain("delegate_to_agent");
+  });
+
   it("formats the root Brain mount clearly in the system prompt", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -245,6 +289,37 @@ describe("resolveAgentRuntimeConfig", () => {
       exposeReasoningSummary: false,
     });
   });
+
+  it("applies OpenAI reasoning options to GPT 5.2 Codex", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Codex agent",
+      instructions: "Work on code.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.2-codex",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.model).toEqual({
+      provider: "vercel-ai-gateway",
+      name: "openai/gpt-5.2-codex",
+      supportsReasoning: true,
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposeReasoningSummary: true,
+    });
+  });
 });
 
 describe("normalizeAgentConfig", () => {
@@ -263,6 +338,7 @@ describe("normalizeAgentConfig", () => {
 
     expect(normalized.tools).toEqual([]);
     expect(normalized.brain).toEqual([]);
+    expect(normalized.agents).toEqual([]);
     expect(normalized.integrations.github.repositories).toEqual([]);
     expect(normalized.triggers).toEqual([]);
     expect(agentGitHubRepositories(config)).toEqual([]);
