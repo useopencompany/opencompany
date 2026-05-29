@@ -454,11 +454,15 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   function deleteBrainPath(path: string) {
     const node = flatNodes.find((candidate) => candidate.path === path);
     if (!node) return;
+    const index = flatNodes.findIndex((candidate) => candidate.path === path);
+    const nextFocus =
+      flatNodes[index + 1]?.path ?? flatNodes[index - 1]?.path ?? parentFolderPath(path);
     if (node.type === "folder") removeFolder(path);
     else {
       const file = files.find((candidate) => candidate.path === path);
       if (file) removeFile(file);
     }
+    setFocusedPath(nextFocus ?? "");
   }
 
   const handleTreeKeyDown = useBrainTreeKeyboard({
