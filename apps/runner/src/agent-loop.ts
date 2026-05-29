@@ -20,10 +20,20 @@ import {
   captureException,
   createLogger,
   endTimingTrace,
+  type LogFields,
   startTimingTrace,
   timeAsync,
 } from "@opencompany/observability";
-import { createGateway, type ModelMessage, stepCountIs, streamText } from "ai";
+import {
+  type BraintrustSpan,
+  flushBraintrust,
+  logBraintrustCurrentSpan,
+  logBraintrustSpan,
+  traceBraintrust,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
+import type { ModelMessage } from "ai";
+import * as ai from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
 import { syncBrainFromSandbox } from "./brain";
@@ -116,6 +126,42 @@ export async function runMessage(input: {
   delegationDepth?: number;
 }) {
   const ctx = createRunContext("runner.run_message", input);
+  try {
+    return await traceBraintrust(
+      {
+        name: "runner.run_message",
+        type: "task",
+        tags: ["runner", "agent-session"],
+        metadata: {
+          run_type: "message",
+          session_id: input.sessionId,
+          message_id: input.messageId,
+          run_lease_id: ctx.leaseId,
+          runner_instance_id: input.env.instanceId,
+          delegation_depth: input.delegationDepth ?? 0,
+        },
+      },
+      (span) => runMessageWithContext(input, ctx, span),
+    );
+  } finally {
+    // The runner is a long-lived worker, so the Braintrust background logger uses async flushing.
+    // Flush after each run so the full trace — including spans whose output/usage/end are logged at
+    // the very end of the run — is delivered promptly instead of lingering "in progress".
+    await flushBraintrust();
+  }
+}
+
+async function runMessageWithContext(
+  input: {
+    sessionId: string;
+    messageId: string;
+    env: RunnerEnv;
+    externalSignal?: AbortSignal;
+    delegationDepth?: number;
+  },
+  ctx: RunContext,
+  braintrustSpan: BraintrustSpan | undefined,
+) {
   let assistantMessageId = newAgentSessionMessageId();
   let leaseAcquired = false;
   let workspaceId: string | undefined;
@@ -128,7 +174,7 @@ export async function runMessage(input: {
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
 
   try {
-    const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
+    const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
@@ -137,9 +183,18 @@ export async function runMessage(input: {
     workspaceId = row.workspace.id;
     userId = row.session.userId;
     agentId = row.agent.id;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        agent_path: row.agent.path,
+        session_status: row.session.status,
+      },
+    });
 
     if (
-      !(await timeAsync(ctx.trace, "check_workspace_credits", () =>
+      !(await observeRunStep(ctx, "check_workspace_credits", () =>
         hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
       ))
     ) {
@@ -153,7 +208,7 @@ export async function runMessage(input: {
       return;
     }
 
-    const userMessage = await timeAsync(ctx.trace, "load_user_message", () =>
+    const userMessage = await observeRunStep(ctx, "load_user_message", () =>
       loadUserMessage(input.sessionId, input.messageId),
     );
     if (!userMessage) {
@@ -161,8 +216,8 @@ export async function runMessage(input: {
       return;
     }
 
-    const existingAssistantResponse = await timeAsync(
-      ctx.trace,
+    const existingAssistantResponse = await observeRunStep(
+      ctx,
       "load_existing_assistant_response",
       () => loadAssistantResponseForMessage(input.sessionId, input.messageId),
     );
@@ -173,6 +228,9 @@ export async function runMessage(input: {
     if (existingAssistantResponse) {
       assistantMessageId = existingAssistantResponse.id;
     }
+    logBraintrustSpan(braintrustSpan, {
+      metadata: { assistant_message_id: assistantMessageId },
+    });
 
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
@@ -182,8 +240,15 @@ export async function runMessage(input: {
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        model_provider: modelProvider,
+        model_name: modelName,
+        enabled_tools: runtime.tools,
+      },
+    });
 
-    const lease = await timeAsync(ctx.trace, "acquire_run_lease", () =>
+    const lease = await observeRunStep(ctx, "acquire_run_lease", () =>
       acquireRunLease({
         sessionId: input.sessionId,
         messageId: input.messageId,
@@ -202,7 +267,7 @@ export async function runMessage(input: {
     setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
-    await timeAsync(ctx.trace, "initial_run_control_check", checkAbort);
+    await observeRunStep(ctx, "initial_run_control_check", checkAbort);
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
@@ -228,7 +293,7 @@ export async function runMessage(input: {
       model_name: modelName,
     });
 
-    const assistantCreated = await timeAsync(ctx.trace, "create_assistant_message", () =>
+    const assistantCreated = await observeRunStep(ctx, "create_assistant_message", () =>
       createAssistantMessageForLease({
         id: assistantMessageId,
         sessionId: input.sessionId,
@@ -243,7 +308,7 @@ export async function runMessage(input: {
       return;
     }
 
-    const storedMessages = await timeAsync(ctx.trace, "load_model_messages", () =>
+    const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
         .select()
         .from(agentSessionMessages)
@@ -317,7 +382,7 @@ export async function runMessage(input: {
 
     if (sandboxAcquirer.current) {
       const activeSandbox = sandboxAcquirer.current;
-      await timeAsync(ctx.trace, "sync_brain_after_message", () =>
+      await observeRunStep(ctx, "sync_brain_after_message", () =>
         syncBrainFromSandbox({
           sandbox: activeSandbox,
           sessionId: input.sessionId,
@@ -368,7 +433,7 @@ export async function runMessage(input: {
       model_provider: modelProvider,
       model_name: modelName,
     });
-    await timeAsync(ctx.trace, "capture_turn_analytics", () =>
+    await observeRunStep(ctx, "capture_turn_analytics", () =>
       captureTurnCompletedAnalytics({
         ctx,
         userId,
@@ -395,11 +460,19 @@ export async function runMessage(input: {
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
+      logBraintrustCurrentSpan({
+        error: braintrustError(error),
+        metadata: { outcome, assistant_message_id: assistantMessageId },
+      });
       return;
     }
 
     if (ctx.controller.signal.aborted || error instanceof RunAbortError) {
       outcome = "aborted";
+      logBraintrustCurrentSpan({
+        error: braintrustError(error),
+        metadata: { outcome, assistant_message_id: assistantMessageId },
+      });
       if (leaseAcquired) {
         await failRunLease(
           input.sessionId,
@@ -425,6 +498,14 @@ export async function runMessage(input: {
     }
 
     const message = error instanceof Error ? error.message : "Unknown runner error";
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: {
+        outcome: "failed",
+        assistant_message_id: assistantMessageId,
+        sandbox_id: sandboxRef.id,
+      },
+    });
     captureException(error, {
       event: "opencompany.runner_message_failed",
       workspace_id: workspaceId,
@@ -505,6 +586,37 @@ export async function runAfterSession(input: {
   externalSignal?: AbortSignal;
 }) {
   const ctx = createRunContext("runner.run_after_session", input);
+  try {
+    return await traceBraintrust(
+      {
+        name: "runner.run_after_session",
+        type: "task",
+        tags: ["runner", "after-session"],
+        metadata: {
+          run_type: "after_session",
+          session_id: input.sessionId,
+          message_id: input.messageId,
+          run_lease_id: ctx.leaseId,
+          runner_instance_id: input.env.instanceId,
+        },
+      },
+      (span) => runAfterSessionWithContext(input, ctx, span),
+    );
+  } finally {
+    await flushBraintrust();
+  }
+}
+
+async function runAfterSessionWithContext(
+  input: {
+    sessionId: string;
+    messageId: string;
+    env: RunnerEnv;
+    externalSignal?: AbortSignal;
+  },
+  ctx: RunContext,
+  braintrustSpan: BraintrustSpan | undefined,
+) {
   const assistantMessageId = newAgentSessionMessageId();
   let leaseAcquired = false;
   let afterSessionRunId: number | undefined;
@@ -518,7 +630,7 @@ export async function runAfterSession(input: {
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
 
   try {
-    const row = await timeAsync(ctx.trace, "load_session", () => loadSession(input.sessionId));
+    const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
     workspaceId = row.workspace.id;
     userId = row.session.userId;
@@ -534,7 +646,7 @@ export async function runAfterSession(input: {
       return;
     }
 
-    const latestUserMessage = await timeAsync(ctx.trace, "load_latest_user_message", () =>
+    const latestUserMessage = await observeRunStep(ctx, "load_latest_user_message", () =>
       loadLatestUserMessage(input.sessionId),
     );
     if (!latestUserMessage || latestUserMessage.id !== input.messageId) {
@@ -556,22 +668,27 @@ export async function runAfterSession(input: {
       return;
     }
 
-    const afterRun = await createAfterSessionRun({
-      sessionId: input.sessionId,
-      workspaceId: row.workspace.id,
-      agentId: row.agent.id,
-      lastUserMessageId: input.messageId,
-      agentVersion: row.agent.version,
-      runLeaseId: ctx.leaseId,
-    });
+    const afterRun = await observeRunStep(ctx, "create_after_session_run", () =>
+      createAfterSessionRun({
+        sessionId: input.sessionId,
+        workspaceId: row.workspace.id,
+        agentId: row.agent.id,
+        lastUserMessageId: input.messageId,
+        agentVersion: row.agent.version,
+        runLeaseId: ctx.leaseId,
+      }),
+    );
     if (!afterRun) {
       outcome = "skipped_duplicate";
       return;
     }
     afterSessionRunId = afterRun.id;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: { after_session_run_id: afterSessionRunId },
+    });
 
     if (
-      !(await timeAsync(ctx.trace, "check_workspace_credits", () =>
+      !(await observeRunStep(ctx, "check_workspace_credits", () =>
         hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
       ))
     ) {
@@ -596,8 +713,15 @@ export async function runAfterSession(input: {
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        model_provider: modelProvider,
+        model_name: modelName,
+        enabled_tools: runtime.tools,
+      },
+    });
 
-    const lease = await timeAsync(ctx.trace, "acquire_run_lease", () =>
+    const lease = await observeRunStep(ctx, "acquire_run_lease", () =>
       acquireRunLease({
         sessionId: input.sessionId,
         messageId: `after-session:${input.messageId}`,
@@ -625,7 +749,7 @@ export async function runAfterSession(input: {
     setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
-    await timeAsync(ctx.trace, "initial_run_control_check", checkAbort);
+    await observeRunStep(ctx, "initial_run_control_check", checkAbort);
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
@@ -653,7 +777,7 @@ export async function runAfterSession(input: {
       model_name: modelName,
     });
 
-    const assistantCreated = await timeAsync(ctx.trace, "create_internal_assistant_message", () =>
+    const assistantCreated = await observeRunStep(ctx, "create_internal_assistant_message", () =>
       createAssistantMessageForLease({
         id: assistantMessageId,
         sessionId: input.sessionId,
@@ -668,7 +792,7 @@ export async function runAfterSession(input: {
       return;
     }
 
-    const storedMessages = await timeAsync(ctx.trace, "load_model_messages", () =>
+    const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
         .select()
         .from(agentSessionMessages)
@@ -739,7 +863,7 @@ export async function runAfterSession(input: {
 
     if (sandboxAcquirer.current) {
       const activeSandbox = sandboxAcquirer.current;
-      await timeAsync(ctx.trace, "sync_brain_after_session", () =>
+      await observeRunStep(ctx, "sync_brain_after_session", () =>
         syncBrainFromSandbox({
           sandbox: activeSandbox,
           sessionId: input.sessionId,
@@ -797,6 +921,10 @@ export async function runAfterSession(input: {
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
+      logBraintrustCurrentSpan({
+        error: braintrustError(error),
+        metadata: { outcome, assistant_message_id: assistantMessageId },
+      });
       return;
     }
 
@@ -806,6 +934,16 @@ export async function runAfterSession(input: {
         : error instanceof Error
           ? error.message
           : "Unknown after-session error";
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: {
+        outcome:
+          ctx.controller.signal.aborted || error instanceof RunAbortError ? "aborted" : "failed",
+        assistant_message_id: assistantMessageId,
+        after_session_run_id: afterSessionRunId,
+        sandbox_id: sandboxRef.id,
+      },
+    });
     captureException(error, {
       event: "opencompany.runner_after_session_failed",
       workspace_id: workspaceId,
@@ -905,6 +1043,21 @@ function createRunContext(
     leaseOwner,
     runLease: { sessionId: input.sessionId, leaseId, leaseOwner },
   };
+}
+
+async function observeRunStep<T>(
+  ctx: RunContext,
+  step: string,
+  run: (span: BraintrustSpan | undefined) => Promise<T>,
+  metadata?: LogFields,
+  options?: Parameters<typeof traceBraintrustStep>[3],
+) {
+  return traceBraintrustStep(
+    step,
+    (span) => timeAsync(ctx.trace, step, () => run(span), metadata),
+    metadata,
+    options,
+  );
 }
 
 function createLeaseAbortCheck(ctx: RunContext) {
@@ -1017,14 +1170,28 @@ export function createAgentDelegationHandler(input: {
       toolCallId,
     });
 
-    const runResult = await runChildMessage({
-      sessionId: childSessionId,
-      messageId: childMessageId,
-      env: input.env,
-      signal: input.signal,
-      checkAbort: input.checkAbort,
-      depth: input.depth,
-    });
+    const runResult = await traceBraintrustStep(
+      "delegate_to_agent.run_child_message",
+      () =>
+        runChildMessage({
+          sessionId: childSessionId,
+          messageId: childMessageId,
+          env: input.env,
+          signal: input.signal,
+          checkAbort: input.checkAbort,
+          depth: input.depth,
+        }),
+      {
+        parent_session_id: input.parentSessionId,
+        parent_message_id: input.parentMessageId,
+        child_session_id: childSessionId,
+        child_message_id: childMessageId,
+        child_agent_id: target.id,
+        child_agent_path: target.path,
+        tool_call_id: toolCallId,
+        delegation_depth: input.depth + 1,
+      },
+    );
     if (runResult) {
       await emitDelegatedUsageRollupForLease({
         parentSessionId: input.parentSessionId,
@@ -1145,14 +1312,26 @@ async function resumeDelegatedAgentSession(input: {
     prompt: input.prompt,
   });
 
-  const runResult = await input.runChildMessage({
-    sessionId: input.childSessionId,
-    messageId: childMessageId,
-    env: input.env,
-    signal: input.signal,
-    checkAbort: input.checkAbort,
-    depth: input.depth,
-  });
+  const runResult = await traceBraintrustStep(
+    "delegate_to_agent.resume_child_message",
+    () =>
+      input.runChildMessage({
+        sessionId: input.childSessionId,
+        messageId: childMessageId,
+        env: input.env,
+        signal: input.signal,
+        checkAbort: input.checkAbort,
+        depth: input.depth,
+      }),
+    {
+      parent_session_id: input.parentSessionId,
+      parent_message_id: input.parentMessageId,
+      child_session_id: input.childSessionId,
+      child_message_id: childMessageId,
+      tool_call_id: input.parentToolCallId,
+      delegation_depth: input.depth + 1,
+    },
+  );
   if (runResult) {
     await emitDelegatedUsageRollupForLease({
       parentSessionId: input.parentSessionId,
@@ -1920,21 +2099,35 @@ function createSandboxAcquirer(input: {
     if (sandboxPromise) return sandboxPromise;
 
     sandboxPromise = (async () => {
-      const hydrated = await timeAsync(
-        input.trace,
+      const hydrated = await traceBraintrustStep(
         "ensure_sandbox",
-        () => ensureSandbox(input.row, input.env),
+        () =>
+          timeAsync(input.trace, "ensure_sandbox", () => ensureSandbox(input.row, input.env), {
+            existing_sandbox: Boolean(input.row.session.e2bSandboxId),
+          }),
         { existing_sandbox: Boolean(input.row.session.e2bSandboxId) },
       );
       await input.checkAbort();
-      const updated = await timeAsync(input.trace, "update_sandbox_for_lease", () =>
-        updateSandboxForLease(
-          input.row.session.id,
-          input.leaseId,
-          input.leaseOwner,
-          hydrated.sandboxId,
-        ),
+      const updated = await traceBraintrustStep(
+        "update_sandbox_for_lease",
+        () =>
+          timeAsync(input.trace, "update_sandbox_for_lease", () =>
+            updateSandboxForLease(
+              input.row.session.id,
+              input.leaseId,
+              input.leaseOwner,
+              hydrated.sandboxId,
+            ),
+          ),
+        { sandbox_id: hydrated.sandboxId },
       );
+      logBraintrustCurrentSpan({
+        metadata: {
+          sandbox_id: hydrated.sandboxId,
+          sandbox_hydrated: true,
+          existing_sandbox: Boolean(input.row.session.e2bSandboxId),
+        },
+      });
       if (!updated) {
         await killSandbox(hydrated.sandboxId);
         throw new StaleRunLeaseError();
@@ -1981,48 +2174,99 @@ async function streamAssistantResponse(input: {
   assistantMessageId: string;
   checkAbort: () => Promise<void>;
 }) {
-  const gateway = createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
-  const mcpToolSet = await createMcpToolSet({
-    sessionId: input.ctx.sessionId,
-    assistantMessageId: input.assistantMessageId,
-    runLeaseId: input.ctx.leaseId,
-    runLeaseOwner: input.ctx.leaseOwner,
-    ...input.mcpContext,
-  });
+  const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
+  const mcpToolSet = await observeRunStep(input.ctx, "create_mcp_tool_set", () =>
+    createMcpToolSet({
+      sessionId: input.ctx.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.ctx.leaseId,
+      runLeaseOwner: input.ctx.leaseOwner,
+      ...input.mcpContext,
+    }),
+  );
+  const modelSystem = buildCacheableSystemPrompt(input.system, input.runtime.model.name);
+  const selectedTools = {
+    ...pickRuntimeTools(input.tools, input.runtime.tools),
+    ...mcpToolSet.tools,
+  };
+  // Instrument the model call as an `llm` span manually rather than via Braintrust's `wrapAISDK`.
+  // wrapAISDK closes the streaming span only when its patched result stream drains to completion
+  // (there is no error/cancel handler on that path), so any abort, tool/stream error, or early
+  // exit while we consume `result.fullStream` ourselves leaves the span stuck "in progress" with
+  // no usage logged. `observeRunStep` -> `traceBraintrustStep` always calls `span.end()` in a
+  // finally, so the span closes deterministically and we log usage/cost from data we collect.
+  const modelInput = [
+    ...(modelSystem ? [{ role: "system", content: modelSystem }] : []),
+    ...input.messages,
+  ];
   try {
-    const result = streamText({
-      model: gateway(input.runtime.model.name),
-      system: buildCacheableSystemPrompt(input.system, input.runtime.model.name),
-      messages: input.messages,
-      tools: {
-        ...pickRuntimeTools(input.tools, input.runtime.tools),
-        ...mcpToolSet.tools,
-      },
-      stopWhen: stepCountIs(MAX_MODEL_STEPS),
-      abortSignal: input.ctx.controller.signal,
-      ...(input.runtime.model.providerOptions
-        ? { providerOptions: input.runtime.model.providerOptions }
-        : {}),
-    });
+    const streamStartedAt = Date.now();
+    let firstStreamPartAt: number | undefined;
+    return await observeRunStep(
+      input.ctx,
+      "model_stream_total",
+      async (span) => {
+        const result = ai.streamText({
+          model: gateway(input.runtime.model.name),
+          system: modelSystem,
+          messages: input.messages,
+          tools: selectedTools,
+          stopWhen: ai.stepCountIs(MAX_MODEL_STEPS),
+          abortSignal: input.ctx.controller.signal,
+          ...(input.runtime.model.providerOptions
+            ? { providerOptions: input.runtime.model.providerOptions }
+            : {}),
+        });
 
-    return await timeAsync(input.ctx.trace, "model_stream_total", () =>
-      collectAssistantStream({
-        stream: result.fullStream,
-        readFirstPart: (iterator) =>
-          timeAsync(input.ctx.trace, "model_first_stream_part", () => iterator.next(), {
+        const collected = await collectAssistantStream({
+          stream: result.fullStream,
+          readFirstPart: async (iterator) => {
+            return observeRunStep(input.ctx, "model_first_stream_part", () => iterator.next(), {
+              model_provider: input.runtime.model.provider,
+              model_name: input.runtime.model.name,
+            });
+          },
+          onFirstOutputPart: () => {
+            firstStreamPartAt ??= Date.now();
+          },
+          sessionId: input.ctx.sessionId,
+          assistantMessageId: input.assistantMessageId,
+          runLeaseId: input.ctx.leaseId,
+          runLeaseOwner: input.ctx.leaseOwner,
+          modelProvider: input.runtime.model.provider,
+          modelName: input.runtime.model.name,
+          exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
+          signal: input.ctx.controller.signal,
+          checkAbort: input.checkAbort,
+        });
+        // Log on the explicit span object (not `currentSpan()`): the AI SDK stream consumption can
+        // run outside this span's async-context, which would silently drop a `currentSpan()` log
+        // to a no-op span — leaving the span with no output/usage and stuck "in progress".
+        logBraintrustSpan(span, {
+          output: collected.reasoningSummary
+            ? {
+                role: "assistant",
+                content: collected.assistantContent,
+                reasoning: collected.reasoningSummary,
+              }
+            : { role: "assistant", content: collected.assistantContent },
+          metrics: modelStreamMetrics(collected.modelSteps, streamStartedAt, firstStreamPartAt),
+          metadata: {
+            // Braintrust derives estimated cost from `metadata.model` + token metrics.
+            model: input.runtime.model.name,
+            assistant_message_id: input.assistantMessageId,
             model_provider: input.runtime.model.provider,
             model_name: input.runtime.model.name,
-          }),
-        sessionId: input.ctx.sessionId,
-        assistantMessageId: input.assistantMessageId,
-        runLeaseId: input.ctx.leaseId,
-        runLeaseOwner: input.ctx.leaseOwner,
-        modelProvider: input.runtime.model.provider,
-        modelName: input.runtime.model.name,
-        exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
-        signal: input.ctx.controller.signal,
-        checkAbort: input.checkAbort,
-      }),
+          },
+        });
+        return collected;
+      },
+      {
+        model_provider: input.runtime.model.provider,
+        model_name: input.runtime.model.name,
+        assistant_message_id: input.assistantMessageId,
+      },
+      { type: "llm", input: modelInput },
     );
   } finally {
     await mcpToolSet.close();
@@ -2056,6 +2300,17 @@ async function persistAssistantCompletion(input: {
     }),
   );
   const normalizedReasoningSummary = normalizeReasoningSummary(input.reasoningSummary);
+  logBraintrustCurrentSpan({
+    output: {
+      content: input.assistantContent,
+      replayParts: input.assistantReplayParts,
+      ...(normalizedReasoningSummary ? { reasoningSummary: normalizedReasoningSummary } : {}),
+    },
+    metadata: {
+      assistant_message_id: input.assistantMessageId,
+      internal: input.internal,
+    },
+  });
   if (normalizedReasoningSummary) {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -2085,6 +2340,50 @@ async function persistAssistantCompletion(input: {
   );
 }
 
+function modelStreamMetrics(
+  modelSteps: Awaited<ReturnType<typeof collectAssistantStream>>["modelSteps"],
+  streamStartedAt: number,
+  firstStreamPartAt: number | undefined,
+): LogFields {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let totalTokens = 0;
+  let cachedTokens = 0;
+  let reasoningTokens = 0;
+
+  for (const step of modelSteps) {
+    const usage = isRecord(step.usage) ? step.usage : {};
+    inputTokens += readMetricNumber(usage.inputTokens) ?? readMetricNumber(usage.promptTokens) ?? 0;
+    outputTokens +=
+      readMetricNumber(usage.outputTokens) ?? readMetricNumber(usage.completionTokens) ?? 0;
+    totalTokens += readMetricNumber(usage.totalTokens) ?? 0;
+    cachedTokens += readMetricNumber(usage.cachedInputTokens) ?? 0;
+    reasoningTokens += readMetricNumber(usage.reasoningTokens) ?? 0;
+  }
+
+  if (totalTokens === 0) totalTokens = inputTokens + outputTokens;
+
+  return {
+    ...(firstStreamPartAt
+      ? { time_to_first_token: (firstStreamPartAt - streamStartedAt) / 1000 }
+      : {}),
+    ...(totalTokens ? { tokens: totalTokens } : {}),
+    ...(inputTokens ? { prompt_tokens: inputTokens } : {}),
+    ...(outputTokens ? { completion_tokens: outputTokens } : {}),
+    ...(cachedTokens ? { prompt_cached_tokens: cachedTokens } : {}),
+    ...(reasoningTokens ? { completion_reasoning_tokens: reasoningTokens } : {}),
+    steps: modelSteps.length,
+  };
+}
+
+function readMetricNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object");
+}
+
 async function finalizeRun(input: {
   ctx: RunContext;
   outcome: string;
@@ -2093,6 +2392,15 @@ async function finalizeRun(input: {
   sandbox: SandboxHandle | null;
 }) {
   clearActiveRun(input.ctx.sessionId, input.ctx.controller);
+  logBraintrustCurrentSpan({
+    metadata: {
+      outcome: input.outcome,
+      model_provider: input.modelProvider,
+      model_name: input.modelName,
+      sandbox_id: input.sandbox?.sandboxId,
+      sandbox_hydrated: Boolean(input.sandbox),
+    },
+  });
   endTimingTrace(input.ctx.trace, {
     outcome: input.outcome,
     model_provider: input.modelProvider,
@@ -2101,8 +2409,11 @@ async function finalizeRun(input: {
   });
   if (input.sandbox) {
     const sandbox = input.sandbox;
-    await timeAsync(input.ctx.trace, "park_sandbox", () =>
-      parkSandboxWhenIdle(sandbox, input.ctx.env),
+    await observeRunStep(
+      input.ctx,
+      "park_sandbox",
+      () => parkSandboxWhenIdle(sandbox, input.ctx.env),
+      { sandbox_id: sandbox.sandboxId },
     );
   }
 }
@@ -2169,4 +2480,15 @@ function linkExternalAbortSignal(controller: AbortController, signal: AbortSigna
     return;
   }
   signal.addEventListener("abort", () => controller.abort(), { once: true });
+}
+
+function braintrustError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return { message: String(error) };
 }
