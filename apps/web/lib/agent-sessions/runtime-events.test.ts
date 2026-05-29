@@ -8,6 +8,7 @@ import {
   emptyCostSummary,
   emptyUsageSummary,
   isInspectableRuntimeEvent,
+  isReasoningInProgress,
   type RuntimeEvent,
   type SessionMessage,
   type SessionRuntimeState,
@@ -332,15 +333,65 @@ describe("applyRuntimeEventToState", () => {
 });
 
 describe("isInspectableRuntimeEvent", () => {
-  it("hides streamed message deltas from inspector activity", () => {
+  it("hides streamed message and reasoning deltas from inspector activity", () => {
     expect(
       isInspectableRuntimeEvent(
         event(1, "message.delta", { messageId: "msg_assistant", delta: "Hello" }),
       ),
     ).toBe(false);
-    expect(isInspectableRuntimeEvent(event(2, "tool.started", { toolCallId: "call_1" }))).toBe(
+    expect(
+      isInspectableRuntimeEvent(
+        event(2, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Hmm" }),
+      ),
+    ).toBe(false);
+    expect(isInspectableRuntimeEvent(event(3, "tool.started", { toolCallId: "call_1" }))).toBe(
       true,
     );
+  });
+});
+
+describe("isReasoningInProgress", () => {
+  const runningMessage: SessionMessage = {
+    id: "msg_assistant",
+    role: "assistant",
+    content: "",
+    status: "running",
+  };
+
+  it("is true when the latest event for the running message is a reasoning delta", () => {
+    const events = [
+      event(1, "message.created", { messageId: "msg_assistant", role: "assistant" }),
+      event(2, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Weighing…" }),
+    ];
+    expect(isReasoningInProgress(runningMessage, events)).toBe(true);
+  });
+
+  it("is false once visible text or a tool call follows the reasoning", () => {
+    const withText = [
+      event(1, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Weighing…" }),
+      event(2, "message.delta", { messageId: "msg_assistant", delta: "Here is" }),
+    ];
+    expect(isReasoningInProgress(runningMessage, withText)).toBe(false);
+
+    const withTool = [
+      event(1, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Weighing…" }),
+      event(2, "tool.started", { messageId: "msg_assistant", toolCallId: "call_1" }),
+    ];
+    expect(isReasoningInProgress(runningMessage, withTool)).toBe(false);
+  });
+
+  it("is false when the message is no longer running", () => {
+    const events = [
+      event(1, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Weighing…" }),
+    ];
+    expect(isReasoningInProgress({ ...runningMessage, status: "completed" }, events)).toBe(false);
+  });
+
+  it("ignores reasoning deltas that belong to other messages", () => {
+    const events = [
+      event(1, "message.reasoning_delta", { messageId: "msg_other", delta: "Weighing…" }),
+    ];
+    expect(isReasoningInProgress(runningMessage, events)).toBe(false);
   });
 });
 

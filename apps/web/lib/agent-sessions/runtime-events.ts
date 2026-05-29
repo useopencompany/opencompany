@@ -380,7 +380,21 @@ function addToolUsageRollup(
 }
 
 export function isInspectableRuntimeEvent(event: RuntimeEvent) {
-  return event.type !== "message.delta";
+  return event.type !== "message.delta" && event.type !== "message.reasoning_delta";
+}
+
+// Reasoning is the model's current phase when the most recent event for a still-running
+// message is a reasoning delta. Visible text, tool, usage, or completion events arrive
+// afterward and flip this off; a later reasoning round (after a tool result) flips it back
+// on. `RuntimeEvent.id` is a monotonic ordinal, so "latest event" is well-defined.
+export function isReasoningInProgress(message: SessionMessage, events: RuntimeEvent[]): boolean {
+  if (message.status !== "running") return false;
+  let latest: RuntimeEvent | null = null;
+  for (const event of events) {
+    if (!eventBelongsToMessage(event, message.id)) continue;
+    if (!latest || event.id > latest.id) latest = event;
+  }
+  return latest?.type === "message.reasoning_delta";
 }
 
 export function buildAssistantTurnParts(

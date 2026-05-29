@@ -46,6 +46,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   isInspectableRuntimeEvent,
+  isReasoningInProgress,
   type RuntimeEvent,
   type RuntimeToolCall,
   readString,
@@ -473,6 +474,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                         message={message}
                         parts={assistantParts}
                         sessionCanGenerate={sessionCanGenerate}
+                        reasoningActive={isReasoningInProgress(message, runtime.events)}
                       />
                     ) : (
                       message.content
@@ -490,7 +492,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
-                <ThinkingShimmer />
+                <TurnActivityIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
               </div>
             ) : null}
 
@@ -746,10 +748,12 @@ function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
+  reasoningActive,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
+  reasoningActive: boolean;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
@@ -758,27 +762,58 @@ function AssistantMessageContent({
   const isCompleted = message.status === "completed";
   const runDurationSeconds = runDurationForMessage(message);
 
-  // Group consecutive tool-call parts so a completed run can collapse its steps into a
-  // one-line summary while text stays the headline. During a run the steps stay expanded.
+  // A still-running tool call on a stopped session reads as failed — it never returned.
+  const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
+    part.type === "tool-call" &&
+    part.toolCall.status === "running" &&
+    !sessionCanGenerate
+      ? {
+          type: "tool-call",
+          toolCall: {
+            ...part.toolCall,
+            status: "failed" as const,
+            outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+          },
+        }
+      : part,
+  );
+
+  // A completed turn reads as a deliverable: the trailing text is the headline, and the work
+  // that produced it — the intermediate narration plus the tool steps — collapses into one
+  // "N steps" summary. Reasoning keeps its own card. While the turn is still running nothing
+  // collapses, so the live narration and steps stay visible (tool calls grouped while
+  // consecutive, text inline).
   type RenderGroup =
     | { kind: "part"; part: AssistantTurnPart; key: string }
-    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string };
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
+    | { kind: "process"; parts: AssistantTurnPart[]; key: string };
+
+  const deliverableStart = isCompleted
+    ? deliverableStartIndex(normalizedParts)
+    : normalizedParts.length;
+  const collapseWork =
+    isCompleted &&
+    normalizedParts
+      .slice(0, deliverableStart)
+      .some((part) => part.type === "tool-call");
+
   const groups: RenderGroup[] = [];
-  parts.forEach((part, index) => {
-    if (part.type === "tool-call") {
-      const toolCall =
-        part.toolCall.status === "running" && !sessionCanGenerate
-          ? {
-              ...part.toolCall,
-              status: "failed" as const,
-              outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
-            }
-          : part.toolCall;
+  normalizedParts.forEach((part, index) => {
+    // Completed turn: fold the intermediate narration + tool steps into one collapsed group.
+    if (collapseWork && index < deliverableStart && part.type !== "reasoning") {
       const last = groups.at(-1);
-      if (last?.kind === "tools") last.toolCalls.push(toolCall);
-      else groups.push({ kind: "tools", toolCalls: [toolCall], key: `tools:${index}` });
+      if (last?.kind === "process") last.parts.push(part);
+      else groups.push({ kind: "process", parts: [part], key: `process:${index}` });
       return;
     }
+
+    if (part.type === "tool-call") {
+      const last = groups.at(-1);
+      if (last?.kind === "tools") last.toolCalls.push(part.toolCall);
+      else groups.push({ kind: "tools", toolCalls: [part.toolCall], key: `tools:${index}` });
+      return;
+    }
+
     groups.push({ kind: "part", part, key: `${index}` });
   });
 
@@ -802,11 +837,11 @@ function AssistantMessageContent({
           return null;
         }
 
-        if (isCompleted) {
+        if (group.kind === "process") {
           return (
             <CompletedStepGroup
               key={group.key}
-              toolCalls={group.toolCalls}
+              parts={group.parts}
               durationSeconds={runDurationSeconds}
             />
           );
@@ -822,7 +857,7 @@ function AssistantMessageContent({
       })}
       {!hasParts ? (
         isRunning ? (
-          <ThinkingShimmer />
+          <TurnActivityIndicator startedAt={message.createdAt} thinking={reasoningActive} />
         ) : isStopped ? (
           <AssistantStoppedNotice />
         ) : (
@@ -831,21 +866,33 @@ function AssistantMessageContent({
       ) : isRunning ? (
         // Keep a live indicator at the tail so the UI never goes silent between a tool
         // result and the model's next output (thinking phases included).
-        <ThinkingShimmer />
+        <TurnActivityIndicator startedAt={message.createdAt} thinking={reasoningActive} />
       ) : null}
     </div>
   );
 }
 
+// The trailing run of text parts is the deliverable headline; everything before it is the
+// work that produced it. Returns the index where that trailing text run begins (the length
+// when the turn does not end in text, e.g. it ended on a tool call).
+function deliverableStartIndex(parts: AssistantTurnPart[]) {
+  let start = parts.length;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    if (parts[index]?.type !== "text") break;
+    start = index;
+  }
+  return start;
+}
+
 function CompletedStepGroup({
-  toolCalls,
+  parts,
   durationSeconds,
 }: {
-  toolCalls: RuntimeToolCall[];
+  parts: AssistantTurnPart[];
   durationSeconds: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const count = toolCalls.length;
+  const count = parts.reduce((total, part) => (part.type === "tool-call" ? total + 1 : total), 0);
   const durationLabel = durationSeconds > 0 ? ` · ${formatStepDuration(durationSeconds)}` : "";
   const summary = `${count} ${count === 1 ? "step" : "steps"}${durationLabel}`;
 
@@ -869,9 +916,13 @@ function CompletedStepGroup({
       </button>
       {expanded ? (
         <div className="ml-2 mt-1 space-y-1.5 border-l border-[#e3e3df] pl-3">
-          {toolCalls.map((toolCall) => (
-            <ToolCallCard key={toolCall.id} toolCall={toolCall} />
-          ))}
+          {parts.map((part, index) =>
+            part.type === "tool-call" ? (
+              <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
+            ) : part.type === "text" ? (
+              <AssistantMarkdown key={`text:${index}`} content={part.text} />
+            ) : null,
+          )}
         </div>
       ) : null}
     </div>
@@ -1049,14 +1100,55 @@ function formatToolName(name: string) {
   return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
 }
 
-function ThinkingShimmer() {
+// Live, counting-up elapsed seconds since `startedAt`. Anchoring to an absolute timestamp
+// (instead of accumulating) means remounts never reset the displayed value.
+function useElapsedSeconds(startedAt: string | undefined) {
+  const startMs = useMemo(() => {
+    const parsed = startedAt ? new Date(startedAt).getTime() : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : Date.now();
+  }, [startedAt]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [startMs]);
+  return Math.max(0, Math.floor((now - startMs) / 1000));
+}
+
+function formatElapsed(totalSeconds: number) {
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+// Tail indicator shown while a turn is in flight. By default it is a neutral spinner with a
+// counting-up timer — work is happening, but the model is not necessarily reasoning. Only
+// when `thinking` (the model is actively producing reasoning) do we surface the real
+// "Thinking…" label.
+function TurnActivityIndicator({
+  startedAt,
+  thinking,
+}: {
+  startedAt: string | undefined;
+  thinking: boolean;
+}) {
+  const elapsed = useElapsedSeconds(startedAt);
   return (
     <div
-      className="thinking-shimmer inline-flex items-center text-[13px] font-medium leading-6"
+      className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-ink-muted"
       role="status"
-      aria-live="polite"
     >
-      Thinking...
+      <LoaderCircle size={12} strokeWidth={2} className="shrink-0 animate-spin text-[#9b8a64]" />
+      {thinking ? (
+        <span className="thinking-shimmer" aria-live="polite">
+          Thinking…
+        </span>
+      ) : null}
+      <span className="tabular-nums text-ink-subtle" aria-hidden="true">
+        {formatElapsed(elapsed)}
+      </span>
     </div>
   );
 }

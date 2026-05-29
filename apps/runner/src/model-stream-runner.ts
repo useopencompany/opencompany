@@ -51,6 +51,27 @@ export async function collectAssistantStream(input: {
     }).catch(() => false);
   };
 
+  // Reasoning streams as its own throttled `message.reasoning_delta` events so the UI can
+  // show a live "Thinking…" label only while the model is actually reasoning. The final
+  // reasoning summary still lands separately at message completion.
+  let pendingReasoningDelta = "";
+  let lastReasoningFlushAt = Date.now();
+  const flushReasoningDelta = async (force: boolean) => {
+    if (!pendingReasoningDelta) return;
+    if (!force && Date.now() - lastReasoningFlushAt < TEXT_DELTA_FLUSH_INTERVAL_MS) return;
+    const delta = pendingReasoningDelta;
+    pendingReasoningDelta = "";
+    lastReasoningFlushAt = Date.now();
+    await appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "message.reasoning_delta",
+      payload: { messageId: input.assistantMessageId, delta },
+    }).catch(() => false);
+  };
+
   const iterator = input.stream[Symbol.asyncIterator]();
   let next = input.readFirstPart ? await input.readFirstPart(iterator) : await iterator.next();
 
@@ -61,6 +82,9 @@ export async function collectAssistantStream(input: {
     throwIfStreamErrorPart(part);
 
     if (part.type === "text-delta") {
+      // Reasoning ends once visible text begins; flush its events first so the client sees
+      // the phase transition (reasoning deltas ordered ahead of the text deltas).
+      await flushReasoningDelta(true);
       assistantContent += part.text;
       appendAssistantTextPart(assistantReplayParts, part.text);
       pendingDelta += part.text;
@@ -68,12 +92,18 @@ export async function collectAssistantStream(input: {
     }
 
     if (input.exposeReasoningSummary) {
-      reasoningSummary += readReasoningTextDelta(part);
+      const reasoningDelta = readReasoningTextDelta(part);
+      if (reasoningDelta) {
+        reasoningSummary += reasoningDelta;
+        pendingReasoningDelta += reasoningDelta;
+        await flushReasoningDelta(false);
+      }
     }
 
-    // Flush buffered text before a tool call so streamed text is ordered ahead of
-    // the tool's events in the UI.
+    // Flush buffered text and reasoning before a tool call so they are ordered ahead of
+    // the tool's events in the UI (and the live "Thinking…" phase reads as ended).
     if (part.type === "tool-call") {
+      await flushReasoningDelta(true);
       await flushTextDelta(true);
     }
 
@@ -108,6 +138,7 @@ export async function collectAssistantStream(input: {
     next = await iterator.next();
   }
 
+  await flushReasoningDelta(true);
   await flushTextDelta(true);
 
   return {
