@@ -486,6 +486,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         const result = await createBrainFile(path, content);
         if (!result.ok) {
           restoreBrainViewSnapshot(snapshot);
+          cancelRenameFile();
           setError(result.error);
           return;
         }
@@ -500,6 +501,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         router.refresh();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
+        cancelRenameFile();
         handleBrainActionError(error, "Create failed.");
       } finally {
         finishOptimisticMutation();
@@ -529,6 +531,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         const result = await createBrainFile(path, content);
         if (!result.ok) {
           restoreBrainViewSnapshot(snapshot);
+          cancelRenameFile();
           setError(result.error);
           return;
         }
@@ -544,6 +547,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         router.refresh();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
+        cancelRenameFile();
         handleBrainActionError(error, "Create failed.");
       } finally {
         finishOptimisticMutation();
