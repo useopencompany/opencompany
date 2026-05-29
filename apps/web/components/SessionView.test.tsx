@@ -455,7 +455,9 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
 
     // Advance 1s to trigger the setInterval tick.
-    act(() => { vi.advanceTimersByTime(1_000); });
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
 
     // Still within threshold (5s + 1s = 6s < 15s), no banner.
     expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
@@ -483,7 +485,9 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
 
     // Advance 1s to trigger the setInterval tick.
-    act(() => { vi.advanceTimersByTime(1_000); });
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
 
     // 20s + 1s tick = 21s > 15s threshold → banner must appear.
     expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
@@ -509,7 +513,9 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
 
     // Trigger tick → banner appears.
-    act(() => { vi.advanceTimersByTime(1_000); });
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
     expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
 
     // A new event arrives: rerender with a new event in the list.

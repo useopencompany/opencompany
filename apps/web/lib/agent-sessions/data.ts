@@ -3,8 +3,8 @@ import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
   agentSessionMessages,
-  agentSessionUsage,
   agentSessions,
+  agentSessionUsage,
   agents,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
