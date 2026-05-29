@@ -68,6 +68,7 @@ const braintrustMocks = vi.hoisted(() => ({
 }));
 
 const githubMocks = vi.hoisted(() => ({
+  createDraftPullRequest: vi.fn(),
   getGitHubWorkInstallationToken: vi.fn(),
 }));
 
@@ -93,6 +94,7 @@ vi.mock("./github", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./github")>();
   return {
     ...actual,
+    createDraftPullRequest: githubMocks.createDraftPullRequest,
     getGitHubWorkInstallationToken: githubMocks.getGitHubWorkInstallationToken,
   };
 });
@@ -374,6 +376,157 @@ describe("usage recording", () => {
       toolName: "exa_search",
       toolCallId: "call_exa",
     });
+  });
+
+  it("records Amp usage streamed through the runtime tool dispatcher", async () => {
+    const db = createLeaseDb({
+      runLeaseId: "run_123",
+      githubRows: [
+        {
+          integrationId: "wint_123",
+          fullName: "opencompany/web",
+          installationId: "12345",
+          connectionLabel: "opencompany",
+          connectionStatus: "connected",
+          connectionStatusReason: null,
+          resourceStatus: "available",
+          resourceStatusReason: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+    githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_123");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ threadID: "T-amp-usage", usage: 0.00815 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    const sandboxRun = vi.fn(
+      async (command: string, options?: { onStdout?: (data: string) => void }) => {
+        if (command.includes("git rev-parse --is-inside-work-tree")) return { stdout: "true" };
+        if (command.includes("amp --dangerously-allow-all")) {
+          options?.onStdout?.(
+            `${JSON.stringify({
+              type: "assistant",
+              message: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "text", text: "working" }],
+                usage: { input_tokens: 100, output_tokens: 20 },
+              },
+              session_id: "T-amp-usage",
+            })}\n`,
+          );
+          options?.onStdout?.(
+            `${JSON.stringify({
+              type: "result",
+              subtype: "success",
+              duration_ms: 500,
+              is_error: false,
+              num_turns: 1,
+              result: "done",
+              session_id: "T-amp-usage",
+              usage: {
+                input_tokens: 1_000,
+                cache_creation_input_tokens: 25,
+                cache_read_input_tokens: 50,
+                output_tokens: 100,
+              },
+            })}\n`,
+          );
+          return { stdout: "", exitCode: 0 };
+        }
+        if (command.includes("git status --short")) return { stdout: "" };
+        if (command.includes("git diff HEAD --stat")) return { stdout: "" };
+        if (command.includes("git diff HEAD -- | head -400")) return { stdout: "" };
+        if (command.includes("git branch --show-current")) return { stdout: "main\n" };
+        if (command.includes("git rev-list --count")) return { stdout: "0\n" };
+        return { stdout: "" };
+      },
+    );
+    const ampAgentConfig = agentConfig();
+    ampAgentConfig.tools = [
+      {
+        id: "amp",
+        type: "coding_agent",
+        provider: "amp",
+        label: "Amp",
+        description: "Delegate coding work to Amp.",
+        repository: "opencompany-web",
+        prCapable: false,
+      },
+    ];
+    ampAgentConfig.integrations.github.repositories = [
+      {
+        id: "opencompany-web",
+        fullName: "opencompany/web",
+        defaultBranch: "main",
+      },
+    ];
+
+    await expect(
+      executeRuntimeTool({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        runLeaseId: "run_123",
+        runLeaseOwner: "runner-test",
+        workspaceId: "wsp_123",
+        agentConfig: ampAgentConfig,
+        toolCallId: "call_amp",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("amp_coder") as RuntimeToolDefinition,
+        args: { task: "implement the change" },
+        getSandbox: (async () => ({
+          sandboxId: "sbx_amp",
+          commands: { run: sandboxRun },
+        })) as never,
+        workdir: "/home/user/workspace",
+        env: env(),
+        enabledTools: ["amp_coder"],
+        signal: new AbortController().signal,
+        checkAbort: async () => {},
+      }),
+    ).resolves.toMatchObject({
+      ampThreadId: "T-amp-usage",
+      usage: {
+        provider: "amp",
+        operation: "session",
+        costUsdMicros: 8_150,
+        rawUsage: {
+          input_tokens: 1_000,
+          cache_creation_input_tokens: 25,
+          cache_read_input_tokens: 50,
+          output_tokens: 100,
+        },
+      },
+    });
+
+    expect(db.state.toolUsage).toEqual([
+      expect.objectContaining({
+        toolCallId: "call_amp",
+        toolName: "amp_coder",
+        provider: "amp",
+        operation: "session",
+        costUsdMicros: 8_150,
+      }),
+    ]);
+    expect(db.state.ledgerDebits).toBe(1);
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "session.tool_usage",
+        payload: expect.objectContaining({
+          toolCallId: "call_amp",
+          provider: "amp",
+          operation: "session",
+          costUsdMicros: 8_150,
+        }),
+      }),
+    );
   });
 
   it("executes agent delegation as an internal tool without hydrating the sandbox", async () => {
@@ -1927,6 +2080,7 @@ describe("Amp stream parsing", () => {
       durationMs: 1200,
       numTurns: 1,
       permissionDenials: [],
+      usage: null,
     });
   });
 
@@ -2007,6 +2161,265 @@ describe("Amp stream parsing", () => {
       durationMs: 300,
       numTurns: 1,
       permissionDenials: ["Bash rm -rf"],
+      usage: null,
+    });
+  });
+
+  it("accumulates usage from multiple assistant events", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "first" }],
+          usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 20 },
+        },
+        session_id: "T-usage-1",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "second" }],
+          usage: {
+            input_tokens: 200,
+            output_tokens: 80,
+            cache_creation_input_tokens: 30,
+            cache_read_input_tokens: 10,
+          },
+        },
+        session_id: "T-usage-1",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 500,
+        is_error: false,
+        num_turns: 2,
+        result: "done",
+        session_id: "T-usage-1",
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      threadId: "T-usage-1",
+      status: "success",
+      result: "done",
+      error: null,
+      durationMs: 500,
+      numTurns: 2,
+      permissionDenials: [],
+      usage: {
+        input_tokens: 300,
+        output_tokens: 130,
+        cache_creation_input_tokens: 30,
+        cache_read_input_tokens: 30,
+      },
+    });
+  });
+
+  it("prefers result event usage over accumulated sum", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "step" }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        session_id: "T-usage-2",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 400,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-2",
+        usage: { input_tokens: 500, output_tokens: 200, cache_read_input_tokens: 80 },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary()).toEqual({
+      threadId: "T-usage-2",
+      status: "success",
+      result: "done",
+      error: null,
+      durationMs: 400,
+      numTurns: 1,
+      permissionDenials: [],
+      usage: {
+        input_tokens: 500,
+        output_tokens: 200,
+        cache_read_input_tokens: 80,
+      },
+    });
+  });
+
+  it("returns usage null when no usage data is present", () => {
+    const stream = createAmpStreamAccumulator();
+
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "no usage" }],
+        },
+        session_id: "T-usage-3",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 100,
+        is_error: false,
+        num_turns: 1,
+        result: "ok",
+        session_id: "T-usage-3",
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toBeNull();
+  });
+
+  it("falls back to accumulated usage when the result event reports zero tokens", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "step" }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        session_id: "T-usage-zero-result",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 200,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-zero-result",
+        usage: { input_tokens: 0, output_tokens: 0 },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 100,
+      output_tokens: 50,
+    });
+  });
+
+  it("preserves cache token counts when result event reports zero tokens but has cache fields", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "step" }],
+          usage: { input_tokens: 100, output_tokens: 50 },
+        },
+        session_id: "T-usage-cache-zero",
+      })}\n`,
+    );
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 200,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-cache-zero",
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_input_tokens: 5000,
+          cache_creation_input_tokens: 200,
+        },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 5000,
+      cache_creation_input_tokens: 200,
+    });
+  });
+
+  it("accepts result event whose usage carries only cache fields", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "result",
+        subtype: "success",
+        duration_ms: 150,
+        is_error: false,
+        num_turns: 1,
+        result: "done",
+        session_id: "T-usage-cache-only",
+        usage: { cache_read_input_tokens: 800 },
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 800,
+    });
+  });
+
+  it("accumulates assistant events whose usage carries only cache fields", () => {
+    const stream = createAmpStreamAccumulator();
+    stream.push(
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "cached step" }],
+          usage: { cache_read_input_tokens: 1234 },
+        },
+        session_id: "T-usage-assistant-cache-only",
+      })}\n`,
+    );
+    stream.finish();
+
+    expect(stream.summary().usage).toEqual({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_input_tokens: 1234,
     });
   });
 

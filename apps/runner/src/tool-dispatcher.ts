@@ -294,7 +294,7 @@ async function executeRuntimeToolWithTracing(input: {
         if (!input.workspaceId || !input.agentConfig) {
           throw new Error("AMP requires workspace and agent configuration context.");
         }
-        return runAmpCoderTool({
+        const ampResult = await runAmpCoderTool({
           sandbox: activeSandbox,
           workdir: input.workdir,
           args: input.args,
@@ -325,6 +325,10 @@ async function executeRuntimeToolWithTracing(input: {
             );
           },
         });
+        if (ampResult.usage) {
+          usage = ampResult.usage;
+        }
+        return ampResult;
       }
       const brainSnapshotBefore =
         input.definition.name === "shell"
