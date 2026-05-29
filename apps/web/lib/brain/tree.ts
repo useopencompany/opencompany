@@ -10,6 +10,32 @@ export type BrainTreeNode<TFile extends BrainTreeFile = BrainTreeFile> = {
   file?: TFile;
 };
 
+export type FlatBrainNode = {
+  path: string;
+  name: string;
+  type: "folder" | "file";
+  depth: number;
+};
+
+export function flattenVisibleTree<TFile extends BrainTreeFile>(
+  tree: BrainTreeNode<TFile>,
+  expandedPaths: Set<string>,
+): FlatBrainNode[] {
+  const flat: FlatBrainNode[] = [];
+
+  const walk = (nodes: Array<BrainTreeNode<TFile>>, depth: number) => {
+    for (const node of nodes) {
+      flat.push({ path: node.path, name: node.name, type: node.type, depth });
+      if (node.type === "folder" && expandedPaths.has(node.path)) {
+        walk(node.children, depth + 1);
+      }
+    }
+  };
+
+  walk(tree.children, 0);
+  return flat;
+}
+
 export function buildBrainTree<TFile extends BrainTreeFile>(
   files: TFile[],
   query = "",
