@@ -1399,9 +1399,9 @@ function TreeItem({
             else if (node.file) onSelect(node.file);
           }}
           onDoubleClick={(event) => {
-            if (!node.file) return;
             event.preventDefault();
-            onStartRename(node.file);
+            if (node.type === "folder") onStartRenameFolder(node.path);
+            else if (node.file) onStartRename(node.file);
           }}
           onContextMenu={(event) => {
             if (node.type === "folder") onContextMenu(event, { type: "folder", path: node.path });
