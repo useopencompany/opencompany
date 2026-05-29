@@ -1,6 +1,6 @@
 import type { Node, Root } from "fumadocs-core/page-tree";
 import type { TOCItemType } from "fumadocs-core/toc";
-import { ArrowUpRight, ChevronRight, FileText, Hash } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, ChevronRight, FileText, Hash } from "lucide-react";
 import type { MDXContent } from "mdx/types";
 import Link from "next/link";
 import { getMDXComponents } from "@/mdx-components";
@@ -101,7 +101,8 @@ function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
             prefetch={false}
             className="flex items-center gap-1.5 text-[12px] text-ink-subtle transition-colors hover:text-ink"
           >
-            <span>← Back to app</span>
+            <ArrowLeft size={12} strokeWidth={1.75} aria-hidden />
+            <span>Back to app</span>
           </Link>
         </div>
       </div>
@@ -163,8 +164,8 @@ function TableOfContents({ toc }: { toc: TOCItemType[] }) {
   if (items.length === 0) return null;
 
   return (
-    <aside className="hidden h-full w-[220px] shrink-0 xl:block">
-      <div className="sticky top-[52px] overflow-y-auto px-5 py-6">
+    <aside className="hidden h-full w-[220px] shrink-0 overflow-y-auto xl:block">
+      <div className="px-5 py-6">
         <div className="mb-3 flex items-center gap-1.5">
           <Hash size={11} strokeWidth={2.5} className="text-ink-subtle" />
           <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-subtle">
@@ -190,13 +191,19 @@ function TableOfContents({ toc }: { toc: TOCItemType[] }) {
 }
 
 function DocsFooterNav({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
-  // Flatten all page nodes
+  // Flatten all page nodes, deduping by url (a folder index may also appear in its children)
   const pages: Array<{ url: string; name: string }> = [];
+  const seen = new Set<string>();
+  function push(url: string, name: string) {
+    if (seen.has(url)) return;
+    seen.add(url);
+    pages.push({ url, name });
+  }
   function collect(nodes: Node[]) {
     for (const n of nodes) {
-      if (n.type === "page") pages.push({ url: n.url, name: String(n.name) });
+      if (n.type === "page") push(n.url, String(n.name));
       else if (n.type === "folder") {
-        if (n.index) pages.push({ url: n.index.url, name: String(n.index.name) });
+        if (n.index) push(n.index.url, String(n.index.name));
         collect(n.children);
       }
     }
@@ -220,8 +227,9 @@ function DocsFooterNav({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
             href={prev.url}
             className="group inline-flex flex-col gap-0.5 rounded-lg border border-border px-4 py-3 transition-colors hover:border-border-strong hover:bg-surface-raised"
           >
-            <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle transition-colors group-hover:text-ink-muted">
-              ← Previous
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle transition-colors group-hover:text-ink-muted">
+              <ArrowLeft size={11} strokeWidth={2} aria-hidden />
+              Previous
             </span>
             <span className="text-[13px] font-medium tracking-[-0.005em] text-ink">
               {prev.name}
@@ -235,8 +243,9 @@ function DocsFooterNav({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
             href={next.url}
             className="group inline-flex flex-col items-end gap-0.5 rounded-lg border border-border px-4 py-3 transition-colors hover:border-border-strong hover:bg-surface-raised"
           >
-            <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle transition-colors group-hover:text-ink-muted">
-              Next →
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle transition-colors group-hover:text-ink-muted">
+              Next
+              <ArrowRight size={11} strokeWidth={2} aria-hidden />
             </span>
             <span className="text-[13px] font-medium tracking-[-0.005em] text-ink">
               {next.name}
@@ -250,11 +259,11 @@ function DocsFooterNav({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
 
 export default function DocsView({ title, description, url, tree, toc, body: MDX }: DocsViewProps) {
   return (
-    <div className="flex min-h-screen w-screen bg-canvas">
+    <div className="flex h-screen w-screen overflow-hidden bg-canvas">
       <DocsSidebar tree={tree} activeUrl={url} />
       <div className="flex min-w-0 flex-1 flex-col">
         <DocsTopBar title={title} />
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
           {/* Main content */}
           <main className="min-w-0 flex-1 overflow-y-auto">
             <article className="mx-auto w-full max-w-[720px] px-6 pb-20 pt-10 sm:px-10 lg:px-12">

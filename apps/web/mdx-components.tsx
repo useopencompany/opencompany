@@ -46,8 +46,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     ),
     ul: ({ children, ...props }) => (
       <ul
-        className="mt-4 space-y-1.5 pl-5 text-[14px] leading-[1.75] text-ink-muted [&>li]:relative [&>li]:pl-1"
-        style={{ listStyleType: "disc" }}
+        className="mt-4 list-disc space-y-1.5 pl-5 text-[14px] leading-[1.75] text-ink-muted [&>li]:pl-1"
         {...props}
       >
         {children}
@@ -121,15 +120,14 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
       </thead>
     ),
     tbody: ({ children, ...props }) => (
-      <tbody className="divide-y divide-border-subtle" {...props}>
+      <tbody
+        className="divide-y divide-border-subtle [&>tr]:transition-colors [&>tr:hover]:bg-surface-raised"
+        {...props}
+      >
         {children}
       </tbody>
     ),
-    tr: ({ children, ...props }) => (
-      <tr className="transition-colors hover:bg-surface-raised" {...props}>
-        {children}
-      </tr>
-    ),
+    tr: ({ children, ...props }) => <tr {...props}>{children}</tr>,
     th: ({ children, ...props }) => (
       <th
         className="px-4 py-2.5 text-left text-[11.5px] font-semibold uppercase tracking-[0.06em] text-ink-muted"
