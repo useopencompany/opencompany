@@ -1,8 +1,8 @@
 import { calculateModelUsageCost, recordWorkspaceUsageDebit } from "@opencompany/billing";
-import { getDb } from "@opencompany/db/client";
 import { agentSessionMessages, agentSessions, agentSessionUsage } from "@opencompany/db/schema";
 import { createGateway, generateText, type LanguageModelUsage } from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { normalizeModelUsage } from "./usage";

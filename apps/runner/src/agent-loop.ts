@@ -8,7 +8,6 @@ import {
 import type { AgentReference } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
   agentSessionMessages,
@@ -37,6 +36,7 @@ import * as ai from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
 import { syncBrainFromSandbox } from "./brain";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { validateHostedToolEnvironment } from "./hosted-tools";
@@ -1989,10 +1989,9 @@ function isDelegatedChildSessionBusy(
 async function appendDelegatedChildUserMessage(input: { sessionId: string; prompt: string }) {
   const now = new Date();
   const messageId = newAgentSessionMessageId();
-  const db = getDb();
 
-  await db.batch([
-    db.insert(agentSessionMessages).values({
+  await getDb().transaction(async (tx) => {
+    await tx.insert(agentSessionMessages).values({
       id: messageId,
       sessionId: input.sessionId,
       role: "user",
@@ -2000,8 +1999,8 @@ async function appendDelegatedChildUserMessage(input: { sessionId: string; promp
       content: input.prompt,
       modelMessage: { role: "user", content: input.prompt },
       completedAt: now,
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId: input.sessionId,
       messageId,
       type: "message.created",
@@ -2011,8 +2010,8 @@ async function appendDelegatedChildUserMessage(input: { sessionId: string; promp
         content: input.prompt,
         status: "completed",
       },
-    }),
-  ]);
+    });
+  });
 
   return messageId;
 }
@@ -2067,9 +2066,8 @@ async function createDelegatedAgentSession(input: {
   toolCallId: string;
 }) {
   const now = new Date();
-  const db = getDb();
-  await db.batch([
-    db.insert(agentSessions).values({
+  await getDb().transaction(async (tx) => {
+    await tx.insert(agentSessions).values({
       id: input.sessionId,
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -2081,8 +2079,8 @@ async function createDelegatedAgentSession(input: {
       parentSessionId: input.parentSessionId,
       parentMessageId: input.parentMessageId,
       parentToolCallId: input.toolCallId,
-    }),
-    db.insert(agentSessionMessages).values({
+    });
+    await tx.insert(agentSessionMessages).values({
       id: input.messageId,
       sessionId: input.sessionId,
       role: "user",
@@ -2090,8 +2088,8 @@ async function createDelegatedAgentSession(input: {
       content: input.prompt,
       modelMessage: { role: "user", content: input.prompt },
       completedAt: now,
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId: input.sessionId,
       type: "session.status",
       payload: {
@@ -2101,8 +2099,8 @@ async function createDelegatedAgentSession(input: {
         parentMessageId: input.parentMessageId,
         toolCallId: input.toolCallId,
       },
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId: input.sessionId,
       messageId: input.messageId,
       type: "message.created",
@@ -2112,8 +2110,8 @@ async function createDelegatedAgentSession(input: {
         content: input.prompt,
         status: "completed",
       },
-    }),
-  ]);
+    });
+  });
 }
 
 function delegationSessionTitle(agentName: string, prompt: string) {

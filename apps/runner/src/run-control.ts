@@ -1,6 +1,6 @@
-import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
 import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { getDb } from "./db";
 
 export const RUN_LEASE_TTL_MS = 15 * 60 * 1000;
 export const RUN_HEARTBEAT_INTERVAL_MS = 5_000;

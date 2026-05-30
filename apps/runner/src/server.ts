@@ -1,10 +1,10 @@
 import { verifySessionStreamToken } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { type RuntimeEventForStream, subscribeSessionEvents } from "./events";
 import { enqueueRunnerJob } from "./jobs";

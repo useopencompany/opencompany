@@ -4,7 +4,6 @@ import {
   BRAIN_SYNC_DELAY_MS,
   shellQuote,
 } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import {
   agentSessionBrainMounts,
   brainFiles,
@@ -13,6 +12,7 @@ import {
 } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubInstallationToken } from "./github";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";

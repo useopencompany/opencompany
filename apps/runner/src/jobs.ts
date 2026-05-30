@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { getDb } from "@opencompany/db/client";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { runAfterSession, runMessage, startSession } from "./agent-loop";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { isNonRetryableRunnerError } from "./runner-errors";
 import { generateSessionTitleForMessage } from "./session-title";

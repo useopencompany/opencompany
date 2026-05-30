@@ -8,7 +8,6 @@ import {
   type OAuthTokens,
 } from "@ai-sdk/mcp";
 import { type AgentConfig, newAgentSessionMessageId } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
@@ -21,6 +20,7 @@ import {
 } from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,

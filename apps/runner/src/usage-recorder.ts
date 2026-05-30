@@ -3,9 +3,9 @@ import {
   calculateModelUsageCost,
   recordWorkspaceUsageDebit,
 } from "@opencompany/billing";
-import { getDb } from "@opencompany/db/client";
 import { agentSessionToolUsage, agentSessionUsage } from "@opencompany/db/schema";
 import type { FinishReason, LanguageModelResponseMetadata, LanguageModelUsage } from "ai";
+import { getDb } from "./db";
 import type { HostedToolUsage } from "./hosted-tools";
 import { appendRuntimeEventForLease, isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import { normalizeModelUsage } from "./usage";
