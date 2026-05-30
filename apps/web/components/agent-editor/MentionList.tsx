@@ -135,7 +135,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
 
   if (rows.length === 0) {
     return (
-      <div className="w-[238px] rounded-md border border-black/[0.08] bg-[#fbfbfa] px-2.5 py-1.5 text-[12px] text-ink-muted shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]">
+      <div className="w-[238px] rounded-md border border-black/[0.08] bg-surface-raised px-2.5 py-1.5 text-[12px] text-ink-muted shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]">
         No matches
       </div>
     );
@@ -144,7 +144,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
   return (
     <div
       role="listbox"
-      className="w-[238px] overflow-hidden rounded-md border border-black/[0.08] bg-[#fbfbfa] p-1 shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]"
+      className="w-[238px] overflow-hidden rounded-md border border-black/[0.08] bg-surface-raised p-1 shadow-[0_10px_22px_rgba(0,0,0,0.09),0_1px_5px_rgba(0,0,0,0.05)]"
     >
       {activeKind && normalizedQuery.length === 0 && (
         <button
@@ -154,7 +154,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
             setActiveKind(null);
             setSelectedIndex(0);
           }}
-          className="mb-0.5 flex h-6 w-full items-center gap-1 rounded px-1.5 text-left text-[11.5px] font-medium text-ink-muted hover:bg-[#eeeeeb]/70"
+          className="mb-0.5 flex h-6 w-full items-center gap-1 rounded px-1.5 text-left text-[11.5px] font-medium text-ink-muted hover:bg-surface-hover/70"
         >
           <ChevronLeft size={12} strokeWidth={1.9} />
           {kindLabel(activeKind)}
@@ -182,10 +182,10 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
               role="option"
               aria-selected={active}
               className={`flex min-h-[38px] w-full items-center gap-1.5 rounded px-1.5 py-1 text-left transition-colors duration-150 ${
-                active ? "bg-[#eeeeeb] text-ink" : "text-ink/90 hover:bg-[#eeeeeb]/70"
+                active ? "bg-surface-hover text-ink" : "text-ink/90 hover:bg-surface-hover/70"
               }`}
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-black/[0.07] bg-white/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-black/[0.07] bg-surface/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)]">
                 <Icon size={12.5} strokeWidth={1.85} className="text-ink-muted" />
               </span>
               <span className="flex min-w-0 flex-1 flex-col">
@@ -203,7 +203,7 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
                   className="ml-1 shrink-0 text-ink-subtle"
                 />
               ) : (
-                <span className="ml-1 shrink-0 rounded-[4px] bg-[#ececea] px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
+                <span className="ml-1 shrink-0 rounded-[4px] bg-surface-subtle px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
                   {row.item.kind}
                 </span>
               )}

@@ -12,7 +12,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     h2: ({ children, id, ...props }) => (
       <h2
         id={id ?? slugFromChildren(children)}
-        className="mt-10 scroll-mt-16 border-t border-[#ececea] pt-8 text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink first:mt-0 first:border-t-0 first:pt-0"
+        className="mt-10 scroll-mt-16 border-t border-border-subtle pt-8 text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink first:mt-0 first:border-t-0 first:pt-0"
         {...props}
       >
         {children}
@@ -57,20 +57,23 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     ),
     a: ({ children, ...props }) => (
       <a
-        className="font-medium text-ink underline decoration-[#d2d2cd] underline-offset-2 transition-colors hover:decoration-ink/60"
+        className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/60"
         {...props}
       >
         {children}
       </a>
     ),
     code: ({ children, ...props }) => (
-      <code className="rounded bg-[#ececea] px-1 py-0.5 font-mono text-[12px] text-ink" {...props}>
+      <code
+        className="rounded bg-surface-subtle px-1 py-0.5 font-mono text-[12px] text-ink"
+        {...props}
+      >
         {children}
       </code>
     ),
     pre: ({ children, ...props }) => (
       <pre
-        className="mt-4 overflow-x-auto rounded-lg border border-[#e6e6e3] bg-[#fbfbfa] p-4 text-[12.5px] leading-6 text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+        className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 text-[12.5px] leading-6 text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]"
         {...props}
       >
         {children}
@@ -78,7 +81,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     ),
     blockquote: ({ children, ...props }) => (
       <blockquote
-        className="mt-4 border-l-2 border-[#d8d8d3] pl-4 text-[14px] leading-7 text-ink-muted"
+        className="mt-4 border-l-2 border-border-strong pl-4 text-[14px] leading-7 text-ink-muted"
         {...props}
       >
         {children}
