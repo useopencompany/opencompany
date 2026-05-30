@@ -132,29 +132,36 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
   }
-  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
-    return { ok: false, error: "Add workspace credits to continue this session." } as const;
-  }
 
   const db = getDb();
-  const [session] = await db
-    .select({
-      id: agentSessions.id,
-      agentId: agentSessions.agentId,
-      modelProvider: agentSessions.modelProvider,
-      modelName: agentSessions.modelName,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.id, sessionId),
-        eq(agentSessions.workspaceId, workspace.id),
-        eq(agentSessions.userId, user.id),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .limit(1);
+  // The balance check and the session-authz lookup are independent reads, so run them
+  // concurrently — one round-trip on the message path instead of two.
+  const [hasBalance, sessionRows] = await Promise.all([
+    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+    db
+      .select({
+        id: agentSessions.id,
+        agentId: agentSessions.agentId,
+        modelProvider: agentSessions.modelProvider,
+        modelName: agentSessions.modelName,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      )
+      .limit(1),
+  ]);
 
+  // Preserve the prior error precedence: credits before session existence.
+  if (!hasBalance) {
+    return { ok: false, error: "Add workspace credits to continue this session." } as const;
+  }
+  const session = sessionRows[0];
   if (!session) {
     return { ok: false, error: "Session not found." } as const;
   }
