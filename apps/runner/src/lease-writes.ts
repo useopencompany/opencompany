@@ -1,6 +1,6 @@
-import { getDb } from "@opencompany/db/client";
 import { agentSessionMessages, agentSessions } from "@opencompany/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
+import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
 import {
   claimRunLease as claimDbRunLease,

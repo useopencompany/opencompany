@@ -15,7 +15,7 @@ const observabilityMocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@opencompany/db/client", () => ({
+vi.mock("./db", () => ({
   getDb: dbMocks.getDb,
 }));
 vi.mock("@opencompany/observability", () => ({

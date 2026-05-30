@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { AgentRuntimeEvent, AgentRuntimeEventPayload } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import { agentSessionEvents } from "@opencompany/db/schema";
 import { and, asc, eq, gt } from "drizzle-orm";
+import { getDb } from "./db";
 
 type Db = ReturnType<typeof getDb>;
 type TransientPublishableRuntimeEvent = Extract<

@@ -73,7 +73,7 @@ const githubMocks = vi.hoisted(() => ({
   getGitHubWorkInstallationToken: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/client", () => ({
+vi.mock("./db", () => ({
   getDb: dbMocks.getDb,
 }));
 
@@ -2835,8 +2835,8 @@ function createDelegationDb(
         },
       };
     },
-    async batch(statements: unknown[]) {
-      return statements;
+    async transaction(callback: (tx: unknown) => Promise<unknown>) {
+      return callback(db);
     },
     async execute() {
       executeCount += 1;
