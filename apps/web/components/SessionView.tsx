@@ -511,6 +511,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   ? extractAssistantText(assistantParts) || message.content
                   : message.content;
               const canCopy = copyText.trim().length > 0;
+              const duration = message.role === "assistant" ? runDurationForMessage(message) : 0;
 
               return (
                 <div
@@ -540,9 +541,9 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 opacity-0 pointer-events-none transition-opacity group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
                       >
                         <CopyMessageButton text={copyText} />
-                        {message.role === "assistant" && runDurationForMessage(message) > 0 ? (
+                        {duration > 0 ? (
                           <span className="text-[10px] tabular-nums text-ink-subtle/60 select-none">
-                            {formatElapsed(Math.round(runDurationForMessage(message)))}
+                            {formatElapsed(Math.round(duration))}
                           </span>
                         ) : null}
                       </div>
