@@ -63,7 +63,12 @@ export async function appendRuntimeEvent(
         payload,
         created_at AS "createdAt"
     `);
-    const event = rowsFromExecute<PersistedRuntimeEvent>(result)[0] ?? null;
+    const row = rowsFromExecute<PersistedRuntimeEvent>(result)[0] ?? null;
+    // The raw `db.execute` path bypasses Drizzle's column mapping, so `created_at`
+    // arrives as the driver's native value — a string under the runner's pg runtime —
+    // rather than a Date. Normalize it so the event honors its `createdAt: Date`
+    // contract and SSE serialization (`createdAt.toISOString()`) cannot throw.
+    const event = row ? { ...row, createdAt: toDate(row.createdAt) } : null;
     if (event) {
       publishRuntimeEvent(input.sessionId, event);
     }
@@ -144,4 +149,10 @@ export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStr
 
 function brokerEventName(sessionId: string) {
   return `session:${sessionId}`;
+}
+
+// Raw `db.execute` rows skip Drizzle's value mapping, so a timestamptz can arrive as a
+// string. Coerce to Date so callers and serializers can rely on the declared type.
+function toDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
 }
