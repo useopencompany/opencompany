@@ -51,6 +51,12 @@ describe("agent editor mention tools", () => {
     });
   });
 
+  test("does not include models in the mention suggestion menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items.every((item) => item.kind !== "model")).toBe(true);
+    expect(items.some((item) => item.mentionId.startsWith("model:"))).toBe(false);
+  });
+
   test("only exposes configured MCP tools for the workspace", () => {
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:linear")).toBe(
       false,
