@@ -141,10 +141,10 @@ Keep path validation in the runtime/sandbox layer rather than relying on model b
 ## Event model
 
 `agent_session_events` stores durable session boundaries and audit-worthy runtime facts. Events are
-append-only and have monotonic numeric ids. High-frequency assistant text, reasoning, and command
-output deltas are transient SSE messages with `id: null`; they are not inserted into Postgres and
-are not replayed after reconnect. On reconnect/open, the browser refetches session detail from the
-web app to catch durable state it missed while disconnected.
+append-only and have monotonic numeric ids backed by a Postgres `bigint` primary key. High-frequency
+assistant text, reasoning, and command output deltas are transient SSE messages with `id: null`; they
+are not inserted into Postgres and are not replayed after reconnect. On reconnect/open, the browser
+refetches session detail from the web app to catch durable state it missed while disconnected.
 
 The SSE endpoint intentionally sends default `message` events with a JSON body that includes the
 runtime `type`. Do not send custom SSE event names unless the client is updated too; the current UI
@@ -176,6 +176,10 @@ Runner state is stored in these tables:
 - `agent_session_messages`: durable user, assistant, and tool messages.
 - `agent_session_events`: append-only durable event log for status, message/tool boundaries, usage,
   errors, file changes, and archive/after-session lifecycle.
+- `agent_session_usage` and `agent_session_tool_usage`: append-only usage facts with deterministic
+  logical keys. Model usage is unique per `(session_id, message_id, step_index)`; hosted tool usage
+  is unique per `(session_id, message_id, tool_call_id, provider, operation)`. Retry replays must
+  resolve to the existing row, not create a second billable fact.
 
 The schema is in `packages/db/src/schema.ts`. Use `bun run db:generate` for schema changes and
 `bun run db:migrate` to apply them to `DATABASE_URL`.
@@ -325,6 +329,11 @@ without fighting request-duration limits.
   of two. "Zero rows written" means the lease was lost (`requireLeaseWrite` throws
   `StaleRunLeaseError`), distinguished from the idempotent "assistant already exists" skip.
   Local `activeRuns` is only a fast in-process guard on top of that.
+- Usage billing is idempotent and transactional. `usage-recorder.ts` writes the usage row,
+  workspace credit ledger debit, and durable usage event in one runner `db.transaction(...)`.
+  Duplicate logical usage keys are treated as retry replays and do not emit another ledger debit.
+  Step boundaries also stop the run once a debit exhausts the workspace balance, so a single turn
+  cannot continue spending indefinitely after credits run out.
 - Abort is process-local for active streams and persisted as a session flag, but deeper cooperative
   cancellation inside long sandbox commands is still minimal.
 - The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. Live deltas are ephemeral;

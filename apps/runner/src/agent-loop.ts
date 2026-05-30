@@ -46,6 +46,7 @@ import {
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
   failRunLease,
+  pauseRunLeaseForCredits,
   releaseRunLease,
   requireLeaseWrite,
   StaleRunLeaseError,
@@ -91,6 +92,7 @@ import { rowsFromExecute } from "./sql-exec";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
+import type { UsageRecordResult } from "./usage-recorder";
 
 export {
   buildAmpCommand,
@@ -403,6 +405,7 @@ async function runMessageWithContext(
       assistantMessageId,
       toolStartCoordinator,
       checkAbort,
+      onStepUsageRecorded: stopWhenCreditsExhausted,
       // Stop at the next model-step boundary if the user steered this run with a new
       // message. In-flight tool calls in the current step still finish and persist.
       extraStopConditions: [
@@ -443,6 +446,27 @@ async function runMessageWithContext(
       reasoningSummary,
       internal: false,
     });
+
+    if (streamResult.stoppedForCredits) {
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.status",
+          payload: {
+            status: "ready",
+            message: "Add workspace credits to continue running agents.",
+          },
+        }),
+      );
+      await requireLeaseWrite(
+        pauseRunLeaseForCredits(input.sessionId, ctx.leaseId, ctx.leaseOwner),
+      );
+      outcome = "stopped_no_credits";
+      return;
+    }
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -624,6 +648,11 @@ export function assertTurnComplete(
   if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
     throw new ToolStepLimitExceededError();
   }
+}
+
+function stopWhenCreditsExhausted(result: UsageRecordResult): "continue" | "stop" {
+  if (!result.inserted || !result.charged || result.balanceUsdMicros === null) return "continue";
+  return result.balanceUsdMicros > 0 ? "continue" : "stop";
 }
 
 export async function runAfterSession(input: {
@@ -888,28 +917,29 @@ async function runAfterSessionWithContext(
       toolBudget: createHostedToolBudget(),
     });
 
-    let { assistantContent, assistantReplayParts, reasoningSummary } =
-      await streamAssistantResponse({
-        ctx,
-        runtime: {
-          ...runtime,
-          tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
-        },
-        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
-        messages,
-        tools,
-        mcpContext: {
-          internalMessages: true,
-          workspaceId: row.workspace.id,
-          agentConfig: row.agent.config,
-          signal: ctx.controller.signal,
-          checkAbort,
-          observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
-        },
-        assistantMessageId,
-        toolStartCoordinator,
+    const streamResult = await streamAssistantResponse({
+      ctx,
+      runtime: {
+        ...runtime,
+        tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
+      },
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+      messages,
+      tools,
+      mcpContext: {
+        internalMessages: true,
+        workspaceId: row.workspace.id,
+        agentConfig: row.agent.config,
+        signal: ctx.controller.signal,
         checkAbort,
-      });
+        observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+      },
+      assistantMessageId,
+      toolStartCoordinator,
+      checkAbort,
+      onStepUsageRecorded: stopWhenCreditsExhausted,
+    });
+    let { assistantContent, assistantReplayParts, reasoningSummary } = streamResult;
 
     if (sandboxAcquirer.current) {
       const activeSandbox = sandboxAcquirer.current;
@@ -940,6 +970,28 @@ async function runAfterSessionWithContext(
       reasoningSummary,
       internal: true,
     });
+
+    if (streamResult.stoppedForCredits) {
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "after_session.skipped",
+          payload: { messageId: input.messageId, reason: "no_credits" },
+        }),
+      );
+      await completeAfterSessionRun(afterSessionRunId, {
+        status: "skipped",
+        skippedReason: "no_credits",
+      });
+      await requireLeaseWrite(
+        pauseRunLeaseForCredits(input.sessionId, ctx.leaseId, ctx.leaseOwner),
+      );
+      outcome = "stopped_no_credits";
+      return;
+    }
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -2204,6 +2256,9 @@ async function streamAssistantResponse(input: {
   assistantMessageId: string;
   toolStartCoordinator: ToolStartCoordinator;
   checkAbort: RunControlCheck;
+  onStepUsageRecorded?: (
+    result: UsageRecordResult,
+  ) => Promise<"continue" | "stop"> | "continue" | "stop";
   extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
@@ -2272,6 +2327,7 @@ async function streamAssistantResponse(input: {
           signal: input.ctx.controller.signal,
           checkAbort: input.checkAbort,
           toolStartCoordinator: input.toolStartCoordinator,
+          ...(input.onStepUsageRecorded ? { onStepUsageRecorded: input.onStepUsageRecorded } : {}),
         });
         // Log on the explicit span object (not `currentSpan()`): the AI SDK stream consumption can
         // run outside this span's async-context, which would silently drop a `currentSpan()` log

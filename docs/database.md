@@ -71,6 +71,11 @@ bun run setup
 
 When teammates pull your branch, their `db:migrate` will catch them up on their own Neon branch.
 
+High-volume append-only ids use `bigint` while staying inside JavaScript's safe integer range for
+application code. Billing migrations need extra review: usage rows and credit ledger debits must stay
+idempotent, and migrations that add usage uniqueness should audit/dedupe existing logical duplicates
+before creating constraints.
+
 ## Production
 
 Production migrations run from the `Release Production` GitHub Actions workflow before the web app

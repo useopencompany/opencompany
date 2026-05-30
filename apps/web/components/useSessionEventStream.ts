@@ -172,7 +172,13 @@ function parseRuntimeEvent(data: string): RuntimeEvent | null {
     const value = JSON.parse(data) as unknown;
     if (!value || typeof value !== "object") return null;
     const record = value as Record<string, unknown>;
-    if (!(typeof record.id === "number" || record.id === null) || typeof record.type !== "string") {
+    if (
+      !(
+        (typeof record.id === "number" && Number.isSafeInteger(record.id) && record.id > 0) ||
+        record.id === null
+      ) ||
+      typeof record.type !== "string"
+    ) {
       return null;
     }
     if (!record.payload || typeof record.payload !== "object") return null;

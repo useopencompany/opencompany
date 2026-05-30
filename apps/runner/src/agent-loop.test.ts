@@ -300,6 +300,56 @@ describe("usage recording", () => {
     );
   });
 
+  it("does not insert usage rows or ledger debits when retried steps are recorded again", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const baseInput = {
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      finishReason: "tool-calls" as const,
+      rawFinishReason: undefined,
+    };
+
+    for (const stepIndex of [1, 2]) {
+      await recordStepUsage({
+        ...baseInput,
+        stepIndex,
+        response: {
+          id: `response_${stepIndex}`,
+          timestamp: new Date(`2026-05-22T12:00:0${stepIndex}.000Z`),
+          modelId: "openai/gpt-5.4-mini",
+        },
+        usage: usage(100 + stepIndex, 20 + stepIndex),
+      });
+    }
+    const usageRows = db.state.usage.length;
+    const ledgerDebits = db.state.ledgerDebits;
+    const usageEvents = vi.mocked(appendRuntimeEvent).mock.calls.length;
+
+    for (const stepIndex of [1, 2]) {
+      await expect(
+        recordStepUsage({
+          ...baseInput,
+          stepIndex,
+          response: {
+            id: `retry_response_${stepIndex}`,
+            timestamp: new Date(`2026-05-22T12:01:0${stepIndex}.000Z`),
+            modelId: "openai/gpt-5.4-mini",
+          },
+          usage: usage(200 + stepIndex, 30 + stepIndex),
+        }),
+      ).resolves.toMatchObject({ inserted: false, charged: false });
+    }
+
+    expect(db.state.usage).toHaveLength(usageRows);
+    expect(db.state.ledgerDebits).toBe(ledgerDebits);
+    expect(vi.mocked(appendRuntimeEvent).mock.calls).toHaveLength(usageEvents);
+  });
+
   it("records hosted tool usage and emits usage events", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);
@@ -342,6 +392,46 @@ describe("usage recording", () => {
         }),
       }),
     );
+  });
+
+  it("does not insert tool usage rows or ledger debits for retried tool calls", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const input = {
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      toolCallId: "call_exa",
+      toolName: "exa_search",
+      usage: {
+        provider: "exa",
+        operation: "search",
+        providerRequestId: "exa_req_123",
+        costUsdMicros: 7000,
+        rawUsage: { costDollars: { total: 0.007 } },
+      },
+    };
+
+    await recordToolUsage(input);
+    const toolUsageRows = db.state.toolUsage.length;
+    const ledgerDebits = db.state.ledgerDebits;
+    const usageEvents = vi.mocked(appendRuntimeEvent).mock.calls.length;
+
+    await expect(
+      recordToolUsage({
+        ...input,
+        usage: {
+          ...input.usage,
+          providerRequestId: "exa_req_retry",
+          costUsdMicros: 9000,
+        },
+      }),
+    ).resolves.toMatchObject({ inserted: false, charged: false });
+
+    expect(db.state.toolUsage).toHaveLength(toolUsageRows);
+    expect(db.state.ledgerDebits).toBe(ledgerDebits);
+    expect(vi.mocked(appendRuntimeEvent).mock.calls).toHaveLength(usageEvents);
   });
 
   it("executes hosted tools without hydrating the sandbox", async () => {
@@ -2570,11 +2660,15 @@ type MessageState = {
 
 type UsageState = {
   id: number;
+  sessionId: string;
+  messageId: string;
   stepIndex: number;
 };
 
 type ToolUsageState = {
   id: number;
+  sessionId: string;
+  messageId: string;
   toolCallId: string;
   toolName: string;
   provider: string;
@@ -2674,16 +2768,32 @@ function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseWriteSto
     async insertModelUsage(input, lease) {
       if (!leaseCurrent(lease)) return null;
       const { usage } = getState();
+      const existing = usage.find(
+        (row) =>
+          row.sessionId === input.sessionId &&
+          row.messageId === input.messageId &&
+          row.stepIndex === input.stepIndex,
+      );
+      if (existing) return { id: existing.id, inserted: false };
       const row = { id: usage.length + 1, ...input } as UsageState;
       usage.push(row);
-      return { id: row.id };
+      return { id: row.id, inserted: true };
     },
     async insertToolUsage(input, lease) {
       if (!leaseCurrent(lease)) return null;
       const { toolUsage } = getState();
+      const existing = toolUsage.find(
+        (row) =>
+          row.sessionId === input.sessionId &&
+          row.messageId === input.messageId &&
+          row.toolCallId === input.toolCallId &&
+          row.provider === input.provider &&
+          row.operation === input.operation,
+      );
+      if (existing) return { id: existing.id, inserted: false };
       const row = { id: toolUsage.length + 1, ...input } as ToolUsageState;
       toolUsage.push(row);
-      return { id: row.id };
+      return { id: row.id, inserted: true };
     },
   };
 }
@@ -2834,6 +2944,9 @@ function createLeaseDb(input: {
     async execute() {
       state.ledgerDebits += 1;
       return { rows: [{ ledgerId: state.ledgerDebits, balanceUsdMicros: 100_000 }] };
+    },
+    async transaction(callback: (tx: unknown) => Promise<unknown>) {
+      return callback(this);
     },
   };
 }

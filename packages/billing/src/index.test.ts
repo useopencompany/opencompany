@@ -170,4 +170,28 @@ describe("recordWorkspaceUsageDebit", () => {
       reason: "duplicate_or_missing_session",
     });
   });
+
+  it("coerces pg int8 string ids and balances from usage debits", async () => {
+    const db = {
+      execute: async () => ({ rows: [{ ledgerId: "2147483648", balanceUsdMicros: "92300" }] }),
+    };
+
+    await expect(
+      recordWorkspaceUsageDebit({
+        db,
+        sessionId: "ses_123",
+        messageId: "msg_123",
+        modelUsageId: 2_147_483_648,
+        source: "model_usage",
+        providerCostUsdMicros: 7_000,
+        platformFeeUsdMicros: 700,
+        totalCostUsdMicros: 7_700,
+        costBasis: { kind: "model_usage" },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      ledgerId: 2_147_483_648,
+      balanceUsdMicros: 92_300,
+    });
+  });
 });

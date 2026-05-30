@@ -175,6 +175,36 @@ describe("useSessionEventStream", () => {
       expect.objectContaining({ id: 8, type: "message.completed" }),
     );
   });
+
+  it("accepts persisted event ids above the int4 range", () => {
+    const onEvent = vi.fn();
+    renderHook(() =>
+      useSessionEventStream({
+        runnerUrl: "http://localhost:3040",
+        streamToken: "token",
+        sessionId: "ses_123",
+        knownEventIds: [],
+        onEvent,
+      }),
+    );
+
+    act(() => {
+      MockEventSource.instances[0]?.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({
+            id: 2_147_483_648,
+            type: "message.completed",
+            messageId: "msg_big",
+            payload: { messageId: "msg_big" },
+          }),
+        }),
+      );
+    });
+
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2_147_483_648, type: "message.completed" }),
+    );
+  });
 });
 
 function setVisibility(value: DocumentVisibilityState) {

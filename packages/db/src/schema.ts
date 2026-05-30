@@ -434,7 +434,9 @@ export const agentSessionRunJobs = pgTable(
 export const agentSessionEvents = pgTable(
   "agent_session_events",
   {
-    id: serial("id").primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`nextval('agent_session_events_id_seq'::regclass)`),
     sessionId: text("session_id")
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
@@ -454,7 +456,9 @@ export const agentSessionEvents = pgTable(
 export const agentSessionUsage = pgTable(
   "agent_session_usage",
   {
-    id: serial("id").primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`nextval('agent_session_usage_id_seq'::regclass)`),
     sessionId: text("session_id")
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
@@ -491,13 +495,20 @@ export const agentSessionUsage = pgTable(
       table.sessionId,
       table.createdAt,
     ),
+    sessionMessageStepIdx: uniqueIndex("agent_session_usage_session_message_step_idx").on(
+      table.sessionId,
+      table.messageId,
+      table.stepIndex,
+    ),
   }),
 );
 
 export const agentSessionToolUsage = pgTable(
   "agent_session_tool_usage",
   {
-    id: serial("id").primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`nextval('agent_session_tool_usage_id_seq'::regclass)`),
     sessionId: text("session_id")
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
@@ -525,6 +536,9 @@ export const agentSessionToolUsage = pgTable(
       table.createdAt,
     ),
     toolCallIdx: index("agent_session_tool_usage_tool_call_idx").on(table.toolCallId),
+    sessionToolCallOperationIdx: uniqueIndex(
+      "agent_session_tool_usage_session_call_operation_idx",
+    ).on(table.sessionId, table.messageId, table.toolCallId, table.provider, table.operation),
   }),
 );
 
@@ -610,7 +624,9 @@ export const creditCodeRedemptions = pgTable(
 export const workspaceCreditLedger = pgTable(
   "workspace_credit_ledger",
   {
-    id: serial("id").primaryKey(),
+    id: bigint("id", { mode: "number" })
+      .primaryKey()
+      .default(sql`nextval('workspace_credit_ledger_id_seq'::regclass)`),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -630,12 +646,18 @@ export const workspaceCreditLedger = pgTable(
     messageId: text("message_id").references(() => agentSessionMessages.id, {
       onDelete: "set null",
     }),
-    modelUsageId: integer("model_usage_id").references(() => agentSessionUsage.id, {
-      onDelete: "set null",
-    }),
-    toolUsageId: integer("tool_usage_id").references(() => agentSessionToolUsage.id, {
-      onDelete: "set null",
-    }),
+    modelUsageId: bigint("model_usage_id", { mode: "number" }).references(
+      () => agentSessionUsage.id,
+      {
+        onDelete: "set null",
+      },
+    ),
+    toolUsageId: bigint("tool_usage_id", { mode: "number" }).references(
+      () => agentSessionToolUsage.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
       .notNull()
       .default(0),

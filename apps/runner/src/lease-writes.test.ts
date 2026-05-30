@@ -5,7 +5,9 @@ import {
   createAssistantMessageForLease,
   insertToolMessageForLease,
   type LeaseWriteStore,
+  type ModelUsageInsert,
   StaleRunLeaseError,
+  type ToolUsageInsert,
 } from "./lease-writes";
 
 // The lease-guarded helpers route their durable event append through
@@ -39,8 +41,8 @@ type StoredMessage = {
 function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: string }) {
   const lease = { leaseId: initial.leaseId, leaseOwner: initial.leaseOwner, archived: false };
   const messages: StoredMessage[] = [];
-  const usage: Array<{ id: number }> = [];
-  const toolUsage: Array<{ id: number }> = [];
+  const usage: Array<{ id: number } & Partial<ModelUsageInsert>> = [];
+  const toolUsage: Array<{ id: number } & Partial<ToolUsageInsert>> = [];
 
   const isCurrent = (guard: { leaseId: string; leaseOwner: string }) =>
     !lease.archived && lease.leaseId === guard.leaseId && lease.leaseOwner === guard.leaseOwner;
@@ -95,17 +97,35 @@ function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: str
       });
       return true;
     },
-    async insertModelUsage(_input, guard) {
+    async insertModelUsage(input, guard) {
       if (!isCurrent(guard)) return null;
+      const existing = usage.find(
+        (row) =>
+          "sessionId" in row &&
+          row.sessionId === input.sessionId &&
+          row.messageId === input.messageId &&
+          row.stepIndex === input.stepIndex,
+      );
+      if (existing) return { id: existing.id, inserted: false };
       const row = { id: usage.length + 1 };
-      usage.push(row);
-      return row;
+      usage.push({ ...row, ...input });
+      return { ...row, inserted: true };
     },
-    async insertToolUsage(_input, guard) {
+    async insertToolUsage(input, guard) {
       if (!isCurrent(guard)) return null;
+      const existing = toolUsage.find(
+        (row) =>
+          "sessionId" in row &&
+          row.sessionId === input.sessionId &&
+          row.messageId === input.messageId &&
+          row.toolCallId === input.toolCallId &&
+          row.provider === input.provider &&
+          row.operation === input.operation,
+      );
+      if (existing) return { id: existing.id, inserted: false };
       const row = { id: toolUsage.length + 1 };
-      toolUsage.push(row);
-      return row;
+      toolUsage.push({ ...row, ...input });
+      return { ...row, inserted: true };
     },
   };
 

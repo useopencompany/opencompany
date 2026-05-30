@@ -96,6 +96,9 @@ export type ToolUsageInsert = {
   rawUsage: Record<string, unknown>;
 };
 
+type LeaseWriteDb = Pick<ReturnType<typeof getDb>, "execute">;
+export type UsageInsertOutcome = { id: number; inserted: boolean };
+
 /**
  * The atomic, lease-guarded durable writes. Each method writes only while the lease
  * is still current and reports "no write" so the caller can map it to lease loss.
@@ -114,8 +117,16 @@ export type LeaseWriteStore = {
     lease: LeaseIdentity,
   ): Promise<boolean>;
   insertToolMessage(input: ToolMessageInsert, lease: LeaseIdentity): Promise<boolean>;
-  insertModelUsage(input: ModelUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
-  insertToolUsage(input: ToolUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
+  insertModelUsage(
+    input: ModelUsageInsert,
+    lease: LeaseIdentity,
+    db?: LeaseWriteDb,
+  ): Promise<UsageInsertOutcome | null>;
+  insertToolUsage(
+    input: ToolUsageInsert,
+    lease: LeaseIdentity,
+    db?: LeaseWriteDb,
+  ): Promise<UsageInsertOutcome | null>;
 };
 
 // `EXISTS (lease current)` predicate shared by every guarded statement. The lease row
@@ -209,42 +220,104 @@ export function createDbLeaseWriteStore(): LeaseWriteStore {
       return rowsFromExecute(result).length > 0;
     },
 
-    async insertModelUsage(input, lease) {
-      const result = await getDb().execute(sql`
-        INSERT INTO agent_session_usage (
-          session_id, message_id, run_lease_id, step_index, model_provider, model_name,
-          response_id, response_model_id, finish_reason, raw_finish_reason,
-          input_tokens, input_no_cache_tokens, input_cache_read_tokens, input_cache_write_tokens,
-          output_tokens, output_text_tokens, output_reasoning_tokens, total_tokens,
-          raw_usage, provider_created_at
+    async insertModelUsage(input, lease, db = getDb()) {
+      const result = await db.execute(sql`
+        WITH lease AS (
+          SELECT 1
+          FROM agent_sessions s
+          WHERE s.id = ${lease.sessionId}
+            AND s.run_lease_id = ${lease.leaseId}
+            AND s.run_lease_owner = ${lease.leaseOwner}
+            AND s.archived_at IS NULL
+        ),
+        ins AS (
+          INSERT INTO agent_session_usage (
+            session_id, message_id, run_lease_id, step_index, model_provider, model_name,
+            response_id, response_model_id, finish_reason, raw_finish_reason,
+            input_tokens, input_no_cache_tokens, input_cache_read_tokens, input_cache_write_tokens,
+            output_tokens, output_text_tokens, output_reasoning_tokens, total_tokens,
+            raw_usage, provider_created_at
+          )
+          SELECT
+            ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.stepIndex},
+            ${input.modelProvider}, ${input.modelName}, ${input.responseId}, ${input.responseModelId},
+            ${input.finishReason}, ${input.rawFinishReason},
+            ${input.inputTokens}, ${input.inputNoCacheTokens}, ${input.inputCacheReadTokens}, ${input.inputCacheWriteTokens},
+            ${input.outputTokens}, ${input.outputTextTokens}, ${input.outputReasoningTokens}, ${input.totalTokens},
+            ${JSON.stringify(input.rawUsage)}::jsonb, ${input.providerCreatedAt}
+          WHERE EXISTS (SELECT 1 FROM lease)
+          ON CONFLICT (session_id, message_id, step_index) DO NOTHING
+          RETURNING id
+        ),
+        existing AS (
+          SELECT id
+          FROM agent_session_usage
+          WHERE session_id = ${input.sessionId}
+            AND message_id = ${input.messageId}
+            AND step_index = ${input.stepIndex}
+          LIMIT 1
         )
         SELECT
-          ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.stepIndex},
-          ${input.modelProvider}, ${input.modelName}, ${input.responseId}, ${input.responseModelId},
-          ${input.finishReason}, ${input.rawFinishReason},
-          ${input.inputTokens}, ${input.inputNoCacheTokens}, ${input.inputCacheReadTokens}, ${input.inputCacheWriteTokens},
-          ${input.outputTokens}, ${input.outputTextTokens}, ${input.outputReasoningTokens}, ${input.totalTokens},
-          ${JSON.stringify(input.rawUsage)}::jsonb, ${input.providerCreatedAt}
-        WHERE ${leaseIsCurrent(lease)}
-        RETURNING id
+          EXISTS (SELECT 1 FROM lease) AS lease_current,
+          (SELECT id FROM ins) AS inserted_id,
+          COALESCE((SELECT id FROM ins), (SELECT id FROM existing)) AS usage_id
       `);
-      return rowsFromExecute<{ id: number }>(result)[0] ?? null;
+      const row =
+        rowsFromExecute<{
+          lease_current: boolean;
+          inserted_id: number | string | null;
+          usage_id: number | string | null;
+        }>(result)[0] ?? null;
+      if (!row || !row.lease_current || row.usage_id === null) return null;
+      return { id: readDbId(row.usage_id), inserted: row.inserted_id !== null };
     },
 
-    async insertToolUsage(input, lease) {
-      const result = await getDb().execute(sql`
-        INSERT INTO agent_session_tool_usage (
-          session_id, message_id, run_lease_id, tool_call_id, tool_name,
-          provider, operation, provider_request_id, cost_usd_micros, raw_usage
+    async insertToolUsage(input, lease, db = getDb()) {
+      const result = await db.execute(sql`
+        WITH lease AS (
+          SELECT 1
+          FROM agent_sessions s
+          WHERE s.id = ${lease.sessionId}
+            AND s.run_lease_id = ${lease.leaseId}
+            AND s.run_lease_owner = ${lease.leaseOwner}
+            AND s.archived_at IS NULL
+        ),
+        ins AS (
+          INSERT INTO agent_session_tool_usage (
+            session_id, message_id, run_lease_id, tool_call_id, tool_name,
+            provider, operation, provider_request_id, cost_usd_micros, raw_usage
+          )
+          SELECT
+            ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.toolCallId}, ${input.toolName},
+            ${input.provider}, ${input.operation}, ${input.providerRequestId}, ${input.costUsdMicros},
+            ${JSON.stringify(input.rawUsage)}::jsonb
+          WHERE EXISTS (SELECT 1 FROM lease)
+          ON CONFLICT (session_id, message_id, tool_call_id, provider, operation) DO NOTHING
+          RETURNING id
+        ),
+        existing AS (
+          SELECT id
+          FROM agent_session_tool_usage
+          WHERE session_id = ${input.sessionId}
+            AND message_id = ${input.messageId}
+            AND tool_call_id = ${input.toolCallId}
+            AND provider = ${input.provider}
+            AND operation = ${input.operation}
+          LIMIT 1
         )
         SELECT
-          ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.toolCallId}, ${input.toolName},
-          ${input.provider}, ${input.operation}, ${input.providerRequestId}, ${input.costUsdMicros},
-          ${JSON.stringify(input.rawUsage)}::jsonb
-        WHERE ${leaseIsCurrent(lease)}
-        RETURNING id
+          EXISTS (SELECT 1 FROM lease) AS lease_current,
+          (SELECT id FROM ins) AS inserted_id,
+          COALESCE((SELECT id FROM ins), (SELECT id FROM existing)) AS usage_id
       `);
-      return rowsFromExecute<{ id: number }>(result)[0] ?? null;
+      const row =
+        rowsFromExecute<{
+          lease_current: boolean;
+          inserted_id: number | string | null;
+          usage_id: number | string | null;
+        }>(result)[0] ?? null;
+      if (!row || !row.lease_current || row.usage_id === null) return null;
+      return { id: readDbId(row.usage_id), inserted: row.inserted_id !== null };
     },
   };
 }
@@ -465,6 +538,36 @@ export async function failRunLease(
   return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: message });
 }
 
+export async function pauseRunLeaseForCredits(
+  sessionId: string,
+  leaseId: string,
+  leaseOwner: string,
+) {
+  const [updated] = await getDb()
+    .update(agentSessions)
+    .set({
+      status: "ready",
+      runLeaseId: null,
+      runLeaseOwner: null,
+      runLeaseMessageId: null,
+      runLeaseExpiresAt: null,
+      runHeartbeatAt: null,
+      lastError: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.runLeaseId, leaseId),
+        eq(agentSessions.runLeaseOwner, leaseOwner),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .returning({ id: agentSessions.id });
+
+  return Boolean(updated);
+}
+
 export async function requireLeaseWrite(write: Promise<boolean> | boolean) {
   if (!(await write)) {
     throw new StaleRunLeaseError();
@@ -475,4 +578,12 @@ export class StaleRunLeaseError extends Error {
   constructor() {
     super("Run lease is no longer current.");
   }
+}
+
+function readDbId(value: number | string) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid database id: ${String(value)}`);
+  }
+  return parsed;
 }

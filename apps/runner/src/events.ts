@@ -63,7 +63,9 @@ export async function appendRuntimeEvent(
         payload,
         created_at AS "createdAt"
     `);
-    const event = rowsFromExecute<PersistedRuntimeEvent>(result)[0] ?? null;
+    const event = normalizePersistedRuntimeEvent(
+      rowsFromExecute<PersistedRuntimeEvent & { id: number | string }>(result)[0] ?? null,
+    );
     if (event) {
       publishRuntimeEvent(input.sessionId, event);
     }
@@ -140,6 +142,21 @@ export function subscribeSessionEvents(
 
 export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
   sessionEventBroker.emit(brokerEventName(sessionId), event);
+}
+
+function normalizePersistedRuntimeEvent(
+  event: (Omit<PersistedRuntimeEvent, "id"> & { id: number | string }) | null,
+): PersistedRuntimeEvent | null {
+  if (!event) return null;
+  return { ...event, id: readDbId(event.id) };
+}
+
+function readDbId(value: number | string) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid runtime event id: ${String(value)}`);
+  }
+  return parsed;
 }
 
 function brokerEventName(sessionId: string) {

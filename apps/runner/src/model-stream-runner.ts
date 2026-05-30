@@ -5,7 +5,7 @@ import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messa
 import type { RunControlCheck } from "./run-control";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
-import { recordStepUsage } from "./usage-recorder";
+import { recordStepUsage, type UsageRecordResult } from "./usage-recorder";
 
 // Live assistant text is transient-only, so publish model deltas as they arrive.
 // The database only stores durable message boundaries and final content.
@@ -26,6 +26,9 @@ export async function collectAssistantStream(input: {
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
   onFirstOutputPart?: () => void;
+  onStepUsageRecorded?: (
+    result: UsageRecordResult,
+  ) => Promise<"continue" | "stop"> | "continue" | "stop";
 }) {
   let assistantContent = "";
   const assistantReplayParts: AssistantReplayPart[] = [];
@@ -41,6 +44,7 @@ export async function collectAssistantStream(input: {
   }> = [];
   let lastFinishReason: FinishReason | undefined;
   let lastRawFinishReason: string | undefined;
+  let stoppedForCredits = false;
 
   const publishTextDelta = (delta: string) => {
     if (!delta) return;
@@ -145,7 +149,7 @@ export async function collectAssistantStream(input: {
           usage: part.usage,
           response: part.response,
         });
-        await recordStepUsage({
+        const usageResult = await recordStepUsage({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
@@ -158,6 +162,11 @@ export async function collectAssistantStream(input: {
           finishReason: part.finishReason,
           rawFinishReason: part.rawFinishReason,
         });
+        const nextAction = await input.onStepUsageRecorded?.(usageResult);
+        if (nextAction === "stop") {
+          stoppedForCredits = true;
+          break;
+        }
       }
 
       if (part.type === "tool-call") {
@@ -215,6 +224,7 @@ export async function collectAssistantStream(input: {
     lastFinishReason,
     lastRawFinishReason,
     lastStepEndedWithToolCalls: lastFinishReason === "tool-calls",
+    stoppedForCredits,
   };
 }
 

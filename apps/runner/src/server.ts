@@ -221,10 +221,10 @@ function requireInternalAuth(header: string | undefined, token: string) {
   }
 }
 
-function readLastEventId(header: string | string[] | undefined, after: string | undefined) {
+export function readLastEventId(header: string | string[] | undefined, after: string | undefined) {
   const value = Array.isArray(header) ? header[0] : header;
   const parsed = Number(value ?? after ?? "0");
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
 }
 
 export function formatSseEvent(event: RuntimeEventForStream) {

@@ -7,6 +7,7 @@ import {
   createSseHeaders,
   formatSseEvent,
   formatStreamError,
+  readLastEventId,
   redactStreamToken,
 } from "./server";
 
@@ -233,6 +234,23 @@ describe("SSE formatting", () => {
     expect(formatSseEvent(event)).toBe(
       'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123","createdAt":"2026-05-22T00:00:00.000Z"}\n\n',
     );
+  });
+
+  it("round-trips event ids above the int4 range", () => {
+    const event: PersistedRuntimeEvent = {
+      id: 2_147_483_648,
+      sessionId: "ses_123",
+      messageId: "msg_123",
+      type: "message.completed",
+      payload: { messageId: "msg_123", content: "hello" },
+      createdAt: new Date("2026-05-22T00:00:00.000Z"),
+    };
+
+    const raw = formatSseEvent(event);
+    expect(raw).toContain("id: 2147483648\n");
+    expect(JSON.parse(raw.split("\ndata: ")[1]!.trim()).id).toBe(2_147_483_648);
+    expect(readLastEventId("2147483648", undefined)).toBe(2_147_483_648);
+    expect(readLastEventId(undefined, "2147483648")).toBe(2_147_483_648);
   });
 
   it("includes createdAt as an ISO string in the SSE payload so web clients can compute thinking duration", () => {

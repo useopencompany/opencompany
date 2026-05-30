@@ -163,50 +163,59 @@ async function recordTitleUsage(input: {
   });
   const responseModelId = input.response?.modelId ?? TITLE_MODEL;
 
-  const [usageRow] = await db
-    .insert(agentSessionUsage)
-    .values({
+  await db.transaction(async (tx) => {
+    const [usageRow] = await tx
+      .insert(agentSessionUsage)
+      .values({
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        runLeaseId: null,
+        stepIndex: 0,
+        modelProvider: "vercel-ai-gateway",
+        modelName: TITLE_MODEL,
+        responseId: input.response?.id ?? null,
+        responseModelId,
+        finishReason: "stop",
+        rawFinishReason: "title_generation",
+        inputTokens: usage.inputTokens,
+        inputNoCacheTokens: usage.inputNoCacheTokens,
+        inputCacheReadTokens: usage.inputCacheReadTokens,
+        inputCacheWriteTokens: usage.inputCacheWriteTokens,
+        outputTokens: usage.outputTokens,
+        outputTextTokens: usage.outputTextTokens,
+        outputReasoningTokens: usage.outputReasoningTokens,
+        totalTokens: usage.totalTokens,
+        rawUsage: usage.rawUsage,
+        providerCreatedAt: input.response?.timestamp ?? null,
+      })
+      .onConflictDoNothing({
+        target: [
+          agentSessionUsage.sessionId,
+          agentSessionUsage.messageId,
+          agentSessionUsage.stepIndex,
+        ],
+      })
+      .returning({ id: agentSessionUsage.id });
+
+    if (!usageRow || !cost.billable) return;
+
+    await recordWorkspaceUsageDebit({
+      db: tx,
       sessionId: input.sessionId,
       messageId: input.messageId,
-      runLeaseId: null,
-      stepIndex: 0,
-      modelProvider: "vercel-ai-gateway",
-      modelName: TITLE_MODEL,
-      responseId: input.response?.id ?? null,
-      responseModelId,
-      finishReason: "stop",
-      rawFinishReason: "title_generation",
-      inputTokens: usage.inputTokens,
-      inputNoCacheTokens: usage.inputNoCacheTokens,
-      inputCacheReadTokens: usage.inputCacheReadTokens,
-      inputCacheWriteTokens: usage.inputCacheWriteTokens,
-      outputTokens: usage.outputTokens,
-      outputTextTokens: usage.outputTextTokens,
-      outputReasoningTokens: usage.outputReasoningTokens,
-      totalTokens: usage.totalTokens,
-      rawUsage: usage.rawUsage,
-      providerCreatedAt: input.response?.timestamp ?? null,
-    })
-    .returning({ id: agentSessionUsage.id });
-
-  if (!usageRow || !cost.billable) return;
-
-  await recordWorkspaceUsageDebit({
-    db,
-    sessionId: input.sessionId,
-    messageId: input.messageId,
-    modelUsageId: usageRow.id,
-    source: "model_usage",
-    providerCostUsdMicros: cost.providerCostUsdMicros,
-    platformFeeUsdMicros: cost.platformFeeUsdMicros,
-    totalCostUsdMicros: cost.totalCostUsdMicros,
-    costBasis: {
-      ...cost.costBasis,
-      usageType: "title_generation",
-    },
-    metadata: {
-      usageType: "title_generation",
-      responseModelId,
-    },
+      modelUsageId: usageRow.id,
+      source: "model_usage",
+      providerCostUsdMicros: cost.providerCostUsdMicros,
+      platformFeeUsdMicros: cost.platformFeeUsdMicros,
+      totalCostUsdMicros: cost.totalCostUsdMicros,
+      costBasis: {
+        ...cost.costBasis,
+        usageType: "title_generation",
+      },
+      metadata: {
+        usageType: "title_generation",
+        responseModelId,
+      },
+    });
   });
 }

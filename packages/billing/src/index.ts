@@ -368,9 +368,15 @@ export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput)
     JOIN balance ON balance.workspace_id = inserted_ledger.workspace_id
   `);
 
-  const rows = rowsFromExecute<{ ledgerId: number; balanceUsdMicros: number }>(result);
+  const rows = rowsFromExecute<{ ledgerId: number | string; balanceUsdMicros: number | string }>(
+    result,
+  );
   if (!rows[0]) return { ok: false as const, reason: "duplicate_or_missing_session" as const };
-  return { ok: true as const, ...rows[0] };
+  return {
+    ok: true as const,
+    ledgerId: readSafeNumber(rows[0].ledgerId),
+    balanceUsdMicros: readSafeNumber(rows[0].balanceUsdMicros),
+  };
 }
 
 export async function hasPositiveWorkspaceBalance(input: {
@@ -387,9 +393,13 @@ export async function hasPositiveWorkspaceBalance(input: {
   `);
   const rows = rowsFromExecute<{ balanceUsdMicros: number | string }>(result);
   const rawBalance = rows[0]?.balanceUsdMicros ?? 0;
-  const balanceUsdMicros =
-    typeof rawBalance === "string" ? Number.parseInt(rawBalance, 10) : rawBalance;
+  const balanceUsdMicros = readSafeNumber(rawBalance);
   return Number.isFinite(balanceUsdMicros) && balanceUsdMicros > 0;
+}
+
+function readSafeNumber(value: number | string) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : 0;
 }
 
 function tokenCost(tokens: number, usdMicrosPerMillionTokens: number) {
