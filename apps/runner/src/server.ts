@@ -259,9 +259,13 @@ function toRuntimeEventPayload(event: RuntimeEventForStream) {
     type: event.type,
     payload: event.payload,
     messageId: event.messageId,
-    createdAt: event.createdAt.toISOString(),
+    createdAt: serializeEventTimestamp(event.createdAt),
     ...("transient" in event && event.transient ? { transient: true } : {}),
   };
+}
+
+function serializeEventTimestamp(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function verifyStreamToken(token: string, secret: string) {
