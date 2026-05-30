@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes yet.
 
+## [0.4.1] - 2026-05-30
+
+### Changed
+- Runner job worker now wakes immediately on enqueue instead of waiting for the next poll interval, reducing time-to-first-token for agent sessions.
+- Web dispatch no longer blocks on analytics flush; PostHog capture and runner dispatch now run concurrently.
+- Workspace context loading collapses user, workspace, and role into a single joined query, and session submission runs the balance check and auth lookup concurrently, cutting pre-dispatch database round-trips.
+
+### Fixed
+- Runner event serialization no longer crashes when `created_at` arrives as a string from the raw lease-write path; the value is now coerced to a `Date` at the source.
+
 ## [0.4.0] - 2026-05-28
 
 ### Added
