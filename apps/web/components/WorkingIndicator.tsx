@@ -1,7 +1,7 @@
 "use client";
 
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export function formatElapsed(seconds: number): string {
   if (seconds < 60) {
@@ -30,9 +30,20 @@ function WorkingIndicatorTimer({
   thinking: boolean;
 }) {
   const [mountedAtMs] = useState(() => Date.now());
-  const parsedStartedAtMs = parseTimestamp(startedAt);
-  const startedAtMs =
-    parsedStartedAtMs === null ? mountedAtMs : Math.min(mountedAtMs, parsedStartedAtMs);
+  const parsedStartedAtMs = useMemo(() => parseTimestamp(startedAt), [startedAt]);
+  const [trackedStart, setTrackedStart] = useState(() =>
+    buildTrackedStart(startedAt, mountedAtMs, parsedStartedAtMs),
+  );
+  let startedAtMs = trackedStart.startedAtMs;
+  if (trackedStart.startedAt !== startedAt) {
+    const nextTrackedStart = buildTrackedStart(
+      startedAt,
+      trackedStart.startedAtMs,
+      parsedStartedAtMs,
+    );
+    startedAtMs = nextTrackedStart.startedAtMs;
+    setTrackedStart(nextTrackedStart);
+  }
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -62,6 +73,20 @@ function parseTimestamp(value: string | undefined) {
   if (!value) return null;
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildTrackedStart(
+  startedAt: string | undefined,
+  earliestStartedAtMs: number,
+  parsedStartedAtMs: number | null,
+) {
+  return {
+    startedAt,
+    startedAtMs:
+      parsedStartedAtMs === null
+        ? earliestStartedAtMs
+        : Math.min(earliestStartedAtMs, parsedStartedAtMs),
+  };
 }
 
 function elapsedBetween(startMs: number, endMs: number) {

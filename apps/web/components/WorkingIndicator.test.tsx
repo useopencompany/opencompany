@@ -111,4 +111,20 @@ describe("WorkingIndicator", () => {
     });
     expect(screen.getByText("10s")).toBeInTheDocument();
   });
+
+  it("keeps the earlier server timestamp when startedAt becomes unavailable", () => {
+    const serverStartedAt = new Date("2026-05-28T10:00:00.000Z");
+    const mountedAt = new Date("2026-05-28T10:00:10.000Z");
+    vi.setSystemTime(mountedAt);
+    const { rerender } = render(<WorkingIndicator startedAt={serverStartedAt.toISOString()} />);
+
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(screen.getByText("15s")).toBeInTheDocument();
+
+    rerender(<WorkingIndicator />);
+
+    expect(screen.getByText("15s")).toBeInTheDocument();
+  });
 });
