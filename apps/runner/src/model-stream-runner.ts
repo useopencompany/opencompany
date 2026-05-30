@@ -2,6 +2,7 @@ import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
 import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
+import type { RunControlCheck } from "./run-control";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordStepUsage } from "./usage-recorder";
@@ -22,7 +23,7 @@ export async function collectAssistantStream(input: {
   modelName: string;
   exposeReasoningSummary: boolean;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
   onFirstOutputPart?: () => void;
 }) {
@@ -130,6 +131,9 @@ export async function collectAssistantStream(input: {
       }
 
       if (part.type === "finish-step") {
+        // A model step boundary is a natural place to reconcile run-control state,
+        // so force a fresh check rather than waiting out the hot-path throttle.
+        await input.checkAbort({ force: true });
         await completeReasoningPhase();
         stepIndex += 1;
         lastFinishReason = part.finishReason;

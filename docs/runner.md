@@ -86,6 +86,17 @@ Important details:
   fan-out even if prompting fails.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
   first tool execution, so text-only fast-model turns avoid that fixed pre-token latency.
+- Run control (abort/lease/archive) is split into a free local check and a throttled remote read,
+  so a streaming turn no longer does a DB read per token. The `checkAbort` gate
+  (`createRunControlGate` in `run-control.ts`) checks the local `AbortController` synchronously on
+  every stream part and tool-output delta — that path stays instant for the stop button and locally
+  detected lease loss. The DB-backed reconciliation (abort requested elsewhere, lease reclaimed,
+  session archived) is folded with the lease heartbeat into a single `UPDATE … RETURNING`
+  round-trip and throttled to `RUN_HEARTBEAT_INTERVAL_MS` (5s). Step/tool/completion boundaries
+  (`finish-step`, before+after each tool execution via `withRunControlChecks`, before persisting
+  completion) pass `{ force: true }` to reconcile immediately regardless of the throttle. A turn
+  therefore performs O(turn-duration / interval) run-control reads instead of O(tokens), and each
+  read also refreshes the lease, so long tool calls keep the lease alive.
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are
   replayed into later model requests. This avoids replaying orphan tool results without their
   matching assistant tool calls.
