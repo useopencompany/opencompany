@@ -29,11 +29,10 @@ function WorkingIndicatorTimer({
   startedAt?: string | undefined;
   thinking: boolean;
 }) {
-  const [startedAtMs] = useState(() => {
-    const parsed = parseTimestamp(startedAt);
-    return parsed ?? Date.now();
-  });
-  const [earliestStartedAtMs, setEarliestStartedAtMs] = useState(startedAtMs);
+  const [mountedAtMs] = useState(() => Date.now());
+  const parsedStartedAtMs = parseTimestamp(startedAt);
+  const startedAtMs =
+    parsedStartedAtMs === null ? mountedAtMs : Math.min(mountedAtMs, parsedStartedAtMs);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -43,13 +42,7 @@ function WorkingIndicatorTimer({
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const parsed = parseTimestamp(startedAt);
-    if (parsed === null) return;
-    setEarliestStartedAtMs((current) => Math.min(current, parsed));
-  }, [startedAt]);
-
-  const elapsed = elapsedBetween(earliestStartedAtMs, now);
+  const elapsed = elapsedBetween(startedAtMs, now);
 
   return (
     <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5">
