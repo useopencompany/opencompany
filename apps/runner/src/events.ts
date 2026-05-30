@@ -1,8 +1,9 @@
 import { EventEmitter } from "node:events";
 import type { AgentRuntimeEvent, AgentRuntimeEventPayload } from "@opencompany/agent-runtime";
 import { agentSessionEvents } from "@opencompany/db/schema";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "./db";
+import { rowsFromExecute } from "./sql-exec";
 
 type Db = ReturnType<typeof getDb>;
 type TransientPublishableRuntimeEvent = Extract<
@@ -29,8 +30,46 @@ export async function appendRuntimeEvent(
   input: {
     sessionId: string;
     messageId?: string | null;
+    // When a lease identity is supplied, the row is appended as a single atomic
+    // statement that inserts only while that lease is still current — there is no
+    // separate check-then-write window. A lost lease yields `null` (the caller treats
+    // it as a rejected lease write) rather than an error. Omitting the lease performs
+    // an unconditional append and throws if the insert somehow writes nothing.
+    leaseId?: string;
+    leaseOwner?: string;
   } & AgentRuntimeEvent,
-) {
+): Promise<PersistedRuntimeEvent | null> {
+  if (input.leaseId && input.leaseOwner) {
+    const result = await db.execute(sql`
+      INSERT INTO agent_session_events (session_id, message_id, type, payload)
+      SELECT
+        ${input.sessionId},
+        ${input.messageId ?? null},
+        ${input.type},
+        ${JSON.stringify(input.payload)}::jsonb
+      WHERE EXISTS (
+        SELECT 1
+        FROM agent_sessions s
+        WHERE s.id = ${input.sessionId}
+          AND s.run_lease_id = ${input.leaseId}
+          AND s.run_lease_owner = ${input.leaseOwner}
+          AND s.archived_at IS NULL
+      )
+      RETURNING
+        id,
+        session_id AS "sessionId",
+        message_id AS "messageId",
+        type,
+        payload,
+        created_at AS "createdAt"
+    `);
+    const event = rowsFromExecute<PersistedRuntimeEvent>(result)[0] ?? null;
+    if (event) {
+      publishRuntimeEvent(input.sessionId, event);
+    }
+    return event;
+  }
+
   const [event] = await db
     .insert(agentSessionEvents)
     .values({
@@ -99,7 +138,7 @@ export function subscribeSessionEvents(
   };
 }
 
-function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
+export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
   sessionEventBroker.emit(brokerEventName(sessionId), event);
 }
 
