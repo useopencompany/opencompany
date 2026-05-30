@@ -10,7 +10,12 @@ type TransientPublishableRuntimeEvent = Extract<
   AgentRuntimeEvent,
   { type: "message.delta" | "message.reasoning_delta" | "command.output" }
 >;
-export type PersistedRuntimeEvent = Awaited<ReturnType<typeof listSessionEvents>>[number];
+export type PersistedRuntimeEvent = Omit<
+  Awaited<ReturnType<typeof listSessionEvents>>[number],
+  "createdAt"
+> & {
+  createdAt: Date | string;
+};
 export type TransientRuntimeEvent = {
   id: null;
   sessionId: string;
