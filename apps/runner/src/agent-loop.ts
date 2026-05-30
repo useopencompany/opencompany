@@ -60,9 +60,9 @@ import {
 } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
 import {
-  checkRunControl,
-  maybeHeartbeatRunLease,
+  createRunControlGate,
   RunAbortError,
+  type RunControlCheck,
   RunLeaseLostError,
 } from "./run-control";
 import { ToolStepLimitExceededError } from "./runner-errors";
@@ -289,7 +289,7 @@ async function runMessageWithContext(
     setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
-    await observeRunStep(ctx, "initial_run_control_check", checkAbort);
+    await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
@@ -429,7 +429,7 @@ async function runMessageWithContext(
       );
     }
 
-    await checkAbort();
+    await checkAbort({ force: true });
     assertTurnComplete(streamResult);
 
     await persistAssistantCompletion({
@@ -795,7 +795,7 @@ async function runAfterSessionWithContext(
     setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
-    await observeRunStep(ctx, "initial_run_control_check", checkAbort);
+    await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
@@ -923,7 +923,7 @@ async function runAfterSessionWithContext(
       );
     }
 
-    await checkAbort();
+    await checkAbort({ force: true });
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = "After-session run completed without changes.";
       appendAssistantTextPart(assistantReplayParts, assistantContent);
@@ -1109,17 +1109,8 @@ async function observeRunStep<T>(
   );
 }
 
-function createLeaseAbortCheck(ctx: RunContext) {
-  let lastHeartbeatAt = Date.now();
-  return async () => {
-    const heartbeat = await maybeHeartbeatRunLease({ ...ctx.runLease, lastHeartbeatAt });
-    lastHeartbeatAt = heartbeat.heartbeatAt;
-    if (!heartbeat.leaseActive) {
-      ctx.controller.abort();
-      throw new RunLeaseLostError();
-    }
-    await checkRunControl({ ...ctx.runLease, controller: ctx.controller });
-  };
+function createLeaseAbortCheck(ctx: RunContext): RunControlCheck {
+  return createRunControlGate({ runLease: ctx.runLease, controller: ctx.controller });
 }
 
 export function createAgentDelegationHandler(input: {
@@ -1131,7 +1122,7 @@ export function createAgentDelegationHandler(input: {
   userId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   depth: number;
   agentReferences: AgentReference[];
   runChildMessage?: typeof runDelegatedChildMessage;
@@ -1310,7 +1301,7 @@ async function resumeDelegatedAgentSession(input: {
   userId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   depth: number;
   runChildMessage: typeof runDelegatedChildMessage;
 }) {
@@ -2021,7 +2012,7 @@ async function runDelegatedChildMessage(input: {
   messageId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   depth: number;
 }) {
   const heartbeat = setInterval(() => {
@@ -2135,7 +2126,7 @@ function createSandboxAcquirer(input: {
   trace: ReturnType<typeof startTimingTrace>;
   leaseId: string;
   leaseOwner: string;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   onHydrated: (sandbox: SandboxHandle) => void;
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
@@ -2209,7 +2200,7 @@ async function streamAssistantResponse(input: {
     workspaceId: string;
     agentConfig: LoadedSession["agent"]["config"];
     signal: AbortSignal;
-    checkAbort: () => Promise<void>;
+    checkAbort: RunControlCheck;
     observabilityContext?: {
       workspaceId?: string;
       userId?: string;
@@ -2220,7 +2211,7 @@ async function streamAssistantResponse(input: {
   };
   assistantMessageId: string;
   toolStartCoordinator: ToolStartCoordinator;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
