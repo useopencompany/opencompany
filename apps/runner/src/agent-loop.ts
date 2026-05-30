@@ -87,6 +87,7 @@ import {
   setStatus,
   startSession,
 } from "./session-lifecycle";
+import { rowsFromExecute } from "./sql-exec";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
@@ -1873,15 +1874,6 @@ function readJsonObject(value: unknown): Record<string, unknown> {
   } catch {
     return {};
   }
-}
-
-function rowsFromExecute<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in result) {
-    const rows = (result as { rows?: unknown }).rows;
-    if (Array.isArray(rows)) return rows as T[];
-  }
-  return [];
 }
 
 function readNumber(value: unknown) {

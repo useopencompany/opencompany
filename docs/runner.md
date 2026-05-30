@@ -184,8 +184,9 @@ The schema is in `packages/db/src/schema.ts`. Use `bun run db:generate` for sche
 
 Unlike the web app, which uses the per-request `neon-http` driver, the runner is a
 long-lived process and uses a pooled `node-postgres` driver (`@opencompany/db/pool`,
-wired through `apps/runner/src/db.ts`). This gives it persistent connections and real
-`db.transaction(...)`, which the session-execution lease writes rely on. See
+wired through `apps/runner/src/db.ts`). This gives it persistent connections, real
+`db.transaction(...)`, and multi-statement SQL — which the atomic session-execution
+lease writes rely on (`lease-writes.ts`). See
 [database.md](./database.md#two-drivers-neon-http-web-vs-pooled-node-postgres-runner)
 for the full rationale and pool-sizing math.
 
@@ -317,8 +318,13 @@ without fighting request-duration limits.
 - Lease enforcement is in Postgres: a job-delivery lease (`jobs.ts`) guarantees one runner
   instance dispatches a given job, and a session-execution lease (`run-control.ts`) gates
   every persisted write through `lease-writes.ts` so a stale runner cannot stomp on a
-  session reclaimed elsewhere. Local `activeRuns` is only a fast in-process guard on top of
-  that. (The guarded writes are being made fully atomic in follow-up work; see handoff H6.)
+  session reclaimed elsewhere. Each guarded write is a single atomic statement that inserts
+  or updates only `WHERE EXISTS (lease still current)` (assistant/tool messages, model and
+  tool usage, and the durable event append in `events.ts`), so there is no check-then-write
+  window for a concurrent reclaim to slip through and each write costs one round-trip instead
+  of two. "Zero rows written" means the lease was lost (`requireLeaseWrite` throws
+  `StaleRunLeaseError`), distinguished from the idempotent "assistant already exists" skip.
+  Local `activeRuns` is only a fast in-process guard on top of that.
 - Abort is process-local for active streams and persisted as a session flag, but deeper cooperative
   cancellation inside long sandbox commands is still minimal.
 - The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. Live deltas are ephemeral;
