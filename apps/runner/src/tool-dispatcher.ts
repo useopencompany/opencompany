@@ -40,7 +40,12 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
-import { RunAbortError, RunLeaseLostError, withRunControlChecks } from "./run-control";
+import {
+  RunAbortError,
+  type RunControlCheck,
+  RunLeaseLostError,
+  withRunControlChecks,
+} from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
@@ -106,7 +111,7 @@ export function createToolSet(input: {
   enabledTools: RuntimeToolName[];
   repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
@@ -210,7 +215,7 @@ export async function executeRuntimeTool(input: {
   enabledTools: RuntimeToolName[];
   repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
@@ -240,7 +245,7 @@ async function executeRuntimeToolWithTracing(input: {
   enabledTools: RuntimeToolName[];
   repository?: WorkspaceRepository | null | undefined;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;

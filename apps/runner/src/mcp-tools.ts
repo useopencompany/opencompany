@@ -31,6 +31,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import type { RunControlCheck } from "./run-control";
 import { formatRuntimePreview } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -108,7 +109,7 @@ type McpToolContext = {
   workspaceId: string;
   agentConfig: AgentConfig;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: {
     workspaceId?: string;
