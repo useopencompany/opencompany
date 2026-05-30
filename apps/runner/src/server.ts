@@ -11,8 +11,22 @@ import { enqueueRunnerJob } from "./jobs";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-export function createServer(env: RunnerEnv) {
+export function createServer(env: RunnerEnv, options: { onJobEnqueued?: () => void } = {}) {
   const app = Fastify({ logger: false });
+
+  // Nudge the in-process job worker as soon as a job lands so it claims the run on the
+  // next tick instead of waiting out its poll interval. Best-effort: never block the
+  // 202 response, and never let a worker hiccup fail the enqueue.
+  const wakeWorker = () => {
+    try {
+      options.onJobEnqueued?.();
+    } catch (error) {
+      logger.warn("Failed to wake runner job worker", {
+        event: "opencompany.runner_job_worker_wake_failed",
+        error,
+      });
+    }
+  };
 
   app.addHook("onRequest", async (request, reply) => {
     const origin = request.headers.origin;
@@ -52,6 +66,7 @@ export function createServer(env: RunnerEnv) {
       kind: "start",
       sessionId: id,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -68,6 +83,7 @@ export function createServer(env: RunnerEnv) {
       sessionId: id,
       messageId,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -79,6 +95,7 @@ export function createServer(env: RunnerEnv) {
       sessionId: id,
       messageId,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -101,6 +118,7 @@ export function createServer(env: RunnerEnv) {
       sessionId: id,
       messageId,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
