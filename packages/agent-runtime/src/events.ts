@@ -33,6 +33,14 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; delta: string };
     }
   | {
+      type: "message.reasoning_started";
+      payload: { messageId: string };
+    }
+  | {
+      type: "message.reasoning_completed";
+      payload: { messageId: string };
+    }
+  | {
       type: "message.completed";
       payload: {
         messageId: string;

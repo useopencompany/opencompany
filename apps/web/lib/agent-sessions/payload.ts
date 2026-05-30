@@ -696,6 +696,9 @@ function parseSessionMessage(value: unknown): SessionMessage {
   }
   if ("toolName" in record) message.toolName = readNullableStringField(record, "toolName");
   if ("toolCallId" in record) message.toolCallId = readNullableStringField(record, "toolCallId");
+  if ("responseToMessageId" in record) {
+    message.responseToMessageId = readNullableStringField(record, "responseToMessageId");
+  }
   if ("outputReasoningTokens" in record) {
     message.outputReasoningTokens = readOptionalNumberField(record, "outputReasoningTokens");
   }
