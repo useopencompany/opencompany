@@ -30,7 +30,11 @@ The V1 loop is intentionally custom and narrow:
   streaming, tool execution, and event writes.
 - `packages/agent-runtime` is the shared contract package. It owns config resolution, runtime
   event types, ids, signed stream tokens, path confinement helpers, and the core tool catalog.
-- `packages/db` owns the Drizzle schema and generated migrations.
+- `packages/db` owns the Drizzle schema, generated migrations, and the two DB clients:
+  the default `neon-http` client (`@opencompany/db/client`, used by web) and the pooled
+  `node-postgres` client (`@opencompany/db/pool`, used by the runner). The runner wires
+  the pooled client through its own `apps/runner/src/db.ts` so the pooled driver can
+  never leak into web code.
 - `apps/web/lib/agent-sessions` owns web-facing session creation, message submission, signed SSE
   token creation, and server-to-server runner calls.
 - `apps/web/components/SessionView.tsx` renders persisted messages and applies streamed runtime
@@ -82,6 +86,17 @@ Important details:
   fan-out even if prompting fails.
 - Message runs do not hydrate E2B before the model call. The sandbox is connected/prepared on the
   first tool execution, so text-only fast-model turns avoid that fixed pre-token latency.
+- Run control (abort/lease/archive) is split into a free local check and a throttled remote read,
+  so a streaming turn no longer does a DB read per token. The `checkAbort` gate
+  (`createRunControlGate` in `run-control.ts`) checks the local `AbortController` synchronously on
+  every stream part and tool-output delta — that path stays instant for the stop button and locally
+  detected lease loss. The DB-backed reconciliation (abort requested elsewhere, lease reclaimed,
+  session archived) is folded with the lease heartbeat into a single `UPDATE … RETURNING`
+  round-trip and throttled to `RUN_HEARTBEAT_INTERVAL_MS` (5s). Step/tool/completion boundaries
+  (`finish-step`, before+after each tool execution via `withRunControlChecks`, before persisting
+  completion) pass `{ force: true }` to reconcile immediately regardless of the throttle. A turn
+  therefore performs O(turn-duration / interval) run-control reads instead of O(tokens), and each
+  read also refreshes the lease, so long tool calls keep the lease alive.
 - Persisted tool messages are kept for UI/debug history, but only user and assistant messages are
   replayed into later model requests. This avoids replaying orphan tool results without their
   matching assistant tool calls.
@@ -165,11 +180,31 @@ Runner state is stored in these tables:
 The schema is in `packages/db/src/schema.ts`. Use `bun run db:generate` for schema changes and
 `bun run db:migrate` to apply them to `DATABASE_URL`.
 
+## Database driver
+
+Unlike the web app, which uses the per-request `neon-http` driver, the runner is a
+long-lived process and uses a pooled `node-postgres` driver (`@opencompany/db/pool`,
+wired through `apps/runner/src/db.ts`). This gives it persistent connections, real
+`db.transaction(...)`, and multi-statement SQL — which the atomic session-execution
+lease writes rely on (`lease-writes.ts`). See
+[database.md](./database.md#two-drivers-neon-http-web-vs-pooled-node-postgres-runner)
+for the full rationale and pool-sizing math.
+
+The runner must connect to Neon's **direct** (non-pooled) endpoint, not the `-pooler`
+host: PgBouncer transaction pooling cannot do interactive transactions or
+`LISTEN`/`NOTIFY`. Set `RUNNER_DATABASE_URL` to the direct URL, or leave it unset and
+the runner derives the direct host from `DATABASE_URL` by stripping `-pooler`. Pool size
+is `RUNNER_DB_POOL_MAX` (default 10). The pool is drained on `SIGTERM`/`SIGINT` after
+in-flight jobs and HTTP requests finish, before the process exits.
+
 ## Local development
 
 Required environment variables:
 
 - `DATABASE_URL`
+- `RUNNER_DATABASE_URL` (optional; direct/non-pooled Neon URL for the runner pool.
+  Defaults to `DATABASE_URL` with the `-pooler` host label stripped.)
+- `RUNNER_DB_POOL_MAX` (optional; runner DB pool size, defaults to `10`)
 - `RUNNER_PUBLIC_URL` (`http://localhost:3040` locally)
 - `RUNNER_INTERNAL_URL` (`http://localhost:3040` locally; optional when it matches `RUNNER_PUBLIC_URL`)
 - `RUNNER_INTERNAL_TOKEN`
@@ -280,8 +315,16 @@ without fighting request-duration limits.
 
 ## Current limitations
 
-- There is no distributed lease enforcement yet; local `activeRuns` only protects one runner
-  process. A multi-instance deployment should enforce leases in Postgres before running messages.
+- Lease enforcement is in Postgres: a job-delivery lease (`jobs.ts`) guarantees one runner
+  instance dispatches a given job, and a session-execution lease (`run-control.ts`) gates
+  every persisted write through `lease-writes.ts` so a stale runner cannot stomp on a
+  session reclaimed elsewhere. Each guarded write is a single atomic statement that inserts
+  or updates only `WHERE EXISTS (lease still current)` (assistant/tool messages, model and
+  tool usage, and the durable event append in `events.ts`), so there is no check-then-write
+  window for a concurrent reclaim to slip through and each write costs one round-trip instead
+  of two. "Zero rows written" means the lease was lost (`requireLeaseWrite` throws
+  `StaleRunLeaseError`), distinguished from the idempotent "assistant already exists" skip.
+  Local `activeRuns` is only a fast in-process guard on top of that.
 - Abort is process-local for active streams and persisted as a session flag, but deeper cooperative
   cancellation inside long sandbox commands is still minimal.
 - The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. Live deltas are ephemeral;

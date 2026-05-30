@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { getDb } from "@opencompany/db/client";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { runAfterSession, runMessage, startSession } from "./agent-loop";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { isNonRetryableRunnerError } from "./runner-errors";
 import { generateSessionTitleForMessage } from "./session-title";
+import { rowsFromExecute } from "./sql-exec";
 
 // Runner has two lease layers that work together:
 //   - This job lease (RUNNER_JOB_LEASE_TTL_MS) is the *delivery* lease. It guarantees one
@@ -536,13 +537,4 @@ function runnerJobFromRow(row: RunnerJobRow): RunnerJob {
 
 function toDate(value: Date | string) {
   return value instanceof Date ? value : new Date(value);
-}
-
-function rowsFromExecute<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in result) {
-    const rows = (result as { rows?: unknown }).rows;
-    if (Array.isArray(rows)) return rows as T[];
-  }
-  return [];
 }

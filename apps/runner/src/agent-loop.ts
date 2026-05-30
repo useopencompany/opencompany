@@ -8,7 +8,6 @@ import {
 import type { AgentReference } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
   agentSessionMessages,
@@ -37,6 +36,7 @@ import * as ai from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
 import { syncBrainFromSandbox } from "./brain";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { validateHostedToolEnvironment } from "./hosted-tools";
@@ -60,9 +60,9 @@ import {
 } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
 import {
-  checkRunControl,
-  maybeHeartbeatRunLease,
+  createRunControlGate,
   RunAbortError,
+  type RunControlCheck,
   RunLeaseLostError,
 } from "./run-control";
 import { ToolStepLimitExceededError } from "./runner-errors";
@@ -87,6 +87,7 @@ import {
   setStatus,
   startSession,
 } from "./session-lifecycle";
+import { rowsFromExecute } from "./sql-exec";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
@@ -289,7 +290,7 @@ async function runMessageWithContext(
     setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
-    await observeRunStep(ctx, "initial_run_control_check", checkAbort);
+    await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
@@ -429,7 +430,7 @@ async function runMessageWithContext(
       );
     }
 
-    await checkAbort();
+    await checkAbort({ force: true });
     assertTurnComplete(streamResult);
 
     await persistAssistantCompletion({
@@ -795,7 +796,7 @@ async function runAfterSessionWithContext(
     setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
-    await observeRunStep(ctx, "initial_run_control_check", checkAbort);
+    await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
     await requireLeaseWrite(
@@ -923,7 +924,7 @@ async function runAfterSessionWithContext(
       );
     }
 
-    await checkAbort();
+    await checkAbort({ force: true });
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = "After-session run completed without changes.";
       appendAssistantTextPart(assistantReplayParts, assistantContent);
@@ -1109,17 +1110,8 @@ async function observeRunStep<T>(
   );
 }
 
-function createLeaseAbortCheck(ctx: RunContext) {
-  let lastHeartbeatAt = Date.now();
-  return async () => {
-    const heartbeat = await maybeHeartbeatRunLease({ ...ctx.runLease, lastHeartbeatAt });
-    lastHeartbeatAt = heartbeat.heartbeatAt;
-    if (!heartbeat.leaseActive) {
-      ctx.controller.abort();
-      throw new RunLeaseLostError();
-    }
-    await checkRunControl({ ...ctx.runLease, controller: ctx.controller });
-  };
+function createLeaseAbortCheck(ctx: RunContext): RunControlCheck {
+  return createRunControlGate({ runLease: ctx.runLease, controller: ctx.controller });
 }
 
 export function createAgentDelegationHandler(input: {
@@ -1131,7 +1123,7 @@ export function createAgentDelegationHandler(input: {
   userId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   depth: number;
   agentReferences: AgentReference[];
   runChildMessage?: typeof runDelegatedChildMessage;
@@ -1310,7 +1302,7 @@ async function resumeDelegatedAgentSession(input: {
   userId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   depth: number;
   runChildMessage: typeof runDelegatedChildMessage;
 }) {
@@ -1884,15 +1876,6 @@ function readJsonObject(value: unknown): Record<string, unknown> {
   }
 }
 
-function rowsFromExecute<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in result) {
-    const rows = (result as { rows?: unknown }).rows;
-    if (Array.isArray(rows)) return rows as T[];
-  }
-  return [];
-}
-
 function readNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -1989,10 +1972,9 @@ function isDelegatedChildSessionBusy(
 async function appendDelegatedChildUserMessage(input: { sessionId: string; prompt: string }) {
   const now = new Date();
   const messageId = newAgentSessionMessageId();
-  const db = getDb();
 
-  await db.batch([
-    db.insert(agentSessionMessages).values({
+  await getDb().transaction(async (tx) => {
+    await tx.insert(agentSessionMessages).values({
       id: messageId,
       sessionId: input.sessionId,
       role: "user",
@@ -2000,8 +1982,8 @@ async function appendDelegatedChildUserMessage(input: { sessionId: string; promp
       content: input.prompt,
       modelMessage: { role: "user", content: input.prompt },
       completedAt: now,
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId: input.sessionId,
       messageId,
       type: "message.created",
@@ -2011,8 +1993,8 @@ async function appendDelegatedChildUserMessage(input: { sessionId: string; promp
         content: input.prompt,
         status: "completed",
       },
-    }),
-  ]);
+    });
+  });
 
   return messageId;
 }
@@ -2022,7 +2004,7 @@ async function runDelegatedChildMessage(input: {
   messageId: string;
   env: RunnerEnv;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   depth: number;
 }) {
   const heartbeat = setInterval(() => {
@@ -2067,9 +2049,8 @@ async function createDelegatedAgentSession(input: {
   toolCallId: string;
 }) {
   const now = new Date();
-  const db = getDb();
-  await db.batch([
-    db.insert(agentSessions).values({
+  await getDb().transaction(async (tx) => {
+    await tx.insert(agentSessions).values({
       id: input.sessionId,
       workspaceId: input.workspaceId,
       userId: input.userId,
@@ -2081,8 +2062,8 @@ async function createDelegatedAgentSession(input: {
       parentSessionId: input.parentSessionId,
       parentMessageId: input.parentMessageId,
       parentToolCallId: input.toolCallId,
-    }),
-    db.insert(agentSessionMessages).values({
+    });
+    await tx.insert(agentSessionMessages).values({
       id: input.messageId,
       sessionId: input.sessionId,
       role: "user",
@@ -2090,8 +2071,8 @@ async function createDelegatedAgentSession(input: {
       content: input.prompt,
       modelMessage: { role: "user", content: input.prompt },
       completedAt: now,
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId: input.sessionId,
       type: "session.status",
       payload: {
@@ -2101,8 +2082,8 @@ async function createDelegatedAgentSession(input: {
         parentMessageId: input.parentMessageId,
         toolCallId: input.toolCallId,
       },
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId: input.sessionId,
       messageId: input.messageId,
       type: "message.created",
@@ -2112,8 +2093,8 @@ async function createDelegatedAgentSession(input: {
         content: input.prompt,
         status: "completed",
       },
-    }),
-  ]);
+    });
+  });
 }
 
 function delegationSessionTitle(agentName: string, prompt: string) {
@@ -2137,7 +2118,7 @@ function createSandboxAcquirer(input: {
   trace: ReturnType<typeof startTimingTrace>;
   leaseId: string;
   leaseOwner: string;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   onHydrated: (sandbox: SandboxHandle) => void;
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
@@ -2211,7 +2192,7 @@ async function streamAssistantResponse(input: {
     workspaceId: string;
     agentConfig: LoadedSession["agent"]["config"];
     signal: AbortSignal;
-    checkAbort: () => Promise<void>;
+    checkAbort: RunControlCheck;
     observabilityContext?: {
       workspaceId?: string;
       userId?: string;
@@ -2222,7 +2203,7 @@ async function streamAssistantResponse(input: {
   };
   assistantMessageId: string;
   toolStartCoordinator: ToolStartCoordinator;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });

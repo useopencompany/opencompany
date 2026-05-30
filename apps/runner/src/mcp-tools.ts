@@ -8,7 +8,6 @@ import {
   type OAuthTokens,
 } from "@ai-sdk/mcp";
 import { type AgentConfig, newAgentSessionMessageId } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
@@ -21,6 +20,7 @@ import {
 } from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,
@@ -31,6 +31,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import type { RunControlCheck } from "./run-control";
 import { formatRuntimePreview } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -108,7 +109,7 @@ type McpToolContext = {
   workspaceId: string;
   agentConfig: AgentConfig;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: {
     workspaceId?: string;

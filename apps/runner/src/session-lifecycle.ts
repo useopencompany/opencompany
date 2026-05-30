@@ -3,7 +3,6 @@ import {
   normalizeAgentConfig,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import {
   agentSessionAfterSessionRuns,
   agentSessionEvents,
@@ -20,6 +19,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { loadGitHubWorkRepository } from "./amp-tool";
 import { materializeBrainForSession } from "./brain";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { getGitHubWorkInstallationToken } from "./github";
@@ -456,8 +456,8 @@ export async function archiveSession(sessionId: string) {
   const sandboxKilled = previousSandboxId ? await killSandbox(previousSandboxId) : false;
   const now = new Date();
 
-  await db.batch([
-    db
+  await db.transaction(async (tx) => {
+    await tx
       .update(agentSessions)
       .set({
         status: "archived",
@@ -472,13 +472,13 @@ export async function archiveSession(sessionId: string) {
         lastError: null,
         updatedAt: now,
       })
-      .where(eq(agentSessions.id, sessionId)),
-    db.insert(agentSessionEvents).values({
+      .where(eq(agentSessions.id, sessionId));
+    await tx.insert(agentSessionEvents).values({
       sessionId,
       type: "session.status",
       payload: { status: "archived", message: "Session archived" },
-    }),
-    db.insert(agentSessionEvents).values({
+    });
+    await tx.insert(agentSessionEvents).values({
       sessionId,
       type: "session.archived",
       payload: {
@@ -486,6 +486,6 @@ export async function archiveSession(sessionId: string) {
         sandboxKilled,
         sandboxAlreadyStopped: previousSandboxId === null || !sandboxKilled,
       },
-    }),
-  ]);
+    });
+  });
 }
