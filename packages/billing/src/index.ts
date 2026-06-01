@@ -14,7 +14,9 @@ type PricingProvider =
   | "google"
   | "deepseek"
   | "mistral"
+  | "minimax"
   | "moonshotai"
+  | "xai"
   | "zai";
 
 type ModelPricing = {
@@ -24,6 +26,11 @@ type ModelPricing = {
   cachedInputUsdMicrosPerMillion: number;
   cacheWriteUsdMicrosPerMillion: number;
   outputUsdMicrosPerMillion: number;
+  longContext?: {
+    inputTokenThreshold: number;
+    inputMultiplier: number;
+    outputMultiplier: number;
+  };
 };
 
 export type UsageCostInput = {
@@ -156,6 +163,70 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cacheWriteUsdMicrosPerMillion: 1_500_000,
     outputUsdMicrosPerMillion: 7_500_000,
   },
+  "minimax/minimax-m3": {
+    model: "minimax/minimax-m3",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 600_000,
+    cachedInputUsdMicrosPerMillion: 120_000,
+    cacheWriteUsdMicrosPerMillion: 600_000,
+    outputUsdMicrosPerMillion: 2_400_000,
+  },
+  "minimax/minimax-m2.7": {
+    model: "minimax/minimax-m2.7",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 300_000,
+    cachedInputUsdMicrosPerMillion: 60_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 1_200_000,
+  },
+  "minimax/minimax-m2.7-highspeed": {
+    model: "minimax/minimax-m2.7-highspeed",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 600_000,
+    cachedInputUsdMicrosPerMillion: 60_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 2_400_000,
+  },
+  "minimax/minimax-m2.5": {
+    model: "minimax/minimax-m2.5",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 270_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 950_000,
+  },
+  "minimax/minimax-m2.5-highspeed": {
+    model: "minimax/minimax-m2.5-highspeed",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 600_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 2_400_000,
+  },
+  "minimax/minimax-m2.1": {
+    model: "minimax/minimax-m2.1",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 300_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 1_200_000,
+  },
+  "minimax/minimax-m2.1-lightning": {
+    model: "minimax/minimax-m2.1-lightning",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 300_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 1_200_000,
+  },
+  "minimax/minimax-m2": {
+    model: "minimax/minimax-m2",
+    provider: "minimax",
+    inputUsdMicrosPerMillion: 300_000,
+    cachedInputUsdMicrosPerMillion: 30_000,
+    cacheWriteUsdMicrosPerMillion: 380_000,
+    outputUsdMicrosPerMillion: 1_200_000,
+  },
   "moonshotai/kimi-k2.6": {
     model: "moonshotai/kimi-k2.6",
     provider: "moonshotai",
@@ -163,6 +234,114 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cachedInputUsdMicrosPerMillion: 160_000,
     cacheWriteUsdMicrosPerMillion: 950_000,
     outputUsdMicrosPerMillion: 4_000_000,
+  },
+  "moonshotai/kimi-k2.5": {
+    model: "moonshotai/kimi-k2.5",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 500_000,
+    cachedInputUsdMicrosPerMillion: 100_000,
+    cacheWriteUsdMicrosPerMillion: 500_000,
+    outputUsdMicrosPerMillion: 2_800_000,
+  },
+  "moonshotai/kimi-k2-thinking": {
+    model: "moonshotai/kimi-k2-thinking",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 600_000,
+    cachedInputUsdMicrosPerMillion: 150_000,
+    cacheWriteUsdMicrosPerMillion: 600_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+  },
+  "moonshotai/kimi-k2-thinking-turbo": {
+    model: "moonshotai/kimi-k2-thinking-turbo",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 1_150_000,
+    cachedInputUsdMicrosPerMillion: 150_000,
+    cacheWriteUsdMicrosPerMillion: 1_150_000,
+    outputUsdMicrosPerMillion: 8_000_000,
+  },
+  "moonshotai/kimi-k2-turbo": {
+    model: "moonshotai/kimi-k2-turbo",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 1_150_000,
+    cachedInputUsdMicrosPerMillion: 150_000,
+    cacheWriteUsdMicrosPerMillion: 1_150_000,
+    outputUsdMicrosPerMillion: 8_000_000,
+  },
+  "moonshotai/kimi-k2": {
+    model: "moonshotai/kimi-k2",
+    provider: "moonshotai",
+    inputUsdMicrosPerMillion: 570_000,
+    cachedInputUsdMicrosPerMillion: 0,
+    cacheWriteUsdMicrosPerMillion: 570_000,
+    outputUsdMicrosPerMillion: 2_300_000,
+  },
+  "xai/grok-4.3": {
+    model: "xai/grok-4.3",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_250_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  "xai/grok-4.20-reasoning": {
+    model: "xai/grok-4.20-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_250_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  "xai/grok-4.20-non-reasoning": {
+    model: "xai/grok-4.20-non-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_250_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  "xai/grok-4.1-fast-reasoning": {
+    model: "xai/grok-4.1-fast-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 200_000,
+    cachedInputUsdMicrosPerMillion: 50_000,
+    cacheWriteUsdMicrosPerMillion: 200_000,
+    outputUsdMicrosPerMillion: 500_000,
+  },
+  "xai/grok-4.1-fast-non-reasoning": {
+    model: "xai/grok-4.1-fast-non-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 200_000,
+    cachedInputUsdMicrosPerMillion: 50_000,
+    cacheWriteUsdMicrosPerMillion: 200_000,
+    outputUsdMicrosPerMillion: 500_000,
+  },
+  "xai/grok-build-0.1": {
+    model: "xai/grok-build-0.1",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_000_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_000_000,
+    outputUsdMicrosPerMillion: 2_000_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
   },
   "zai/glm-5.1": {
     model: "zai/glm-5.1",
@@ -220,11 +399,21 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
     };
   }
 
-  const longContextMultiplier =
+  const configuredLongContext =
+    pricing.longContext &&
+    safeTokenCount(input.inputTokens) > pricing.longContext.inputTokenThreshold
+      ? {
+          input: pricing.longContext.inputMultiplier,
+          output: pricing.longContext.outputMultiplier,
+        }
+      : null;
+  const legacyOpenAiLongContext =
     pricing.model === "openai/gpt-5.4" &&
     safeTokenCount(input.inputTokens) > GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD
       ? { input: 2, output: 1.5 }
-      : { input: 1, output: 1 };
+      : null;
+  const longContextMultiplier = configuredLongContext ??
+    legacyOpenAiLongContext ?? { input: 1, output: 1 };
   const uncachedInputRate = pricing.inputUsdMicrosPerMillion * longContextMultiplier.input;
   const cacheReadRate = pricing.cachedInputUsdMicrosPerMillion * longContextMultiplier.input;
   const cacheWriteRate = pricing.cacheWriteUsdMicrosPerMillion * longContextMultiplier.input;

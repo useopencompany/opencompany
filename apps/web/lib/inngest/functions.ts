@@ -1,4 +1,8 @@
 import {
+  AGENT_SCHEDULE_SWEEP_CRON,
+  sweepAgentSchedules as runAgentScheduleSweep,
+} from "@/lib/agent-schedules/runner";
+import {
   AGENT_AFTER_SESSION_CHECK_EVENT,
   AGENT_MESSAGE_SUBMITTED_EVENT,
   AGENT_SESSION_ABORT_REQUESTED_EVENT,
@@ -196,6 +200,21 @@ export const runAgentAfterSession = inngest.createFunction(
   },
 );
 
+export const sweepAgentSchedules = inngest.createFunction(
+  {
+    id: "sweep-agent-schedules",
+    name: "Sweep agent schedules",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: AGENT_SCHEDULE_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return step.run("run due agent schedules", async () => {
+      return runAgentScheduleSweep();
+    });
+  },
+);
+
 export const abortAgentSession = inngest.createFunction(
   {
     id: "abort-agent-session",
@@ -242,6 +261,7 @@ export const inngestFunctions = [
   runAgentSessionMessage,
   generateAgentSessionTitle,
   runAgentAfterSession,
+  sweepAgentSchedules,
   abortAgentSession,
   sendSignupWelcome,
 ];

@@ -29,24 +29,16 @@ const boundRepositories = [
 ];
 
 describe("extractConfigFromMentions", () => {
-  it("resolves model aliases and lets the last model win", () => {
-    const config = extractConfigFromMentions("Use @fast, then switch to @deep.");
-
-    expect(config.model).toBe("openai/gpt-5.4");
-  });
-
-  it("resolves supported AI Gateway model mentions", () => {
+  it("leaves model-looking mentions out of derived config", () => {
     const config = extractConfigFromMentions(
-      "Use @google/gemini-3-flash first, then @deepseek/deepseek-v4-flash.",
+      "Use @fast, then @deep, then @openai/gpt-5.4, then @xai/grok-4.3.",
     );
 
-    expect(config.model).toBe("deepseek/deepseek-v4-flash");
-  });
-
-  it("resolves Kimi and GLM model mentions", () => {
-    const config = extractConfigFromMentions("Use @moonshotai/kimi-k2.6 first, then @zai/glm-5.1.");
-
-    expect(config.model).toBe("zai/glm-5.1");
+    expect(config).toMatchObject({
+      tools: [],
+      brain: [],
+      agents: [],
+    });
   });
 
   it("resolves tool ids and labels", () => {
@@ -88,16 +80,15 @@ describe("deriveAgentConfigFromBody", () => {
     ]);
   });
 
-  it("binds Amp to the mentioned GitHub repository", () => {
+  it("records the mentioned GitHub repository without binding it to Amp", () => {
     const { config } = deriveAgentConfigFromBody({
       title: "Code agent",
       body: "Use @amp in @opencompany/web.",
       repositories,
     });
 
-    expect(config.tools).toEqual([
-      expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
-    ]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
     expect(config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
@@ -181,14 +172,15 @@ describe("deriveAgentConfigFromBody", () => {
     ]);
   });
 
-  it("keeps Amp unbound when the repo mention is unknown", () => {
+  it("does not record an unknown repo mention", () => {
     const { config } = deriveAgentConfigFromBody({
       title: "Code agent",
       body: "Use @amp in @opencompany/missing.",
       repositories,
     });
 
-    expect(config.tools).toEqual([expect.objectContaining({ id: "amp", repository: null })]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
     expect(config.integrations.github.repositories).toEqual([]);
   });
 
@@ -202,12 +194,8 @@ describe("deriveAgentConfigFromBody", () => {
     expect(config.integrations.github.repositories).toEqual([
       expect.objectContaining({ id: "useopencompany-agent-engineering-radar" }),
     ]);
-    expect(config.tools).toEqual([
-      expect.objectContaining({
-        id: "amp",
-        repository: "useopencompany-agent-engineering-radar",
-      }),
-    ]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
   });
 
   it("binds known workspace agent mentions and dedupes repeats", () => {

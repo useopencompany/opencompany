@@ -549,6 +549,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   ? extractAssistantText(assistantParts) || message.content
                   : message.content;
               const canCopy = copyText.trim().length > 0;
+              const duration = message.role === "assistant" ? runDurationForMessage(message) : 0;
 
               return (
                 <div
@@ -574,10 +575,16 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                       message.content
                     )}
                     {canCopy && message.status !== "running" ? (
-                      <CopyMessageButton
-                        text={copyText}
-                        align={message.role === "user" ? "right" : "left"}
-                      />
+                      <div
+                        className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 opacity-70 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100`}
+                      >
+                        <CopyMessageButton text={copyText} />
+                        {duration > 0 ? (
+                          <span className="text-[10px] tabular-nums text-ink-subtle/60 select-none">
+                            {formatElapsed(Math.round(duration))}
+                          </span>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -881,7 +888,7 @@ function extractAssistantText(parts: AssistantTurnPart[]): string {
     .join("\n\n");
 }
 
-function CopyMessageButton({ text, align }: { text: string; align: "left" | "right" }) {
+function CopyMessageButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -904,15 +911,13 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
     }
   };
 
-  const positionClasses = align === "right" ? "top-full right-0 mt-1" : "top-full left-0 mt-1";
-
   return (
     <button
       type="button"
       onClick={handleCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className={`absolute ${positionClasses} z-10 inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 pointer-events-none transition-opacity hover:bg-surface-subtle hover:text-ink focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       {copied ? (
         <Check size={10} strokeWidth={2} className="text-success" />

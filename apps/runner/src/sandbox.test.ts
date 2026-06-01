@@ -1,4 +1,10 @@
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const execFileAsync = promisify(execFile);
 
 const e2bMocks = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -12,9 +18,11 @@ vi.mock("e2b", () => ({
 
 import {
   armSandboxIdleTimeout,
+  cloneGitHubRepositoryIntoWorkdir,
   createOrConnectSandbox,
   githubRemoteMatches,
   prepareWorkspace,
+  resolveSandboxSkillPath,
   resolveSandboxToolPath,
   runSandboxTool,
   SandboxPreparationError,
@@ -166,23 +174,37 @@ describe("prepareWorkspace", () => {
     );
   });
 
-  it("clones the configured repository into work when no git checkout exists", async () => {
+  it("matches tokenized GitHub remotes without exposing the token", () => {
+    expect(
+      githubRemoteMatches(
+        "https://x-access-token:ghs_secret@github.com/opencompany/app.git",
+        "opencompany/app",
+      ),
+    ).toBe(true);
+    expect(githubRemoteMatches("git@github.com:opencompany/app.git", "opencompany/app")).toBe(true);
+    expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
+      false,
+    );
+  });
+});
+
+describe("cloneGitHubRepositoryIntoWorkdir", () => {
+  const WORKDIR = "/home/user/workspace/work";
+
+  it("clones the repository when no git checkout exists", async () => {
     const sandbox = createWorkspaceSandbox(["__opencompany_missing_git__\n"]);
 
-    await prepareWorkspace({
+    await cloneGitHubRepositoryIntoWorkdir({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
-      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      workdir: WORKDIR,
       repositoryFullName: "opencompany/app",
-      repositoryDefaultBranch: "main",
+      defaultBranch: "main",
       githubToken: "ghs_token",
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("git remote get-url origin"),
-      {
-        timeoutMs: 30_000,
-      },
+      { timeoutMs: 30_000 },
     );
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("clone --depth 1 --branch 'main'"),
@@ -203,32 +225,20 @@ describe("prepareWorkspace", () => {
         String(command).includes("x-access-token"),
       ),
     ).toBe(false);
-    expect(sandbox.commands.run).toHaveBeenCalledWith(
-      expect.stringContaining("'/home/user/workspace/work'"),
-      {
-        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
-        timeoutMs: 120_000,
-      },
-    );
-    expect(
-      sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git -C")),
-    ).toBe(false);
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/.opencompany/agent.agent",
-      '---\ntitle: "Agent"\n---\n\nInstructions',
-      { user: "root", requestTimeoutMs: 30_000 },
-    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(expect.stringContaining(`'${WORKDIR}'`), {
+      envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+      timeoutMs: 120_000,
+    });
   });
 
-  it("keeps an existing checkout when origin matches the configured repository", async () => {
+  it("keeps an existing checkout when origin matches the repository", async () => {
     const sandbox = createWorkspaceSandbox(["https://github.com/opencompany/app.git\n"]);
 
-    await prepareWorkspace({
+    await cloneGitHubRepositoryIntoWorkdir({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
-      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      workdir: WORKDIR,
       repositoryFullName: "opencompany/app",
-      repositoryDefaultBranch: "main",
+      defaultBranch: "main",
       githubToken: "ghs_token",
     });
 
@@ -246,12 +256,11 @@ describe("prepareWorkspace", () => {
   it("reclones when the existing checkout points at another repository", async () => {
     const sandbox = createWorkspaceSandbox(["https://github.com/opencompany/other.git\n"]);
 
-    await prepareWorkspace({
+    await cloneGitHubRepositoryIntoWorkdir({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
-      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      workdir: WORKDIR,
       repositoryFullName: "opencompany/app",
-      repositoryDefaultBranch: "develop",
+      defaultBranch: "develop",
       githubToken: "ghs_token",
     });
 
@@ -264,7 +273,7 @@ describe("prepareWorkspace", () => {
     );
   });
 
-  it("adds searchable stage context to repository preparation failures", async () => {
+  it("adds searchable stage context to clone failures", async () => {
     const cloneError = new Error("exit status 128");
     cloneError.name = "CommandExitError";
     const sandbox = {
@@ -284,12 +293,11 @@ describe("prepareWorkspace", () => {
 
     let caught: unknown;
     try {
-      await prepareWorkspace({
+      await cloneGitHubRepositoryIntoWorkdir({
         sandbox: sandbox as never,
-        workdir: "/home/user/workspace",
-        agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+        workdir: WORKDIR,
         repositoryFullName: "opencompany/app",
-        repositoryDefaultBranch: "main",
+        defaultBranch: "main",
         githubToken: "ghs_token",
       });
     } catch (error) {
@@ -305,19 +313,6 @@ describe("prepareWorkspace", () => {
       cause_name: "CommandExitError",
       cause_message: "exit status 128",
     });
-  });
-
-  it("matches tokenized GitHub remotes without exposing the token", () => {
-    expect(
-      githubRemoteMatches(
-        "https://x-access-token:ghs_secret@github.com/opencompany/app.git",
-        "opencompany/app",
-      ),
-    ).toBe(true);
-    expect(githubRemoteMatches("git@github.com:opencompany/app.git", "opencompany/app")).toBe(true);
-    expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
-      false,
-    );
   });
 });
 
@@ -343,6 +338,39 @@ describe("resolveSandboxToolPath", () => {
         /work\/ or brain\//,
       );
     }
+  });
+
+  it("rejects skills paths for generic file tools", () => {
+    expect(() =>
+      resolveSandboxToolPath("/home/user/workspace", "skills/agent-self-edit/SKILL.md"),
+    ).toThrow(/work\/ or brain\//);
+  });
+
+  it("allows work and brain paths for generic file tools", () => {
+    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
+      "/home/user/workspace/work/foo.txt",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
+      "/home/user/workspace/brain/foo.md",
+    );
+  });
+
+  it("resolves skill file paths only inside the requested skill directory", () => {
+    expect(resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", undefined)).toBe(
+      "/home/user/workspace/skills/agent-self-edit/SKILL.md",
+    );
+    expect(
+      resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", "references/help.md"),
+    ).toBe("/home/user/workspace/skills/agent-self-edit/references/help.md");
+    expect(() =>
+      resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", "../other/SKILL.md"),
+    ).toThrow(/relative file path/);
+    expect(() =>
+      resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", "refs/../SKILL.md"),
+    ).toThrow(/relative file path/);
+    expect(() =>
+      resolveSandboxSkillPath("/home/user/workspace", "agent/self-edit", "SKILL.md"),
+    ).toThrow(/valid mounted skill id/);
   });
 });
 
@@ -403,6 +431,94 @@ describe("runSandboxTool", () => {
     });
   });
 
+  it("returns shell nonzero exit output instead of throwing", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "partial output",
+            stderr: "fatal: not a git repository\n",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "shell",
+      args: { command: "git status" },
+    });
+
+    expect(result).toEqual({
+      stdout: "partial output",
+      stderr: "fatal: not a git repository\n",
+      exitCode: 1,
+    });
+  });
+
+  it("runs gh commands from the work directory with injected auth and redaction", async () => {
+    const onOutput = vi.fn();
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStderr?: (data: string) => void }) => {
+          options.onStderr?.("using github_token_123\n");
+          return { stdout: "ok github_token_123", stderr: "", exitCode: 0 };
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "pr create --fill" },
+      envs: { GH_TOKEN: "github_token_123" },
+      redactOutput: (value) => value.replaceAll("github_token_123", "[redacted]"),
+      onOutput,
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "gh pr create --fill",
+      expect.objectContaining({
+        cwd: sandboxLayout("/home/user/workspace").workRoot,
+        envs: { GH_TOKEN: "github_token_123" },
+      }),
+    );
+    expect(onOutput).toHaveBeenCalledWith("stderr", "using [redacted]\n");
+    expect(result).toEqual({ stdout: "ok [redacted]", stderr: "", exitCode: 0 });
+  });
+
+  it("returns gh nonzero exit output instead of throwing", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "",
+            stderr: "failed to determine repository\n",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "pr list" },
+    });
+
+    expect(result).toEqual({
+      stdout: "",
+      stderr: "failed to determine repository\n",
+      exitCode: 1,
+    });
+  });
+
   it("creates parent directories before writing nested files", async () => {
     const sandbox = {
       commands: {
@@ -428,6 +544,55 @@ describe("runSandboxTool", () => {
       "/home/user/workspace/work/sub/new/file.txt",
       "content",
     );
+  });
+
+  it("reads mounted skill files through read_skill", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("---\nname: agent-self-edit\n---\n"),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "read_skill",
+      args: { skillId: "agent-self-edit" },
+    });
+
+    expect(sandbox.files.read).toHaveBeenCalledWith(
+      "/home/user/workspace/skills/agent-self-edit/SKILL.md",
+    );
+    expect(result).toEqual({
+      path: "skills/agent-self-edit/SKILL.md",
+      content: "---\nname: agent-self-edit\n---\n",
+    });
+  });
+
+  it("rejects invalid read_skill paths and missing files", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockRejectedValue(new Error("not found")),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "read_skill",
+        args: { skillId: "agent-self-edit", path: "/SKILL.md" },
+      }),
+    ).rejects.toThrow(/relative file path/);
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "read_skill",
+        args: { skillId: "agent-self-edit", path: "missing.md" },
+      }),
+    ).rejects.toThrow(/Skill file not found/);
   });
 
   it("applies ordered exact edits atomically", async () => {
@@ -652,30 +817,148 @@ describe("runSandboxTool", () => {
     expect(result).toEqual({ path: "work", entries: ["work", "work/a.txt"] });
   });
 
-  it("returns the diff from the session work git repo including untracked files", async () => {
+  it("returns the scratch diff from the session work git repo including untracked files", async () => {
+    const workdir = await createTempWorkdir();
     const sandbox = {
       commands: {
-        run: vi.fn().mockResolvedValue({ stdout: "diff --git a/a.txt b/a.txt\n", stderr: "" }),
+        run: vi.fn(runLocalCommand),
       },
     };
+    await writeFile(`${workdir}/work/a.txt`, "hello\n");
 
     const result = await runSandboxTool({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
+      workdir,
       name: "git_diff",
       args: {},
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
-      [
-        "git -C '/home/user/workspace/work' diff --",
-        "git -C '/home/user/workspace/work' ls-files --others --exclude-standard | while IFS= read -r file; do git -C '/home/user/workspace/work' diff --no-index -- /dev/null \"$file\" || true; done",
-      ].join(" && "),
+      expect.stringContaining(`WORK='${workdir}/work'`),
       { timeoutMs: 60_000 },
     );
-    expect(result).toEqual({ diff: "diff --git a/a.txt b/a.txt\n", stderr: "" });
+    const diff = readDiffOutput(result);
+    expect(diff).toContain("--- work/ ---");
+    expect(diff).toContain("?? a.txt");
+    expect(diff).toContain("hello");
+  });
+
+  it("returns the root checkout diff when work itself is a cloned repo", async () => {
+    const workdir = await createTempWorkdir();
+    const sandbox = {
+      commands: {
+        run: vi.fn(runLocalCommand),
+      },
+    };
+    await execFileAsync("git", [
+      "-C",
+      `${workdir}/work`,
+      "config",
+      "user.email",
+      "test@example.com",
+    ]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "config", "user.name", "Test User"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "before\n");
+    await execFileAsync("git", ["-C", `${workdir}/work`, "add", "tracked.txt"]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "commit", "-m", "initial"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "after\n");
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir,
+      name: "git_diff",
+      args: {},
+    });
+
+    const diff = readDiffOutput(result);
+    expect(diff).toContain("--- work/ ---");
+    expect(diff).toContain(" M tracked.txt");
+    expect(diff).toContain("-before");
+    expect(diff).toContain("+after");
+  });
+
+  it("includes staged root checkout changes in the git diff", async () => {
+    const workdir = await createTempWorkdir();
+    const sandbox = {
+      commands: {
+        run: vi.fn(runLocalCommand),
+      },
+    };
+    await execFileAsync("git", [
+      "-C",
+      `${workdir}/work`,
+      "config",
+      "user.email",
+      "test@example.com",
+    ]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "config", "user.name", "Test User"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "before\n");
+    await execFileAsync("git", ["-C", `${workdir}/work`, "add", "tracked.txt"]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "commit", "-m", "initial"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "after\n");
+    await execFileAsync("git", ["-C", `${workdir}/work`, "add", "tracked.txt"]);
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir,
+      name: "git_diff",
+      args: {},
+    });
+
+    const diff = readDiffOutput(result);
+    expect(diff).toContain("--- work/ ---");
+    expect(diff).toContain("M  tracked.txt");
+    expect(diff).toContain("-before");
+    expect(diff).toContain("+after");
+  });
+
+  it("returns immediate child repository diffs without reporting the child as scratch", async () => {
+    const workdir = await createTempWorkdir();
+    const sandbox = {
+      commands: {
+        run: vi.fn(runLocalCommand),
+      },
+    };
+    await mkdir(`${workdir}/work/app`);
+    await execFileAsync("git", ["-C", `${workdir}/work/app`, "init", "-q"]);
+    await writeFile(`${workdir}/work/app/new.txt`, "nested\n");
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir,
+      name: "git_diff",
+      args: {},
+    });
+
+    const diff = readDiffOutput(result);
+    expect(diff).not.toContain("--- work/ ---");
+    expect(diff).not.toContain("?? app/");
+    expect(diff).toContain("--- work/app/ ---");
+    expect(diff).toContain("?? new.txt");
+    expect(diff).toContain("nested");
   });
 });
+
+async function createTempWorkdir() {
+  const workdir = await mkdtemp(`${os.tmpdir()}/opencompany-sandbox-test-`);
+  await mkdir(`${workdir}/work`);
+  await execFileAsync("git", ["-C", `${workdir}/work`, "init", "-q"]);
+  return workdir;
+}
+
+function readDiffOutput(value: unknown) {
+  if (value && typeof value === "object" && "diff" in value && typeof value.diff === "string") {
+    return value.diff;
+  }
+  throw new Error("Expected git_diff output.");
+}
+
+async function runLocalCommand(command: string) {
+  const result = await execFileAsync("bash", ["-lc", command], {
+    maxBuffer: 1024 * 1024,
+  });
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+}
 
 function createWorkspaceSandbox(stdout: string[]) {
   return {
