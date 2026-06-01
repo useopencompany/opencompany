@@ -292,7 +292,7 @@ export async function runSandboxTool(input: {
   if (input.name === "shell") {
     const command = readString(args, "command");
     const layout = sandboxLayout(input.workdir);
-    const result = await input.sandbox.commands.run(command, {
+    const result = await runCommandWithExitResult(input.sandbox, command, {
       cwd: layout.workspaceRoot,
       ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
@@ -313,7 +313,7 @@ export async function runSandboxTool(input: {
   if (input.name === "gh") {
     const ghArgs = readString(args, "args");
     const layout = sandboxLayout(input.workdir);
-    const result = await input.sandbox.commands.run(`gh ${ghArgs}`, {
+    const result = await runCommandWithExitResult(input.sandbox, `gh ${ghArgs}`, {
       cwd: layout.workRoot,
       ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
@@ -449,25 +449,93 @@ export async function runSandboxTool(input: {
 
   if (input.name === "git_diff") {
     const layout = sandboxLayout(input.workdir);
-    const result = await input.sandbox.commands.run(
-      [
-        `git -C ${shellQuote(layout.workRoot)} diff --`,
-        `git -C ${shellQuote(layout.workRoot)} ls-files --others --exclude-standard | while IFS= read -r file; do git -C ${shellQuote(layout.workRoot)} diff --no-index -- /dev/null "$file" || true; done`,
-      ].join(" && "),
-      {
-        timeoutMs: 60_000,
-      },
-    );
+    const result = await input.sandbox.commands.run(gitDiffCommand(layout.workRoot), {
+      timeoutMs: 60_000,
+    });
     return truncate({ diff: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") });
   }
 
   throw new Error(`Unknown tool: ${input.name}`);
 }
 
+async function runCommandWithExitResult(
+  sandbox: SandboxHandle,
+  command: string,
+  options: Parameters<SandboxHandle["commands"]["run"]>[1],
+) {
+  try {
+    return await sandbox.commands.run(command, options);
+  } catch (error) {
+    const exitResult = commandExitResult(error);
+    if (exitResult) return exitResult;
+    throw error;
+  }
+}
+
+function commandExitResult(error: unknown) {
+  if (!error || typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  if (record.name !== "CommandExitError") return null;
+  if (typeof record.exitCode !== "number") return null;
+
+  return {
+    stdout: typeof record.stdout === "string" ? record.stdout : "",
+    stderr: typeof record.stderr === "string" ? record.stderr : "",
+    exitCode: record.exitCode,
+  };
+}
+
+function gitDiffCommand(workRoot: string) {
+  return [
+    `WORK=${shellQuote(workRoot)}`,
+    "emit_repo_diff() {",
+    '  repo="$1"',
+    '  label="$2"',
+    '  skip_nested="${3:-0}"',
+    '  [ -d "$repo/.git" ] || return 0',
+    '  body="$(',
+    '    git -C "$repo" status --short | while IFS= read -r line; do',
+    '      if [ "$skip_nested" = "1" ]; then',
+    '        path="${line#?? }"',
+    '        first="${path%%/*}"',
+    '        if [ -n "$first" ] && [ -d "$repo/$first/.git" ]; then',
+    "          continue",
+    "        fi",
+    "      fi",
+    '      printf "%s\\n" "$line"',
+    "    done",
+    '    git -C "$repo" diff --cached --',
+    '    git -C "$repo" diff --',
+    '    git -C "$repo" ls-files --others --exclude-standard | while IFS= read -r file; do',
+    '      [ -n "$file" ] || continue',
+    '      if [ "$skip_nested" = "1" ]; then',
+    '        first="${file%%/*}"',
+    '        if [ -n "$first" ] && [ -d "$repo/$first/.git" ]; then',
+    "          continue",
+    "        fi",
+    "      fi",
+    '      if [ -f "$repo/$file" ]; then',
+    '        git -C "$repo" diff --no-index -- /dev/null "$file" || true',
+    "      fi",
+    "    done",
+    '  )"',
+    '  if [ -n "$body" ]; then',
+    '    printf -- "--- %s ---\\n%s\\n" "$label" "$body"',
+    "  fi",
+    "}",
+    'emit_repo_diff "$WORK" "work/" "1"',
+    'find "$WORK" -mindepth 2 -maxdepth 2 -type d -name .git -print | sort | while IFS= read -r git_dir; do',
+    '  repo_dir="$(dirname "$git_dir")"',
+    '  repo_name="${repo_dir##*/}"',
+    '  emit_repo_diff "$repo_dir" "work/$repo_name/"',
+    "done",
+  ].join("\n");
+}
+
 export function resolveSandboxToolPath(
   workdir: string,
   inputPath = "work",
-  mode: "read" | "write" = "write",
+  _mode: "read" | "write" = "write",
 ) {
   const allowedRootsMessage = "Path must be inside work/ or brain/ for this session.";
   let resolved: string;

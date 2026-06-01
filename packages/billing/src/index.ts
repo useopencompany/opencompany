@@ -16,6 +16,7 @@ type PricingProvider =
   | "mistral"
   | "minimax"
   | "moonshotai"
+  | "xai"
   | "zai";
 
 type ModelPricing = {
@@ -25,6 +26,11 @@ type ModelPricing = {
   cachedInputUsdMicrosPerMillion: number;
   cacheWriteUsdMicrosPerMillion: number;
   outputUsdMicrosPerMillion: number;
+  longContext?: {
+    inputTokenThreshold: number;
+    inputMultiplier: number;
+    outputMultiplier: number;
+  };
 };
 
 export type UsageCostInput = {
@@ -269,6 +275,74 @@ const MODEL_PRICING: Record<AgentModelId, ModelPricing> = {
     cacheWriteUsdMicrosPerMillion: 570_000,
     outputUsdMicrosPerMillion: 2_300_000,
   },
+  "xai/grok-4.3": {
+    model: "xai/grok-4.3",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_250_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  "xai/grok-4.20-reasoning": {
+    model: "xai/grok-4.20-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_250_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  "xai/grok-4.20-non-reasoning": {
+    model: "xai/grok-4.20-non-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_250_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_250_000,
+    outputUsdMicrosPerMillion: 2_500_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
+  "xai/grok-4.1-fast-reasoning": {
+    model: "xai/grok-4.1-fast-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 200_000,
+    cachedInputUsdMicrosPerMillion: 50_000,
+    cacheWriteUsdMicrosPerMillion: 200_000,
+    outputUsdMicrosPerMillion: 500_000,
+  },
+  "xai/grok-4.1-fast-non-reasoning": {
+    model: "xai/grok-4.1-fast-non-reasoning",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 200_000,
+    cachedInputUsdMicrosPerMillion: 50_000,
+    cacheWriteUsdMicrosPerMillion: 200_000,
+    outputUsdMicrosPerMillion: 500_000,
+  },
+  "xai/grok-build-0.1": {
+    model: "xai/grok-build-0.1",
+    provider: "xai",
+    inputUsdMicrosPerMillion: 1_000_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 1_000_000,
+    outputUsdMicrosPerMillion: 2_000_000,
+    longContext: {
+      inputTokenThreshold: 200_001,
+      inputMultiplier: 2,
+      outputMultiplier: 2,
+    },
+  },
   "zai/glm-5.1": {
     model: "zai/glm-5.1",
     provider: "zai",
@@ -325,11 +399,21 @@ export function calculateModelUsageCost(input: UsageCostInput): UsageCostResult 
     };
   }
 
-  const longContextMultiplier =
+  const configuredLongContext =
+    pricing.longContext &&
+    safeTokenCount(input.inputTokens) > pricing.longContext.inputTokenThreshold
+      ? {
+          input: pricing.longContext.inputMultiplier,
+          output: pricing.longContext.outputMultiplier,
+        }
+      : null;
+  const legacyOpenAiLongContext =
     pricing.model === "openai/gpt-5.4" &&
     safeTokenCount(input.inputTokens) > GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD
       ? { input: 2, output: 1.5 }
-      : { input: 1, output: 1 };
+      : null;
+  const longContextMultiplier = configuredLongContext ??
+    legacyOpenAiLongContext ?? { input: 1, output: 1 };
   const uncachedInputRate = pricing.inputUsdMicrosPerMillion * longContextMultiplier.input;
   const cacheReadRate = pricing.cachedInputUsdMicrosPerMillion * longContextMultiplier.input;
   const cacheWriteRate = pricing.cacheWriteUsdMicrosPerMillion * longContextMultiplier.input;

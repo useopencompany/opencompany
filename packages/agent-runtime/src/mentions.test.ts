@@ -29,8 +29,10 @@ const boundRepositories = [
 ];
 
 describe("extractConfigFromMentions", () => {
-  it("leaves legacy model-looking mentions out of derived config", () => {
-    const config = extractConfigFromMentions("Use @fast, then @deep, then @openai/gpt-5.4.");
+  it("leaves model-looking mentions out of derived config", () => {
+    const config = extractConfigFromMentions(
+      "Use @fast, then @deep, then @openai/gpt-5.4, then @xai/grok-4.3.",
+    );
 
     expect(config).toMatchObject({
       tools: [],

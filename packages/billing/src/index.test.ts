@@ -59,6 +59,12 @@ describe("calculateModelUsageCost", () => {
     ["moonshotai/kimi-k2-thinking-turbo", 10_450],
     ["moonshotai/kimi-k2-turbo", 10_450],
     ["moonshotai/kimi-k2", 3_440],
+    ["xai/grok-4.3", 5_200],
+    ["xai/grok-4.20-reasoning", 5_200],
+    ["xai/grok-4.20-non-reasoning", 5_200],
+    ["xai/grok-4.1-fast-reasoning", 950],
+    ["xai/grok-4.1-fast-non-reasoning", 950],
+    ["xai/grok-build-0.1", 4_200],
     ["zai/glm-5.1", 7_460],
     ["zai/glm-5-turbo", 6_640],
     ["zai/glm-5v-turbo", 6_640],
@@ -100,6 +106,20 @@ describe("calculateModelUsageCost", () => {
     });
 
     expect(cost.providerCostUsdMicros).toBe(27_500);
+    expect(cost.costBasis.longContextApplied).toBe(true);
+  });
+
+  it("applies xAI long-context tiers when input exceeds the threshold", () => {
+    const cost = calculateModelUsageCost({
+      modelName: "xai/grok-4.3",
+      inputTokens: 200_002,
+      inputNoCacheTokens: 1_000,
+      inputCacheReadTokens: 1_000,
+      inputCacheWriteTokens: 0,
+      outputTokens: 1_000,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(7_900);
     expect(cost.costBasis.longContextApplied).toBe(true);
   });
 

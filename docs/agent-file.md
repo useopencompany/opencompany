@@ -88,6 +88,12 @@ The model the agent runs on. Must be one of:
 | `moonshotai/kimi-k2-thinking-turbo`        | Faster Kimi reasoning variant for interactive workflows.        |
 | `moonshotai/kimi-k2-turbo`                 | Speed-optimized Kimi K2 for latency-sensitive tool use.         |
 | `moonshotai/kimi-k2`                       | Kimi K2 instruct model for coding and agentic pipelines.        |
+| `xai/grok-4.3`                             | Latest Grok reasoning model with 1M context and tool use.       |
+| `xai/grok-4.20-reasoning`                  | Long-context Grok reasoning model for agent workflows.          |
+| `xai/grok-4.20-non-reasoning`              | Long-context Grok model for direct tool-using tasks.            |
+| `xai/grok-4.1-fast-reasoning`              | Fast, low-cost Grok reasoning model with 1M context.            |
+| `xai/grok-4.1-fast-non-reasoning`          | Fast, low-cost Grok model for direct answers.                   |
+| `xai/grok-build-0.1`                       | xAI coding model for fast agentic software development.         |
 | `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
 | `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
 | `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |

@@ -652,6 +652,7 @@ async function resolveShellGitHubAuth(input: {
       githubAuthHeader,
       githubToken,
       toolCallId: input.toolCallId,
+      ...(resolved.length === 1 ? { repositoryFullName: resolved[0]!.fullName } : {}),
     }),
     redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
   };
