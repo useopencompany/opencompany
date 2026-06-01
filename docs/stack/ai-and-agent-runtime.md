@@ -155,6 +155,12 @@ Internal delegation tools are enabled by agent configuration:
 - `delegate_to_agent` when the agent references other workspace agents; it can start an inspectable
   child session hidden from sidebar history or continue one of its own prior child sessions by `sessionId`
 
+Skill-enabled tools are enabled by agent skill configuration:
+
+- `read_skill` reads mounted skill files from the read-only `skills/<id>/` tree
+- `update_agent_file` when the agent enables `agent-self-edit`; it validates and persists changes to
+  the agent's own `.agent` configuration and queues GitHub sync
+
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository

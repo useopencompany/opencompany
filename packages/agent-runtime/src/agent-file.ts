@@ -9,8 +9,8 @@ import {
   SUPPORTED_AGENT_TOOLS,
   toConfigTool,
 } from "./mentions";
-import { normalizeAgentSkills } from "./skills";
 import { isSupportedScheduleCron, normalizeScheduleTimezone } from "./schedules";
+import { normalizeAgentSkills } from "./skills";
 import type {
   AgentBrainReference,
   AgentConfig,
@@ -104,7 +104,7 @@ export function validateAgentFileSource(source: string): AgentFileValidationResu
   const errors: string[] = [];
   const normalized = source.replace(/\r\n/g, "\n");
 
-  if (Buffer.byteLength(normalized, "utf8") > MAX_AGENT_FILE_BYTES) {
+  if (new TextEncoder().encode(normalized).length > MAX_AGENT_FILE_BYTES) {
     errors.push(
       `Agent file is too large (max ${Math.floor(MAX_AGENT_FILE_BYTES / 1024)} KB). Shorten the instructions.`,
     );

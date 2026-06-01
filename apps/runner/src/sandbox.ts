@@ -332,7 +332,7 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "read_file") {
-    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"), "read");
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
     return truncate({
       path: relativePath(input.workdir, filePath),
       content: await input.sandbox.files.read(filePath),
@@ -432,7 +432,7 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "list_files") {
-    const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"), "read");
+    const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"));
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
     const toolRelativePath = relativePath(input.workdir, dirPath);
     const result = await input.sandbox.commands.run(
@@ -532,11 +532,7 @@ function gitDiffCommand(workRoot: string) {
   ].join("\n");
 }
 
-export function resolveSandboxToolPath(
-  workdir: string,
-  inputPath = "work",
-  _mode: "read" | "write" = "write",
-) {
+export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
   const allowedRootsMessage = "Path must be inside work/ or brain/ for this session.";
   let resolved: string;
   try {

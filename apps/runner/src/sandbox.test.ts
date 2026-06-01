@@ -342,15 +342,15 @@ describe("resolveSandboxToolPath", () => {
 
   it("rejects skills paths for generic file tools", () => {
     expect(() =>
-      resolveSandboxToolPath("/home/user/workspace", "skills/agent-self-edit/SKILL.md", "read"),
+      resolveSandboxToolPath("/home/user/workspace", "skills/agent-self-edit/SKILL.md"),
     ).toThrow(/work\/ or brain\//);
   });
 
-  it("still allows work and brain for read mode", () => {
-    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt", "read")).toBe(
+  it("allows work and brain paths for generic file tools", () => {
+    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
       "/home/user/workspace/work/foo.txt",
     );
-    expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md", "read")).toBe(
+    expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
       "/home/user/workspace/brain/foo.md",
     );
   });
