@@ -55,6 +55,7 @@ export function sandboxLayout(workdir: string) {
     workspaceRoot: workdir,
     brainRoot: `${workdir}/brain`,
     workRoot: `${workdir}/work`,
+    skillsRoot: `${workdir}/skills`,
     metadataRoot: METADATA_ROOT,
     agentFile: `${METADATA_ROOT}/agent.agent`,
     brainManifest: `${METADATA_ROOT}/brain-manifest.json`,
@@ -338,6 +339,23 @@ export async function runSandboxTool(input: {
     });
   }
 
+  if (input.name === "read_skill") {
+    const filePath = resolveSandboxSkillPath(
+      input.workdir,
+      readString(args, "skillId"),
+      readOptionalString(args, "path"),
+    );
+    const toolRelativePath = relativePath(input.workdir, filePath);
+    try {
+      return truncate({
+        path: toolRelativePath,
+        content: await input.sandbox.files.read(filePath),
+      });
+    } catch {
+      throw new Error(`Skill file not found or unreadable: ${toolRelativePath}.`);
+    }
+  }
+
   if (input.name === "write_file") {
     const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
     const content = readString(args, "content");
@@ -515,24 +533,54 @@ function gitDiffCommand(workRoot: string) {
 }
 
 export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
+  const allowedRootsMessage = "Path must be inside work/ or brain/ for this session.";
   let resolved: string;
   try {
     resolved = resolveWorkspacePath(workdir, inputPath);
   } catch {
-    throw new Error("Path must be inside work/ or brain/ for this session.");
+    throw new Error(allowedRootsMessage);
   }
   const relative = relativePath(workdir, resolved);
 
-  if (
+  const inAllowedRoot =
     relative === "work" ||
     relative.startsWith("work/") ||
     relative === "brain" ||
-    relative.startsWith("brain/")
-  ) {
+    relative.startsWith("brain/");
+
+  if (inAllowedRoot) {
     return resolved;
   }
 
-  throw new Error("Path must be inside work/ or brain/ for this session.");
+  throw new Error(allowedRootsMessage);
+}
+
+export function resolveSandboxSkillPath(workdir: string, skillId: string, inputPath = "SKILL.md") {
+  const id = skillId.trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(id) || id.includes("--")) {
+    throw new Error("Skill id must be a valid mounted skill id.");
+  }
+
+  const relativeFilePath = inputPath.trim() || "SKILL.md";
+  if (
+    relativeFilePath.includes("\0") ||
+    path.posix.isAbsolute(relativeFilePath) ||
+    relativeFilePath === "." ||
+    relativeFilePath.split("/").includes("..") ||
+    relativeFilePath.endsWith("/")
+  ) {
+    throw new Error("Skill path must be a relative file path inside the skill directory.");
+  }
+
+  const resolved = resolveWorkspacePath(workdir, path.posix.join("skills", id, relativeFilePath));
+  const relative = relativePath(workdir, resolved);
+  const skillRoot = `skills/${id}`;
+
+  if (relative !== skillRoot && relative.startsWith(`${skillRoot}/`)) {
+    return resolved;
+  }
+
+  throw new Error("Skill path must stay inside the requested skill directory.");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -29,6 +29,7 @@ import {
   type SandboxHandle,
   sandboxPreparationErrorFields,
 } from "./sandbox";
+import { materializeSkillsForSession } from "./skills";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
@@ -64,6 +65,11 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       workspaceId: row.workspace.id,
       workdir: row.session.workdir,
       references: agentConfig.brain,
+    });
+    await materializeSkillsForSession({
+      sandbox,
+      workdir: row.session.workdir,
+      config: agentConfig,
     });
     return sandbox;
   } catch (error) {
