@@ -65,6 +65,13 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
     },
     {
       type: "category" as const,
+      kind: "schedule" as const,
+      label: "Schedules",
+      description: `${items.filter((item) => item.kind === "schedule").length} available`,
+      icon: Clock3,
+    },
+    {
+      type: "category" as const,
       kind: "hook" as const,
       label: "Hooks",
       description: `${items.filter((item) => item.kind === "hook").length} available`,
@@ -220,11 +227,16 @@ function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "tool") return "Tools";
   if (kind === "agent") return "Agents";
   if (kind === "integration") return "Work integrations";
+  if (kind === "schedule") return "Schedules";
   if (kind === "hook") return "Hooks";
   return "Brain";
 }
 
 function mentionCommandItem(item: AgentMentionItem) {
+  if (item.kind === "schedule") {
+    return { id: item.mentionId, label: item.label, action: "schedule" };
+  }
+
   return {
     id: item.mentionId,
     label: item.label,

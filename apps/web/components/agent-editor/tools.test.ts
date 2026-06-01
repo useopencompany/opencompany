@@ -40,7 +40,26 @@ describe("agent editor mention tools", () => {
       "google/gemini-3.1-flash-lite-preview",
       "deepseek/deepseek-v4-flash",
       "mistral/mistral-medium-3.5",
+      "minimax/minimax-m3",
+      "minimax/minimax-m2.7",
+      "minimax/minimax-m2.7-highspeed",
+      "minimax/minimax-m2.5",
+      "minimax/minimax-m2.5-highspeed",
+      "minimax/minimax-m2.1",
+      "minimax/minimax-m2.1-lightning",
+      "minimax/minimax-m2",
       "moonshotai/kimi-k2.6",
+      "moonshotai/kimi-k2.5",
+      "moonshotai/kimi-k2-thinking",
+      "moonshotai/kimi-k2-thinking-turbo",
+      "moonshotai/kimi-k2-turbo",
+      "moonshotai/kimi-k2",
+      "xai/grok-4.3",
+      "xai/grok-4.20-reasoning",
+      "xai/grok-4.20-non-reasoning",
+      "xai/grok-4.1-fast-reasoning",
+      "xai/grok-4.1-fast-non-reasoning",
+      "xai/grok-build-0.1",
       "zai/glm-5.1",
       "zai/glm-5-turbo",
       "zai/glm-5v-turbo",
@@ -49,12 +68,28 @@ describe("agent editor mention tools", () => {
       id: "google/gemini-3-flash",
       displayLabel: "google/gemini-3-flash",
     });
+    expect(findModel("model:minimax/minimax-m3")).toMatchObject({
+      id: "minimax/minimax-m3",
+      displayLabel: "minimax/minimax-m3",
+    });
   });
 
   test("does not include models in the mention suggestion menu", () => {
     const items = buildAgentMentionItems();
     expect(items.every((item) => item.kind !== "model")).toBe(true);
     expect(items.some((item) => item.mentionId.startsWith("model:"))).toBe(false);
+  });
+
+  test("exposes schedule creation as an action mention", () => {
+    expect(buildAgentMentionItems()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "schedule",
+          mentionId: "schedule:run-every",
+          displayLabel: "Run every...",
+        }),
+      ]),
+    );
   });
 
   test("only exposes configured MCP tools for the workspace", () => {

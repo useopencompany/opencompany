@@ -38,7 +38,26 @@ export type AgentModelId =
   | "google/gemini-3.1-flash-lite-preview"
   | "deepseek/deepseek-v4-flash"
   | "mistral/mistral-medium-3.5"
+  | "minimax/minimax-m3"
+  | "minimax/minimax-m2.7"
+  | "minimax/minimax-m2.7-highspeed"
+  | "minimax/minimax-m2.5"
+  | "minimax/minimax-m2.5-highspeed"
+  | "minimax/minimax-m2.1"
+  | "minimax/minimax-m2.1-lightning"
+  | "minimax/minimax-m2"
   | "moonshotai/kimi-k2.6"
+  | "moonshotai/kimi-k2.5"
+  | "moonshotai/kimi-k2-thinking"
+  | "moonshotai/kimi-k2-thinking-turbo"
+  | "moonshotai/kimi-k2-turbo"
+  | "moonshotai/kimi-k2"
+  | "xai/grok-4.3"
+  | "xai/grok-4.20-reasoning"
+  | "xai/grok-4.20-non-reasoning"
+  | "xai/grok-4.1-fast-reasoning"
+  | "xai/grok-4.1-fast-non-reasoning"
+  | "xai/grok-build-0.1"
   | "zai/glm-5.1"
   | "zai/glm-5-turbo"
   | "zai/glm-5v-turbo";
@@ -56,7 +75,6 @@ export type AgentCodingToolConfig = {
   provider: "amp";
   label: string;
   description: string;
-  repository: string | null;
   prCapable: boolean;
 };
 
@@ -78,6 +96,10 @@ export type AgentBrainReference = {
 export type AgentReference = {
   path: string;
   name: string;
+};
+
+export type AgentSkillReference = {
+  id: string;
 };
 
 export type AgentAfterSessionConfig = {
@@ -106,7 +128,7 @@ export type AgentGitHubRepositoryConfig = {
   binding?: AgentGitHubRepositoryBinding;
 };
 
-export type AgentTriggerConfig = {
+export type AgentGitHubPullRequestTriggerConfig = {
   id: string;
   type: "github.pull_request";
   repository: string;
@@ -114,6 +136,17 @@ export type AgentTriggerConfig = {
   branches: string[];
   enabled: boolean;
 };
+
+export type AgentScheduleTriggerConfig = {
+  id: string;
+  type: "agent.schedule";
+  cron: string;
+  timezone: string;
+  prompt: string;
+  enabled: boolean;
+};
+
+export type AgentTriggerConfig = AgentGitHubPullRequestTriggerConfig | AgentScheduleTriggerConfig;
 
 export type AgentConfig = {
   schemaVersion: "agent.v1";
@@ -126,6 +159,7 @@ export type AgentConfig = {
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
   agents?: AgentReference[];
+  skills?: AgentSkillReference[];
   afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {

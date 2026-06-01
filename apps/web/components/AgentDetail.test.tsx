@@ -227,6 +227,61 @@ describe("AgentDetail", () => {
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
   });
+
+  it("saves a preset schedule from the inspector", async () => {
+    const user = userEvent.setup();
+    updateAgentMock.mockResolvedValue({
+      id: detailAgent.id,
+      workspaceId: detailAgent.workspaceId,
+      path: "agents/leo.agent",
+      agent: {
+        ...detailAgent,
+        config: {
+          ...detailAgent.config,
+          triggers: [
+            {
+              id: "review-priorities",
+              type: "agent.schedule",
+              cron: "0 9 * * 1-5",
+              timezone: "UTC",
+              prompt: "Review priorities.",
+              enabled: true,
+            },
+          ],
+        },
+      },
+      pathChanged: false,
+    } satisfies Awaited<ReturnType<typeof updateAgent>>);
+
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+    await user.click(screen.getByRole("button", { name: /run every/i }));
+    expect(screen.getByLabelText(/enabled/i)).toBeChecked();
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "daily");
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "weekdays");
+    await user.clear(screen.getByLabelText(/timezone/i));
+    await user.type(screen.getByLabelText(/timezone/i), "UTC");
+    await user.type(screen.getByLabelText(/prompt/i), "Review priorities.");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(updateAgentMock).toHaveBeenCalledWith("agt_123", {
+        config: {
+          triggers: [
+            {
+              id: expect.stringMatching(/^review-priorities/),
+              type: "agent.schedule",
+              cron: "0 9 * * 1-5",
+              timezone: "UTC",
+              prompt: "Review priorities.",
+              enabled: true,
+            },
+          ],
+        },
+      }),
+    );
+  });
 });
 
 describe("AgentDetail – rename behaviour", () => {

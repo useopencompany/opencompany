@@ -20,21 +20,20 @@ agents:
     name: Sales research
 ---
 
-Research investors with @exa. Use @deep for fund-thesis write-ups. Keep context from @brain/docs/README.md close. Ask @agent/sales-research for account notes.
+Research investors with @exa. Write careful fund-thesis summaries. Keep context from @brain/docs/README.md close. Ask @agent/sales-research for account notes.
 ```
 
 A `.agent` file has two parts:
 
 1. **Frontmatter** — a YAML block fenced by `---` lines. Deterministic metadata the runtime needs to dispatch the agent.
-2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind models, tools, and Brain files/folders.
+2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind tools, Brain files/folders, repositories, and workspace agents.
 
 Files live at `agents/<slug>.agent` in the workspace's GitHub repo, where `<slug>` is the lowercased, dash-joined title.
 
 ## Mentions are the source of truth
 
-Frontmatter is **derived from the body**, not authored independently. When the editor serializes an agent:
+Some frontmatter fields are **derived from body mentions** rather than authored independently. When the editor serializes an agent:
 
-- The most recent supported `@model` mention wins → written to `model:`.
 - Unique supported `@tool` mentions → written to `tools:`.
 - Unique supported `@brain/<path>` mentions → written to `brain:`.
 - A supported GitHub repository mention, such as `@owner/repo`, is written to
@@ -42,15 +41,15 @@ Frontmatter is **derived from the body**, not authored independently. When the e
 - Unique supported `@agent/<slug>` mentions → written to `agents:`.
 - The title input → written to `title:`.
 
-Editing `@deep` into the body changes the model. Removing `@exa` removes the tool. One source of truth, zero drift between what the instructions reference and what the runtime is configured to do.
+Removing `@exa` removes the tool. Tool and context mentions stay in sync with what the runtime is configured to use.
 
-If the body has no model mention, `model:` defaults to `openai/gpt-5.4-mini`.
+Model selection is per-agent config in `model:`. Body mentions do not change the model.
 
 ### Tiptap content is not the contract
 
 The web editor may store a Tiptap JSON document so mentions can render as chips when the agent is reopened. That JSON is an editor presentation cache only. It can be stale, incomplete, or missing mention attributes after a client update, so persisted saves must never derive runtime config from Tiptap JSON when body text is available.
 
-On save, the server derives frontmatter/config from the body text that will be written to the `.agent` file, then stores sanitized Tiptap JSON separately for editor hydration. If body and Tiptap content disagree, the body wins.
+On save, the server derives mention-backed frontmatter/config from the body text that will be written to the `.agent` file, then stores sanitized Tiptap JSON separately for editor hydration. If body and Tiptap content disagree, the body wins for mention-backed fields.
 
 ## Frontmatter fields
 
@@ -75,7 +74,26 @@ The model the agent runs on. Must be one of:
 | `google/gemini-3.1-flash-lite-preview`     | Very fast, low-cost Gemini for simple high-volume tasks.        |
 | `deepseek/deepseek-v4-flash`               | High-throughput DeepSeek for cost-sensitive work.               |
 | `mistral/mistral-medium-3.5`               | Mistral model balancing quality, latency, and cost.             |
+| `minimax/minimax-m3`                       | Latest MiniMax with 1M context and agentic coding strength.     |
+| `minimax/minimax-m2.7`                     | High-capability MiniMax for software engineering agents.        |
+| `minimax/minimax-m2.7-highspeed`           | Fast MiniMax M2.7 variant for latency-sensitive agent work.     |
+| `minimax/minimax-m2.5`                     | MiniMax for full-stack and multi-file code work.                |
+| `minimax/minimax-m2.5-highspeed`           | Fast MiniMax M2.5 variant for responsive coding workflows.      |
+| `minimax/minimax-m2.1`                     | MiniMax for reliable agentic coding with interleaved thinking.  |
+| `minimax/minimax-m2.1-lightning`           | Speed-optimized MiniMax M2.1 for fast coding assistance.        |
+| `minimax/minimax-m2`                       | MiniMax MoE model for coding and agentic tasks.                 |
 | `moonshotai/kimi-k2.6`                     | Latest Kimi for long-horizon coding and agent workflows.        |
+| `moonshotai/kimi-k2.5`                     | Kimi multimodal model for agents, coding, and vision tasks.     |
+| `moonshotai/kimi-k2-thinking`              | Kimi reasoning model for long tool-call chains.                 |
+| `moonshotai/kimi-k2-thinking-turbo`        | Faster Kimi reasoning variant for interactive workflows.        |
+| `moonshotai/kimi-k2-turbo`                 | Speed-optimized Kimi K2 for latency-sensitive tool use.         |
+| `moonshotai/kimi-k2`                       | Kimi K2 instruct model for coding and agentic pipelines.        |
+| `xai/grok-4.3`                             | Latest Grok reasoning model with 1M context and tool use.       |
+| `xai/grok-4.20-reasoning`                  | Long-context Grok reasoning model for agent workflows.          |
+| `xai/grok-4.20-non-reasoning`              | Long-context Grok model for direct tool-using tasks.            |
+| `xai/grok-4.1-fast-reasoning`              | Fast, low-cost Grok reasoning model with 1M context.            |
+| `xai/grok-4.1-fast-non-reasoning`          | Fast, low-cost Grok model for direct answers.                   |
+| `xai/grok-build-0.1`                       | xAI coding model for fast agentic software development.         |
 | `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
 | `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
 | `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |
@@ -148,6 +166,34 @@ final answer plus `childSessionId` as a tool result. Later calls can pass that
 `childSessionId` as `sessionId` with a new prompt to continue the same delegated
 child session.
 
+### `skills` — list of skill ids
+
+Skills are agentskills.io-style folders of instructions that the runtime materializes
+read-only into `./skills/<id>/` inside the session sandbox. The agent reads a skill's
+`SKILL.md` on demand with `read_skill` (progressive disclosure); the system prompt only
+advertises each enabled skill's name and description.
+
+```yaml
+skills:
+  - agent-self-edit
+```
+
+Entries are skill ids from the built-in catalog
+(`packages/agent-runtime/src/skills.ts`); unknown ids are dropped. Built-in skills marked
+`defaultEnabled` are available in every session without being listed here, so the key is
+usually omitted and only appears once additional opt-in skills exist.
+
+The first built-in skill, `agent-self-edit`, teaches the agent to evolve its own `.agent`
+definition. With it enabled, the runtime exposes an internal `update_agent_file` tool: the
+agent submits a complete new body (and optionally a new model), the runner validates it
+strictly (rejecting empty bodies, unknown models, or malformed content rather than silently
+falling back to defaults), persists it with a version bump, and queues the same async
+GitHub sync as an editor save. Changes apply to the agent's next session. Title/slug,
+repositories, triggers, and delegated agents are preserved and cannot be changed this way.
+As a guardrail, the runner rejects `update_agent_file` until the agent has read the
+`agent-self-edit` SKILL.md (via `read_skill`) in the current session, so the edit is always
+made with the skill's guidance in context.
+
 ### `integrations.github.repositories` — list of repository objects
 
 Each entry binds a workspace-authorized GitHub repository referenced by the body.
@@ -190,34 +236,37 @@ triggers:
     enabled: true
 ```
 
+Scheduled run triggers store a generated preset cron expression, an IANA timezone,
+and the prompt to submit when the schedule fires. The editor generates these from
+the "Run every..." UI; arbitrary cron text is not part of the MVP.
+
+```yaml
+triggers:
+  - id: weekday-brief
+    type: agent.schedule
+    cron: "0 9 * * 1-5"
+    timezone: America/Los_Angeles
+    prompt: Review open priorities and write a concise status brief.
+    enabled: true
+```
+
 ## The body
 
 Markdown. The model sees it verbatim as system instructions. There is no preprocessing besides mention parsing.
 
 ### Mention syntax
 
-`@<id>` where `<id>` is a tool ID, a model ID, a Brain path, a workspace agent reference, a GitHub `owner/repo`, or an alias. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
+`@<id>` where `<id>` is a tool ID, a Brain path, a workspace agent reference, or a GitHub `owner/repo`. Mentions can include `/`, `-`, `.`, and `_`. Trailing punctuation (`. , ; : ! ? ) ] }`) is stripped before lookup.
 
 ```text
 Find investors with @exa.        ← @exa            (tool)
-Use @openai/gpt-5.4 for this.    ← @openai/gpt-5.4 (model)
-Run @deep on the summary.        ← @deep           (alias → openai/gpt-5.4)
 Read @brain/product/ first.      ← @brain/product/ (Brain folder)
 Work in @opencompany/web.        ← @opencompany/web (GitHub repository)
 Read @brain/ first.              ← @brain/         (Brain root folder)
 Ask @agent/sales-research.       ← @agent/sales-research (workspace agent)
 ```
 
-### Aliases
-
-Aliases are only recognized inside body mentions — not as raw `model:` values.
-
-| Alias                | Resolves to           |
-| -------------------- | --------------------- |
-| `@fast`, `@default`  | `openai/gpt-5.4-mini` |
-| `@deep`              | `openai/gpt-5.4`      |
-
-Unknown `@text` that doesn't match a model, tool, or alias stays in the body as plain text — no error, no contribution to frontmatter.
+Unknown `@text` that doesn't match a tool, Brain path, repository, or workspace agent stays in the body as plain text — no error, no contribution to frontmatter.
 
 ### After-session memory hook
 
@@ -299,25 +348,25 @@ tools:
   - exa
 ---
 
-Find recent fund announcements with @exa. Use @deep to write the brief.
+Find recent fund announcements with @exa. Write the brief carefully.
 ```
 
-### Letting mentions drive everything
+### Letting mentions drive tools and context
 
 Author with only the body. The serializer fills in the frontmatter from the mentions:
 
 ```yaml
 ---
 title: "Research"
-model: openai/gpt-5.4
+model: openai/gpt-5.4-mini
 tools:
   - exa
 ---
 
-Find investors with @exa and run a deep pass with @deep.
+Find investors with @exa and write a concise brief.
 ```
 
-You never touched `model:` or `tools:`. They reflect what the body actually references.
+You never touched `tools:`. It reflects what the body actually references. The model remains explicit per-agent config.
 
 ## Compiled config
 
@@ -353,7 +402,16 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
       repositories: [],
     },
   },
-  triggers: [],
+  triggers: [
+    {
+      id: "weekday-brief",
+      type: "agent.schedule",
+      cron: "0 9 * * 1-5",
+      timezone: "America/Los_Angeles",
+      prompt: "Review open priorities and write a concise status brief.",
+      enabled: true,
+    },
+  ],
 }
 ```
 
