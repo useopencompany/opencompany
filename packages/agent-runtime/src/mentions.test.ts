@@ -44,9 +44,19 @@ describe("extractConfigFromMentions", () => {
   });
 
   it("resolves Kimi and GLM model mentions", () => {
-    const config = extractConfigFromMentions("Use @moonshotai/kimi-k2.6 first, then @zai/glm-5.1.");
+    const config = extractConfigFromMentions(
+      "Use @moonshotai/kimi-k2.6 first, then @moonshotai/kimi-k2-thinking-turbo, then @zai/glm-5.1.",
+    );
 
     expect(config.model).toBe("zai/glm-5.1");
+  });
+
+  it("resolves MiniMax model mentions", () => {
+    const config = extractConfigFromMentions(
+      "Use @minimax/minimax-m2.7 first, then @minimax/minimax-m3.",
+    );
+
+    expect(config.model).toBe("minimax/minimax-m3");
   });
 
   it("resolves tool ids and labels", () => {
