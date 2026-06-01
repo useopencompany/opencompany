@@ -129,7 +129,7 @@ export default function IntegrationsView({
         </div>
 
         <div className="mt-7 flex flex-wrap items-center gap-2">
-          <div className="flex h-8 min-w-[260px] flex-1 items-center gap-2 rounded-md border border-[#e3e3df] bg-white/70 px-2.5">
+          <div className="flex h-8 min-w-[260px] flex-1 items-center gap-2 rounded-md border border-border bg-surface/70 px-2.5">
             <Search size={13} strokeWidth={1.9} className="text-ink-subtle" />
             <input
               value={query}
@@ -145,8 +145,8 @@ export default function IntegrationsView({
               onClick={() => setFilter(item)}
               className={`h-8 rounded-md border px-2.5 text-[12.5px] font-medium ${
                 filter === item
-                  ? "border-ink/20 bg-ink text-white"
-                  : "border-[#e3e3df] bg-white/65 text-ink-muted hover:bg-white"
+                  ? "border-ink/20 bg-ink text-canvas"
+                  : "border-border bg-surface/65 text-ink-muted hover:bg-surface"
               }`}
             >
               {filterLabel(item)}
@@ -197,10 +197,10 @@ function IntegrationCard({
   const StatusIcon = state.status === "connected" ? CheckCircle2 : ShieldAlert;
 
   return (
-    <section className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+    <section className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
             <Icon size={17} strokeWidth={1.85} />
           </span>
           <div className="min-w-0">
@@ -208,7 +208,7 @@ function IntegrationCard({
               <h2 className="text-[13.5px] font-semibold tracking-[-0.005em] text-ink">
                 {integration.name}
               </h2>
-              <span className="rounded-full border border-[#e5e5e1] bg-[#f7f7f4] px-2 py-0.5 text-[10.5px] font-medium text-ink-subtle">
+              <span className="rounded-full border border-border bg-canvas px-2 py-0.5 text-[10.5px] font-medium text-ink-subtle">
                 {integration.category}
               </span>
             </div>
@@ -227,7 +227,7 @@ function IntegrationCard({
         </span>
       </div>
 
-      <div className="mt-4 border-t border-[#ecece8] pt-4">
+      <div className="mt-4 border-t border-border-subtle pt-4">
         <IntegrationControls provider={integration.id} integrations={integrations} />
       </div>
     </section>
@@ -318,7 +318,7 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
             href={`/api/integrations/github/start?intent=settings&returnTo=${encodeURIComponent(
               "/settings/integrations",
             )}`}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-black"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
           >
             <ExternalLink size={13} strokeWidth={1.9} />
             {connected ? "Connect another GitHub account" : "Connect GitHub"}
@@ -327,7 +327,7 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
           <button
             type="button"
             disabled
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#d9d9d4] px-3 text-[12.5px] font-medium text-ink-subtle"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-surface-active px-3 text-[12.5px] font-medium text-ink-subtle"
           >
             <ShieldAlert size={13} strokeWidth={1.9} />
             Not configured
@@ -335,9 +335,9 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
         )}
       </div>
       {integration.connections.length > 0 ? (
-        <div className="mt-4 overflow-hidden rounded-md border border-[#e6e6e3] bg-white/55">
+        <div className="mt-4 overflow-hidden rounded-md border border-border bg-surface/55">
           {integration.connections.map((connection) => (
-            <div key={connection.id} className="border-t border-[#ecece8] p-3 first:border-t-0">
+            <div key={connection.id} className="border-t border-border-subtle p-3 first:border-t-0">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-[12.5px] font-semibold text-ink">
@@ -347,7 +347,7 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
                     {connection.accountType ?? "Account"} - {formatDateTime(connection.updatedAt)}
                   </div>
                   {connection.status !== "connected" ? (
-                    <p className="mt-1 text-[11.5px] leading-4 text-[#795b19]">
+                    <p className="mt-1 text-[11.5px] leading-4 text-warning">
                       {connection.statusReason ?? integrationStatusDescription(connection.status)}
                     </p>
                   ) : null}
@@ -373,7 +373,7 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
                     type="button"
                     onClick={() => requestDisconnectGitHub(connection)}
                     disabled={isDisconnecting}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#efd0ca] bg-white px-3 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff7f5] disabled:cursor-not-allowed disabled:opacity-65"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-danger-border bg-surface px-3 text-[12.5px] font-medium text-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-65"
                   >
                     <Trash2 size={13} strokeWidth={1.9} />
                     {disconnectingConnectionId === connection.id ? "Uninstalling" : "Uninstall"}
@@ -383,18 +383,18 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
               {disconnectFeedback?.connectionId === connection.id ? (
                 <p
                   className={`mt-2 text-[12px] leading-5 ${
-                    disconnectFeedback.type === "success" ? "text-[#216b35]" : "text-[#9f2f24]"
+                    disconnectFeedback.type === "success" ? "text-success" : "text-danger"
                   }`}
                 >
                   {disconnectFeedback.message}
                 </p>
               ) : null}
               {connection.repositories.length > 0 ? (
-                <div className="mt-3 max-h-[150px] overflow-y-auto rounded-md border border-[#eeeeea] bg-white/60">
+                <div className="mt-3 max-h-[150px] overflow-y-auto rounded-md border border-border-subtle bg-surface/60">
                   {connection.repositories.map((repository) => (
                     <div
                       key={`${connection.id}:${repository.fullName}`}
-                      className="border-t border-[#eeeeea] px-3 py-2 first:border-t-0"
+                      className="border-t border-border-subtle px-3 py-2 first:border-t-0"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <span className="truncate text-[12.5px] font-medium text-ink">
@@ -450,7 +450,7 @@ function RefreshRepositoriesButton() {
     <button
       type="submit"
       disabled={pending}
-      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#e3e3df] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#f7f7f5] disabled:cursor-not-allowed disabled:opacity-65"
+      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-65"
     >
       <RefreshCw size={13} strokeWidth={1.9} />
       {pending ? "Refreshing" : "Refresh"}
@@ -494,12 +494,12 @@ function DisconnectGitHubDialog({
   if (!connection) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 px-4 py-6">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="disconnect-github-title"
-        className="w-full max-w-[420px] rounded-lg border border-black/[0.1] bg-[#fbfbfa] shadow-[0_24px_64px_rgba(0,0,0,0.22),0_4px_14px_rgba(0,0,0,0.12)]"
+        className="w-full max-w-[420px] rounded-lg border border-black/[0.1] bg-surface-raised shadow-[0_24px_64px_rgba(0,0,0,0.22),0_4px_14px_rgba(0,0,0,0.12)]"
       >
         <div className="border-b border-black/[0.08] px-4 py-3">
           <h2 id="disconnect-github-title" className="text-[14px] font-semibold text-ink">
@@ -518,7 +518,7 @@ function DisconnectGitHubDialog({
             type="button"
             onClick={onCancel}
             disabled={isPending}
-            className="inline-flex h-8 items-center rounded-md border border-[#deded9] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#f5f5f1] disabled:cursor-not-allowed disabled:opacity-65"
+            className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-65"
           >
             Cancel
           </button>
@@ -526,7 +526,7 @@ function DisconnectGitHubDialog({
             type="button"
             onClick={onConfirm}
             disabled={isPending}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#efd0ca] bg-[#fff7f5] px-3 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff0ed] disabled:cursor-not-allowed disabled:opacity-65"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-danger-border bg-danger-bg px-3 text-[12.5px] font-medium text-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-65"
           >
             <Trash2 size={13} strokeWidth={1.9} />
             Uninstall
@@ -607,16 +607,16 @@ function githubIntegrationState(status: IntegrationStatus): IntegrationCardState
 }
 
 function statusClass(status: IntegrationStatus | "disconnected") {
-  if (status === "connected") return "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]";
+  if (status === "connected") return "border-success-border bg-success-bg text-success";
   if (
     status === "needs_repository_access" ||
     status === "needs_reauth" ||
     status === "sync_failed" ||
     status === "error"
   ) {
-    return "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]";
+    return "border-warning-border bg-warning-bg text-warning";
   }
-  return "border-[#e3e3df] bg-white text-ink-muted";
+  return "border-border bg-surface text-ink-muted";
 }
 
 function integrationStatusLabel(status: IntegrationStatus | "disconnected") {
@@ -644,8 +644,8 @@ function resourceStatusLabel(status: ResourceStatus) {
 }
 
 function resourceStatusClass(status: ResourceStatus) {
-  if (status === "available") return "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]";
-  return "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]";
+  if (status === "available") return "border-success-border bg-success-bg text-success";
+  return "border-warning-border bg-warning-bg text-warning";
 }
 
 function filterLabel(filter: Filter) {
