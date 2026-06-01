@@ -10,6 +10,13 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      # Direct (non-pooled) Neon endpoint for the runner's pooled pg driver. If unset,
+      # the runner derives it from DATABASE_URL by stripping the "-pooler" host label.
+      - key: RUNNER_DATABASE_URL
+        sync: false
+      # Optional: runner DB pool size (default 10). instances * max < Neon limit.
+      - key: RUNNER_DB_POOL_MAX
+        sync: false
       - key: RUNNER_INTERNAL_TOKEN
         sync: false
       - key: RUNNER_STREAM_TOKEN_SECRET

@@ -1,6 +1,6 @@
 import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PersistedRuntimeEvent } from "./events";
+import type { PersistedRuntimeEvent, RuntimeEventForStream } from "./events";
 import { enqueueRunnerJob } from "./jobs";
 import {
   createServer,
@@ -231,7 +231,58 @@ describe("SSE formatting", () => {
     };
 
     expect(formatSseEvent(event)).toBe(
-      'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123"}\n\n',
+      'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123","createdAt":"2026-05-22T00:00:00.000Z"}\n\n',
+    );
+  });
+
+  it("includes createdAt as an ISO string in the SSE payload so web clients can compute thinking duration", () => {
+    const createdAt = new Date("2026-05-28T12:00:01.500Z");
+    const event: PersistedRuntimeEvent = {
+      id: 7,
+      sessionId: "ses_abc",
+      messageId: "msg_abc",
+      type: "tool.started",
+      payload: { toolCallId: "call_1", name: "read_file", input: {} },
+      createdAt,
+    };
+
+    const raw = formatSseEvent(event);
+    const dataLine = raw.split("\ndata: ")[1];
+    expect(dataLine).toBeDefined();
+    const data = JSON.parse(dataLine!.trim());
+    expect(data.createdAt).toBe(createdAt.toISOString());
+  });
+
+  it("formats events returned from raw SQL with string timestamps", () => {
+    const event: PersistedRuntimeEvent = {
+      id: 8,
+      sessionId: "ses_abc",
+      messageId: "msg_abc",
+      type: "message.created",
+      payload: { messageId: "msg_abc", role: "assistant", internal: false },
+      createdAt: "2026-05-28T12:00:01.500Z",
+    };
+
+    const raw = formatSseEvent(event);
+    const dataLine = raw.split("\ndata: ")[1];
+    expect(dataLine).toBeDefined();
+    const data = JSON.parse(dataLine!.trim());
+    expect(data.createdAt).toBe("2026-05-28T12:00:01.500Z");
+  });
+
+  it("formats transient runtime events without advancing Last-Event-ID", () => {
+    const event: RuntimeEventForStream = {
+      id: null,
+      sessionId: "ses_abc",
+      messageId: "msg_abc",
+      type: "message.delta",
+      payload: { messageId: "msg_abc", delta: "hello" },
+      createdAt: new Date("2026-05-28T12:00:01.500Z"),
+      transient: true,
+    };
+
+    expect(formatSseEvent(event)).toBe(
+      'data: {"id":null,"type":"message.delta","payload":{"messageId":"msg_abc","delta":"hello"},"messageId":"msg_abc","createdAt":"2026-05-28T12:00:01.500Z","transient":true}\n\n',
     );
   });
 

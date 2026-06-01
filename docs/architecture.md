@@ -13,7 +13,7 @@ This is the short map for coming back to the project after time away. Source fil
   per workspace. This backing repo is separate from GitHub work integrations that agents use for
   coding workflows.
 - Inngest runs background jobs. The app exposes `/api/inngest`, and local development runs the Inngest dev server through the `@opencompany/inngest-dev` workspace.
-- `apps/runner` is the long-lived agent-session data plane. It provisions E2B sandboxes, runs the model/tool loop through Vercel AI Gateway and AI SDK Core, and writes replayable runtime events to Postgres.
+- `apps/runner` is the long-lived agent-session data plane. It provisions E2B sandboxes, runs the model/tool loop through Vercel AI Gateway and AI SDK Core, writes durable runtime boundaries to Postgres, and streams live-only deltas to active clients.
 
 ## Agent Editing Flow
 
@@ -143,8 +143,9 @@ The session flow is:
 7. Runner resolves the `.agent` config, streams the model through Vercel AI Gateway using AI SDK
    Core, runs allowed tools in E2B, and appends typed runtime events to Postgres. Assistant text
    chunks are accumulated in memory and saved when the assistant message completes.
-8. Browser receives lifecycle, tool, command, file, completion, and error events. On refresh, it
-   replays from `agent_session_events` instead of relying on an in-memory stream.
+8. Browser receives lifecycle, tool, command, file, completion, and error events. On refresh or
+   reconnect, it refetches canonical session detail; high-frequency text/reasoning/command deltas
+   are live-only and are not replayed from Postgres.
 
 The runner endpoints are documented in [runner.md](./runner.md).
 
@@ -179,7 +180,7 @@ The high-level table groups are:
 - Agent work integrations: `workspace_integrations` stores connected provider accounts, and
   `workspace_integration_resources` stores provider resources such as GitHub repositories.
 - Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store
-  durable session ownership, transcript, and replayable streaming state.
+  durable session ownership, transcript, and boundary/runtime facts.
 - Onboarding: `onboarding_responses`.
 
 All app-owned data should stay scoped by `workspaceId` so tenancy remains enforceable.
@@ -188,7 +189,7 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
 
 - `bun run dev` starts ngrok when authenticated, then starts the web app, local Inngest dev helper,
   Stripe webhook listener, and runner. ngrok is the expected local path for callback/webhook
-  integrations such as GitHub.
+  integrations such as GitHub; WorkOS sign-in still redirects to localhost in local development.
 - `bun run dev:web` runs only the web app.
 - `bun run dev:runner` runs only the runner.
 - `bun run db:generate` creates migrations from `packages/db/src/schema.ts`.

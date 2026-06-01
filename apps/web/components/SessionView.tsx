@@ -23,8 +23,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
+import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
@@ -46,6 +48,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   isInspectableRuntimeEvent,
+  isReasoningInProgress,
   type RuntimeEvent,
   type RuntimeToolCall,
   readString,
@@ -56,6 +59,7 @@ import {
 } from "@/lib/agent-sessions/runtime-events";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
@@ -68,7 +72,7 @@ const MARKDOWN_COMPONENTS: Components = {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="font-medium text-ink underline decoration-[#c7c7c2] underline-offset-2 transition-colors hover:decoration-ink/70"
+      className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70"
     >
       {children}
     </a>
@@ -104,8 +108,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     return (
       <main className="relative flex h-full flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 items-center justify-center px-6">
-          <div className="max-w-sm rounded-lg border border-[#f0d2d2] bg-[#fff6f6] px-5 py-6 text-center">
-            <p className="text-[13.5px] font-medium text-[#9f1d1d]">Could not load session</p>
+          <div className="max-w-sm rounded-lg border border-danger-border bg-danger-bg px-5 py-6 text-center">
+            <p className="text-[13.5px] font-medium text-danger">Could not load session</p>
             <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
               {error instanceof Error
                 ? error.message
@@ -117,7 +121,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
               onClick={() => {
                 void refetch();
               }}
-              className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-[#e4e4e0] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#fafaf8] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRefetching ? "Retrying..." : "Try again"}
             </button>
@@ -131,7 +135,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     return (
       <main className="relative flex h-full flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 items-center justify-center px-6">
-          <div className="max-w-sm rounded-lg border border-dashed border-[#deded9] bg-white/45 px-5 py-6 text-center">
+          <div className="max-w-sm rounded-lg border border-dashed border-border bg-surface/45 px-5 py-6 text-center">
             <p className="text-[13.5px] font-medium text-ink">Session not found</p>
             <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
               This session may have been archived or is no longer available.
@@ -145,7 +149,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
 }
 
-function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
+export function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
@@ -159,7 +163,9 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   });
   const runnerUrl = streamCredential?.runnerUrl ?? detail.runnerUrl;
   const streamToken = streamCredential?.streamToken ?? null;
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
+  const relatedSessionCount = relatedCount(detail.related);
+  const previousRelatedSessionCountRef = useRef(relatedSessionCount);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -180,8 +186,10 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     }),
     [detail],
   );
-  const lastEventId = useMemo(() => runtime.events.at(-1)?.id ?? 0, [runtime.events]);
-  const knownEventIds = useMemo(() => runtime.events.map((event) => event.id), [runtime.events]);
+  const knownEventIds = useMemo(
+    () => runtime.events.flatMap((event) => (typeof event.id === "number" ? [event.id] : [])),
+    [runtime.events],
+  );
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -217,8 +225,27 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   );
   const showWaitingForAssistant =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
+  const showStoppedAfterUser =
+    !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
   const canAbort = sessionCanGenerate;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
+
+  const waitStartedAtRef = useRef<number | null>(null);
+  const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
+  useEffect(() => {
+    const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
+    if (waiting && waitStartedAtRef.current === null) {
+      waitStartedAtRef.current = Date.now();
+    }
+    if (showStoppedAfterUser && waitStartedAtRef.current !== null) {
+      setStoppedElapsedSeconds(
+        Math.max(Math.floor((Date.now() - waitStartedAtRef.current) / 1000), 0),
+      );
+    } else if (!waiting && !showStoppedAfterUser) {
+      waitStartedAtRef.current = null;
+      setStoppedElapsedSeconds(null);
+    }
+  }, [showWaitingForAssistant, hasRunningAssistantMessage, showStoppedAfterUser]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
     setInspectorCollapsed(nextCollapsed);
@@ -243,19 +270,52 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
       if (!current) return;
       const next = applyRuntimeEventToSessionDetail(current, event);
       seedSessionQueries(queryClient, workspaceId, next);
-      invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event);
+      invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event, {
+        sessionId: session.id,
+      });
+      if (
+        event.type === "message.completed" ||
+        event.type === "tool.completed" ||
+        event.type === "tool.failed"
+      ) {
+        void queryClient.invalidateQueries({ queryKey: detailKey });
+      }
     },
-    [detailKey, queryClient, workspaceId, session.agentId],
+    [detailKey, queryClient, workspaceId, session.agentId, session.id],
   );
+
+  const refetchSessionDetail = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: detailKey });
+  }, [detailKey, queryClient]);
 
   const stream = useSessionEventStream({
     runnerUrl,
     streamToken,
     sessionId: session.id,
-    afterId: lastEventId,
     knownEventIds,
     onEvent: applyRuntimeEvent,
+    onOpen: refetchSessionDetail,
   });
+
+  // Data-freshness staleness detection: derive the timestamp of the last runtime event
+  // from runtime.events and compare against a ticked `now` so the stale banner triggers
+  // even when SSE reconnects keep flipping stream.status away from "stale".
+  const STALE_THRESHOLD_MS = 45_000;
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(id);
+  }, []);
+  const lastRuntimeActivityMs = useMemo(() => {
+    const last = runtime.events.at(-1);
+    if (last?.createdAt) return Date.parse(last.createdAt);
+    return Date.parse(detail.session.updatedAt);
+  }, [runtime.events, detail.session.updatedAt]);
+  const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
+  const sessionFeedsLooksStale =
+    awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
+  const showStaleBanner =
+    awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -317,6 +377,12 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
     };
   }, [attachMenuOpen]);
 
+  useEffect(() => {
+    const previousCount = previousRelatedSessionCountRef.current;
+    previousRelatedSessionCountRef.current = relatedSessionCount;
+    if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
+  }, [relatedSessionCount]);
+
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
@@ -345,7 +411,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="border-b border-[#eaeae6] bg-canvas/90 px-6 py-3">
+        <div className="border-b border-border-subtle bg-canvas/90 px-6 py-3">
           <div className="mx-auto flex w-full max-w-[960px] items-center gap-3">
             <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
             <div className="min-w-0 pr-10">
@@ -393,7 +459,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
               className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
               aria-hidden="true"
             >
-              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-[#9a9a96] bg-canvas/85 px-8 py-6 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
                 <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
                 <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
                 <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
@@ -402,14 +468,14 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
           ) : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError ? (
-              <div className="flex items-start gap-2 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[12.5px] leading-5 text-[#9f1d1d]">
+              <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
                 <span>{runtime.lastError}</span>
               </div>
             ) : null}
 
             {visibleMessages.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-[#deded9] bg-white/40 px-6 py-12 text-center">
+              <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
                 <p className="mt-1 text-[12.5px] text-ink-muted">
@@ -429,7 +495,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                         setInput(chip);
                         textareaRef.current?.focus();
                       }}
-                      className="rounded-full border border-[#e6e6e3] bg-white px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-surface-muted"
                     >
                       {chip}
                     </button>
@@ -454,7 +520,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   <div
                     className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
                       message.role === "user"
-                        ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+                        ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
                         : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
                     }`}
                   >
@@ -463,6 +529,8 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                         message={message}
                         parts={assistantParts}
                         sessionCanGenerate={sessionCanGenerate}
+                        reasoningActive={isReasoningInProgress(message, runtime.events)}
+                        activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
                       />
                     ) : (
                       message.content
@@ -480,7 +548,11 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
             {showWaitingForAssistant ? (
               <div className="flex justify-start">
-                <ThinkingShimmer />
+                <WorkingIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
+              </div>
+            ) : showStoppedAfterUser ? (
+              <div className="flex justify-start">
+                <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
               </div>
             ) : null}
 
@@ -502,8 +574,27 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
 
         <div className="bg-canvas px-8 lg:px-12 py-4">
           <div className="group/composer mx-auto max-w-[960px]">
-            {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
-            <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+            {showStaleBanner ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mb-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[12.5px] text-warning"
+              >
+                <span>Connection idle — waiting for updates…</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+                    void queryClient.invalidateQueries({ queryKey: detailKey });
+                  }}
+                  className="shrink-0 rounded border border-warning-border bg-surface px-2.5 py-1 text-[11.5px] font-medium text-warning hover:bg-warning-bg"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+            {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               <div ref={attachMenuRef} className="relative">
                 <button
                   type="button"
@@ -511,14 +602,14 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   aria-label="Attach file"
                   aria-expanded={attachMenuOpen}
                   aria-haspopup="menu"
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-[#6b6b6b] hover:bg-[#f3f3f0] hover:text-[#111]"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
                 >
                   <Plus size={15} strokeWidth={1.75} />
                 </button>
                 {attachMenuOpen ? (
                   <div
                     role="menu"
-                    className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                    className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
                   >
                     <button
                       type="button"
@@ -531,7 +622,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                         });
                         setAttachMenuOpen(false);
                       }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
                     >
                       <Upload size={13} strokeWidth={1.75} />
                       Upload file
@@ -584,7 +675,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   onClick={requestAbort}
                   aria-label="Stop generating"
                   title="Stop generating"
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[#f0c0b8] bg-[#fff5f3] text-[#9f2f21] transition-colors hover:bg-[#ffebe7] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <CircleStop size={16} strokeWidth={1.9} />
                 </button>
@@ -594,7 +685,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
                   disabled={isBusy || !input.trim()}
                   onClick={submit}
                   aria-label="Send message"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-[#111] text-white transition-opacity hover:bg-black disabled:opacity-40"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
                 >
                   <ArrowUp size={13} strokeWidth={2} />
                 </button>
@@ -602,13 +693,13 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
             </div>
             <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/composer:opacity-100">
               <span>
-                <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
                   ↵
                 </kbd>{" "}
                 send
               </span>
               <span>
-                <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
                   ⇧↵
                 </kbd>{" "}
                 new line
@@ -622,13 +713,13 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         <button
           type="button"
           aria-label="Collapse runtime details"
-          className="fixed inset-0 z-30 bg-black/[0.06] lg:hidden"
+          className="fixed inset-0 z-30 bg-ink/[0.06] lg:hidden"
           onClick={() => updateInspectorCollapsed(true)}
         />
       )}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-[#e4e4e0] bg-[#fbfbf9]/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-[#fbfbf9]/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
+        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed
             ? "hidden"
             : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"
@@ -640,6 +731,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         </div>
         <SessionInspector
           session={session}
+          related={detail.related}
           currentStatus={runtime.currentStatus}
           lastError={runtime.lastError}
           streamStatus={stream.status}
@@ -661,7 +753,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
         aria-expanded={!inspectorCollapsed}
         onClick={() => updateInspectorCollapsed(!inspectorCollapsed)}
-        className="fixed right-2 top-3 z-50 rounded-md border border-[#e6e6e3] bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="fixed right-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <PanelRight size={15} strokeWidth={1.75} />
       </button>
@@ -669,14 +761,76 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
   );
 }
 
-function AssistantMarkdown({ content }: { content: string }) {
+function AssistantMarkdown({
+  content,
+  streaming = false,
+}: {
+  content: string;
+  streaming?: boolean;
+}) {
+  const ref = useStreamingMarkdownAppendAnimation(content, streaming);
+
   return (
-    <div className="session-markdown">
+    <div ref={ref} className="session-markdown" data-streaming={streaming ? "true" : undefined}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
         {content}
       </ReactMarkdown>
     </div>
   );
+}
+
+function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const previousContentRef = useRef("");
+  const lastAnimationAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const animationRef = useRef<Animation | null>(null);
+
+  useEffect(() => {
+    const previousContent = previousContentRef.current;
+    previousContentRef.current = content;
+
+    if (!streaming || !shouldAnimateStreamingAppend(previousContent, content)) return;
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    const now = performance.now();
+    if (now - lastAnimationAtRef.current < STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS) return;
+
+    const element = ref.current;
+    if (!element || typeof element.animate !== "function") return;
+    const animatedElement =
+      element.lastElementChild instanceof HTMLElement ? element.lastElementChild : element;
+
+    lastAnimationAtRef.current = now;
+    animationRef.current?.cancel();
+    const animation = animatedElement.animate(
+      [
+        { opacity: 0.9, filter: "blur(0.2px)" },
+        { opacity: 1, filter: "blur(0)" },
+      ],
+      {
+        duration: 160,
+        easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+      },
+    );
+    animationRef.current = animation;
+    animation.onfinish = () => {
+      if (animationRef.current === animation) animationRef.current = null;
+    };
+  }, [content, streaming]);
+
+  useEffect(
+    () => () => {
+      animationRef.current?.cancel();
+    },
+    [],
+  );
+
+  return ref;
 }
 
 // Copy only the user-visible answer text — reasoning is hidden by default in
@@ -720,10 +874,10 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
       onClick={handleCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className={`absolute ${positionClasses} z-10 inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 pointer-events-none transition-opacity hover:bg-[#f0f0ec] hover:text-ink focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
+      className={`absolute ${positionClasses} z-10 inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 pointer-events-none transition-opacity hover:bg-surface-subtle hover:text-ink focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
     >
       {copied ? (
-        <Check size={10} strokeWidth={2} className="text-[#16a34a]" />
+        <Check size={10} strokeWidth={2} className="text-success" />
       ) : (
         <Copy size={10} strokeWidth={1.75} />
       )}
@@ -731,65 +885,265 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
   );
 }
 
-function AssistantMessageContent({
+export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
+  reasoningActive = false,
+  activeStartedAt,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
+  reasoningActive?: boolean;
+  activeStartedAt?: string | undefined;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
   const isStopped =
     message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
+  const isCompleted = message.status === "completed";
+  const runDurationSeconds = runDurationForMessage(message);
+
+  // A still-running tool call on a stopped session reads as failed — it never returned.
+  const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
+    part.type === "tool-call" && part.toolCall.status === "running" && !sessionCanGenerate
+      ? {
+          type: "tool-call",
+          toolCall: {
+            ...part.toolCall,
+            status: "failed" as const,
+            outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+          },
+        }
+      : part,
+  );
+
+  // A completed turn reads as a deliverable: the trailing text is the headline, and the work
+  // that produced it — the intermediate narration plus the tool steps — collapses into one
+  // "N steps" summary. Reasoning keeps its own card. While the turn is still running nothing
+  // collapses, so the live narration and steps stay visible (tool calls grouped while
+  // consecutive, text inline).
+  type RenderGroup =
+    | { kind: "part"; part: AssistantTurnPart; key: string }
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
+    | { kind: "process"; parts: AssistantTurnPart[]; key: string };
+
+  const deliverableStart = isCompleted
+    ? deliverableStartIndex(normalizedParts)
+    : normalizedParts.length;
+  const collapseWork =
+    isCompleted &&
+    normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
+
+  const groups: RenderGroup[] = [];
+  normalizedParts.forEach((part, index) => {
+    // Completed turn: fold the intermediate narration + tool steps into one collapsed group.
+    if (collapseWork && index < deliverableStart && part.type !== "reasoning") {
+      const last = groups.at(-1);
+      if (last?.kind === "process") last.parts.push(part);
+      else groups.push({ kind: "process", parts: [part], key: `process:${index}` });
+      return;
+    }
+
+    if (part.type === "tool-call") {
+      const last = groups.at(-1);
+      if (last?.kind === "tools") last.toolCalls.push(part.toolCall);
+      else groups.push({ kind: "tools", toolCalls: [part.toolCall], key: `tools:${index}` });
+      return;
+    }
+
+    groups.push({ kind: "part", part, key: `${index}` });
+  });
+  const streamingTextGroupKey = isRunning ? findLatestTextGroupKey(groups) : null;
 
   return (
     <div className="space-y-3">
-      {parts.map((part, index) => {
-        if (part.type === "text") {
-          return <AssistantMarkdown key={`${index}:${part.text.length}`} content={part.text} />;
+      {groups.map((group) => {
+        if (group.kind === "part") {
+          const part = group.part;
+          if (part.type === "text") {
+            return (
+              <AssistantMarkdown
+                key={group.key}
+                content={part.text}
+                streaming={group.key === streamingTextGroupKey}
+              />
+            );
+          }
+          if (part.type === "reasoning") {
+            return (
+              <ReasoningSummaryCard
+                key={group.key}
+                text={part.text}
+                durationSeconds={part.durationSeconds}
+              />
+            );
+          }
+          return null;
         }
 
-        if (part.type === "reasoning") {
+        if (group.kind === "process") {
           return (
-            <ReasoningSummaryCard
-              key={`${index}:reasoning`}
-              text={part.text}
-              durationSeconds={part.durationSeconds}
+            <CompletedStepGroup
+              key={group.key}
+              parts={group.parts}
+              durationSeconds={runDurationSeconds}
             />
           );
         }
 
-        const toolCall =
-          part.toolCall.status === "running" && !sessionCanGenerate
-            ? {
-                ...part.toolCall,
-                status: "failed" as const,
-                outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
-              }
-            : part.toolCall;
-        return <ToolCallCard key={part.toolCall.id} toolCall={toolCall} />;
+        return (
+          <div key={group.key} className="space-y-1.5">
+            {group.toolCalls.map((toolCall) => (
+              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+            ))}
+          </div>
+        );
       })}
       {!hasParts ? (
         isRunning ? (
-          <ThinkingShimmer />
+          <WorkingIndicator
+            startedAt={activeStartedAt ?? message.createdAt}
+            thinking={reasoningActive}
+          />
         ) : isStopped ? (
           <AssistantStoppedNotice />
         ) : (
           "..."
         )
+      ) : isRunning ? (
+        // Keep a live indicator at the tail so the UI never goes silent between a tool
+        // result and the model's next output (thinking phases included).
+        <WorkingIndicator
+          startedAt={activeStartedAt ?? message.createdAt}
+          thinking={reasoningActive}
+        />
+      ) : null}
+      {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
+    </div>
+  );
+}
+
+function activeStartForAssistantMessage(
+  message: SessionMessage,
+  visibleMessages: SessionMessage[],
+) {
+  if (message.role !== "assistant" || message.status !== "running") return undefined;
+  if (message.responseToMessageId) {
+    const responseToMessage = visibleMessages.find(
+      (item) => item.id === message.responseToMessageId,
+    );
+    if (responseToMessage?.createdAt) return responseToMessage.createdAt;
+  }
+
+  const messageIndex = visibleMessages.findIndex((item) => item.id === message.id);
+  if (messageIndex > 0) {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const previous = visibleMessages[index];
+      if (previous?.role === "user" && previous.createdAt) return previous.createdAt;
+    }
+  }
+
+  return message.createdAt;
+}
+
+function findLatestTextGroupKey(
+  groups: Array<
+    | { kind: "part"; part: AssistantTurnPart; key: string }
+    | { kind: "tools"; toolCalls: RuntimeToolCall[]; key: string }
+    | { kind: "process"; parts: AssistantTurnPart[]; key: string }
+  >,
+) {
+  for (let index = groups.length - 1; index >= 0; index -= 1) {
+    const group = groups[index];
+    if (group?.kind === "part" && group.part.type === "text") return group.key;
+  }
+  return null;
+}
+
+// The trailing run of text parts is the deliverable headline; everything before it is the
+// work that produced it. Returns the index where that trailing text run begins (the length
+// when the turn does not end in text, e.g. it ended on a tool call).
+function deliverableStartIndex(parts: AssistantTurnPart[]) {
+  let start = parts.length;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    if (parts[index]?.type !== "text") break;
+    start = index;
+  }
+  return start;
+}
+
+function CompletedStepGroup({
+  parts,
+  durationSeconds,
+}: {
+  parts: AssistantTurnPart[];
+  durationSeconds: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const count = parts.reduce((total, part) => (part.type === "tool-call" ? total + 1 : total), 0);
+  const durationLabel = durationSeconds > 0 ? ` · ${formatStepDuration(durationSeconds)}` : "";
+  const summary = `${count} ${count === 1 ? "step" : "steps"}${durationLabel}`;
+
+  return (
+    <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
+      >
+        <ChevronRight
+          size={11}
+          strokeWidth={1.9}
+          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+          <Wrench size={11} strokeWidth={1.75} />
+        </span>
+        <span className="min-w-0 truncate font-medium text-ink/65">{summary}</span>
+      </button>
+      {expanded ? (
+        <div className="ml-2 mt-1 space-y-1.5 border-l border-border pl-3">
+          {parts.map((part, index) =>
+            part.type === "tool-call" ? (
+              <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
+            ) : part.type === "text" ? (
+              <AssistantMarkdown key={`text:${index}`} content={part.text} />
+            ) : null,
+          )}
+        </div>
       ) : null}
     </div>
   );
 }
 
-function AssistantStoppedNotice() {
+function runDurationForMessage(message: SessionMessage) {
+  if (!message.completedAt || !message.createdAt) return 0;
+  const start = new Date(message.createdAt).getTime();
+  const end = new Date(message.completedAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
+  return (end - start) / 1000;
+}
+
+function formatStepDuration(seconds: number) {
+  const total = Math.max(Math.round(seconds), 1);
+  if (total < 60) return `${total}s`;
+  const minutes = Math.round(total / 60);
+  return `${minutes} min`;
+}
+
+function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
   return (
-    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-[#9f2f21]">
+    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
+      {typeof elapsedSeconds === "number" ? (
+        <span className="text-[12px] font-normal tabular-nums text-danger/70">
+          {formatElapsed(elapsedSeconds)}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -799,7 +1153,7 @@ function ReasoningSummaryCard({
   durationSeconds,
 }: {
   text: string | undefined;
-  durationSeconds: number;
+  durationSeconds: number | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasSummary = Boolean(text);
@@ -829,7 +1183,7 @@ function ReasoningSummaryCard({
         </span>
       </button>
       {expanded && text ? (
-        <div className="mt-1 border-l border-[#e3e3df] pl-3">
+        <div className="mt-1 border-l border-border pl-3">
           <div className="py-1 text-[11.5px] leading-5 text-ink/65">
             <AssistantMarkdown content={text} />
           </div>
@@ -851,7 +1205,7 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
-        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-[#efefeb]/65 hover:text-ink/75"
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
       >
         <ChevronRight
           size={11}
@@ -861,27 +1215,27 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
           <Wrench size={11} strokeWidth={1.75} />
         </span>
-        <span className="min-w-0 truncate font-medium text-ink/65">
-          {formatToolName(toolCall.name)}
+        <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
+          {toolCall.label || formatToolName(toolCall.name)}
         </span>
         {toolCall.brainPath ? (
           <span
             title={`Updated brain/${toolCall.brainPath}`}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d7e4cf] bg-[#f3f8ef] px-1.5 py-px text-[10.5px] font-medium text-[#4d6f35]"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
           >
             <Brain size={9} strokeWidth={1.9} />
             Brain updated
           </span>
         ) : null}
         {isFailed ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-[#a33a2d]">
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-danger">
             <AlertCircle size={9} strokeWidth={1.9} />
             failed
           </span>
         ) : null}
         {!isCompleted && !isFailed ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
-            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-[#9b8a64]" />
+            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
             running
           </span>
         ) : null}
@@ -895,7 +1249,7 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         </div>
       ) : null}
       {expanded ? (
-        <div className="ml-6 mt-1 border-l border-[#e3e3df] pl-3">
+        <div className="ml-6 mt-1 border-l border-border pl-3">
           {toolCall.inputPreview ? (
             <ToolCallPreview label="Input" value={toolCall.inputPreview} />
           ) : null}
@@ -941,20 +1295,9 @@ function formatToolName(name: string) {
   return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
 }
 
-function ThinkingShimmer() {
-  return (
-    <div
-      className="thinking-shimmer inline-flex items-center text-[13px] font-medium leading-6"
-      role="status"
-      aria-live="polite"
-    >
-      Thinking...
-    </div>
-  );
-}
-
 function SessionInspector({
   session,
+  related,
   currentStatus,
   lastError,
   streamStatus,
@@ -970,6 +1313,7 @@ function SessionInspector({
   onAbort,
 }: {
   session: AgentSessionDetailPayload["session"];
+  related: AgentSessionDetailPayload["related"];
   currentStatus: string;
   lastError: string | null;
   streamStatus: string;
@@ -1003,6 +1347,29 @@ function SessionInspector({
         </div>
       </div>
 
+      {(related.parent || related.children.length > 0) && (
+        <div>
+          <InspectorHeader label="Related sessions" countLabel={relatedCountLabel(related)} />
+          <div className="space-y-4">
+            {related.parent ? (
+              <InspectorRelatedSession label="Generated by" session={related.parent} />
+            ) : null}
+            {related.children.length > 0 ? (
+              <div>
+                <div className="text-[10.5px] font-medium uppercase text-ink-subtle">
+                  Generated sessions
+                </div>
+                <div className="mt-2 space-y-2">
+                  {related.children.map((child) => (
+                    <RelatedSessionLink key={child.id} session={child} />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
       <div>
         <InspectorHeader label="Runtime" countLabel={streamStatusLabel(streamStatus)} />
         <div className="space-y-4">
@@ -1028,11 +1395,11 @@ function SessionInspector({
           <InspectorField label="Activity events" value={String(eventCount)} />
         </div>
         {lastError ? (
-          <div className="mt-4 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[11.5px] leading-4 text-[#9f1d1d]">
+          <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
             {lastError}
           </div>
         ) : streamErrorMessage || streamStatus === "stale" ? (
-          <div className="mt-4 rounded-md border border-[#ead9b8] bg-[#fffaf0] px-3 py-2 text-[11.5px] leading-4 text-[#8a5a00]">
+          <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
             {streamStatus === "stale"
               ? "The live session stream is not responding. Reloading will show persisted events."
               : streamErrorMessage}
@@ -1058,7 +1425,7 @@ function SessionInspector({
               value={formatTokenCount(usage.inputCacheWriteTokens)}
             />
           </div>
-          <div className="space-y-4 border-t border-[#e5e5e1] pt-4">
+          <div className="space-y-4 border-t border-border pt-4">
             <InspectorField label="Output total" value={formatTokenCount(usage.outputTokens)} />
             <InspectorField label="Output text" value={formatTokenCount(usage.outputTextTokens)} />
             <InspectorField
@@ -1111,7 +1478,7 @@ function SessionInspector({
           type="button"
           disabled={isPending || !canAbort}
           onClick={onAbort}
-          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-[#f0c0b8] bg-[#fff5f3] px-3 text-[12px] font-medium text-[#9f2f21] transition-colors hover:bg-[#ffebe7] disabled:cursor-not-allowed disabled:opacity-45"
+          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-danger-border bg-danger-bg px-3 text-[12px] font-medium text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
         >
           <CircleStop size={13} strokeWidth={1.9} />
           Abort session
@@ -1122,10 +1489,10 @@ function SessionInspector({
         <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
         {recentEvents.length > 0 ? (
           <div className="space-y-1.5">
-            {recentEvents.map((event) => (
+            {recentEvents.map((event, index) => (
               <div
-                key={event.id}
-                className="rounded-md border border-[#e5e5e1] bg-white/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
+                key={event.id ?? `transient-${index}`}
+                className="rounded-md border border-border bg-surface/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <TerminalSquare
@@ -1144,7 +1511,7 @@ function SessionInspector({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
             No runtime events yet
           </div>
         )}
@@ -1157,7 +1524,7 @@ function InspectorHeader({ label, countLabel }: { label: string; countLabel: str
   return (
     <div className="mb-3 flex items-center justify-between">
       <span className="text-[12px] font-medium text-ink">{label}</span>
-      <span className="rounded-full border border-[#e3e3df] bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
+      <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
         {countLabel}
       </span>
     </div>
@@ -1199,12 +1566,72 @@ function InspectorStatusField({ status, lastError }: { status: string; lastError
   );
 }
 
-function InspectorLink({ label, href, value }: { label: string; href: string; value: string }) {
+function InspectorRelatedSession({
+  label,
+  session,
+}: {
+  label: string;
+  session: AgentSessionDetailPayload["related"]["children"][number];
+}) {
+  return (
+    <div>
+      <div className="text-[10.5px] font-medium uppercase text-ink-subtle">{label}</div>
+      <RelatedSessionLink session={session} />
+    </div>
+  );
+}
+
+function RelatedSessionLink({
+  session,
+}: {
+  session: AgentSessionDetailPayload["related"]["children"][number];
+}) {
+  return (
+    <Link
+      href={`/session/${session.id}`}
+      target="_blank"
+      rel="noreferrer"
+      title={session.title}
+      className="group flex min-w-0 items-center gap-2 rounded-md border border-border bg-surface/45 px-2.5 py-2 text-[12.5px] text-ink transition-colors hover:bg-surface"
+    >
+      <SessionStatusDot status={session.status} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{session.title}</span>
+        <span className="block truncate text-[11px] text-ink-subtle">{session.agentName}</span>
+      </span>
+      <ExternalLink size={11} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+    </Link>
+  );
+}
+
+function relatedCountLabel(related: AgentSessionDetailPayload["related"]) {
+  const count = relatedCount(related);
+  return `${count} linked`;
+}
+
+function relatedCount(related: AgentSessionDetailPayload["related"]) {
+  const count = (related.parent ? 1 : 0) + related.children.length;
+  return count;
+}
+
+function InspectorLink({
+  label,
+  href,
+  value,
+  newTab = false,
+}: {
+  label: string;
+  href: string;
+  value: string;
+  newTab?: boolean;
+}) {
   return (
     <div>
       <div className="text-[10.5px] font-medium uppercase text-ink-subtle">{label}</div>
       <Link
         href={href}
+        target={newTab ? "_blank" : undefined}
+        rel={newTab ? "noreferrer" : undefined}
         className="mt-1 inline-flex max-w-full items-center gap-1.5 text-[13px] font-medium text-ink hover:text-ink/75"
       >
         <span className="truncate">{value}</span>
@@ -1239,7 +1666,8 @@ function formatTokenCount(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
 }
 
-function formatThinkingDuration(seconds: number) {
+function formatThinkingDuration(seconds: number | undefined) {
+  if (seconds === undefined) return "Thought";
   const duration = Math.max(Math.round(seconds), 1);
   return `Thought for ${duration} ${duration === 1 ? "second" : "seconds"}`;
 }
@@ -1274,6 +1702,8 @@ function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "after_session.failed") {
     return `After-session failed: ${readString(event.payload.message)}`;
   }
+  if (event.type === "message.reasoning_started") return "Thinking started";
+  if (event.type === "message.reasoning_completed") return "Thinking completed";
   if (event.type === "message.reasoning_summary") return "Thinking summary";
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
@@ -1281,6 +1711,13 @@ function summarizeEvent(event: RuntimeEvent) {
     return `${readString(event.payload.provider)} ${formatUsdMicros(
       Number(event.payload.costUsdMicros ?? 0),
     )}`;
+  }
+  if (event.type === "session.delegated_usage") {
+    const cost =
+      event.payload.cost && typeof event.payload.cost === "object"
+        ? (event.payload.cost as Record<string, unknown>)
+        : {};
+    return `Delegated agent ${formatUsdMicros(Number(cost.totalCostUsdMicros ?? 0))}`;
   }
   if (event.type === "file.changed") return readString(event.payload.path);
   if (event.type === "brain.file_changed") return `brain/${readString(event.payload.path)}`;

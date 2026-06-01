@@ -5,7 +5,15 @@ import { workspaceExperiments, workspaceMcpServers } from "@opencompany/db/schem
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
-import { LINEAR_MCP_ENDPOINT_URL, LINEAR_MCP_SERVER_KEY, MCP_EXPERIMENT_KEY } from "@/lib/mcp/data";
+import {
+  LINEAR_MCP_ENDPOINT_URL,
+  LINEAR_MCP_SERVER_KEY,
+  MCP_EXPERIMENT_KEY,
+  type McpProviderKey,
+  SLACK_MCP_ENDPOINT_URL,
+  SLACK_MCP_OAUTH_CREDENTIAL_KIND,
+  SLACK_MCP_SERVER_KEY,
+} from "@/lib/mcp/data";
 import { linearMcpOAuthCredentialKind } from "@/lib/mcp/linear-oauth";
 
 export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
@@ -74,37 +82,87 @@ export async function removeLinearMcpToken() {
   return { ok: true as const };
 }
 
+export async function removeSlackMcpConnection() {
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  const server = await upsertSlackMcpServer(
+    workspace.id,
+    "missing_credential",
+    "Slack MCP connection was removed.",
+  );
+  await deleteMcpCredential({
+    workspaceId: workspace.id,
+    serverId: server.id,
+    kind: SLACK_MCP_OAUTH_CREDENTIAL_KIND,
+  });
+
+  revalidateMcpPaths();
+  return { ok: true as const };
+}
+
 export async function upsertLinearMcpServer(
   workspaceId: string,
   status: "configured" | "missing_credential" | "error",
   statusReason: string | null,
 ) {
+  return upsertMcpServer({
+    workspaceId,
+    serverKey: LINEAR_MCP_SERVER_KEY,
+    displayName: "Linear",
+    endpointUrl: LINEAR_MCP_ENDPOINT_URL,
+    status,
+    statusReason,
+  });
+}
+
+export async function upsertSlackMcpServer(
+  workspaceId: string,
+  status: "configured" | "missing_credential" | "error",
+  statusReason: string | null,
+) {
+  return upsertMcpServer({
+    workspaceId,
+    serverKey: SLACK_MCP_SERVER_KEY,
+    displayName: "Slack",
+    endpointUrl: SLACK_MCP_ENDPOINT_URL,
+    status,
+    statusReason,
+  });
+}
+
+async function upsertMcpServer(input: {
+  workspaceId: string;
+  serverKey: McpProviderKey;
+  displayName: string;
+  endpointUrl: string;
+  status: "configured" | "missing_credential" | "error";
+  statusReason: string | null;
+}) {
   const now = new Date();
   const [server] = await getDb()
     .insert(workspaceMcpServers)
     .values({
       id: newWorkspaceMcpServerId(),
-      workspaceId,
-      serverKey: LINEAR_MCP_SERVER_KEY,
-      displayName: "Linear",
-      endpointUrl: LINEAR_MCP_ENDPOINT_URL,
-      status,
-      statusReason,
+      workspaceId: input.workspaceId,
+      serverKey: input.serverKey,
+      displayName: input.displayName,
+      endpointUrl: input.endpointUrl,
+      status: input.status,
+      statusReason: input.statusReason,
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [workspaceMcpServers.workspaceId, workspaceMcpServers.serverKey],
       set: {
-        displayName: "Linear",
-        endpointUrl: LINEAR_MCP_ENDPOINT_URL,
-        status,
-        statusReason,
+        displayName: input.displayName,
+        endpointUrl: input.endpointUrl,
+        status: input.status,
+        statusReason: input.statusReason,
         updatedAt: now,
       },
     })
     .returning({ id: workspaceMcpServers.id });
 
-  if (!server) throw new Error("Could not persist Linear MCP server.");
+  if (!server) throw new Error(`Could not persist ${input.displayName} MCP server.`);
   return server;
 }
 

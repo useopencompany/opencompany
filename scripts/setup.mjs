@@ -82,6 +82,10 @@ const OBSERVABILITY_ENV_KEYS = [
   "OBSERVABILITY_RELEASE",
   "OBSERVABILITY_LOG_LEVEL",
   "OBSERVABILITY_TIMING",
+  "BRAINTRUST_ENABLED",
+  "BRAINTRUST_API_KEY",
+  "BRAINTRUST_PROJECT_ID",
+  "BRAINTRUST_PROJECT_NAME",
   "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
@@ -117,6 +121,7 @@ const SHARED_DEV_ENV_KEYS = [
 const NEON_ENV_KEYS = ["NEON_PROJECT_ID"];
 const INFISICAL_DEV_ENV = "dev";
 const INFISICAL_DEV_PATHS = ["/web", "/runner"];
+const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   "DATABASE_URL",
   "NEON_BRANCH",
@@ -459,6 +464,10 @@ function pullSharedDevEnvFromInfisical({
       }
       pulled[secret.key] = secret.value;
     }
+  }
+  pulled.NEXT_PUBLIC_WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
+  if (!isPlaceholder(pulled.WORKOS_REDIRECT_URI)) {
+    pulled.WORKOS_REDIRECT_URI = LOCAL_WORKOS_REDIRECT_URI;
   }
 
   const requiredKeys = [

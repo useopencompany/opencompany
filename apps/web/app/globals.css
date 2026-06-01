@@ -4,19 +4,116 @@
   --color-canvas: #f7f7f5;
   --color-sidebar: #f1f1ef;
   --color-border: #e6e6e3;
+  --color-border-subtle: #eaeae6;
+  --color-border-strong: #d4d4cf;
   --color-ink: #111111;
   --color-ink-muted: #6b6b6b;
   --color-ink-subtle: #9a9a96;
+  --color-surface: #ffffff;
+  --color-surface-raised: #fbfbfa;
+  --color-surface-muted: #fafaf7;
+  --color-surface-subtle: #ececea;
+  --color-surface-hover: #f3f3f0;
+  --color-surface-active: #e3e3df;
+  --color-surface-selected: #eef0ec;
+  --color-danger: #a33929;
+  --color-danger-bg: #fff5f3;
+  --color-danger-border: #f0c0b8;
+  --color-warning: #795b19;
+  --color-warning-bg: #fff8e7;
+  --color-warning-border: #eadcb6;
+  --color-success: #216b35;
+  --color-success-bg: #f0f8f2;
+  --color-success-border: #cfe5d5;
+  --color-info: #2b557f;
+  --color-info-bg: #eef3fb;
+  --color-info-border: #d6dde9;
+  --color-accent: #5a3b78;
+  --color-accent-bg: #f4f0fb;
+  --color-accent-border: #ded6e9;
   --color-pill-green: #e9f5ec;
   --color-pill-green-text: #1f7a3a;
   --font-sans:
     -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica", "Arial", sans-serif;
 }
 
+:root[data-theme="dark"] {
+  --color-canvas: #10120f;
+  --color-sidebar: #151713;
+  --color-border: #2b2e28;
+  --color-border-subtle: #22251f;
+  --color-border-strong: #3c4237;
+  --color-ink: #f0f1ec;
+  --color-ink-muted: #a8aca2;
+  --color-ink-subtle: #7b8074;
+  --color-surface: #1a1c18;
+  --color-surface-raised: #20231e;
+  --color-surface-muted: #242720;
+  --color-surface-subtle: #2a2e27;
+  --color-surface-hover: #2f342b;
+  --color-surface-active: #3a4035;
+  --color-surface-selected: #293228;
+  --color-danger: #ffb4a8;
+  --color-danger-bg: #3a1c18;
+  --color-danger-border: #633128;
+  --color-warning: #f1d08a;
+  --color-warning-bg: #322613;
+  --color-warning-border: #5b4218;
+  --color-success: #9fdaa8;
+  --color-success-bg: #193021;
+  --color-success-border: #2e5537;
+  --color-info: #a9cfff;
+  --color-info-bg: #18283a;
+  --color-info-border: #2f4b6a;
+  --color-accent: #d0b8ef;
+  --color-accent-bg: #2a2138;
+  --color-accent-border: #4a3864;
+  --color-pill-green: #193021;
+  --color-pill-green-text: #9fdaa8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-canvas: #10120f;
+    --color-sidebar: #151713;
+    --color-border: #2b2e28;
+    --color-border-subtle: #22251f;
+    --color-border-strong: #3c4237;
+    --color-ink: #f0f1ec;
+    --color-ink-muted: #a8aca2;
+    --color-ink-subtle: #7b8074;
+    --color-surface: #1a1c18;
+    --color-surface-raised: #20231e;
+    --color-surface-muted: #242720;
+    --color-surface-subtle: #2a2e27;
+    --color-surface-hover: #2f342b;
+    --color-surface-active: #3a4035;
+    --color-surface-selected: #293228;
+    --color-danger: #ffb4a8;
+    --color-danger-bg: #3a1c18;
+    --color-danger-border: #633128;
+    --color-warning: #f1d08a;
+    --color-warning-bg: #322613;
+    --color-warning-border: #5b4218;
+    --color-success: #9fdaa8;
+    --color-success-bg: #193021;
+    --color-success-border: #2e5537;
+    --color-info: #a9cfff;
+    --color-info-bg: #18283a;
+    --color-info-border: #2f4b6a;
+    --color-accent: #d0b8ef;
+    --color-accent-bg: #2a2138;
+    --color-accent-border: #4a3864;
+    --color-pill-green: #193021;
+    --color-pill-green-text: #9fdaa8;
+  }
+}
+
 html,
 body {
-  background: #f7f7f5;
-  color: #111;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "cv11", "ss01";
   /* Stop inner scroll areas (chat, sidebar) from chaining their scroll to the
@@ -24,8 +121,25 @@ body {
   overscroll-behavior: none;
 }
 
+:root[data-theme="dark"],
+:root[data-theme="dark"] body {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"],
+:root[data-theme="light"] body {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]),
+  :root:not([data-theme="light"]) body {
+    color-scheme: dark;
+  }
+}
+
 * {
-  border-color: #e6e6e3;
+  border-color: var(--color-border);
 }
 
 .tiptap-agent p {
@@ -92,36 +206,36 @@ body {
   padding: 0 7px;
   margin: 0 2px;
   border-radius: 5px;
-  border: 1px solid #d8e1d7;
-  background: #eef7f0;
+  border: 1px solid var(--color-success-border);
+  background: var(--color-success-bg);
   box-shadow:
     inset 0 0 0 1px rgb(255 255 255 / 0.58),
     0 1px 1px rgb(17 17 17 / 0.035);
   font-size: 12px;
   font-weight: 560;
-  color: #246238;
+  color: var(--color-success);
   vertical-align: -0.2em;
   white-space: nowrap;
 }
 .agent-mention[data-kind="model"] {
-  border-color: #d6dde9;
-  background: #eef3fb;
-  color: #2b557f;
+  border-color: var(--color-info-border);
+  background: var(--color-info-bg);
+  color: var(--color-info);
 }
 .agent-mention[data-kind="tool"] {
-  border-color: #d8e1d7;
-  background: #eef7f0;
-  color: #246238;
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 .agent-mention[data-kind="brain"] {
-  border-color: #ded6e9;
-  background: #f4f0fb;
-  color: #5a3b78;
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
 }
 .agent-mention[data-kind="hook"] {
-  border-color: #eadcb6;
-  background: #fff8e7;
-  color: #795b19;
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .tiptap-brain > *:first-child {
@@ -176,13 +290,13 @@ body {
   margin: 0.12em 0;
 }
 .tiptap-brain blockquote {
-  border-left: 3px solid #d9d9d3;
+  border-left: 3px solid var(--color-border-strong);
   padding-left: 0.95em;
   color: var(--color-ink-muted);
 }
 .tiptap-brain code {
   border-radius: 5px;
-  background: #ececea;
+  background: var(--color-surface-subtle);
   padding: 0.12em 0.34em;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
   font-size: 0.9em;
@@ -190,9 +304,9 @@ body {
 }
 .tiptap-brain pre {
   overflow-x: auto;
-  border: 1px solid #e2e2de;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f0f0ed;
+  background: var(--color-surface-muted);
   padding: 0.85em 1em;
   line-height: 1.55;
 }
@@ -205,10 +319,10 @@ body {
 .tiptap-brain hr {
   margin: 1.25em 0;
   border: 0;
-  border-top: 1px solid #deded9;
+  border-top: 1px solid var(--color-border);
 }
 .tiptap-brain .ProseMirror-selectednode {
-  outline: 2px solid #cfcfc8;
+  outline: 2px solid var(--color-border-strong);
 }
 
 .session-markdown > *:first-child {
@@ -264,13 +378,13 @@ body {
   margin: 0.15em 0;
 }
 .session-markdown blockquote {
-  border-left: 2px solid #d8d8d2;
+  border-left: 2px solid var(--color-border-strong);
   padding-left: 0.85em;
   color: var(--color-ink-muted);
 }
 .session-markdown code {
   border-radius: 5px;
-  background: #ececea;
+  background: var(--color-surface-subtle);
   padding: 0.12em 0.35em;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
   font-size: 0.92em;
@@ -278,9 +392,9 @@ body {
 }
 .session-markdown pre {
   overflow-x: auto;
-  border: 1px solid #e2e2de;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f0f0ed;
+  background: var(--color-surface-muted);
   padding: 0.85em 1em;
   line-height: 1.55;
 }
@@ -298,46 +412,50 @@ body {
 }
 .session-markdown th,
 .session-markdown td {
-  border: 1px solid #deded9;
+  border: 1px solid var(--color-border);
   padding: 0.35em 0.55em;
   text-align: left;
   vertical-align: top;
 }
 .session-markdown th {
-  background: #f0f0ed;
+  background: var(--color-surface-muted);
   font-weight: 650;
   color: var(--color-ink);
 }
 .session-markdown hr {
   margin: 1em 0;
   border: 0;
-  border-top: 1px solid #deded9;
+  border-top: 1px solid var(--color-border);
+}
+.session-markdown[data-streaming="true"] {
+  will-change: opacity, filter;
 }
 
 .thinking-shimmer {
-  color: transparent;
-  background: linear-gradient(90deg, #8b8b86 0%, #111111 42%, #8b8b86 58%, #8b8b86 100%);
-  background-size: 240% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: thinking-shimmer 1.7s ease-in-out infinite;
+  color: var(--color-ink);
+  animation: thinking-shimmer 1.4s ease-in-out infinite;
+  will-change: opacity;
 }
 
 @keyframes thinking-shimmer {
-  0% {
-    background-position: 120% 0;
-  }
+  0%,
   100% {
-    background-position: -120% 0;
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .session-markdown[data-streaming="true"] {
+    will-change: auto;
+  }
+
   .thinking-shimmer {
     animation: none;
     color: var(--color-ink-muted);
-    -webkit-text-fill-color: currentColor;
+    opacity: 1;
   }
 }
 

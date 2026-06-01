@@ -42,6 +42,7 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
+    expect(resolved.systemPrompt).toMatch(/Current date: \w+, \w+ \d{1,2}, \d{4}/);
     expect(resolved.tools).toContain("shell");
     expect(resolved.tools).toContain("edit_file");
     expect(resolved.tools).toContain("git_diff");
@@ -116,6 +117,50 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
     expect(resolved.mcpServers).toEqual([config.tools[0]]);
+  });
+
+  it("enables agent delegation when workspace agent references are configured", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Coordinator",
+      instructions: "Delegate focused work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      agents: [{ path: "agents/research.agent", name: "Research" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("delegate_to_agent");
+    expect(resolved.systemPrompt).toContain("Delegatable workspace agents: Research");
+    expect(resolved.systemPrompt).toContain("childSessionId");
+    expect(resolved.systemPrompt).toContain("continue the same delegated session");
+  });
+
+  it("does not enable agent delegation without configured agent references", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Solo",
+      instructions: "Work alone.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).not.toContain("delegate_to_agent");
   });
 
   it("formats the root Brain mount clearly in the system prompt", () => {
@@ -294,6 +339,7 @@ describe("normalizeAgentConfig", () => {
 
     expect(normalized.tools).toEqual([]);
     expect(normalized.brain).toEqual([]);
+    expect(normalized.agents).toEqual([]);
     expect(normalized.integrations.github.repositories).toEqual([]);
     expect(normalized.triggers).toEqual([]);
     expect(agentGitHubRepositories(config)).toEqual([]);

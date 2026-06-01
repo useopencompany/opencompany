@@ -4,6 +4,7 @@ import type { AgentConfig } from "@opencompany/agent-runtime";
 import { jsonSchema, type ToolSet } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpToolSet } from "./mcp-tools";
+import { createToolStartCoordinator } from "./tool-start-coordinator";
 
 const db = vi.hoisted(() => ({
   queryResults: [] as unknown[][],
@@ -32,7 +33,17 @@ const observability = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@opencompany/db/client", () => ({
+const braintrust = vi.hoisted(() => ({
+  logBraintrustCurrentSpan: vi.fn(),
+  traceBraintrustStep: vi.fn(
+    async (
+      _name: string,
+      run: (span: { log: (fields: unknown) => void } | undefined) => Promise<unknown>,
+    ) => run({ log: vi.fn() }),
+  ),
+}));
+
+vi.mock("./db", () => ({
   getDb: () => db,
 }));
 
@@ -44,6 +55,8 @@ vi.mock("@opencompany/observability", () => ({
   captureException: observability.captureException,
   createLogger: vi.fn(() => observability.logger),
 }));
+
+vi.mock("@opencompany/observability/braintrust", () => braintrust);
 
 vi.mock("./lease-writes", () => leaseWrites);
 
@@ -72,9 +85,26 @@ const agentConfig: AgentConfig = {
   triggers: [],
 };
 
+const slackAgentConfig: AgentConfig = {
+  ...agentConfig,
+  title: "Slack",
+  instructions: "Use @slack.",
+  tools: [
+    {
+      id: "slack",
+      type: "mcp",
+      server: "slack",
+      label: "slack",
+      description: "Use workspace-configured Slack MCP tools.",
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey());
+  vi.stubEnv("SLACK_MCP_CLIENT_ID", "slack_client");
+  vi.stubEnv("SLACK_MCP_CLIENT_SECRET", "slack_secret");
   db.queryResults = [];
   db.select.mockImplementation(() => ({
     from: vi.fn(() => ({
@@ -142,7 +172,8 @@ describe("createMcpToolSet", () => {
       },
     });
 
-    const mcpTools = await createMcpToolSet(baseInput());
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
     const linearTool = (mcpTools.tools as ToolSet).linear__create_issue;
     await linearTool?.onInputAvailable?.({
       input: { title: "Fix login" },
@@ -150,6 +181,12 @@ describe("createMcpToolSet", () => {
       messages: [],
       abortSignal: new AbortController().signal,
     });
+    expect(toolStartCoordinator.read("call_123")).toEqual({
+      toolCallId: "call_123",
+      name: "linear__create_issue",
+      input: { title: "Fix login" },
+    });
+    toolStartCoordinator.markStarted("call_123");
     const output = await linearTool?.execute?.(
       { title: "Fix login" },
       {
@@ -161,7 +198,7 @@ describe("createMcpToolSet", () => {
 
     expect(output).toEqual({ identifier: "OC-123" });
     expect(execute).toHaveBeenCalledWith({ title: "Fix login" }, { toolCallId: "call_123" });
-    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+    expect(leaseWrites.appendRuntimeEventForLease).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "tool.started" }),
     );
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
@@ -173,6 +210,62 @@ describe("createMcpToolSet", () => {
 
     await mcpTools.close();
     expect(mcpClient.close).toHaveBeenCalled();
+  });
+
+  it("logs handled MCP tool failures to Braintrust", async () => {
+    const execute = vi.fn(async () => {
+      throw new Error("Linear unavailable");
+    });
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      create_issue: {
+        description: "Create a Linear issue",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        }),
+        execute,
+      },
+    });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
+    const linearTool = (mcpTools.tools as ToolSet).linear__create_issue;
+    await linearTool?.onInputAvailable?.({
+      input: { title: "Fix login" },
+      toolCallId: "call_123",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_123");
+    const output = await linearTool?.execute?.(
+      { title: "Fix login" },
+      {
+        toolCallId: "call_123",
+        messages: [],
+        abortSignal: new AbortController().signal,
+      },
+    );
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: { code: "mcp_tool_execution_failed", recoverable: true },
+    });
+    expect(braintrust.logBraintrustCurrentSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ name: "Error", message: "Linear unavailable" }),
+        metadata: expect.objectContaining({
+          session_id: "ses_123",
+          message_id: "msg_123",
+          tool_call_id: "call_123",
+          tool_name: "linear__create_issue",
+          mcp_server: "linear",
+          mcp_tool_name: "create_issue",
+        }),
+      }),
+    );
   });
 
   it("prefers stored Linear MCP OAuth credentials over bearer tokens", async () => {
@@ -205,18 +298,96 @@ describe("createMcpToolSet", () => {
       client_id: "linear_client",
     });
   });
+
+  it("loads Slack MCP OAuth tools with static env-backed client credentials", async () => {
+    const execute = vi.fn(async () => ({ messages: [{ text: "hello" }] }));
+    db.queryResults = [[{ enabled: true }], [slackServerRow()], [slackOAuthConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      search: {
+        description: "Search Slack",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        }),
+        execute,
+      },
+    });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig, toolStartCoordinator));
+    const slackTool = (mcpTools.tools as ToolSet).slack__search;
+    await slackTool?.onInputAvailable?.({
+      input: { query: "launch" },
+      toolCallId: "call_slack",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_slack");
+    const output = await slackTool?.execute?.(
+      { query: "launch" },
+      {
+        toolCallId: "call_slack",
+        messages: [],
+        abortSignal: new AbortController().signal,
+      },
+    );
+
+    expect(output).toEqual({ messages: [{ text: "hello" }] });
+    expect(execute).toHaveBeenCalledWith({ query: "launch" }, { toolCallId: "call_slack" });
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "slack__search", toolCallId: "call_slack" }),
+    );
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          type: "http",
+          url: "https://mcp.slack.com/mcp",
+          authProvider: expect.any(Object),
+        }),
+      }),
+    );
+    const call = vi.mocked(createMCPClient).mock.calls.at(-1)?.[0] as {
+      transport?: {
+        authProvider?: {
+          tokens: () => unknown;
+          clientInformation: () => unknown;
+          clientMetadata: { scope?: string };
+        };
+      };
+    };
+    expect(call.transport?.authProvider?.tokens()).toEqual({
+      access_token: "slack_access",
+      refresh_token: "slack_refresh",
+      token_type: "Bearer",
+    });
+    expect(call.transport?.authProvider?.clientInformation()).toEqual({
+      client_id: "slack_client",
+      client_secret: "slack_secret",
+    });
+    expect(call.transport?.authProvider?.clientMetadata.scope).toContain("search:read.public");
+    expect(call.transport?.authProvider?.clientMetadata.scope).toContain("channels:history");
+
+    await mcpTools.close();
+    expect(mcpClient.close).toHaveBeenCalled();
+  });
 });
 
-function baseInput() {
+function baseInput(
+  config: AgentConfig = agentConfig,
+  toolStartCoordinator = createToolStartCoordinator(),
+) {
   return {
     sessionId: "ses_123",
     assistantMessageId: "msg_123",
     runLeaseId: "lease_123",
     runLeaseOwner: "runner_123",
     workspaceId: "wks_123",
-    agentConfig,
+    agentConfig: config,
     signal: new AbortController().signal,
     checkAbort: async () => {},
+    toolStartCoordinator,
   };
 }
 
@@ -256,14 +427,41 @@ function linearOAuthConnectionRow() {
   };
 }
 
-function encryptPayload(payload: Record<string, unknown>, kind: string) {
+function slackServerRow() {
+  return {
+    id: "wmcps_slack",
+    endpointUrl: "https://mcp.slack.com/mcp",
+    status: "configured",
+  };
+}
+
+function slackOAuthConnectionRow() {
+  return {
+    serverId: "wmcps_slack",
+    credentialKind: "oauth",
+    encryptionKeyVersion: 1,
+    encryptedPayload: encryptPayload(
+      {
+        tokens: {
+          access_token: "slack_access",
+          refresh_token: "slack_refresh",
+          token_type: "Bearer",
+        },
+      },
+      "oauth",
+      "wmcps_slack",
+    ),
+  };
+}
+
+function encryptPayload(payload: Record<string, unknown>, kind: string, serverId = "wmcps_123") {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", Buffer.from(credentialKey(), "base64"), iv);
   cipher.setAAD(
     Buffer.from(
       JSON.stringify({
         workspaceId: "wks_123",
-        serverId: "wmcps_123",
+        serverId,
         kind,
         keyVersion: 1,
       }),

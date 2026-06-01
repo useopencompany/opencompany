@@ -8,15 +8,19 @@ import {
   type OAuthTokens,
 } from "@ai-sdk/mcp";
 import { type AgentConfig, newAgentSessionMessageId } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
   workspaceMcpServers,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
+import {
+  logBraintrustCurrentSpan,
+  traceBraintrustStep,
+} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,
@@ -27,16 +31,74 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import type { RunControlCheck } from "./run-control";
+import { formatRuntimePreview } from "./tool-dispatcher";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
 const LINEAR_MCP_SERVER_KEY = "linear";
 const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const SLACK_MCP_SERVER_KEY = "slack";
+const SLACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const SLACK_READ_SCOPES = [
+  "search:read.public",
+  "search:read.private",
+  "search:read.mpim",
+  "search:read.im",
+  "search:read.files",
+  "search:read.users",
+  "channels:history",
+  "groups:history",
+  "mpim:history",
+  "im:history",
+  "files:read",
+  "emoji:read",
+  "users:read",
+  "users:read.email",
+  "channels:read",
+  "groups:read",
+  "mpim:read",
+];
 const ENCRYPTION_KEY_ENV = "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY";
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 const ENCRYPTION_KEY_VERSION = 1;
 const ENCRYPTION_KEY_BYTE_LENGTH = 32;
 const IV_BYTE_LENGTH = 12;
 const logger = createLogger({ service: "opencompany-runner" });
+
+type McpProviderKey = typeof LINEAR_MCP_SERVER_KEY | typeof SLACK_MCP_SERVER_KEY;
+
+type McpProvider = {
+  key: McpProviderKey;
+  displayName: string;
+  oauthCredentialKind: string;
+  supportsBearerToken: boolean;
+  staticClientEnv?: {
+    clientId: string;
+    clientSecret: string;
+  };
+  scopes?: string[];
+};
+
+const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
+  linear: {
+    key: LINEAR_MCP_SERVER_KEY,
+    displayName: "Linear",
+    oauthCredentialKind: LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
+    supportsBearerToken: true,
+  },
+  slack: {
+    key: SLACK_MCP_SERVER_KEY,
+    displayName: "Slack",
+    oauthCredentialKind: SLACK_MCP_OAUTH_CREDENTIAL_KIND,
+    supportsBearerToken: false,
+    staticClientEnv: {
+      clientId: "SLACK_MCP_CLIENT_ID",
+      clientSecret: "SLACK_MCP_CLIENT_SECRET",
+    },
+    scopes: SLACK_READ_SCOPES,
+  },
+};
 
 type McpToolContext = {
   sessionId: string;
@@ -47,7 +109,8 @@ type McpToolContext = {
   workspaceId: string;
   agentConfig: AgentConfig;
   signal: AbortSignal;
-  checkAbort: () => Promise<void>;
+  checkAbort: RunControlCheck;
+  toolStartCoordinator: ToolStartCoordinator;
   observabilityContext?: {
     workspaceId?: string;
     userId?: string;
@@ -63,132 +126,192 @@ export type McpToolSet = {
 };
 
 export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSet> {
-  const wantsLinear = input.agentConfig.tools.some(
-    (configTool) => configTool.id === "linear" && configTool.type === "mcp",
-  );
-  if (!wantsLinear) return emptyMcpToolSet();
+  const requestedProviders = requestedMcpProviders(input.agentConfig);
+  if (requestedProviders.length === 0) return emptyMcpToolSet();
 
-  const linear = await loadLinearMcpConnection(input.workspaceId).catch((error: unknown) => {
-    const diagnostic = mcpConnectionErrorDiagnostic(error);
-    logger.error("Linear MCP connection setup failed", {
-      event: "opencompany.runner_mcp_connection_failed",
-      workspace_id: input.observabilityContext?.workspaceId ?? input.workspaceId,
-      user_id: input.observabilityContext?.userId,
-      agent_id: input.observabilityContext?.agentId,
-      session_id: input.sessionId,
-      message_id: input.assistantMessageId,
-      mcp_server: LINEAR_MCP_SERVER_KEY,
-      mcp_failure_reason: diagnostic.reason,
-      ...(diagnostic.credentialKind ? { mcp_credential_kind: diagnostic.credentialKind } : {}),
-      ...(diagnostic.encryptionKeyVersion
-        ? { mcp_credential_key_version: diagnostic.encryptionKeyVersion }
-        : {}),
-      ...(diagnostic.algorithm ? { mcp_credential_algorithm: diagnostic.algorithm } : {}),
-      error,
-    });
-    captureException(error, {
-      event: "opencompany.runner_mcp_connection_failed",
-      workspace_id: input.observabilityContext?.workspaceId ?? input.workspaceId,
-      user_id: input.observabilityContext?.userId,
-      agent_id: input.observabilityContext?.agentId,
-      session_id: input.sessionId,
-      message_id: input.assistantMessageId,
-      mcp_server: LINEAR_MCP_SERVER_KEY,
-      mcp_failure_reason: diagnostic.reason,
-      ...(diagnostic.credentialKind ? { mcp_credential_kind: diagnostic.credentialKind } : {}),
-      ...(diagnostic.encryptionKeyVersion
-        ? { mcp_credential_key_version: diagnostic.encryptionKeyVersion }
-        : {}),
-      ...(diagnostic.algorithm ? { mcp_credential_algorithm: diagnostic.algorithm } : {}),
-    });
-    throw error;
-  });
-  const transport =
-    linear.auth.type === "oauth"
-      ? {
-          type: "http" as const,
-          url: linear.endpointUrl,
-          authProvider: createRunnerLinearMcpOAuthProvider({
-            workspaceId: input.workspaceId,
-            serverId: linear.serverId,
-            payload: linear.auth.payload,
-          }),
-        }
-      : {
-          type: "http" as const,
-          url: linear.endpointUrl,
-          headers: {
-            Authorization: `Bearer ${linear.auth.bearerToken}`,
-          },
-        };
-  const client = await createMCPClient({
-    clientName: "opencompany-runner",
-    version: "0.2.0",
-    transport,
-  });
-
+  const clients: MCPClient[] = [];
+  const tools: ToolSet = {};
+  const usedNames = new Set<string>();
   try {
-    const definitions = await client.listTools({ options: { signal: input.signal } });
-    const rawTools = client.toolsFromDefinitions(definitions);
-    const tools: ToolSet = {};
-    const usedNames = new Set<string>();
-
-    for (const [rawName, rawTool] of Object.entries(rawTools)) {
-      const prefixedName = uniqueToolName(`linear__${sanitizeMcpToolName(rawName)}`, usedNames);
-      const mcpTool = rawTool as {
-        description?: string;
-        inputSchema?: unknown;
-        execute?: (input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>;
-      };
-      tools[prefixedName] = tool({
-        description: `Linear MCP: ${mcpTool.description ?? rawName}`,
-        inputSchema:
-          (mcpTool.inputSchema as never) ?? jsonSchema({ type: "object", properties: {} } as never),
-        onInputAvailable: async ({
-          input: toolInput,
-          toolCallId,
-        }: {
-          input: unknown;
-          toolCallId: string;
-        }) => {
-          await input.checkAbort();
-          await requireLeaseWrite(
-            appendRuntimeEventForLease({
-              sessionId: input.sessionId,
-              messageId: input.assistantMessageId,
-              leaseId: input.runLeaseId,
-              leaseOwner: input.runLeaseOwner,
-              type: "tool.started",
-              payload: {
-                messageId: input.assistantMessageId,
-                toolCallId,
-                name: prefixedName,
-                input: toolInput,
-              },
-            }),
-          );
+    for (const provider of requestedProviders) {
+      const connection = await loadMcpConnection(input.workspaceId, provider).catch(
+        (error: unknown) => {
+          logMcpConnectionSetupFailure({ error, input, provider });
+          throw error;
         },
-        execute: async (toolInput: unknown, options: { toolCallId: string }) =>
-          executeMcpTool({
-            ...input,
-            toolCallId: options.toolCallId,
-            toolName: prefixedName,
-            rawToolName: rawName,
-            execute: mcpTool.execute,
-            args: toolInput,
-          }),
-      } as never) as ToolSet[string];
+      );
+      const client = await createMCPClient({
+        clientName: "opencompany-runner",
+        version: "0.2.0",
+        transport: mcpTransportForConnection({
+          workspaceId: input.workspaceId,
+          provider,
+          connection,
+        }),
+      });
+      clients.push(client);
+
+      const definitions = await client.listTools({ options: { signal: input.signal } });
+      const rawTools = client.toolsFromDefinitions(definitions);
+
+      for (const [rawName, rawTool] of Object.entries(rawTools)) {
+        const prefixedName = uniqueToolName(
+          `${provider.key}__${sanitizeMcpToolName(rawName)}`,
+          usedNames,
+        );
+        const mcpTool = rawTool as {
+          description?: string;
+          inputSchema?: unknown;
+          execute?: (input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>;
+        };
+        tools[prefixedName] = tool({
+          description: `${provider.displayName} MCP: ${mcpTool.description ?? rawName}`,
+          inputSchema:
+            (mcpTool.inputSchema as never) ??
+            jsonSchema({ type: "object", properties: {} } as never),
+          onInputAvailable: async ({
+            input: toolInput,
+            toolCallId,
+          }: {
+            input: unknown;
+            toolCallId: string;
+          }) => {
+            await input.checkAbort();
+            input.toolStartCoordinator.record({
+              toolCallId,
+              name: prefixedName,
+              input: toolInput,
+            });
+          },
+          execute: async (toolInput: unknown, options: { toolCallId: string }) => {
+            await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+            return executeMcpTool({
+              ...input,
+              mcpServer: provider.key,
+              toolCallId: options.toolCallId,
+              toolName: prefixedName,
+              rawToolName: rawName,
+              execute: mcpTool.execute,
+              args: toolInput,
+            });
+          },
+        } as never) as ToolSet[string];
+      }
     }
 
-    return { tools, close: () => client.close() };
+    return { tools, close: () => closeMcpClients(clients) };
   } catch (error) {
-    await closeMcpClient(client);
+    await closeMcpClients(clients);
     throw error;
   }
 }
 
+function requestedMcpProviders(agentConfig: AgentConfig) {
+  const seen = new Set<McpProviderKey>();
+  const providers: McpProvider[] = [];
+  for (const configTool of agentConfig.tools) {
+    if (configTool.type !== "mcp") continue;
+    const key = configTool.server as McpProviderKey;
+    if (!isMcpProviderKey(key) || seen.has(key)) continue;
+    seen.add(key);
+    providers.push(MCP_PROVIDER_CATALOG[key]);
+  }
+  return providers;
+}
+
+function isMcpProviderKey(value: string): value is McpProviderKey {
+  return value === LINEAR_MCP_SERVER_KEY || value === SLACK_MCP_SERVER_KEY;
+}
+
+function mcpTransportForConnection(input: {
+  workspaceId: string;
+  provider: McpProvider;
+  connection: Awaited<ReturnType<typeof loadMcpConnection>>;
+}) {
+  if (input.connection.auth.type === "oauth") {
+    return {
+      type: "http" as const,
+      url: input.connection.endpointUrl,
+      authProvider: createRunnerMcpOAuthProvider({
+        workspaceId: input.workspaceId,
+        serverId: input.connection.serverId,
+        payload: input.connection.auth.payload,
+        provider: input.provider,
+      }),
+    };
+  }
+
+  return {
+    type: "http" as const,
+    url: input.connection.endpointUrl,
+    headers: {
+      Authorization: `Bearer ${input.connection.auth.bearerToken}`,
+    },
+  };
+}
+
+function logMcpConnectionSetupFailure(input: {
+  error: unknown;
+  input: McpToolContext;
+  provider: McpProvider;
+}) {
+  const diagnostic = mcpConnectionErrorDiagnostic(input.error);
+  logger.error(`${input.provider.displayName} MCP connection setup failed`, {
+    event: "opencompany.runner_mcp_connection_failed",
+    workspace_id: input.input.observabilityContext?.workspaceId ?? input.input.workspaceId,
+    user_id: input.input.observabilityContext?.userId,
+    agent_id: input.input.observabilityContext?.agentId,
+    session_id: input.input.sessionId,
+    message_id: input.input.assistantMessageId,
+    mcp_server: input.provider.key,
+    mcp_failure_reason: diagnostic.reason,
+    ...(diagnostic.credentialKind ? { mcp_credential_kind: diagnostic.credentialKind } : {}),
+    ...(diagnostic.encryptionKeyVersion
+      ? { mcp_credential_key_version: diagnostic.encryptionKeyVersion }
+      : {}),
+    ...(diagnostic.algorithm ? { mcp_credential_algorithm: diagnostic.algorithm } : {}),
+    error: input.error,
+  });
+  captureException(input.error, {
+    event: "opencompany.runner_mcp_connection_failed",
+    workspace_id: input.input.observabilityContext?.workspaceId ?? input.input.workspaceId,
+    user_id: input.input.observabilityContext?.userId,
+    agent_id: input.input.observabilityContext?.agentId,
+    session_id: input.input.sessionId,
+    message_id: input.input.assistantMessageId,
+    mcp_server: input.provider.key,
+    mcp_failure_reason: diagnostic.reason,
+    ...(diagnostic.credentialKind ? { mcp_credential_kind: diagnostic.credentialKind } : {}),
+    ...(diagnostic.encryptionKeyVersion
+      ? { mcp_credential_key_version: diagnostic.encryptionKeyVersion }
+      : {}),
+    ...(diagnostic.algorithm ? { mcp_credential_algorithm: diagnostic.algorithm } : {}),
+  });
+}
+
 async function executeMcpTool(
   input: McpToolContext & {
+    mcpServer: McpProviderKey;
+    toolCallId: string;
+    toolName: string;
+    rawToolName: string;
+    execute:
+      | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
+      | undefined;
+    args: unknown;
+  },
+) {
+  return traceBraintrustStep(
+    `tool.${input.toolName}`,
+    () => executeMcpToolWithTracing(input),
+    mcpToolTraceMetadata(input),
+    { type: "tool", input: input.args },
+  );
+}
+
+async function executeMcpToolWithTracing(
+  input: McpToolContext & {
+    mcpServer: McpProviderKey;
     toolCallId: string;
     toolName: string;
     rawToolName: string;
@@ -208,6 +331,19 @@ async function executeMcpTool(
     output = await input.execute(input.args, { toolCallId: input.toolCallId });
   } catch (error) {
     failed = true;
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: {
+        session_id: input.sessionId,
+        message_id: input.assistantMessageId,
+        tool_call_id: input.toolCallId,
+        tool_name: input.toolName,
+        mcp_server: input.mcpServer,
+        mcp_tool_name: input.rawToolName,
+        model_provider: input.observabilityContext?.modelProvider,
+        model_name: input.observabilityContext?.modelName,
+      },
+    });
     captureException(error, {
       event: "opencompany.runner_mcp_tool_failed",
       workspace_id: input.observabilityContext?.workspaceId,
@@ -217,7 +353,7 @@ async function executeMcpTool(
       message_id: input.assistantMessageId,
       tool_call_id: input.toolCallId,
       tool_name: input.toolName,
-      mcp_server: LINEAR_MCP_SERVER_KEY,
+      mcp_server: input.mcpServer,
       mcp_tool_name: input.rawToolName,
       model_provider: input.observabilityContext?.modelProvider,
       model_name: input.observabilityContext?.modelName,
@@ -260,7 +396,7 @@ async function executeMcpTool(
           error: isMcpFailedToolOutput(output)
             ? output.error
             : buildMcpFailedToolOutput(new Error("MCP tool failed.")).error,
-          output,
+          outputPreview: formatRuntimePreview(output),
         },
       }),
     );
@@ -276,13 +412,42 @@ async function executeMcpTool(
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
           name: input.toolName,
-          output,
+          outputPreview: formatRuntimePreview(output),
         },
       }),
     );
   }
 
+  logBraintrustCurrentSpan({
+    output,
+    metadata: {
+      ...mcpToolTraceMetadata(input),
+      tool_message_id: toolMessageId,
+      failed,
+    },
+  });
+
   return output;
+}
+
+function mcpToolTraceMetadata(
+  input: McpToolContext & {
+    mcpServer: McpProviderKey;
+    toolCallId: string;
+    toolName: string;
+    rawToolName: string;
+  },
+) {
+  return {
+    session_id: input.sessionId,
+    message_id: input.assistantMessageId,
+    tool_call_id: input.toolCallId,
+    tool_name: input.toolName,
+    mcp_server: input.mcpServer,
+    mcp_tool_name: input.rawToolName,
+    model_provider: input.observabilityContext?.modelProvider,
+    model_name: input.observabilityContext?.modelName,
+  };
 }
 
 function buildMcpFailedToolOutput(error: unknown) {
@@ -294,6 +459,17 @@ function buildMcpFailedToolOutput(error: unknown) {
       recoverable: true,
     },
   };
+}
+
+function braintrustError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack ? { stack: error.stack } : {}),
+    };
+  }
+  return { message: String(error) };
 }
 
 function isMcpFailedToolOutput(
@@ -308,7 +484,7 @@ function isMcpFailedToolOutput(
   );
 }
 
-async function loadLinearMcpConnection(workspaceId: string) {
+async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
   const db = getDb();
   const [[experiment], [server]] = await Promise.all([
     db
@@ -331,17 +507,21 @@ async function loadLinearMcpConnection(workspaceId: string) {
       .where(
         and(
           eq(workspaceMcpServers.workspaceId, workspaceId),
-          eq(workspaceMcpServers.serverKey, LINEAR_MCP_SERVER_KEY),
+          eq(workspaceMcpServers.serverKey, provider.key),
         ),
       )
       .limit(1),
   ]);
 
   if (!experiment?.enabled) {
-    throw new Error("Linear MCP is enabled on this agent, but the workspace MCP beta is off.");
+    throw new Error(
+      `${provider.displayName} MCP is enabled on this agent, but the workspace MCP beta is off.`,
+    );
   }
   if (!server || server.status !== "configured") {
-    throw new Error("Linear MCP is enabled on this agent, but Linear is not configured.");
+    throw new Error(
+      `${provider.displayName} MCP is enabled on this agent, but ${provider.displayName} is not configured.`,
+    );
   }
 
   const rows = await db
@@ -360,10 +540,10 @@ async function loadLinearMcpConnection(workspaceId: string) {
     );
 
   const oauthRow = rows.find(
-    (candidate) => candidate.credentialKind === LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
+    (candidate) => candidate.credentialKind === provider.oauthCredentialKind,
   );
   if (oauthRow) {
-    const payload = parseLinearMcpOAuthPayload(
+    const payload = parseMcpOAuthPayload(
       decryptPayload(oauthRow.encryptedPayload, {
         workspaceId,
         serverId: oauthRow.serverId,
@@ -371,8 +551,10 @@ async function loadLinearMcpConnection(workspaceId: string) {
         keyVersion: oauthRow.encryptionKeyVersion,
       }),
     );
-    if (!payload.clientInformation || !payload.tokens) {
-      throw new Error("Linear MCP OAuth credential is incomplete. Reconnect Linear.");
+    if (!(provider.staticClientEnv || payload.clientInformation) || !payload.tokens) {
+      throw new Error(
+        `${provider.displayName} MCP OAuth credential is incomplete. Reconnect ${provider.displayName}.`,
+      );
     }
     return {
       endpointUrl: server.endpointUrl,
@@ -381,9 +563,17 @@ async function loadLinearMcpConnection(workspaceId: string) {
     };
   }
 
+  if (!provider.supportsBearerToken) {
+    throw new Error(
+      `${provider.displayName} MCP is enabled on this agent, but ${provider.displayName} is not configured.`,
+    );
+  }
+
   const bearerRow = rows.find((candidate) => candidate.credentialKind === "bearer_token");
   if (!bearerRow)
-    throw new Error("Linear MCP is enabled on this agent, but Linear is not configured.");
+    throw new Error(
+      `${provider.displayName} MCP is enabled on this agent, but ${provider.displayName} is not configured.`,
+    );
   const payload = decryptPayload(bearerRow.encryptedPayload, {
     workspaceId,
     serverId: bearerRow.serverId,
@@ -391,7 +581,8 @@ async function loadLinearMcpConnection(workspaceId: string) {
     keyVersion: bearerRow.encryptionKeyVersion,
   });
   const bearerToken = typeof payload.bearerToken === "string" ? payload.bearerToken.trim() : "";
-  if (!bearerToken) throw new Error("Linear MCP credential is missing a bearer token.");
+  if (!bearerToken)
+    throw new Error(`${provider.displayName} MCP credential is missing a bearer token.`);
   return {
     endpointUrl: server.endpointUrl,
     serverId: bearerRow.serverId,
@@ -399,28 +590,29 @@ async function loadLinearMcpConnection(workspaceId: string) {
   };
 }
 
-type LinearMcpOAuthPayload = {
+type McpOAuthPayload = {
   clientInformation?: OAuthClientInformation;
   tokens?: OAuthTokens;
   codeVerifier?: string;
   state?: string;
 };
 
-function createRunnerLinearMcpOAuthProvider(input: {
+function createRunnerMcpOAuthProvider(input: {
   workspaceId: string;
   serverId: string;
-  payload: LinearMcpOAuthPayload;
+  payload: McpOAuthPayload;
+  provider: McpProvider;
 }): OAuthClientProvider {
   let payload = input.payload;
 
-  async function persist(next: LinearMcpOAuthPayload) {
+  async function persist(next: McpOAuthPayload) {
     payload = next;
     const encryptedPayload = encryptPayload(
       { ...next },
       {
         workspaceId: input.workspaceId,
         serverId: input.serverId,
-        kind: LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
+        kind: input.provider.oauthCredentialKind,
         keyVersion: ENCRYPTION_KEY_VERSION,
       },
     );
@@ -431,7 +623,7 @@ function createRunnerLinearMcpOAuthProvider(input: {
         id: newWorkspaceMcpCredentialId(),
         workspaceId: input.workspaceId,
         serverId: input.serverId,
-        kind: LINEAR_MCP_OAUTH_CREDENTIAL_KIND,
+        kind: input.provider.oauthCredentialKind,
         encryptedPayload,
         encryptionKeyVersion: ENCRYPTION_KEY_VERSION,
         lastRotatedAt: now,
@@ -451,30 +643,39 @@ function createRunnerLinearMcpOAuthProvider(input: {
 
   return {
     get redirectUrl() {
-      return linearMcpCallbackUrl();
+      return mcpCallbackUrl(input.provider);
     },
     get clientMetadata(): OAuthClientMetadata {
       return {
         client_name: "OpenCompany Runner",
-        redirect_uris: [linearMcpCallbackUrl()],
+        redirect_uris: [mcpCallbackUrl(input.provider)],
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
+        ...(input.provider.scopes ? { scope: input.provider.scopes.join(" ") } : {}),
       };
     },
-    clientInformation: () => payload.clientInformation,
+    clientInformation: () =>
+      input.provider.staticClientEnv
+        ? staticClientInformation(input.provider)
+        : payload.clientInformation,
     tokens: () => payload.tokens,
     saveTokens: async (tokens) => persist({ ...payload, tokens }),
-    saveClientInformation: async (clientInformation) => persist({ ...payload, clientInformation }),
+    saveClientInformation: async (clientInformation) => {
+      if (!input.provider.staticClientEnv) await persist({ ...payload, clientInformation });
+    },
     saveCodeVerifier: async (codeVerifier) => persist({ ...payload, codeVerifier }),
     codeVerifier: () => {
-      if (!payload.codeVerifier) throw new Error("Linear MCP OAuth verifier is missing.");
+      if (!payload.codeVerifier)
+        throw new Error(`${input.provider.displayName} MCP OAuth verifier is missing.`);
       return payload.codeVerifier;
     },
     state: () => payload.state ?? "",
     saveState: async (state) => persist({ ...payload, state }),
     storedState: () => payload.state,
     redirectToAuthorization: () => {
-      throw new Error("Linear MCP needs to be reconnected from workspace settings.");
+      throw new Error(
+        `${input.provider.displayName} MCP needs to be reconnected from workspace settings.`,
+      );
     },
     invalidateCredentials: async (scope) => {
       if (scope === "all") {
@@ -483,15 +684,15 @@ function createRunnerLinearMcpOAuthProvider(input: {
         await persist(omitOAuthPayload(payload, ["tokens"]));
       } else if (scope === "verifier") {
         await persist(omitOAuthPayload(payload, ["codeVerifier", "state"]));
-      } else if (scope === "client") {
+      } else if (scope === "client" && !input.provider.staticClientEnv) {
         await persist(omitOAuthPayload(payload, ["clientInformation"]));
       }
     },
   };
 }
 
-function parseLinearMcpOAuthPayload(payload: Record<string, unknown>): LinearMcpOAuthPayload {
-  const parsed: LinearMcpOAuthPayload = {};
+function parseMcpOAuthPayload(payload: Record<string, unknown>): McpOAuthPayload {
+  const parsed: McpOAuthPayload = {};
   if (isOAuthClientInformation(payload.clientInformation)) {
     parsed.clientInformation = payload.clientInformation;
   }
@@ -501,8 +702,8 @@ function parseLinearMcpOAuthPayload(payload: Record<string, unknown>): LinearMcp
   return parsed;
 }
 
-function omitOAuthPayload<TKey extends keyof LinearMcpOAuthPayload>(
-  payload: LinearMcpOAuthPayload,
+function omitOAuthPayload<TKey extends keyof McpOAuthPayload>(
+  payload: McpOAuthPayload,
   keys: TKey[],
 ) {
   const next = { ...payload };
@@ -661,12 +862,28 @@ function newWorkspaceMcpCredentialId() {
   return `wmcpc_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
-function linearMcpCallbackUrl() {
+function mcpCallbackUrl(provider: McpProvider) {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     process.env.NEXT_PUBLIC_WORKOS_REDIRECT_URI?.trim().replace(/\/auth\/callback$/, "") ||
     "http://localhost:3000";
-  return `${appUrl.replace(/\/$/, "")}/api/mcp/linear/callback`;
+  return `${appUrl.replace(/\/$/, "")}/api/mcp/${provider.key}/callback`;
+}
+
+function staticClientInformation(provider: McpProvider): OAuthClientInformation {
+  if (!provider.staticClientEnv) {
+    throw new Error(`${provider.displayName} MCP OAuth client information is missing.`);
+  }
+  return {
+    client_id: requiredEnv(provider.staticClientEnv.clientId),
+    client_secret: requiredEnv(provider.staticClientEnv.clientSecret),
+  };
+}
+
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for MCP OAuth.`);
+  return value;
 }
 
 function isOAuthClientInformation(value: unknown): value is OAuthClientInformation {
@@ -711,6 +928,10 @@ async function closeMcpClient(client: MCPClient) {
   } catch {
     // Best effort cleanup after setup failure.
   }
+}
+
+async function closeMcpClients(clients: MCPClient[]) {
+  await Promise.all(clients.map((client) => closeMcpClient(client)));
 }
 
 function throwIfAborted(signal: AbortSignal) {

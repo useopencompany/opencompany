@@ -12,6 +12,7 @@ import {
   runClaimedRunnerJob,
   startRunnerJobWorker,
 } from "./jobs";
+import { ToolStepLimitExceededError } from "./runner-errors";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -206,6 +207,40 @@ describe("runner job execution", () => {
     expect(firstJob(store).lastError).toBe("model unavailable");
   });
 
+  it("marks non-retryable runner errors failed without requeueing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "running",
+        attempts: 1,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          runMessage: vi.fn(async () => {
+            throw new ToolStepLimitExceededError();
+          }),
+        }),
+      }),
+    ).rejects.toThrow("Agent reached the tool-step limit before producing a final answer.");
+
+    expect(firstJob(store).status).toBe("failed");
+    expect(firstJob(store).nextRunAt).toEqual(new Date("2026-05-27T12:00:00.000Z"));
+    expect(firstJob(store).lastError).toBe(
+      "Agent reached the tool-step limit before producing a final answer. Send another message to continue.",
+    );
+  });
+
   it("marks jobs failed after the max attempt", async () => {
     const store = createMemoryRunnerJobStore([
       job({
@@ -234,6 +269,37 @@ describe("runner job execution", () => {
     expect(firstJob(store).status).toBe("failed");
     expect(firstJob(store).leaseId).toBeNull();
     expect(firstJob(store).lastError).toBe("still broken");
+  });
+});
+
+describe("runner job worker wake", () => {
+  it("claims a newly enqueued job on notify() instead of waiting for the poll interval", async () => {
+    // A poll interval far longer than the test timeout proves the claim was driven by
+    // notify(), not by the fallback poll.
+    const store = createMemoryRunnerJobStore();
+    const runMessage = vi.fn(async () => undefined);
+    const worker = startRunnerJobWorker(env(), {
+      store,
+      handlers: handlers({ runMessage }),
+      pollIntervalMs: 60_000,
+    });
+
+    try {
+      // Let the worker run its initial claim pass (store is empty) and settle into its wait.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(runMessage).not.toHaveBeenCalled();
+
+      await enqueueRunnerJob(
+        { kind: "message", sessionId: "ses_123", messageId: "msg_123" },
+        store,
+      );
+      worker.notify();
+
+      await vi.waitFor(() => expect(runMessage).toHaveBeenCalledOnce());
+      expect(firstJob(store).status).toBe("completed");
+    } finally {
+      await worker.stop();
+    }
   });
 });
 

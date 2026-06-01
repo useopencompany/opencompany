@@ -1,7 +1,8 @@
 # Observability
 
 OpenCompany observability is intentionally narrow: production error capture, structured server
-logs, runtime context, and a short debugging path for failed agent sessions.
+logs, runtime context, Braintrust runner traces for opted-in agent debugging, and a short debugging
+path for failed agent sessions.
 
 Better Stack receives errors through its Sentry-compatible DSN and production server logs through
 platform log drains. The repo-owned `@opencompany/observability` package provides the app-facing
@@ -35,6 +36,38 @@ OBSERVABILITY_LOG_LEVEL=info
 OBSERVABILITY_TIMING=0
 BETTER_STACK_ERRORS_DSN=https://...
 ```
+
+Braintrust runner tracing is disabled unless it is explicitly enabled and keyed:
+
+```sh
+BRAINTRUST_ENABLED=false
+BRAINTRUST_API_KEY=...
+BRAINTRUST_PROJECT_ID=...
+BRAINTRUST_PROJECT_NAME="OpenCompany Runner"
+```
+
+When enabled, Braintrust captures runner-only agent traces: agent turn spans, model stream spans,
+tool and MCP calls, delegation, sandbox hydration, Brain sync, exposed reasoning summaries, and run
+outcomes. This intentionally captures prompt/model/tool content for debugging. Keep it disabled in
+environments where full AI content must not leave the platform.
+
+The model call is instrumented as an `llm` span manually (not via Braintrust's `wrapAISDK`). We open
+the span with `traceBraintrustStep`/`observeRunStep`, which always calls `span.end()` in a `finally`,
+then log the chat transcript (`input` as messages, `output` as the assistant message), token usage
+(prompt, completion, total, plus cached and reasoning tokens), time-to-first-token, and the model slug
+in `metadata.model`. Braintrust derives estimated cost from `metadata.model` plus those token metrics.
+
+We deliberately avoid `wrapAISDK` for streaming here: it closes the `llm` span (and logs usage) only
+when its patched result stream drains to completion, with no error/cancel handler on that path. Since
+the runner consumes `result.fullStream` itself and can abort or hit tool/stream errors mid-stream,
+`wrapAISDK` would leave spans stuck "in progress" with no usage. Manual instrumentation closes the span
+deterministically on success, error, and abort.
+
+Two further reliability details for the long-lived runner: the model span's output/usage are logged on
+the explicit span object (not `currentSpan()`), so they can't be dropped to a no-op span if the AI SDK
+stream runs outside the span's async-context; and each run flushes Braintrust (`flushBraintrust()` in a
+`finally` around the root trace) so end-of-run spans are delivered promptly rather than lingering
+because the background async flush hadn't completed.
 
 Hosted releases get commit attribution automatically: Vercel/Render expose server commit metadata,
 and the production workflow injects the released SHA into the web build for browser captures. Use
@@ -80,6 +113,13 @@ Allowed log fields:
 
 Do not log prompts, model output, command output, command bodies, agent file text, repo file
 contents, tokens, secrets, emails, browser URLs with query strings, or other free-form user text.
+
+Braintrust traces are the exception to the prompt/output rule when `BRAINTRUST_ENABLED=true`.
+Braintrust masking still redacts secret-like keys and common inline credential patterns, but agents
+can surface sensitive data in free text. Treat Braintrust access as production data access. Masking
+only redacts secret-like *string* values: numeric/boolean values (e.g. the `tokens`, `prompt_tokens`,
+`completion_tokens`, and `time_to_first_token` metrics, which match the "token" key rule) are left
+intact, because Braintrust requires `metrics.*` to be numeric and rejects the whole row otherwise.
 
 ## Failed Agent Run Checklist
 
@@ -161,10 +201,9 @@ Prefer these correlation fields in all handled captures:
 
 ## Deferred
 
-This slice deliberately does not include Langfuse, distributed tracing, Better Stack OTLP logs,
-browser log capture, session replay, alert rules, a local `observe` CLI, or a full E2B lifecycle
-model. Track AI/agent trace work in the Langfuse issue and sandbox lifecycle work in the E2B
-lifecycle issue.
+This slice deliberately does not include distributed web/Inngest-to-runner tracing, Better Stack
+OTLP logs, browser log capture, session replay, alert rules, a local `observe` CLI, Braintrust eval
+scaffolding, or a full E2B lifecycle model. Track sandbox lifecycle work in the E2B lifecycle issue.
 
 If deeper client debugging becomes necessary, prefer highly masked, error-triggered or
 support-triggered replay over broad browser logs.

@@ -10,13 +10,18 @@ import {
   GitBranch,
   KeyRound,
   LogOut,
+  MessageSquare,
+  Monitor,
+  Moon,
   Plug,
+  Sun,
   Trash2,
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
+import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { Toggle } from "@/components/ui/toggle";
 import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
@@ -27,6 +32,7 @@ import {
 } from "@/lib/billing/constants";
 import {
   removeLinearMcpToken,
+  removeSlackMcpConnection,
   saveLinearMcpToken,
   setWorkspaceMcpExperimentEnabled,
 } from "@/lib/mcp/actions";
@@ -35,6 +41,8 @@ import { updateWorkspaceName } from "@/lib/workspaces/actions";
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
 const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
 const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
+const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
+const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
 
 type Props = {
   profile: {
@@ -86,6 +94,12 @@ type Props = {
       statusReason: string | null;
       updatedAt: string | null;
     };
+    slack: {
+      configured: boolean;
+      status: "configured" | "missing_credential" | "disabled" | "error" | null;
+      statusReason: string | null;
+      updatedAt: string | null;
+    };
   };
 };
 
@@ -99,7 +113,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="border-t border-[#eaeae6] py-7 first:border-t-0 first:pt-0">
+    <section className="border-t border-border-subtle py-7 first:border-t-0 first:pt-0">
       <div className="grid grid-cols-[200px_1fr] gap-8">
         <div>
           <h2 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">{title}</h2>
@@ -126,8 +140,53 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function ReadOnly({ value }: { value: string }) {
   return (
-    <div className="rounded-md border border-[#e6e6e3] bg-white/60 px-2.5 py-1.5 text-[13px] text-ink/85">
+    <div className="rounded-md border border-border bg-surface/60 px-2.5 py-1.5 text-[13px] text-ink/85">
       {value}
+    </div>
+  );
+}
+
+const themeOptions: Array<{
+  value: ThemeMode;
+  label: string;
+  icon: typeof Monitor;
+}> = [
+  { value: "system", label: "System", icon: Monitor },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+];
+
+function AppearanceSection() {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <div
+      className="inline-flex w-fit rounded-lg border border-border bg-surface p-1 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+      role="radiogroup"
+      aria-label="Theme"
+    >
+      {themeOptions.map((option) => {
+        const Icon = option.icon;
+        const selected = theme === option.value;
+
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            onClick={() => setTheme(option.value)}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              selected
+                ? "bg-surface-active text-ink shadow-[0_1px_1px_rgba(15,15,15,0.05)]"
+                : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+            }`}
+          >
+            <Icon size={13} strokeWidth={1.9} />
+            {option.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -188,8 +247,8 @@ function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCha
   );
 
   return (
-    <details className="group border-t border-[#ecece8] first:border-t-0">
-      <summary className="grid cursor-pointer list-none grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-white/70 [&::-webkit-details-marker]:hidden">
+    <details className="group border-t border-border-subtle first:border-t-0">
+      <summary className="grid cursor-pointer list-none grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-surface/70 [&::-webkit-details-marker]:hidden">
         <ChevronRight
           size={14}
           strokeWidth={1.9}
@@ -208,7 +267,7 @@ function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCha
           {formatUsdMicros(entry.totalUsdMicros)}
         </div>
       </summary>
-      <div className="border-t border-[#ecece8] bg-white/35 px-8 py-3">
+      <div className="border-t border-border-subtle bg-surface/35 px-8 py-3">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -234,7 +293,7 @@ function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCha
         </div>
         <Link
           href={`/session/${entry.sessionId}`}
-          className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-ink hover:text-black"
+          className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-ink hover:text-ink"
         >
           Open session
           <ExternalLink size={12} strokeWidth={1.9} />
@@ -278,8 +337,8 @@ function TopUpButton({
       }}
       className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[12.5px] font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
         featured
-          ? "bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-black"
-          : "border border-[#e1e1dd] bg-white text-ink hover:bg-[#f5f5f1]"
+          ? "bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
+          : "border border-border bg-surface text-ink hover:bg-surface-muted"
       }`}
     >
       <CreditCard size={13} strokeWidth={1.9} />
@@ -315,7 +374,7 @@ function CustomTopUpForm({ onError }: { onError: (message: string | null) => voi
           }
         });
       }}
-      className="flex h-8 min-w-[184px] items-center rounded-md border border-[#e1e1dd] bg-white transition-colors focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15"
+      className="flex h-8 min-w-[184px] items-center rounded-md border border-border bg-surface transition-colors focus-within:border-ink/30 focus-within:ring-1 focus-within:ring-ink/15"
     >
       <span className="pl-2.5 text-[12.5px] text-ink-subtle">$</span>
       <input
@@ -332,7 +391,7 @@ function CustomTopUpForm({ onError }: { onError: (message: string | null) => voi
       <button
         type="submit"
         disabled={isPending || !amount.trim()}
-        className="inline-flex h-full shrink-0 items-center gap-1.5 rounded-r-md border-l border-[#e1e1dd] px-2.5 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1] disabled:cursor-not-allowed disabled:opacity-40"
+        className="inline-flex h-full shrink-0 items-center gap-1.5 rounded-r-md border-l border-border px-2.5 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-40"
       >
         <CreditCard size={13} strokeWidth={1.9} />
         {isPending ? "Opening..." : "Add"}
@@ -350,10 +409,10 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
               <WalletCards size={15} strokeWidth={1.8} />
             </span>
             <div>
@@ -367,7 +426,7 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-[#ecece8] pt-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border-subtle pt-4">
           <div>
             <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
               7-day spend
@@ -394,7 +453,7 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
           ))}
           <CustomTopUpForm onError={setCheckoutError} />
         </div>
-        {checkoutError && <div className="mt-2 text-[12px] text-[#b42318]">{checkoutError}</div>}
+        {checkoutError && <div className="mt-2 text-[12px] text-danger">{checkoutError}</div>}
       </div>
 
       <form
@@ -415,10 +474,10 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
             setMessage({ type: "error", text: result.error });
           });
         }}
-        className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+        className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
       >
         <div className="flex items-start gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
             <Gift size={15} strokeWidth={1.8} />
           </span>
           <div className="min-w-0 flex-1">
@@ -431,12 +490,12 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
                   setMessage(null);
                 }}
                 placeholder="Enter code"
-                className="h-8 min-w-0 flex-1 rounded-md border border-[#e6e6e3] bg-white px-2.5 text-[13px] uppercase text-ink outline-none transition-colors placeholder:normal-case placeholder:text-ink-subtle focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
+                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface px-2.5 text-[13px] uppercase text-ink outline-none transition-colors placeholder:normal-case placeholder:text-ink-subtle focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
               />
               <button
                 type="submit"
                 disabled={isPending || !code.trim()}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isPending ? "Redeeming..." : "Redeem"}
               </button>
@@ -444,7 +503,7 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
             {message && (
               <div
                 className={`mt-2 text-[12px] ${
-                  message.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+                  message.type === "success" ? "text-success" : "text-danger"
                 }`}
               >
                 {message.text}
@@ -459,11 +518,11 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
           Recent session charges
         </div>
         {billing.recentSessionCharges.length === 0 ? (
-          <div className="rounded-md border border-dashed border-[#deded9] bg-white/35 px-3 py-3 text-[12px] leading-5 text-ink-muted">
+          <div className="rounded-md border border-dashed border-border bg-surface/35 px-3 py-3 text-[12px] leading-5 text-ink-muted">
             Session charges will appear here after agents run.
           </div>
         ) : (
-          <div className="mb-4 overflow-hidden rounded-lg border border-[#e3e3df] bg-white/55">
+          <div className="mb-4 overflow-hidden rounded-lg border border-border bg-surface/55">
             {billing.recentSessionCharges.map((entry) => (
               <SessionChargeRow key={entry.sessionId} entry={entry} />
             ))}
@@ -476,15 +535,15 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
           Recent activity
         </div>
         {billing.ledger.length === 0 ? (
-          <div className="rounded-md border border-dashed border-[#deded9] bg-white/35 px-3 py-3 text-[12px] leading-5 text-ink-muted">
+          <div className="rounded-md border border-dashed border-border bg-surface/35 px-3 py-3 text-[12px] leading-5 text-ink-muted">
             Billing activity will appear here.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-[#e3e3df] bg-white/55">
+          <div className="overflow-hidden rounded-lg border border-border bg-surface/55">
             {billing.ledger.map((entry) => (
               <div
                 key={entry.id}
-                className="flex items-center justify-between gap-4 border-t border-[#ecece8] px-3 py-2.5 first:border-t-0"
+                className="flex items-center justify-between gap-4 border-t border-border-subtle px-3 py-2.5 first:border-t-0"
               >
                 <div className="min-w-0">
                   <div className="truncate text-[13px] font-medium text-ink">
@@ -496,7 +555,7 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
                 </div>
                 <div
                   className={`shrink-0 text-[13px] font-medium ${
-                    entry.amountUsdMicros >= 0 ? "text-[#1f7a3a]" : "text-ink"
+                    entry.amountUsdMicros >= 0 ? "text-success" : "text-ink"
                   }`}
                 >
                   {entry.amountUsdMicros >= 0 ? "+" : ""}
@@ -513,9 +572,9 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
 
 function WorkspaceState({ repository }: { repository: Props["workspace"]["repository"] }) {
   return (
-    <div className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
       <div className="flex items-start gap-3">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
           <GitBranch size={15} strokeWidth={1.8} />
         </span>
         <div className="min-w-0">
@@ -545,13 +604,17 @@ function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
     linearSetupStatus === "connected" || linearSetupStatus === "error" ? linearSetupStatus : null;
   const linearSetupReason =
     searchParams.get("mcp") === "linear" ? searchParams.get("reason") : null;
+  const slackSetupStatus = searchParams.get("mcp") === "slack" ? searchParams.get("setup") : null;
+  const normalizedSlackSetupStatus =
+    slackSetupStatus === "connected" || slackSetupStatus === "error" ? slackSetupStatus : null;
+  const slackSetupReason = searchParams.get("mcp") === "slack" ? searchParams.get("reason") : null;
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
               <FlaskConical size={15} strokeWidth={1.8} />
             </span>
             <div className="min-w-0">
@@ -586,7 +649,7 @@ function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
         {message && (
           <div
             className={`mt-3 text-[12px] ${
-              message.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+              message.type === "success" ? "text-success" : "text-danger"
             }`}
           >
             {message.text}
@@ -595,11 +658,18 @@ function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
       </div>
 
       {enabled ? (
-        <LinearMcpCard
-          linear={mcp.linear}
-          setupStatus={normalizedLinearSetupStatus}
-          setupReason={linearSetupReason}
-        />
+        <>
+          <LinearMcpCard
+            linear={mcp.linear}
+            setupStatus={normalizedLinearSetupStatus}
+            setupReason={linearSetupReason}
+          />
+          <SlackMcpCard
+            slack={mcp.slack}
+            setupStatus={normalizedSlackSetupStatus}
+            setupReason={slackSetupReason}
+          />
+        </>
       ) : null}
     </div>
   );
@@ -651,11 +721,11 @@ function LinearMcpCard({
           setMessage({ type: "error", text: result.error });
         });
       }}
-      className="rounded-lg border border-[#e3e3df] bg-white/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
+      className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#e6e6e3] bg-[#f7f7f5] text-ink-muted">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
             <KeyRound size={15} strokeWidth={1.8} />
           </span>
           <div className="min-w-0">
@@ -664,8 +734,8 @@ function LinearMcpCard({
               <span
                 className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
                   configured
-                    ? "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]"
-                    : "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]"
+                    ? "border-success-border bg-success-bg text-success"
+                    : "border-warning-border bg-warning-bg text-warning"
                 }`}
               >
                 {configured ? "Configured" : "Not connected"}
@@ -694,18 +764,18 @@ function LinearMcpCard({
                 }
               });
             }}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Trash2 size={13} strokeWidth={1.9} />
             Remove
           </button>
         ) : null}
       </div>
-      <div className="mt-4 border-t border-[#ecece8] pt-4">
+      <div className="mt-4 border-t border-border-subtle pt-4">
         <div className="flex flex-wrap items-center gap-2">
           <a
             href={LINEAR_MCP_START_URL}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85"
           >
             <ExternalLink size={13} strokeWidth={1.9} />
             {configured ? "Reconnect Linear" : "Connect Linear"}
@@ -714,7 +784,7 @@ function LinearMcpCard({
             href={LINEAR_MCP_DOCS_URL}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-[#f5f5f1] hover:text-ink"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted hover:text-ink"
           >
             MCP docs
             <ExternalLink size={12} strokeWidth={1.9} />
@@ -729,7 +799,7 @@ function LinearMcpCard({
               href={LINEAR_API_KEYS_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted"
             >
               <ExternalLink size={13} strokeWidth={1.9} />
               Create Linear API key
@@ -746,12 +816,12 @@ function LinearMcpCard({
                   configured ? "Paste a new token to replace it" : "Linear API key or OAuth token"
                 }
                 type="password"
-                className="h-8 min-w-0 flex-1 rounded-md border border-[#e6e6e3] bg-white px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
+                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
               />
               <button
                 type="submit"
                 disabled={isPending || !token.trim()}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isPending ? "Saving..." : configured ? "Replace" : "Save"}
               </button>
@@ -762,13 +832,124 @@ function LinearMcpCard({
       {visibleMessage && (
         <div
           className={`mt-2 text-[12px] ${
-            visibleMessage.type === "success" ? "text-[#1f7a3a]" : "text-[#b42318]"
+            visibleMessage.type === "success" ? "text-success" : "text-danger"
           }`}
         >
           {visibleMessage.text}
         </div>
       )}
     </form>
+  );
+}
+
+function SlackMcpCard({
+  slack,
+  setupStatus,
+  setupReason,
+}: {
+  slack: Props["mcp"]["slack"];
+  setupStatus: "connected" | "error" | null;
+  setupReason: string | null;
+}) {
+  const router = useRouter();
+  const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
+    null,
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const configured = slack.configured;
+  const setupMessage =
+    setupStatus && setupStatus !== dismissedSetupStatus
+      ? {
+          type: setupStatus === "connected" ? ("success" as const) : ("error" as const),
+          text:
+            setupStatus === "connected"
+              ? "Slack connected."
+              : slackMcpSetupErrorMessage(setupReason),
+        }
+      : null;
+  const visibleMessage = message ?? setupMessage;
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+            <MessageSquare size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Slack MCP</div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
+                  configured
+                    ? "border-success-border bg-success-bg text-success"
+                    : "border-warning-border bg-warning-bg text-warning"
+                }`}
+              >
+                {configured ? "Configured" : "Not connected"}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+              Agents can opt in with @slack after Slack is connected.
+            </p>
+            {slack.statusReason ? (
+              <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">{slack.statusReason}</p>
+            ) : null}
+          </div>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => {
+              setMessage(null);
+              setDismissedSetupStatus(setupStatus);
+              startTransition(async () => {
+                const result = await removeSlackMcpConnection();
+                if (result.ok) {
+                  setMessage({ type: "success", text: "Slack MCP connection removed." });
+                  router.refresh();
+                }
+              });
+            }}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 border-t border-border-subtle pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={SLACK_MCP_START_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {configured ? "Reconnect Slack" : "Connect Slack"}
+          </a>
+          <a
+            href={SLACK_MCP_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted hover:text-ink"
+          >
+            MCP docs
+            <ExternalLink size={12} strokeWidth={1.9} />
+          </a>
+        </div>
+      </div>
+      {visibleMessage && (
+        <div
+          className={`mt-2 text-[12px] ${
+            visibleMessage.type === "success" ? "text-success" : "text-danger"
+          }`}
+        >
+          {visibleMessage.text}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -791,6 +972,25 @@ function linearMcpSetupErrorMessage(reason: string | null) {
   }
 }
 
+function slackMcpSetupErrorMessage(reason: string | null) {
+  switch (reason) {
+    case "invalid_state":
+      return "Slack connection expired or was started in another browser tab. Try reconnecting Slack.";
+    case "session_mismatch":
+      return "Slack returned to a different OpenCompany session. Sign in to the same workspace and try again.";
+    case "slack_denied":
+      return "Slack did not authorize the connection.";
+    case "missing_code":
+      return "Slack did not return an authorization code. Try reconnecting Slack.";
+    case "token_exchange_failed":
+      return "Slack authorized the connection, but token exchange failed. Check the server logs and try again.";
+    case "start_failed":
+      return "Could not start Slack authorization. Check SLACK_MCP_CLIENT_ID and SLACK_MCP_CLIENT_SECRET, then try again.";
+    default:
+      return "Slack connection failed. Try reconnecting Slack.";
+  }
+}
+
 function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
   if (avatarUrl) {
     return (
@@ -805,7 +1005,7 @@ function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; init
   return (
     <div
       aria-hidden
-      className="flex h-12 w-12 items-center justify-center rounded-full text-[14px] font-semibold text-white ring-1 ring-black/[0.06]"
+      className="flex h-12 w-12 items-center justify-center rounded-full text-[14px] font-semibold text-canvas ring-1 ring-black/[0.06]"
       style={{
         background: "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
       }}
@@ -851,22 +1051,22 @@ function WorkspaceNameForm({ initial }: { initial: string }) {
           setSaved(false);
         }}
         maxLength={80}
-        className="h-8 flex-1 rounded-md border border-[#e6e6e3] bg-white px-2.5 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
+        className="h-8 flex-1 rounded-md border border-border bg-surface px-2.5 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
       />
       <button
         type="submit"
         disabled={!dirty || isPending}
-        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+        className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {isPending ? "Saving…" : "Save"}
       </button>
       {saved && (
-        <span className="inline-flex items-center gap-1 text-[12px] text-[#1f7a3a]">
+        <span className="inline-flex items-center gap-1 text-[12px] text-success">
           <Check size={13} strokeWidth={2} />
           Saved
         </span>
       )}
-      {error && <span className="text-[12px] text-[#b42318]">{error}</span>}
+      {error && <span className="text-[12px] text-danger">{error}</span>}
     </form>
   );
 }
@@ -896,6 +1096,12 @@ export default function SettingsView({ profile, workspace, billing, mcp }: Props
             </Field>
           </Section>
 
+          <Section title="Appearance" description="Choose the color mode for this device.">
+            <Field label="Theme">
+              <AppearanceSection />
+            </Field>
+          </Section>
+
           <Section title="Workspace" description="Visible to everyone in this workspace.">
             <Field label="Workspace name">
               <WorkspaceNameForm initial={workspace.name} />
@@ -918,7 +1124,7 @@ export default function SettingsView({ profile, workspace, billing, mcp }: Props
           >
             <Link
               href="/settings/integrations"
-              className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"
+              className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted"
             >
               <Plug size={13} strokeWidth={1.9} />
               Open integrations
@@ -932,7 +1138,7 @@ export default function SettingsView({ profile, workspace, billing, mcp }: Props
           <Section title="Account" description="Sign out of all sessions for this device.">
             <a
               href="/auth/sign-out"
-              className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-[#f5f5f1]"
+              className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted"
             >
               <LogOut size={13} strokeWidth={1.9} />
               Log out

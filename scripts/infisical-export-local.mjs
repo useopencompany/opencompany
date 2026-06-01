@@ -19,6 +19,7 @@ const preserveLocalKeys = new Set([
   "INNGEST_DEV",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",
 ]);
+const LOCAL_WORKOS_REDIRECT_URI = "http://localhost:3000/auth/callback";
 const localDefaultLines = ['OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS="louis@acta.so"'];
 const chunks = [];
 for (const path of paths) {
@@ -38,6 +39,7 @@ for (const path of paths) {
 
   const lines = result.stdout
     .split("\n")
+    .map((line) => localizeDevWorkOSRedirect(line))
     .filter((line) => {
       const match = line.match(/^([A-Z0-9_]+)=/);
       return !match || !preserveLocalKeys.has(match[1]);
@@ -96,4 +98,11 @@ function appendMissingLocalDefaults(lines) {
   );
 
   return [...lines, ...localDefaultLines.filter((line) => !seen.has(line.split("=")[0]))];
+}
+
+function localizeDevWorkOSRedirect(line) {
+  if (env !== "dev") return line;
+  const match = line.match(/^(NEXT_PUBLIC_WORKOS_REDIRECT_URI|WORKOS_REDIRECT_URI)=/);
+  if (!match) return line;
+  return `${match[1]}=${JSON.stringify(LOCAL_WORKOS_REDIRECT_URI)}`;
 }

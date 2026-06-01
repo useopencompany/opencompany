@@ -3,6 +3,7 @@ import {
   ancestorFolderPaths,
   buildBrainTree,
   collectFolderPaths,
+  flattenVisibleTree,
   parentFolderPath,
   uniqueNewBrainPath,
 } from "./tree";
@@ -56,5 +57,39 @@ describe("brain tree helpers", () => {
     );
     expect(uniqueNewBrainPath(files, "docs/product")).toBe("docs/product/new-note.md");
     expect(uniqueNewBrainPath(files, "docs/README.md")).toBe("docs/new-note.md");
+  });
+});
+
+describe("flattenVisibleTree", () => {
+  const tree = buildBrainTree([
+    { path: "docs/README.md" },
+    { path: "docs/product/positioning.md" },
+    { path: "notes/todo.md" },
+    { path: "CHANGELOG.md" },
+  ]);
+
+  it("lists only top-level nodes when nothing is expanded", () => {
+    const flat = flattenVisibleTree(tree, new Set());
+    expect(flat.map((n) => n.path)).toEqual(["docs", "notes", "CHANGELOG.md"]);
+    expect(flat.map((n) => n.depth)).toEqual([0, 0, 0]);
+  });
+
+  it("reveals children of expanded folders in DFS order with depth", () => {
+    const flat = flattenVisibleTree(tree, new Set(["docs"]));
+    // sortTreeNodes orders folders before files, so docs/product precedes docs/README.md.
+    expect(flat.map((n) => n.path)).toEqual([
+      "docs",
+      "docs/product",
+      "docs/README.md",
+      "notes",
+      "CHANGELOG.md",
+    ]);
+    expect(flat.find((n) => n.path === "docs/product")?.depth).toBe(1);
+  });
+
+  it("recurses into nested expanded folders", () => {
+    const flat = flattenVisibleTree(tree, new Set(["docs", "docs/product"]));
+    expect(flat.map((n) => n.path)).toContain("docs/product/positioning.md");
+    expect(flat.find((n) => n.path === "docs/product/positioning.md")?.depth).toBe(2);
   });
 });

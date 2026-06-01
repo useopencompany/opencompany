@@ -31,13 +31,29 @@ export type AgentSessionPayload = {
   agentPath: string | null;
   title: string;
   status: string;
+  source: "user" | "agent";
   modelProvider: string;
   modelName: string;
+  parentSessionId: string | null;
+  parentMessageId: string | null;
+  parentToolCallId: string | null;
   e2bSandboxId: string | null;
   workdir: string;
   runLeaseId: string | null;
   abortRequestedAt: string | null;
   lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RelatedSessionPayload = {
+  id: string;
+  title: string;
+  status: string;
+  agentName: string;
+  agentPath: string | null;
+  parentMessageId: string | null;
+  parentToolCallId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -51,6 +67,10 @@ const LIVE_SESSION_FIELDS = [
 
 export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
+  related: {
+    parent: RelatedSessionPayload | null;
+    children: RelatedSessionPayload[];
+  };
   messages: SessionMessage[];
   events: RuntimeEvent[];
   usage: SessionUsageSummary;
@@ -75,17 +95,30 @@ export type AgentSessionDetailSerializable = {
     createdAt: Date;
     updatedAt: Date;
   };
+  related: {
+    parent: RelatedSessionSerializable | null;
+    children: RelatedSessionSerializable[];
+  };
   messages: Array<
     Omit<SessionMessage, "createdAt" | "completedAt"> & {
       createdAt: Date;
       completedAt: Date | null;
     }
   >;
-  events: RuntimeEvent[];
+  events: RuntimeEventSerializable[];
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
   runnerUrl: string | null;
+};
+
+type RuntimeEventSerializable = Omit<RuntimeEvent, "createdAt"> & {
+  createdAt?: Date | string | null;
+};
+
+export type RelatedSessionSerializable = Omit<RelatedSessionPayload, "createdAt" | "updatedAt"> & {
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 export const sessionQueryKeys = {
@@ -115,17 +148,43 @@ export function serializeAgentSessionDetail(
       createdAt: detail.session.createdAt.toISOString(),
       updatedAt: detail.session.updatedAt.toISOString(),
     },
+    related: {
+      parent: detail.related.parent ? serializeRelatedSession(detail.related.parent) : null,
+      children: detail.related.children.map(serializeRelatedSession),
+    },
     messages: detail.messages.map((message) => ({
       ...message,
       createdAt: message.createdAt.toISOString(),
       completedAt: message.completedAt?.toISOString() ?? null,
     })),
-    events: detail.events,
+    events: detail.events.map(serializeRuntimeEvent),
     usage: detail.usage,
     toolUsage: detail.toolUsage,
     cost: detail.cost,
     runnerUrl: detail.runnerUrl,
   });
+}
+
+function serializeRelatedSession(session: RelatedSessionSerializable): RelatedSessionPayload {
+  return {
+    ...session,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString(),
+  };
+}
+
+function serializeRuntimeEvent(event: RuntimeEventSerializable): RuntimeEvent {
+  return {
+    id: event.id,
+    type: event.type,
+    messageId: event.messageId,
+    payload: event.payload,
+    ...(event.createdAt ? { createdAt: serializeDateValue(event.createdAt) } : {}),
+  };
+}
+
+function serializeDateValue(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): SidebarSessionPayload {
@@ -218,7 +277,10 @@ export function applyRuntimeEventToSessionDetail(
   event: RuntimeEvent,
   updatedAt = new Date().toISOString(),
 ): AgentSessionDetailPayload {
-  const nextRuntime = applyRuntimeEventToState(toRuntimeState(detail), event);
+  const stampedEvent: RuntimeEvent = event.createdAt
+    ? event
+    : { ...event, createdAt: new Date().toISOString() };
+  const nextRuntime = applyRuntimeEventToState(toRuntimeState(detail), stampedEvent);
   let session: AgentSessionPayload = detail.session;
 
   if (event.type === "session.status") {
@@ -320,10 +382,22 @@ export function invalidateRelatedCachesForSessionEvent(
   workspaceId: string,
   agentId: string,
   event: RuntimeEvent,
+  options: { sessionId?: string } = {},
 ) {
-  if (!event.type.startsWith("brain.")) return;
-  void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
-  void queryClient.invalidateQueries({ queryKey: agentQueryKeys.detail(workspaceId, agentId) });
+  if (event.type.startsWith("brain.")) {
+    void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
+    void queryClient.invalidateQueries({ queryKey: agentQueryKeys.detail(workspaceId, agentId) });
+  }
+
+  if (
+    options.sessionId &&
+    (event.type === "session.delegated_usage" ||
+      (event.type === "tool.completed" && readString(event.payload.name) === "delegate_to_agent"))
+  ) {
+    void queryClient.invalidateQueries({
+      queryKey: sessionQueryKeys.detail(workspaceId, options.sessionId),
+    });
+  }
 }
 
 export function seedSessionQueries(
@@ -332,6 +406,14 @@ export function seedSessionQueries(
   detail: AgentSessionDetailPayload,
 ) {
   queryClient.setQueryData(sessionQueryKeys.detail(workspaceId, detail.session.id), detail);
+  if (detail.session.source !== "user") {
+    queryClient.setQueryData<SidebarSessionPayload[]>(
+      sessionQueryKeys.list(workspaceId),
+      (sessions) => removeSidebarSession(sessions, detail.session.id),
+    );
+    return;
+  }
+
   const projected = sidebarSessionFromDetail(detail);
   queryClient.setQueryData<SidebarSessionPayload[]>(
     sessionQueryKeys.list(workspaceId),
@@ -392,10 +474,13 @@ function replayMissingCurrentEvents(
   current: AgentSessionDetailPayload,
   incoming: AgentSessionDetailPayload,
 ) {
-  const maxIncomingEventId = incoming.events.reduce((max, event) => Math.max(max, event.id), 0);
+  const maxIncomingEventId = incoming.events.reduce(
+    (max, event) => Math.max(max, event.id ?? 0),
+    0,
+  );
   return current.events
-    .filter((event) => event.id > maxIncomingEventId)
-    .toSorted((left, right) => left.id - right.id)
+    .filter((event) => typeof event.id === "number" && event.id > maxIncomingEventId)
+    .toSorted((left, right) => (left.id ?? 0) - (right.id ?? 0))
     .reduce(
       (detail, event) => applyRuntimeEventToSessionDetail(detail, event, current.session.updatedAt),
       incoming,
@@ -404,9 +489,29 @@ function replayMissingCurrentEvents(
 
 function mergeEvents(current: RuntimeEvent[], incoming: RuntimeEvent[]) {
   const events = new Map<number, RuntimeEvent>();
-  for (const event of current) events.set(event.id, event);
-  for (const event of incoming) events.set(event.id, event);
-  return Array.from(events.values()).toSorted((left, right) => left.id - right.id);
+  for (const event of incoming) {
+    if (typeof event.id === "number") events.set(event.id, event);
+  }
+
+  const result: RuntimeEvent[] = [];
+  const seen = new Set<number>();
+  for (const event of current) {
+    if (typeof event.id !== "number") {
+      result.push(event);
+      continue;
+    }
+    const replacement = events.get(event.id) ?? event;
+    result.push(replacement);
+    seen.add(event.id);
+  }
+
+  for (const event of incoming) {
+    if (typeof event.id !== "number" || seen.has(event.id)) continue;
+    result.push(event);
+    seen.add(event.id);
+  }
+
+  return result;
 }
 
 function mergeMessages(current: SessionMessage[], incoming: SessionMessage[]) {
@@ -496,6 +601,7 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
   const record = assertRecord(value, "session detail");
   return normalizeAgentSessionDetail({
     session: parseAgentSessionPayload(record.session),
+    related: parseRelatedSessions(record.related),
     messages: assertArray(record.messages, "messages").map(parseSessionMessage),
     events: assertArray(record.events, "events").map(parseRuntimeEventPayload),
     usage: parseUsageSummary(record.usage),
@@ -531,13 +637,44 @@ function parseAgentSessionPayload(value: unknown): AgentSessionPayload {
     agentPath: readNullableStringField(record, "agentPath"),
     title: readStringField(record, "title"),
     status: readStringField(record, "status"),
+    source: readSessionSource(record, "source"),
     modelProvider: readStringField(record, "modelProvider"),
     modelName: readStringField(record, "modelName"),
+    parentSessionId: readNullableStringField(record, "parentSessionId"),
+    parentMessageId: readNullableStringField(record, "parentMessageId"),
+    parentToolCallId: readNullableStringField(record, "parentToolCallId"),
     e2bSandboxId: readNullableStringField(record, "e2bSandboxId"),
     workdir: readStringField(record, "workdir"),
     runLeaseId: readNullableStringField(record, "runLeaseId"),
     abortRequestedAt: readNullableStringField(record, "abortRequestedAt"),
     lastError: readNullableStringField(record, "lastError"),
+    createdAt: readStringField(record, "createdAt"),
+    updatedAt: readStringField(record, "updatedAt"),
+  };
+}
+
+function parseRelatedSessions(value: unknown): AgentSessionDetailPayload["related"] {
+  if (value === undefined) return { parent: null, children: [] };
+  const record = assertRecord(value, "related sessions");
+  return {
+    parent:
+      record.parent === null || record.parent === undefined
+        ? null
+        : parseRelatedSessionPayload(record.parent),
+    children: assertArray(record.children, "related children").map(parseRelatedSessionPayload),
+  };
+}
+
+function parseRelatedSessionPayload(value: unknown): RelatedSessionPayload {
+  const record = assertRecord(value, "related session");
+  return {
+    id: readStringField(record, "id"),
+    title: readNonEmptyStringField(record, "title"),
+    status: readNonEmptyStringField(record, "status"),
+    agentName: readNonEmptyStringField(record, "agentName"),
+    agentPath: readNullableStringField(record, "agentPath"),
+    parentMessageId: readNullableStringField(record, "parentMessageId"),
+    parentToolCallId: readNullableStringField(record, "parentToolCallId"),
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
   };
@@ -559,6 +696,9 @@ function parseSessionMessage(value: unknown): SessionMessage {
   }
   if ("toolName" in record) message.toolName = readNullableStringField(record, "toolName");
   if ("toolCallId" in record) message.toolCallId = readNullableStringField(record, "toolCallId");
+  if ("responseToMessageId" in record) {
+    message.responseToMessageId = readNullableStringField(record, "responseToMessageId");
+  }
   if ("outputReasoningTokens" in record) {
     message.outputReasoningTokens = readOptionalNumberField(record, "outputReasoningTokens");
   }
@@ -575,12 +715,17 @@ function parseSessionMessage(value: unknown): SessionMessage {
 
 function parseRuntimeEventPayload(value: unknown): RuntimeEvent {
   const record = assertRecord(value, "runtime event");
-  return {
+  const event: RuntimeEvent = {
     id: readNumberField(record, "id"),
     type: readStringField(record, "type"),
     messageId: readNullableStringField(record, "messageId"),
     payload: assertRecord(record.payload, "runtime event payload"),
   };
+  if ("createdAt" in record) {
+    const createdAt = readOptionalStringField(record, "createdAt");
+    if (createdAt !== undefined) event.createdAt = createdAt;
+  }
+  return event;
 }
 
 function parseUsageSummary(value: unknown): SessionUsageSummary {
@@ -647,6 +792,12 @@ function readStringField(record: Record<string, unknown>, field: string) {
 function readNonEmptyStringField(record: Record<string, unknown>, field: string) {
   const value = readStringField(record, field);
   if (value.trim() === "") throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readSessionSource(record: Record<string, unknown>, field: string): "user" | "agent" {
+  const value = readStringField(record, field);
+  if (value !== "user" && value !== "agent") throw new Error(`Invalid ${field}.`);
   return value;
 }
 

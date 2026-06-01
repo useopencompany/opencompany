@@ -1,18 +1,32 @@
 import { verifySessionStreamToken } from "@opencompany/agent-runtime";
-import { getDb } from "@opencompany/db/client";
 import { agentSessions } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { listSessionEvents, type PersistedRuntimeEvent, subscribeSessionEvents } from "./events";
+import { type RuntimeEventForStream, subscribeSessionEvents } from "./events";
 import { enqueueRunnerJob } from "./jobs";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-export function createServer(env: RunnerEnv) {
+export function createServer(env: RunnerEnv, options: { onJobEnqueued?: () => void } = {}) {
   const app = Fastify({ logger: false });
+
+  // Nudge the in-process job worker as soon as a job lands so it claims the run on the
+  // next tick instead of waiting out its poll interval. Best-effort: never block the
+  // 202 response, and never let a worker hiccup fail the enqueue.
+  const wakeWorker = () => {
+    try {
+      options.onJobEnqueued?.();
+    } catch (error) {
+      logger.warn("Failed to wake runner job worker", {
+        event: "opencompany.runner_job_worker_wake_failed",
+        error,
+      });
+    }
+  };
 
   app.addHook("onRequest", async (request, reply) => {
     const origin = request.headers.origin;
@@ -52,6 +66,7 @@ export function createServer(env: RunnerEnv) {
       kind: "start",
       sessionId: id,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -68,6 +83,7 @@ export function createServer(env: RunnerEnv) {
       sessionId: id,
       messageId,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -79,6 +95,7 @@ export function createServer(env: RunnerEnv) {
       sessionId: id,
       messageId,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -101,6 +118,7 @@ export function createServer(env: RunnerEnv) {
       sessionId: id,
       messageId,
     });
+    wakeWorker();
     reply.status(202).send({ ok: true });
   });
 
@@ -167,52 +185,33 @@ export function createServer(env: RunnerEnv) {
     reply.hijack();
     raw.writeHead(200, createSseHeaders(env, request.headers.origin));
 
-    let lastId = readLastEventId(request.headers["last-event-id"], query.after);
     const connectedAt = Date.now();
-    const requestedAfterId = lastId;
+    const requestedAfterId = readLastEventId(request.headers["last-event-id"], query.after);
+    let latestDurableEventId = requestedAfterId;
     let closed = false;
     request.raw.on("close", () => {
       closed = true;
     });
 
-    const writeEvent = (event: PersistedRuntimeEvent) => {
-      if (closed || event.id <= lastId) return false;
-      lastId = event.id;
+    const writeEvent = (event: RuntimeEventForStream) => {
+      if (closed) return false;
+      if (typeof event.id === "number") {
+        latestDurableEventId = Math.max(latestDurableEventId, event.id);
+      }
       raw.write(formatSseEvent(event));
       return true;
     };
 
-    const flush = async () => {
-      const events = await listSessionEvents({ sessionId: id, afterId: lastId, limit: 100 });
-      let written = 0;
-      for (const event of events) {
-        if (writeEvent(event)) written += 1;
-      }
-      return written;
-    };
-
-    const replayedEvents = await flush();
     logger.info("Runner SSE connected", {
       event: "opencompany.runner_sse_connected",
       session_id: id,
       user_id: payload.userId,
       after_id: requestedAfterId,
-      latest_event_id: lastId,
-      replayed_events: replayedEvents,
+      replayed_events: 0,
     });
     const unsubscribe = subscribeSessionEvents(id, (event) => {
       writeEvent(event);
     });
-    const timer = setInterval(() => {
-      void flush().catch((error) => {
-        logger.error("Event stream flush failed", {
-          event: "opencompany.runner_sse_flush_failed",
-          session_id: id,
-          error,
-        });
-        raw.write(formatStreamError("Event stream failed."));
-      });
-    }, 300);
     const heartbeat = setInterval(() => {
       raw.write(": heartbeat\n\n");
     }, 15000);
@@ -220,14 +219,13 @@ export function createServer(env: RunnerEnv) {
     while (!closed) {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    clearInterval(timer);
     clearInterval(heartbeat);
     unsubscribe();
     logger.info("Runner SSE closed", {
       event: "opencompany.runner_sse_closed",
       session_id: id,
       user_id: payload.userId,
-      latest_event_id: lastId,
+      latest_event_id: latestDurableEventId,
       duration_ms: Date.now() - connectedAt,
     });
   });
@@ -247,8 +245,9 @@ function readLastEventId(header: string | string[] | undefined, after: string | 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
-export function formatSseEvent(event: PersistedRuntimeEvent) {
-  return `id: ${event.id}\ndata: ${JSON.stringify(toRuntimeEventPayload(event))}\n\n`;
+export function formatSseEvent(event: RuntimeEventForStream) {
+  const idLine = typeof event.id === "number" ? `id: ${event.id}\n` : "";
+  return `${idLine}data: ${JSON.stringify(toRuntimeEventPayload(event))}\n\n`;
 }
 
 export function formatStreamError(message: string) {
@@ -272,13 +271,19 @@ export function createSseHeaders(env: RunnerEnv, origin: string | undefined) {
   };
 }
 
-function toRuntimeEventPayload(event: PersistedRuntimeEvent) {
+function toRuntimeEventPayload(event: RuntimeEventForStream) {
   return {
     id: event.id,
     type: event.type,
     payload: event.payload,
     messageId: event.messageId,
+    createdAt: serializeEventTimestamp(event.createdAt),
+    ...("transient" in event && event.transient ? { transient: true } : {}),
   };
+}
+
+function serializeEventTimestamp(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function verifyStreamToken(token: string, secret: string) {
