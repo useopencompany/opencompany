@@ -1,4 +1,5 @@
 import {
+  AGENT_SELF_EDIT_SKILL_ID,
   type AgentConfig,
   newAgentSessionMessageId,
   RUNTIME_TOOL_DEFINITIONS,
@@ -12,6 +13,7 @@ import {
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
+import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
@@ -47,6 +49,7 @@ import {
   withRunControlChecks,
 } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
+import { hasReadSkill, markSkillRead } from "./self-edit-gate";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
@@ -278,6 +281,23 @@ async function executeRuntimeToolWithTracing(input: {
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "update_agent_file") {
+          if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {
+            return {
+              ok: false,
+              errors: [
+                'Read the agent-self-edit skill first: call read_skill({skillId:"agent-self-edit"}) and follow it, then call update_agent_file again. Nothing was saved.',
+              ],
+            };
+          }
+          return applyAgentSelfUpdate({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            args: input.args,
+          });
+        }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
         }
@@ -349,6 +369,12 @@ async function executeRuntimeToolWithTracing(input: {
           commandOutput.push(stream, delta);
         },
       });
+      // Reaching here means the read succeeded (read_skill throws on a missing file), so the
+      // session can be credited with having read this skill — clearing skill-gated tools.
+      if (input.definition.name === "read_skill" && isRecord(input.args)) {
+        const skillId = input.args.skillId;
+        if (typeof skillId === "string") markSkillRead(input.sessionId, skillId);
+      }
       if (
         input.definition.name === "shell" &&
         brainSnapshotBefore !== null &&

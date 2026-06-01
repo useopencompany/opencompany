@@ -5,17 +5,20 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
+import { AGENT_MODEL_CATALOG } from "./models";
 import type { AgentConfigTool, AgentMcpToolConfig, AgentToolId } from "./types";
 
 export type RuntimeToolName =
   | "shell"
   | "gh"
   | "read_file"
+  | "read_skill"
   | "edit_file"
   | "write_file"
   | "list_files"
   | "git_diff"
   | "delegate_to_agent"
+  | "update_agent_file"
   | "amp_coder"
   | "exa_search"
   | "exa_contents"
@@ -154,14 +157,38 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "read_file",
     kind: "sandbox",
-    description:
-      "Read a UTF-8 text file from ./work or ./brain. The path must start with work/ or brain/.",
+    description: "Read a UTF-8 text file from ./work or ./brain.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/ or brain/.",
+        },
       },
       required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_skill",
+    kind: "sandbox",
+    description:
+      "Read a UTF-8 text file from a mounted read-only skill directory. Use this instead of read_file for SKILL.md and supporting skill files.",
+    parameters: {
+      type: "object",
+      properties: {
+        skillId: {
+          type: "string",
+          description: "Mounted skill id, such as agent-self-edit.",
+        },
+        path: {
+          type: "string",
+          description: "Path inside the skill directory. Defaults to SKILL.md.",
+          default: "SKILL.md",
+        },
+      },
+      required: ["skillId"],
       additionalProperties: false,
     },
   },
@@ -235,8 +262,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "list_files",
     kind: "sandbox",
-    description:
-      "List files and directories below ./work or ./brain. The path must start with work/ or brain/.",
+    description: "List files and directories below ./work or ./brain.",
     parameters: {
       type: "object",
       properties: {
@@ -294,6 +320,38 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool blocks until the child session completes or fails, then returns the child answer and session id.",
       "Resume a child session only when continuity matters; start a new delegated session for independent subtasks.",
       "Keep delegated prompts bounded; do not delegate recursively unless the user's task clearly requires it.",
+    ].join("\n"),
+  },
+  {
+    name: "update_agent_file",
+    kind: "internal",
+    description:
+      'Update your own .agent definition (your instructions, explicitly selected model, and the tools you reference). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.',
+    parameters: {
+      type: "object",
+      properties: {
+        body: {
+          type: "string",
+          description:
+            "The full new Markdown instructions body. Keep any @mentions for tools and @brain/... paths you still want active; tools and brain follow the mentions in this body.",
+        },
+        model: {
+          type: "string",
+          enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+          description: "Optional model id to switch to. If omitted, your current model is kept.",
+        },
+        summary: {
+          type: "string",
+          description: "One-line description of what changed and why, for the activity log.",
+        },
+      },
+      required: ["body"],
+      additionalProperties: false,
+    },
+    help: [
+      'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
+      "Pass the COMPLETE new Markdown body, not a diff.",
+      "Changes apply on your next session, not the current one — offer to start one.",
     ].join("\n"),
   },
   {
@@ -610,11 +668,14 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   tools: ReadonlyArray<{ id?: unknown }> | undefined;
   agents?: ReadonlyArray<unknown> | undefined;
   repositories?: ReadonlyArray<unknown> | undefined;
+  // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on.
+  selfEditEnabled?: boolean;
 }) {
   const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
-    if (tool.name === "delegate_to_agent") continue;
+    // Skill- and reference-gated tools are added below, not unconditionally.
+    if (tool.name === "delegate_to_agent" || tool.name === "update_agent_file") continue;
     // Unconditional core tools (no configToolId) are always available, except
     // those gated on an attached repository (e.g. gh).
     if (tool.configToolId) continue;
@@ -622,6 +683,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     names.add(tool.name);
   }
   names.add("tool_help");
+  if (input.selfEditEnabled) {
+    names.add("update_agent_file");
+  }
 
   const selectedToolIds = new Set(
     (input.tools ?? []).flatMap((tool) => (typeof tool.id === "string" ? [tool.id] : [])),

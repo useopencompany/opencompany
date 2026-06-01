@@ -86,6 +86,36 @@ describe("runtime tool definitions", () => {
     expect(definition.help).toContain("childSessionId");
   });
 
+  it("exposes read_skill for mounted skill files and keeps generic file tools out of skills", () => {
+    const readSkill = RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_skill");
+    const readFile = RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file");
+    const listFiles = RUNTIME_TOOL_DEFINITION_BY_NAME.get("list_files");
+
+    if (!readSkill || !readFile || !listFiles) {
+      throw new Error("Expected read_skill, read_file, and list_files definitions to exist");
+    }
+
+    expect(readSkill.parameters.required).toEqual(["skillId"]);
+    expect(readSkill.parameters.properties).toHaveProperty("path");
+    expect(readFile.description).not.toContain("skills");
+    expect(listFiles.description).not.toContain("skills");
+  });
+
+  it("requires reading the self-edit skill and points to it instead of duplicating it", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("update_agent_file");
+
+    if (!definition) {
+      throw new Error("Expected update_agent_file runtime tool definition to exist");
+    }
+
+    expect(definition.description).toContain('read_skill({skillId:"agent-self-edit"})');
+    expect(definition.help).toContain('read_skill({skillId:"agent-self-edit"})');
+    // The help is a pointer to the skill, not a second copy of the protocol.
+    expect(definition.help).toContain("source of truth");
+    expect(definition.help).toContain("COMPLETE new Markdown body");
+    expect(definition.help).toContain("next session");
+  });
+
   it("keeps Exa category compatibility guidance in the visible search schema", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search");
 
@@ -127,7 +157,9 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
 
   it("always exposes the core file/shell tools and tool_help", () => {
     const names = resolveRuntimeToolNamesForConfigTools({ tools: [] });
-    expect(names).toEqual(expect.arrayContaining(["shell", "read_file", "tool_help"]));
+    expect(names).toEqual(
+      expect.arrayContaining(["shell", "read_file", "read_skill", "tool_help"]),
+    );
   });
 
   it("gates the gh tool on an attached repository, independent of amp", () => {
