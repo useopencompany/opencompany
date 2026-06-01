@@ -47,15 +47,19 @@ describe(".agent files", () => {
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa"]);
   });
 
-  test("round-trips newly supported AI Gateway models", () => {
+  test.each([
+    "google/gemini-3-flash",
+    "minimax/minimax-m3",
+    "moonshotai/kimi-k2-thinking",
+  ] as const)("round-trips newly supported AI Gateway model %s", (model) => {
     const source = serializeAgentFile({
-      title: "Gemini agent",
+      title: "Gateway agent",
       body: "Use the selected gateway model.",
-      model: "google/gemini-3-flash",
+      model,
     });
 
-    expect(source).toContain("model: google/gemini-3-flash");
-    expect(parseAgentFile(source).config.model.name).toBe("google/gemini-3-flash");
+    expect(source).toContain(`model: ${model}`);
+    expect(parseAgentFile(source).config.model.name).toBe(model);
   });
 
   test("syncs config from markdown mentions", () => {
@@ -326,7 +330,6 @@ describe(".agent files", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],
@@ -353,12 +356,110 @@ describe(".agent files", () => {
     expect(parsed.config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
-    expect(parsed.config.tools).toEqual([
-      expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
-    ]);
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(parsed.config.tools[0]).not.toHaveProperty("repository");
     expect(parsed.config.triggers).toEqual([
       expect.objectContaining({ id: "opencompany-web-pr", repository: "opencompany-web" }),
     ]);
+  });
+
+  test("round-trips supported schedule triggers through frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Briefing",
+      body: "Prepare recurring status updates.",
+      triggers: [
+        {
+          id: "weekday-brief",
+          type: "agent.schedule",
+          cron: "0 9 * * 1-5",
+          timezone: "America/Los_Angeles",
+          prompt: "Review open priorities and write a concise status brief.",
+          enabled: true,
+        },
+      ],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("type: agent.schedule");
+    expect(source).toContain("cron: 0 9 * * 1-5");
+    expect(parsed.config.triggers).toEqual([
+      {
+        id: "weekday-brief",
+        type: "agent.schedule",
+        cron: "0 9 * * 1-5",
+        timezone: "America/Los_Angeles",
+        prompt: "Review open priorities and write a concise status brief.",
+        enabled: true,
+      },
+    ]);
+  });
+
+  test("drops unsupported schedule trigger shapes", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Briefing"',
+        "triggers:",
+        "  - id: ok",
+        "    type: agent.schedule",
+        "    cron: '*/15 * * * *'",
+        "    timezone: America/New_York",
+        "    prompt: Run the briefing.",
+        "    enabled: true",
+        "  - id: arbitrary-cron",
+        "    type: agent.schedule",
+        "    cron: '13 9 1 * *'",
+        "    timezone: America/New_York",
+        "    prompt: Run the briefing.",
+        "    enabled: true",
+        "  - id: missing-prompt",
+        "    type: agent.schedule",
+        "    cron: '0 9 * * *'",
+        "    timezone: America/New_York",
+        "---",
+        "",
+        "Prepare recurring status updates.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.triggers).toEqual([
+      {
+        id: "ok",
+        type: "agent.schedule",
+        cron: "*/15 * * * *",
+        timezone: "America/New_York",
+        prompt: "Run the briefing.",
+        enabled: true,
+      },
+    ]);
+  });
+
+  test("ignores a legacy amp.repository field when parsing", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Code"',
+        "model: openai/gpt-5.4-mini",
+        "tools:",
+        "  - id: amp",
+        "    type: coding_agent",
+        "    provider: amp",
+        "    repository: opencompany-web",
+        "    prCapable: true",
+        "integrations:",
+        "  github:",
+        "    repositories:",
+        "      - id: opencompany-web",
+        "        fullName: opencompany/web",
+        "        defaultBranch: main",
+        "---",
+        "",
+        "Work in @opencompany/web with @amp.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(parsed.config.tools[0]).not.toHaveProperty("repository");
   });
 
   test("round-trips optional GitHub repository connection binding", () => {

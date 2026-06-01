@@ -11,7 +11,7 @@ import type { RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
 import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
-import { type SandboxHandle, sandboxLayout } from "./sandbox";
+import { cloneGitHubRepositoryIntoWorkdir, type SandboxHandle, sandboxLayout } from "./sandbox";
 
 const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
 const AMP_API_BASE_URL = "https://ampcode.com";
@@ -43,15 +43,13 @@ export async function runAmpCoderTool(input: {
   const ampMode = readAmpMode(args.mode);
 
   const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
-  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) {
-    throw new Error("The amp_coder tool is enabled, but no GitHub repository is bound.");
+  if (!ampTool || ampTool.id !== "amp") {
+    throw new Error("The amp_coder tool is not enabled for this agent.");
   }
-  const repository = input.agentConfig.integrations.github.repositories.find(
-    (candidate) => candidate.id === ampTool.repository,
-  );
-  if (!repository) {
-    throw new Error(`AMP repository binding ${ampTool.repository} was not found.`);
-  }
+  const repository = resolveAmpTargetRepository({
+    repositories: input.agentConfig.integrations.github.repositories,
+    requestedRepository: typeof args.repository === "string" ? args.repository : undefined,
+  });
 
   const ampApiKey = loadPlatformAmpApiKey(input.env);
   const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
@@ -67,22 +65,24 @@ export async function runAmpCoderTool(input: {
     ampApiKey,
     githubAuthHeader,
     githubToken,
+    repositoryFullName: repository.fullName,
     toolCallId: input.toolCallId,
   });
   const redactAmpOutput = createKnownSecretRedactor([ampApiKey, githubToken, githubAuthHeader]);
   const layout = sandboxLayout(input.workdir);
+  // Clone the target repository into work/ on demand. This is idempotent: if work/
+  // is already a checkout of the repository it just refreshes the authenticated
+  // remote, otherwise it clones fresh.
+  await cloneGitHubRepositoryIntoWorkdir({
+    sandbox: input.sandbox,
+    workdir: layout.workRoot,
+    repositoryFullName: repository.fullName,
+    defaultBranch: repository.defaultBranch,
+    githubToken,
+  });
   await input.sandbox.commands.run(
     `git config --global --add safe.directory ${shellQuote(layout.workRoot)}`,
   );
-  const gitCheck = await input.sandbox.commands.run(
-    `cd ${shellQuote(layout.workRoot)} && git rev-parse --is-inside-work-tree`,
-    { timeoutMs: 30_000 },
-  );
-  if (String(gitCheck.stdout ?? "").trim() !== "true") {
-    throw new Error(
-      "AMP requires a cloned GitHub repository. Check the workspace GitHub installation and repository binding.",
-    );
-  }
   const ampStream = createAmpStreamAccumulator();
   const ampActivity = createAmpActivityFormatter();
   await input.sandbox.commands.run(`mkdir -p ${shellQuote(ampEnv.GH_CONFIG_DIR)}`, {
@@ -322,6 +322,7 @@ export function buildAmpCommandEnv(input: {
   githubAuthHeader: string;
   githubToken: string;
   toolCallId: string;
+  repositoryFullName?: string;
 }) {
   return {
     AMP_API_KEY: input.ampApiKey,
@@ -333,11 +334,13 @@ export function buildGitHubCommandEnv(input: {
   githubAuthHeader: string;
   githubToken: string;
   toolCallId: string;
+  repositoryFullName?: string;
 }) {
   return {
     GH_TOKEN: input.githubToken,
     GH_PROMPT_DISABLED: "1",
     GH_NO_UPDATE_NOTIFIER: "1",
+    ...(input.repositoryFullName ? { GH_REPO: input.repositoryFullName } : {}),
     GH_CONFIG_DIR: `/tmp/opencompany-gh-${safePathSegment(input.toolCallId)}`,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
@@ -370,6 +373,66 @@ export function selectPublishBranch(input: {
   }
 
   return `opencompany/amp-${input.sessionId.slice(-8)}-${input.now}`;
+}
+
+export function resolveAmpTargetRepository(input: {
+  repositories: AgentGitHubRepositoryConfig[];
+  requestedRepository?: string | undefined;
+}): AgentGitHubRepositoryConfig {
+  const { repositories } = input;
+  if (repositories.length === 0) {
+    throw new Error(
+      "amp_coder needs at least one GitHub repository attached to the agent. Add a repository, then try again.",
+    );
+  }
+
+  const requested = input.requestedRepository?.trim();
+  if (requested) {
+    const requestedLower = requested.toLowerCase();
+    const match = repositories.find(
+      (repository) =>
+        repository.id === requested || repository.fullName.toLowerCase() === requestedLower,
+    );
+    if (!match) {
+      throw new Error(
+        `Requested repository "${requested}" is not attached to this agent. Attached repositories: ${repositories
+          .map((repository) => repository.fullName)
+          .join(", ")}.`,
+      );
+    }
+    return match;
+  }
+
+  if (repositories.length === 1) return repositories[0]!;
+
+  throw new Error(
+    `More than one repository is attached. Set the repository argument (owner/repo or id) to choose one. Attached repositories: ${repositories
+      .map((repository) => repository.fullName)
+      .join(", ")}.`,
+  );
+}
+
+/**
+ * Resolve the GitHub App installation for each attached repository, preserving
+ * order. A failing integration (e.g. needs-reauth) propagates so the caller can
+ * surface it — an attached-but-broken repository should be fixed, not silently
+ * ignored. A single installation token cannot span multiple installations, so
+ * callers that need one token should scope it to the repos of one installation
+ * (typically the first attached repo's installation).
+ */
+export async function resolveAttachedRepositoryInstallations(
+  workspaceId: string,
+  repositories: AgentGitHubRepositoryConfig[],
+): Promise<Array<{ fullName: string; installationId: string }>> {
+  const resolved: Array<{ fullName: string; installationId: string }> = [];
+  for (const repository of repositories) {
+    const integrationRepository = await loadGitHubWorkRepository(workspaceId, repository);
+    resolved.push({
+      fullName: repository.fullName,
+      installationId: integrationRepository.installationId,
+    });
+  }
+  return resolved;
 }
 
 export async function loadGitHubWorkRepository(

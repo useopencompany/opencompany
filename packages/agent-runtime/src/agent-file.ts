@@ -9,22 +9,25 @@ import {
   SUPPORTED_AGENT_TOOLS,
   toConfigTool,
 } from "./mentions";
+import { isSupportedScheduleCron, normalizeScheduleTimezone } from "./schedules";
 import type {
   AgentBrainReference,
   AgentConfig,
   AgentConfigTool,
   AgentFile,
+  AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
   AgentReference,
+  AgentScheduleTriggerConfig,
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
 
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));
-const GITHUB_PULL_REQUEST_EVENTS = new Set<AgentTriggerConfig["events"][number]>([
+const GITHUB_PULL_REQUEST_EVENTS = new Set<AgentGitHubPullRequestTriggerConfig["events"][number]>([
   "opened",
   "reopened",
   "synchronize",
@@ -57,7 +60,7 @@ export function parseAgentFile(source: string): AgentFile {
   const brain = normalizeBrainReferences(frontmatter.brain);
   const agents = normalizeAgentReferences(frontmatter.agents);
   const repositories = normalizeGitHubRepositories(frontmatter.integrations);
-  const tools = normalizeTools(frontmatter.tools, repositories);
+  const tools = normalizeTools(frontmatter.tools);
   const triggers = normalizeTriggers(frontmatter.triggers, repositories);
 
   return {
@@ -87,7 +90,7 @@ export function serializeAgentFile(input: {
   const agents = normalizeAgentReferences(agentInput);
   const repositories = normalizeGitHubRepositories(input.integrations);
   const toolInput = input.tools && input.tools.length > 0 ? input.tools : fromMentions.tools;
-  const tools = normalizeTools(toolInput, repositories);
+  const tools = normalizeTools(toolInput);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
 
   return [
@@ -121,7 +124,7 @@ export function serializeAgentFrontmatter(input: {
   const title = normalizeTitle(input.title);
   const model = normalizeModelId(input.model);
   const repositories = normalizeGitHubRepositories(input.integrations);
-  const tools = normalizeTools(input.tools, repositories);
+  const tools = normalizeTools(input.tools);
   const brain = normalizeBrainReferences(input.brain);
   const agents = normalizeAgentReferences(input.agents);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
@@ -156,7 +159,7 @@ export function buildAgentFile(input: {
   const brain = normalizeBrainReferences(input.config?.brain ?? mentioned.brain);
   const agents = normalizeAgentReferences(input.config?.agents ?? mentioned.agents);
   const repositories = normalizeGitHubRepositories(input.config?.integrations);
-  const tools = normalizeTools(input.config?.tools ?? mentioned.tools, repositories);
+  const tools = normalizeTools(input.config?.tools ?? mentioned.tools);
   const triggers = normalizeTriggers(input.config?.triggers ?? [], repositories);
 
   return {
@@ -258,10 +261,9 @@ function normalizeModelId(id: string): AgentModelId {
   return normalizeAgentModelId(id);
 }
 
-function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfig[]) {
+function normalizeTools(value: unknown) {
   const tools: AgentConfigTool[] = [];
   const seen = new Set<string>();
-  const repoIds = new Set(repositories.map((repository) => repository.id));
 
   for (const item of Array.isArray(value) ? value : []) {
     const id = typeof item === "string" ? item : readString(isRecord(item) ? item.id : undefined);
@@ -271,10 +273,8 @@ function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfi
 
     if (id === "amp") {
       const record = isRecord(item) ? item : {};
-      const repository = normalizeNullableRepositoryId(record.repository);
       tools.push(
         toConfigTool(definition, {
-          repository: repository && repoIds.has(repository) ? repository : null,
           prCapable: readBoolean(record.prCapable) ?? true,
         }),
       );
@@ -296,7 +296,6 @@ function serializeTools(tools: AgentConfigTool[]) {
         id: tool.id,
         type: tool.type,
         provider: tool.provider,
-        repository: tool.repository,
         prCapable: tool.prCapable,
       };
     }
@@ -457,19 +456,31 @@ function normalizeTriggers(value: unknown, repositories: AgentGitHubRepositoryCo
   const repoIds = new Set(repositories.map((repository) => repository.id));
   const triggers: AgentTriggerConfig[] = [];
   const seen = new Set<string>();
+  let scheduleIndex = 1;
 
   for (const item of Array.isArray(value) ? value : []) {
     if (!isRecord(item)) continue;
     const type = readString(item.type);
+    if (type === "agent.schedule") {
+      const trigger = normalizeScheduleTrigger(item, scheduleIndex);
+      if (!trigger || seen.has(trigger.id)) continue;
+      scheduleIndex += 1;
+      seen.add(trigger.id);
+      triggers.push(trigger);
+      continue;
+    }
+
     const repository = normalizeNullableRepositoryId(item.repository);
     if (type !== "github.pull_request" || !repository || !repoIds.has(repository)) continue;
-    const id = normalizeRepositoryId(readString(item.id) ?? `${repository}-pr`);
+    const id = normalizeTriggerId(readString(item.id) ?? `${repository}-pr`);
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const events = (Array.isArray(item.events) ? item.events : [])
       .flatMap((event) => (typeof event === "string" ? [event] : []))
-      .filter((event): event is AgentTriggerConfig["events"][number] =>
-        GITHUB_PULL_REQUEST_EVENTS.has(event as AgentTriggerConfig["events"][number]),
+      .filter((event): event is AgentGitHubPullRequestTriggerConfig["events"][number] =>
+        GITHUB_PULL_REQUEST_EVENTS.has(
+          event as AgentGitHubPullRequestTriggerConfig["events"][number],
+        ),
       );
     triggers.push({
       id,
@@ -482,6 +493,27 @@ function normalizeTriggers(value: unknown, repositories: AgentGitHubRepositoryCo
   }
 
   return triggers;
+}
+
+function normalizeScheduleTrigger(
+  item: Record<string, unknown>,
+  scheduleIndex: number,
+): AgentScheduleTriggerConfig | null {
+  const cron = readString(item.cron);
+  const prompt = readString(item.prompt);
+  if (!cron || !isSupportedScheduleCron(cron) || !prompt) return null;
+
+  const id = normalizeTriggerId(readString(item.id) ?? `schedule-${scheduleIndex}`);
+  if (!id) return null;
+
+  return {
+    id,
+    type: "agent.schedule",
+    cron,
+    timezone: normalizeScheduleTimezone(readString(item.timezone)),
+    prompt,
+    enabled: readBoolean(item.enabled) ?? false,
+  };
 }
 
 function normalizeBranches(value: unknown) {
@@ -503,6 +535,10 @@ function normalizeRepositoryId(value: string) {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
+}
+
+function normalizeTriggerId(value: string) {
+  return normalizeRepositoryId(value);
 }
 
 function normalizeNullableRepositoryId(value: unknown) {

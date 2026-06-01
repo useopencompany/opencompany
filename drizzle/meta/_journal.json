@@ -204,6 +204,20 @@
       "when": 1779975815733,
       "tag": "0028_free_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1780314922212,
+      "tag": "0029_square_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1780319293489,
+      "tag": "0030_equal_justin_hammer",
+      "breakpoints": true
     }
   ]
 }

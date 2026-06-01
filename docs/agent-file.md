@@ -75,7 +75,26 @@ The model the agent runs on. Must be one of:
 | `google/gemini-3.1-flash-lite-preview`     | Very fast, low-cost Gemini for simple high-volume tasks.        |
 | `deepseek/deepseek-v4-flash`               | High-throughput DeepSeek for cost-sensitive work.               |
 | `mistral/mistral-medium-3.5`               | Mistral model balancing quality, latency, and cost.             |
+| `minimax/minimax-m3`                       | Latest MiniMax with 1M context and agentic coding strength.     |
+| `minimax/minimax-m2.7`                     | High-capability MiniMax for software engineering agents.        |
+| `minimax/minimax-m2.7-highspeed`           | Fast MiniMax M2.7 variant for latency-sensitive agent work.     |
+| `minimax/minimax-m2.5`                     | MiniMax for full-stack and multi-file code work.                |
+| `minimax/minimax-m2.5-highspeed`           | Fast MiniMax M2.5 variant for responsive coding workflows.      |
+| `minimax/minimax-m2.1`                     | MiniMax for reliable agentic coding with interleaved thinking.  |
+| `minimax/minimax-m2.1-lightning`           | Speed-optimized MiniMax M2.1 for fast coding assistance.        |
+| `minimax/minimax-m2`                       | MiniMax MoE model for coding and agentic tasks.                 |
 | `moonshotai/kimi-k2.6`                     | Latest Kimi for long-horizon coding and agent workflows.        |
+| `moonshotai/kimi-k2.5`                     | Kimi multimodal model for agents, coding, and vision tasks.     |
+| `moonshotai/kimi-k2-thinking`              | Kimi reasoning model for long tool-call chains.                 |
+| `moonshotai/kimi-k2-thinking-turbo`        | Faster Kimi reasoning variant for interactive workflows.        |
+| `moonshotai/kimi-k2-turbo`                 | Speed-optimized Kimi K2 for latency-sensitive tool use.         |
+| `moonshotai/kimi-k2`                       | Kimi K2 instruct model for coding and agentic pipelines.        |
+| `xai/grok-4.3`                             | Latest Grok reasoning model with 1M context and tool use.       |
+| `xai/grok-4.20-reasoning`                  | Long-context Grok reasoning model for agent workflows.          |
+| `xai/grok-4.20-non-reasoning`              | Long-context Grok model for direct tool-using tasks.            |
+| `xai/grok-4.1-fast-reasoning`              | Fast, low-cost Grok reasoning model with 1M context.            |
+| `xai/grok-4.1-fast-non-reasoning`          | Fast, low-cost Grok model for direct answers.                   |
+| `xai/grok-build-0.1`                       | xAI coding model for fast agentic software development.         |
 | `zai/glm-5.1`                              | Latest GLM for coding-heavy and agentic engineering tasks.      |
 | `zai/glm-5-turbo`                          | Faster GLM 5 variant for production agent workflows.            |
 | `zai/glm-5v-turbo`                         | Multimodal GLM 5 model for visual coding and GUI tasks.         |
@@ -187,6 +206,20 @@ triggers:
       - synchronize
     branches:
       - main
+    enabled: true
+```
+
+Scheduled run triggers store a generated preset cron expression, an IANA timezone,
+and the prompt to submit when the schedule fires. The editor generates these from
+the "Run every..." UI; arbitrary cron text is not part of the MVP.
+
+```yaml
+triggers:
+  - id: weekday-brief
+    type: agent.schedule
+    cron: "0 9 * * 1-5"
+    timezone: America/Los_Angeles
+    prompt: Review open priorities and write a concise status brief.
     enabled: true
 ```
 
@@ -353,7 +386,16 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
       repositories: [],
     },
   },
-  triggers: [],
+  triggers: [
+    {
+      id: "weekday-brief",
+      type: "agent.schedule",
+      cron: "0 9 * * 1-5",
+      timezone: "America/Los_Angeles",
+      prompt: "Review open priorities and write a concise status brief.",
+      enabled: true,
+    },
+  ],
 }
 ```
 
