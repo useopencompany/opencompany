@@ -6,6 +6,7 @@ import type {
   AgentToolId,
 } from "@opencompany/agent-runtime/types";
 import {
+  AtSign,
   Clock3,
   Code2,
   FileText,
@@ -98,6 +99,7 @@ export type AgentMentionItem =
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
+  x: AtSign,
   amp: Code2,
   linear: ListTodo,
   slack: MessageSquare,

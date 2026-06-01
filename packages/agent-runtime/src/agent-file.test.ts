@@ -65,10 +65,10 @@ describe(".agent files", () => {
 
   test("syncs tool and brain config from markdown mentions", () => {
     const config = extractConfigFromMentions(
-      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",
+      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa, @x, and @exa. Read @brain/docs/README.md and @brain/product/.",
     );
 
-    expect(config.tools).toEqual(["exa"]);
+    expect(config.tools).toEqual(["exa", "x"]);
     expect(config.brain).toEqual([
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
@@ -119,6 +119,26 @@ describe(".agent files", () => {
         server: "slack",
         label: "slack",
         description: "Use workspace-configured Slack MCP tools.",
+      },
+    ]);
+  });
+
+  test("round-trips X hosted tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "X research",
+      body: "Research public conversations with @x.",
+    });
+
+    expect(source).toContain("id: x");
+    expect(source).toContain("type: hosted_tool");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "x",
+        type: "hosted_tool",
+        label: "x",
+        description:
+          "Read public X posts, profiles, timelines, discussions, and trends through the official X API.",
       },
     ]);
   });

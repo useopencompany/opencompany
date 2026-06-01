@@ -57,6 +57,11 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   exa_search: 8,
   exa_contents: 8,
   exa_answer: 4,
+  x_search_posts: 4,
+  x_get_profile: 8,
+  x_get_user_posts: 4,
+  x_get_discussion: 3,
+  x_get_trends: 4,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
