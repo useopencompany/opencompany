@@ -357,7 +357,7 @@ function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
         </div>
 
         <div
-          className="relative flex-1 overflow-y-auto px-8 lg:px-12 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain px-8 lg:px-12 py-6"
           onDragEnter={(event) => {
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();

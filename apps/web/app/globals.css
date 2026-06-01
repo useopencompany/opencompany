@@ -19,6 +19,9 @@ body {
   color: #111;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "cv11", "ss01";
+  /* Stop inner scroll areas (chat, sidebar) from chaining their scroll to the
+     page — no rubber-band / page shift when hitting top or bottom of the fold. */
+  overscroll-behavior: none;
 }
 
 * {
