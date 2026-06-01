@@ -116,13 +116,26 @@ function updateAgentQueries(
   }
   const listItem = agentDetailToListItem(agent);
   queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
-    if (!agents) return [listItem];
+    // The list cache may be empty here when the agent was reached through the
+    // create→redirect flow (the client never fetched the list with this agent
+    // in it) or after the unobserved list query was garbage-collected. Seeding
+    // it with only this agent would hide every other agent until a manual
+    // refresh (PRO-94), so leave the cache untouched and let the invalidation
+    // below trigger an authoritative refetch when the list is next viewed.
+    if (!agents) return agents;
 
     const next = agents.map((item) => (item.id === agent.id ? listItem : item));
     if (!next.some((item) => item.id === agent.id)) next.unshift(listItem);
     return next.toSorted(
       (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
     );
+  });
+  // Mark the list stale regardless of the optimistic update so a remount of the
+  // agents list (e.g. navigating back after editing a new agent) refetches the
+  // full server-side list rather than trusting a partial client cache.
+  void queryClient.invalidateQueries({
+    queryKey: agentQueryKeys.list(workspaceId),
+    refetchType: "none",
   });
 }
 

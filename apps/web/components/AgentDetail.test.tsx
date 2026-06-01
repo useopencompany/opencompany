@@ -6,11 +6,13 @@ import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { updateAgent } from "@/lib/agents/actions";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
   agentQueryKeys,
   fetchAgent,
+  fetchAgents,
 } from "@/lib/agents/payload";
 import AgentDetail from "./AgentDetail";
 
@@ -156,6 +158,20 @@ const detailAgent: AgentDetailPayload = {
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
+const fetchAgentsMock = vi.mocked(fetchAgents);
+const updateAgentMock = vi.mocked(updateAgent);
+
+const existingListAgent: AgentListItemPayload = {
+  id: "agt_existing",
+  workspaceId: "wks_123",
+  path: "agents/research.agent",
+  name: "Research",
+  config,
+  githubSyncStatus: "synced",
+  githubSyncError: null,
+  createdAt: "2026-05-20T10:00:00.000Z",
+  updatedAt: "2026-05-20T10:10:00.000Z",
+};
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
@@ -224,5 +240,75 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
+  });
+
+  it("keeps pre-existing agents in the list after saving a freshly created agent (PRO-94)", async () => {
+    // Reproduces PRO-94: after creating a new agent and editing it, the
+    // detail page's list-cache update must not clobber the agents the user
+    // hasn't loaded into the client cache yet. The new agent reaches the
+    // detail view via a server redirect, so the client list query has not
+    // been populated with it (and may not be populated at all). The server
+    // (fetchAgents) remains the source of truth and still has every agent.
+    const user = userEvent.setup();
+    const queryClient = createQueryClient();
+
+    // The server-side list always returns both the pre-existing agent and the
+    // freshly created one. AgentsView reads it through this query.
+    fetchAgentsMock.mockResolvedValue([detailAgent, existingListAgent]);
+
+    updateAgentMock.mockResolvedValue({
+      id: detailAgent.id,
+      workspaceId: detailAgent.workspaceId,
+      path: detailAgent.path ?? detailAgent.id,
+      pathChanged: false,
+      agent: { ...detailAgent, name: "Leo renamed" },
+    });
+
+    renderWithProviders(
+      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
+      queryClient,
+    );
+
+    // Editing the freshly created agent's name and blurring triggers a save.
+    const nameInput = await screen.findByPlaceholderText(/untitled agent/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, "Leo renamed");
+    await user.tab();
+
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
+
+    // After the save, the list query must not have been clobbered into a
+    // single-item cache. AgentsView reads this list query while it is still
+    // fresh (within staleTime), so a wrong optimistic value here is exactly
+    // what makes the other agents disappear until a manual refresh. If the
+    // save left the cache untouched/absent it must be marked stale so the
+    // remount refetches the authoritative list.
+    await waitFor(() => {
+      const cached = queryClient.getQueryData<AgentListItemPayload[]>(
+        agentQueryKeys.list("wks_123"),
+      );
+      const listState = queryClient.getQueryState(agentQueryKeys.list("wks_123"));
+
+      if (cached) {
+        // An optimistic cache is acceptable only if it still includes every
+        // pre-existing agent.
+        expect(cached.map((agent) => agent.id)).toContain(existingListAgent.id);
+      } else {
+        // No optimistic cache: the query must be invalidated so AgentsView
+        // refetches the server list (which still has every agent) on remount.
+        expect(listState?.isInvalidated ?? true).toBe(true);
+      }
+    });
+
+    // Finally, resolve the list the way AgentsView's useQuery would once the
+    // user navigates back: a fresh, non-stale read must surface every agent.
+    const list = await queryClient.ensureQueryData({
+      queryKey: agentQueryKeys.list("wks_123"),
+      queryFn: fetchAgents,
+      staleTime: 30_000,
+    });
+
+    expect(list.map((agent) => agent.id)).toContain(existingListAgent.id);
+    expect(list.map((agent) => agent.id)).toContain(detailAgent.id);
   });
 });
