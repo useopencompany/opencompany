@@ -129,6 +129,7 @@ Core tools are always available to runner sessions:
 
 - `shell`
 - `read_file`
+- `read_skill`
 - `edit_file`
 - `write_file`
 - `list_files`

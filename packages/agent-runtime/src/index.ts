@@ -7,6 +7,7 @@ export * from "./ids";
 export * from "./mentions";
 export * from "./models";
 export * from "./paths";
+export * from "./skills";
 export * from "./tokens";
 export * from "./tools";
 export * from "./types";

@@ -9,6 +9,7 @@ import {
   SUPPORTED_AGENT_TOOLS,
   toConfigTool,
 } from "./mentions";
+import { normalizeAgentSkills } from "./skills";
 import type {
   AgentBrainReference,
   AgentConfig,
@@ -18,6 +19,7 @@ import type {
   AgentGitHubRepositoryConfig,
   AgentModelId,
   AgentReference,
+  AgentSkillReference,
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
@@ -38,6 +40,7 @@ type Frontmatter = {
   tools?: unknown;
   brain?: unknown;
   agents?: unknown;
+  skills?: unknown;
   integrations?: unknown;
   triggers?: unknown;
 };
@@ -46,6 +49,7 @@ export type AgentConfigPatch = {
   tools?: AgentConfigTool[];
   brain?: AgentBrainReference[];
   agents?: AgentReference[];
+  skills?: AgentSkillReference[];
   integrations?: AgentConfig["integrations"];
   triggers?: AgentTriggerConfig[];
 };
@@ -58,13 +62,123 @@ export function parseAgentFile(source: string): AgentFile {
   const agents = normalizeAgentReferences(frontmatter.agents);
   const repositories = normalizeGitHubRepositories(frontmatter.integrations);
   const tools = normalizeTools(frontmatter.tools);
+  const skills = normalizeAgentSkills(frontmatter.skills);
   const triggers = normalizeTriggers(frontmatter.triggers, repositories);
 
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools, brain, agents, repositories, triggers }),
+    config: buildAgentConfig({
+      title,
+      body,
+      model,
+      tools,
+      brain,
+      agents,
+      skills,
+      repositories,
+      triggers,
+    }),
   };
+}
+
+// Upper bound on a serialized .agent file. Generous for prose instructions while still
+// rejecting runaway content that would bloat the system prompt or a GitHub commit.
+const MAX_AGENT_FILE_BYTES = 128 * 1024;
+
+export type AgentFileValidationResult =
+  | { ok: true; parsed: AgentFile }
+  | { ok: false; errors: string[] };
+
+/**
+ * Strict validation for a serialized `.agent` file. `parseAgentFile` is intentionally
+ * lenient — it never throws and silently falls back to defaults — which is the right
+ * behavior for loading hand-edited files but dangerous for programmatic self-edits, where a
+ * malformed change would quietly degrade the agent. This validator rejects those degenerate
+ * cases so a bad self-edit surfaces an error instead of being applied.
+ */
+export function validateAgentFileSource(source: string): AgentFileValidationResult {
+  const errors: string[] = [];
+  const normalized = source.replace(/\r\n/g, "\n");
+
+  if (Buffer.byteLength(normalized, "utf8") > MAX_AGENT_FILE_BYTES) {
+    errors.push(
+      `Agent file is too large (max ${Math.floor(MAX_AGENT_FILE_BYTES / 1024)} KB). Shorten the instructions.`,
+    );
+  }
+
+  if (!normalized.startsWith("---\n")) {
+    errors.push("Missing YAML frontmatter: the file must start with a '---' fence.");
+    return { ok: false, errors };
+  }
+  const fenceEnd = normalized.indexOf("\n---", 4);
+  if (fenceEnd === -1) {
+    errors.push("Unterminated YAML frontmatter: expected a closing '---' line.");
+    return { ok: false, errors };
+  }
+
+  const yaml = normalized.slice(4, fenceEnd);
+  let frontmatter: unknown;
+  try {
+    frontmatter = parseYaml(yaml);
+  } catch (error) {
+    errors.push(`Frontmatter is not valid YAML: ${error instanceof Error ? error.message : error}`);
+    return { ok: false, errors };
+  }
+  if (!isRecord(frontmatter)) {
+    errors.push("Frontmatter must be a YAML mapping of fields.");
+    return { ok: false, errors };
+  }
+
+  const rawTitle = readString(frontmatter.title);
+  if (!rawTitle) {
+    errors.push("`title` is required and must be a non-empty string.");
+  }
+
+  // `model:` must resolve to a known model id without falling back. Aliases are not valid
+  // raw `model:` values.
+  const rawModel = readString(frontmatter.model);
+  if (!rawModel) {
+    errors.push("`model` is required and must be a known model id.");
+  } else if (normalizeAgentModelId(rawModel) !== rawModel) {
+    errors.push(`Unknown model "${rawModel}". Use one of the supported model ids.`);
+  }
+
+  const body = normalized.slice(fenceEnd + 4).replace(/^\n+/, "");
+  if (!normalizeBody(body)) {
+    errors.push("The instructions body must not be empty.");
+  }
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  const parsed = parseAgentFile(normalized);
+  // Round-trip guard: re-serializing the parsed result and parsing again must reproduce the
+  // same essentials. Catches any silent drift the lenient parser might introduce.
+  const reparsed = parseAgentFile(
+    serializeAgentFile({
+      title: parsed.title,
+      body: parsed.body,
+      model: parsed.config.model.name,
+      tools: parsed.config.tools,
+      brain: parsed.config.brain,
+      agents: parsed.config.agents ?? [],
+      skills: parsed.config.skills ?? [],
+      integrations: parsed.config.integrations,
+      triggers: parsed.config.triggers,
+    }),
+  );
+  if (
+    reparsed.title !== parsed.title ||
+    reparsed.config.model.name !== parsed.config.model.name ||
+    reparsed.config.instructions !== parsed.config.instructions
+  ) {
+    return {
+      ok: false,
+      errors: ["The agent file did not round-trip cleanly; the change may be malformed."],
+    };
+  }
+
+  return { ok: true, parsed };
 }
 
 export function serializeAgentFile(input: {
@@ -74,17 +188,19 @@ export function serializeAgentFile(input: {
   tools?: AgentConfigTool[];
   brain?: AgentBrainReference[];
   agents?: AgentReference[];
+  skills?: AgentSkillReference[];
   integrations?: AgentConfig["integrations"];
   triggers?: AgentTriggerConfig[];
 }) {
   const title = normalizeTitle(input.title);
   const body = normalizeBody(input.body);
   const fromMentions = extractConfigFromMentions(body);
-  const model = normalizeModelId(input.model ?? fromMentions.model);
+  const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const brainInput = input.brain && input.brain.length > 0 ? input.brain : fromMentions.brain;
   const brain = normalizeBrainReferences(brainInput);
   const agentInput = input.agents && input.agents.length > 0 ? input.agents : fromMentions.agents;
   const agents = normalizeAgentReferences(agentInput);
+  const skills = normalizeAgentSkills(input.skills);
   const repositories = normalizeGitHubRepositories(input.integrations);
   const toolInput = input.tools && input.tools.length > 0 ? input.tools : fromMentions.tools;
   const tools = normalizeTools(toolInput);
@@ -97,6 +213,7 @@ export function serializeAgentFile(input: {
       tools,
       brain,
       agents,
+      skills,
       integrations: {
         github: {
           repositories,
@@ -115,15 +232,17 @@ export function serializeAgentFrontmatter(input: {
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
   agents?: AgentReference[];
+  skills?: AgentSkillReference[];
   integrations?: AgentConfig["integrations"];
   triggers?: AgentTriggerConfig[];
 }) {
   const title = normalizeTitle(input.title);
-  const model = normalizeModelId(input.model);
+  const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const repositories = normalizeGitHubRepositories(input.integrations);
   const tools = normalizeTools(input.tools);
   const brain = normalizeBrainReferences(input.brain);
   const agents = normalizeAgentReferences(input.agents);
+  const skills = normalizeAgentSkills(input.skills);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
   const frontmatter = {
     schemaVersion: "agent.v1",
@@ -132,6 +251,9 @@ export function serializeAgentFrontmatter(input: {
     tools: serializeTools(tools),
     brain: brain.map((reference) => reference.path),
     agents: serializeAgentReferences(agents),
+    // Omit `skills:` entirely when empty so existing agent files don't gain a noisy
+    // empty key on re-serialize. The built-in default skill is implicit, not persisted.
+    ...(skills.length > 0 ? { skills: skills.map((skill) => skill.id) } : {}),
     integrations: {
       github: {
         repositories,
@@ -152,9 +274,10 @@ export function buildAgentFile(input: {
   const body = normalizeBody(input.body);
   const title = normalizeTitle(input.title);
   const mentioned = extractConfigFromMentions(body);
-  const model = normalizeModelId(input.model ?? mentioned.model);
+  const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const brain = normalizeBrainReferences(input.config?.brain ?? mentioned.brain);
   const agents = normalizeAgentReferences(input.config?.agents ?? mentioned.agents);
+  const skills = normalizeAgentSkills(input.config?.skills);
   const repositories = normalizeGitHubRepositories(input.config?.integrations);
   const tools = normalizeTools(input.config?.tools ?? mentioned.tools);
   const triggers = normalizeTriggers(input.config?.triggers ?? [], repositories);
@@ -162,7 +285,17 @@ export function buildAgentFile(input: {
   return {
     title,
     body,
-    config: buildAgentConfig({ title, body, model, tools, brain, agents, repositories, triggers }),
+    config: buildAgentConfig({
+      title,
+      body,
+      model,
+      tools,
+      brain,
+      agents,
+      skills,
+      repositories,
+      triggers,
+    }),
   };
 }
 
@@ -188,6 +321,7 @@ function buildAgentConfig(input: {
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
   agents: AgentReference[];
+  skills: AgentSkillReference[];
   repositories: AgentGitHubRepositoryConfig[];
   triggers: AgentTriggerConfig[];
 }): AgentConfig {
@@ -204,6 +338,7 @@ function buildAgentConfig(input: {
     tools: input.tools,
     brain: input.brain,
     agents: input.agents,
+    ...(input.skills.length > 0 ? { skills: input.skills } : {}),
     ...(afterSession ? { afterSession } : {}),
     integrations: {
       github: {

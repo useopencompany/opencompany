@@ -1076,12 +1076,18 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "amp_coder":
       return "Coding with Amp";
+    case "read_skill": {
+      const skillId = field("skillId");
+      return skillId ? `Reading ${skillId} skill` : "Reading a skill";
+    }
     case "tool_help":
       return "Checking tool help";
     case "delegate_to_agent": {
       const agent = field("agent");
       return agent ? `Delegating to ${agent}` : "Delegating to an agent";
     }
+    case "update_agent_file":
+      return "Updating its agent configuration";
     default:
       return undefined;
   }

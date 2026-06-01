@@ -148,7 +148,7 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
     expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
   });
 
-  it("binds label-only mention nodes when the label is supported", () => {
+  it("binds supported label-only tool mention nodes without deriving model labels", () => {
     const { body, config } = derivePreviewConfigFromTiptapDoc({
       title: "Label only",
       content: doc([
@@ -159,9 +159,9 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
       repositories,
     });
 
-    expect(body).toBe("@amp with @minimax/minimax-m3");
+    expect(body).toBe("@amp with @MiniMax M3");
     expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
-    expect(config.model.name).toBe("minimax/minimax-m3");
+    expect(config.model.name).toBe("openai/gpt-5.4-mini");
   });
 
   it("uses saved mention binding attrs to resolve duplicate GitHub repository names", () => {

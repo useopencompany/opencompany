@@ -12,6 +12,7 @@ import {
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
+import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
@@ -278,6 +279,15 @@ async function executeRuntimeToolWithTracing(input: {
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "update_agent_file") {
+          return applyAgentSelfUpdate({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            args: input.args,
+          });
+        }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
         }

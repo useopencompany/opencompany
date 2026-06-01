@@ -123,6 +123,7 @@ describe("resolveAgentRuntimeConfig", () => {
       expect.arrayContaining([
         "shell",
         "read_file",
+        "read_skill",
         "edit_file",
         "git_diff",
         "tool_help",
