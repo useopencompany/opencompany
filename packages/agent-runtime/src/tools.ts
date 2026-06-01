@@ -270,7 +270,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         agent: {
           type: "string",
           description:
-            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research.agent. Omit when continuing a prior child session by sessionId.",
+            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research/agent.agent. Omit when continuing a prior child session by sessionId.",
         },
         sessionId: {
           type: "string",

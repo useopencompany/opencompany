@@ -69,7 +69,7 @@ export function repositoryIdForFullName(fullName: string) {
 export function agentMentionIdForPath(path: string) {
   const normalized = normalizeAgentPath(path);
   if (!normalized) return null;
-  return `agent/${normalized.slice("agents/".length, -".agent".length)}`;
+  return `agent/${normalized.slice("agents/".length, -"/agent.agent".length)}`;
 }
 
 export function extractMentionIds(body: string) {
@@ -403,21 +403,30 @@ function normalizeTitle(title: string) {
 function normalizeAgentMentionId(value: string) {
   return value
     .trim()
+    .replace(/^@/, "")
     .toLowerCase()
-    .replace(/\.agent$/i, "");
+    .replace(/^agents\//, "agent/")
+    .replace(/\/agent\.agent$/i, "");
 }
 
 function normalizeAgentPath(value: string) {
-  const trimmed = value.trim().replace(/^\/+/, "");
-  const path = trimmed.startsWith("agents/") ? trimmed : `agents/${trimmed}`;
-  const withExtension = path.endsWith(".agent") ? path : `${path}.agent`;
-  const normalized = withExtension.replace(/\/{2,}/g, "/");
-  const slug = normalized.slice("agents/".length, -".agent".length);
+  const trimmed = value.trim().replace(/^@/, "").replace(/^\/+/, "");
+  const withoutAgentPrefix = trimmed.startsWith("agent/")
+    ? trimmed.slice("agent/".length)
+    : trimmed;
+  const normalized = withoutAgentPrefix.startsWith("agents/")
+    ? withoutAgentPrefix.replace(/\/{2,}/g, "/")
+    : `agents/${withoutAgentPrefix.replace(/\/{2,}/g, "/")}/agent.agent`;
+  const slug =
+    normalized.startsWith("agents/") && normalized.endsWith("/agent.agent")
+      ? normalized.slice("agents/".length, -"/agent.agent".length)
+      : "";
 
   if (
     !normalized.startsWith("agents/") ||
-    !normalized.endsWith(".agent") ||
+    !normalized.endsWith("/agent.agent") ||
     !slug ||
+    !/^[a-z0-9-]+$/.test(slug) ||
     slug.includes("/") ||
     slug.includes("..") ||
     slug.startsWith(".")

@@ -93,7 +93,7 @@ const config: AgentConfig = {
 const listAgent: AgentListItemPayload = {
   id: "agt_123",
   workspaceId: "wks_123",
-  path: "agents/leo.agent",
+  path: "agents/leo/agent.agent",
   name: "Leo",
   config,
   githubSyncStatus: "synced",
@@ -147,7 +147,7 @@ const detailAgent: AgentDetailPayload = {
       binding,
     },
   ],
-  workspaceAgents: [{ path: "agents/research.agent", name: "Research" }],
+  workspaceAgents: [{ path: "agents/research/agent.agent", name: "Research" }],
   mcp: {
     mcpEnabled: false,
     linearConfigured: false,
@@ -191,20 +191,23 @@ describe("AgentDetail", () => {
     queryClient.setQueryData(agentQueryKeys.list("wks_123"), [listAgent]);
     fetchAgentMock.mockReturnValue(new Promise(() => {}) as Promise<AgentDetailPayload>);
 
-    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" />, queryClient);
+    renderWithProviders(<AgentDetail idOrPath="agents/leo/agent.agent" />, queryClient);
 
     expect(screen.getByRole("status", { name: /loading agent/i })).toBeInTheDocument();
     expect(screen.queryByText("@opencompany/web")).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchAgentMock).toHaveBeenCalledWith("agents/leo.agent"));
+    await waitFor(() => expect(fetchAgentMock).toHaveBeenCalledWith("agents/leo/agent.agent"));
   });
 
   it("mounts with highlighted mentions from full detail cache", async () => {
     const queryClient = createQueryClient();
-    queryClient.setQueryData(agentQueryKeys.detail("wks_123", "agents/leo.agent"), detailAgent);
+    queryClient.setQueryData(
+      agentQueryKeys.detail("wks_123", "agents/leo/agent.agent"),
+      detailAgent,
+    );
     fetchAgentMock.mockResolvedValue(detailAgent);
 
     const { container } = renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" />,
+      <AgentDetail idOrPath="agents/leo/agent.agent" />,
       queryClient,
     );
 
@@ -215,7 +218,7 @@ describe("AgentDetail", () => {
   it("preserves a saved GitHub repository binding in the detail view", async () => {
     const user = userEvent.setup();
     const { container } = renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
+      <AgentDetail idOrPath="agents/leo/agent.agent" initialAgent={detailAgent} />,
     );
 
     expect(await screen.findByText("@opencompany/web")).toBeInTheDocument();

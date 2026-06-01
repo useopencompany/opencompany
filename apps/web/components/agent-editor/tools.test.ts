@@ -100,7 +100,7 @@ describe("agent editor mention tools", () => {
 
   test("exposes workspace agents as stable agent slug mentions", () => {
     const items = buildWorkspaceAgentMentionItems([
-      { path: "agents/research.agent", name: "Research" },
+      { path: "agents/research/agent.agent", name: "Research" },
     ]);
 
     expect(items).toEqual([
@@ -110,12 +110,12 @@ describe("agent editor mention tools", () => {
         kind: "agent",
         label: "agent/research",
         displayLabel: "Research",
-        description: "agents/research.agent",
+        description: "agents/research/agent.agent",
       }),
     ]);
     expect(
       buildAgentMentionItems([], [], {
-        agents: [{ path: "agents/research.agent", name: "Research" }],
+        agents: [{ path: "agents/research/agent.agent", name: "Research" }],
       }).some((item) => item.mentionId === "agent/research"),
     ).toBe(true);
   });

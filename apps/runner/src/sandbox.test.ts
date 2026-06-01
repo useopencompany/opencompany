@@ -325,7 +325,7 @@ describe("resolveSandboxToolPath", () => {
       "../.opencompany/agent.agent",
       "/home/user/.opencompany/agent.agent",
       "notes.md",
-      "agents/foo.agent",
+      "agents/foo/agent.agent",
     ]) {
       expect(() => resolveSandboxToolPath("/home/user/workspace", candidate)).toThrow(
         /work\/ or brain\//,

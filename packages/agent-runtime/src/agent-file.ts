@@ -178,7 +178,11 @@ export function slugifyAgentTitle(title: string) {
 }
 
 export function agentPathForSlug(slug: string) {
-  return `agents/${slug}.agent`;
+  return `agents/${slug}/agent.agent`;
+}
+
+export function agentBundleDir(path: string) {
+  return path.replace(/\/[^/]+$/g, "");
 }
 
 function buildAgentConfig(input: {
@@ -374,10 +378,13 @@ function serializeAgentReferences(agents: AgentReference[]) {
 }
 
 function normalizeAgentPath(value: string) {
-  const trimmed = value.trim().replace(/^\/+/, "");
-  const path = trimmed.startsWith("agents/") ? trimmed : `agents/${trimmed}`;
-  const withExtension = path.endsWith(".agent") ? path : `${path}.agent`;
-  const normalized = withExtension.replace(/\/{2,}/g, "/");
+  const trimmed = value.trim().replace(/^@/, "").replace(/^\/+/, "");
+  const withoutAgentPrefix = trimmed.startsWith("agent/")
+    ? trimmed.slice("agent/".length)
+    : trimmed;
+  const normalized = withoutAgentPrefix.startsWith("agents/")
+    ? withoutAgentPrefix.replace(/\/{2,}/g, "/")
+    : `agents/${withoutAgentPrefix.replace(/\/{2,}/g, "/")}/agent.agent`;
   const mentionId = agentMentionIdForPath(normalized);
   if (!mentionId) return null;
   return normalized;

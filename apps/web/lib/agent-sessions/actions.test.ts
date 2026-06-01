@@ -78,7 +78,7 @@ function fakeAgent() {
   return {
     id: "agt_123",
     name: "Leo",
-    path: "agents/leo.agent",
+    path: "agents/leo/agent.agent",
     workspaceId: "wks_123",
     config: { model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" } },
   };
@@ -90,7 +90,7 @@ function fakeDetail(): AgentSessionDetailPayload {
       id: "ses_123",
       agentId: "agt_123",
       agentName: "Leo",
-      agentPath: "agents/leo.agent",
+      agentPath: "agents/leo/agent.agent",
       title: "Untitled",
       status: "created",
       source: "user",

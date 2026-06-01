@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  agentBundleDir,
+  agentPathForSlug,
   buildAgentFile,
   parseAgentFile,
   serializeAgentFile,
@@ -8,6 +10,12 @@ import {
 import { extractConfigFromMentions } from "./mentions";
 
 describe(".agent files", () => {
+  test("builds bundle-backed agent paths from slugs", () => {
+    expect(agentPathForSlug("research")).toBe("agents/research/agent.agent");
+    expect(agentPathForSlug("research-2")).toBe("agents/research-2/agent.agent");
+    expect(agentBundleDir("agents/research-2/agent.agent")).toBe("agents/research-2");
+  });
+
   test("round-trips deterministic frontmatter and markdown body", () => {
     const source = [
       "---",
@@ -259,12 +267,14 @@ describe(".agent files", () => {
     const source = serializeAgentFile({
       title: "Coordinator",
       body: "Delegate research to @agent/research.",
-      agents: [{ path: "agents/research.agent", name: "Research" }],
+      agents: [{ path: "agents/research/agent.agent", name: "Research" }],
     });
     const parsed = parseAgentFile(source);
 
-    expect(source).toContain("agents:\n  - path: agents/research.agent\n    name: Research");
-    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(source).toContain("agents:\n  - path: agents/research/agent.agent\n    name: Research");
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/agent.agent", name: "Research" },
+    ]);
   });
 
   test("drops invalid delegated agent frontmatter entries", () => {
@@ -273,7 +283,7 @@ describe(".agent files", () => {
         "---",
         'title: "Coordinator"',
         "agents:",
-        "  - path: agents/research.agent",
+        "  - path: agents/research/agent.agent",
         "    name: Research",
         "  - path: ../secret.agent",
         "    name: Missing",
@@ -283,7 +293,9 @@ describe(".agent files", () => {
       ].join("\n"),
     );
 
-    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/agent.agent", name: "Research" },
+    ]);
   });
 
   test("does not derive unknown delegated agent mentions without a catalog", () => {

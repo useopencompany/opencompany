@@ -151,7 +151,10 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
   it("adds delegate_to_agent only when delegatable agents are present", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
     expect(
-      resolveRuntimeToolNamesForConfigTools({ tools: [], agents: [{ path: "agents/x.agent" }] }),
+      resolveRuntimeToolNamesForConfigTools({
+        tools: [],
+        agents: [{ path: "agents/x/agent.agent" }],
+      }),
     ).toContain("delegate_to_agent");
   });
 });

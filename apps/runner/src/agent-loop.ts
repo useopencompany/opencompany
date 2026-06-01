@@ -1,4 +1,5 @@
 import {
+  agentMentionIdForPath,
   newAgentSessionId,
   newAgentSessionMessageId,
   newRunLeaseId,
@@ -1889,11 +1890,8 @@ function resolveDelegatedAgentReference(agent: string, references: AgentReferenc
   const normalized = normalizeDelegatedAgentKey(agent);
   return references.find((reference) => {
     const path = reference.path;
-    const slug =
-      path.startsWith("agents/") && path.endsWith(".agent")
-        ? path.slice("agents/".length, -".agent".length)
-        : "";
-    const mention = path.startsWith("agents/") && path.endsWith(".agent") ? `agent/${slug}` : "";
+    const mention = agentMentionIdForPath(path) ?? "";
+    const slug = mention.startsWith("agent/") ? mention.slice("agent/".length) : "";
     return (
       normalizeDelegatedAgentKey(path) === normalized ||
       normalizeDelegatedAgentKey(mention) === normalized ||
@@ -1907,7 +1905,8 @@ function normalizeDelegatedAgentKey(value: string) {
   return value
     .trim()
     .replace(/^@/, "")
-    .replace(/\.agent$/i, "")
+    .replace(/^agents\//, "agent/")
+    .replace(/\/agent\.agent$/i, "")
     .toLowerCase();
 }
 

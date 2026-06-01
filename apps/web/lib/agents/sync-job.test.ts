@@ -5,11 +5,11 @@ describe("resolveAgentSyncRename", () => {
   test("records the previous file path for a fresh rename", () => {
     expect(
       resolveAgentSyncRename({
-        renamePreviousPath: "agents/old.agent",
+        renamePreviousPath: "agents/old/agent.agent",
         renamePreviousBlobSha: "blob-old",
       }),
     ).toEqual({
-      previousPath: "agents/old.agent",
+      previousPath: "agents/old/agent.agent",
       previousBlobSha: "blob-old",
     });
   });
@@ -17,13 +17,13 @@ describe("resolveAgentSyncRename", () => {
   test("preserves the original previous file path across rapid renames", () => {
     expect(
       resolveAgentSyncRename({
-        existingPreviousPath: "agents/a.agent",
+        existingPreviousPath: "agents/a/agent.agent",
         existingPreviousBlobSha: "blob-a",
-        renamePreviousPath: "agents/b.agent",
+        renamePreviousPath: "agents/b/agent.agent",
         renamePreviousBlobSha: "blob-b",
       }),
     ).toEqual({
-      previousPath: "agents/a.agent",
+      previousPath: "agents/a/agent.agent",
       previousBlobSha: "blob-a",
     });
   });
