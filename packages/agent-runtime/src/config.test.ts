@@ -74,6 +74,9 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("Attached GitHub repositories: opencompany/web.");
     expect(resolved.systemPrompt).toContain("git and gh (GitHub CLI) access");
     expect(resolved.systemPrompt).toContain("gh commands default to the attached repository");
+    expect(resolved.systemPrompt).toContain(
+      "--repo is not needed when targeting this attached repository",
+    );
     expect(resolved.systemPrompt).toContain("Clone a repository into work/<repo> on demand");
     expect(resolved.systemPrompt).toContain("All session work must happen under work/");
   });

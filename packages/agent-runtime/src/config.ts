@@ -114,7 +114,7 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
   const fullNames = repositories.map((repository) => repository.fullName).join(", ");
   const ghRepoGuidance =
     repositories.length === 1
-      ? "gh commands default to the attached repository even before it is cloned; use --repo only when you intentionally target a different attached repository."
+      ? "gh commands default to the attached repository even before it is cloned; --repo is not needed when targeting this attached repository."
       : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
   return [
     `Attached GitHub repositories: ${fullNames}.`,

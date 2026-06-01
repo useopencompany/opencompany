@@ -794,6 +794,41 @@ describe("runSandboxTool", () => {
     expect(diff).toContain("+after");
   });
 
+  it("includes staged root checkout changes in the git diff", async () => {
+    const workdir = await createTempWorkdir();
+    const sandbox = {
+      commands: {
+        run: vi.fn(runLocalCommand),
+      },
+    };
+    await execFileAsync("git", [
+      "-C",
+      `${workdir}/work`,
+      "config",
+      "user.email",
+      "test@example.com",
+    ]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "config", "user.name", "Test User"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "before\n");
+    await execFileAsync("git", ["-C", `${workdir}/work`, "add", "tracked.txt"]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "commit", "-m", "initial"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "after\n");
+    await execFileAsync("git", ["-C", `${workdir}/work`, "add", "tracked.txt"]);
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir,
+      name: "git_diff",
+      args: {},
+    });
+
+    const diff = readDiffOutput(result);
+    expect(diff).toContain("--- work/ ---");
+    expect(diff).toContain("M  tracked.txt");
+    expect(diff).toContain("-before");
+    expect(diff).toContain("+after");
+  });
+
   it("returns immediate child repository diffs without reporting the child as scratch", async () => {
     const workdir = await createTempWorkdir();
     const sandbox = {

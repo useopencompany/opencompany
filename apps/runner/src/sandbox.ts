@@ -486,6 +486,7 @@ function gitDiffCommand(workRoot: string) {
     "      fi",
     '      printf "%s\\n" "$line"',
     "    done",
+    '    git -C "$repo" diff --cached --',
     '    git -C "$repo" diff --',
     '    git -C "$repo" ls-files --others --exclude-standard | while IFS= read -r file; do',
     '      [ -n "$file" ] || continue',
