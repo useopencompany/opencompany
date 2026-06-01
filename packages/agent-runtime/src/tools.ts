@@ -23,6 +23,11 @@ export type RuntimeToolName =
   | "exa_search"
   | "exa_contents"
   | "exa_answer"
+  | "x_search_posts"
+  | "x_get_profile"
+  | "x_get_user_posts"
+  | "x_get_discussion"
+  | "x_get_trends"
   | "web_fetch"
   | "tool_help";
 
@@ -69,6 +74,23 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "platform",
     requiredPlatformEnvVars: ["EXA_API_KEY"],
+  },
+  {
+    id: "x",
+    type: "hosted_tool",
+    label: "x",
+    description:
+      "Read public X posts, profiles, timelines, discussions, and trends through the official X API.",
+    runtimeTools: [
+      "x_search_posts",
+      "x_get_profile",
+      "x_get_user_posts",
+      "x_get_discussion",
+      "x_get_trends",
+    ],
+    defaultEnabled: true,
+    credentialSource: "platform",
+    requiredPlatformEnvVars: ["X_API_BEARER_TOKEN"],
   },
   {
     id: "amp",
@@ -599,6 +621,168 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Prefer exa_search plus exa_contents when source selection, detailed evidence review, or multi-step investigation matters.",
       "Set includeText=true only when you need snippets from the cited pages; citation URLs and metadata are returned by default.",
       "Use outputSchema only for small structured answers. For larger extraction tasks across known URLs, use exa_contents mode=summary with summarySchema.",
+    ].join("\n"),
+  },
+  {
+    name: "x_search_posts",
+    kind: "hosted",
+    configToolId: "x",
+    description:
+      'Search public X posts through the official X API. Use recent search first for current conversations; mode="all" uses full-archive search and requires elevated X API access.',
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            'X search query using X operators, such as "AI agents lang:en -is:retweet" or "from:openai".',
+        },
+        mode: {
+          type: "string",
+          enum: ["recent", "all"],
+          description:
+            'Search recent posts or the full archive. Defaults to recent. mode="all" requires elevated X API access and may fail with standard bearer tokens.',
+          default: "recent",
+        },
+        maxResults: {
+          type: "number",
+          description: "Number of posts to return. Defaults to 20. Maximum 100.",
+          default: 20,
+        },
+        paginationToken: {
+          type: "string",
+          description: "Optional next_token from a previous search result.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_search_posts to discover current public X conversations, hashtags, mentions, links, and posts from specific users.",
+      'Prefer mode="recent". Use mode="all" only when the token has full-archive search access and older posts are required.',
+      "Keep maxResults small unless the user asks for breadth. The X API bills per returned Post.",
+      "The output includes normalized posts, author profiles, result count, and an optional nextToken for pagination.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_profile",
+    kind: "hosted",
+    configToolId: "x",
+    description: "Look up a public X profile by username through the official X API.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description: "X username, with or without a leading @.",
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_profile to inspect a public X account's bio, verification flags, profile images, and public metrics.",
+      "Protected or suspended accounts may return limited data or provider errors.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_user_posts",
+    kind: "hosted",
+    configToolId: "x",
+    description: "Fetch recent public posts from an X user timeline by username.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description: "X username, with or without a leading @.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Number of posts to return. Defaults to 20. Maximum 100.",
+          default: 20,
+        },
+        paginationToken: {
+          type: "string",
+          description: "Optional pagination_token from a previous timeline result.",
+        },
+        excludeReplies: {
+          type: "boolean",
+          description: "Whether to exclude reply posts. Defaults to false.",
+          default: false,
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_user_posts to understand what a public profile has been posting recently.",
+      "Set excludeReplies=true for a cleaner top-level timeline.",
+      "The tool first resolves the username to a user id, then fetches that user's public posts.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_discussion",
+    kind: "hosted",
+    configToolId: "x",
+    description:
+      'Inspect a public X post discussion by fetching the target post, replies in its conversation, and quote posts. mode="all" requires elevated X API access for full-archive reply search.',
+    parameters: {
+      type: "object",
+      properties: {
+        postIdOrUrl: {
+          type: "string",
+          description: "X post ID or URL, such as https://x.com/user/status/123.",
+        },
+        mode: {
+          type: "string",
+          enum: ["recent", "all"],
+          description:
+            'Search recent replies or the full archive. Defaults to recent. mode="all" requires elevated X API access and may fail with standard bearer tokens.',
+          default: "recent",
+        },
+        maxResults: {
+          type: "number",
+          description:
+            "Maximum replies and maximum quote posts to return per collection. Defaults to 50. Maximum 100.",
+          default: 50,
+        },
+      },
+      required: ["postIdOrUrl"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_discussion when the user provides a post URL/id or asks what people are saying around one post.",
+      'Prefer mode="recent". Use mode="all" only when the token has full-archive search access and older replies are required.',
+      "The result includes the target post, replies from the same conversation, quote posts, and author profiles.",
+      "This can be more expensive than a simple lookup because it may return many Posts.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_trends",
+    kind: "hosted",
+    configToolId: "x",
+    description: "Fetch current X trending topics for a WOEID location.",
+    parameters: {
+      type: "object",
+      properties: {
+        woeid: {
+          type: "number",
+          description:
+            "Yahoo Where On Earth ID. Defaults to 1 for worldwide; United States is 23424977.",
+          default: 1,
+        },
+        maxResults: {
+          type: "number",
+          description: "Number of trends to return. Defaults to 25. Maximum 50.",
+          default: 25,
+        },
+      },
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_trends to answer what is currently trending on X in a broad location.",
+      "Common WOEIDs: worldwide=1, United States=23424977, United Kingdom=23424975, New York=2459115, London=44418.",
     ].join("\n"),
   },
   {

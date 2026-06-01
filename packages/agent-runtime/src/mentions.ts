@@ -9,6 +9,7 @@ import type {
   AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
+  AgentHostedToolConfig,
   AgentModelId,
   AgentReference,
   AgentToolId,
@@ -190,7 +191,7 @@ export function toConfigTool(
   }
 
   return {
-    id: "exa",
+    id: tool.id as AgentHostedToolConfig["id"],
     type: "hosted_tool",
     label: tool.label,
     description: tool.description,

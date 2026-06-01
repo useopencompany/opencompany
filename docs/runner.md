@@ -225,6 +225,7 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
+- `X_API_BEARER_TOKEN` (optional; required only for agents that enable the X hosted tool)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
@@ -249,7 +250,7 @@ retrying the stale id.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
 also merges the runner env vars from Infisical `dev` + `/runner` into `.env.local`, including
-hosted-tool secrets like `EXA_API_KEY` when they are present.
+hosted-tool secrets like `EXA_API_KEY` and `X_API_BEARER_TOKEN` when they are present.
 
 Run the app, Inngest dev server, and runner together:
 
