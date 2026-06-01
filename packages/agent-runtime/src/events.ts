@@ -95,6 +95,14 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "agent.self_updated";
+      payload: {
+        version: number;
+        changedFields: string[];
+        summary?: string;
+      };
+    }
+  | {
       type: "command.output";
       payload: {
         command: string;

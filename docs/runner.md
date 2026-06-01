@@ -122,6 +122,7 @@ V1 tools:
 
 - `shell`
 - `read_file`
+- `read_skill`
 - `edit_file`
 - `write_file`
 - `list_files`
@@ -129,6 +130,8 @@ V1 tools:
 - `delegate_to_agent` when the saved agent references other workspace agents; pass `agent` to
   start an inspectable child session hidden from sidebar history, or pass a returned
   `childSessionId` as `sessionId` to continue that child session
+- `update_agent_file` when the saved agent enables the `agent-self-edit` skill; validates and
+  persists version-guarded changes to the agent's own `.agent` configuration and queues GitHub sync
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has workspace OAuth or bearer-token credentials configured
@@ -140,6 +143,9 @@ V1 tools:
 
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
 `/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
+Enabled skills are also materialized as read-only files under `/home/user/workspace/skills/<id>/`;
+use `read_skill` with the skill id and an optional path inside that skill directory rather than
+generic file tools.
 Keep path validation in the runtime/sandbox layer rather than relying on model behavior.
 For connected GitHub code edits, clone the target repository into `work/<repo>` first unless the
 workflow is delegated to `amp_coder`.

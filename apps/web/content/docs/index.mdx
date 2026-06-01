@@ -31,7 +31,7 @@ The body of an agent file is just Markdown — the same plain text you'd use to 
 
 ### Mentions
 
-Inside the instructions, you can write mentions like `@exa`, `@amp`, `@deep`, or `@web-app` as readable references. The actual model, tools, integrations, and trigger drafts live in the YAML frontmatter, which the builder writes for you.
+Inside the instructions, you can write mentions like `@exa`, `@amp`, or `@web-app` as readable references. The model is explicit per-agent config; tools, integrations, and trigger drafts live in the YAML frontmatter, which the builder writes for you.
 
 ### Sync
 
@@ -55,8 +55,8 @@ triggers: []
 ---
 
 Find recent fund announcements with @exa. Write a one-paragraph brief for
-each fund covering thesis, check size, and a recent investment. Use @deep
-when summarizing — accuracy matters more than speed.
+each fund covering thesis, check size, and a recent investment. Accuracy
+matters more than speed.
 ```
 
 That's the whole thing. A header that says who this agent is and what it can use, and a body of instructions in plain English. The builder keeps the YAML current when you change models, tools, repositories, or trigger drafts.

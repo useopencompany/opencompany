@@ -98,6 +98,10 @@ export type AgentReference = {
   name: string;
 };
 
+export type AgentSkillReference = {
+  id: string;
+};
+
 export type AgentAfterSessionConfig = {
   enabled: boolean;
   prompt: string;
@@ -155,6 +159,7 @@ export type AgentConfig = {
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
   agents?: AgentReference[];
+  skills?: AgentSkillReference[];
   afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {

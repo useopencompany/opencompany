@@ -4,6 +4,7 @@ import {
   parseAgentFile,
   serializeAgentFile,
   serializeAgentFrontmatter,
+  validateAgentFileSource,
 } from "./agent-file";
 import { extractConfigFromMentions } from "./mentions";
 
@@ -62,12 +63,11 @@ describe(".agent files", () => {
     expect(parseAgentFile(source).config.model.name).toBe(model);
   });
 
-  test("syncs config from markdown mentions", () => {
+  test("syncs tool and brain config from markdown mentions", () => {
     const config = extractConfigFromMentions(
       "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",
     );
 
-    expect(config.model).toBe("openai/gpt-5.4");
     expect(config.tools).toEqual(["exa"]);
     expect(config.brain).toEqual([
       { path: "docs/README.md", type: "file" },
@@ -192,7 +192,7 @@ describe(".agent files", () => {
     });
 
     expect(source).toContain("title: Research");
-    expect(source).toContain("model: openai/gpt-5.4");
+    expect(source).toContain("model: openai/gpt-5.4-mini");
     expect(source).toContain("id: exa");
     expect(source).toContain("brain:\n  - docs/README.md");
     expect(
@@ -295,7 +295,7 @@ describe(".agent files", () => {
     expect(parseAgentFile(source).config.agents).toEqual([]);
   });
 
-  test("serializes explicit model selection ahead of legacy model mentions", () => {
+  test("serializes explicit model selection and ignores legacy model mentions", () => {
     const source = serializeAgentFile({
       title: "Research",
       body: "Find people with @exa and use @deep.",
@@ -525,5 +525,57 @@ describe(".agent files", () => {
     expect(parsed.config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
+  });
+});
+
+describe("validateAgentFileSource", () => {
+  const goodSource = serializeAgentFile({
+    title: "Agent",
+    body: "Help the user with @exa.",
+    model: "openai/gpt-5.4",
+  });
+
+  test("accepts a well-formed source and returns the parsed file", () => {
+    const result = validateAgentFileSource(goodSource);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.parsed.title).toBe("Agent");
+      expect(result.parsed.config.model.name).toBe("openai/gpt-5.4");
+    }
+  });
+
+  test("rejects a missing frontmatter fence", () => {
+    const result = validateAgentFileSource("Just a body, no frontmatter.");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/frontmatter/i);
+  });
+
+  test("rejects an empty title", () => {
+    const result = validateAgentFileSource('---\ntitle: ""\nmodel: openai/gpt-5.4\n---\n\nBody.');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/title/i);
+  });
+
+  test("rejects an unknown model instead of silently defaulting", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent"\nmodel: openai/not-a-real-model\n---\n\nBody.',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/model/i);
+  });
+
+  test("rejects an empty body", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent"\nmodel: openai/gpt-5.4\n---\n\n   ',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/body/i);
+  });
+
+  test("rejects malformed frontmatter YAML", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent\nmodel: openai/gpt-5.4\n---\n\nBody.',
+    );
+    expect(result.ok).toBe(false);
   });
 });
