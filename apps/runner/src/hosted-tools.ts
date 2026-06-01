@@ -40,6 +40,72 @@ type NormalizedExaResult = {
   subpages?: NormalizedExaResult[];
 };
 
+type XPost = {
+  id?: string;
+  text?: string;
+  author_id?: string;
+  created_at?: string;
+  conversation_id?: string;
+  in_reply_to_user_id?: string;
+  public_metrics?: Record<string, unknown>;
+  referenced_tweets?: Array<{ type?: string; id?: string }>;
+};
+
+type XUser = {
+  id?: string;
+  username?: string;
+  name?: string;
+  description?: string;
+  location?: string;
+  created_at?: string;
+  profile_image_url?: string;
+  profile_banner_url?: string;
+  protected?: boolean;
+  verified?: boolean;
+  is_identity_verified?: boolean;
+  public_metrics?: Record<string, unknown>;
+};
+
+type NormalizedXUser = {
+  id: string;
+  username: string;
+  name?: string;
+  description?: string;
+  location?: string;
+  createdAt?: string;
+  profileImageUrl?: string;
+  profileBannerUrl?: string;
+  protected?: boolean;
+  verified?: boolean;
+  isIdentityVerified?: boolean;
+  metrics?: Record<string, number>;
+  url: string;
+};
+
+// Estimated X API read costs for internal usage tracking; persisted raw usage marks them estimated.
+const X_POST_READ_COST_USD_MICROS = 5_000;
+const X_USER_READ_COST_USD_MICROS = 10_000;
+const X_TREND_READ_COST_USD_MICROS = 10_000;
+const X_TWEET_FIELDS = [
+  "author_id",
+  "conversation_id",
+  "created_at",
+  "in_reply_to_user_id",
+  "public_metrics",
+  "referenced_tweets",
+].join(",");
+const X_USER_FIELDS = [
+  "created_at",
+  "description",
+  "is_identity_verified",
+  "location",
+  "profile_banner_url",
+  "profile_image_url",
+  "protected",
+  "public_metrics",
+  "verified",
+].join(",");
+
 export class MissingEnvError extends Error {
   constructor(
     readonly envName: string,
@@ -106,6 +172,31 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
     failureContext: ({ args, error }) => getExaAnswerFailureContext(args, error),
     validateEnvironment: (env) => validateExaEnvironment(env, "exa_answer"),
   },
+  x_search_posts: {
+    execute: ({ args, env, signal }) => executeXSearchPosts(args, env, signal),
+    failureContext: ({ args, error }) => getXFailureContext("search_posts", args, error),
+    validateEnvironment: (env) => validateXEnvironment(env, "x_search_posts"),
+  },
+  x_get_profile: {
+    execute: ({ args, env, signal }) => executeXGetProfile(args, env, signal),
+    failureContext: ({ args, error }) => getXFailureContext("get_profile", args, error),
+    validateEnvironment: (env) => validateXEnvironment(env, "x_get_profile"),
+  },
+  x_get_user_posts: {
+    execute: ({ args, env, signal }) => executeXGetUserPosts(args, env, signal),
+    failureContext: ({ args, error }) => getXFailureContext("get_user_posts", args, error),
+    validateEnvironment: (env) => validateXEnvironment(env, "x_get_user_posts"),
+  },
+  x_get_discussion: {
+    execute: ({ args, env, signal }) => executeXGetDiscussion(args, env, signal),
+    failureContext: ({ args, error }) => getXFailureContext("get_discussion", args, error),
+    validateEnvironment: (env) => validateXEnvironment(env, "x_get_discussion"),
+  },
+  x_get_trends: {
+    execute: ({ args, env, signal }) => executeXGetTrends(args, env, signal),
+    failureContext: ({ args, error }) => getXFailureContext("get_trends", args, error),
+    validateEnvironment: (env) => validateXEnvironment(env, "x_get_trends"),
+  },
   web_fetch: {
     execute: ({ args, signal }) => executeWebFetch(args, signal),
     failureContext: () => ({
@@ -122,6 +213,15 @@ function validateExaEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
     throw new MissingEnvError(
       "EXA_API_KEY",
       `The ${toolName} tool is enabled, but EXA_API_KEY is not configured.`,
+    );
+  }
+}
+
+function validateXEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
+  if (!env.xApiBearerToken) {
+    throw new MissingEnvError(
+      "X_API_BEARER_TOKEN",
+      `The ${toolName} tool is enabled, but X_API_BEARER_TOKEN is not configured.`,
     );
   }
 }
@@ -320,6 +420,198 @@ async function executeExaAnswer(
         costDollars: isRecord(body.costDollars) ? body.costDollars : {},
       },
     },
+  };
+}
+
+async function executeXSearchPosts(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const token = requireXBearerToken(env, "x_search_posts");
+  const request = buildXSearchPostsRequest(args);
+  const endpoint = request.mode === "all" ? "/tweets/search/all" : "/tweets/search/recent";
+  const url = xApiUrl(endpoint, {
+    query: request.query,
+    max_results: String(request.maxResults),
+    ...(request.paginationToken ? { next_token: request.paginationToken } : {}),
+    "tweet.fields": X_TWEET_FIELDS,
+    expansions: "author_id,referenced_tweets.id,in_reply_to_user_id",
+    "user.fields": X_USER_FIELDS,
+  });
+  const body = await fetchXJsonWithArchiveAccessContext(
+    url,
+    token,
+    signal,
+    "search_posts",
+    request.mode,
+  );
+  const normalized = normalizeXPostCollection(body);
+
+  return {
+    output: normalized,
+    usage: xUsage("search_posts", normalized.usageCounts),
+  };
+}
+
+async function executeXGetProfile(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const token = requireXBearerToken(env, "x_get_profile");
+  const username = readXUsername(asRecord(args));
+  const url = xApiUrl(`/users/by/username/${encodeURIComponent(username)}`, {
+    "user.fields": X_USER_FIELDS,
+  });
+  const body = await fetchXJson(url, token, signal, "get_profile");
+  if (!isRecord(body) || !isRecord(body.data)) {
+    throw new Error("X get_profile returned an unexpected response shape.");
+  }
+  const user = normalizeXUser(body.data);
+  if (!user?.id) {
+    throw new Error("X get_profile returned an unexpected response shape.");
+  }
+
+  return {
+    output: { user },
+    usage: xUsage("get_profile", { posts: 0, users: 1, trends: 0 }),
+  };
+}
+
+async function executeXGetUserPosts(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const token = requireXBearerToken(env, "x_get_user_posts");
+  const request = buildXGetUserPostsRequest(args);
+  const user = await fetchXUserByUsername(request.username, token, signal);
+  const url = xApiUrl(`/users/${encodeURIComponent(user.id)}/tweets`, {
+    max_results: String(request.maxResults),
+    ...(request.paginationToken ? { pagination_token: request.paginationToken } : {}),
+    ...(request.excludeReplies ? { exclude: "replies" } : {}),
+    "tweet.fields": X_TWEET_FIELDS,
+    expansions: "author_id,referenced_tweets.id,in_reply_to_user_id",
+    "user.fields": X_USER_FIELDS,
+  });
+  const body = await fetchXJson(url, token, signal, "get_user_posts");
+  const normalized = normalizeXPostCollection(body);
+  const users = mergeXUsers([user], normalized.users);
+
+  return {
+    output: omitUndefined({
+      user,
+      posts: normalized.posts,
+      users,
+      meta: normalized.meta,
+      nextToken: normalized.nextToken,
+    }),
+    usage: xUsage("get_user_posts", {
+      posts: normalized.usageCounts.posts,
+      users: users.length,
+      trends: 0,
+    }),
+  };
+}
+
+async function executeXGetDiscussion(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const token = requireXBearerToken(env, "x_get_discussion");
+  const request = buildXDiscussionRequest(args);
+  const targetBody = await fetchXJson(
+    xApiUrl(`/tweets/${encodeURIComponent(request.postId)}`, {
+      "tweet.fields": X_TWEET_FIELDS,
+      expansions: "author_id,referenced_tweets.id,in_reply_to_user_id",
+      "user.fields": X_USER_FIELDS,
+    }),
+    token,
+    signal,
+    "get_discussion",
+  );
+  const targetCollection = normalizeXPostCollection(targetBody);
+  const targetPost = targetCollection.posts[0];
+  if (!targetPost) {
+    throw new Error("X get_discussion returned an unexpected response shape.");
+  }
+
+  const conversationId = targetPost.conversationId ?? request.postId;
+  const searchEndpoint = request.mode === "all" ? "/tweets/search/all" : "/tweets/search/recent";
+  const repliesBody = await fetchXJsonWithArchiveAccessContext(
+    xApiUrl(searchEndpoint, {
+      query: `conversation_id:${conversationId} -is:retweet`,
+      max_results: String(request.maxResults),
+      "tweet.fields": X_TWEET_FIELDS,
+      expansions: "author_id,referenced_tweets.id,in_reply_to_user_id",
+      "user.fields": X_USER_FIELDS,
+    }),
+    token,
+    signal,
+    "get_discussion",
+    request.mode,
+  );
+  const quotesBody = await fetchXJson(
+    xApiUrl(`/tweets/${encodeURIComponent(request.postId)}/quote_tweets`, {
+      max_results: String(request.maxResults),
+      "tweet.fields": X_TWEET_FIELDS,
+      expansions: "author_id,referenced_tweets.id,in_reply_to_user_id",
+      "user.fields": X_USER_FIELDS,
+    }),
+    token,
+    signal,
+    "get_discussion",
+  );
+  const replies = normalizeXPostCollection(repliesBody);
+  const quotes = normalizeXPostCollection(quotesBody);
+  const users = mergeXUsers(targetCollection.users, replies.users, quotes.users);
+  const postIds = new Set([
+    ...targetCollection.posts.map((post) => post.id),
+    ...replies.posts.map((post) => post.id),
+    ...quotes.posts.map((post) => post.id),
+  ]);
+
+  return {
+    output: omitUndefined({
+      targetPost,
+      conversationId,
+      replies: replies.posts.filter((post) => post.id !== targetPost.id),
+      quotePosts: quotes.posts,
+      users,
+      replyMeta: replies.meta,
+      quoteMeta: quotes.meta,
+    }),
+    usage: xUsage("get_discussion", {
+      posts: postIds.size,
+      users: users.length,
+      trends: 0,
+    }),
+  };
+}
+
+async function executeXGetTrends(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const token = requireXBearerToken(env, "x_get_trends");
+  const request = buildXTrendsRequest(args);
+  const body = await fetchXJson(
+    xApiUrl(`/trends/by/woeid/${request.woeid}`),
+    token,
+    signal,
+    "get_trends",
+  );
+  if (!isRecord(body) || !Array.isArray(body.data)) {
+    throw new Error("X get_trends returned an unexpected response shape.");
+  }
+  const trends = body.data.map(normalizeXTrend).slice(0, request.maxResults);
+
+  return {
+    output: { woeid: request.woeid, trends },
+    usage: xUsage("get_trends", { posts: 0, users: 0, trends: trends.length }),
   };
 }
 
@@ -662,6 +954,397 @@ function classifySharedExaFailure(
 function readHttpStatusFromMessage(message: string) {
   const match = message.match(/\((\d{3})\)/);
   return match?.[1] ? { provider_status: Number(match[1]) } : {};
+}
+
+function getXFailureContext(operation: string, args: unknown, error: unknown) {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const context: Record<string, unknown> = {
+    hosted_provider: "x",
+    hosted_operation: operation,
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+  };
+
+  if (message.startsWith("X_API_BEARER_TOKEN") || message.includes("X_API_BEARER_TOKEN")) {
+    return {
+      ...context,
+      tool_error_stage: "configuration",
+      tool_error_code: "x_missing_bearer_token",
+    };
+  }
+
+  if (message.startsWith("X ") && message.includes("must")) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "x_invalid_request",
+    };
+  }
+  if (operation === "search_posts" && !readOptionalString(asRecord(args), "query")?.trim()) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "x_invalid_request",
+    };
+  }
+
+  if (message.startsWith(`X ${operation} failed (`)) {
+    const status = readHttpStatusFromMessage(message);
+    const code = status.provider_status === 429 ? "x_rate_limited" : "x_http_error";
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: code,
+      ...status,
+    };
+  }
+
+  if (message.includes("unexpected response shape") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "x_malformed_response",
+    };
+  }
+
+  return context;
+}
+
+function requireXBearerToken(env: RunnerEnv, toolName: RuntimeToolName) {
+  if (!env.xApiBearerToken) {
+    throw new MissingEnvError(
+      "X_API_BEARER_TOKEN",
+      `X_API_BEARER_TOKEN is required for ${toolName}.`,
+    );
+  }
+  return env.xApiBearerToken;
+}
+
+function buildXSearchPostsRequest(args: unknown) {
+  const record = asRecord(args);
+  const query = readString(record, "query").trim();
+  if (!query) throw new Error("X search query must not be empty.");
+  return {
+    query,
+    mode: readOptionalEnum(record, "mode", ["recent", "all"] as const) ?? "recent",
+    maxResults: readXMaxResults(record, 20, 100, 10),
+    paginationToken: readOptionalString(record, "paginationToken"),
+  };
+}
+
+function buildXGetUserPostsRequest(args: unknown) {
+  const record = asRecord(args);
+  return {
+    username: readXUsername(record),
+    maxResults: readXMaxResults(record, 20, 100, 10),
+    paginationToken: readOptionalString(record, "paginationToken"),
+    excludeReplies: readOptionalBoolean(record, "excludeReplies") ?? false,
+  };
+}
+
+function buildXDiscussionRequest(args: unknown) {
+  const record = asRecord(args);
+  return {
+    postId: readXPostId(record),
+    mode: readOptionalEnum(record, "mode", ["recent", "all"] as const) ?? "recent",
+    maxResults: readXMaxResults(record, 50, 100, 10),
+  };
+}
+
+function buildXTrendsRequest(args: unknown) {
+  const record = asRecord(args);
+  const rawWoeid = readOptionalNumber(record, "woeid") ?? 1;
+  const woeid = Math.floor(rawWoeid);
+  if (!Number.isInteger(woeid) || woeid <= 0) {
+    throw new Error("X trends woeid must be a positive integer.");
+  }
+  return {
+    woeid,
+    maxResults: readXMaxResults(record, 25, 50, 1),
+  };
+}
+
+function readXMaxResults(
+  record: Record<string, unknown>,
+  fallback: number,
+  max: number,
+  min: number,
+) {
+  const value = readOptionalNumber(record, "maxResults") ?? fallback;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error("X maxResults must be a positive number.");
+  }
+  return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function readXUsername(record: Record<string, unknown>) {
+  const username = readString(record, "username").trim().replace(/^@+/, "");
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(username)) {
+    throw new Error("X username must be 1-15 letters, numbers, or underscores.");
+  }
+  return username;
+}
+
+function readXPostId(record: Record<string, unknown>) {
+  const raw = readString(record, "postIdOrUrl").trim();
+  const fromUrl = raw.match(/(?:x|twitter)\.com\/[^/]+\/status(?:es)?\/(\d+)/i)?.[1];
+  const postId = fromUrl ?? raw;
+  if (!/^\d{1,30}$/.test(postId)) {
+    throw new Error("X postIdOrUrl must be a post ID or public X status URL.");
+  }
+  return postId;
+}
+
+function xApiUrl(path: string, params: Record<string, string | undefined> = {}) {
+  const url = new URL(`https://api.x.com/2${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value) url.searchParams.set(key, value);
+  }
+  return url;
+}
+
+async function fetchXUserByUsername(username: string, token: string, signal: AbortSignal) {
+  const body = await fetchXJson(
+    xApiUrl(`/users/by/username/${encodeURIComponent(username)}`, {
+      "user.fields": X_USER_FIELDS,
+    }),
+    token,
+    signal,
+    "get_profile",
+  );
+  if (!isRecord(body) || !isRecord(body.data)) {
+    throw new Error("X get_profile returned an unexpected response shape.");
+  }
+  const user = normalizeXUser(body.data);
+  if (!user?.id) {
+    throw new Error("X get_profile returned an unexpected response shape.");
+  }
+  return user;
+}
+
+async function fetchXJson(url: URL, bearerToken: string, signal: AbortSignal, operation: string) {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      Accept: "application/json",
+    },
+    signal,
+  });
+  const body = await readProviderJsonResponse(response, "X", operation);
+  if (!response.ok) {
+    const message = providerErrorMessage(body) ?? response.statusText;
+    throw new Error(`X ${operation} failed (${response.status}): ${message}`);
+  }
+  return body;
+}
+
+async function fetchXJsonWithArchiveAccessContext(
+  url: URL,
+  bearerToken: string,
+  signal: AbortSignal,
+  operation: string,
+  mode: "recent" | "all",
+) {
+  try {
+    return await fetchXJson(url, bearerToken, signal, operation);
+  } catch (error) {
+    if (
+      mode === "all" &&
+      error instanceof Error &&
+      error.message.startsWith(`X ${operation} failed (403)`)
+    ) {
+      throw new Error(
+        `${error.message} mode="all" uses X full-archive search and requires elevated API access. Retry with mode="recent" unless older posts are required and the token has that access.`,
+      );
+    }
+    throw error;
+  }
+}
+
+async function readProviderJsonResponse(response: Response, provider: string, operation: string) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`${provider} ${operation} returned non-JSON response (${response.status}).`);
+  }
+}
+
+function providerErrorMessage(body: unknown) {
+  if (!isRecord(body)) return undefined;
+  if (typeof body.detail === "string") return body.detail;
+  if (typeof body.title === "string") return body.title;
+  if (Array.isArray(body.errors)) {
+    const first = body.errors.find(isRecord);
+    if (typeof first?.detail === "string") return first.detail;
+    if (typeof first?.message === "string") return first.message;
+    if (typeof first?.title === "string") return first.title;
+  }
+  if (Array.isArray(body.error) && typeof body.error[0] === "string") return body.error[0];
+  if (typeof body.error === "string") return body.error;
+  return undefined;
+}
+
+function normalizeXPostCollection(body: unknown) {
+  if (!isRecord(body)) {
+    throw new Error("X posts returned an unexpected response shape.");
+  }
+  const data = Array.isArray(body.data) ? body.data : isRecord(body.data) ? [body.data] : [];
+  const includes = isRecord(body.includes) ? body.includes : {};
+  const includedUsers = Array.isArray(includes.users)
+    ? includes.users.flatMap((user) => {
+        const normalized = normalizeXUser(user);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+  const usersById = new Map(includedUsers.map((user) => [user.id, user]));
+  const posts = data.flatMap((post) => {
+    const normalized = normalizeXPost(post, usersById);
+    return normalized ? [normalized] : [];
+  });
+  const meta = normalizeXMeta(body.meta);
+  const nextToken = isRecord(body.meta) ? readOptionalString(body.meta, "next_token") : undefined;
+
+  return {
+    posts,
+    users: includedUsers,
+    meta,
+    nextToken,
+    usageCounts: {
+      posts: posts.length,
+      users: includedUsers.length,
+      trends: 0,
+    },
+  };
+}
+
+function normalizeXPost(value: unknown, usersById: Map<string, NormalizedXUser>) {
+  if (!isRecord(value)) return null;
+  const post = value as XPost;
+  if (!post.id || !post.text) return null;
+  const author = post.author_id ? usersById.get(post.author_id) : undefined;
+  return omitUndefined({
+    id: post.id,
+    url: author?.username ? `https://x.com/${author.username}/status/${post.id}` : undefined,
+    text: truncate(post.text, 4000),
+    createdAt: post.created_at,
+    author: author
+      ? {
+          id: author.id,
+          username: author.username,
+          name: author.name,
+          verified: author.verified,
+          isIdentityVerified: author.isIdentityVerified,
+        }
+      : post.author_id
+        ? { id: post.author_id }
+        : undefined,
+    metrics: normalizeMetricObject(post.public_metrics),
+    conversationId: post.conversation_id,
+    inReplyToUserId: post.in_reply_to_user_id,
+    referencedPosts: Array.isArray(post.referenced_tweets)
+      ? post.referenced_tweets.flatMap((reference) =>
+          reference.id && reference.type ? [{ type: reference.type, id: reference.id }] : [],
+        )
+      : undefined,
+  });
+}
+
+function normalizeXUser(value: unknown): NormalizedXUser | null {
+  if (!isRecord(value)) return null;
+  const user = value as XUser;
+  if (!user.id || !user.username) return null;
+  return omitUndefined({
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    description: user.description ? truncate(user.description, 1000) : undefined,
+    location: user.location,
+    createdAt: user.created_at,
+    profileImageUrl: user.profile_image_url,
+    profileBannerUrl: user.profile_banner_url,
+    protected: typeof user.protected === "boolean" ? user.protected : undefined,
+    verified: typeof user.verified === "boolean" ? user.verified : undefined,
+    isIdentityVerified:
+      typeof user.is_identity_verified === "boolean" ? user.is_identity_verified : undefined,
+    metrics: normalizeMetricObject(user.public_metrics),
+    url: `https://x.com/${user.username}`,
+  });
+}
+
+function normalizeXTrend(value: unknown) {
+  const record = asRecord(value);
+  const name =
+    readOptionalString(record, "trend_name") ??
+    readOptionalString(record, "name") ??
+    readOptionalString(record, "query");
+  return omitUndefined({
+    name,
+    postCount:
+      readOptionalNumber(record, "tweet_count") ?? readOptionalNumber(record, "post_count"),
+    url: name ? `https://x.com/search?q=${encodeURIComponent(name)}&src=trend_click` : undefined,
+  });
+}
+
+function normalizeMetricObject(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) return undefined;
+  return omitUndefined({
+    retweetCount: readOptionalNumber(value, "retweet_count"),
+    replyCount: readOptionalNumber(value, "reply_count"),
+    likeCount: readOptionalNumber(value, "like_count"),
+    quoteCount: readOptionalNumber(value, "quote_count"),
+    bookmarkCount: readOptionalNumber(value, "bookmark_count"),
+    impressionCount: readOptionalNumber(value, "impression_count"),
+    followersCount: readOptionalNumber(value, "followers_count"),
+    followingCount: readOptionalNumber(value, "following_count"),
+    postCount: readOptionalNumber(value, "tweet_count"),
+    listedCount: readOptionalNumber(value, "listed_count"),
+  });
+}
+
+function normalizeXMeta(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  return omitUndefined({
+    resultCount: readOptionalNumber(value, "result_count"),
+    newestId: readOptionalString(value, "newest_id"),
+    oldestId: readOptionalString(value, "oldest_id"),
+  });
+}
+
+function mergeXUsers(...groups: NormalizedXUser[][]) {
+  const users = new Map<string, NormalizedXUser>();
+  for (const group of groups) {
+    for (const user of group) {
+      users.set(user.id, user);
+    }
+  }
+  return Array.from(users.values());
+}
+
+function xUsage(
+  operation: string,
+  counts: { posts: number; users: number; trends: number },
+): HostedToolUsage {
+  return {
+    provider: "x",
+    operation,
+    costUsdMicros:
+      counts.posts * X_POST_READ_COST_USD_MICROS +
+      counts.users * X_USER_READ_COST_USD_MICROS +
+      counts.trends * X_TREND_READ_COST_USD_MICROS,
+    rawUsage: {
+      estimated: true,
+      postsRead: counts.posts,
+      usersRead: counts.users,
+      trendsRead: counts.trends,
+      unitCostsUsdMicros: {
+        postRead: X_POST_READ_COST_USD_MICROS,
+        userRead: X_USER_READ_COST_USD_MICROS,
+        trendRead: X_TREND_READ_COST_USD_MICROS,
+      },
+    },
+  };
 }
 
 function buildWebFetchRequest(args: unknown) {

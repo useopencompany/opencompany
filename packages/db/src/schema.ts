@@ -354,6 +354,42 @@ export const agentSessions = pgTable(
   }),
 );
 
+export const agentScheduleRuns = pgTable(
+  "agent_schedule_runs",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    triggerId: text("trigger_id").notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("pending"),
+    reservationToken: text("reservation_token"),
+    pendingExpiresAt: timestamp("pending_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agent_schedule_runs_workspace_idx").on(table.workspaceId),
+    agentIdx: index("agent_schedule_runs_agent_idx").on(table.agentId),
+    scheduledForIdx: index("agent_schedule_runs_scheduled_for_idx").on(table.scheduledFor),
+    idempotencyIdx: uniqueIndex("agent_schedule_runs_idempotency_idx").on(
+      table.agentId,
+      table.triggerId,
+      table.scheduledFor,
+    ),
+    statusCheck: check(
+      "agent_schedule_runs_status_check",
+      sql`${table.status} IN ('pending', 'started', 'failed')`,
+    ),
+  }),
+);
+
 export const agentSessionBrainMounts = pgTable(
   "agent_session_brain_mounts",
   {
@@ -1475,6 +1511,7 @@ export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
 export type CreditCode = typeof creditCodes.$inferSelect;
 export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
 export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
+export type AgentScheduleRun = typeof agentScheduleRuns.$inferSelect;
 export type BrainFile = typeof brainFiles.$inferSelect;
 export type BrainSyncJob = typeof brainSyncJobs.$inferSelect;
 export type AgentFile = typeof agentFiles.$inferSelect;

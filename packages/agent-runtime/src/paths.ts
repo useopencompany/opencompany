@@ -20,7 +20,9 @@ export function resolveWorkspacePath(workdir: string, inputPath = ".") {
     workspaceRelative !== "brain" &&
     !workspaceRelative.startsWith("brain/") &&
     workspaceRelative !== "agent" &&
-    !workspaceRelative.startsWith("agent/")
+    !workspaceRelative.startsWith("agent/") &&
+    workspaceRelative !== "skills" &&
+    !workspaceRelative.startsWith("skills/")
   ) {
     throw new Error("Path must be inside work/, brain/, or agent/ for this session.");
   }

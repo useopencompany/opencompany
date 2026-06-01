@@ -50,6 +50,26 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).not.toContain("exa_search");
   });
 
+  it("nudges the agent to read the self-edit skill before update_agent_file", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Ops agent",
+      instructions: "Do the work.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.systemPrompt).toContain("You can evolve your own definition.");
+    expect(resolved.systemPrompt).toContain("skills/agent-self-edit/SKILL.md");
+    expect(resolved.systemPrompt).toContain("before calling update_agent_file");
+    expect(resolved.tools).toContain("update_agent_file");
+  });
+
   it("advertises attached GitHub repositories and exposes the gh tool", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -155,6 +175,7 @@ describe("resolveAgentRuntimeConfig", () => {
       expect.arrayContaining([
         "shell",
         "read_file",
+        "read_skill",
         "edit_file",
         "git_diff",
         "tool_help",

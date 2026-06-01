@@ -59,6 +59,7 @@ const groups = {
     ],
     optional: [
       "EXA_API_KEY",
+      "X_API_BEARER_TOKEN",
       "OPENCOMPANY_E2B_TEMPLATE",
       "AMP_API_KEY",
       "OPENCOMPANY_AMP_E2B_TEMPLATE",

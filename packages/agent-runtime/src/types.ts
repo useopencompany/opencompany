@@ -24,7 +24,7 @@ export type TiptapDoc = {
   content?: TiptapNode[];
 };
 
-export type AgentToolId = "exa" | "amp" | "linear" | "slack";
+export type AgentToolId = "exa" | "x" | "amp" | "linear" | "slack";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -63,7 +63,7 @@ export type AgentModelId =
   | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
-  id: "exa";
+  id: "exa" | "x";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;
@@ -98,6 +98,10 @@ export type AgentReference = {
   name: string;
 };
 
+export type AgentSkillReference = {
+  id: string;
+};
+
 export type AgentAfterSessionConfig = {
   enabled: boolean;
   prompt: string;
@@ -124,7 +128,7 @@ export type AgentGitHubRepositoryConfig = {
   binding?: AgentGitHubRepositoryBinding;
 };
 
-export type AgentTriggerConfig = {
+export type AgentGitHubPullRequestTriggerConfig = {
   id: string;
   type: "github.pull_request";
   repository: string;
@@ -132,6 +136,17 @@ export type AgentTriggerConfig = {
   branches: string[];
   enabled: boolean;
 };
+
+export type AgentScheduleTriggerConfig = {
+  id: string;
+  type: "agent.schedule";
+  cron: string;
+  timezone: string;
+  prompt: string;
+  enabled: boolean;
+};
+
+export type AgentTriggerConfig = AgentGitHubPullRequestTriggerConfig | AgentScheduleTriggerConfig;
 
 export type AgentConfig = {
   schemaVersion: "agent.v1";
@@ -144,6 +159,7 @@ export type AgentConfig = {
   tools: AgentConfigTool[];
   brain: AgentBrainReference[];
   agents?: AgentReference[];
+  skills?: AgentSkillReference[];
   afterSession?: AgentAfterSessionConfig;
   integrations: {
     github: {

@@ -1,6 +1,6 @@
 {
-  "id": "3702bcee-f479-4e3e-bc83-a79799b8c84e",
-  "prevId": "c8758380-24e0-47c4-90a7-79173eea39d8",
+  "id": "e3610573-55b7-4237-87ea-99980093d0a5",
+  "prevId": "3702bcee-f479-4e3e-bc83-a79799b8c84e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -50,6 +50,18 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'pending'"
+        },
+        "reservation_token": {
+          "name": "reservation_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_expires_at": {
+          "name": "pending_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "error": {
           "name": "error",

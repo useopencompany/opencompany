@@ -33,50 +33,24 @@ const boundRepositories = [
 ];
 
 describe("extractConfigFromMentions", () => {
-  it("resolves model aliases and lets the last model win", () => {
-    const config = extractConfigFromMentions("Use @fast, then switch to @deep.");
-
-    expect(config.model).toBe("openai/gpt-5.4");
-  });
-
-  it("resolves supported AI Gateway model mentions", () => {
+  it("leaves model-looking mentions out of derived config", () => {
     const config = extractConfigFromMentions(
-      "Use @google/gemini-3-flash first, then @deepseek/deepseek-v4-flash.",
+      "Use @fast, then @deep, then @openai/gpt-5.4, then @xai/grok-4.3.",
     );
 
-    expect(config.model).toBe("deepseek/deepseek-v4-flash");
-  });
-
-  it("resolves Kimi and GLM model mentions", () => {
-    const config = extractConfigFromMentions(
-      "Use @moonshotai/kimi-k2.6 first, then @moonshotai/kimi-k2-thinking-turbo, then @zai/glm-5.1.",
-    );
-
-    expect(config.model).toBe("zai/glm-5.1");
-  });
-
-  it("resolves MiniMax model mentions", () => {
-    const config = extractConfigFromMentions(
-      "Use @minimax/minimax-m2.7 first, then @minimax/minimax-m3.",
-    );
-
-    expect(config.model).toBe("minimax/minimax-m3");
-  });
-
-  it("resolves xAI Grok model mentions", () => {
-    const config = extractConfigFromMentions(
-      "Use @xai/grok-4.1-fast-reasoning first, then @xai/grok-4.3.",
-    );
-
-    expect(config.model).toBe("xai/grok-4.3");
+    expect(config).toMatchObject({
+      tools: [],
+      brain: [],
+      agents: [],
+    });
   });
 
   it("resolves tool ids and labels", () => {
     const config = extractConfigFromMentions(
-      "Research with @exa, @slack, and implement with @AMP.",
+      "Research with @exa, @x, @slack, and implement with @AMP.",
     );
 
-    expect(config.tools).toEqual(["exa", "slack", "amp"]);
+    expect(config.tools).toEqual(["exa", "x", "slack", "amp"]);
   });
 
   it("normalizes Brain file and folder paths", () => {

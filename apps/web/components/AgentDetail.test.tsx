@@ -6,6 +6,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { updateAgent } from "@/lib/agents/actions";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
@@ -170,6 +171,7 @@ const detailAgent: AgentDetailPayload = {
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
+const updateAgentMock = vi.mocked(updateAgent);
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
@@ -251,5 +253,118 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
+  });
+
+  it("saves a preset schedule from the inspector", async () => {
+    const user = userEvent.setup();
+    updateAgentMock.mockResolvedValue({
+      id: detailAgent.id,
+      workspaceId: detailAgent.workspaceId,
+      path: "agents/leo.agent",
+      agent: {
+        ...detailAgent,
+        config: {
+          ...detailAgent.config,
+          triggers: [
+            {
+              id: "review-priorities",
+              type: "agent.schedule",
+              cron: "0 9 * * 1-5",
+              timezone: "UTC",
+              prompt: "Review priorities.",
+              enabled: true,
+            },
+          ],
+        },
+      },
+      pathChanged: false,
+    } satisfies Awaited<ReturnType<typeof updateAgent>>);
+
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+    await user.click(screen.getByRole("button", { name: /run every/i }));
+    expect(screen.getByLabelText(/enabled/i)).toBeChecked();
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "daily");
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "weekdays");
+    await user.clear(screen.getByLabelText(/timezone/i));
+    await user.type(screen.getByLabelText(/timezone/i), "UTC");
+    await user.type(screen.getByLabelText(/prompt/i), "Review priorities.");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(updateAgentMock).toHaveBeenCalledWith("agt_123", {
+        config: {
+          triggers: [
+            {
+              id: expect.stringMatching(/^review-priorities/),
+              type: "agent.schedule",
+              cron: "0 9 * * 1-5",
+              timezone: "UTC",
+              prompt: "Review priorities.",
+              enabled: true,
+            },
+          ],
+        },
+      }),
+    );
+  });
+});
+
+describe("AgentDetail – rename behaviour", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("does not save an empty name when the name field is cleared mid-rename", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    const nameInput = await screen.findByPlaceholderText("Untitled agent");
+
+    // Clear the field — mimics the user clearing the field before typing the new name.
+    await user.clear(nameInput);
+
+    expect(nameInput).toHaveValue("");
+
+    // Blur triggers flush; the server should not receive an empty name.
+    await user.tab();
+
+    // updateAgent should not have been called with an empty/whitespace name.
+    for (const [, patch] of updateAgentMock.mock.calls) {
+      const name = (patch as { name?: string }).name;
+      if (name !== undefined) {
+        expect(name.trim()).not.toBe("");
+      }
+    }
+  });
+
+  it("saves the new name when the user renames an agent", async () => {
+    const user = userEvent.setup({ delay: null });
+    updateAgentMock.mockResolvedValue({
+      id: "agt_123",
+      workspaceId: "wks_123",
+      path: "agents/louis.agent",
+      pathChanged: true,
+      agent: {
+        ...detailAgent,
+        name: "louis",
+        path: "agents/louis.agent",
+        config: { ...detailAgent.config, title: "louis" },
+      },
+    });
+
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    const nameInput = await screen.findByPlaceholderText("Untitled agent");
+
+    await user.clear(nameInput);
+    await user.type(nameInput, "louis");
+    await user.tab();
+
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
+    const [, patch] = updateAgentMock.mock.calls[0]!;
+    expect((patch as { name?: string }).name).toBe("louis");
   });
 });

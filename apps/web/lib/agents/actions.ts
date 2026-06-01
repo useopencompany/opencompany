@@ -137,8 +137,12 @@ export async function updateAgent(
     config?: AgentConfigPatch;
   },
 ) {
+  // A rename with an empty/whitespace-only name should not override the stored
+  // name. Treat blank patch.name the same as a missing name (no rename intent).
+  const trimmedName = patch.name?.trim();
+  const effectiveName = trimmedName ? trimmedName : undefined;
   const trace = startTimingTrace("agents.update", {
-    hasName: typeof patch.name === "string",
+    hasName: effectiveName !== undefined,
     hasBody: typeof patch.body === "string",
     hasModel: typeof patch.model === "string",
     hasConfig: Boolean(patch.config),
@@ -147,7 +151,7 @@ export async function updateAgent(
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
   const changedFields: Array<"name" | "body" | "model" | "config"> = [];
-  if (typeof patch.name === "string") changedFields.push("name");
+  if (effectiveName !== undefined) changedFields.push("name");
   if (typeof patch.body === "string") changedFields.push("body");
   if (patch.content && !changedFields.includes("body")) changedFields.push("body");
   if (typeof patch.model === "string") changedFields.push("model");
@@ -181,11 +185,11 @@ export async function updateAgent(
   }
 
   const currentConfig = normalizeAgentConfig(agent.config);
-  const title = patch.name ?? agent.name;
+  const title = effectiveName ?? agent.name;
   const currentSlug = agent.path ? agentSlugFromPath(agent.path) : null;
   const canonicalCurrentPath = currentSlug ? agentPathForSlug(currentSlug) : null;
   const path =
-    typeof patch.name === "string" ||
+    effectiveName !== undefined ||
     !agent.path ||
     Boolean(canonicalCurrentPath && agent.path !== canonicalCurrentPath)
       ? await timeAsync(trace, "db.nextAvailableAgentPath", () =>
@@ -273,6 +277,7 @@ export async function updateAgent(
       ? extractPreferredGitHubRepositoriesFromTiptapDoc(sanitizedContent, derivationRepositories)
       : []),
   ];
+  const requestedTriggers = patch.config?.triggers ?? currentConfig.triggers;
   const derivedFromTiptap = sanitizedContent
     ? derivePreviewConfigFromTiptapDoc({
         title,
@@ -281,7 +286,7 @@ export async function updateAgent(
         repositories: derivationRepositories,
         agents: workspaceAgentReferences,
         preferredRepositories: savedPreferredRepositories,
-        triggers: currentConfig.triggers,
+        triggers: requestedTriggers,
       })
     : null;
   // The .agent body is the product contract and the source for runtime config.
@@ -296,7 +301,7 @@ export async function updateAgent(
           repositories: derivationRepositories,
           agents: workspaceAgentReferences,
           preferredRepositories,
-          triggers: currentConfig.triggers,
+          triggers: requestedTriggers,
         })
       : derivedFromTiptap;
   warnOnBodyTiptapMismatch({
