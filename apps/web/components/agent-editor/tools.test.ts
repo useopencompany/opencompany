@@ -80,6 +80,18 @@ describe("agent editor mention tools", () => {
     expect(items.some((item) => item.mentionId.startsWith("model:"))).toBe(false);
   });
 
+  test("exposes schedule creation as an action mention", () => {
+    expect(buildAgentMentionItems()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "schedule",
+          mentionId: "schedule:run-every",
+          displayLabel: "Run every...",
+        }),
+      ]),
+    );
+  });
+
   test("only exposes configured MCP tools for the workspace", () => {
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:linear")).toBe(
       false,

@@ -165,7 +165,7 @@ const createAutoMentionExtension = (getItems: () => AgentMentionItem[]) =>
                   trigger === "@"
                     ? (findMentionItem(token, items) ?? findMentionItem(`${token}/`, items))
                     : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
-                if (!item) continue;
+                if (!item || item.kind === "schedule") continue;
 
                 replacements.push({ from: matchStart, to: tokenEnd, trigger, item });
               }
@@ -576,7 +576,7 @@ function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONC
       trigger === "@"
         ? findMentionItem(token, mentionItems)
         : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
-    if (!item) continue;
+    if (!item || item.kind === "schedule") continue;
 
     pushText(content, text.slice(cursor, index));
     content.push({
