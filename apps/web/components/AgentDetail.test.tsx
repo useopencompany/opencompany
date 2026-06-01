@@ -264,6 +264,13 @@ describe("AgentDetail", () => {
       agent: { ...detailAgent, name: "Leo renamed" },
     });
 
+    // Seed the list cache the way AgentsView would after loading it, so the
+    // test exercises the invalidate->refetch path. With an empty cache,
+    // ensureQueryData would fetch anyway — even if the fix were removed.
+    queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list("wks_123"), [
+      existingListAgent,
+    ]);
+
     renderWithProviders(
       <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
       queryClient,
@@ -277,37 +284,25 @@ describe("AgentDetail", () => {
 
     await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
 
-    // After the save, the list query must not have been clobbered into a
-    // single-item cache. AgentsView reads this list query while it is still
-    // fresh (within staleTime), so a wrong optimistic value here is exactly
-    // what makes the other agents disappear until a manual refresh. If the
-    // save left the cache untouched/absent it must be marked stale so the
-    // remount refetches the authoritative list.
+    // The fix must mark the seeded list query stale so a remount refetches the
+    // authoritative server list. Without it the seeded [existingListAgent]
+    // cache stays fresh and the freshly created agent / full list never reload.
     await waitFor(() => {
-      const cached = queryClient.getQueryData<AgentListItemPayload[]>(
-        agentQueryKeys.list("wks_123"),
-      );
-      const listState = queryClient.getQueryState(agentQueryKeys.list("wks_123"));
-
-      if (cached) {
-        // An optimistic cache is acceptable only if it still includes every
-        // pre-existing agent.
-        expect(cached.map((agent) => agent.id)).toContain(existingListAgent.id);
-      } else {
-        // No optimistic cache: the query must be invalidated so AgentsView
-        // refetches the server list (which still has every agent) on remount.
-        expect(listState?.isInvalidated ?? true).toBe(true);
-      }
+      expect(queryClient.getQueryState(agentQueryKeys.list("wks_123"))?.isInvalidated).toBe(true);
     });
 
-    // Finally, resolve the list the way AgentsView's useQuery would once the
-    // user navigates back: a fresh, non-stale read must surface every agent.
+    // Navigating back remounts AgentsView's useQuery, which revalidates the
+    // now-stale list and refetches via fetchAgents. Prove the stale mark
+    // actually triggers that refetch and that it surfaces every agent.
+    fetchAgentsMock.mockClear();
     const list = await queryClient.ensureQueryData({
       queryKey: agentQueryKeys.list("wks_123"),
       queryFn: fetchAgents,
       staleTime: 30_000,
+      revalidateIfStale: true,
     });
 
+    expect(fetchAgentsMock).toHaveBeenCalled();
     expect(list.map((agent) => agent.id)).toContain(existingListAgent.id);
     expect(list.map((agent) => agent.id)).toContain(detailAgent.id);
   });
