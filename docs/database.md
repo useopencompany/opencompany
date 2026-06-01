@@ -118,3 +118,34 @@ Database code lives in `@opencompany/db` so the web app and future workers/scrip
 
 - `@opencompany/db/schema` exports Drizzle tables, relations, and inferred row types.
 - `@opencompany/db/client` exports `getDb()` for the default singleton client and `createDb(databaseUrl?)` for callers that need an explicit connection string.
+- `@opencompany/db/pool` exports `createPooledDb(databaseUrl?, options?)` for long-lived services that need a connection pool and interactive transactions.
+
+### Two drivers: `neon-http` (web) vs pooled `node-postgres` (runner)
+
+The two clients exist for two very different workloads:
+
+| | `@opencompany/db/client` (`neon-http`) | `@opencompany/db/pool` (`node-postgres`) |
+|---|---|---|
+| Used by | Web app (Vercel, serverless) | Runner (`apps/runner`, long-lived) |
+| Transport | One HTTPS request per query | Bounded pool of persistent TCP sockets |
+| Transactions | None (only `db.batch()` non-interactive batches) | Real `db.transaction(...)` |
+| Neon endpoint | Pooled (`-pooler`) | **Direct (non-pooled)** |
+
+A serverless web request touches the database once or twice and then disappears, so a
+per-request HTTP driver against Neon's PgBouncer pooler is the right fit. The runner is
+the opposite: a persistent process that streams for minutes and issues many queries per
+turn. It keeps its own small pool of real Postgres connections, which gives it
+statement pipelining and interactive transactions (used by the session-execution lease
+writes), and it connects to Neon's **direct** endpoint because PgBouncer transaction
+pooling cannot do interactive transactions or `LISTEN`/`NOTIFY`.
+
+The runner resolves its connection string as `RUNNER_DATABASE_URL`, falling back to
+`DATABASE_URL` with the `-pooler` host label stripped to reach the direct endpoint.
+
+### Runner pool sizing
+
+`RUNNER_DB_POOL_MAX` (default `10`) bounds the runner's pool. Size it as worker
+concurrency plus headroom for HTTP routes, the job poller, and lease heartbeats — the
+default comfortably covers the current worker concurrency of 2. The hard ceiling is
+Neon's per-project connection limit: keep `instances × RUNNER_DB_POOL_MAX` under it
+(e.g. 2 instances × 10 = 20).

@@ -78,7 +78,10 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturningResult
 
   const limit = vi.fn(async () => selectResults.shift() ?? []);
   const where = vi.fn(() => ({ limit }));
-  const from = vi.fn(() => ({ where }));
+  // `innerJoin` is chainable and terminates in the same `where().limit()` shape the
+  // non-join callers use, so both query shapes share one mock.
+  const innerJoin = vi.fn(() => ({ innerJoin, where }));
+  const from = vi.fn(() => ({ where, innerJoin }));
   const select = vi.fn(() => ({ from }));
 
   const onConflictDoUpdate = vi.fn(() => returningOrThenable(insertReturningResults.shift() ?? []));
@@ -142,7 +145,8 @@ describe("workspace organization auth sync", () => {
 
   it("loads an existing workspace read-only without upserting route auth state", async () => {
     const { db, insertedValues, execute } = createDbMock({
-      selectResults: [[appUser], [workspace], [{ userId: appUser.id }]],
+      // One joined row now resolves user + workspace + role in a single round-trip.
+      selectResults: [[{ user: appUser, workspace, role: "member" }]],
       insertReturningResults: [],
     });
     getDbMock.mockReturnValue(db as never);
@@ -151,6 +155,7 @@ describe("workspace organization auth sync", () => {
 
     expect(result?.user).toEqual(appUser);
     expect(result?.workspace).toEqual(workspace);
+    expect(result?.role).toBe("member");
     expect(result?.isNewUser).toBe(false);
     expect(insertedValues).toEqual([]);
     expect(execute).not.toHaveBeenCalled();

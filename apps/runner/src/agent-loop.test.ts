@@ -11,7 +11,7 @@ import {
   agentSessionUsage,
   agents,
 } from "@opencompany/db/schema";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireRunLease,
   appendRuntimeEventForLease,
@@ -39,7 +39,8 @@ import {
 } from "./agent-loop";
 import { loadGitHubWorkRepository } from "./amp-tool";
 import type { RunnerEnv } from "./env";
-import { appendRuntimeEvent } from "./events";
+import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
+import { type LeaseWriteStore, setLeaseWriteStoreForTests } from "./lease-writes";
 
 const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
@@ -73,7 +74,7 @@ const githubMocks = vi.hoisted(() => ({
   getGitHubWorkInstallationToken: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/client", () => ({
+vi.mock("./db", () => ({
   getDb: dbMocks.getDb,
 }));
 
@@ -89,6 +90,7 @@ vi.mock("@opencompany/observability/braintrust", () => braintrustMocks);
 
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
+  publishTransientRuntimeEvent: vi.fn((event) => ({ ...event, id: null, transient: true })),
 }));
 
 vi.mock("./github", async (importOriginal) => {
@@ -100,7 +102,17 @@ vi.mock("./github", async (importOriginal) => {
   };
 });
 
+// Lease-guarded DB writes run atomic conditional statements that the hand-rolled fake
+// db cannot interpret, so route them through an in-memory store bound to the current
+// fake db's `state`. Reads, the lease claim, and the ledger debit still hit the fake db.
+beforeEach(() => {
+  setLeaseWriteStoreForTests(
+    createStateLeaseWriteStore(() => (dbMocks.getDb() as { state: LeaseDbState }).state),
+  );
+});
+
 afterEach(() => {
+  setLeaseWriteStoreForTests(undefined);
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -189,9 +201,13 @@ describe("lease-guarded writes", () => {
     expect(appendRuntimeEvent).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects event writes under the wrong lease", async () => {
+  it("rejects event writes when the lease guard writes no row", async () => {
     const db = createLeaseDb({ runLeaseId: "run_current" });
     dbMocks.getDb.mockReturnValue(db);
+    // The atomic append inserts only while the lease is current; a lost lease writes
+    // nothing and resolves to null. appendRuntimeEventForLease must surface that as a
+    // rejected lease write rather than a success.
+    vi.mocked(appendRuntimeEvent).mockResolvedValueOnce(null);
 
     await expect(
       appendRuntimeEventForLease({
@@ -202,8 +218,6 @@ describe("lease-guarded writes", () => {
         payload: { status: "running" },
       }),
     ).resolves.toBe(false);
-
-    expect(appendRuntimeEvent).not.toHaveBeenCalled();
   });
 
   it("rejects assistant completion under the wrong lease", async () => {
@@ -1467,8 +1481,7 @@ describe("usage recording", () => {
       stderr: "err [redacted]",
       exitCode: 0,
     });
-    expect(appendRuntimeEvent).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(publishTransientRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "command.output",
         payload: expect.objectContaining({
@@ -1476,8 +1489,7 @@ describe("usage recording", () => {
         }),
       }),
     );
-    expect(appendRuntimeEvent).toHaveBeenCalledWith(
-      expect.anything(),
+    expect(publishTransientRuntimeEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "command.output",
         payload: expect.objectContaining({
@@ -1829,16 +1841,16 @@ describe("stream error handling", () => {
       toolStartCoordinator,
     });
 
-    const events = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
-    expect(events.map((event) => event.type)).toEqual([
-      "message.delta",
-      "tool.started",
-      "message.delta",
-    ]);
-    expect(events[0]).toMatchObject({
+    const transientEvents = vi
+      .mocked(publishTransientRuntimeEvent)
+      .mock.calls.map((call) => call[0]);
+    const durableEvents = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
+    expect(transientEvents.map((event) => event.type)).toEqual(["message.delta", "message.delta"]);
+    expect(durableEvents.map((event) => event.type)).toEqual(["tool.started"]);
+    expect(transientEvents[0]).toMatchObject({
       payload: { delta: "I'll search, then distill the" },
     });
-    expect(events[1]).toMatchObject({
+    expect(durableEvents[0]).toMatchObject({
       payload: {
         toolCallId: "call_search",
         name: "exa_search",
@@ -2585,6 +2597,97 @@ type DelegationSessionState = {
   archivedAt?: Date | null;
 };
 
+type LeaseDbState = {
+  session: {
+    id: string;
+    archivedAt: Date | null;
+    runLeaseId: string | null;
+    runLeaseOwner: string | null;
+  };
+  messages: MessageState[];
+  usage: UsageState[];
+  toolUsage: ToolUsageState[];
+};
+
+// In-memory `LeaseWriteStore` that mirrors the atomic SQL semantics against the fake
+// db's `state`: a write lands only while the lease still matches the session row, and
+// it distinguishes "lease lost" from the idempotent "assistant already exists" path —
+// exactly what the database statements enforce.
+function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseWriteStore {
+  const leaseCurrent = (lease: { leaseId: string; leaseOwner: string }) => {
+    const { session } = getState();
+    return Boolean(
+      session &&
+        !session.archivedAt &&
+        session.runLeaseId === lease.leaseId &&
+        session.runLeaseOwner === lease.leaseOwner,
+    );
+  };
+
+  return {
+    async insertAssistantMessage(input, lease) {
+      if (!leaseCurrent(lease)) return null;
+      const { messages } = getState();
+      if (
+        input.responseToMessageId &&
+        messages.some((message) => message.responseToMessageId === input.responseToMessageId)
+      ) {
+        return "conflict";
+      }
+      messages.push({
+        id: input.id,
+        sessionId: input.sessionId,
+        role: "assistant",
+        status: "running",
+        responseToMessageId: input.responseToMessageId,
+      });
+      return "inserted";
+    },
+    async findResponseMessage(sessionId, responseToMessageId) {
+      const message = getState().messages.find(
+        (item) => item.sessionId === sessionId && item.responseToMessageId === responseToMessageId,
+      );
+      return message ? { id: message.id, status: message.status ?? "running" } : null;
+    },
+    async completeAssistantMessage(input, lease) {
+      if (!leaseCurrent(lease)) return false;
+      const message = getState().messages.find(
+        (item) => item.id === input.assistantMessageId && item.sessionId === input.sessionId,
+      );
+      if (!message) return false;
+      Object.assign(message, { status: "completed", content: input.content });
+      return true;
+    },
+    async insertToolMessage(input, lease) {
+      if (!leaseCurrent(lease)) return false;
+      getState().messages.push({
+        id: input.id,
+        sessionId: input.sessionId,
+        role: "tool",
+        status: "completed",
+        content: input.content,
+        toolName: input.toolName,
+        toolCallId: input.toolCallId,
+      });
+      return true;
+    },
+    async insertModelUsage(input, lease) {
+      if (!leaseCurrent(lease)) return null;
+      const { usage } = getState();
+      const row = { id: usage.length + 1, ...input } as UsageState;
+      usage.push(row);
+      return { id: row.id };
+    },
+    async insertToolUsage(input, lease) {
+      if (!leaseCurrent(lease)) return null;
+      const { toolUsage } = getState();
+      const row = { id: toolUsage.length + 1, ...input } as ToolUsageState;
+      toolUsage.push(row);
+      return { id: row.id };
+    },
+  };
+}
+
 function createLeaseDb(input: {
   runLeaseId?: string | null;
   runLeaseExpiresAt?: Date | null;
@@ -2836,8 +2939,8 @@ function createDelegationDb(
         },
       };
     },
-    async batch(statements: unknown[]) {
-      return statements;
+    async transaction(callback: (tx: unknown) => Promise<unknown>) {
+      return callback(db);
     },
     async execute() {
       executeCount += 1;
