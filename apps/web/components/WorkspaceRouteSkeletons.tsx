@@ -1,5 +1,5 @@
 function Block({ className = "" }: { className?: string }) {
-  return <div className={`rounded-md bg-[#e5e5e1] ${className}`} />;
+  return <div className={`rounded-md bg-surface-subtle ${className}`} />;
 }
 
 function PageShell({
@@ -74,7 +74,7 @@ export function AgentDetailSkeleton() {
           </div>
         </div>
       </div>
-      <aside className="hidden w-[280px] shrink-0 border-l border-[#e6e6e3] bg-sidebar/60 px-4 py-5 lg:block">
+      <aside className="hidden w-[280px] shrink-0 border-l border-border bg-sidebar/60 px-4 py-5 lg:block">
         <Block className="h-4 w-24" />
         <div className="mt-5 space-y-3">
           <Block className="h-8 w-full" />
@@ -95,7 +95,7 @@ export function SessionPageSkeleton() {
           role="status"
           aria-label="Loading session"
         >
-          <div className="border-b border-[#eaeae6] pb-4">
+          <div className="border-b border-border-subtle pb-4">
             <Block className="h-5 w-64" />
             <Block className="mt-2 h-3 w-40" />
           </div>
@@ -114,7 +114,7 @@ export function SessionPageSkeleton() {
           </div>
         </div>
       </div>
-      <aside className="hidden w-[280px] shrink-0 border-l border-[#e6e6e3] bg-sidebar/60 px-4 py-5 lg:block">
+      <aside className="hidden w-[280px] shrink-0 border-l border-border bg-sidebar/60 px-4 py-5 lg:block">
         <Block className="h-4 w-24" />
         <div className="mt-5 space-y-3">
           <Block className="h-9 w-full" />
@@ -135,7 +135,7 @@ export function SettingsPageSkeleton() {
         {[0, 1, 2].map((section) => (
           <section
             key={section}
-            className="grid grid-cols-[200px_1fr] gap-8 border-t border-[#eaeae6] pt-7 first:border-t-0 first:pt-0"
+            className="grid grid-cols-[200px_1fr] gap-8 border-t border-border-subtle pt-7 first:border-t-0 first:pt-0"
           >
             <div>
               <Block className="h-4 w-24" />
