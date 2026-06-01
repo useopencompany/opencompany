@@ -36,6 +36,7 @@ import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
+import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { syncBrainFromSandbox } from "./brain";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -425,6 +426,16 @@ async function runMessageWithContext(
           sandbox: activeSandbox,
           sessionId: input.sessionId,
           workspaceId: row.workspace.id,
+          workdir: row.session.workdir,
+          repository: row.repository,
+        }),
+      );
+      await observeRunStep(ctx, "sync_agent_bundle_after_message", () =>
+        syncAgentBundleFromSandbox({
+          sandbox: activeSandbox,
+          sessionId: input.sessionId,
+          workspaceId: row.workspace.id,
+          agentId: row.agent.id,
           workdir: row.session.workdir,
           repository: row.repository,
         }),
@@ -896,7 +907,7 @@ async function runAfterSessionWithContext(
           ...runtime,
           tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
         },
-        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture durable learnings from the transcript in agent/memory.md when worthwhile, and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
         messages,
         tools,
         mcpContext: {
@@ -919,6 +930,16 @@ async function runAfterSessionWithContext(
           sandbox: activeSandbox,
           sessionId: input.sessionId,
           workspaceId: row.workspace.id,
+          workdir: row.session.workdir,
+          repository: row.repository,
+        }),
+      );
+      await observeRunStep(ctx, "sync_agent_bundle_after_session", () =>
+        syncAgentBundleFromSandbox({
+          sandbox: activeSandbox,
+          sessionId: input.sessionId,
+          workspaceId: row.workspace.id,
+          agentId: row.agent.id,
           workdir: row.session.workdir,
           repository: row.repository,
         }),

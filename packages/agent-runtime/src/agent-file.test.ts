@@ -153,7 +153,7 @@ describe(".agent files", () => {
     const agent = buildAgentFile({
       title: "Memory",
       body: [
-        "Help with onboarding. #after-session Update @brain/memory.md with durable customer preferences.",
+        "Help with onboarding. #after-session Update agent/memory.md with durable customer preferences.",
         "Keep this line in the same after-session paragraph.",
         "",
         "This paragraph is normal instructions.",
@@ -163,7 +163,7 @@ describe(".agent files", () => {
     expect(agent.config.afterSession).toEqual({
       enabled: true,
       prompt:
-        "Update @brain/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
+        "Update agent/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
       idleDelaySeconds: 180,
     });
   });
@@ -211,12 +211,12 @@ describe(".agent files", () => {
   test("round-trips after-session tags through serialization", () => {
     const source = serializeAgentFile({
       title: "Memory",
-      body: "Help users. #after-session Save durable facts in @brain/memory.md.",
+      body: "Help users. #after-session Save durable facts in agent/memory.md.",
     });
 
     expect(parseAgentFile(source).config.afterSession).toEqual({
       enabled: true,
-      prompt: "Save durable facts in @brain/memory.md.",
+      prompt: "Save durable facts in agent/memory.md.",
       idleDelaySeconds: 180,
     });
   });

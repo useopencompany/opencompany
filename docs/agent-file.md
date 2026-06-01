@@ -243,10 +243,10 @@ Unknown `@text` that doesn't match a model, tool, or alias stays in the body as 
 Add `#after-session` inside the body to enable a background pass after a session has been idle for 3 minutes. The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. The marker remains part of the normal instructions, but the runtime also uses the parsed prompt for an internal after-session run.
 
 ```text
-Help the user during the session. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+Help the user during the session. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
 ```
 
-The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should update only mounted Brain files when there is useful long-lived context to preserve.
+The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should update `agent/memory.md` when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
 
 ## Storage layout
 
@@ -364,7 +364,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
   ],
   afterSession: {
     enabled: true,
-    prompt: "Update @brain/memory.md with durable preferences and decisions from the transcript.",
+    prompt: "Update agent/memory.md with durable preferences and decisions from the transcript.",
     idleDelaySeconds: 180,
   },
   integrations: {

@@ -38,6 +38,10 @@ vi.mock("@/lib/agents/actions", () => ({
   updateAgent: vi.fn(),
 }));
 
+vi.mock("@/lib/agents/bundle-file-actions", () => ({
+  updateAgentBundleFile: vi.fn(),
+}));
+
 vi.mock("@/lib/agent-sessions/actions", () => ({
   createAgentSession: vi.fn(),
 }));
@@ -127,6 +131,20 @@ const detailAgent: AgentDetailPayload = {
   githubCommitSha: "abc123",
   githubSyncedAt: "2026-05-24T10:05:00.000Z",
   brainPaths: [],
+  bundleFiles: [
+    {
+      path: "agents/leo/memory.md",
+      relativePath: "memory.md",
+      content: "Private notes",
+      sizeBytes: 13,
+      contentHash: "hash_memory",
+      githubCommitSha: "def456",
+      githubSyncedAt: "2026-05-24T10:06:00.000Z",
+      githubSyncStatus: "synced",
+      githubSyncError: null,
+      updatedAt: "2026-05-24T10:06:00.000Z",
+    },
+  ],
   githubIntegrationRepositories: [
     {
       fullName: "opencompany/web",
@@ -213,6 +231,16 @@ describe("AgentDetail", () => {
 
     expect(await screen.findByText("@opencompany/web")).toBeInTheDocument();
     expect(container.querySelector(".agent-mention[data-kind='integration']")).toBeInTheDocument();
+  });
+
+  it("lists bundle files on the detail page", async () => {
+    renderWithProviders(
+      <AgentDetail idOrPath="agents/leo/agent.agent" initialAgent={detailAgent} />,
+    );
+
+    expect(await screen.findByText("Bundle files")).toBeInTheDocument();
+    expect(screen.getByText("memory.md")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Private notes")).toBeInTheDocument();
   });
 
   it("preserves a saved GitHub repository binding in the detail view", async () => {

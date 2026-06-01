@@ -204,6 +204,13 @@
       "when": 1779975815733,
       "tag": "0028_free_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1780318394276,
+      "tag": "0029_mysterious_whirlwind",
+      "breakpoints": true
     }
   ]
 }

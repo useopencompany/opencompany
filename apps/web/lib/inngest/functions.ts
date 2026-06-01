@@ -5,8 +5,11 @@ import {
   AGENT_SESSION_STARTED_EVENT,
 } from "@/lib/agent-sessions/events";
 import { callRunner } from "@/lib/agent-sessions/runner";
-import { materializeAgentToGitHub } from "@/lib/agents/materialize";
-import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
+import { materializeAgentFileToGitHub, materializeAgentToGitHub } from "@/lib/agents/materialize";
+import {
+  AGENT_FILE_SYNC_REQUESTED_EVENT,
+  AGENT_SYNC_REQUESTED_EVENT,
+} from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { materializeBrainFileToGitHub } from "@/lib/brain/materialize";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
@@ -14,6 +17,7 @@ import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import {
+  sweepAgentFileSyncOutbox as runAgentFileSyncOutboxSweep,
   sweepAgentSyncOutbox as runAgentSyncOutboxSweep,
   sweepBrainSyncOutbox as runBrainSyncOutboxSweep,
   SYNC_OUTBOX_SWEEP_CRON,
@@ -34,7 +38,9 @@ export const syncAgentToGitHub = inngest.createFunction(
     await step.sleep("coalesce agent edits", "10s");
 
     return step.run("materialize latest agent file", async () => {
-      return materializeAgentToGitHub(event.data.agentId, { mode: "scheduled" });
+      return materializeAgentToGitHub(event.data.agentId, {
+        mode: "scheduled",
+      });
     });
   },
 );
@@ -62,6 +68,29 @@ export const syncBrainToGitHub = inngest.createFunction(
   },
 );
 
+export const syncAgentFileToGitHub = inngest.createFunction(
+  {
+    id: "sync-agent-file-to-github",
+    name: "Sync agent file to GitHub",
+    retries: 5,
+    concurrency: {
+      limit: 1,
+      key: "event.data.workspaceId + ':' + event.data.path",
+    },
+    triggers: { event: AGENT_FILE_SYNC_REQUESTED_EVENT },
+  },
+  async ({ event, step }) => {
+    await step.sleep("coalesce agent file edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
+
+    return step.run("materialize latest agent bundle file", async () => {
+      return materializeAgentFileToGitHub({
+        workspaceId: event.data.workspaceId,
+        path: event.data.path,
+      });
+    });
+  },
+);
+
 export const sweepAgentSyncOutbox = inngest.createFunction(
   {
     id: "sweep-agent-sync-outbox",
@@ -72,6 +101,19 @@ export const sweepAgentSyncOutbox = inngest.createFunction(
   },
   async ({ step }) => {
     return runAgentSyncOutboxSweep(step);
+  },
+);
+
+export const sweepAgentFileSyncOutbox = inngest.createFunction(
+  {
+    id: "sweep-agent-file-sync-outbox",
+    name: "Sweep agent file sync outbox",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return runAgentFileSyncOutboxSweep(step);
   },
 );
 

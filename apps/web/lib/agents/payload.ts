@@ -10,6 +10,7 @@ import type {
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { Agent } from "@opencompany/db/schema";
+import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 
 export const AGENTS_QUERY_STALE_TIME_MS = 30_000;
 
@@ -38,6 +39,7 @@ export type AgentDetailPayload = AgentListItemPayload & {
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   brainPaths: string[];
+  bundleFiles: AgentBundleFilePayload[];
   githubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
   usableGitHubIntegrationRepositories: GitHubIntegrationRepositoryPayload[];
   workspaceAgents: AgentReference[];
@@ -75,6 +77,7 @@ export function serializeAgentDetail(
     linearConfigured: false,
     slackConfigured: false,
   },
+  bundleFiles: AgentBundleFilePayload[] = [],
 ): AgentDetailPayload {
   const config = normalizeAgentConfig(agent.config);
 
@@ -85,6 +88,7 @@ export function serializeAgentDetail(
     githubCommitSha: agent.githubCommitSha,
     githubSyncedAt: agent.githubSyncedAt?.toISOString() ?? null,
     brainPaths,
+    bundleFiles,
     githubIntegrationRepositories,
     usableGitHubIntegrationRepositories,
     workspaceAgents,

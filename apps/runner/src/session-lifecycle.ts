@@ -17,6 +17,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
+import { materializeAgentBundleForSession } from "./agent-bundle";
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -64,6 +65,13 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       workspaceId: row.workspace.id,
       workdir: row.session.workdir,
       references: agentConfig.brain,
+    });
+    await materializeAgentBundleForSession({
+      sandbox,
+      sessionId: row.session.id,
+      workspaceId: row.workspace.id,
+      agentId: row.agent.id,
+      workdir: row.session.workdir,
     });
     return sandbox;
   } catch (error) {

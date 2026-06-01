@@ -53,6 +53,7 @@ export function sandboxPreparationErrorFields(error: unknown) {
 export function sandboxLayout(workdir: string) {
   return {
     workspaceRoot: workdir,
+    agentRoot: `${workdir}/agent`,
     brainRoot: `${workdir}/brain`,
     workRoot: `${workdir}/work`,
     metadataRoot: METADATA_ROOT,
@@ -147,7 +148,7 @@ export async function prepareWorkspace(input: {
     stage: "create_workspace_layout",
     commandName: "mkdir_chown_metadata",
     command: [
-      `mkdir -p ${shellQuote(layout.brainRoot)} ${shellQuote(layout.workRoot)} ${shellQuote(layout.metadataRoot)}`,
+      `mkdir -p ${shellQuote(layout.agentRoot)} ${shellQuote(layout.brainRoot)} ${shellQuote(layout.workRoot)} ${shellQuote(layout.metadataRoot)}`,
       `chown -R ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(layout.workspaceRoot)}`,
       `chown root:root ${shellQuote(layout.metadataRoot)}`,
       `chmod 700 ${shellQuote(layout.metadataRoot)}`,
@@ -519,7 +520,7 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
   try {
     resolved = resolveWorkspacePath(workdir, inputPath);
   } catch {
-    throw new Error("Path must be inside work/ or brain/ for this session.");
+    throw new Error("Path must be inside work/, brain/, or agent/ for this session.");
   }
   const relative = relativePath(workdir, resolved);
 
@@ -527,12 +528,14 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
     relative === "work" ||
     relative.startsWith("work/") ||
     relative === "brain" ||
-    relative.startsWith("brain/")
+    relative.startsWith("brain/") ||
+    relative === "agent" ||
+    relative.startsWith("agent/")
   ) {
     return resolved;
   }
 
-  throw new Error("Path must be inside work/ or brain/ for this session.");
+  throw new Error("Path must be inside work/, brain/, or agent/ for this session.");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

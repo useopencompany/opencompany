@@ -1,9 +1,4 @@
-import { createHash } from "node:crypto";
-import {
-  type AgentBrainReference,
-  BRAIN_SYNC_DELAY_MS,
-  shellQuote,
-} from "@opencompany/agent-runtime";
+import { type AgentBrainReference, shellQuote } from "@opencompany/agent-runtime";
 import {
   agentSessionBrainMounts,
   brainFiles,
@@ -14,12 +9,19 @@ import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
-import { getGitHubInstallationToken } from "./github";
+import {
+  conflictPath,
+  deleteRepoFileFromGitHub,
+  hashContent,
+  upsertRepoFileSyncJob,
+  writeRepoFileToGitHub,
+} from "./repo-files";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
-const MAX_BRAIN_FILE_BYTES = 256 * 1024;
-const MAX_BRAIN_MOUNT_FILES = 80;
-const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
+export const MAX_BRAIN_FILE_BYTES = 256 * 1024;
+export const MAX_BRAIN_MOUNT_FILES = 80;
+export const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
+const BRAIN_REPO_PREFIX = "brain/";
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 type BrainFileRow = typeof brainFiles.$inferSelect;
@@ -153,7 +155,7 @@ export async function syncBrainFromSandbox(input: {
   const sandboxPaths = String(result.stdout ?? "")
     .split("\n")
     .filter(Boolean)
-    .map((path) => normalizeBrainPath(path.replace(/^brain\//, "")))
+    .map((path) => normalizeBrainPath(stripBrainRepoPrefix(path)))
     .filter((path): path is string => Boolean(path));
   const sandboxPathSet = new Set(sandboxPaths);
   const fileMounts = mounts.filter((mount) => mount.referenceType === "file");
@@ -388,24 +390,7 @@ async function writeBrainFileToGitHub(
   path: string,
   content: string,
 ) {
-  if (!repository) return { commitSha: null, blobSha: null };
-  const token = await getGitHubInstallationToken();
-  if (!token) return { commitSha: null, blobSha: null };
-  const repositoryPath = githubRepositoryPath(repository.fullName);
-  const current = await getGitHubFile(token, repository, `brain/${path}`);
-  const result = await githubRequest<{ content?: { sha?: string }; commit?: { sha?: string } }>({
-    token,
-    repository,
-    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
-    method: "PUT",
-    body: {
-      message: `Update brain/${path}`,
-      branch: repository.defaultBranch,
-      content: Buffer.from(content, "utf8").toString("base64"),
-      ...(current?.sha ? { sha: current.sha } : {}),
-    },
-  });
-  return { commitSha: result.commit?.sha ?? null, blobSha: result.content?.sha ?? null };
+  return writeRepoFileToGitHub(repository, brainRepoPath(path), content);
 }
 
 async function deleteBrainFileFromGitHub(
@@ -413,25 +398,7 @@ async function deleteBrainFileFromGitHub(
   path: string,
   blobSha: string | null,
 ) {
-  if (!repository) return;
-  const token = await getGitHubInstallationToken();
-  if (!token) return;
-  const repositoryPath = githubRepositoryPath(repository.fullName);
-  const current = blobSha
-    ? { sha: blobSha }
-    : await getGitHubFile(token, repository, `brain/${path}`);
-  if (!current?.sha) return;
-  await githubRequest({
-    token,
-    repository,
-    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(`brain/${path}`)}`,
-    method: "DELETE",
-    body: {
-      message: `Delete brain/${path}`,
-      branch: repository.defaultBranch,
-      sha: current.sha,
-    },
-  });
+  await deleteRepoFileFromGitHub(repository, brainRepoPath(path), blobSha);
 }
 
 async function upsertBrainSyncJob(input: {
@@ -442,74 +409,15 @@ async function upsertBrainSyncJob(input: {
   previousPath?: string | null;
   previousBlobSha?: string | null;
 }) {
-  const now = new Date();
-  const nextRunAt = new Date(now.getTime() + BRAIN_SYNC_DELAY_MS);
-  await getDb()
-    .insert(brainSyncJobs)
-    .values({
-      workspaceId: input.workspaceId,
-      path: input.path,
-      operation: input.operation,
-      desiredHash: input.desiredHash,
-      previousPath: input.previousPath ?? null,
-      previousBlobSha: input.previousBlobSha ?? null,
-      nextRunAt,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [brainSyncJobs.workspaceId, brainSyncJobs.path],
-      set: {
-        operation: input.operation,
-        desiredHash: input.desiredHash,
-        previousPath: input.previousPath ?? null,
-        previousBlobSha: input.previousBlobSha ?? null,
-        status: "pending",
-        nextRunAt,
-        lastError: null,
-        updatedAt: now,
-      },
-    });
-}
-
-async function getGitHubFile(token: string, repository: WorkspaceRepository, path: string) {
-  try {
-    const repositoryPath = githubRepositoryPath(repository.fullName);
-    return await githubRequest<{ sha?: string }>({
-      token,
-      repository,
-      path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}?ref=${encodeURIComponent(repository.defaultBranch)}`,
-      method: "GET",
-    });
-  } catch (error) {
-    if (error instanceof Error && /404|not found/i.test(error.message)) return null;
-    throw error;
-  }
-}
-
-async function githubRequest<T = unknown>(input: {
-  token: string;
-  repository: WorkspaceRepository;
-  path: string;
-  method: "GET" | "PUT" | "DELETE";
-  body?: unknown;
-}): Promise<T> {
-  const init: RequestInit = {
-    method: input.method,
-    headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${input.token}`,
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-  };
-  if (input.body !== undefined) {
-    init.body = JSON.stringify(input.body);
-  }
-  const response = await fetch(`https://api.github.com${input.path}`, init);
-  if (!response.ok) {
-    throw new Error(`GitHub request failed with ${response.status}: ${await response.text()}`);
-  }
-  return (await response.json()) as T;
+  await upsertRepoFileSyncJob({
+    jobsTable: brainSyncJobs,
+    workspaceId: input.workspaceId,
+    path: input.path,
+    operation: input.operation,
+    desiredHash: input.desiredHash,
+    previousPath: input.previousPath,
+    previousBlobSha: input.previousBlobSha,
+  });
 }
 
 function normalizeBrainPath(input: string) {
@@ -523,24 +431,10 @@ function dirname(path: string) {
   return index === -1 ? "." : path.slice(0, index);
 }
 
-function hashContent(content: string) {
-  return createHash("sha256").update(content, "utf8").digest("hex");
+function brainRepoPath(path: string) {
+  return `${BRAIN_REPO_PREFIX}${path}`;
 }
 
-function conflictPath(path: string) {
-  const dot = path.lastIndexOf(".");
-  const suffix = `.conflict-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-  if (dot <= 0) return `${path}${suffix}`;
-  return `${path.slice(0, dot)}${suffix}${path.slice(dot)}`;
-}
-
-function encodeURIComponentPath(path: string) {
-  return path.split("/").map(encodeURIComponent).join("/");
-}
-
-function githubRepositoryPath(fullName: string) {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName)) {
-    throw new Error("Invalid GitHub repository full name.");
-  }
-  return fullName;
+function stripBrainRepoPrefix(path: string) {
+  return path.startsWith(BRAIN_REPO_PREFIX) ? path.slice(BRAIN_REPO_PREFIX.length) : path;
 }

@@ -2,6 +2,7 @@
 
 import {
   type AgentConfigPatch,
+  agentBundleDir,
   collectBodyRepositoryMentions,
   deriveAgentConfigFromBody,
   normalizeAgentBody,
@@ -12,6 +13,8 @@ import type { AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentFileSyncJobs,
+  agentFiles,
   agentSessions,
   agentSyncJobs,
   agents,
@@ -25,6 +28,7 @@ import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   derivePreviewConfigFromTiptapDoc,
   extractPreferredGitHubRepositoriesFromTiptapDoc,
@@ -37,6 +41,7 @@ import {
   prepareAgentSyncJobUpsert,
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
+import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
 import {
@@ -45,7 +50,11 @@ import {
   normalizeAgentConfig,
   serializeAgentDetail,
 } from "@/lib/agents/payload";
-import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
+import {
+  agentFileSyncJobUpsert,
+  prepareAgentBundleFileMoves,
+  resolveAgentSyncRename,
+} from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
 import {
@@ -325,6 +334,39 @@ export async function updateAgent(
     renamePreviousPath: pathChanged ? previousPath : null,
     renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
   });
+  const bundleFileMoves =
+    pathChanged && previousPath
+      ? await timeAsync(trace, "db.prepareAgentBundleFileMoves", async () => {
+          const oldBundleDir = agentBundleDir(previousPath);
+          const newBundleDir = agentBundleDir(path);
+          const [files, existingFileSyncJobs] = await Promise.all([
+            db
+              .select({
+                id: agentFiles.id,
+                path: agentFiles.path,
+                contentHash: agentFiles.contentHash,
+                githubBlobSha: agentFiles.githubBlobSha,
+              })
+              .from(agentFiles)
+              .where(eq(agentFiles.workspaceId, workspace.id)),
+            db
+              .select({
+                path: agentFileSyncJobs.path,
+                previousPath: agentFileSyncJobs.previousPath,
+                previousBlobSha: agentFileSyncJobs.previousBlobSha,
+              })
+              .from(agentFileSyncJobs)
+              .where(eq(agentFileSyncJobs.workspaceId, workspace.id)),
+          ]);
+
+          return prepareAgentBundleFileMoves({
+            files,
+            existingFileSyncJobs,
+            oldBundleDir,
+            newBundleDir,
+          });
+        })
+      : [];
   const syncJob = prepareAgentSyncJobUpsert(db, {
     agentId: agent.id,
     workspaceId: workspace.id,
@@ -335,6 +377,7 @@ export async function updateAgent(
     previousBlobSha: rename.previousBlobSha,
   });
 
+  const now = new Date();
   await timeAsync(trace, "db.updateAgentAndSyncJob", () =>
     db.batch([
       db
@@ -349,14 +392,55 @@ export async function updateAgent(
           config: parsed.config,
           githubSyncStatus: "pending",
           githubSyncError: null,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+      ...bundleFileMoves.map((move) =>
+        db
+          .update(agentFiles)
+          .set({
+            path: move.path,
+            githubBlobSha: null,
+            githubCommitSha: null,
+            githubSyncedHash: null,
+            githubSyncedAt: null,
+            githubSyncStatus: "pending",
+            githubSyncError: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agentFiles.id, move.fileId),
+              eq(agentFiles.workspaceId, workspace.id),
+              eq(agentFiles.path, move.previousPath),
+            ),
+          ),
+      ),
       syncJob.query,
+      ...bundleFileMoves.map((move) =>
+        agentFileSyncJobUpsert(db, {
+          workspaceId: workspace.id,
+          path: move.path,
+          operation: "upsert",
+          desiredHash: move.contentHash,
+          previousPath: move.rename.previousPath,
+          previousBlobSha: move.rename.previousBlobSha,
+        }),
+      ),
+      ...bundleFileMoves.map((move) =>
+        db
+          .delete(agentFileSyncJobs)
+          .where(
+            and(
+              eq(agentFileSyncJobs.workspaceId, workspace.id),
+              eq(agentFileSyncJobs.path, move.previousPath),
+            ),
+          ),
+      ),
     ]),
   );
   logAgentSyncJobQueued(syncJob.metadata);
-  const [[updatedAgent], brainPathRows, mcpSettings] = await Promise.all([
+  const [[updatedAgent], brainPathRows, bundleFileRows, mcpSettings] = await Promise.all([
     timeAsync(trace, "db.selectUpdatedAgent", () =>
       db
         .select()
@@ -371,9 +455,17 @@ export async function updateAgent(
         .where(eq(brainFiles.workspaceId, workspace.id))
         .orderBy(asc(brainFiles.path)),
     ),
+    timeAsync(trace, "db.selectAgentBundleFiles", () =>
+      db
+        .select()
+        .from(agentFiles)
+        .where(and(eq(agentFiles.workspaceId, workspace.id), eq(agentFiles.agentId, agent.id)))
+        .orderBy(asc(agentFiles.path)),
+    ),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
   ]);
   const brainPaths = brainPathRows.map((row) => row.path);
+  const bundleFiles = serializeAgentBundleFiles(path, bundleFileRows);
 
   if (changedFields.length > 0) {
     await captureServerEvent("agent_saved", user.id, {
@@ -401,6 +493,7 @@ export async function updateAgent(
             linearConfigured: mcpSettings.linear.configured,
             slackConfigured: mcpSettings.slack.configured,
           },
+          bundleFiles,
         )
       : null,
   };
@@ -414,6 +507,12 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
   });
+  for (const move of bundleFileMoves) {
+    scheduleAgentFileSyncDispatch({
+      workspaceId: workspace.id,
+      path: move.path,
+    });
+  }
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
 }
@@ -530,7 +629,11 @@ export async function deleteAgent(
           path: agent.path,
           error: err instanceof Error ? err.message : String(err),
         });
-        endTimingTrace(trace, { found: true, path: agent.path, githubDeleted: false });
+        endTimingTrace(trace, {
+          found: true,
+          path: agent.path,
+          githubDeleted: false,
+        });
         return {
           ok: false,
           error:

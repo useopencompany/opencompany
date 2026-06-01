@@ -50,7 +50,15 @@ describe("agent detail API route", () => {
       createdAt: "2026-05-24T10:00:00.000Z",
       updatedAt: "2026-05-24T10:00:00.000Z",
       brainPaths: ["product/brief.md"],
+      bundleFiles: [],
       githubIntegrationRepositories: [{ fullName: "opencompany/web", defaultBranch: "main" }],
+      usableGitHubIntegrationRepositories: [],
+      workspaceAgents: [],
+      mcp: {
+        mcpEnabled: false,
+        linearConfigured: false,
+        slackConfigured: false,
+      },
     });
 
     const response = await GET(
@@ -67,6 +75,7 @@ describe("agent detail API route", () => {
         path: "agents/leo/agent.agent",
         body: "Help with issues",
         brainPaths: ["product/brief.md"],
+        bundleFiles: [],
         githubIntegrationRepositories: [{ fullName: "opencompany/web", defaultBranch: "main" }],
       }),
     });

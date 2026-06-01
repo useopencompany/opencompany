@@ -155,11 +155,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "read_file",
     kind: "sandbox",
     description:
-      "Read a UTF-8 text file from ./work or ./brain. The path must start with work/ or brain/.",
+      "Read a UTF-8 text file from ./work, ./brain, or ./agent. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
       },
       required: ["path"],
       additionalProperties: false,
@@ -169,11 +172,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "edit_file",
     kind: "sandbox",
     description:
-      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work or ./brain. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
+      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
         instructions: {
           type: "string",
           description:
@@ -221,11 +227,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "write_file",
     kind: "sandbox",
     description:
-      "Create or overwrite a UTF-8 text file inside ./work or ./brain. Use edit_file for targeted changes to existing files. The path must start with work/ or brain/.",
+      "Create or overwrite a UTF-8 text file inside ./work, ./brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
         content: { type: "string", description: "Full file content." },
       },
       required: ["path", "content"],
@@ -236,13 +245,13 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "list_files",
     kind: "sandbox",
     description:
-      "List files and directories below ./work or ./brain. The path must start with work/ or brain/.",
+      "List files and directories below ./work, ./brain, or ./agent. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Relative path starting with work/ or brain/.",
+          description: "Relative path starting with work/, brain/, or agent/.",
           default: "work",
         },
         depth: { type: "number", description: "Maximum traversal depth.", default: 2 },

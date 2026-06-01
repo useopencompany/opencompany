@@ -1,11 +1,13 @@
 import { getDb } from "@opencompany/db/client";
 import {
+  agentFiles,
   agents,
   brainFiles,
   workspaceIntegrationResources,
   workspaceIntegrations,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, or } from "drizzle-orm";
+import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
@@ -136,6 +138,12 @@ export async function loadAgentForWorkspace(
 
   if (!agent) return null;
 
+  const bundleFiles = await db
+    .select()
+    .from(agentFiles)
+    .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agent.id)))
+    .orderBy(asc(agentFiles.path));
+
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubIntegrationRepositories,
     savedRepositories: agentGitHubRepositories(agent.config),
@@ -152,6 +160,7 @@ export async function loadAgentForWorkspace(
       linearConfigured: mcpSettings.linear.configured,
       slackConfigured: mcpSettings.slack.configured,
     },
+    serializeAgentBundleFiles(agent.path, bundleFiles),
   );
 }
 

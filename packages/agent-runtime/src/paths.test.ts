@@ -2,9 +2,21 @@ import { describe, expect, it } from "vitest";
 import { resolveWorkspacePath, shellQuote } from "./paths";
 
 describe("resolveWorkspacePath", () => {
-  it("resolves relative paths inside the workspace", () => {
-    expect(resolveWorkspacePath("/home/user/workspace", "src/index.ts")).toBe(
-      "/home/user/workspace/src/index.ts",
+  it("resolves paths inside configured workspace roots", () => {
+    expect(resolveWorkspacePath("/home/user/workspace", "work/src/index.ts")).toBe(
+      "/home/user/workspace/work/src/index.ts",
+    );
+    expect(resolveWorkspacePath("/home/user/workspace", "brain/context.md")).toBe(
+      "/home/user/workspace/brain/context.md",
+    );
+    expect(resolveWorkspacePath("/home/user/workspace", "agent/memory.md")).toBe(
+      "/home/user/workspace/agent/memory.md",
+    );
+  });
+
+  it("rejects bare paths outside configured workspace roots", () => {
+    expect(() => resolveWorkspacePath("/home/user/workspace", "notes.md")).toThrow(
+      "Path must be inside work/, brain/, or agent/",
     );
   });
 
