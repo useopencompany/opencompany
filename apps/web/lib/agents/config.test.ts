@@ -154,14 +154,14 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
       content: doc([
         { type: "mention", attrs: { label: "AMP", mentionSuggestionChar: "@" } },
         text(" with "),
-        { type: "mention", attrs: { label: "GPT 5.4", mentionSuggestionChar: "@" } },
+        { type: "mention", attrs: { label: "MiniMax M3", mentionSuggestionChar: "@" } },
       ]),
       repositories,
     });
 
-    expect(body).toBe("@amp with @openai/gpt-5.4");
+    expect(body).toBe("@amp with @minimax/minimax-m3");
     expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
-    expect(config.model.name).toBe("openai/gpt-5.4");
+    expect(config.model.name).toBe("minimax/minimax-m3");
   });
 
   it("uses saved mention binding attrs to resolve duplicate GitHub repository names", () => {
