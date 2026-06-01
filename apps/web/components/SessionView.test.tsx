@@ -221,6 +221,15 @@ describe("AssistantMessageContent — completed message regression", () => {
     expect(screen.getByText("Thought for 5 seconds")).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
+
+  it("renders completed reasoning without a made-up duration", () => {
+    const message = makeMessage({ status: "completed" });
+    const parts: AssistantTurnPart[] = [{ type: "reasoning", text: "Reviewed the request." }];
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("Thought")).toBeInTheDocument();
+    expect(screen.queryByText(/Thought for/)).not.toBeInTheDocument();
+  });
 });
 
 // ── Phase B-extra: AssistantStoppedNotice on abort ────────────────────────
@@ -350,6 +359,43 @@ function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatu
     </QueryClientProvider>,
   );
 }
+
+describe("SessionViewContent — active turn timer", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses the triggering user message time for a running assistant turn", () => {
+    const now = new Date("2026-05-28T10:00:10.000Z").getTime();
+    vi.setSystemTime(now);
+    const userCreatedAt = new Date(now - 5000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: new Date(now).toISOString() }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Run tests",
+          status: "completed",
+          createdAt: userCreatedAt,
+        },
+        makeRunningAssistantMessage({
+          createdAt: new Date(now).toISOString(),
+          responseToMessageId: "msg_user",
+        }),
+      ],
+    });
+
+    renderSessionViewContent(detail, "open");
+
+    expect(screen.getByText("5s")).toBeInTheDocument();
+    expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+});
 
 describe("SessionViewContent — Phase C: stale-stream banner", () => {
   it("shows banner when stream is stale AND there is a running assistant message", () => {

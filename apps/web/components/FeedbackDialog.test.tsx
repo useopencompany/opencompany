@@ -1,6 +1,7 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { usePathname } from "next/navigation";
 import { describe, expect, it, vi } from "vitest";
+import { submitFeedback } from "@/lib/feedback/actions";
 import FeedbackDialog from "./FeedbackDialog";
 
 vi.mock("next/navigation", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/lib/feedback/actions", () => ({
 }));
 
 const usePathnameMock = vi.mocked(usePathname);
+const submitFeedbackMock = vi.mocked(submitFeedback);
 
 describe("FeedbackDialog", () => {
   it("submits the current session id when feedback opens from a session page", () => {
@@ -29,5 +31,24 @@ describe("FeedbackDialog", () => {
     const { container } = render(<FeedbackDialog open onClose={vi.fn()} />);
 
     expect(container.querySelector('input[name="sessionId"]')).toBeNull();
+  });
+
+  it("auto-closes the dialog after a successful submit", async () => {
+    usePathnameMock.mockReturnValue("/settings");
+    submitFeedbackMock.mockResolvedValue({ ok: true });
+    const onClose = vi.fn();
+
+    const { container } = render(<FeedbackDialog open onClose={onClose} />);
+
+    const message = container.querySelector<HTMLTextAreaElement>('textarea[name="message"]');
+    if (!message) throw new Error("message field not found");
+    fireEvent.change(message, { target: { value: "Something looks off." } });
+
+    const form = container.querySelector("form");
+    if (!form) throw new Error("form not found");
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(submitFeedbackMock).toHaveBeenCalled());
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: 4000 });
   });
 });

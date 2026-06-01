@@ -7,6 +7,7 @@ export type SessionMessage = {
   modelMessage?: Record<string, unknown> | null;
   toolName?: string | null;
   toolCallId?: string | null;
+  responseToMessageId?: string | null;
   outputReasoningTokens?: number | undefined;
   createdAt?: string | undefined;
   completedAt?: string | null | undefined;
@@ -14,11 +15,12 @@ export type SessionMessage = {
 };
 
 export type RuntimeEvent = {
-  id: number;
+  id: number | null;
   type: string;
   messageId: string | null;
   payload: Record<string, unknown>;
   createdAt?: string;
+  transient?: boolean;
 };
 
 export type SessionUsageSummary = {
@@ -82,7 +84,9 @@ export function applyRuntimeEventToState(
   state: SessionRuntimeState,
   event: RuntimeEvent,
 ): SessionRuntimeState {
-  if (state.events.some((item) => item.id === event.id)) return state;
+  if (typeof event.id === "number" && state.events.some((item) => item.id === event.id)) {
+    return state;
+  }
 
   let next: SessionRuntimeState = {
     ...state,
@@ -391,17 +395,18 @@ export function isInspectableRuntimeEvent(event: RuntimeEvent) {
 }
 
 // Reasoning is the model's current phase when the most recent event for a still-running
-// message is a reasoning delta. Visible text, tool, usage, or completion events arrive
-// afterward and flip this off; a later reasoning round (after a tool result) flips it back
-// on. `RuntimeEvent.id` is a monotonic ordinal, so "latest event" is well-defined.
+// message is a reasoning start/delta. Visible text, tool, usage, completion, or a durable
+// reasoning completion flips this off; a later reasoning round flips it back on. Persisted
+// `RuntimeEvent.id` values are monotonic; transient null-id events are ordered by arrival
+// and win ties.
 export function isReasoningInProgress(message: SessionMessage, events: RuntimeEvent[]): boolean {
   if (message.status !== "running") return false;
   let latest: RuntimeEvent | null = null;
   for (const event of events) {
     if (!eventBelongsToMessage(event, message.id)) continue;
-    if (!latest || event.id > latest.id) latest = event;
+    if (!latest || isEventAtLeastAsRecent(event, latest)) latest = event;
   }
-  return latest?.type === "message.reasoning_delta";
+  return latest?.type === "message.reasoning_started" || latest?.type === "message.reasoning_delta";
 }
 
 export function buildAssistantTurnParts(
@@ -421,19 +426,24 @@ export function buildAssistantTurnParts(
   const toolCallsById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   const modelParts = readAssistantModelParts(message.modelMessage);
   const reasoningSummary = readReasoningSummary(events, message.id);
-  const reasoningTokenCount = message.outputReasoningTokens ?? 0;
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
-  const reasoningParts: AssistantTurnPart[] =
-    reasoningSummary || reasoningTokenCount > 0
-      ? [
-          {
-            type: "reasoning",
-            text: reasoningSummary || undefined,
-            durationSeconds: thinkingDurationSeconds,
-          },
-        ]
-      : [];
+  const hasReasoningEvidence =
+    Boolean(reasoningSummary) ||
+    thinkingDurationSeconds !== undefined ||
+    hasReasoningPhaseEvent(events, message.id) ||
+    hasReasoningDelta(events, message.id);
+  const reasoningParts: AssistantTurnPart[] = hasReasoningEvidence
+    ? [
+        {
+          type: "reasoning",
+          text: reasoningSummary || undefined,
+          ...(thinkingDurationSeconds !== undefined
+            ? { durationSeconds: thinkingDurationSeconds }
+            : {}),
+        },
+      ]
+    : [];
 
   if (modelParts) {
     const turnParts: AssistantTurnPart[] = [...reasoningParts];
@@ -599,17 +609,17 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
     const call = getCall({ runId, messageId });
     if (event.type === "after_session.started") {
       call.status = "running";
-      call.startedEventId = event.id;
+      call.startedEventId = event.id ?? null;
     }
     if (event.type === "after_session.completed") {
       call.status = "completed";
       call.outputPreview = "Completed";
-      call.completedEventId = event.id;
+      call.completedEventId = event.id ?? null;
     }
     if (event.type === "after_session.failed") {
       call.status = "failed";
       call.outputPreview = readString(event.payload.message) || "After-session run failed.";
-      call.completedEventId = event.id;
+      call.completedEventId = event.id ?? null;
     }
   }
 
@@ -624,7 +634,19 @@ function readEventKey(value: unknown) {
 
 function eventOrderForMessage(events: RuntimeEvent[], messageId: string) {
   const event = events.find((item) => item.messageId === messageId);
-  return event?.id;
+  return event?.id ?? undefined;
+}
+
+function eventOrderValue(event: RuntimeEvent) {
+  return event.id ?? Number.MAX_SAFE_INTEGER;
+}
+
+function isEventAtLeastAsRecent(event: RuntimeEvent, latest: RuntimeEvent) {
+  const order = eventOrderValue(event);
+  const latestOrder = eventOrderValue(latest);
+  if (order > latestOrder) return true;
+  if (order < latestOrder) return false;
+  return event.id === null;
 }
 
 export function buildRuntimeToolCallsForMessage(
@@ -696,7 +718,7 @@ export function buildRuntimeToolCallsForMessage(
       if (brainPath) {
         call.brainPath = brainPath;
       }
-      call.startedEventId = event.id;
+      call.startedEventId = event.id ?? null;
     }
 
     if (event.type === "tool.completed" || event.type === "tool.failed") {
@@ -705,13 +727,15 @@ export function buildRuntimeToolCallsForMessage(
       call.status = event.type === "tool.failed" ? "failed" : "completed";
       call.outputPreview =
         event.type === "tool.failed"
-          ? formatRuntimePreview(event.payload.error || event.payload.output)
-          : formatRuntimePreview(event.payload.output);
+          ? formatRuntimePreview(
+              event.payload.outputPreview || event.payload.error || event.payload.output,
+            )
+          : formatRuntimePreview(event.payload.outputPreview || event.payload.output);
       const brainPath = brainPathForToolPayload(call.name, event.payload.output);
       if (brainPath) {
         call.brainPath = brainPath;
       }
-      call.completedEventId = event.id;
+      call.completedEventId = event.id ?? null;
     }
   }
 
@@ -720,14 +744,16 @@ export function buildRuntimeToolCallsForMessage(
     const latestRunningCall = [...calls]
       .reverse()
       .find(
-        (call) => call.status === "running" && (call.startedEventId ?? 0) < latestSessionError.id,
+        (call) =>
+          call.status === "running" &&
+          (call.startedEventId ?? 0) < (latestSessionError.id ?? Number.MAX_SAFE_INTEGER),
       );
     if (latestRunningCall) {
       latestRunningCall.status = "failed";
       latestRunningCall.outputPreview =
         formatRuntimePreview({ message: readString(latestSessionError.payload.message) }) ||
         "The session failed before this tool returned a result.";
-      latestRunningCall.completedEventId = latestSessionError.id;
+      latestRunningCall.completedEventId = latestSessionError.id ?? null;
     }
   }
 
@@ -795,13 +821,13 @@ function latestSessionErrorAfter(events: RuntimeEvent[], messageId: string) {
 
   for (const event of events) {
     if (eventBelongsToMessage(event, messageId) && event.type === "tool.started") {
-      latestToolEventId = Math.max(latestToolEventId, event.id);
+      latestToolEventId = Math.max(latestToolEventId, event.id ?? 0);
     }
   }
 
   let latestError: RuntimeEvent | null = null;
   for (const event of events) {
-    if (event.type === "session.error" && event.id > latestToolEventId) {
+    if (event.type === "session.error" && (event.id ?? 0) > latestToolEventId) {
       latestError = event;
     }
   }
@@ -928,9 +954,25 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .join("\n\n");
 }
 
+function hasReasoningDelta(events: RuntimeEvent[], messageId: string) {
+  return events.some(
+    (event) => event.type === "message.reasoning_delta" && eventBelongsToMessage(event, messageId),
+  );
+}
+
+function hasReasoningPhaseEvent(events: RuntimeEvent[], messageId: string) {
+  return events.some(
+    (event) =>
+      (event.type === "message.reasoning_started" ||
+        event.type === "message.reasoning_completed") &&
+      eventBelongsToMessage(event, messageId),
+  );
+}
+
 function readReasoningWindowDurationSeconds(message: SessionMessage, events: RuntimeEvent[]) {
   let durationMs = 0;
   let reasoningStartedAt: number | null = null;
+  let reasoningStartedBy: "durable" | "transient" | null = null;
 
   for (const event of events) {
     if (!eventBelongsToMessage(event, message.id)) continue;
@@ -938,14 +980,25 @@ function readReasoningWindowDurationSeconds(message: SessionMessage, events: Run
     const eventAt = readTimestamp(event.createdAt);
     if (!eventAt) continue;
 
-    if (event.type === "message.reasoning_delta") {
+    if (event.type === "message.reasoning_started") {
       reasoningStartedAt ??= eventAt;
+      reasoningStartedBy ??= "durable";
       continue;
     }
 
-    if (reasoningStartedAt !== null) {
+    if (event.type === "message.reasoning_delta") {
+      reasoningStartedAt ??= eventAt;
+      reasoningStartedBy ??= "transient";
+      continue;
+    }
+
+    if (
+      reasoningStartedAt !== null &&
+      (event.type === "message.reasoning_completed" || reasoningStartedBy === "transient")
+    ) {
       if (eventAt > reasoningStartedAt) durationMs += eventAt - reasoningStartedAt;
       reasoningStartedAt = null;
+      reasoningStartedBy = null;
     }
   }
 
@@ -963,47 +1016,8 @@ function readReasoningWindowDurationSeconds(message: SessionMessage, events: Run
 export function computeThinkingDurationSeconds(
   message: SessionMessage,
   events: RuntimeEvent[],
-): number {
-  const reasoningDurationSeconds = readReasoningWindowDurationSeconds(message, events);
-  if (reasoningDurationSeconds !== undefined) return reasoningDurationSeconds;
-
-  const startedAt = readTimestamp(message.createdAt);
-  const completedAt = readTimestamp(message.completedAt);
-  if (!startedAt || !completedAt || completedAt < startedAt) return 1;
-
-  const totalMs = completedAt - startedAt;
-
-  // Pair tool.started with tool.completed/tool.failed for the same messageId+toolCallId,
-  // using event.createdAt timestamps. Unpaired tool.started events are ignored.
-  const startedByToolCallId = new Map<string, number>();
-  let toolMs = 0;
-
-  for (const event of events) {
-    if (!eventBelongsToMessage(event, message.id)) continue;
-
-    if (event.type === "tool.started") {
-      const toolCallId = readString(event.payload.toolCallId);
-      const ts = readTimestamp(event.createdAt);
-      if (toolCallId && ts !== null) {
-        startedByToolCallId.set(toolCallId, ts);
-      }
-    }
-
-    if (event.type === "tool.completed" || event.type === "tool.failed") {
-      const toolCallId = readString(event.payload.toolCallId);
-      const ts = readTimestamp(event.createdAt);
-      if (toolCallId && ts !== null) {
-        const startTs = startedByToolCallId.get(toolCallId);
-        if (startTs !== undefined) {
-          toolMs += Math.max(ts - startTs, 0);
-          startedByToolCallId.delete(toolCallId);
-        }
-      }
-    }
-  }
-
-  const thinkingMs = Math.max(totalMs - toolMs, 0);
-  return Math.max(Math.round(thinkingMs / 1000), 1);
+): number | undefined {
+  return readReasoningWindowDurationSeconds(message, events);
 }
 
 function readTimestamp(value: string | null | undefined) {

@@ -14,7 +14,6 @@ import {
   ListFilter,
   LogOut,
   MessageSquarePlus,
-  MoreHorizontal,
   PanelLeft,
   ScrollText,
   Search,
@@ -52,7 +51,7 @@ function persistSidebarCollapsed(collapsed: boolean) {
 
 function SoonBadge() {
   return (
-    <span className="rounded-[3px] bg-[#ececea] px-1 py-px text-[8.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+    <span className="rounded-[3px] bg-surface-subtle px-1 py-px text-[8.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
       Soon
     </span>
   );
@@ -88,8 +87,8 @@ function NavItem({
     disabled
       ? "cursor-not-allowed text-ink/35"
       : active
-        ? "bg-[#e3e3df] text-ink"
-        : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+        ? "bg-surface-active text-ink"
+        : "text-ink/90 hover:bg-surface-hover hover:text-ink"
   }`;
 
   if (disabled) {
@@ -145,7 +144,7 @@ function SessionHistoryItem({
   return (
     <div
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
-        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       } ${isPending ? "opacity-60" : ""}`}
     >
       <Link
@@ -191,7 +190,7 @@ function SessionHistoryItem({
             }
           });
         }}
-        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-[#dededa] hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+        className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
           isPending
             ? "opacity-100"
             : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
@@ -248,10 +247,10 @@ function SessionHistorySkeleton() {
     <div className="space-y-4 px-2" role="status" aria-label="Loading sessions">
       {[0, 1].map((group) => (
         <div key={group}>
-          <div className="mb-2 h-3 w-16 rounded bg-[#e0e0dc]" />
+          <div className="mb-2 h-3 w-16 rounded bg-surface-subtle" />
           <div className="space-y-1.5">
             {[0, 1, 2].map((row) => (
-              <div key={row} className="h-6 rounded-md bg-[#e8e8e4]" />
+              <div key={row} className="h-6 rounded-md bg-surface-subtle" />
             ))}
           </div>
         </div>
@@ -287,7 +286,7 @@ function AccountMenu({
   ];
 
   return (
-    <div className="absolute bottom-[52px] left-3 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-[#fbfbfa] shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
+    <div className="absolute bottom-[52px] left-3 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
       <div className="px-3 pb-3 pt-3">
         <div className="text-[13.5px] font-medium leading-[1.2] tracking-[-0.01em] text-ink">
           {userName}
@@ -296,7 +295,7 @@ function AccountMenu({
         {/* <button
           type="button"
           onClick={onClose}
-          className="mt-3 flex h-7 w-full items-center justify-center gap-2 rounded-md border border-black/[0.09] bg-white/30 px-3 text-[13px] font-medium tracking-[-0.005em] text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)] transition-colors duration-150 hover:bg-white/70 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="mt-3 flex h-7 w-full items-center justify-center gap-2 rounded-md border border-black/[0.09] bg-surface/30 px-3 text-[13px] font-medium tracking-[-0.005em] text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.65)] transition-colors duration-150 hover:bg-surface/70 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <Sparkles size={15} strokeWidth={1.85} className="text-ink/85" />
           Upgrade to Pro+
@@ -316,7 +315,7 @@ function AccountMenu({
             </>
           );
           const className =
-            "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-[#eeeeeb] focus:outline-none focus-visible:bg-[#eeeeeb]";
+            "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
 
           if (href) {
             return (
@@ -345,7 +344,7 @@ function AccountMenu({
         <a
           href="/auth/sign-out"
           onClick={onClose}
-          className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-[#eeeeeb] focus:outline-none focus-visible:bg-[#eeeeeb]"
+          className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
         >
           <LogOut size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
           <span>Log Out</span>
@@ -431,7 +430,7 @@ export default function Sidebar({
   return (
     <>
       <aside
-        className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-[#e6e6e3] after:transition-opacity after:duration-200 ${
+        className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border after:transition-opacity after:duration-200 ${
           collapsed ? "w-0 after:opacity-0" : "w-[232px] after:opacity-100"
         }`}
         aria-hidden={collapsed}
@@ -444,7 +443,7 @@ export default function Sidebar({
               aria-label="Collapse sidebar"
               aria-expanded={!collapsed}
               onClick={() => updateCollapsed(true)}
-              className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >
               <PanelLeft size={15} strokeWidth={1.75} />
             </button>
@@ -478,14 +477,14 @@ export default function Sidebar({
                   value={sessionQuery}
                   onChange={(event) => setSessionQuery(event.target.value)}
                   placeholder="Filter sessions"
-                  className="h-7 w-full rounded-md border border-[#e4e4e0] bg-white/55 pl-7 pr-7 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-[#d4d4cf] focus:ring-2 focus:ring-ink/[0.04]"
+                  className="h-7 w-full rounded-md border border-border bg-surface/55 pl-7 pr-7 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong focus:ring-2 focus:ring-ink/[0.04]"
                 />
                 {sessionQuery && (
                   <button
                     type="button"
                     aria-label="Clear session filter"
                     onClick={() => setSessionQuery("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-subtle hover:bg-[#ececea] hover:text-ink"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-subtle hover:bg-surface-subtle hover:text-ink"
                   >
                     <X size={11.5} strokeWidth={2} />
                   </button>
@@ -496,11 +495,11 @@ export default function Sidebar({
             {showSessionsLoading ? (
               <SessionHistorySkeleton />
             ) : sessions.length === 0 ? (
-              <div className="mx-2 mt-2 rounded-md border border-dashed border-[#deded9] bg-white/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
+              <div className="mx-2 mt-2 rounded-md border border-dashed border-border bg-surface/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
                 Sessions you start from agents will appear here.
               </div>
             ) : filteredSessions.length === 0 ? (
-              <div className="mx-2 mt-2 rounded-md border border-dashed border-[#deded9] bg-white/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
+              <div className="mx-2 mt-2 rounded-md border border-dashed border-border bg-surface/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
                 No sessions match this filter.
               </div>
             ) : (
@@ -527,7 +526,7 @@ export default function Sidebar({
           {/* Footer profile */}
           <div
             ref={footerRef}
-            className="relative flex items-center gap-2.5 border-t border-[#eaeae6] px-3 py-2.5"
+            className="relative flex items-center gap-2.5 border-t border-border-subtle px-3 py-2.5"
           >
             {accountMenuOpen && (
               <AccountMenu
@@ -537,42 +536,41 @@ export default function Sidebar({
                 onFeedbackOpen={() => setFeedbackOpen(true)}
               />
             )}
-            <div
-              aria-hidden
-              className="h-6 w-6 shrink-0 rounded-full ring-1 ring-black/[0.06]"
-              style={{
-                background:
-                  "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
-                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
-              }}
-            />
-            <div className="flex min-w-0 flex-col leading-tight">
-              <span
-                title={userEmail}
-                className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
-              >
-                {userName}
-              </span>
-              <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
-            </div>
+            <button
+              type="button"
+              aria-label="Open account menu"
+              aria-expanded={accountMenuOpen}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              className={`-mx-1.5 flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                accountMenuOpen ? "bg-surface-active" : ""
+              }`}
+            >
+              <div
+                aria-hidden
+                className="h-6 w-6 shrink-0 rounded-full ring-1 ring-black/[0.06]"
+                style={{
+                  background:
+                    "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
+                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
+                }}
+              />
+              <div className="flex min-w-0 flex-col leading-tight text-left">
+                <span
+                  title={userEmail}
+                  className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
+                >
+                  {userName}
+                </span>
+                <span className="truncate text-[11px] text-ink-subtle">{workspaceName}</span>
+              </div>
+            </button>
             <div className="ml-auto flex items-center gap-0.5 text-ink-muted">
-              <button
-                type="button"
-                aria-label="Open account menu"
-                aria-expanded={accountMenuOpen}
-                className={`rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                  accountMenuOpen ? "bg-[#e3e3df] text-ink" : ""
-                }`}
-                onClick={() => setAccountMenuOpen((open) => !open)}
-              >
-                <MoreHorizontal size={14} strokeWidth={1.75} />
-              </button>
               <button
                 type="button"
                 aria-label="Filter sessions"
                 aria-pressed={filterOpen}
-                className={`rounded-md p-1 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                  filterOpen ? "bg-[#e3e3df] text-ink" : ""
+                className={`rounded-md p-1 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                  filterOpen ? "bg-surface-active text-ink" : ""
                 }`}
                 onClick={() => setFilterOpen((open) => !open)}
               >
@@ -589,7 +587,7 @@ export default function Sidebar({
           aria-label="Expand sidebar"
           aria-expanded={false}
           onClick={() => updateCollapsed(false)}
-          className="fixed left-2 top-3 z-50 rounded-md border border-[#e6e6e3] bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="fixed left-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <PanelLeft size={15} strokeWidth={1.75} />
         </button>

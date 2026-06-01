@@ -17,9 +17,10 @@ Two capabilities make the loop feel richer:
 1. **Intermediate assistant utterances** — e.g. the opening "mode announcement"
    before tool calls. These need no new loop machinery: `streamText` already
    interleaves text and tool calls across steps, and assistant text is now
-   streamed to the UI as throttled `message.delta` events (see
-   `apps/runner/src/model-stream-runner.ts`). The client interleaves streamed
-   text with tool cards in event order (`buildEventAssistantTurnParts`).
+   streamed to the UI as live immediate transient `message.delta` events (see
+   `apps/runner/src/model-stream-runner.ts`). The client interleaves live text
+   with tool cards in event order (`buildEventAssistantTurnParts`) while the
+   final assistant message remains the durable transcript.
 2. **Mid-run user steering** — the user adds or redirects work while a run is
    in flight ("also include competitor W", "skip Z"), without starting a
    disconnected session.

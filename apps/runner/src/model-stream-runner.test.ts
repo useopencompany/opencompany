@@ -1,13 +1,28 @@
 import type { TextStreamPart, ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { collectAssistantStream } from "./model-stream-runner";
+import {
+  createRunControlGate,
+  RunAbortError,
+  type RunControlStore,
+  type RunLeaseState,
+} from "./run-control";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
 const usageRecorder = vi.hoisted(() => ({
   recordStepUsage: vi.fn(async () => {}),
 }));
+const eventMocks = vi.hoisted(() => ({
+  publishTransientRuntimeEvent: vi.fn(),
+}));
+const leaseWrites = vi.hoisted(() => ({
+  appendRuntimeEventForLease: vi.fn(async () => true),
+  requireLeaseWrite: vi.fn(async (value: unknown) => value),
+}));
 
 vi.mock("./usage-recorder", () => usageRecorder);
+vi.mock("./events", () => eventMocks);
+vi.mock("./lease-writes", () => leaseWrites);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -88,6 +103,144 @@ describe("collectAssistantStream", () => {
     });
     expect(stream.return).not.toHaveBeenCalled();
   });
+
+  it("publishes text deltas as transient runtime events as they arrive", async () => {
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "Hello" }),
+      streamPart({ type: "text-delta", text: " world" }),
+    ]);
+
+    await collect(stream);
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Hello" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: " world" },
+    });
+  });
+
+  it("publishes reasoning deltas as transient runtime events as they arrive", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", delta: "..." }),
+    ]);
+
+    await collect(stream, { exposeReasoningSummary: true });
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Thinking" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "..." },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_started",
+      payload: { messageId: "msg_assistant" },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_completed",
+      payload: { messageId: "msg_assistant" },
+    });
+  });
+
+  it("does not read run control from the DB on every streamed part", async () => {
+    // Many fast text-delta tokens emitted inside a single throttle window.
+    const stream = createStream(
+      Array.from({ length: 50 }, (_, i) => streamPart({ type: "text-delta", text: `t${i}` })),
+    );
+    const { gate, heartbeatAndLoadState } = gateHarness();
+
+    await collect(stream, { checkAbort: gate, signal: new AbortController().signal });
+
+    // O(1) DB reconciliations for 50 parts, not O(N).
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces a run-control read at each finish-step boundary", async () => {
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "answer" }),
+      streamPart({ type: "finish-step", finishReason: "stop", rawFinishReason: "stop" }),
+    ]);
+    const { gate, heartbeatAndLoadState } = gateHarness();
+
+    await collect(stream, { checkAbort: gate, signal: new AbortController().signal });
+
+    // Initial part read (1) plus the forced finish-step boundary read (2).
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops within one stream part when the local controller is aborted, without a DB read", async () => {
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "first" }),
+      streamPart({ type: "text-delta", text: "second" }),
+      streamPart({ type: "text-delta", text: "third" }),
+    ]);
+    const { gate, heartbeatAndLoadState, controller } = gateHarness();
+
+    // Local abort fires before streaming begins (e.g. stop button already pressed).
+    controller.abort();
+
+    await expect(collect(stream, { checkAbort: gate, signal: controller.signal })).rejects.toThrow(
+      RunAbortError,
+    );
+    expect(stream.return).toHaveBeenCalledTimes(1);
+    // Instant local abort: no DB round-trip at all.
+    expect(heartbeatAndLoadState).not.toHaveBeenCalled();
+  });
+
+  it("persists reasoning phase boundaries without exposing deltas when summaries are hidden", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Hidden thinking" }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await collect(stream, { exposeReasoningSummary: false });
+
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledTimes(1);
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Visible answer" },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_started",
+      payload: { messageId: "msg_assistant" },
+    });
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      leaseId: "run_123",
+      leaseOwner: "runner-test",
+      type: "message.reasoning_completed",
+      payload: { messageId: "msg_assistant" },
+    });
+  });
 });
 
 function collect(
@@ -108,6 +261,34 @@ function collect(
     toolStartCoordinator: createToolStartCoordinator(),
     ...overrides,
   });
+}
+
+function gateHarness() {
+  const controller = new AbortController();
+  const runState: RunLeaseState = {
+    status: "running",
+    runLeaseId: "run_123",
+    runLeaseOwner: "runner-test",
+    runLeaseExpiresAt: new Date("2026-05-29T09:00:00.000Z"),
+    runHeartbeatAt: new Date("2026-05-29T08:00:00.000Z"),
+    abortRequestedAt: null,
+    archivedAt: null,
+  };
+  const heartbeatAndLoadState = vi.fn().mockResolvedValue(runState);
+  const runStore: RunControlStore = {
+    claimLease: vi.fn(),
+    heartbeatAndLoadState,
+    finishLease: vi.fn(),
+    releaseLease: vi.fn(),
+  };
+  const gate = createRunControlGate({
+    runLease: { sessionId: "ses_123", leaseId: "run_123", leaseOwner: "runner-test" },
+    controller,
+    store: runStore,
+    intervalMs: 5_000,
+    now: () => 0, // freeze the clock so every part stays in the first throttle window
+  });
+  return { controller, gate, heartbeatAndLoadState };
 }
 
 function createStream(
