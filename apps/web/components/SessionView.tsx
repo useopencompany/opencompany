@@ -1,5 +1,6 @@
 "use client";
 
+import { captureEvent } from "@opencompany/analytics/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -231,6 +232,9 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   const waitStartedAtRef = useRef<number | null>(null);
+  // Felt time-to-first-token: stamped at the Send click, resolved when the first
+  // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
+  const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
   const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
   useEffect(() => {
     const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
@@ -266,6 +270,30 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
 
   const applyRuntimeEvent = useCallback(
     (event: RuntimeEvent) => {
+      // Felt TTFT: the first delta (text or visible reasoning) ends the timer.
+      const pending = pendingTtftRef.current;
+      if (
+        pending &&
+        (event.type === "message.delta" || event.type === "message.reasoning_delta")
+      ) {
+        if (pending.messageId) {
+          captureEvent("session_first_token", {
+            workspace_id: workspaceId,
+            agent_id: session.agentId,
+            session_id: session.id,
+            message_id: pending.messageId,
+            model_provider: session.modelProvider,
+            model_name: session.modelName,
+            ttft_ms: Math.round(performance.now() - pending.startedAt),
+            first_token_kind: event.type === "message.reasoning_delta" ? "reasoning" : "text",
+          });
+        }
+        pendingTtftRef.current = null;
+      } else if (pendingTtftRef.current && event.type === "message.completed") {
+        // Turn ended without ever streaming a delta — drop the stuck timer.
+        pendingTtftRef.current = null;
+      }
+
       const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
       if (!current) return;
       const next = applyRuntimeEventToSessionDetail(current, event);
@@ -281,7 +309,15 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         void queryClient.invalidateQueries({ queryKey: detailKey });
       }
     },
-    [detailKey, queryClient, workspaceId, session.agentId, session.id],
+    [
+      detailKey,
+      queryClient,
+      workspaceId,
+      session.agentId,
+      session.id,
+      session.modelProvider,
+      session.modelName,
+    ],
   );
 
   const refetchSessionDetail = useCallback(() => {
@@ -388,9 +424,13 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     const content = input.trim();
     if (!content) return;
     setFormError(null);
+    // Start the felt-TTFT clock at the click, before the server round-trip, so
+    // dispatch latency is counted as part of what the user feels.
+    pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
       const result = await submitAgentSessionMessage(session.id, content);
       if (result.ok) {
+        if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
         // Only clear the textarea once the server acknowledged the message —
         // a failed submit should keep the user's draft so they don't lose it.
         setInput("");
@@ -404,6 +444,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         }
         return;
       }
+      pendingTtftRef.current = null; // failed send — drop the timer
       setFormError(result.error);
     });
   };
