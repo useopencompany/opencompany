@@ -10,6 +10,14 @@ const release =
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Pin a custom deployment ID so Vercel Skew Protection works with our prebuilt
+  // deploys (`vercel build` + `vercel deploy --prebuilt`). Next writes this into
+  // the build output (routes-manifest.json) and stamps it on client requests, so a
+  // stale client's Server Actions/assets route to the deployment that served its
+  // page instead of throwing into the error boundary. Must be unique per release
+  // and must not start with `dpl_`; the commit SHA satisfies both. Only set when
+  // present so local `next dev`/`next build` are unaffected.
+  ...(release ? { deploymentId: release } : {}),
   env: {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
   },
