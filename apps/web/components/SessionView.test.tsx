@@ -19,11 +19,13 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
+import { addUserMessageToSessionDetail } from "@/lib/agent-sessions/payload";
 import type {
   AssistantTurnPart,
   RuntimeEvent,
@@ -620,5 +622,238 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
 
     // Banner must appear immediately (stream.status === "stale") without needing tick.
     expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+  });
+});
+
+// ── PRO-124: snap-to-top on send ───────────────────────────────────────────
+//
+// Verifies the headline behaviour: on send, the just-sent user message snaps to
+// the TOP of the viewport, and the streaming bottom-auto-scroll does NOT override
+// it on the next render (the bug the review flagged).
+
+describe("SessionViewContent — PRO-124: snap user message to top on send", () => {
+  let scrollToSpy: ReturnType<typeof vi.fn>;
+  let originalScrollTo: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    // jsdom does not implement scrollTo; install a spy so the snap effect runs.
+    scrollToSpy = vi.fn();
+    originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollToSpy,
+    });
+    // Give the scroll container a non-zero clientHeight so the spacer seeds.
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => 800,
+    });
+    // scrollHeight just above clientHeight so a scroll event lands within the
+    // bottom threshold (distanceFromBottom = 860 - 0 - 800 = 60 ≤ 80) yet > 1, so
+    // the streaming follow would fire if it were (wrongly) re-armed.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 860,
+    });
+  });
+
+  afterEach(() => {
+    if (originalScrollTo) {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+    } else {
+      // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+      delete (HTMLElement.prototype as unknown as { scrollTo?: unknown }).scrollTo;
+    }
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { clientHeight?: unknown }).clientHeight;
+    // biome-ignore lint/performance/noDelete: restore prototype to pre-test state
+    delete (HTMLElement.prototype as unknown as { scrollHeight?: unknown }).scrollHeight;
+    vi.clearAllMocks();
+  });
+
+  it("scrolls the just-sent user message toward the top and does not follow to bottom on the next render", async () => {
+    const user = userEvent.setup();
+    const userMessage: SessionMessage = {
+      id: "msg_user_snap",
+      role: "user",
+      content: "Hello there",
+      status: "completed",
+    };
+
+    // The submit action resolves with the id of the user message already present
+    // in the detail, so the snap effect can find its DOM node.
+    vi.mocked(submitAgentSessionMessage).mockResolvedValue({
+      ok: true,
+      messageId: "msg_user_snap",
+    } as Awaited<ReturnType<typeof submitAgentSessionMessage>>);
+    // Keep the query cache untouched so visibleMessages stays driven by props.
+    vi.mocked(addUserMessageToSessionDetail).mockImplementation((detail) => detail);
+
+    // A completed assistant turn follows the user message so the composer shows the
+    // "Send message" button initially (not the waiting/abort state), while the user
+    // message remains present in the DOM for the snap effect to target.
+    const detail = makeDetail({
+      messages: [
+        userMessage,
+        {
+          id: "msg_prev_assistant",
+          role: "assistant",
+          content: "Earlier reply",
+          status: "completed",
+        },
+      ],
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "Hello there");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    // The snap effect ran: a scrollTo was issued. It is a "top" snap (behavior
+    // "smooth"), NOT the streaming bottom-follow (which uses behavior "auto").
+    await waitFor(() => {
+      expect(scrollToSpy).toHaveBeenCalled();
+    });
+    const snapCall = scrollToSpy.mock.calls.at(-1)?.[0];
+    expect(snapCall).toMatchObject({ behavior: "smooth" });
+
+    scrollToSpy.mockClear();
+
+    // Simulate the response streaming in: a running assistant message appears.
+    const streamingDetail = makeDetail({
+      messages: [
+        userMessage,
+        {
+          id: "msg_prev_assistant",
+          role: "assistant",
+          content: "Earlier reply",
+          status: "completed",
+        },
+        { id: "msg_assistant", role: "assistant", content: "Working…", status: "running" },
+      ],
+    });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // The bottom-auto-scroll must NOT fire after the snap (snapInProgress + not
+    // pinned). No scroll-to-bottom (behavior "auto") should override the snap.
+    await waitFor(() => {
+      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
+      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
+      // follow-to-bottom.
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(false);
+    });
+  });
+
+  // Drives send → snap, then returns handles to simulate the streaming render.
+  async function sendAndSnap() {
+    const user = userEvent.setup();
+    const userMessage: SessionMessage = {
+      id: "msg_user_snap",
+      role: "user",
+      content: "Hello there",
+      status: "completed",
+    };
+    vi.mocked(submitAgentSessionMessage).mockResolvedValue({
+      ok: true,
+      messageId: "msg_user_snap",
+    } as Awaited<ReturnType<typeof submitAgentSessionMessage>>);
+    vi.mocked(addUserMessageToSessionDetail).mockImplementation((detail) => detail);
+
+    const baseMessages: SessionMessage[] = [
+      userMessage,
+      {
+        id: "msg_prev_assistant",
+        role: "assistant",
+        content: "Earlier reply",
+        status: "completed",
+      },
+    ];
+    const detail = makeDetail({ messages: baseMessages });
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "Hello there");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(scrollToSpy).toHaveBeenCalled());
+    scrollToSpy.mockClear();
+
+    const streamingDetail = makeDetail({
+      messages: [
+        ...baseMessages,
+        { id: "msg_assistant", role: "assistant", content: "Working…", status: "running" },
+      ],
+    });
+    const scroller = view.container.querySelector(".overflow-y-auto");
+    return { ...view, queryClient, scroller, streamingDetail };
+  }
+
+  it("does not let a programmatic / layout-driven scroll near the bottom override the snap", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // A scroll event fires WITHOUT any user gesture — e.g. the reserved spacer
+    // shrinking or the viewport height changing right after the snap. It lands within
+    // the bottom threshold (distanceFromBottom = 60 ≤ 80) but must NOT be mistaken for
+    // "the user returned to the bottom" (the PRO-124 follow-up bug).
+    if (scroller) fireEvent.scroll(scroller);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
+      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
+      // follow-to-bottom.
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(false);
+    });
+  });
+
+  it("re-arms the streaming follow when the USER scrolls back to the bottom", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // A genuine user gesture (wheel) precedes the scroll, so reaching the bottom IS
+    // user intent → the streaming follow may resume.
+    if (scroller) {
+      fireEvent.wheel(scroller);
+      fireEvent.scroll(scroller);
+    }
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
+      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
+      // follow-to-bottom.
+      const followedToBottom = scrollToSpy.mock.calls.some(
+        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
+      );
+      expect(followedToBottom).toBe(true);
+    });
   });
 });
