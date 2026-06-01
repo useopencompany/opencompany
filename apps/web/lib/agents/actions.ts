@@ -125,8 +125,12 @@ export async function updateAgent(
     config?: AgentConfigPatch;
   },
 ) {
+  // A rename with an empty/whitespace-only name should not override the stored
+  // name. Treat blank patch.name the same as a missing name (no rename intent).
+  const trimmedName = patch.name?.trim();
+  const effectiveName = trimmedName ? trimmedName : undefined;
   const trace = startTimingTrace("agents.update", {
-    hasName: typeof patch.name === "string",
+    hasName: effectiveName !== undefined,
     hasBody: typeof patch.body === "string",
     hasModel: typeof patch.model === "string",
     hasConfig: Boolean(patch.config),
@@ -135,7 +139,7 @@ export async function updateAgent(
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
   const changedFields: Array<"name" | "body" | "model" | "config"> = [];
-  if (typeof patch.name === "string") changedFields.push("name");
+  if (effectiveName !== undefined) changedFields.push("name");
   if (typeof patch.body === "string") changedFields.push("body");
   if (patch.content && !changedFields.includes("body")) changedFields.push("body");
   if (typeof patch.model === "string") changedFields.push("model");
@@ -169,9 +173,9 @@ export async function updateAgent(
   }
 
   const currentConfig = normalizeAgentConfig(agent.config);
-  const title = patch.name ?? agent.name;
+  const title = effectiveName ?? agent.name;
   const path =
-    typeof patch.name === "string" || !agent.path
+    effectiveName !== undefined || !agent.path
       ? await timeAsync(trace, "db.nextAvailableAgentPath", () =>
           nextAvailableAgentPath(db, workspace.id, title, agent.path),
         )
