@@ -1,8 +1,11 @@
+import type { JsonValue } from "@opencompany/agent-runtime/types";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 import { MentionList, type MentionListHandle } from "./MentionList";
 import { type AgentMentionItem } from "./tools";
+
+type MentionCommandItem = { id: string; label: string } & Record<string, JsonValue>;
 
 export function createMentionSuggestion({
   getItems,
@@ -37,7 +40,18 @@ export function createMentionSuggestion({
       return {
         onStart: (props) => {
           component = new ReactRenderer(MentionList, {
-            props: { ...props, onSelect, showCategories },
+            props: {
+              ...props,
+              command: (item: MentionCommandItem) => {
+                if (item.action === "schedule") {
+                  props.editor.chain().focus().deleteRange(props.range).run();
+                  return;
+                }
+                props.command(item);
+              },
+              onSelect,
+              showCategories,
+            },
             editor: props.editor,
           });
 
@@ -55,7 +69,18 @@ export function createMentionSuggestion({
           });
         },
         onUpdate: (props) => {
-          component?.updateProps({ ...props, onSelect, showCategories });
+          component?.updateProps({
+            ...props,
+            command: (item: MentionCommandItem) => {
+              if (item.action === "schedule") {
+                props.editor.chain().focus().deleteRange(props.range).run();
+                return;
+              }
+              props.command(item);
+            },
+            onSelect,
+            showCategories,
+          });
           if (!props.clientRect || !popup) return;
           popup.setProps({
             getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),

@@ -233,6 +233,20 @@ triggers:
     enabled: true
 ```
 
+Scheduled run triggers store a generated preset cron expression, an IANA timezone,
+and the prompt to submit when the schedule fires. The editor generates these from
+the "Run every..." UI; arbitrary cron text is not part of the MVP.
+
+```yaml
+triggers:
+  - id: weekday-brief
+    type: agent.schedule
+    cron: "0 9 * * 1-5"
+    timezone: America/Los_Angeles
+    prompt: Review open priorities and write a concise status brief.
+    enabled: true
+```
+
 ## The body
 
 Markdown. The model sees it verbatim as system instructions. There is no preprocessing besides mention parsing.
@@ -385,7 +399,16 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
       repositories: [],
     },
   },
-  triggers: [],
+  triggers: [
+    {
+      id: "weekday-brief",
+      type: "agent.schedule",
+      cron: "0 9 * * 1-5",
+      timezone: "America/Los_Angeles",
+      prompt: "Review open priorities and write a concise status brief.",
+      enabled: true,
+    },
+  ],
 }
 ```
 

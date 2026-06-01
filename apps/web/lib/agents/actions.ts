@@ -257,6 +257,7 @@ export async function updateAgent(
       ? extractPreferredGitHubRepositoriesFromTiptapDoc(sanitizedContent, derivationRepositories)
       : []),
   ];
+  const requestedTriggers = patch.config?.triggers ?? currentConfig.triggers;
   const derivedFromTiptap = sanitizedContent
     ? derivePreviewConfigFromTiptapDoc({
         title,
@@ -265,7 +266,7 @@ export async function updateAgent(
         repositories: derivationRepositories,
         agents: workspaceAgentReferences,
         preferredRepositories: savedPreferredRepositories,
-        triggers: currentConfig.triggers,
+        triggers: requestedTriggers,
       })
     : null;
   // The .agent body is the product contract and the source for runtime config.
@@ -280,7 +281,7 @@ export async function updateAgent(
           repositories: derivationRepositories,
           agents: workspaceAgentReferences,
           preferredRepositories,
-          triggers: currentConfig.triggers,
+          triggers: requestedTriggers,
         })
       : derivedFromTiptap;
   warnOnBodyTiptapMismatch({

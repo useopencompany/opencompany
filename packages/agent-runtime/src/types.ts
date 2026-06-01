@@ -128,7 +128,7 @@ export type AgentGitHubRepositoryConfig = {
   binding?: AgentGitHubRepositoryBinding;
 };
 
-export type AgentTriggerConfig = {
+export type AgentGitHubPullRequestTriggerConfig = {
   id: string;
   type: "github.pull_request";
   repository: string;
@@ -136,6 +136,17 @@ export type AgentTriggerConfig = {
   branches: string[];
   enabled: boolean;
 };
+
+export type AgentScheduleTriggerConfig = {
+  id: string;
+  type: "agent.schedule";
+  cron: string;
+  timezone: string;
+  prompt: string;
+  enabled: boolean;
+};
+
+export type AgentTriggerConfig = AgentGitHubPullRequestTriggerConfig | AgentScheduleTriggerConfig;
 
 export type AgentConfig = {
   schemaVersion: "agent.v1";

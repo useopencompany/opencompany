@@ -1,11 +1,19 @@
 "use client";
 
-import { serializeAgentFrontmatter } from "@opencompany/agent-runtime";
+import {
+  cronForSchedulePreset,
+  normalizeScheduleTimezone,
+  schedulePresetFromCron,
+  scheduleSummary,
+  serializeAgentFrontmatter,
+} from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
   AgentModelId,
   AgentReference,
+  AgentScheduleTriggerConfig,
   AgentToolId,
+  AgentTriggerConfig,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -83,6 +91,15 @@ type OptimisticGitHubSync = {
 
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const WEEKDAYS = [
+  { value: 0, label: "Sunday" },
+  { value: 1, label: "Monday" },
+  { value: 2, label: "Tuesday" },
+  { value: 3, label: "Wednesday" },
+  { value: 4, label: "Thursday" },
+  { value: 5, label: "Friday" },
+  { value: 6, label: "Saturday" },
+];
 
 // Duplicated from AgentsView.tsx — extracting to a shared module is tracked
 // as a follow-up cleanup. Without this re-throw, Next.js never gets to
@@ -163,6 +180,7 @@ function AgentDetailContent({
   const [name, setName] = useState(agent.name);
   const [content, setContent] = useState<TiptapDoc>(agent.content);
   const [hasEditorDraft, setHasEditorDraft] = useState(false);
+  const [triggers, setTriggers] = useState<AgentConfig["triggers"]>(agent.config.triggers);
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
   );
@@ -172,6 +190,8 @@ function AgentDetailContent({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -180,6 +200,7 @@ function AgentDetailContent({
     body?: string;
     content?: TiptapDoc;
     model?: AgentModelId;
+    config?: { triggers: AgentConfig["triggers"] };
   }>({});
   const submittedPatchRef = useRef<typeof pendingRef.current | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,7 +213,7 @@ function AgentDetailContent({
         selectedModelId,
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
-        triggers: agent.config.triggers,
+        triggers,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
       }),
     [
@@ -203,6 +224,7 @@ function AgentDetailContent({
       hasEditorDraft,
       name,
       selectedModelId,
+      triggers,
     ],
   );
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
@@ -244,6 +266,7 @@ function AgentDetailContent({
       pendingRef.current.body !== undefined ||
       pendingRef.current.content !== undefined ||
       pendingRef.current.model !== undefined ||
+      pendingRef.current.config !== undefined ||
       submittedPatchRef.current
     ) {
       return;
@@ -251,6 +274,7 @@ function AgentDetailContent({
     setName(agent.name);
     setContent(agent.content);
     setHasEditorDraft(false);
+    setTriggers(agent.config.triggers);
     setSelectedModelId(findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID);
   }, [
     agent.id,
@@ -259,6 +283,7 @@ function AgentDetailContent({
     agent.content,
     agent.config.instructions,
     agent.config.model.name,
+    agent.config.triggers,
   ]);
 
   function updateInspectorCollapsed(nextCollapsed: boolean) {
@@ -272,7 +297,8 @@ function AgentDetailContent({
       typeof patch.name !== "string" &&
       patch.body === undefined &&
       patch.content === undefined &&
-      !patch.model
+      !patch.model &&
+      !patch.config
     ) {
       return;
     }
@@ -323,6 +349,28 @@ function AgentDetailContent({
   const schedule = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(flush, 600);
+  };
+
+  const updateTriggers = (next: AgentConfig["triggers"]) => {
+    setTriggers(next);
+    pendingRef.current.config = { triggers: next };
+    schedule();
+  };
+
+  const saveScheduleTrigger = (trigger: AgentScheduleTriggerConfig) => {
+    updateTriggers(upsertScheduleTrigger(triggers, trigger));
+    setShowScheduleDialog(false);
+    setEditingSchedule(null);
+  };
+
+  const removeScheduleTrigger = (triggerId: string) => {
+    updateTriggers(
+      triggers.filter(
+        (trigger) => !(trigger.type === "agent.schedule" && trigger.id === triggerId),
+      ),
+    );
+    setShowScheduleDialog(false);
+    setEditingSchedule(null);
   };
 
   useEffect(() => {
@@ -459,6 +507,11 @@ function AgentDetailContent({
               initialBody={initialBody}
               initialContent={agent.content}
               mentionItems={mentionItems}
+              onMentionSelect={(item) => {
+                if (item.kind !== "schedule") return;
+                setEditingSchedule(null);
+                setShowScheduleDialog(true);
+              }}
               onChange={(body, content) => {
                 const nextContent = content as TiptapDoc;
                 setContent(nextContent);
@@ -501,15 +554,42 @@ function AgentDetailContent({
           brain={configPreview.brain}
           agents={configPreview.agents}
           afterSession={configPreview.config.afterSession}
+          schedules={configPreview.config.triggers.filter(
+            (trigger): trigger is AgentScheduleTriggerConfig => trigger.type === "agent.schedule",
+          )}
           saveState={saveState}
           githubStatus={githubSyncStatus}
           githubError={githubSyncError}
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          onAddSchedule={() => {
+            setEditingSchedule(null);
+            setShowScheduleDialog(true);
+          }}
+          onEditSchedule={(trigger) => {
+            setEditingSchedule(trigger);
+            setShowScheduleDialog(true);
+          }}
+          onRemoveSchedule={removeScheduleTrigger}
           onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
+
+      {showScheduleDialog ? (
+        <ScheduleDialog
+          schedule={editingSchedule}
+          existingIds={triggers.map((trigger) => trigger.id)}
+          onClose={() => {
+            setShowScheduleDialog(false);
+            setEditingSchedule(null);
+          }}
+          onSave={saveScheduleTrigger}
+          {...(editingSchedule
+            ? { onRemove: () => removeScheduleTrigger(editingSchedule.id) }
+            : {})}
+        />
+      ) : null}
 
       <DeleteAgentDialog
         agentName={agent.name}
@@ -597,12 +677,16 @@ function AgentInspector({
   brain,
   agents,
   afterSession,
+  schedules,
   saveState,
   githubStatus,
   githubError,
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  onAddSchedule,
+  onEditSchedule,
+  onRemoveSchedule,
   onDeleteClick,
 }: {
   name: string;
@@ -613,12 +697,16 @@ function AgentInspector({
   brain: Array<{ path: string; type: "file" | "folder" }>;
   agents: AgentReference[];
   afterSession: AgentConfig["afterSession"];
+  schedules: AgentScheduleTriggerConfig[];
   saveState: SaveState;
   githubStatus: string;
   githubError: string | null;
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  onAddSchedule: () => void;
+  onEditSchedule: (trigger: AgentScheduleTriggerConfig) => void;
+  onRemoveSchedule: (triggerId: string) => void;
   onDeleteClick: () => void;
 }) {
   return (
@@ -730,6 +818,13 @@ function AgentInspector({
         )}
       </div>
 
+      <ScheduleConfigPanel
+        schedules={schedules}
+        onAdd={onAddSchedule}
+        onEdit={onEditSchedule}
+        onRemove={onRemoveSchedule}
+      />
+
       <GitHubSyncPanel
         saveState={saveState}
         status={githubStatus}
@@ -767,6 +862,380 @@ function AfterSessionConfigItem({ prompt }: { prompt: string }) {
       </div>
     </div>
   );
+}
+
+function ScheduleConfigPanel({
+  schedules,
+  onAdd,
+  onEdit,
+  onRemove,
+}: {
+  schedules: AgentScheduleTriggerConfig[];
+  onAdd: () => void;
+  onEdit: (trigger: AgentScheduleTriggerConfig) => void;
+  onRemove: (triggerId: string) => void;
+}) {
+  return (
+    <div>
+      <InspectorHeader
+        label="Schedules"
+        countLabel={`${schedules.length} ${schedules.length === 1 ? "schedule" : "schedules"}`}
+      />
+      <div className="space-y-2">
+        {schedules.map((trigger) => (
+          <div key={trigger.id} className="rounded-lg border border-border bg-surface/55 px-3 py-3">
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-surface/70 bg-surface/70 text-ink-muted">
+                <Clock3 size={14} strokeWidth={1.9} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-[12.5px] font-medium text-ink">
+                    {scheduleSummary(trigger)}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9.5px] font-medium ${
+                      trigger.enabled
+                        ? "border-success-border bg-success-bg text-success"
+                        : "border-border bg-surface text-ink-subtle"
+                    }`}
+                  >
+                    {trigger.enabled ? "on" : "off"}
+                  </span>
+                </div>
+                <div className="mt-0.5 truncate text-[11.5px] text-ink-muted">
+                  {trigger.timezone}
+                </div>
+                <div className="mt-2 whitespace-pre-wrap break-words text-[11.5px] leading-4 text-ink-muted">
+                  {trigger.prompt}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onEdit(trigger)}
+                    className="rounded-md border border-border bg-surface px-2 py-1 text-[11.5px] font-medium text-ink-muted hover:bg-surface-muted"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(trigger.id)}
+                    className="rounded-md px-2 py-1 text-[11.5px] font-medium text-danger hover:bg-danger-bg"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+        {schedules.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
+            No scheduled runs
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1.5 text-[12px] font-medium text-ink/85 hover:bg-surface-muted"
+        >
+          <Clock3 size={12} strokeWidth={1.9} />
+          Run every...
+        </button>
+      </div>
+    </div>
+  );
+}
+
+type ScheduleFormKind = "minutes" | "hours" | "daily" | "weekdays" | "weekly";
+
+function ScheduleDialog({
+  schedule,
+  existingIds,
+  onClose,
+  onSave,
+  onRemove,
+}: {
+  schedule: AgentScheduleTriggerConfig | null;
+  existingIds: string[];
+  onClose: () => void;
+  onSave: (trigger: AgentScheduleTriggerConfig) => void;
+  onRemove?: () => void;
+}) {
+  const initial = scheduleFormFromTrigger(schedule);
+  const [kind, setKind] = useState<ScheduleFormKind>(initial.kind);
+  const [interval, setInterval] = useState(initial.interval);
+  const [time, setTime] = useState(initial.time);
+  const [dayOfWeek, setDayOfWeek] = useState(initial.dayOfWeek);
+  const [timezone, setTimezone] = useState(initial.timezone || browserTimezone() || "UTC");
+  const [prompt, setPrompt] = useState(initial.prompt);
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = () => {
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      setError("Prompt is required.");
+      return;
+    }
+
+    const [hour, minute] = parseTimeInput(time);
+    const cron =
+      kind === "minutes"
+        ? cronForSchedulePreset({ kind, interval })
+        : kind === "hours"
+          ? cronForSchedulePreset({ kind, interval })
+          : kind === "daily"
+            ? cronForSchedulePreset({ kind, hour, minute })
+            : kind === "weekdays"
+              ? cronForSchedulePreset({ kind, hour, minute })
+              : cronForSchedulePreset({ kind, dayOfWeek, hour, minute });
+
+    onSave({
+      id: schedule?.id ?? uniqueScheduleId(trimmedPrompt, existingIds),
+      type: "agent.schedule",
+      cron,
+      timezone: normalizeScheduleTimezone(timezone),
+      prompt: trimmedPrompt,
+      enabled,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/25 px-4">
+      <div className="w-full max-w-[420px] rounded-lg border border-border bg-surface-raised p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <div className="flex items-center justify-between">
+          <div className="text-[13px] font-semibold text-ink">
+            {schedule ? "Edit schedule" : "Run every..."}
+          </div>
+          <label className="flex items-center gap-2 text-[12px] font-medium text-ink-muted">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(event) => setEnabled(event.target.checked)}
+            />
+            Enabled
+          </label>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          <label className="block">
+            <span className="text-[11px] font-medium uppercase text-ink-subtle">Frequency</span>
+            <select
+              value={kind}
+              onChange={(event) => setKind(event.target.value as ScheduleFormKind)}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:ring-1 focus:ring-ink/20"
+            >
+              <option value="minutes">Every few minutes</option>
+              <option value="hours">Every few hours</option>
+              <option value="daily">Daily</option>
+              <option value="weekdays">Weekdays</option>
+              <option value="weekly">Weekly</option>
+            </select>
+          </label>
+
+          {kind === "minutes" || kind === "hours" ? (
+            <label className="block">
+              <span className="text-[11px] font-medium uppercase text-ink-subtle">Every</span>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={kind === "minutes" ? 59 : 23}
+                  value={interval}
+                  onChange={(event) => setInterval(Number.parseInt(event.target.value, 10) || 1)}
+                  className="h-9 w-20 rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:ring-1 focus:ring-ink/20"
+                />
+                <span className="text-[12.5px] text-ink-muted">
+                  {kind === "minutes" ? "minutes" : "hours"}
+                </span>
+              </div>
+            </label>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {kind === "weekly" ? (
+                <label className="block">
+                  <span className="text-[11px] font-medium uppercase text-ink-subtle">Day</span>
+                  <select
+                    value={dayOfWeek}
+                    onChange={(event) => setDayOfWeek(Number.parseInt(event.target.value, 10))}
+                    className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:ring-1 focus:ring-ink/20"
+                  >
+                    {WEEKDAYS.map((day) => (
+                      <option key={day.value} value={day.value}>
+                        {day.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="block">
+                <span className="text-[11px] font-medium uppercase text-ink-subtle">Time</span>
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(event) => setTime(event.target.value)}
+                  className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:ring-1 focus:ring-ink/20"
+                />
+              </label>
+            </div>
+          )}
+
+          <label className="block">
+            <span className="text-[11px] font-medium uppercase text-ink-subtle">Timezone</span>
+            <input
+              value={timezone}
+              onChange={(event) => setTimezone(event.target.value)}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none focus:ring-1 focus:ring-ink/20"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-[11px] font-medium uppercase text-ink-subtle">Prompt</span>
+            <textarea
+              value={prompt}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                setError(null);
+              }}
+              rows={4}
+              className="mt-1 w-full resize-none rounded-md border border-border bg-surface px-2 py-2 text-[13px] leading-5 text-ink outline-none focus:ring-1 focus:ring-ink/20"
+              placeholder="Tell the agent exactly what to do on each run."
+            />
+          </label>
+        </div>
+
+        {error ? <div className="mt-3 text-[12px] font-medium text-danger">{error}</div> : null}
+
+        <div className="mt-5 flex items-center justify-between">
+          {onRemove ? (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded-md px-2 py-1.5 text-[12.5px] font-medium text-danger hover:bg-danger-bg"
+            >
+              Remove
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-surface-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              className="rounded-md bg-ink px-3 py-1.5 text-[12.5px] font-medium text-canvas hover:bg-ink/90"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function scheduleFormFromTrigger(schedule: AgentScheduleTriggerConfig | null): {
+  kind: ScheduleFormKind;
+  interval: number;
+  time: string;
+  dayOfWeek: number;
+  timezone: string;
+  prompt: string;
+  enabled: boolean;
+} {
+  const preset = schedule ? schedulePresetFromCron(schedule.cron) : null;
+  const timezone = schedule?.timezone ?? browserTimezone() ?? "UTC";
+  const prompt = schedule?.prompt ?? "";
+  const enabled = schedule?.enabled ?? true;
+
+  if (preset?.kind === "minutes") {
+    return {
+      kind: "minutes",
+      interval: preset.interval,
+      time: "09:00",
+      dayOfWeek: 1,
+      timezone,
+      prompt,
+      enabled,
+    };
+  }
+  if (preset?.kind === "hours") {
+    return {
+      kind: "hours",
+      interval: preset.interval,
+      time: "09:00",
+      dayOfWeek: 1,
+      timezone,
+      prompt,
+      enabled,
+    };
+  }
+  if (preset?.kind === "daily" || preset?.kind === "weekdays") {
+    return {
+      kind: preset.kind,
+      interval: 1,
+      time: `${String(preset.hour).padStart(2, "0")}:${String(preset.minute).padStart(2, "0")}`,
+      dayOfWeek: 1,
+      timezone,
+      prompt,
+      enabled,
+    };
+  }
+  if (preset?.kind === "weekly") {
+    return {
+      kind: "weekly",
+      interval: 1,
+      time: `${String(preset.hour).padStart(2, "0")}:${String(preset.minute).padStart(2, "0")}`,
+      dayOfWeek: preset.dayOfWeek,
+      timezone,
+      prompt,
+      enabled,
+    };
+  }
+
+  return {
+    kind: "weekdays",
+    interval: 1,
+    time: "09:00",
+    dayOfWeek: 1,
+    timezone,
+    prompt,
+    enabled,
+  };
+}
+
+function browserTimezone() {
+  if (typeof window === "undefined") return null;
+  return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+}
+
+function parseTimeInput(value: string) {
+  const [hour, minute] = value.split(":").map((part) => Number.parseInt(part, 10));
+  return [Number.isFinite(hour) ? hour! : 9, Number.isFinite(minute) ? minute! : 0] as const;
+}
+
+function uniqueScheduleId(prompt: string, existingIds: string[]) {
+  const base =
+    prompt
+      .toLowerCase()
+      .replace(/['"]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 36) || "schedule";
+  const used = new Set(existingIds);
+  if (!used.has(base)) return base;
+  for (let index = 2; index < 100; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}`;
 }
 
 function InspectorHeader({ label, countLabel }: { label: string; countLabel: string }) {
@@ -996,6 +1465,7 @@ function buildConfigPreview({
           ...fallback.model,
           name: selectedModelId,
         },
+        triggers,
       };
   const model =
     findModel(config.model.name) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
@@ -1026,6 +1496,17 @@ function buildConfigPreview({
 function normalizePreviewTitle(title: string) {
   const trimmed = title.trim();
   return trimmed.length > 0 ? trimmed : "Untitled agent";
+}
+
+function upsertScheduleTrigger(
+  triggers: AgentTriggerConfig[],
+  next: AgentScheduleTriggerConfig,
+): AgentTriggerConfig[] {
+  const index = triggers.findIndex(
+    (trigger) => trigger.type === "agent.schedule" && trigger.id === next.id,
+  );
+  if (index === -1) return [...triggers, next];
+  return triggers.map((trigger, triggerIndex) => (triggerIndex === index ? next : trigger));
 }
 
 function brainReferenceLabel(path: string) {
