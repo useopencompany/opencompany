@@ -182,10 +182,10 @@ function SessionHistoryItem({
             event.stopPropagation();
             onToggleStar(session.id);
           }}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-opacity duration-150 hover:bg-[#dededa] focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
             starred
-              ? "text-ink-subtle opacity-100"
-              : "text-ink-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
           }`}
         >
           <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
