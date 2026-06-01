@@ -1464,6 +1464,7 @@ describe("usage recording", () => {
         GH_TOKEN: "github_token_123",
         GH_PROMPT_DISABLED: "1",
         GH_NO_UPDATE_NOTIFIER: "1",
+        GH_REPO: "opencompany/web",
         GH_CONFIG_DIR: "/tmp/opencompany-gh-toolu-with-spaces",
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
@@ -2047,7 +2048,25 @@ describe("Amp stream parsing", () => {
       GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
       GIT_CONFIG_VALUE_0: "Authorization: Basic github_basic_secret",
     });
+    expect(env).not.toHaveProperty("GH_REPO");
     expect(buildAmpCommand({ task: "open a pr" })).not.toContain("github_token_123");
+  });
+
+  it("adds GitHub default repo context when an env builder receives one", () => {
+    const env = buildAmpCommandEnv({
+      ampApiKey: "amp_secret_123",
+      githubAuthHeader: "Authorization: Basic github_basic_secret",
+      githubToken: "github_token_123",
+      repositoryFullName: "opencompany/web",
+      toolCallId: "toolu/with spaces",
+    });
+
+    expect(env).toMatchObject({
+      GH_REPO: "opencompany/web",
+      GH_TOKEN: "github_token_123",
+      GH_PROMPT_DISABLED: "1",
+      GH_NO_UPDATE_NOTIFIER: "1",
+    });
   });
 
   it("redacts known Amp and GitHub secrets from streamed or saved text", () => {

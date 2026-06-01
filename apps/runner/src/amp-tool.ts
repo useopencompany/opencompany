@@ -65,6 +65,7 @@ export async function runAmpCoderTool(input: {
     ampApiKey,
     githubAuthHeader,
     githubToken,
+    repositoryFullName: repository.fullName,
     toolCallId: input.toolCallId,
   });
   const redactAmpOutput = createKnownSecretRedactor([ampApiKey, githubToken, githubAuthHeader]);
@@ -321,6 +322,7 @@ export function buildAmpCommandEnv(input: {
   githubAuthHeader: string;
   githubToken: string;
   toolCallId: string;
+  repositoryFullName?: string;
 }) {
   return {
     AMP_API_KEY: input.ampApiKey,
@@ -332,11 +334,13 @@ export function buildGitHubCommandEnv(input: {
   githubAuthHeader: string;
   githubToken: string;
   toolCallId: string;
+  repositoryFullName?: string;
 }) {
   return {
     GH_TOKEN: input.githubToken,
     GH_PROMPT_DISABLED: "1",
     GH_NO_UPDATE_NOTIFIER: "1",
+    ...(input.repositoryFullName ? { GH_REPO: input.repositoryFullName } : {}),
     GH_CONFIG_DIR: `/tmp/opencompany-gh-${safePathSegment(input.toolCallId)}`,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
