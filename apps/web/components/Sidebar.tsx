@@ -119,6 +119,7 @@ function SessionHistoryItem({
   const queryClient = useQueryClient();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
+  const [archiving, setArchiving] = useState(false);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const schedulePrefetch = useCallback(() => {
@@ -143,9 +144,9 @@ function SessionHistoryItem({
 
   return (
     <div
-      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+      className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-      } ${isPending ? "opacity-60" : ""}`}
+      } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : isPending ? "opacity-60" : ""}`}
     >
       <Link
         href={`/session/${session.id}`}
@@ -171,7 +172,11 @@ function SessionHistoryItem({
           event.preventDefault();
           event.stopPropagation();
 
+          // Kurze rote Hervorhebung als Feedback, bevor die Session optimistisch verschwindet.
+          setArchiving(true);
+
           startTransition(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 220));
             const result = await archiveSidebarSessionOptimistically({
               queryClient,
               workspaceId,
@@ -179,6 +184,7 @@ function SessionHistoryItem({
               archive: archiveAgentSession,
             });
             if (!result.ok) {
+              setArchiving(false);
               showError(result.error, "Could not archive session");
               return;
             }
