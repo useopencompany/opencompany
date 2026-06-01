@@ -23,4 +23,19 @@ describe("MentionList", () => {
 
     expect(events).toEqual(["command", "select"]);
   });
+
+  it("marks schedule selection as an action instead of an empty mention", () => {
+    const schedule = buildAgentMentionItems().find((item) => item.kind === "schedule")!;
+    const command = vi.fn();
+
+    render(<MentionList items={[schedule]} query="run" command={command} onSelect={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("option", { name: /run every/i }));
+
+    expect(command).toHaveBeenCalledWith({
+      id: "schedule:run-every",
+      label: "run-every",
+      action: "schedule",
+    });
+  });
 });

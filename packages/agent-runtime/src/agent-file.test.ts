@@ -363,6 +363,77 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips supported schedule triggers through frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Briefing",
+      body: "Prepare recurring status updates.",
+      triggers: [
+        {
+          id: "weekday-brief",
+          type: "agent.schedule",
+          cron: "0 9 * * 1-5",
+          timezone: "America/Los_Angeles",
+          prompt: "Review open priorities and write a concise status brief.",
+          enabled: true,
+        },
+      ],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("type: agent.schedule");
+    expect(source).toContain("cron: 0 9 * * 1-5");
+    expect(parsed.config.triggers).toEqual([
+      {
+        id: "weekday-brief",
+        type: "agent.schedule",
+        cron: "0 9 * * 1-5",
+        timezone: "America/Los_Angeles",
+        prompt: "Review open priorities and write a concise status brief.",
+        enabled: true,
+      },
+    ]);
+  });
+
+  test("drops unsupported schedule trigger shapes", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Briefing"',
+        "triggers:",
+        "  - id: ok",
+        "    type: agent.schedule",
+        "    cron: '*/15 * * * *'",
+        "    timezone: America/New_York",
+        "    prompt: Run the briefing.",
+        "    enabled: true",
+        "  - id: arbitrary-cron",
+        "    type: agent.schedule",
+        "    cron: '13 9 1 * *'",
+        "    timezone: America/New_York",
+        "    prompt: Run the briefing.",
+        "    enabled: true",
+        "  - id: missing-prompt",
+        "    type: agent.schedule",
+        "    cron: '0 9 * * *'",
+        "    timezone: America/New_York",
+        "---",
+        "",
+        "Prepare recurring status updates.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.triggers).toEqual([
+      {
+        id: "ok",
+        type: "agent.schedule",
+        cron: "*/15 * * * *",
+        timezone: "America/New_York",
+        prompt: "Run the briefing.",
+        enabled: true,
+      },
+    ]);
+  });
+
   test("ignores a legacy amp.repository field when parsing", () => {
     const parsed = parseAgentFile(
       [

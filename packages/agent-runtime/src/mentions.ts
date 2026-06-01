@@ -6,6 +6,7 @@ import type {
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
+  AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
@@ -387,12 +388,15 @@ function syncTriggersToRepository(
   triggers: AgentTriggerConfig[],
   repository: AgentGitHubRepositoryConfig,
 ) {
-  return triggers.map((trigger) => ({
-    ...trigger,
-    id: `${repository.id}-pr`,
-    repository: repository.id,
-    branches: trigger.branches.length > 0 ? trigger.branches : [repository.defaultBranch],
-  }));
+  return triggers.map((trigger) => {
+    if (trigger.type !== "github.pull_request") return trigger;
+    return {
+      ...trigger,
+      id: `${repository.id}-pr`,
+      repository: repository.id,
+      branches: trigger.branches.length > 0 ? trigger.branches : [repository.defaultBranch],
+    } satisfies AgentGitHubPullRequestTriggerConfig;
+  });
 }
 
 function normalizeTitle(title: string) {
