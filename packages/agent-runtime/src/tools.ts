@@ -9,6 +9,7 @@ import type { AgentConfigTool, AgentMcpToolConfig, AgentToolId } from "./types";
 
 export type RuntimeToolName =
   | "shell"
+  | "gh"
   | "read_file"
   | "edit_file"
   | "write_file"
@@ -26,7 +27,7 @@ export type RuntimeToolDefinition = {
   name: RuntimeToolName;
   kind: "sandbox" | "hosted" | "internal";
   configToolId?: AgentToolId;
-  requiresRepositoryBinding?: boolean;
+  requiresAttachedRepository?: boolean;
   description: string;
   parameters: JsonSchema;
   help?: string;
@@ -114,7 +115,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When the agent has an explicit GitHub repository binding, shell commands get repo-scoped gh and git auth for that repository; run repository commands from ./work.",
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When one or more GitHub repositories are attached to the agent, shell commands get repo-scoped git and gh auth automatically; clone on demand into ./work and run repository commands there.",
     parameters: {
       type: "object",
       properties: {
@@ -123,6 +124,31 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       required: ["command"],
       additionalProperties: false,
     },
+  },
+  {
+    name: "gh",
+    kind: "sandbox",
+    requiresAttachedRepository: true,
+    description:
+      "Run the GitHub CLI (gh) against the attached GitHub repositories. Repo-scoped auth is injected automatically; never handle tokens yourself. Use for pull requests, issues, reviews, releases, and cloning (gh repo clone). All work happens under ./work; never push to a repository's default branch.",
+    parameters: {
+      type: "object",
+      properties: {
+        args: {
+          type: "string",
+          description:
+            'Arguments passed to the gh CLI, without the leading "gh". Example: "pr create --fill --base main --head my-branch".',
+        },
+      },
+      required: ["args"],
+      additionalProperties: false,
+    },
+    help: [
+      "Run gh subcommands against the attached repositories; authentication is pre-injected.",
+      "Commands run from ./work. Clone a repository first (git clone or gh repo clone <owner>/<repo> work/<repo>) when you need its code.",
+      "Use gh pr create / gh pr view / gh issue list / gh api as needed.",
+      "Never push to or open a PR against a repository's default branch directly; always use a feature branch.",
+    ].join("\n"),
   },
   {
     name: "read_file",
@@ -273,15 +299,20 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "amp_coder",
     kind: "sandbox",
     configToolId: "amp",
-    requiresRepositoryBinding: true,
+    requiresAttachedRepository: true,
     description:
-      "Delegate coding work to Amp in the connected GitHub repository. Use for multi-file implementation, debugging, refactors, and PR-ready code changes.",
+      "Delegate coding work to Amp in an attached GitHub repository. Amp clones the repository into ./work on demand. Use for multi-file implementation, debugging, refactors, and PR-ready code changes. When more than one repository is attached, set the repository argument.",
     parameters: {
       type: "object",
       properties: {
         task: {
           type: "string",
-          description: "Specific coding task for Amp to perform in the connected repository.",
+          description: "Specific coding task for Amp to perform in the target repository.",
+        },
+        repository: {
+          type: "string",
+          description:
+            "Target repository full name (owner/repo) or id. Required when more than one repository is attached; optional when exactly one is attached.",
         },
         createPullRequest: {
           type: "boolean",
@@ -312,9 +343,10 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use amp_coder for substantial codebase work that benefits from Amp's coding-agent loop.",
       "Give Amp a concrete task and any constraints from the user or agent instructions.",
+      "Set the repository argument (owner/repo or id) when more than one repository is attached so Amp targets the right one. Amp clones it into ./work on demand.",
       "When the user asks for a follow-up to prior Amp work, pass the previous ampThreadId so Amp continues that thread with its existing context.",
       "The tool output includes ampResult, ampStatus, ampThreadId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on ampResult when present.",
-      "Amp has repository-scoped GitHub CLI and git push access when a GitHub work repository is bound.",
+      "Amp has repository-scoped GitHub CLI and git push access for the attached repositories.",
       "Set createPullRequest=true only when the instructions call for a reviewable PR. Amp may create the PR itself; if it leaves publishable local work behind, the runner creates the draft PR after Amp finishes.",
       "The tool works on non-default branches and must never push directly to the default branch.",
     ].join("\n"),
@@ -573,32 +605,41 @@ export const RUNTIME_TOOL_DEFINITION_BY_NAME = new Map(
   RUNTIME_TOOL_DEFINITIONS.map((tool) => [tool.name, tool]),
 );
 
-export function resolveRuntimeToolNamesForConfigTools(
-  tools: ReadonlyArray<{ id?: unknown }> | undefined,
-  agents: ReadonlyArray<unknown> | undefined = [],
-) {
+export function resolveRuntimeToolNamesForConfigTools(input: {
+  tools: ReadonlyArray<{ id?: unknown }> | undefined;
+  agents?: ReadonlyArray<unknown> | undefined;
+  repositories?: ReadonlyArray<unknown> | undefined;
+}) {
+  const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
     if (tool.name === "delegate_to_agent") continue;
-    if (!tool.configToolId) names.add(tool.name);
+    // Unconditional core tools (no configToolId) are always available, except
+    // those gated on an attached repository (e.g. gh).
+    if (tool.configToolId) continue;
+    if (tool.requiresAttachedRepository && !hasAttachedRepository) continue;
+    names.add(tool.name);
   }
   names.add("tool_help");
 
   const selectedToolIds = new Set(
-    (tools ?? []).flatMap((tool) => (typeof tool.id === "string" ? [tool.id] : [])),
+    (input.tools ?? []).flatMap((tool) => (typeof tool.id === "string" ? [tool.id] : [])),
   );
   for (const selectedToolId of selectedToolIds) {
     const agentTool = AGENT_TOOL_DEFINITION_BY_ID.get(selectedToolId as AgentToolId);
     if (!agentTool) continue;
     for (const runtimeToolName of agentTool.runtimeTools) {
       const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(runtimeToolName);
-      if (definition && isRuntimeToolEnabledByConfig(definition, tools, selectedToolIds)) {
+      if (
+        definition &&
+        isRuntimeToolEnabledByConfig(definition, selectedToolIds, hasAttachedRepository)
+      ) {
         names.add(definition.name);
       }
     }
   }
 
-  if ((agents ?? []).length > 0) {
+  if ((input.agents ?? []).length > 0) {
     names.add("delegate_to_agent");
   }
 
@@ -607,20 +648,13 @@ export function resolveRuntimeToolNamesForConfigTools(
 
 function isRuntimeToolEnabledByConfig(
   definition: RuntimeToolDefinition,
-  tools: ReadonlyArray<{ id?: unknown }> | undefined,
   selectedToolIds: Set<string>,
+  hasAttachedRepository: boolean,
 ) {
   if (!definition.configToolId) return false;
   if (!selectedToolIds.has(definition.configToolId)) return false;
-  if (!definition.requiresRepositoryBinding) return true;
-
-  const configTool = tools?.find((tool) => tool?.id === definition.configToolId);
-  if (!configTool) return false;
-  return (
-    "repository" in configTool &&
-    typeof configTool.repository === "string" &&
-    configTool.repository.trim().length > 0
-  );
+  if (definition.requiresAttachedRepository && !hasAttachedRepository) return false;
+  return true;
 }
 
 export function getRuntimeToolHelp(toolName: string, enabledTools: readonly RuntimeToolName[]) {

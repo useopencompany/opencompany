@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
+  resolveRuntimeToolNamesForConfigTools,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
 } from "./tools";
 
@@ -40,7 +41,7 @@ describe("AGENT_TOOL_CATALOG", () => {
       expect.objectContaining({
         name: "amp_coder",
         configToolId: "amp",
-        requiresRepositoryBinding: true,
+        requiresAttachedRepository: true,
       }),
     );
   });
@@ -118,5 +119,39 @@ describe("runtime tool definitions", () => {
     expect(descriptionFor("endPublishedDate")).toContain(
       "Not supported with category=people or category=company",
     );
+  });
+});
+
+describe("resolveRuntimeToolNamesForConfigTools", () => {
+  const repo = { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" };
+
+  it("always exposes the core file/shell tools and tool_help", () => {
+    const names = resolveRuntimeToolNamesForConfigTools({ tools: [] });
+    expect(names).toEqual(expect.arrayContaining(["shell", "read_file", "tool_help"]));
+  });
+
+  it("gates the gh tool on an attached repository, independent of amp", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("gh");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
+    ).toContain("gh");
+  });
+
+  it("enables amp_coder only when amp is selected and a repository is attached", () => {
+    const ampTool = { id: "amp" };
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [ampTool] })).not.toContain("amp_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [ampTool], repositories: [repo] }),
+    ).toContain("amp_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
+    ).not.toContain("amp_coder");
+  });
+
+  it("adds delegate_to_agent only when delegatable agents are present", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], agents: [{ path: "agents/x.agent" }] }),
+    ).toContain("delegate_to_agent");
   });
 });

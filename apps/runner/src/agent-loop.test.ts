@@ -472,7 +472,6 @@ describe("usage recording", () => {
         provider: "amp",
         label: "Amp",
         description: "Delegate coding work to Amp.",
-        repository: "opencompany-web",
         prCapable: false,
       },
     ];
@@ -1411,7 +1410,6 @@ describe("usage recording", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],
@@ -1474,7 +1472,7 @@ describe("usage recording", () => {
     });
     expect(githubMocks.getGitHubWorkInstallationToken).toHaveBeenCalledWith({
       installationId: "install_123",
-      repositoryFullName: "opencompany/web",
+      repositoryFullNames: ["opencompany/web"],
     });
     expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toEqual({
       stdout: "done [redacted]",
@@ -1572,7 +1570,6 @@ describe("usage recording", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],

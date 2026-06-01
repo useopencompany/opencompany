@@ -28,8 +28,13 @@ export async function getGitHubInstallationToken(
 export async function getGitHubWorkInstallationToken(input: {
   installationId: string;
   repositoryFullName?: string;
+  repositoryFullNames?: string[];
 }) {
   if (!hasGitHubIntegrationAppEnv()) return null;
+
+  const repositoryFullNames = normalizeRepositoryFullNames(
+    input.repositoryFullNames ?? (input.repositoryFullName ? [input.repositoryFullName] : []),
+  );
 
   return getInstallationToken({
     installationId: input.installationId,
@@ -38,20 +43,26 @@ export async function getGitHubWorkInstallationToken(input: {
     cachePrefix: "integration",
     purpose: "work repository integration",
     envNames: ["GITHUB_INTEGRATION_APP_ID", "GITHUB_INTEGRATION_APP_PRIVATE_KEY"],
-    ...(input.repositoryFullName ? { repositoryFullName: input.repositoryFullName } : {}),
+    repositoryFullNames,
   });
+}
+
+function normalizeRepositoryFullNames(names: string[]) {
+  return [...new Set(names)].sort();
 }
 
 async function getInstallationToken(input: {
   installationId: string;
-  repositoryFullName?: string;
+  repositoryFullNames?: string[];
   appId: string;
   privateKey: string;
   cachePrefix: string;
   purpose: string;
   envNames: [string, string];
 }) {
-  const cacheKey = `${input.cachePrefix}:${input.installationId}:${input.repositoryFullName ?? "*"}`;
+  const repositoryFullNames = input.repositoryFullNames ?? [];
+  const cacheScope = repositoryFullNames.length > 0 ? repositoryFullNames.join(",") : "*";
+  const cacheKey = `${input.cachePrefix}:${input.installationId}:${cacheScope}`;
   const cachedToken = cachedTokens.get(cacheKey);
   if (cachedToken && cachedToken.expiresAt - Date.now() > 60_000) {
     return cachedToken.token;
@@ -70,10 +81,10 @@ async function getInstallationToken(input: {
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28",
       },
-      ...(input.repositoryFullName
+      ...(repositoryFullNames.length > 0
         ? {
             body: JSON.stringify({
-              repositories: [githubRepositoryName(input.repositoryFullName)],
+              repositories: repositoryFullNames.map(githubRepositoryName),
             }),
           }
         : {}),

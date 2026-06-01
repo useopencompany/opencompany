@@ -12,6 +12,7 @@ vi.mock("e2b", () => ({
 
 import {
   armSandboxIdleTimeout,
+  cloneGitHubRepositoryIntoWorkdir,
   createOrConnectSandbox,
   githubRemoteMatches,
   prepareWorkspace,
@@ -166,23 +167,37 @@ describe("prepareWorkspace", () => {
     );
   });
 
-  it("clones the configured repository into work when no git checkout exists", async () => {
+  it("matches tokenized GitHub remotes without exposing the token", () => {
+    expect(
+      githubRemoteMatches(
+        "https://x-access-token:ghs_secret@github.com/opencompany/app.git",
+        "opencompany/app",
+      ),
+    ).toBe(true);
+    expect(githubRemoteMatches("git@github.com:opencompany/app.git", "opencompany/app")).toBe(true);
+    expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
+      false,
+    );
+  });
+});
+
+describe("cloneGitHubRepositoryIntoWorkdir", () => {
+  const WORKDIR = "/home/user/workspace/work";
+
+  it("clones the repository when no git checkout exists", async () => {
     const sandbox = createWorkspaceSandbox(["__opencompany_missing_git__\n"]);
 
-    await prepareWorkspace({
+    await cloneGitHubRepositoryIntoWorkdir({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
-      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      workdir: WORKDIR,
       repositoryFullName: "opencompany/app",
-      repositoryDefaultBranch: "main",
+      defaultBranch: "main",
       githubToken: "ghs_token",
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("git remote get-url origin"),
-      {
-        timeoutMs: 30_000,
-      },
+      { timeoutMs: 30_000 },
     );
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       expect.stringContaining("clone --depth 1 --branch 'main'"),
@@ -203,32 +218,20 @@ describe("prepareWorkspace", () => {
         String(command).includes("x-access-token"),
       ),
     ).toBe(false);
-    expect(sandbox.commands.run).toHaveBeenCalledWith(
-      expect.stringContaining("'/home/user/workspace/work'"),
-      {
-        envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
-        timeoutMs: 120_000,
-      },
-    );
-    expect(
-      sandbox.commands.run.mock.calls.some(([command]) => String(command).includes("git -C")),
-    ).toBe(false);
-    expect(sandbox.files.write).toHaveBeenCalledWith(
-      "/home/user/.opencompany/agent.agent",
-      '---\ntitle: "Agent"\n---\n\nInstructions',
-      { user: "root", requestTimeoutMs: 30_000 },
-    );
+    expect(sandbox.commands.run).toHaveBeenCalledWith(expect.stringContaining(`'${WORKDIR}'`), {
+      envs: { GITHUB_AUTH_HEADER: expect.stringMatching(/^Authorization: Basic /) },
+      timeoutMs: 120_000,
+    });
   });
 
-  it("keeps an existing checkout when origin matches the configured repository", async () => {
+  it("keeps an existing checkout when origin matches the repository", async () => {
     const sandbox = createWorkspaceSandbox(["https://github.com/opencompany/app.git\n"]);
 
-    await prepareWorkspace({
+    await cloneGitHubRepositoryIntoWorkdir({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
-      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      workdir: WORKDIR,
       repositoryFullName: "opencompany/app",
-      repositoryDefaultBranch: "main",
+      defaultBranch: "main",
       githubToken: "ghs_token",
     });
 
@@ -246,12 +249,11 @@ describe("prepareWorkspace", () => {
   it("reclones when the existing checkout points at another repository", async () => {
     const sandbox = createWorkspaceSandbox(["https://github.com/opencompany/other.git\n"]);
 
-    await prepareWorkspace({
+    await cloneGitHubRepositoryIntoWorkdir({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
-      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+      workdir: WORKDIR,
       repositoryFullName: "opencompany/app",
-      repositoryDefaultBranch: "develop",
+      defaultBranch: "develop",
       githubToken: "ghs_token",
     });
 
@@ -264,7 +266,7 @@ describe("prepareWorkspace", () => {
     );
   });
 
-  it("adds searchable stage context to repository preparation failures", async () => {
+  it("adds searchable stage context to clone failures", async () => {
     const cloneError = new Error("exit status 128");
     cloneError.name = "CommandExitError";
     const sandbox = {
@@ -284,12 +286,11 @@ describe("prepareWorkspace", () => {
 
     let caught: unknown;
     try {
-      await prepareWorkspace({
+      await cloneGitHubRepositoryIntoWorkdir({
         sandbox: sandbox as never,
-        workdir: "/home/user/workspace",
-        agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+        workdir: WORKDIR,
         repositoryFullName: "opencompany/app",
-        repositoryDefaultBranch: "main",
+        defaultBranch: "main",
         githubToken: "ghs_token",
       });
     } catch (error) {
@@ -305,19 +306,6 @@ describe("prepareWorkspace", () => {
       cause_name: "CommandExitError",
       cause_message: "exit status 128",
     });
-  });
-
-  it("matches tokenized GitHub remotes without exposing the token", () => {
-    expect(
-      githubRemoteMatches(
-        "https://x-access-token:ghs_secret@github.com/opencompany/app.git",
-        "opencompany/app",
-      ),
-    ).toBe(true);
-    expect(githubRemoteMatches("git@github.com:opencompany/app.git", "opencompany/app")).toBe(true);
-    expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
-      false,
-    );
   });
 });
 
@@ -401,6 +389,38 @@ describe("runSandboxTool", () => {
       stderr: "err [redacted]",
       exitCode: 0,
     });
+  });
+
+  it("runs gh commands from the work directory with injected auth and redaction", async () => {
+    const onOutput = vi.fn();
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStderr?: (data: string) => void }) => {
+          options.onStderr?.("using github_token_123\n");
+          return { stdout: "ok github_token_123", stderr: "", exitCode: 0 };
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "pr create --fill" },
+      envs: { GH_TOKEN: "github_token_123" },
+      redactOutput: (value) => value.replaceAll("github_token_123", "[redacted]"),
+      onOutput,
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "gh pr create --fill",
+      expect.objectContaining({
+        cwd: sandboxLayout("/home/user/workspace").workRoot,
+        envs: { GH_TOKEN: "github_token_123" },
+      }),
+    );
+    expect(onOutput).toHaveBeenCalledWith("stderr", "using [redacted]\n");
+    expect(result).toEqual({ stdout: "ok [redacted]", stderr: "", exitCode: 0 });
   });
 
   it("creates parent directories before writing nested files", async () => {

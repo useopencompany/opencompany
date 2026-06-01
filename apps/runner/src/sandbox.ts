@@ -139,9 +139,6 @@ export async function prepareWorkspace(input: {
   sandbox: SandboxHandle;
   workdir: string;
   agentFile: string;
-  repositoryFullName?: string | null | undefined;
-  repositoryDefaultBranch?: string | null | undefined;
-  githubToken?: string | null | undefined;
 }) {
   const layout = sandboxLayout(input.workdir);
 
@@ -157,26 +154,18 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
-  if (input.repositoryFullName && input.githubToken) {
-    await prepareGitHubRepository({
-      sandbox: input.sandbox,
-      workdir: layout.workRoot,
-      repositoryFullName: input.repositoryFullName,
-      defaultBranch: input.repositoryDefaultBranch ?? "main",
-      githubToken: input.githubToken,
-    });
-  } else {
-    await runSandboxPreparationCommand({
-      sandbox: input.sandbox,
-      stage: "initialize_empty_work_repository",
-      commandName: "git_init",
-      command: `git -C ${shellQuote(layout.workRoot)} init -q`,
-      options: {
-        user: SANDBOX_USER,
-        timeoutMs: 30_000,
-      },
-    });
-  }
+  // The session starts with an empty work/ directory. Repositories are cloned on
+  // demand by the agent (git/gh in the shell) or by amp; nothing is cloned here.
+  await runSandboxPreparationCommand({
+    sandbox: input.sandbox,
+    stage: "initialize_empty_work_repository",
+    commandName: "git_init",
+    command: `git -C ${shellQuote(layout.workRoot)} init -q`,
+    options: {
+      user: SANDBOX_USER,
+      timeoutMs: 30_000,
+    },
+  });
   await input.sandbox.files.write(layout.agentFile, input.agentFile, {
     user: SANDBOX_ROOT_USER,
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
@@ -214,7 +203,7 @@ async function runSandboxPreparationCommand(input: {
   }
 }
 
-async function prepareGitHubRepository(input: {
+export async function cloneGitHubRepositoryIntoWorkdir(input: {
   sandbox: SandboxHandle;
   workdir: string;
   repositoryFullName: string;
@@ -304,6 +293,27 @@ export async function runSandboxTool(input: {
     const layout = sandboxLayout(input.workdir);
     const result = await input.sandbox.commands.run(command, {
       cwd: layout.workspaceRoot,
+      ...(input.envs ? { envs: input.envs } : {}),
+      timeoutMs: 120_000,
+      onStdout: async (data: string) => {
+        await input.onOutput?.("stdout", redact(data));
+      },
+      onStderr: async (data: string) => {
+        await input.onOutput?.("stderr", redact(data));
+      },
+    });
+    return truncate({
+      stdout: redact(String(result.stdout ?? "")),
+      stderr: redact(String(result.stderr ?? "")),
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+    });
+  }
+
+  if (input.name === "gh") {
+    const ghArgs = readString(args, "args");
+    const layout = sandboxLayout(input.workdir);
+    const result = await input.sandbox.commands.run(`gh ${ghArgs}`, {
+      cwd: layout.workRoot,
       ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
       onStdout: async (data: string) => {

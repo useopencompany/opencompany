@@ -57,7 +57,7 @@ export function parseAgentFile(source: string): AgentFile {
   const brain = normalizeBrainReferences(frontmatter.brain);
   const agents = normalizeAgentReferences(frontmatter.agents);
   const repositories = normalizeGitHubRepositories(frontmatter.integrations);
-  const tools = normalizeTools(frontmatter.tools, repositories);
+  const tools = normalizeTools(frontmatter.tools);
   const triggers = normalizeTriggers(frontmatter.triggers, repositories);
 
   return {
@@ -87,7 +87,7 @@ export function serializeAgentFile(input: {
   const agents = normalizeAgentReferences(agentInput);
   const repositories = normalizeGitHubRepositories(input.integrations);
   const toolInput = input.tools && input.tools.length > 0 ? input.tools : fromMentions.tools;
-  const tools = normalizeTools(toolInput, repositories);
+  const tools = normalizeTools(toolInput);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
 
   return [
@@ -121,7 +121,7 @@ export function serializeAgentFrontmatter(input: {
   const title = normalizeTitle(input.title);
   const model = normalizeModelId(input.model);
   const repositories = normalizeGitHubRepositories(input.integrations);
-  const tools = normalizeTools(input.tools, repositories);
+  const tools = normalizeTools(input.tools);
   const brain = normalizeBrainReferences(input.brain);
   const agents = normalizeAgentReferences(input.agents);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
@@ -156,7 +156,7 @@ export function buildAgentFile(input: {
   const brain = normalizeBrainReferences(input.config?.brain ?? mentioned.brain);
   const agents = normalizeAgentReferences(input.config?.agents ?? mentioned.agents);
   const repositories = normalizeGitHubRepositories(input.config?.integrations);
-  const tools = normalizeTools(input.config?.tools ?? mentioned.tools, repositories);
+  const tools = normalizeTools(input.config?.tools ?? mentioned.tools);
   const triggers = normalizeTriggers(input.config?.triggers ?? [], repositories);
 
   return {
@@ -258,10 +258,9 @@ function normalizeModelId(id: string): AgentModelId {
   return normalizeAgentModelId(id);
 }
 
-function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfig[]) {
+function normalizeTools(value: unknown) {
   const tools: AgentConfigTool[] = [];
   const seen = new Set<string>();
-  const repoIds = new Set(repositories.map((repository) => repository.id));
 
   for (const item of Array.isArray(value) ? value : []) {
     const id = typeof item === "string" ? item : readString(isRecord(item) ? item.id : undefined);
@@ -271,10 +270,8 @@ function normalizeTools(value: unknown, repositories: AgentGitHubRepositoryConfi
 
     if (id === "amp") {
       const record = isRecord(item) ? item : {};
-      const repository = normalizeNullableRepositoryId(record.repository);
       tools.push(
         toConfigTool(definition, {
-          repository: repository && repoIds.has(repository) ? repository : null,
           prCapable: readBoolean(record.prCapable) ?? true,
         }),
       );
@@ -296,7 +293,6 @@ function serializeTools(tools: AgentConfigTool[]) {
         id: tool.id,
         type: tool.type,
         provider: tool.provider,
-        repository: tool.repository,
         prCapable: tool.prCapable,
       };
     }
