@@ -440,21 +440,32 @@ export default function Sidebar({
       );
 
       void (async () => {
-        const result = await setSessionStar(sessionId, nextStarred);
-        if (!result.ok) {
-          // Roll back to the server-truth value we captured before the toggle.
+        try {
+          const result = await setSessionStar(sessionId, nextStarred);
+          if (!result.ok) {
+            // Roll back to the server-truth value we captured before the toggle.
+            queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+              setSidebarSessionStar(entries, sessionId, previousStarredAt),
+            );
+            showError(
+              result.error,
+              nextStarred ? "Could not pin session" : "Could not unpin session",
+            );
+            return;
+          }
+          queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+            setSidebarSessionStar(entries, sessionId, result.starredAt),
+          );
+        } catch (error) {
+          // Unexpected throw (network/server exception) — roll back and surface it.
           queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
             setSidebarSessionStar(entries, sessionId, previousStarredAt),
           );
           showError(
-            result.error,
+            error instanceof Error ? error.message : "Could not reach the server.",
             nextStarred ? "Could not pin session" : "Could not unpin session",
           );
-          return;
         }
-        queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
-          setSidebarSessionStar(entries, sessionId, result.starredAt),
-        );
       })();
     },
     [queryClient, showError, workspaceId],
