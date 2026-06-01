@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Added
+- Cron-based agent schedules — agents can now be scheduled to run on a recurring basis (#208).
+- Read-only X (Twitter) hosted tool for agents (#212).
+- Agent self-update skill, allowing agents to evolve their own `.agent` definition (#210).
+- Dark mode support (#186).
+- Grok model support via the AI gateway (#206).
+- MiniMax and Kimi gateway models (#193).
+- Client-side felt time-to-first-token measurement (#192).
+
+### Changed
+- GitHub repositories are now decoupled from the amp tool, making repository bindings more flexible (#204).
+- Lazy GitHub sandbox initialization is more solid and reliable (#207).
+- Vercel Skew Protection is enabled via custom `deploymentId` for safer deploys (#205).
+- Onboarding call booking step is now skippable (#191).
+- Assistant turn duration is now shown next to the copy button (#187).
+
+### Fixed
+- Agents no longer disappear from the list after creating or editing a new agent (#203).
+- Renaming an agent no longer resets it to "Untitled agent" (#194).
+- Vercel deployment ID length is correctly handled (#211).
+- Session archiving is now optimistic and instant instead of waiting on the server (#200).
+- Feedback dialog auto-closes after a successful submit (#190).
+- Page no longer rubber-bands at the fold due to `overscroll-behavior` fix (#189).
 
 ## [0.4.1] - 2026-05-30
 
