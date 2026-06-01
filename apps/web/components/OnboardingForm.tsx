@@ -151,13 +151,13 @@ function OnboardingCallEmbed() {
       <div
         ref={containerRef}
         aria-label="Book an onboarding call"
-        className="min-h-[620px] overflow-hidden rounded-lg border border-[#e2e2de] bg-white shadow-[0_1px_2px_rgba(17,17,17,0.04)]"
+        className="min-h-[620px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_1px_2px_rgba(17,17,17,0.04)]"
       />
       <a
         href={onboardingCallUrl}
         target="_blank"
         rel="noreferrer"
-        className="mx-auto flex h-7 w-fit items-center rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-[#eeeeeb] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="mx-auto flex h-7 w-fit items-center rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         Open scheduler in a new tab
       </a>
@@ -172,7 +172,7 @@ function SubmitButton({ label = "Start using opencompany" }: { label?: string })
     <button
       type="submit"
       disabled={pending}
-      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
+      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
     >
       <span>{pending ? "Saving" : label}</span>
       <ArrowRight size={12} strokeWidth={2} />
@@ -195,8 +195,8 @@ function ChoiceButton({
       onClick={onClick}
       className={`flex min-h-8 w-full items-center rounded-md border px-3 py-1.5 text-left text-[12.5px] font-medium tracking-[-0.005em] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
         selected
-          ? "border-[#d8d8d3] bg-[#e9e9e5] text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
-          : "border-[#e4e4e0] bg-white text-ink/85 hover:bg-[#f3f3f0]"
+          ? "border-border-strong bg-surface-active text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
+          : "border-border bg-surface text-ink/85 hover:bg-surface-hover"
       }`}
     >
       {children}
@@ -338,7 +338,7 @@ export default function OnboardingForm({
                   aria-label={`Go to step ${index + 1}`}
                   onClick={() => setStep(index)}
                   className={`h-1 rounded-full transition-all ${
-                    index === step ? "w-5 bg-ink" : "w-1 bg-[#d2d2cd]"
+                    index === step ? "w-5 bg-ink" : "w-1 bg-border-strong"
                   }`}
                 />
               ))}
@@ -372,7 +372,7 @@ export default function OnboardingForm({
                       value={values.heardFromDetail}
                       onChange={(event) => updateValue("heardFromDetail", event.target.value)}
                       placeholder="Where did you hear about us?"
-                      className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                      className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
                     />
                   </label>
                 ) : null}
@@ -388,7 +388,7 @@ export default function OnboardingForm({
                     value={values.role}
                     onChange={(event) => updateValue("role", event.target.value)}
                     placeholder="Founder, PM, engineer..."
-                    className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                    className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
                   />
                 </label>
 
@@ -410,7 +410,7 @@ export default function OnboardingForm({
                 <label className="block">
                   <span className="flex items-center gap-1.5 text-[12px] font-medium text-ink-subtle">
                     <span>Company URL</span>
-                    <span className="rounded-[3px] bg-[#ececea] px-1 py-px text-[9px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                    <span className="rounded-[3px] bg-surface-subtle px-1 py-px text-[9px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
                       Optional
                     </span>
                   </span>
@@ -419,7 +419,7 @@ export default function OnboardingForm({
                     value={values.companyUrl}
                     onChange={(event) => updateValue("companyUrl", event.target.value)}
                     placeholder="Optional"
-                    className="mt-2 h-8 w-full rounded-md border border-[#e2e2de] bg-white px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                    className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
                   />
                 </label>
               </div>
@@ -469,7 +469,7 @@ export default function OnboardingForm({
               <button
                 type="button"
                 onClick={goForward}
-                className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-[#111] px-3 text-[12px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+                className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
               >
                 <span>Continue</span>
                 <ArrowRight size={12} strokeWidth={2} />
@@ -483,7 +483,7 @@ export default function OnboardingForm({
                   setError("");
                   setStep((current) => Math.max(current - 1, 0));
                 }}
-                className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-[#eeeeeb] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <ArrowLeft size={12} strokeWidth={2} />
                 <span>Back</span>

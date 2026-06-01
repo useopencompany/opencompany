@@ -83,7 +83,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         event.preventDefault();
         submit();
       }}
-      className="group/prompt rounded-xl border border-[#e4e4e0] bg-white px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]"
+      className="group/prompt rounded-xl border border-border bg-surface px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]"
     >
       <textarea
         ref={textareaRef}
@@ -126,7 +126,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         >
           <SelectTrigger
             aria-label="Agent"
-            className="h-7 w-auto max-w-[240px] border-transparent bg-transparent py-1 pl-1.5 pr-2 text-[12.5px] text-ink/90 shadow-none hover:bg-[#f3f3f0] focus:ring-1 focus:ring-ink/20 data-[placeholder]:text-ink-subtle"
+            className="h-7 w-auto max-w-[240px] border-transparent bg-transparent py-1 pl-1.5 pr-2 text-[12.5px] text-ink/90 shadow-none hover:bg-surface-hover focus:ring-1 focus:ring-ink/20 data-[placeholder]:text-ink-subtle"
           >
             <SelectValue placeholder="No agents available" />
           </SelectTrigger>
@@ -138,11 +138,11 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             ))}
           </SelectContent>
         </Select>
-        {error ? <p className="ml-3 text-[12px] text-[#b42318]">{error}</p> : null}
+        {error ? <p className="ml-3 text-[12px] text-danger">{error}</p> : null}
         <button
           type="submit"
           disabled={!canSubmit}
-          className="ml-auto flex h-9 w-9 items-center justify-center rounded-full bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+          className="ml-auto flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
           aria-label={isPending ? "Starting session…" : "Start session"}
         >
           {isPending ? (
@@ -154,13 +154,13 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       </div>
       <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/prompt:opacity-100">
         <span>
-          <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
             ↵
           </kbd>{" "}
           start
         </span>
         <span>
-          <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
             ⇧↵
           </kbd>{" "}
           new line

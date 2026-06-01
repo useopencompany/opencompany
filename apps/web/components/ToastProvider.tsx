@@ -85,15 +85,15 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
 
   return (
     <div
-      className={`pointer-events-auto rounded-md border bg-white px-3.5 py-3 shadow-[0_12px_32px_rgba(15,15,15,0.12)] ${
-        toast.tone === "error" ? "border-[#f0d2d2]" : "border-[#e4e4e0]"
+      className={`pointer-events-auto rounded-md border bg-surface px-3.5 py-3 shadow-[0_12px_32px_rgba(15,15,15,0.12)] ${
+        toast.tone === "error" ? "border-danger-border" : "border-border"
       }`}
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <p
             className={`text-[13px] font-medium ${
-              toast.tone === "error" ? "text-[#9f1d1d]" : "text-ink"
+              toast.tone === "error" ? "text-danger" : "text-ink"
             }`}
           >
             {toast.title}
@@ -106,7 +106,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
           type="button"
           aria-label="Dismiss notification"
           onClick={() => onDismiss(toast.id)}
-          className="shrink-0 rounded px-1 text-[15px] leading-4 text-ink-subtle hover:bg-[#f1f1ee] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="shrink-0 rounded px-1 text-[15px] leading-4 text-ink-subtle hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <X size={12} strokeWidth={2} />
         </button>

@@ -57,7 +57,7 @@ function TreeNode({ node, activeUrl }: { node: Node; activeUrl: string }) {
     <Link
       href={node.url}
       className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active ? "bg-[#e3e3df] text-ink" : "text-ink/90 hover:bg-[#ebebe8] hover:text-ink"
+        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
       <FileText
@@ -72,7 +72,7 @@ function TreeNode({ node, activeUrl }: { node: Node; activeUrl: string }) {
 
 function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
   return (
-    <aside className="relative hidden h-screen w-[232px] shrink-0 overflow-hidden bg-sidebar after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-[#e6e6e3] md:block">
+    <aside className="relative hidden h-screen w-[232px] shrink-0 overflow-hidden bg-sidebar after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border md:block">
       <div className="flex h-full w-[232px] flex-col">
         <div className="flex items-center gap-2 px-3 pb-3 pt-3">
           <Link
@@ -80,7 +80,7 @@ function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
             prefetch={false}
             aria-label="Back to app"
             title="Back to app"
-            className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </Link>
@@ -103,11 +103,11 @@ function DocsSidebar({ tree, activeUrl }: { tree: Root; activeUrl: string }) {
 
 function TopBar({ title }: { title: string }) {
   return (
-    <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-[#eaeae6] bg-canvas/85 px-5 backdrop-blur-md">
+    <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
       <Link
         href="/"
         prefetch={false}
-        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink md:hidden"
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-muted transition-colors hover:bg-surface-subtle hover:text-ink md:hidden"
       >
         <ArrowLeft size={13} strokeWidth={1.75} />
         App
@@ -125,7 +125,7 @@ function TopBar({ title }: { title: string }) {
         <Link
           href="/changelog"
           prefetch={false}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors hover:bg-surface-subtle hover:text-ink"
         >
           Changelog
           <ExternalLink size={11} strokeWidth={1.9} />
@@ -141,7 +141,7 @@ function TableOfContents({ toc }: { toc: TOCItemType[] }) {
   if (items.length === 0) return null;
 
   return (
-    <aside className="hidden h-full w-[232px] shrink-0 overflow-y-auto border-l border-[#e6e6e3] bg-canvas px-4 py-4 xl:block">
+    <aside className="hidden h-full w-[232px] shrink-0 overflow-y-auto border-l border-border bg-canvas px-4 py-4 xl:block">
       <div className="sticky top-4">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -154,7 +154,7 @@ function TableOfContents({ toc }: { toc: TOCItemType[] }) {
             <a
               key={item.url}
               href={item.url}
-              className={`block truncate rounded-md py-1.5 pr-2 text-[12.5px] text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink ${
+              className={`block truncate rounded-md py-1.5 pr-2 text-[12.5px] text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink ${
                 item.depth === 3 ? "pl-5" : "pl-2"
               }`}
             >
@@ -176,7 +176,7 @@ export default function DocsView({ title, description, url, tree, toc, body: MDX
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-y-auto">
             <article className="mx-auto w-full max-w-[760px] px-6 pb-16 pt-9 sm:px-10">
-              <header className="border-b border-[#ececea] pb-7">
+              <header className="border-b border-border-subtle pb-7">
                 <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
                   {title}
                 </h1>
