@@ -293,12 +293,20 @@ function AgentDetailContent({
 
   const flush = () => {
     const patch = { ...pendingRef.current };
+    // Drop an empty/whitespace-only name from the server patch so a blank
+    // input never overwrites the stored name with "Untitled agent". We still
+    // clear it from pendingRef below so the useEffect doesn't clobber the
+    // in-progress typed value.
+    const serverPatch = { ...patch };
+    if (typeof serverPatch.name === "string" && !serverPatch.name.trim()) {
+      delete serverPatch.name;
+    }
     if (
-      typeof patch.name !== "string" &&
-      patch.body === undefined &&
-      patch.content === undefined &&
-      !patch.model &&
-      !patch.config
+      serverPatch.name === undefined &&
+      serverPatch.body === undefined &&
+      serverPatch.content === undefined &&
+      serverPatch.model === undefined &&
+      serverPatch.config === undefined
     ) {
       return;
     }
@@ -326,7 +334,7 @@ function AgentDetailContent({
             : Promise.resolve(),
         ]);
 
-        const result = await updateAgent(agent.id, patch);
+        const result = await updateAgent(agent.id, serverPatch);
         if (!result?.agent) {
           throw new Error("Agent save did not return an updated agent.");
         }
