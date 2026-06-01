@@ -15,10 +15,10 @@ import {
   LogOut,
   MessageSquarePlus,
   PanelLeft,
+  Pin,
   ScrollText,
   Search,
   Settings,
-  Star,
   X,
   // Sparkles,
 } from "lucide-react";
@@ -174,8 +174,8 @@ function SessionHistoryItem({
       {onToggleStar && (
         <button
           type="button"
-          title={starred ? "Unstar session" : "Star session"}
-          aria-label={starred ? `Unstar ${session.title}` : `Star ${session.title}`}
+          title={starred ? "Unpin session" : "Pin session"}
+          aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
           aria-pressed={starred}
           onClick={(event) => {
             event.preventDefault();
@@ -184,11 +184,11 @@ function SessionHistoryItem({
           }}
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-opacity duration-150 hover:bg-[#dededa] focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
             starred
-              ? "text-amber-500 opacity-100"
+              ? "text-ink-subtle opacity-100"
               : "text-ink-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
           }`}
         >
-          <Star size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+          <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
         </button>
       )}
       <button
@@ -448,7 +448,7 @@ export default function Sidebar({
           );
           showError(
             result.error,
-            nextStarred ? "Could not star session" : "Could not unstar session",
+            nextStarred ? "Could not pin session" : "Could not unpin session",
           );
           return;
         }
@@ -595,14 +595,14 @@ export default function Sidebar({
                 {starredSessions.length > 0 && (
                   <div className="pb-3">
                     <div className="flex items-center gap-1 px-2 pb-1">
-                      <Star
+                      <Pin
                         size={9}
                         strokeWidth={2}
                         fill="currentColor"
-                        className="text-amber-500"
+                        className="text-ink-subtle"
                       />
                       <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-                        Starred
+                        Pinned
                       </span>
                     </div>
                     <div className="flex flex-col gap-px">
