@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
-  resolveRuntimeToolNamesForConfigTools,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
+  resolveRuntimeToolNamesForConfigTools,
 } from "./tools";
 
 describe("AGENT_TOOL_CATALOG", () => {
@@ -132,9 +132,9 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
 
   it("gates the gh tool on an attached repository, independent of amp", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("gh");
-    expect(
-      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
-    ).toContain("gh");
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] })).toContain(
+      "gh",
+    );
   });
 
   it("enables amp_coder only when amp is selected and a repository is attached", () => {
