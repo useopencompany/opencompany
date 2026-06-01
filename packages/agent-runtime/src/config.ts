@@ -112,10 +112,15 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
   if (repositories.length === 0) return [];
 
   const fullNames = repositories.map((repository) => repository.fullName).join(", ");
+  const ghRepoGuidance =
+    repositories.length === 1
+      ? "gh commands default to the attached repository even before it is cloned; use --repo only when you intentionally target a different attached repository."
+      : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
   return [
     `Attached GitHub repositories: ${fullNames}.`,
     "You have repository-scoped git and gh (GitHub CLI) access to these repositories from the shell and gh tools. Authentication is injected automatically; never handle tokens yourself.",
-    "The sandbox starts with an empty work/ directory. Clone a repository into work/ on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
+    ghRepoGuidance,
+    "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
     "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",
   ];
 }

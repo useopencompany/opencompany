@@ -1,4 +1,10 @@
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const execFileAsync = promisify(execFile);
 
 const e2bMocks = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -391,6 +397,34 @@ describe("runSandboxTool", () => {
     });
   });
 
+  it("returns shell nonzero exit output instead of throwing", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "partial output",
+            stderr: "fatal: not a git repository\n",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "shell",
+      args: { command: "git status" },
+    });
+
+    expect(result).toEqual({
+      stdout: "partial output",
+      stderr: "fatal: not a git repository\n",
+      exitCode: 1,
+    });
+  });
+
   it("runs gh commands from the work directory with injected auth and redaction", async () => {
     const onOutput = vi.fn();
     const sandbox = {
@@ -421,6 +455,34 @@ describe("runSandboxTool", () => {
     );
     expect(onOutput).toHaveBeenCalledWith("stderr", "using [redacted]\n");
     expect(result).toEqual({ stdout: "ok [redacted]", stderr: "", exitCode: 0 });
+  });
+
+  it("returns gh nonzero exit output instead of throwing", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "",
+            stderr: "failed to determine repository\n",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "pr list" },
+    });
+
+    expect(result).toEqual({
+      stdout: "",
+      stderr: "failed to determine repository\n",
+      exitCode: 1,
+    });
   });
 
   it("creates parent directories before writing nested files", async () => {
@@ -672,30 +734,113 @@ describe("runSandboxTool", () => {
     expect(result).toEqual({ path: "work", entries: ["work", "work/a.txt"] });
   });
 
-  it("returns the diff from the session work git repo including untracked files", async () => {
+  it("returns the scratch diff from the session work git repo including untracked files", async () => {
+    const workdir = await createTempWorkdir();
     const sandbox = {
       commands: {
-        run: vi.fn().mockResolvedValue({ stdout: "diff --git a/a.txt b/a.txt\n", stderr: "" }),
+        run: vi.fn(runLocalCommand),
       },
     };
+    await writeFile(`${workdir}/work/a.txt`, "hello\n");
 
     const result = await runSandboxTool({
       sandbox: sandbox as never,
-      workdir: "/home/user/workspace",
+      workdir,
       name: "git_diff",
       args: {},
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
-      [
-        "git -C '/home/user/workspace/work' diff --",
-        "git -C '/home/user/workspace/work' ls-files --others --exclude-standard | while IFS= read -r file; do git -C '/home/user/workspace/work' diff --no-index -- /dev/null \"$file\" || true; done",
-      ].join(" && "),
+      expect.stringContaining(`WORK='${workdir}/work'`),
       { timeoutMs: 60_000 },
     );
-    expect(result).toEqual({ diff: "diff --git a/a.txt b/a.txt\n", stderr: "" });
+    const diff = readDiffOutput(result);
+    expect(diff).toContain("--- work/ ---");
+    expect(diff).toContain("?? a.txt");
+    expect(diff).toContain("hello");
+  });
+
+  it("returns the root checkout diff when work itself is a cloned repo", async () => {
+    const workdir = await createTempWorkdir();
+    const sandbox = {
+      commands: {
+        run: vi.fn(runLocalCommand),
+      },
+    };
+    await execFileAsync("git", [
+      "-C",
+      `${workdir}/work`,
+      "config",
+      "user.email",
+      "test@example.com",
+    ]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "config", "user.name", "Test User"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "before\n");
+    await execFileAsync("git", ["-C", `${workdir}/work`, "add", "tracked.txt"]);
+    await execFileAsync("git", ["-C", `${workdir}/work`, "commit", "-m", "initial"]);
+    await writeFile(`${workdir}/work/tracked.txt`, "after\n");
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir,
+      name: "git_diff",
+      args: {},
+    });
+
+    const diff = readDiffOutput(result);
+    expect(diff).toContain("--- work/ ---");
+    expect(diff).toContain(" M tracked.txt");
+    expect(diff).toContain("-before");
+    expect(diff).toContain("+after");
+  });
+
+  it("returns immediate child repository diffs without reporting the child as scratch", async () => {
+    const workdir = await createTempWorkdir();
+    const sandbox = {
+      commands: {
+        run: vi.fn(runLocalCommand),
+      },
+    };
+    await mkdir(`${workdir}/work/app`);
+    await execFileAsync("git", ["-C", `${workdir}/work/app`, "init", "-q"]);
+    await writeFile(`${workdir}/work/app/new.txt`, "nested\n");
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir,
+      name: "git_diff",
+      args: {},
+    });
+
+    const diff = readDiffOutput(result);
+    expect(diff).not.toContain("--- work/ ---");
+    expect(diff).not.toContain("?? app/");
+    expect(diff).toContain("--- work/app/ ---");
+    expect(diff).toContain("?? new.txt");
+    expect(diff).toContain("nested");
   });
 });
+
+async function createTempWorkdir() {
+  const workdir = await mkdtemp(`${os.tmpdir()}/opencompany-sandbox-test-`);
+  await mkdir(`${workdir}/work`);
+  await execFileAsync("git", ["-C", `${workdir}/work`, "init", "-q"]);
+  return workdir;
+}
+
+function readDiffOutput(value: unknown) {
+  if (value && typeof value === "object" && "diff" in value && typeof value.diff === "string") {
+    return value.diff;
+  }
+  throw new Error("Expected git_diff output.");
+}
+
+async function runLocalCommand(command: string) {
+  const result = await execFileAsync("bash", ["-lc", command], {
+    maxBuffer: 1024 * 1024,
+  });
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: 0 };
+}
 
 function createWorkspaceSandbox(stdout: string[]) {
   return {

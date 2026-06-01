@@ -135,8 +135,12 @@ Core tools are always available to runner sessions:
 - `git_diff`
 - `tool_help`
 
-Sandbox sessions do not clone the managed workspace repository. `work/` is an empty git repository
-for session-local scratch changes, and configured Brain files are mounted separately under `brain/`.
+Sandbox sessions do not clone the managed workspace repository. `work/` is an empty scratch git
+repository for session-local changes, and configured Brain files are mounted separately under
+`brain/`. Connected GitHub repositories are lazy: `gh` metadata commands can run before clone, but
+code/file edits should clone the target repository into `work/<repo>` first. With one attached
+repository the runner sets `GH_REPO`; with multiple attached repositories, `gh` commands must pass
+`--repo owner/repo`.
 
 Hosted tools are enabled by agent configuration:
 
@@ -153,6 +157,9 @@ Internal delegation tools are enabled by agent configuration:
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
+
+AMP owns its coding checkout and may clone the selected connected repository directly into `work/`
+for that tool run.
 
 Experimental MCP tools are enabled by workspace setup plus agent configuration:
 
