@@ -33,6 +33,14 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; delta: string };
     }
   | {
+      type: "message.reasoning_started";
+      payload: { messageId: string };
+    }
+  | {
+      type: "message.reasoning_completed";
+      payload: { messageId: string };
+    }
+  | {
       type: "message.completed";
       payload: {
         messageId: string;
@@ -51,7 +59,13 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "tool.completed";
-      payload: { messageId: string; toolCallId: string; name: string; output: unknown };
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        name: string;
+        outputPreview?: string;
+        output?: unknown;
+      };
     }
   | {
       type: "tool.failed";
@@ -59,6 +73,7 @@ export type AgentRuntimeEvent =
         messageId: string;
         toolCallId: string;
         name: string;
+        outputPreview?: string;
         output?: unknown;
         error: { message: string; code: string; recoverable: boolean };
       };

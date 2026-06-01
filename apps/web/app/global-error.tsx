@@ -24,6 +24,8 @@ export default function GlobalError({
         <main
           style={{
             alignItems: "center",
+            background: "var(--color-canvas, #f7f7f5)",
+            color: "var(--color-ink, #111)",
             display: "flex",
             fontFamily: "system-ui, sans-serif",
             justifyContent: "center",
@@ -33,17 +35,17 @@ export default function GlobalError({
         >
           <div style={{ maxWidth: "360px", textAlign: "center" }}>
             <h1 style={{ fontSize: "20px", margin: 0 }}>Something went wrong</h1>
-            <p style={{ color: "#666", fontSize: "14px", lineHeight: 1.5 }}>
+            <p style={{ color: "var(--color-ink-muted, #666)", fontSize: "14px", lineHeight: 1.5 }}>
               Please try again. We have captured the error.
             </p>
             <button
               type="button"
               onClick={reset}
               style={{
-                background: "#111",
+                background: "var(--color-ink, #111)",
                 border: 0,
                 borderRadius: "6px",
-                color: "#fff",
+                color: "var(--color-canvas, #fff)",
                 cursor: "pointer",
                 fontSize: "14px",
                 padding: "10px 14px",

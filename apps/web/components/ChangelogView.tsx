@@ -33,45 +33,45 @@ type CategoryStyle = {
 const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   Added: {
     icon: Plus,
-    dot: "bg-[#16a34a]",
-    text: "text-[#15803d]",
-    pill: "bg-[#e9f5ec] text-[#15803d]",
-    border: "border-[#cfe7d6]",
+    dot: "bg-success",
+    text: "text-success",
+    pill: "bg-success-bg text-success",
+    border: "border-success-border",
   },
   Changed: {
     icon: RefreshCw,
-    dot: "bg-[#2563eb]",
-    text: "text-[#1d4ed8]",
-    pill: "bg-[#e8eefc] text-[#1d4ed8]",
-    border: "border-[#d3deef]",
+    dot: "bg-info",
+    text: "text-info",
+    pill: "bg-info-bg text-info",
+    border: "border-info-border",
   },
   Deprecated: {
     icon: CircleDashed,
-    dot: "bg-[#a16207]",
-    text: "text-[#854d0e]",
-    pill: "bg-[#fdf3df] text-[#854d0e]",
-    border: "border-[#ecd9aa]",
+    dot: "bg-warning",
+    text: "text-warning",
+    pill: "bg-warning-bg text-warning",
+    border: "border-warning-border",
   },
   Removed: {
     icon: Trash2,
-    dot: "bg-[#dc2626]",
-    text: "text-[#b91c1c]",
-    pill: "bg-[#fbeaea] text-[#b91c1c]",
-    border: "border-[#eecbcb]",
+    dot: "bg-danger",
+    text: "text-danger",
+    pill: "bg-danger-bg text-danger",
+    border: "border-danger-border",
   },
   Fixed: {
     icon: Wrench,
-    dot: "bg-[#7c3aed]",
-    text: "text-[#6d28d9]",
-    pill: "bg-[#efeafc] text-[#6d28d9]",
-    border: "border-[#d9cef0]",
+    dot: "bg-accent",
+    text: "text-accent",
+    pill: "bg-accent-bg text-accent",
+    border: "border-accent-border",
   },
   Security: {
     icon: ShieldAlert,
-    dot: "bg-[#b91c1c]",
-    text: "text-[#991b1b]",
-    pill: "bg-[#fbeaea] text-[#991b1b]",
-    border: "border-[#eecbcb]",
+    dot: "bg-danger",
+    text: "text-danger",
+    pill: "bg-danger-bg text-danger",
+    border: "border-danger-border",
   },
 };
 
@@ -79,8 +79,8 @@ const FALLBACK_STYLE: CategoryStyle = {
   icon: AlertTriangle,
   dot: "bg-ink-muted",
   text: "text-ink-muted",
-  pill: "bg-[#ececea] text-ink-muted",
-  border: "border-[#e4e4e0]",
+  pill: "bg-surface-subtle text-ink-muted",
+  border: "border-border",
 };
 
 function getCategoryStyle(category: string): CategoryStyle {
@@ -102,7 +102,7 @@ function InlineTokenView({ token }: { token: InlineToken }) {
   switch (token.kind) {
     case "code":
       return (
-        <code className="rounded bg-[#ececea] px-1 py-0.5 font-mono text-[12px] text-ink">
+        <code className="rounded bg-surface-subtle px-1 py-0.5 font-mono text-[12px] text-ink">
           {token.text}
         </code>
       );
@@ -112,7 +112,7 @@ function InlineTokenView({ token }: { token: InlineToken }) {
       return (
         <a
           href={token.href}
-          className="text-ink underline decoration-[#d2d2cd] underline-offset-2 transition-colors hover:decoration-ink/60"
+          className="text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/60"
         >
           {token.text}
         </a>
@@ -124,7 +124,7 @@ function InlineTokenView({ token }: { token: InlineToken }) {
 
 function ReleasePill({ release }: { release: Release }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-[#e6e6e3] bg-white px-2 py-1 text-[12px] font-medium tracking-[-0.005em] text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-[12px] font-medium tracking-[-0.005em] text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]">
       <Tag size={11} strokeWidth={1.9} className="text-ink-muted" />
       <span className="font-mono text-[12px]">{release.version}</span>
     </span>
@@ -175,7 +175,7 @@ function ReleaseCard({ release }: { release: Release }) {
         <ReleasePill release={release} />
         {release.date && <span className="text-[12.5px] text-ink-muted">{release.date}</span>}
         {release.yanked && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-[#fbeaea] px-1.5 py-0.5 text-[11px] font-medium text-[#b91c1c]">
+          <span className="inline-flex items-center gap-1 rounded-md bg-danger-bg px-1.5 py-0.5 text-[11px] font-medium text-danger">
             <AlertTriangle size={11} strokeWidth={2} />
             YANKED
           </span>
@@ -183,7 +183,7 @@ function ReleaseCard({ release }: { release: Release }) {
         {release.link && (
           <a
             href={release.link}
-            className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] text-ink-muted transition-colors hover:bg-surface-subtle hover:text-ink"
           >
             Compare
             <ArrowUpRight size={12} strokeWidth={1.9} />
@@ -201,7 +201,7 @@ function ReleaseCard({ release }: { release: Release }) {
         </div>
       )}
 
-      <div className="mt-4 rounded-lg border border-[#e6e6e3] bg-white p-4 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      <div className="mt-4 rounded-lg border border-border bg-surface p-4 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
         {release.sections.length === 0 ? (
           <p className="text-[13px] text-ink-subtle">No changes recorded.</p>
         ) : (
@@ -221,7 +221,7 @@ function IconButton({ label, children }: { label: string; children: React.ReactN
     <button
       aria-label={label}
       title={label}
-      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       {children}
     </button>
@@ -230,7 +230,7 @@ function IconButton({ label, children }: { label: string; children: React.ReactN
 
 function TopBar() {
   return (
-    <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-[#eaeae6] bg-canvas/85 px-5 backdrop-blur-md">
+    <div className="sticky top-0 z-10 flex h-12 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
       <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-muted">
         <span className="truncate font-medium text-ink">CHANGELOG.md</span>
       </div>
@@ -239,7 +239,7 @@ function TopBar() {
           href="https://keepachangelog.com/en/1.1.0/"
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors hover:bg-[#ececea] hover:text-ink"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors hover:bg-surface-subtle hover:text-ink"
         >
           Keep a Changelog 1.1.0
           <ExternalLink size={11} strokeWidth={1.9} />
@@ -257,7 +257,7 @@ function TopBar() {
 
 function OutlinePanel({ releases }: { releases: Release[] }) {
   return (
-    <aside className="hidden w-[232px] shrink-0 border-l border-[#e6e6e3] bg-canvas px-4 py-4 xl:block">
+    <aside className="hidden w-[232px] shrink-0 border-l border-border bg-canvas px-4 py-4 xl:block">
       <div className="sticky top-4">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
@@ -272,8 +272,8 @@ function OutlinePanel({ releases }: { releases: Release[] }) {
               href={`#release-${release.version.toLowerCase()}`}
               className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[12.5px] transition-colors duration-150 ${
                 index === 0
-                  ? "bg-[#ececea] font-medium text-ink"
-                  : "text-ink-muted hover:bg-[#ececea] hover:text-ink"
+                  ? "bg-surface-subtle font-medium text-ink"
+                  : "text-ink-muted hover:bg-surface-subtle hover:text-ink"
               }`}
             >
               <span className="truncate font-mono">{release.version}</span>
@@ -301,7 +301,7 @@ export default function ChangelogView({ changelog }: { changelog: Changelog }) {
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-y-auto">
             <article className="mx-auto w-full max-w-[760px] px-10 pb-16 pt-9">
-              <header className="border-b border-[#ececea] pb-7">
+              <header className="border-b border-border-subtle pb-7">
                 <h1 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink">
                   {changelog.title}
                 </h1>
@@ -316,7 +316,7 @@ export default function ChangelogView({ changelog }: { changelog: Changelog }) {
                 )}
                 {latest && (
                   <div className="mt-5 flex flex-wrap items-center gap-2 text-[12px] text-ink-muted">
-                    <span className="inline-flex items-center gap-1.5 rounded-md border border-[#e8e8e4] bg-white px-2 py-1 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface px-2 py-1 shadow-[0_1px_0_rgba(0,0,0,0.02)]">
                       <Tag size={12} strokeWidth={1.75} />
                       Latest {latest.version}
                     </span>

@@ -433,11 +433,42 @@ describe("submitAgentSessionMessage", () => {
       workspace_id: "wks_123",
       agent_id: "agt_123",
       session_id: "ses_123",
-      message_id: "msg_456",
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
+      message_id: "msg_456",
       is_initial_message: false,
       message_length: "Follow up".length,
     });
+  });
+
+  it("reports missing credits before session existence", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    // Session lookup runs concurrently with the balance check, so it must still resolve.
+    const limit = vi.fn().mockResolvedValue([]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    getDbMock.mockReturnValue({ select } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", "Hi");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to continue this session.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a message for a session the user cannot access", async () => {
+    const limit = vi.fn().mockResolvedValue([]);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    getDbMock.mockReturnValue({ select } as never);
+
+    const result = await submitAgentSessionMessage("ses_123", "Hi");
+
+    expect(result).toEqual({ ok: false, error: "Session not found." });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 });

@@ -272,6 +272,37 @@ describe("runner job execution", () => {
   });
 });
 
+describe("runner job worker wake", () => {
+  it("claims a newly enqueued job on notify() instead of waiting for the poll interval", async () => {
+    // A poll interval far longer than the test timeout proves the claim was driven by
+    // notify(), not by the fallback poll.
+    const store = createMemoryRunnerJobStore();
+    const runMessage = vi.fn(async () => undefined);
+    const worker = startRunnerJobWorker(env(), {
+      store,
+      handlers: handlers({ runMessage }),
+      pollIntervalMs: 60_000,
+    });
+
+    try {
+      // Let the worker run its initial claim pass (store is empty) and settle into its wait.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(runMessage).not.toHaveBeenCalled();
+
+      await enqueueRunnerJob(
+        { kind: "message", sessionId: "ses_123", messageId: "msg_123" },
+        store,
+      );
+      worker.notify();
+
+      await vi.waitFor(() => expect(runMessage).toHaveBeenCalledOnce());
+      expect(firstJob(store).status).toBe("completed");
+    } finally {
+      await worker.stop();
+    }
+  });
+});
+
 describe("runner job worker shutdown", () => {
   it("waits for active jobs to finish before stop resolves", async () => {
     const store = createMemoryRunnerJobStore([

@@ -10,7 +10,7 @@ import {
 
 function HeaderBar() {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-[#eaeae6] bg-canvas/85 px-8 py-3 backdrop-blur-md">
+    <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-subtle bg-canvas/85 px-8 py-3 backdrop-blur-md">
       <span className="text-[13px] font-medium tracking-[-0.005em] text-ink">
         Development environment setup
       </span>
@@ -25,7 +25,7 @@ function HeaderBar() {
 function UserMessage() {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[78%] rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[13px] leading-[1.55] tracking-[-0.005em] text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+      <div className="max-w-[78%] rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[13px] leading-[1.55] tracking-[-0.005em] text-ink shadow-[0_1px_0_rgba(0,0,0,0.02)]">
         Please set up the development environment for this codebase. Run the application(s) and
         demonstrate that the environment is working.
       </div>
@@ -35,7 +35,7 @@ function UserMessage() {
 
 function Code({ children }: { children: React.ReactNode }) {
   return (
-    <code className="rounded-[5px] border border-[#ececea] bg-[#f4f4f1] px-1.5 py-[1px] font-mono text-[11.5px] text-ink/90">
+    <code className="rounded-[5px] border border-border-subtle bg-surface-muted px-1.5 py-[1px] font-mono text-[11.5px] text-ink/90">
       {children}
     </code>
   );
@@ -49,19 +49,19 @@ function Screenshot({ tone }: { tone: "dark" | "light" | "neutral" }) {
         ? "linear-gradient(135deg, #ffffff 0%, #f1f3f7 60%, #e3e6ee 100%)"
         : "linear-gradient(135deg, #fafaf6 0%, #efeee7 60%, #e2e0d2 100%)";
   return (
-    <div className="relative aspect-[16/10] overflow-hidden rounded-md border border-[#e4e4e0] shadow-[0_1px_2px_rgba(15,15,15,0.04)]">
+    <div className="relative aspect-[16/10] overflow-hidden rounded-md border border-border shadow-[0_1px_2px_rgba(15,15,15,0.04)]">
       <div className="absolute inset-0" style={{ background: bg }} />
       {/* faux browser chrome */}
       <div className="absolute inset-x-0 top-0 flex items-center gap-1 px-2 py-1.5">
-        <span className="h-1.5 w-1.5 rounded-full bg-white/30" />
-        <span className="h-1.5 w-1.5 rounded-full bg-white/30" />
-        <span className="h-1.5 w-1.5 rounded-full bg-white/30" />
+        <span className="h-1.5 w-1.5 rounded-full bg-surface/30" />
+        <span className="h-1.5 w-1.5 rounded-full bg-surface/30" />
+        <span className="h-1.5 w-1.5 rounded-full bg-surface/30" />
       </div>
       {/* faux content shimmer */}
       <div className="absolute inset-x-3 top-6 flex flex-col gap-1.5">
-        <div className="h-1.5 w-1/3 rounded bg-white/15" />
-        <div className="h-1.5 w-2/3 rounded bg-white/10" />
-        <div className="h-1.5 w-1/2 rounded bg-white/10" />
+        <div className="h-1.5 w-1/3 rounded bg-surface/15" />
+        <div className="h-1.5 w-2/3 rounded bg-surface/10" />
+        <div className="h-1.5 w-1/2 rounded bg-surface/10" />
       </div>
     </div>
   );
@@ -106,10 +106,10 @@ function CheckTable() {
     },
   ];
   return (
-    <div className="overflow-hidden rounded-lg border border-[#e6e6e3] bg-white">
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
       <table className="w-full border-collapse text-[12.5px]">
         <thead>
-          <tr className="border-b border-[#eeeeea] bg-[#fafaf7] text-left text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+          <tr className="border-b border-border-subtle bg-surface-muted text-left text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
             <th className="px-3 py-2 font-medium">Check</th>
             <th className="px-3 py-2 font-medium">Command</th>
             <th className="px-3 py-2 font-medium">Result</th>
@@ -117,7 +117,7 @@ function CheckTable() {
         </thead>
         <tbody>
           {rows.map((row, i) => (
-            <tr key={i} className="border-b border-[#f0f0ec] last:border-b-0 align-top">
+            <tr key={i} className="border-b border-border-subtle last:border-b-0 align-top">
               <td className="px-3 py-2.5 text-ink/90">{row.check}</td>
               <td className="px-3 py-2.5">{row.command}</td>
               <td className="px-3 py-2.5 text-ink/85">{row.result}</td>
@@ -132,7 +132,7 @@ function CheckTable() {
 function TestRow({ children }: { children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-2">
-      <CheckCircle2 size={14} strokeWidth={1.75} className="mt-[2px] shrink-0 text-[#16a34a]" />
+      <CheckCircle2 size={14} strokeWidth={1.75} className="mt-[2px] shrink-0 text-success" />
       <span className="text-[13px] leading-[1.55] tracking-[-0.005em] text-ink/90">{children}</span>
     </li>
   );
@@ -147,7 +147,7 @@ function FilesChanged() {
   return (
     <details
       open
-      className="group rounded-lg border border-[#e6e6e3] bg-white shadow-[0_1px_0_rgba(0,0,0,0.02)]"
+      className="group rounded-lg border border-border bg-surface shadow-[0_1px_0_rgba(0,0,0,0.02)]"
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] text-ink/90">
         <ChevronDown
@@ -157,19 +157,19 @@ function FilesChanged() {
         />
         <span className="font-medium">3 Files Changed</span>
       </summary>
-      <div className="border-t border-[#f0f0ec]">
+      <div className="border-t border-border-subtle">
         {files.map((f, i) => (
           <div
             key={f.name}
             className={`flex items-center gap-2 px-3 py-2 text-[12.5px] ${
-              i !== files.length - 1 ? "border-b border-[#f4f4f0]" : ""
+              i !== files.length - 1 ? "border-b border-border-subtle" : ""
             }`}
           >
             <FileText size={12} strokeWidth={1.75} className="text-ink-muted" />
             <span className="text-ink/90">{f.name}</span>
             <span className="ml-auto flex items-center gap-2 font-medium tabular-nums">
-              {f.removed > 0 && <span className="text-[#dc2626]">−{f.removed}</span>}
-              <span className="text-[#16a34a]">+{f.added.toLocaleString()}</span>
+              {f.removed > 0 && <span className="text-danger">−{f.removed}</span>}
+              <span className="text-success">+{f.added.toLocaleString()}</span>
             </span>
           </div>
         ))}
@@ -182,28 +182,28 @@ function FollowUp() {
   return (
     <div className="mt-6 space-y-2">
       <div className="flex items-center">
-        <button className="inline-flex items-center gap-1.5 rounded-full border border-[#e4e4e0] bg-white px-3 py-1 text-[12px] text-ink/90 transition-colors duration-150 hover:bg-[#fafaf8]">
+        <button className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1 text-[12px] text-ink/90 transition-colors duration-150 hover:bg-surface-muted">
           Save environment
         </button>
       </div>
-      <div className="rounded-xl border border-[#e4e4e0] bg-white px-3.5 pt-2.5 pb-2 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow duration-200 focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]">
+      <div className="rounded-xl border border-border bg-surface px-3.5 pt-2.5 pb-2 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow duration-200 focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]">
         <input
           type="text"
           placeholder="Add follow up for setup agent"
           className="w-full bg-transparent text-[13px] tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
         />
         <div className="mt-2 flex items-center gap-1.5">
-          <button className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink/85 transition-colors duration-150 hover:bg-[#f3f3f0]">
+          <button className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink/85 transition-colors duration-150 hover:bg-surface-hover">
             <span>GPT-5.5 High</span>
             <ChevronDown size={12} strokeWidth={1.75} className="text-ink-muted" />
           </button>
           <div className="flex items-center">
-            <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full border border-white bg-[#0e1320] text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)]">
+            <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full border border-surface bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.12)]">
               <Plus size={11} strokeWidth={2.25} />
             </span>
             <span
               aria-hidden
-              className="-ml-1.5 h-5 w-5 rounded-full border border-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+              className="-ml-1.5 h-5 w-5 rounded-full border border-surface shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
               style={{
                 background:
                   "radial-gradient(circle at 35% 30%, #ffffff 0%, #d0d0cf 30%, #1a1a1a 80%)",
@@ -211,10 +211,10 @@ function FollowUp() {
             />
           </div>
           <div className="ml-auto flex items-center gap-1">
-            <button className="rounded-md p-1.5 text-ink-muted transition-colors duration-150 hover:bg-[#f3f3f0] hover:text-ink">
+            <button className="rounded-md p-1.5 text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink">
               <ImageIcon size={14} strokeWidth={1.75} />
             </button>
-            <button className="flex h-7 w-7 items-center justify-center rounded-full bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black">
+            <button className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85">
               <ArrowUp size={13} strokeWidth={2.25} />
             </button>
           </div>

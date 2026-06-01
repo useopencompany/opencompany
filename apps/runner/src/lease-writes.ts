@@ -1,15 +1,266 @@
-import { getDb } from "@opencompany/db/client";
-import { agentSessionMessages, agentSessions } from "@opencompany/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
+import type { AgentRuntimeEvent } from "@opencompany/agent-runtime";
+import { agentSessions } from "@opencompany/db/schema";
+import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
+import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
 import {
   claimRunLease as claimDbRunLease,
   finishRunLease as finishDbRunLease,
 } from "./run-control";
+import { rowsFromExecute } from "./sql-exec";
 
 // Session-execution lease helpers. See `jobs.ts` for the separate job-delivery lease;
 // this layer owns in-flight model/tool execution and gates every persisted write so
 // that a stale runner cannot stomp on a session that was reclaimed elsewhere.
+//
+// The guard is *enforced by the database*, not advisory: every lease-guarded write is
+// a single conditional statement that only writes while the lease row is still ours
+// (`WHERE EXISTS (lease current)`). There is no separate check-then-write window for a
+// concurrent reclaim to slip through, and each guarded write costs one round-trip
+// instead of two. Zero rows affected means the lease was lost. The DB writes live
+// behind {@link LeaseWriteStore} so the behaviour is testable without a database; the
+// durable event append carries the same guard inside `appendRuntimeEvent`.
+
+export type LeaseIdentity = {
+  sessionId: string;
+  leaseId: string;
+  leaseOwner: string;
+};
+
+type AssistantMessageInsert = {
+  id: string;
+  sessionId: string;
+  internal: boolean;
+  responseToMessageId: string | null;
+};
+
+/**
+ * Outcome of a lease-guarded assistant-message insert. `null` means the lease was
+ * lost (no write). `"conflict"` means the row already existed (idempotent re-entry,
+ * not a lease problem) — the caller decides whether that counts as success.
+ */
+export type AssistantInsertOutcome = "inserted" | "conflict";
+
+type ExistingMessage = { id: string; status: string };
+
+type CompleteAssistantMessageInput = {
+  sessionId: string;
+  assistantMessageId: string;
+  content: string;
+  modelMessage: Record<string, unknown>;
+};
+
+type ToolMessageInsert = {
+  id: string;
+  sessionId: string;
+  internal: boolean;
+  content: string;
+  modelMessage: Record<string, unknown>;
+  toolName: string;
+  toolCallId: string;
+};
+
+export type ModelUsageInsert = {
+  sessionId: string;
+  messageId: string;
+  runLeaseId: string;
+  stepIndex: number;
+  modelProvider: string;
+  modelName: string;
+  responseId: string | null;
+  responseModelId: string | null;
+  finishReason: string;
+  rawFinishReason: string | null;
+  inputTokens: number;
+  inputNoCacheTokens: number;
+  inputCacheReadTokens: number;
+  inputCacheWriteTokens: number;
+  outputTokens: number;
+  outputTextTokens: number;
+  outputReasoningTokens: number;
+  totalTokens: number;
+  rawUsage: Record<string, unknown>;
+  providerCreatedAt: Date | null;
+};
+
+export type ToolUsageInsert = {
+  sessionId: string;
+  messageId: string;
+  runLeaseId: string;
+  toolCallId: string;
+  toolName: string;
+  provider: string;
+  operation: string;
+  providerRequestId: string | null;
+  costUsdMicros: number;
+  rawUsage: Record<string, unknown>;
+};
+
+/**
+ * The atomic, lease-guarded durable writes. Each method writes only while the lease
+ * is still current and reports "no write" so the caller can map it to lease loss.
+ */
+export type LeaseWriteStore = {
+  insertAssistantMessage(
+    input: AssistantMessageInsert,
+    lease: LeaseIdentity,
+  ): Promise<AssistantInsertOutcome | null>;
+  findResponseMessage(
+    sessionId: string,
+    responseToMessageId: string,
+  ): Promise<ExistingMessage | null>;
+  completeAssistantMessage(
+    input: CompleteAssistantMessageInput,
+    lease: LeaseIdentity,
+  ): Promise<boolean>;
+  insertToolMessage(input: ToolMessageInsert, lease: LeaseIdentity): Promise<boolean>;
+  insertModelUsage(input: ModelUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
+  insertToolUsage(input: ToolUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
+};
+
+// `EXISTS (lease current)` predicate shared by every guarded statement. The lease row
+// is matched by id + lease id + owner and must not be archived. Because it lives in
+// the same statement as the write, the check and the write commit atomically.
+function leaseIsCurrent(lease: LeaseIdentity): SQL {
+  return sql`EXISTS (
+    SELECT 1
+    FROM agent_sessions s
+    WHERE s.id = ${lease.sessionId}
+      AND s.run_lease_id = ${lease.leaseId}
+      AND s.run_lease_owner = ${lease.leaseOwner}
+      AND s.archived_at IS NULL
+  )`;
+}
+
+export function createDbLeaseWriteStore(): LeaseWriteStore {
+  return {
+    async insertAssistantMessage(input, lease) {
+      // Regular assistant responses are idempotent by response_to_message_id; internal
+      // messages have no response target, so they carry no conflict clause. The CTE
+      // reports the lease state and the insert result together so the caller can tell
+      // "lease lost" (no row at all) apart from "row already existed" (idempotent).
+      const conflictClause = input.responseToMessageId
+        ? sql`ON CONFLICT (response_to_message_id) DO NOTHING`
+        : sql``;
+      const result = await getDb().execute(sql`
+        WITH lease AS (
+          SELECT 1
+          FROM agent_sessions s
+          WHERE s.id = ${lease.sessionId}
+            AND s.run_lease_id = ${lease.leaseId}
+            AND s.run_lease_owner = ${lease.leaseOwner}
+            AND s.archived_at IS NULL
+        ),
+        ins AS (
+          INSERT INTO agent_session_messages (id, session_id, role, status, internal, response_to_message_id)
+          SELECT ${input.id}, ${input.sessionId}, 'assistant', 'running', ${input.internal}, ${input.responseToMessageId}
+          WHERE EXISTS (SELECT 1 FROM lease)
+          ${conflictClause}
+          RETURNING id
+        )
+        SELECT
+          EXISTS (SELECT 1 FROM lease) AS lease_current,
+          (SELECT id FROM ins) AS inserted_id
+      `);
+      const row = rowsFromExecute<{ lease_current: boolean; inserted_id: string | null }>(
+        result,
+      )[0];
+      if (!row || !row.lease_current) return null;
+      return row.inserted_id ? "inserted" : "conflict";
+    },
+
+    async findResponseMessage(sessionId, responseToMessageId) {
+      const result = await getDb().execute(sql`
+        SELECT id, status
+        FROM agent_session_messages
+        WHERE session_id = ${sessionId}
+          AND response_to_message_id = ${responseToMessageId}
+        LIMIT 1
+      `);
+      return rowsFromExecute<ExistingMessage>(result)[0] ?? null;
+    },
+
+    async completeAssistantMessage(input, lease) {
+      const result = await getDb().execute(sql`
+        UPDATE agent_session_messages AS m
+        SET status = 'completed',
+            content = ${input.content},
+            model_message = ${JSON.stringify(input.modelMessage)}::jsonb,
+            completed_at = ${new Date()}
+        WHERE m.id = ${input.assistantMessageId}
+          AND m.session_id = ${input.sessionId}
+          AND ${leaseIsCurrent(lease)}
+        RETURNING m.id
+      `);
+      return rowsFromExecute(result).length > 0;
+    },
+
+    async insertToolMessage(input, lease) {
+      const result = await getDb().execute(sql`
+        INSERT INTO agent_session_messages (
+          id, session_id, role, status, internal, content, model_message, tool_name, tool_call_id, completed_at
+        )
+        SELECT
+          ${input.id}, ${input.sessionId}, 'tool', 'completed', ${input.internal}, ${input.content},
+          ${JSON.stringify(input.modelMessage)}::jsonb, ${input.toolName}, ${input.toolCallId}, ${new Date()}
+        WHERE ${leaseIsCurrent(lease)}
+        RETURNING id
+      `);
+      return rowsFromExecute(result).length > 0;
+    },
+
+    async insertModelUsage(input, lease) {
+      const result = await getDb().execute(sql`
+        INSERT INTO agent_session_usage (
+          session_id, message_id, run_lease_id, step_index, model_provider, model_name,
+          response_id, response_model_id, finish_reason, raw_finish_reason,
+          input_tokens, input_no_cache_tokens, input_cache_read_tokens, input_cache_write_tokens,
+          output_tokens, output_text_tokens, output_reasoning_tokens, total_tokens,
+          raw_usage, provider_created_at
+        )
+        SELECT
+          ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.stepIndex},
+          ${input.modelProvider}, ${input.modelName}, ${input.responseId}, ${input.responseModelId},
+          ${input.finishReason}, ${input.rawFinishReason},
+          ${input.inputTokens}, ${input.inputNoCacheTokens}, ${input.inputCacheReadTokens}, ${input.inputCacheWriteTokens},
+          ${input.outputTokens}, ${input.outputTextTokens}, ${input.outputReasoningTokens}, ${input.totalTokens},
+          ${JSON.stringify(input.rawUsage)}::jsonb, ${input.providerCreatedAt}
+        WHERE ${leaseIsCurrent(lease)}
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result)[0] ?? null;
+    },
+
+    async insertToolUsage(input, lease) {
+      const result = await getDb().execute(sql`
+        INSERT INTO agent_session_tool_usage (
+          session_id, message_id, run_lease_id, tool_call_id, tool_name,
+          provider, operation, provider_request_id, cost_usd_micros, raw_usage
+        )
+        SELECT
+          ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.toolCallId}, ${input.toolName},
+          ${input.provider}, ${input.operation}, ${input.providerRequestId}, ${input.costUsdMicros},
+          ${JSON.stringify(input.rawUsage)}::jsonb
+        WHERE ${leaseIsCurrent(lease)}
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result)[0] ?? null;
+    },
+  };
+}
+
+// Tests that drive whole runs (agent-loop) cannot thread a store through every helper,
+// so they install an in-memory store here. Production never sets this and always gets
+// the real DB-backed store.
+let leaseWriteStoreOverride: LeaseWriteStore | undefined;
+
+export function setLeaseWriteStoreForTests(store: LeaseWriteStore | undefined) {
+  leaseWriteStoreOverride = store;
+}
+
+export function defaultLeaseWriteStore(): LeaseWriteStore {
+  return leaseWriteStoreOverride ?? createDbLeaseWriteStore();
+}
 
 export async function acquireRunLease(input: {
   sessionId: string;
@@ -22,6 +273,13 @@ export async function acquireRunLease(input: {
   return claimDbRunLease(input);
 }
 
+/**
+ * Advisory lease probe. Use only to gate *external* side effects (a sandbox command,
+ * a git push, a GitHub API call) that cannot be folded into a single DB statement, so
+ * the best we can do is check first and accept the residual race. Durable DB writes
+ * must use the atomic {@link LeaseWriteStore} helpers below instead, where the lease
+ * guard is enforced in the same statement as the write.
+ */
 export async function isRunLeaseCurrent(sessionId: string, leaseId: string, leaseOwner: string) {
   const [session] = await getDb()
     .select({ id: agentSessions.id })
@@ -61,49 +319,46 @@ export async function updateSandboxForLease(
   return Boolean(updated);
 }
 
-export async function createAssistantMessageForLease(input: {
-  id: string;
-  sessionId: string;
-  responseToMessageId?: string;
-  leaseId: string;
-  leaseOwner: string;
-  internal?: boolean;
-}) {
-  await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
-
-  const insert = getDb()
-    .insert(agentSessionMessages)
-    .values({
+export async function createAssistantMessageForLease(
+  input: {
+    id: string;
+    sessionId: string;
+    responseToMessageId?: string;
+    leaseId: string;
+    leaseOwner: string;
+    internal?: boolean;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
+  const lease = {
+    sessionId: input.sessionId,
+    leaseId: input.leaseId,
+    leaseOwner: input.leaseOwner,
+  };
+  const outcome = await store.insertAssistantMessage(
+    {
       id: input.id,
       sessionId: input.sessionId,
-      role: "assistant",
-      status: "running",
       internal: input.internal ?? false,
       responseToMessageId: input.responseToMessageId ?? null,
-    });
-  // Regular assistant responses are idempotent by responseToMessageId. Internal
-  // after-session messages do not respond to a user message, so their duplicate
-  // guard lives at the after-session run/lease layer instead.
-  const [message] = await (input.responseToMessageId
-    ? insert
-        .onConflictDoNothing({ target: agentSessionMessages.responseToMessageId })
-        .returning({ id: agentSessionMessages.id })
-    : insert.returning({ id: agentSessionMessages.id }));
+    },
+    lease,
+  );
 
-  if (!message) {
+  // Lease lost between the caller's intent and this write — the guard rejected it.
+  // Throw (rather than return false) so callers don't mistake it for the idempotent
+  // "assistant already exists" skip below.
+  if (outcome === null) {
+    throw new StaleRunLeaseError();
+  }
+
+  if (outcome === "conflict") {
     if (!input.responseToMessageId) return false;
 
-    const [existing] = await getDb()
-      .select({ id: agentSessionMessages.id, status: agentSessionMessages.status })
-      .from(agentSessionMessages)
-      .where(
-        and(
-          eq(agentSessionMessages.sessionId, input.sessionId),
-          eq(agentSessionMessages.responseToMessageId, input.responseToMessageId),
-        ),
-      )
-      .limit(1);
-
+    // Idempotent re-entry: a row already responds to this user message. Treat a
+    // retry of the SAME in-flight assistant message as success; a different or
+    // already-completed response is a genuine duplicate to skip.
+    const existing = await store.findResponseMessage(input.sessionId, input.responseToMessageId);
     return Boolean(existing && existing.id === input.id && existing.status !== "completed");
   }
 
@@ -120,74 +375,75 @@ export async function createAssistantMessageForLease(input: {
   return true;
 }
 
-export async function completeAssistantMessageForLease(input: {
-  sessionId: string;
-  assistantMessageId: string;
-  leaseId: string;
-  leaseOwner: string;
-  content: string;
-  modelMessage: Record<string, unknown>;
-}) {
-  await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
-
-  const [updated] = await getDb()
-    .update(agentSessionMessages)
-    .set({
-      status: "completed",
+export async function completeAssistantMessageForLease(
+  input: {
+    sessionId: string;
+    assistantMessageId: string;
+    leaseId: string;
+    leaseOwner: string;
+    content: string;
+    modelMessage: Record<string, unknown>;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
+  const updated = await store.completeAssistantMessage(
+    {
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
       content: input.content,
       modelMessage: input.modelMessage,
-      completedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(agentSessionMessages.id, input.assistantMessageId),
-        eq(agentSessionMessages.sessionId, input.sessionId),
-      ),
-    )
-    .returning({ id: agentSessionMessages.id });
-
-  return Boolean(updated);
+    },
+    { sessionId: input.sessionId, leaseId: input.leaseId, leaseOwner: input.leaseOwner },
+  );
+  // No row updated means the lease was lost (or the message vanished); either way the
+  // guard rejected the write. Throw so the caller does not treat it as completed.
+  if (!updated) {
+    throw new StaleRunLeaseError();
+  }
+  return true;
 }
 
-export async function insertToolMessageForLease(input: {
-  id: string;
-  sessionId: string;
-  leaseId: string;
-  leaseOwner: string;
-  content: string;
-  modelMessage: Record<string, unknown>;
-  toolName: string;
-  toolCallId: string;
-  internal?: boolean;
-}) {
-  await requireLeaseWrite(isRunLeaseCurrent(input.sessionId, input.leaseId, input.leaseOwner));
-
-  const [message] = await getDb()
-    .insert(agentSessionMessages)
-    .values({
+export async function insertToolMessageForLease(
+  input: {
+    id: string;
+    sessionId: string;
+    leaseId: string;
+    leaseOwner: string;
+    content: string;
+    modelMessage: Record<string, unknown>;
+    toolName: string;
+    toolCallId: string;
+    internal?: boolean;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
+  return store.insertToolMessage(
+    {
       id: input.id,
       sessionId: input.sessionId,
-      role: "tool",
-      status: "completed",
       internal: input.internal ?? false,
       content: input.content,
       modelMessage: input.modelMessage,
       toolName: input.toolName,
       toolCallId: input.toolCallId,
-      completedAt: new Date(),
-    })
-    .returning({ id: agentSessionMessages.id });
-
-  return Boolean(message);
+    },
+    { sessionId: input.sessionId, leaseId: input.leaseId, leaseOwner: input.leaseOwner },
+  );
 }
 
 export async function appendRuntimeEventForLease(
-  input: Parameters<typeof appendRuntimeEvent>[1] & { leaseId: string; leaseOwner: string },
+  input: {
+    sessionId: string;
+    messageId?: string | null;
+    leaseId: string;
+    leaseOwner: string;
+  } & AgentRuntimeEvent,
 ) {
-  const { leaseId, leaseOwner, ...event } = input;
-  if (!(await isRunLeaseCurrent(input.sessionId, leaseId, leaseOwner))) return false;
-  await appendRuntimeEvent(getDb(), event);
-  return true;
+  // `appendRuntimeEvent` performs the lease-guarded insert in a single statement and
+  // returns null when the lease is no longer current (no row written, nothing
+  // published). Map that to a rejected lease write.
+  const event = await appendRuntimeEvent(getDb(), input);
+  return event !== null;
 }
 
 export async function releaseRunLease(
