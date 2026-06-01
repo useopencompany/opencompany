@@ -54,8 +54,10 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (state?.ok) {
       formRef.current?.reset();
+      const timer = setTimeout(onClose, 2500);
+      return () => clearTimeout(timer);
     }
-  }, [state]);
+  }, [state, onClose]);
 
   return (
     <form
