@@ -970,7 +970,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
       />
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[#eaeae6] bg-canvas/85 px-5 backdrop-blur-md">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
           {selected ? (
             <>
               <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[12.5px]">
@@ -986,8 +986,8 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
                   aria-expanded={fileMenuOpen}
                   aria-haspopup="menu"
                   onClick={() => setFileMenuOpen((open) => !open)}
-                  className={`flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-                    fileMenuOpen ? "bg-[#e3e3df] text-ink" : ""
+                  className={`flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+                    fileMenuOpen ? "bg-surface-active text-ink" : ""
                   }`}
                 >
                   <MoreHorizontal size={15} strokeWidth={1.75} />
@@ -1010,7 +1010,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-[860px] px-8 pb-16 pt-6">
               {error ? (
-                <div className="mb-4 rounded-md border border-[#f1b8ae] bg-[#fff7f5] px-3 py-2 text-[12px] text-[#9f2f21]">
+                <div className="mb-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12px] text-danger">
                   {error}
                 </div>
               ) : null}
@@ -1128,10 +1128,10 @@ function BrainSidebar({
   const canDropOnRoot = canDropItemOnFolder(draggingItem, "");
 
   return (
-    <aside className="flex h-full w-[292px] shrink-0 flex-col border-r border-[#e6e6e3] bg-[#f4f4f1]">
-      <div className="border-b border-[#e6e6e3] px-3 py-3">
+    <aside className="flex h-full w-[292px] shrink-0 flex-col border-r border-border bg-surface-muted">
+      <div className="border-b border-border px-3 py-3">
         <div className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.16)]">
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.16)]">
             <FileText size={14} strokeWidth={1.9} />
           </div>
           <div className="min-w-0 flex-1">
@@ -1143,7 +1143,7 @@ function BrainSidebar({
             aria-label="Create brain file"
             title="Create brain file"
             onClick={() => onCreateFile()}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <FilePlus2 size={15} strokeWidth={1.8} />
           </button>
@@ -1152,12 +1152,12 @@ function BrainSidebar({
             aria-label="Create brain folder"
             title="Create brain folder"
             onClick={() => onCreateFolder()}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <FolderPlus size={15} strokeWidth={1.8} />
           </button>
         </div>
-        <label className="mt-3 flex h-8 items-center gap-2 rounded-md border border-[#e4e4e0] bg-white px-2.5 text-[12.5px] text-ink-muted shadow-[0_1px_0_rgba(0,0,0,0.02)]">
+        <label className="mt-3 flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-[12.5px] text-ink-muted shadow-[0_1px_0_rgba(0,0,0,0.02)]">
           <Search size={13} strokeWidth={1.75} />
           <input
             value={query}
@@ -1179,7 +1179,7 @@ function BrainSidebar({
         onFocus={() => onTreeFocusChange(true)}
         onBlur={() => onTreeFocusChange(false)}
         className={`flex-1 overflow-y-auto px-2 py-3 transition-colors duration-150 focus:outline-none ${
-          dropTargetPath === "" ? "bg-[#ededeb]" : ""
+          dropTargetPath === "" ? "bg-surface-hover" : ""
         }`}
         onClick={(event) => {
           if (event.target === event.currentTarget) onSelectRoot();
@@ -1350,14 +1350,14 @@ function TreeItem({
 
   const rowClassName = `group flex w-full items-center gap-1.5 rounded-md py-[5px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
     dropActive
-      ? "bg-[#d9d9d4] text-ink ring-1 ring-[#b9b9b1]"
+      ? "bg-surface-active text-ink ring-1 ring-border-strong"
       : active
-        ? "bg-[#dfdfda] text-ink"
+        ? "bg-surface-active text-ink"
         : focused
-          ? "bg-[#ececea] text-ink ring-1 ring-[#cfcfc8]"
+          ? "bg-surface-subtle text-ink ring-1 ring-border-strong"
           : contextActive
-            ? "bg-[#ebebe7] text-ink"
-            : "text-ink/85 hover:bg-[#ececea] hover:text-ink"
+            ? "bg-surface-hover text-ink"
+            : "text-ink/85 hover:bg-surface-subtle hover:text-ink"
   }`;
   const paddingStyle = { paddingLeft: `${6 + depth * 14}px` };
 
@@ -1406,7 +1406,7 @@ function TreeItem({
               }
             }}
             onClick={(event) => event.stopPropagation()}
-            className="h-[21px] min-w-0 flex-1 rounded-[3px] border border-[#bdbdb7] bg-white px-1.5 font-mono text-[12px] text-ink outline-none"
+            className="h-[21px] min-w-0 flex-1 rounded-[3px] border border-border-strong bg-surface px-1.5 font-mono text-[12px] text-ink outline-none"
           />
         </div>
       ) : (
@@ -1573,7 +1573,7 @@ function MarkdownBrainEditor({
       {editor ? (
         <BubbleMenu
           editor={editor}
-          className="flex items-center gap-0.5 rounded-lg border border-black/[0.08] bg-[#fbfbfa] p-1 shadow-[0_12px_28px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
+          className="flex items-center gap-0.5 rounded-lg border border-black/[0.08] bg-surface-raised p-1 shadow-[0_12px_28px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
         >
           <FormatButton
             label="Heading 1"
@@ -1638,7 +1638,7 @@ function RawBrainEditor({
       value={content}
       onChange={(event) => onChange(event.target.value)}
       spellCheck={false}
-      className="min-h-[560px] w-full resize-y rounded-md border border-[#dfdfda] bg-white px-4 py-3 font-mono text-[12.5px] leading-6 text-ink outline-none focus:border-[#cfcfc8]"
+      className="min-h-[560px] w-full resize-y rounded-md border border-border bg-surface px-4 py-3 font-mono text-[12.5px] leading-6 text-ink outline-none focus:border-border-strong"
     />
   );
 }
@@ -1664,7 +1664,9 @@ function FormatButton({
       disabled={disabled}
       onClick={onClick}
       className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-35 ${
-        active ? "bg-[#e3e3df] text-ink" : "text-ink-muted hover:bg-[#ececea] hover:text-ink"
+        active
+          ? "bg-surface-active text-ink"
+          : "text-ink-muted hover:bg-surface-subtle hover:text-ink"
       }`}
     >
       {children}
@@ -1673,7 +1675,7 @@ function FormatButton({
 }
 
 function Divider() {
-  return <span className="mx-1 h-4 w-px bg-[#deded9]" />;
+  return <span className="mx-1 h-4 w-px bg-border" />;
 }
 
 function BrainFileMenu({
@@ -1690,7 +1692,7 @@ function BrainFileMenu({
   return (
     <div
       role="menu"
-      className="absolute right-0 top-full z-[200] mt-1 w-[244px] overflow-hidden rounded-md border border-[#d8d8d2] bg-[#fbfbfa] py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
+      className="absolute right-0 top-full z-[200] mt-1 w-[244px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
@@ -1718,7 +1720,7 @@ function BrainFileMenu({
           ) : null}
         </div>
         {file.githubSyncError ? (
-          <div className="mt-2 rounded-md border border-[#f1b8ae] bg-[#fff7f5] px-2 py-1.5 text-[11.5px] leading-4 text-[#9f2f21]">
+          <div className="mt-2 rounded-md border border-danger-border bg-danger-bg px-2 py-1.5 text-[11.5px] leading-4 text-danger">
             {file.githubSyncError}
           </div>
         ) : null}
@@ -1797,7 +1799,7 @@ function BrainContextMenu({
 
   return (
     <div
-      className="fixed z-[90] min-w-[152px] overflow-hidden rounded-md border border-[#d8d8d2] bg-[#fbfbfa] py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
+      className="fixed z-[90] min-w-[152px] overflow-hidden rounded-md border border-border-strong bg-surface-raised py-1 text-[12.5px] text-ink shadow-[0_10px_30px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
       style={{ left: state.x, top: state.y }}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
@@ -1874,8 +1876,8 @@ function ContextMenuButton({
         event.stopPropagation();
         onClick();
       }}
-      className={`flex h-7 w-full items-center gap-2 px-2.5 text-left transition-colors hover:bg-[#ececea] disabled:cursor-not-allowed disabled:opacity-45 ${
-        destructive ? "text-[#a33a2d]" : "text-ink"
+      className={`flex h-7 w-full items-center gap-2 px-2.5 text-left transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-45 ${
+        destructive ? "text-danger" : "text-ink"
       }`}
     >
       <span className="flex w-4 shrink-0 justify-center">{icon}</span>
@@ -1885,7 +1887,7 @@ function ContextMenuButton({
 }
 
 function ContextMenuDivider() {
-  return <div className="my-1 h-px bg-[#e5e5df]" />;
+  return <div className="my-1 h-px bg-surface-subtle" />;
 }
 
 function draggedBrainItem(event: React.DragEvent): BrainDragItem | null {
@@ -2043,20 +2045,20 @@ function syncStatus(status: string) {
     return {
       label: "Needs attention",
       icon: CircleAlert,
-      className: "border-[#f0c0b8] bg-[#fff5f3] text-[#a33929]",
+      className: "border-danger-border bg-danger-bg text-danger",
     };
   }
   if (status === "pending" || status === "syncing") {
     return {
       label: status === "syncing" ? "Committing" : "Queued",
       icon: Loader2,
-      className: "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]",
+      className: "border-warning-border bg-warning-bg text-warning",
     };
   }
   return {
     label: "Synced",
     icon: CheckCircle2,
-    className: "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]",
+    className: "border-success-border bg-success-bg text-success",
   };
 }
 

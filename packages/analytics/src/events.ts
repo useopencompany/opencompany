@@ -55,6 +55,16 @@ export type AnalyticsEventPropertiesByName = {
     is_initial_message: boolean;
     message_length: number;
   };
+  session_first_token: {
+    workspace_id: string;
+    agent_id: string;
+    session_id: string;
+    message_id: string;
+    model_provider: string;
+    model_name: string;
+    ttft_ms: number;
+    first_token_kind: "text" | "reasoning";
+  };
   session_turn_completed: {
     user_id: string;
     workspace_id: string;
@@ -158,6 +168,21 @@ export const analyticsEvents = {
       "model_name",
       "is_initial_message",
       "message_length",
+    ],
+  },
+  session_first_token: {
+    name: "session_first_token",
+    description:
+      "The first streamed token rendered in the browser for a user's message (felt time-to-first-token).",
+    safeProperties: [
+      "workspace_id",
+      "agent_id",
+      "session_id",
+      "message_id",
+      "model_provider",
+      "model_name",
+      "ttft_ms",
+      "first_token_kind",
     ],
   },
   session_turn_completed: {

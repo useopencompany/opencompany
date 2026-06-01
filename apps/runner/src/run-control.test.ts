@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  checkRunControl,
+  createRunControlGate,
+  heartbeatAndCheckRunControl,
   isStaleActiveRun,
-  maybeHeartbeatRunLease,
   RunAbortError,
   type RunControlStore,
+  RunLeaseLostError,
   type RunLeaseState,
   withRunControlChecks,
 } from "./run-control";
@@ -31,8 +32,7 @@ function state(overrides: Partial<RunLeaseState> = {}): RunLeaseState {
 function store(overrides: Partial<RunControlStore>): RunControlStore {
   return {
     claimLease: vi.fn(),
-    heartbeat: vi.fn(),
-    loadState: vi.fn(),
+    heartbeatAndLoadState: vi.fn().mockResolvedValue(state()),
     finishLease: vi.fn(),
     releaseLease: vi.fn(),
     ...overrides,
@@ -43,28 +43,39 @@ describe("run control", () => {
   it("aborts a local controller when DB state has an external abort request", async () => {
     const controller = new AbortController();
     const runStore = store({
-      loadState: vi.fn().mockResolvedValue(state({ abortRequestedAt: new Date() })),
+      heartbeatAndLoadState: vi.fn().mockResolvedValue(state({ abortRequestedAt: new Date() })),
     });
 
-    await expect(checkRunControl({ ...lease, controller }, runStore)).rejects.toThrow(
+    await expect(heartbeatAndCheckRunControl({ ...lease, controller }, runStore)).rejects.toThrow(
       RunAbortError,
     );
     expect(controller.signal.aborted).toBe(true);
   });
 
-  it("writes heartbeats with the current lease id and owner", async () => {
-    const heartbeat = vi.fn().mockResolvedValue(true);
-    const runStore = store({ heartbeat });
+  it("refreshes the lease heartbeat and reads run control in a single round-trip", async () => {
+    const controller = new AbortController();
+    const heartbeatAndLoadState = vi.fn().mockResolvedValue(state());
+    const runStore = store({ heartbeatAndLoadState });
 
-    await expect(
-      maybeHeartbeatRunLease({ ...lease, lastHeartbeatAt: 0 }, runStore),
-    ).resolves.toMatchObject({ leaseActive: true });
+    await heartbeatAndCheckRunControl({ ...lease, controller }, runStore);
 
-    expect(heartbeat).toHaveBeenCalledWith(
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
+    expect(heartbeatAndLoadState).toHaveBeenCalledWith(
       expect.objectContaining(lease),
       expect.any(Date),
       expect.any(Date),
     );
+    expect(controller.signal.aborted).toBe(false);
+  });
+
+  it("treats a missing row (reclaimed or archived lease) as lease loss", async () => {
+    const controller = new AbortController();
+    const runStore = store({ heartbeatAndLoadState: vi.fn().mockResolvedValue(null) });
+
+    await expect(heartbeatAndCheckRunControl({ ...lease, controller }, runStore)).rejects.toThrow(
+      RunLeaseLostError,
+    );
+    expect(controller.signal.aborted).toBe(true);
   });
 
   it("identifies stale active runs by old heartbeat timestamps", () => {
@@ -104,5 +115,91 @@ describe("run control", () => {
 
     expect(run).not.toHaveBeenCalled();
     expect(checkAbort).toHaveBeenCalledOnce();
+  });
+});
+
+describe("createRunControlGate", () => {
+  function gateHarness(overrides: Partial<RunControlStore> = {}) {
+    const controller = new AbortController();
+    const heartbeatAndLoadState = vi.fn().mockResolvedValue(state());
+    const runStore = store({ heartbeatAndLoadState, ...overrides });
+    let clock = 0;
+    const gate = createRunControlGate({
+      runLease: lease,
+      controller,
+      store: runStore,
+      intervalMs: 5_000,
+      now: () => clock,
+    });
+    return {
+      controller,
+      heartbeatAndLoadState,
+      gate,
+      advance: (ms: number) => {
+        clock += ms;
+      },
+    };
+  }
+
+  it("reads from the DB once per interval, not once per call", async () => {
+    const { gate, heartbeatAndLoadState, advance } = gateHarness();
+
+    // First call always reconciles, then 100 hot-path calls inside one interval.
+    for (let i = 0; i < 100; i += 1) {
+      await gate();
+      advance(40); // ~40ms apart, like fast text-delta tokens
+    }
+
+    // 100 calls spanning ~4s stay within the 5s window after the initial read.
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
+
+    // Crossing the interval boundary triggers exactly one more read.
+    advance(5_000);
+    await gate();
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(2);
+  });
+
+  it("forces a DB read at a boundary regardless of the throttle", async () => {
+    const { gate, heartbeatAndLoadState } = gateHarness();
+
+    await gate(); // initial reconcile
+    await gate({ force: true });
+    await gate({ force: true });
+
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(3);
+  });
+
+  it("detects a remote abort flipped mid-stream within the throttle interval", async () => {
+    const { gate, heartbeatAndLoadState, controller, advance } = gateHarness();
+
+    await gate(); // healthy initial read
+    expect(controller.signal.aborted).toBe(false);
+
+    // Abort requested on another path after the run started streaming.
+    heartbeatAndLoadState.mockResolvedValue(state({ abortRequestedAt: new Date() }));
+
+    // Still inside the interval: hot-path calls skip the DB and do not yet see it.
+    advance(2_000);
+    await expect(gate()).resolves.toBeUndefined();
+    expect(controller.signal.aborted).toBe(false);
+
+    // Once the interval elapses the next hot-path call reconciles and aborts.
+    advance(3_000);
+    await expect(gate()).rejects.toThrow(RunAbortError);
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("honors a local abort on the very next call without a DB read", async () => {
+    const { gate, heartbeatAndLoadState, controller } = gateHarness();
+
+    await gate(); // initial read
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
+
+    // Stop button / external signal aborts the local controller mid-interval.
+    controller.abort();
+
+    await expect(gate()).rejects.toThrow(RunAbortError);
+    // No throttle wait, no extra DB round-trip — local abort is instant.
+    expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
   });
 });

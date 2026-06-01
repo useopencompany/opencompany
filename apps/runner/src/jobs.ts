@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { getDb } from "@opencompany/db/client";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { runAfterSession, runMessage, startSession } from "./agent-loop";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { isNonRetryableRunnerError } from "./runner-errors";
 import { generateSessionTitleForMessage } from "./session-title";
+import { rowsFromExecute } from "./sql-exec";
 
 // Runner has two lease layers that work together:
 //   - This job lease (RUNNER_JOB_LEASE_TTL_MS) is the *delivery* lease. It guarantees one
@@ -346,6 +347,40 @@ export function startRunnerJobWorker(
   const active = new Set<Promise<void>>();
   let stopped = false;
 
+  // `notify()` lets the in-process server nudge the loop the moment a job is enqueued
+  // instead of waiting out the poll interval, which is the dominant source of dead time
+  // between accepting a message and claiming its run job. A wake that arrives while the
+  // loop is busy (not currently waiting) is coalesced into `pendingWake` so it is never
+  // lost. Polling still backstops retries, `nextRunAt`, and any future second instance.
+  let pendingWake = false;
+  let wake: (() => void) | null = null;
+
+  const notify = () => {
+    if (wake) {
+      wake();
+    } else {
+      pendingWake = true;
+    }
+  };
+
+  const waitForPollOrWake = () => {
+    if (pendingWake) {
+      pendingWake = false;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        wake = null;
+        resolve();
+      }, pollIntervalMs);
+      wake = () => {
+        clearTimeout(timer);
+        wake = null;
+        resolve();
+      };
+    });
+  };
+
   const runLoop = async () => {
     while (!stopped) {
       try {
@@ -380,14 +415,18 @@ export function startRunnerJobWorker(
           error,
         });
       }
-      await sleep(pollIntervalMs);
+      if (stopped) break;
+      await waitForPollOrWake();
     }
   };
 
   const loop = runLoop();
   return {
+    notify,
     stop: async () => {
       stopped = true;
+      // Break out of any in-progress wait so shutdown does not stall a poll interval.
+      notify();
       await loop;
       while (active.size > 0) {
         await Promise.allSettled(Array.from(active));
@@ -496,10 +535,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown runner job error.";
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 const runnerJobColumnsSql = sql`
   id,
   idempotency_key AS "idempotencyKey",
@@ -536,13 +571,4 @@ function runnerJobFromRow(row: RunnerJobRow): RunnerJob {
 
 function toDate(value: Date | string) {
   return value instanceof Date ? value : new Date(value);
-}
-
-function rowsFromExecute<T>(result: unknown): T[] {
-  if (Array.isArray(result)) return result as T[];
-  if (result && typeof result === "object" && "rows" in result) {
-    const rows = (result as { rows?: unknown }).rows;
-    if (Array.isArray(rows)) return rows as T[];
-  }
-  return [];
 }

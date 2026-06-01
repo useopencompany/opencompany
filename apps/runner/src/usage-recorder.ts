@@ -3,30 +3,40 @@ import {
   calculateModelUsageCost,
   recordWorkspaceUsageDebit,
 } from "@opencompany/billing";
-import { getDb } from "@opencompany/db/client";
-import { agentSessionToolUsage, agentSessionUsage } from "@opencompany/db/schema";
 import type { FinishReason, LanguageModelResponseMetadata, LanguageModelUsage } from "ai";
+import { getDb } from "./db";
 import type { HostedToolUsage } from "./hosted-tools";
-import { appendRuntimeEventForLease, isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
+import {
+  appendRuntimeEventForLease,
+  defaultLeaseWriteStore,
+  type LeaseWriteStore,
+  requireLeaseWrite,
+  StaleRunLeaseError,
+} from "./lease-writes";
 import { normalizeModelUsage } from "./usage";
 
-export async function recordStepUsage(input: {
-  sessionId: string;
-  assistantMessageId: string;
-  runLeaseId: string;
-  runLeaseOwner: string;
-  stepIndex: number;
-  modelProvider: string;
-  modelName: string;
-  response: LanguageModelResponseMetadata;
-  usage: LanguageModelUsage;
-  finishReason: FinishReason;
-  rawFinishReason: string | undefined;
-}) {
+export async function recordStepUsage(
+  input: {
+    sessionId: string;
+    assistantMessageId: string;
+    runLeaseId: string;
+    runLeaseOwner: string;
+    stepIndex: number;
+    modelProvider: string;
+    modelName: string;
+    response: LanguageModelResponseMetadata;
+    usage: LanguageModelUsage;
+    finishReason: FinishReason;
+    rawFinishReason: string | undefined;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
   const db = getDb();
-  await requireLeaseWrite(
-    isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
-  );
+  const lease = {
+    sessionId: input.sessionId,
+    leaseId: input.runLeaseId,
+    leaseOwner: input.runLeaseOwner,
+  };
 
   const usage = normalizeModelUsage(input.usage);
   const cost = calculateModelUsageCost({
@@ -59,17 +69,19 @@ export async function recordStepUsage(input: {
     ...(input.rawFinishReason ? { rawFinishReason: input.rawFinishReason } : {}),
   };
 
-  const [usageRow] = await db
-    .insert(agentSessionUsage)
-    .values({
+  // Lease-guarded atomic insert: the row only lands while the lease is still ours, so
+  // a stale runner cannot record usage (or bill against it below) for a session that
+  // was reclaimed elsewhere. No row means the lease was lost.
+  const usageRow = await store.insertModelUsage(
+    {
       sessionId: input.sessionId,
       messageId: input.assistantMessageId,
       runLeaseId: input.runLeaseId,
       stepIndex: input.stepIndex,
       modelProvider: input.modelProvider,
       modelName: input.modelName,
-      responseId: input.response.id,
-      responseModelId: input.response.modelId,
+      responseId: input.response.id ?? null,
+      responseModelId: input.response.modelId ?? null,
       finishReason: input.finishReason,
       rawFinishReason: input.rawFinishReason ?? null,
       inputTokens: usage.inputTokens,
@@ -81,11 +93,15 @@ export async function recordStepUsage(input: {
       outputReasoningTokens: usage.outputReasoningTokens,
       totalTokens: usage.totalTokens,
       rawUsage: usage.rawUsage,
-      providerCreatedAt: input.response.timestamp,
-    })
-    .returning({ id: agentSessionUsage.id });
+      providerCreatedAt: input.response.timestamp ?? null,
+    },
+    lease,
+  );
+  if (!usageRow) {
+    throw new StaleRunLeaseError();
+  }
 
-  if (usageRow && cost.billable) {
+  if (cost.billable) {
     await recordWorkspaceUsageDebit({
       db,
       sessionId: input.sessionId,
@@ -117,19 +133,24 @@ export async function recordStepUsage(input: {
   );
 }
 
-export async function recordToolUsage(input: {
-  sessionId: string;
-  assistantMessageId: string;
-  runLeaseId: string;
-  runLeaseOwner: string;
-  toolCallId: string;
-  toolName: string;
-  usage: HostedToolUsage;
-}) {
+export async function recordToolUsage(
+  input: {
+    sessionId: string;
+    assistantMessageId: string;
+    runLeaseId: string;
+    runLeaseOwner: string;
+    toolCallId: string;
+    toolName: string;
+    usage: HostedToolUsage;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
   const db = getDb();
-  await requireLeaseWrite(
-    isRunLeaseCurrent(input.sessionId, input.runLeaseId, input.runLeaseOwner),
-  );
+  const lease = {
+    sessionId: input.sessionId,
+    leaseId: input.runLeaseId,
+    leaseOwner: input.runLeaseOwner,
+  };
   const cost = calculateHostedToolUsageCost({
     provider: input.usage.provider,
     operation: input.usage.operation,
@@ -150,9 +171,10 @@ export async function recordToolUsage(input: {
     chargedCostUsdMicros: cost.totalCostUsdMicros,
   };
 
-  const [toolUsageRow] = await db
-    .insert(agentSessionToolUsage)
-    .values({
+  // Lease-guarded atomic insert, mirroring recordStepUsage: no row means the lease was
+  // lost, so we never bill a reclaimed session.
+  const toolUsageRow = await store.insertToolUsage(
+    {
       sessionId: input.sessionId,
       messageId: input.assistantMessageId,
       runLeaseId: input.runLeaseId,
@@ -163,10 +185,14 @@ export async function recordToolUsage(input: {
       providerRequestId: input.usage.providerRequestId ?? null,
       costUsdMicros: input.usage.costUsdMicros,
       rawUsage: input.usage.rawUsage,
-    })
-    .returning({ id: agentSessionToolUsage.id });
+    },
+    lease,
+  );
+  if (!toolUsageRow) {
+    throw new StaleRunLeaseError();
+  }
 
-  if (toolUsageRow && cost.billable) {
+  if (cost.billable) {
     await recordWorkspaceUsageDebit({
       db,
       sessionId: input.sessionId,

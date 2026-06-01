@@ -43,7 +43,7 @@ const braintrust = vi.hoisted(() => ({
   ),
 }));
 
-vi.mock("@opencompany/db/client", () => ({
+vi.mock("./db", () => ({
   getDb: () => db,
 }));
 

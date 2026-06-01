@@ -6,6 +6,7 @@ import {
 } from "@opencompany/observability";
 import { flushBraintrust } from "@opencompany/observability/braintrust";
 import * as Sentry from "@sentry/bun";
+import { assertRunnerDbConfig, closeDb } from "./db";
 import { loadEnv } from "./env";
 import { startRunnerJobWorker } from "./jobs";
 import { createServer } from "./server";
@@ -13,12 +14,16 @@ import { createServer } from "./server";
 initializeExceptionReporting();
 
 const env = loadEnv();
-const server = createServer(env);
+assertRunnerDbConfig();
 const jobWorker = startRunnerJobWorker(env);
+const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
+    // Stop accepting work and drain in-flight jobs/requests first, then close the
+    // DB pool so no checked-out connection is cut mid-query, then flush telemetry.
     void Promise.allSettled([jobWorker.stop(), server.close()])
+      .then(() => Promise.allSettled([closeDb()]))
       .then(() => Promise.allSettled([flushObservability(), flushBraintrust()]))
       .finally(() => process.exit(0));
   });
