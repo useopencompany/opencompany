@@ -169,6 +169,7 @@ function SessionHistoryItem({
         type="button"
         title="Archive session"
         aria-label={`Archive ${session.title}`}
+        aria-busy={archiving}
         disabled={isPending}
         onClick={(event) => {
           event.preventDefault();
