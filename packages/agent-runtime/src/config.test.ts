@@ -236,6 +236,8 @@ describe("resolveAgentRuntimeConfig", () => {
     "google/gemini-3.1-flash-lite-preview",
     "deepseek/deepseek-v4-flash",
     "mistral/mistral-medium-3.5",
+    "moonshotai/kimi-k2-turbo",
+    "moonshotai/kimi-k2",
   ] as const)("keeps %s on AI Gateway without provider-specific options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -262,7 +264,18 @@ describe("resolveAgentRuntimeConfig", () => {
   });
 
   it.each([
+    "minimax/minimax-m3",
+    "minimax/minimax-m2.7",
+    "minimax/minimax-m2.7-highspeed",
+    "minimax/minimax-m2.5",
+    "minimax/minimax-m2.5-highspeed",
+    "minimax/minimax-m2.1",
+    "minimax/minimax-m2.1-lightning",
+    "minimax/minimax-m2",
     "moonshotai/kimi-k2.6",
+    "moonshotai/kimi-k2.5",
+    "moonshotai/kimi-k2-thinking",
+    "moonshotai/kimi-k2-thinking-turbo",
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",

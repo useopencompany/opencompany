@@ -47,15 +47,19 @@ describe(".agent files", () => {
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa"]);
   });
 
-  test("round-trips newly supported AI Gateway models", () => {
+  test.each([
+    "google/gemini-3-flash",
+    "minimax/minimax-m3",
+    "moonshotai/kimi-k2-thinking",
+  ] as const)("round-trips newly supported AI Gateway model %s", (model) => {
     const source = serializeAgentFile({
-      title: "Gemini agent",
+      title: "Gateway agent",
       body: "Use the selected gateway model.",
-      model: "google/gemini-3-flash",
+      model,
     });
 
-    expect(source).toContain("model: google/gemini-3-flash");
-    expect(parseAgentFile(source).config.model.name).toBe("google/gemini-3-flash");
+    expect(source).toContain(`model: ${model}`);
+    expect(parseAgentFile(source).config.model.name).toBe(model);
   });
 
   test("syncs config from markdown mentions", () => {
