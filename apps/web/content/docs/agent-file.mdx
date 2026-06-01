@@ -97,14 +97,20 @@ tools:
   - id: amp
     type: coding_agent
     provider: amp
-    repository: opencompany-web
     prCapable: true
 ```
+
+Attaching a GitHub repository (via `integrations.github.repositories`) is what grants
+repository access — not the `amp` tool. Any agent with an attached repository gets
+repo-scoped `git`/`gh` credentials in the `shell` tool plus a dedicated `gh` tool, and
+can clone on demand into `work/`. `amp` is just one consumer of attached repositories;
+when more than one is attached, pass the target to `amp_coder` via its `repository`
+argument.
 
 | ID | What it does |
 | --- | --- |
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
-| `amp` | Coding work delegated into a sandboxed runtime. |
+| `amp` | Coding work delegated into a sandboxed runtime, operating on an attached repository. |
 | `linear` | Workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Workspace MCP access to Slack search, messages, files, emoji, and users. |
 
@@ -320,7 +326,6 @@ tools:
   - id: amp
     type: coding_agent
     provider: amp
-    repository: opencompany-web
     prCapable: true
 integrations:
   github:

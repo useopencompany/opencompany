@@ -330,7 +330,6 @@ describe(".agent files", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],
@@ -357,12 +356,39 @@ describe(".agent files", () => {
     expect(parsed.config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
-    expect(parsed.config.tools).toEqual([
-      expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
-    ]);
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(parsed.config.tools[0]).not.toHaveProperty("repository");
     expect(parsed.config.triggers).toEqual([
       expect.objectContaining({ id: "opencompany-web-pr", repository: "opencompany-web" }),
     ]);
+  });
+
+  test("ignores a legacy amp.repository field when parsing", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Code"',
+        "model: openai/gpt-5.4-mini",
+        "tools:",
+        "  - id: amp",
+        "    type: coding_agent",
+        "    provider: amp",
+        "    repository: opencompany-web",
+        "    prCapable: true",
+        "integrations:",
+        "  github:",
+        "    repositories:",
+        "      - id: opencompany-web",
+        "        fullName: opencompany/web",
+        "        defaultBranch: main",
+        "---",
+        "",
+        "Work in @opencompany/web with @amp.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(parsed.config.tools[0]).not.toHaveProperty("repository");
   });
 
   test("round-trips optional GitHub repository connection binding", () => {

@@ -69,7 +69,6 @@ export type AgentCodingToolConfig = {
   provider: "amp";
   label: string;
   description: string;
-  repository: string | null;
   prCapable: boolean;
 };
 

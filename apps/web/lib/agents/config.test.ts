@@ -21,7 +21,7 @@ const repositoryBinding = {
 };
 
 describe("derivePreviewConfigFromTiptapDoc", () => {
-  it("binds amp to the mentioned GitHub work repository", () => {
+  it("records the mentioned GitHub work repository without binding it to amp", () => {
     const { body, config } = derivePreviewConfigFromTiptapDoc({
       title: "Code agent",
       content: doc([
@@ -33,22 +33,22 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
     });
 
     expect(body).toBe("@amp in @opencompany/web");
-    expect(config.tools).toEqual([
-      expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
-    ]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
     expect(config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
   });
 
-  it("keeps amp selected without exposing a repository when no repo is mentioned", () => {
+  it("keeps amp selected without any repository when no repo is mentioned", () => {
     const { config } = derivePreviewConfigFromTiptapDoc({
       title: "Code agent",
       content: doc([mention("tool:amp", "amp")]),
       repositories,
     });
 
-    expect(config.tools).toEqual([expect.objectContaining({ id: "amp", repository: null })]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
     expect(config.integrations.github.repositories).toEqual([]);
   });
 
@@ -63,7 +63,7 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
     expect(config.integrations.github.repositories).toEqual([]);
   });
 
-  it("keeps all repository mentions and binds amp to the last repository mention", () => {
+  it("keeps all repository mentions on the agent", () => {
     const { config } = derivePreviewConfigFromTiptapDoc({
       title: "Code agent",
       content: doc([
@@ -76,16 +76,15 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
       repositories,
     });
 
-    expect(config.tools).toEqual([
-      expect.objectContaining({ id: "amp", repository: "opencompany-runner" }),
-    ]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
     expect(config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
       { id: "opencompany-runner", fullName: "opencompany/runner", defaultBranch: "develop" },
     ]);
   });
 
-  it("preserves unavailable repo mentions in body but does not bind amp", () => {
+  it("preserves unavailable repo mentions in body but does not record them", () => {
     const { body, config } = derivePreviewConfigFromTiptapDoc({
       title: "Code agent",
       content: doc([
@@ -97,7 +96,8 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
     });
 
     expect(body).toBe("@amp in @opencompany/missing");
-    expect(config.tools).toEqual([expect.objectContaining({ id: "amp", repository: null })]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
     expect(config.integrations.github.repositories).toEqual([]);
   });
 
@@ -240,7 +240,7 @@ describe("derivePreviewConfigFromTiptapDoc", () => {
 });
 
 describe("deriveAgentConfigFromBody", () => {
-  it("binds amp to the mentioned GitHub repository from plain body text", () => {
+  it("records the mentioned GitHub repository from plain body text", () => {
     const { body, config } = deriveAgentConfigFromBody({
       title: "Code agent",
       body: "hello world\n@brain/new-folder/ \n\n@amp\n@useopencompany/agent-engineering-radar",
@@ -258,12 +258,8 @@ describe("deriveAgentConfigFromBody", () => {
         defaultBranch: "main",
       },
     ]);
-    expect(config.tools).toEqual([
-      expect.objectContaining({
-        id: "amp",
-        repository: "useopencompany-agent-engineering-radar",
-      }),
-    ]);
+    expect(config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(config.tools[0]).not.toHaveProperty("repository");
   });
 
   it("documents the save invariant: body-derived config wins over stale Tiptap content", () => {
@@ -282,12 +278,8 @@ describe("deriveAgentConfigFromBody", () => {
     expect(bodyResult.config.integrations.github.repositories).toEqual([
       expect.objectContaining({ id: "useopencompany-agent-engineering-radar" }),
     ]);
-    expect(bodyResult.config.tools).toEqual([
-      expect.objectContaining({
-        id: "amp",
-        repository: "useopencompany-agent-engineering-radar",
-      }),
-    ]);
+    expect(bodyResult.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(bodyResult.config.tools[0]).not.toHaveProperty("repository");
   });
 });
 

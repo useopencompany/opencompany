@@ -53,4 +53,31 @@ describe("GitHub installation tokens", () => {
       repositories: ["app"],
     });
   });
+
+  it("scopes work repository tokens to all requested repositories, sorted and deduped", async () => {
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    vi.stubEnv("GITHUB_INTEGRATION_APP_ID", "12345");
+    vi.stubEnv(
+      "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+      privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+    );
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({ token: "ghs_multi", expires_at: "2099-01-01T00:00:00Z" }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getGitHubWorkInstallationToken({
+        installationId: "135242330",
+        repositoryFullNames: ["opencompany/web", "opencompany/app", "opencompany/web"],
+      }),
+    ).resolves.toBe("ghs_multi");
+
+    const requestInit = (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>)[0]?.[1];
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      repositories: ["app", "web"],
+    });
+  });
 });
