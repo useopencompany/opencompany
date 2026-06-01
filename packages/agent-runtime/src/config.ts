@@ -30,6 +30,7 @@ export function resolveAgentRuntimeConfig(input: {
   userName?: string;
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
+  const repositories = input.agent.integrations?.github?.repositories ?? [];
   const context = [
     "You are an OpenCompany agent running in an isolated cloud sandbox.",
     "Use tools when you need to inspect or change files, run commands, or verify work.",
@@ -39,6 +40,7 @@ export function resolveAgentRuntimeConfig(input: {
     "The sandbox workspace root contains exactly two visible file roots: ./work for session-local files and scratch work, and ./brain for mounted Brain context.",
     "File tools require paths prefixed with work/ or brain/. Bare paths like README.md are invalid; use work/README.md or brain/README.md.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
+    ...githubRepositoryContext(repositories),
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
           .map((reference) => formatBrainReferencePath(reference.path))
@@ -70,7 +72,11 @@ export function resolveAgentRuntimeConfig(input: {
       ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),
       exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
     },
-    tools: resolveRuntimeToolNamesForConfigTools(input.agent.tools, input.agent.agents),
+    tools: resolveRuntimeToolNamesForConfigTools({
+      tools: input.agent.tools,
+      agents: input.agent.agents,
+      repositories,
+    }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
 }
@@ -100,4 +106,21 @@ export function agentGitHubRepositories(config: AgentConfig): AgentGitHubReposit
 
 function formatBrainReferencePath(path: string) {
   return path === "/" ? "brain/" : path;
+}
+
+function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): string[] {
+  if (repositories.length === 0) return [];
+
+  const fullNames = repositories.map((repository) => repository.fullName).join(", ");
+  const ghRepoGuidance =
+    repositories.length === 1
+      ? "gh commands default to the attached repository even before it is cloned; --repo is not needed when targeting this attached repository."
+      : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
+  return [
+    `Attached GitHub repositories: ${fullNames}.`,
+    "You have repository-scoped git and gh (GitHub CLI) access to these repositories from the shell and gh tools. Authentication is injected automatically; never handle tokens yourself.",
+    ghRepoGuidance,
+    "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
+    "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",
+  ];
 }

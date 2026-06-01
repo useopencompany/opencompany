@@ -29,7 +29,7 @@ import {
 } from "@/components/icons/model-provider-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
-type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent";
+type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent" | "schedule";
 
 type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -82,13 +82,19 @@ export type AgentWorkspaceMention = BaseAgentMentionItem & {
   path: string;
 };
 
+export type AgentScheduleMention = BaseAgentMentionItem & {
+  id: "run-every";
+  kind: "schedule";
+};
+
 export type AgentMentionItem =
   | AgentModel
   | AgentTool
   | AgentIntegration
   | AgentBrainMention
   | AgentHookMention
-  | AgentWorkspaceMention;
+  | AgentWorkspaceMention
+  | AgentScheduleMention;
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
@@ -154,6 +160,18 @@ export const AGENT_AFTER_SESSION_MENTION_ITEMS: AgentHookMention[] = [
   },
 ];
 
+export const AGENT_SCHEDULE_MENTION_ITEMS: AgentScheduleMention[] = [
+  {
+    id: "run-every",
+    mentionId: "schedule:run-every",
+    kind: "schedule",
+    label: "run-every",
+    displayLabel: "Run every...",
+    description: "Create a recurring scheduled run",
+    icon: Clock3,
+  },
+];
+
 export function buildAgentMentionItems(
   repositories: Array<{
     fullName: string;
@@ -197,6 +215,7 @@ export function buildAgentMentionItems(
   });
 
   return [
+    ...AGENT_SCHEDULE_MENTION_ITEMS,
     ...AGENT_TOOLS.filter(
       (tool) =>
         tool.kind !== "tool" ||

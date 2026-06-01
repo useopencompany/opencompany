@@ -6,6 +6,7 @@ import type {
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
+  AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
@@ -137,7 +138,7 @@ export function deriveAgentConfigFromBody(input: {
   const model =
     MODEL_BY_ID.get(mentions.model ?? input.model ?? DEFAULT_MODEL_ID) ??
     MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
-  const tools = bodyToolsToConfig(mentions.tools, mentions.activeRepository?.id ?? null);
+  const tools = bodyToolsToConfig(mentions.tools);
 
   return {
     body,
@@ -176,7 +177,6 @@ export function toConfigTool(
       provider: "amp",
       label: tool.label,
       description: tool.description,
-      repository: overrides.repository ?? null,
       prCapable: overrides.prCapable ?? tool.prCapableDefault ?? true,
     };
   }
@@ -340,13 +340,11 @@ function resolveRepositoryGroup(
   };
 }
 
-function bodyToolsToConfig(toolIds: AgentToolId[], repositoryId: string | null) {
+function bodyToolsToConfig(toolIds: AgentToolId[]) {
   return toolIds.flatMap((id) => {
     const tool = TOOL_BY_ID.get(id);
     if (!tool) return [];
-    return [
-      tool.id === "amp" ? toConfigTool(tool, { repository: repositoryId }) : toConfigTool(tool),
-    ];
+    return [toConfigTool(tool)];
   });
 }
 
@@ -390,12 +388,15 @@ function syncTriggersToRepository(
   triggers: AgentTriggerConfig[],
   repository: AgentGitHubRepositoryConfig,
 ) {
-  return triggers.map((trigger) => ({
-    ...trigger,
-    id: `${repository.id}-pr`,
-    repository: repository.id,
-    branches: trigger.branches.length > 0 ? trigger.branches : [repository.defaultBranch],
-  }));
+  return triggers.map((trigger) => {
+    if (trigger.type !== "github.pull_request") return trigger;
+    return {
+      ...trigger,
+      id: `${repository.id}-pr`,
+      repository: repository.id,
+      branches: trigger.branches.length > 0 ? trigger.branches : [repository.defaultBranch],
+    } satisfies AgentGitHubPullRequestTriggerConfig;
+  });
 }
 
 function normalizeTitle(title: string) {
