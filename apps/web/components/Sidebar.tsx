@@ -41,6 +41,8 @@ const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 // Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
+// How long the red highlight shows on a session row before it is optimistically removed.
+const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
 
 export type SidebarSession = SidebarSessionPayload;
 
@@ -172,11 +174,11 @@ function SessionHistoryItem({
           event.preventDefault();
           event.stopPropagation();
 
-          // Kurze rote Hervorhebung als Feedback, bevor die Session optimistisch verschwindet.
+          // Brief red highlight as feedback before the session is optimistically removed.
           setArchiving(true);
 
           startTransition(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 220));
+            await new Promise((resolve) => setTimeout(resolve, ARCHIVE_HIGHLIGHT_DELAY_MS));
             const result = await archiveSidebarSessionOptimistically({
               queryClient,
               workspaceId,
