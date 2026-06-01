@@ -1500,7 +1500,7 @@ function TreeItem({
   );
 }
 
-function MarkdownBrainEditor({
+export function MarkdownBrainEditor({
   content,
   onChange,
 }: {
