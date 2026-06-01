@@ -2,10 +2,11 @@
 
 ## Vercel AI Gateway
 
-**What it is:** Model gateway for routing calls to providers such as OpenAI and Anthropic.
+**What it is:** Model gateway for routing calls to model providers.
 
 **What it does for us:** Gives the runner one gateway credential and provider-neutral model IDs for
-agent runs. The model catalog currently exposes OpenAI GPT and Anthropic Claude fast/deep choices.
+agent runs. The exact catalog changes over time; `packages/agent-runtime/src/models.ts` is the
+source of truth for current fast/deep model choices.
 
 **Where it is used:**
 
@@ -44,7 +45,7 @@ normalization without each model provider needing bespoke runner code.
 **Reconsider if:** We need lower-level streaming/tool control than the SDK provides, or billing
 usage needs cannot be normalized reliably through it.
 
-## OpenAI and Anthropic
+## Gateway model providers
 
 **What they are:** AI model providers exposed through Vercel AI Gateway.
 
@@ -58,8 +59,8 @@ runner. The exact model IDs change more often than this register should; keep
 - `apps/web/lib/agents/config.ts`.
 - `apps/web/components/agent-editor/tools.ts`.
 
-**Why we use them:** We want at least two high-quality provider families so agents can choose fast
-or deep behavior without the product being locked to one model vendor.
+**Why we use them:** We want multiple high-quality provider families so agents can choose fast or
+deep behavior without the product being locked to one model vendor.
 
 **Owner:** AI Platform.
 

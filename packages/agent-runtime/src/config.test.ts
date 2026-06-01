@@ -50,6 +50,51 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).not.toContain("exa_search");
   });
 
+  it("advertises attached GitHub repositories and exposes the gh tool", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Repo agent",
+      instructions: "Work in the repo.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      integrations: {
+        github: {
+          repositories: [
+            { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+          ],
+        },
+      },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("gh");
+    expect(resolved.systemPrompt).toContain("Attached GitHub repositories: opencompany/web.");
+    expect(resolved.systemPrompt).toContain("git and gh (GitHub CLI) access");
+    expect(resolved.systemPrompt).toContain("Clone a repository into work/ on demand");
+    expect(resolved.systemPrompt).toContain("All session work must happen under work/");
+  });
+
+  it("omits GitHub repository context and the gh tool when no repository is attached", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "No repo agent",
+      instructions: "Just chat.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).not.toContain("gh");
+    expect(resolved.systemPrompt).not.toContain("Attached GitHub repositories");
+  });
+
   it("enables hosted runtime tools from selected agent config tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -236,6 +281,8 @@ describe("resolveAgentRuntimeConfig", () => {
     "google/gemini-3.1-flash-lite-preview",
     "deepseek/deepseek-v4-flash",
     "mistral/mistral-medium-3.5",
+    "moonshotai/kimi-k2-turbo",
+    "moonshotai/kimi-k2",
   ] as const)("keeps %s on AI Gateway without provider-specific options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -262,7 +309,18 @@ describe("resolveAgentRuntimeConfig", () => {
   });
 
   it.each([
+    "minimax/minimax-m3",
+    "minimax/minimax-m2.7",
+    "minimax/minimax-m2.7-highspeed",
+    "minimax/minimax-m2.5",
+    "minimax/minimax-m2.5-highspeed",
+    "minimax/minimax-m2.1",
+    "minimax/minimax-m2.1-lightning",
+    "minimax/minimax-m2",
     "moonshotai/kimi-k2.6",
+    "moonshotai/kimi-k2.5",
+    "moonshotai/kimi-k2-thinking",
+    "moonshotai/kimi-k2-thinking-turbo",
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",
