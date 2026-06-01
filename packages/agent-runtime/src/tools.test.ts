@@ -69,6 +69,21 @@ describe("AGENT_TOOL_CATALOG", () => {
     expect(exa?.requiredPlatformEnvVars).toEqual(["EXA_API_KEY"]);
     expect(exa?.requiredWorkspaceResource).toBeUndefined();
   });
+
+  it("documents platform-only credentials for X without workspace resource requirements", () => {
+    const x = AGENT_TOOL_DEFINITION_BY_ID.get("x");
+
+    expect(x?.credentialSource).toBe("platform");
+    expect(x?.requiredPlatformEnvVars).toEqual(["X_API_BEARER_TOKEN"]);
+    expect(x?.requiredWorkspaceResource).toBeUndefined();
+    expect(x?.runtimeTools).toEqual([
+      "x_search_posts",
+      "x_get_profile",
+      "x_get_user_posts",
+      "x_get_discussion",
+      "x_get_trends",
+    ]);
+  });
 });
 
 describe("runtime tool definitions", () => {
@@ -150,6 +165,25 @@ describe("runtime tool definitions", () => {
       "Not supported with category=people or category=company",
     );
   });
+
+  it("exposes read-only X tools with visible schemas and help", () => {
+    const search = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_search_posts");
+    const discussion = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_discussion");
+
+    if (!search || !discussion) {
+      throw new Error("Expected X runtime tool definitions to exist");
+    }
+
+    expect(search.configToolId).toBe("x");
+    expect(search.parameters.required).toEqual(["query"]);
+    expect(search.parameters.properties).toHaveProperty("mode");
+    expect(search.parameters.properties).toHaveProperty("paginationToken");
+    expect(search.description).toContain("official X API");
+
+    expect(discussion.configToolId).toBe("x");
+    expect(discussion.parameters.required).toEqual(["postIdOrUrl"]);
+    expect(discussion.help).toContain("target post");
+  });
 });
 
 describe("resolveRuntimeToolNamesForConfigTools", () => {
@@ -185,5 +219,18 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     expect(
       resolveRuntimeToolNamesForConfigTools({ tools: [], agents: [{ path: "agents/x.agent" }] }),
     ).toContain("delegate_to_agent");
+  });
+
+  it("enables X hosted tools only when x is selected", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("x_search_posts");
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "x" }] })).toEqual(
+      expect.arrayContaining([
+        "x_search_posts",
+        "x_get_profile",
+        "x_get_user_posts",
+        "x_get_discussion",
+        "x_get_trends",
+      ]),
+    );
   });
 });

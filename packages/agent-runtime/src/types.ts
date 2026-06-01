@@ -24,7 +24,7 @@ export type TiptapDoc = {
   content?: TiptapNode[];
 };
 
-export type AgentToolId = "exa" | "amp" | "linear" | "slack";
+export type AgentToolId = "exa" | "x" | "amp" | "linear" | "slack";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -63,7 +63,7 @@ export type AgentModelId =
   | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
-  id: "exa";
+  id: "exa" | "x";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;

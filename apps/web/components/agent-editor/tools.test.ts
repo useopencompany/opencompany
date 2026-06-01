@@ -80,6 +80,19 @@ describe("agent editor mention tools", () => {
     expect(items.some((item) => item.mentionId.startsWith("model:"))).toBe(false);
   });
 
+  test("includes the X hosted tool in the mention suggestion menu", () => {
+    expect(buildAgentMentionItems()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "x",
+          kind: "tool",
+          mentionId: "tool:x",
+          displayLabel: "x",
+        }),
+      ]),
+    );
+  });
+
   test("exposes schedule creation as an action mention", () => {
     expect(buildAgentMentionItems()).toEqual(
       expect.arrayContaining([

@@ -43,10 +43,10 @@ describe("extractConfigFromMentions", () => {
 
   it("resolves tool ids and labels", () => {
     const config = extractConfigFromMentions(
-      "Research with @exa, @slack, and implement with @AMP.",
+      "Research with @exa, @x, @slack, and implement with @AMP.",
     );
 
-    expect(config.tools).toEqual(["exa", "slack", "amp"]);
+    expect(config.tools).toEqual(["exa", "x", "slack", "amp"]);
   });
 
   it("normalizes Brain file and folder paths", () => {

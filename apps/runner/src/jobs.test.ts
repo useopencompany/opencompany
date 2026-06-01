@@ -515,6 +515,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
+    xApiBearerToken: "x_test",
     ampApiKey: "amp_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
