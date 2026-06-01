@@ -279,6 +279,53 @@ export function setSidebarSessionStar(
   );
 }
 
+export type ArchiveSidebarSessionResult = { ok: true } | { ok: false; error: string };
+
+// Archive a session with an optimistic sidebar update: the session leaves the list
+// immediately, then the server action runs. On failure the previous list is restored so
+// the session reappears; on success the detail cache is dropped and the list is refetched
+// to reconcile with the server. Extracted as a pure helper so the optimistic-removal and
+// rollback-on-error behavior can be unit-tested without rendering the component.
+export async function archiveSidebarSessionOptimistically({
+  queryClient,
+  workspaceId,
+  sessionId,
+  archive,
+}: {
+  queryClient: QueryClient;
+  workspaceId: string;
+  sessionId: string;
+  archive: (sessionId: string) => Promise<ArchiveSidebarSessionResult>;
+}): Promise<ArchiveSidebarSessionResult> {
+  const listKey = sessionQueryKeys.list(workspaceId);
+  const previousSessions = queryClient.getQueryData<SidebarSessionPayload[]>(listKey);
+
+  // Optimistically remove the session so the sidebar updates instantly.
+  queryClient.setQueryData<SidebarSessionPayload[]>(listKey, (sessions) =>
+    removeSidebarSession(sessions, sessionId),
+  );
+
+  let result: ArchiveSidebarSessionResult;
+  try {
+    result = await archive(sessionId);
+  } catch (error) {
+    result = {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not archive session.",
+    };
+  }
+
+  if (!result.ok) {
+    // Roll back to the pre-archive list so the session reappears.
+    queryClient.setQueryData<SidebarSessionPayload[]>(listKey, previousSessions);
+    return result;
+  }
+
+  queryClient.removeQueries({ queryKey: sessionQueryKeys.detail(workspaceId, sessionId) });
+  void queryClient.invalidateQueries({ queryKey: listKey });
+  return result;
+}
+
 export function mergeAgentSessionDetail(
   current: AgentSessionDetailPayload | undefined,
   incoming: AgentSessionDetailPayload,

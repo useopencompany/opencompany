@@ -6,8 +6,10 @@ import type {
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
+  AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
+  AgentHostedToolConfig,
   AgentModelId,
   AgentReference,
   AgentToolId,
@@ -91,7 +93,6 @@ export function extractMentionIds(body: string) {
 }
 
 export function extractConfigFromMentions(body: string): {
-  model: AgentModelId;
   tools: AgentToolId[];
   brain: AgentBrainReference[];
   agents: AgentReference[];
@@ -100,7 +101,6 @@ export function extractConfigFromMentions(body: string): {
   const mentions = collectBodyMentions(body, [], [], []);
   const afterSession = extractAfterSessionConfig(body);
   return {
-    model: mentions.model ?? DEFAULT_MODEL_ID,
     tools: mentions.tools,
     brain: mentions.brain,
     agents: mentions.agents,
@@ -114,8 +114,8 @@ export function collectBodyRepositoryMentions(body: string) {
 
 /**
  * Canonical derivation for persisted agent saves. The body is what is written
- * to the .agent file, so runtime config must be derived from this text rather
- * than from the editor's optional Tiptap presentation cache.
+ * to the .agent file, so mention-backed runtime config must be derived from
+ * this text rather than from the editor's optional Tiptap presentation cache.
  */
 export function deriveAgentConfigFromBody(input: {
   title: string;
@@ -135,9 +135,8 @@ export function deriveAgentConfigFromBody(input: {
   );
   const afterSession = extractAfterSessionConfig(body);
   const model =
-    MODEL_BY_ID.get(mentions.model ?? input.model ?? DEFAULT_MODEL_ID) ??
-    MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
-  const tools = bodyToolsToConfig(mentions.tools, mentions.activeRepository?.id ?? null);
+    MODEL_BY_ID.get(input.model ?? DEFAULT_MODEL_ID) ?? MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
+  const tools = bodyToolsToConfig(mentions.tools);
 
   return {
     body,
@@ -176,7 +175,6 @@ export function toConfigTool(
       provider: "amp",
       label: tool.label,
       description: tool.description,
-      repository: overrides.repository ?? null,
       prCapable: overrides.prCapable ?? tool.prCapableDefault ?? true,
     };
   }
@@ -193,7 +191,7 @@ export function toConfigTool(
   }
 
   return {
-    id: "exa",
+    id: tool.id as AgentHostedToolConfig["id"],
     type: "hosted_tool",
     label: tool.label,
     description: tool.description,
@@ -208,7 +206,6 @@ function collectBodyMentions(
 ) {
   const repositoryCatalog = repositoryCatalogForDerivation(repositories, preferredRepositories);
   const agentCatalog = agentCatalogForDerivation(agents);
-  let model: AgentModelId | null = null;
   let activeRepository: AgentGitHubRepositoryConfig | null = null;
   const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
   const tools = new Set<AgentToolId>();
@@ -225,12 +222,6 @@ function collectBodyMentions(
     const brainReference = brainReferenceFromMention(rawId);
     if (brainReference) {
       brain.set(brainReference.path, brainReference);
-      continue;
-    }
-
-    const modelId = modelIdFromMention(rawId);
-    if (modelId) {
-      model = modelId;
       continue;
     }
 
@@ -255,7 +246,6 @@ function collectBodyMentions(
   }
 
   return {
-    model,
     tools: Array.from(tools),
     brain: Array.from(brain.values()),
     agents: Array.from(agentReferences.values()),
@@ -340,13 +330,11 @@ function resolveRepositoryGroup(
   };
 }
 
-function bodyToolsToConfig(toolIds: AgentToolId[], repositoryId: string | null) {
+function bodyToolsToConfig(toolIds: AgentToolId[]) {
   return toolIds.flatMap((id) => {
     const tool = TOOL_BY_ID.get(id);
     if (!tool) return [];
-    return [
-      tool.id === "amp" ? toConfigTool(tool, { repository: repositoryId }) : toConfigTool(tool),
-    ];
+    return [toConfigTool(tool)];
   });
 }
 
@@ -374,12 +362,6 @@ function brainReferenceFromMention(id: string): AgentBrainReference | null {
   };
 }
 
-function modelIdFromMention(id: string): AgentModelId | null {
-  if (id === "default" || id === "fast") return "openai/gpt-5.4-mini";
-  if (id === "deep") return "openai/gpt-5.4";
-  return MODEL_BY_ID.has(id as AgentModelId) ? (id as AgentModelId) : null;
-}
-
 function toolIdFromMention(id: string): AgentToolId | null {
   if (TOOL_BY_ID.has(id as AgentToolId)) return id as AgentToolId;
   const tool = TOOL_BY_LABEL.get(id.toLowerCase());
@@ -390,12 +372,15 @@ function syncTriggersToRepository(
   triggers: AgentTriggerConfig[],
   repository: AgentGitHubRepositoryConfig,
 ) {
-  return triggers.map((trigger) => ({
-    ...trigger,
-    id: `${repository.id}-pr`,
-    repository: repository.id,
-    branches: trigger.branches.length > 0 ? trigger.branches : [repository.defaultBranch],
-  }));
+  return triggers.map((trigger) => {
+    if (trigger.type !== "github.pull_request") return trigger;
+    return {
+      ...trigger,
+      id: `${repository.id}-pr`,
+      repository: repository.id,
+      branches: trigger.branches.length > 0 ? trigger.branches : [repository.defaultBranch],
+    } satisfies AgentGitHubPullRequestTriggerConfig;
+  });
 }
 
 function normalizeTitle(title: string) {

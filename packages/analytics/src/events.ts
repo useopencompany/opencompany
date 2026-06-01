@@ -42,7 +42,8 @@ export type AnalyticsEventPropertiesByName = {
     session_id: string;
     model_provider: string;
     model_name: string;
-    source: "agent" | "prompt";
+    source: "agent" | "prompt" | "schedule";
+    trigger_id?: string;
   };
   session_message_sent: {
     user_id: string;

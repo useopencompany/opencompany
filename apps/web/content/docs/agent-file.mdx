@@ -27,7 +27,7 @@ integrations:
         defaultBranch: main
 ---
 
-Research investors with @exa. Use @deep for thesis write-ups. Read @brain/ first. Ask @agent/sales-research for account notes. Work in @opencompany/web with @amp.
+Research investors with @exa. Write careful thesis summaries. Read @brain/ first. Ask @agent/sales-research for account notes. Work in @opencompany/web with @amp.
 ```
 
 That's it. The `---` lines fence off the header. Everything below is what the AI model reads as instructions.
@@ -63,7 +63,26 @@ Which AI model runs this agent. Pick one of:
 | `google/gemini-3.1-flash-lite-preview` | Very fast and low cost for simple high-volume tasks. |
 | `deepseek/deepseek-v4-flash` | High-throughput model for cost-sensitive work. |
 | `mistral/mistral-medium-3.5` | Balanced Mistral model for quality, latency, and cost. |
+| `minimax/minimax-m3` | Latest MiniMax with 1M context and agentic coding strength. |
+| `minimax/minimax-m2.7` | High-capability MiniMax for software engineering agents. |
+| `minimax/minimax-m2.7-highspeed` | Fast MiniMax M2.7 variant for latency-sensitive agent work. |
+| `minimax/minimax-m2.5` | MiniMax for full-stack and multi-file code work. |
+| `minimax/minimax-m2.5-highspeed` | Fast MiniMax M2.5 variant for responsive coding workflows. |
+| `minimax/minimax-m2.1` | MiniMax for reliable agentic coding with interleaved thinking. |
+| `minimax/minimax-m2.1-lightning` | Speed-optimized MiniMax M2.1 for fast coding assistance. |
+| `minimax/minimax-m2` | MiniMax MoE model for coding and agentic tasks. |
 | `moonshotai/kimi-k2.6` | Latest Kimi for long-horizon coding and agent workflows. |
+| `moonshotai/kimi-k2.5` | Kimi multimodal model for agents, coding, and vision tasks. |
+| `moonshotai/kimi-k2-thinking` | Kimi reasoning model for long tool-call chains. |
+| `moonshotai/kimi-k2-thinking-turbo` | Faster Kimi reasoning variant for interactive workflows. |
+| `moonshotai/kimi-k2-turbo` | Speed-optimized Kimi K2 for latency-sensitive tool use. |
+| `moonshotai/kimi-k2` | Kimi K2 instruct model for coding and agentic pipelines. |
+| `xai/grok-4.3` | Latest Grok reasoning model with 1M context and tool use. |
+| `xai/grok-4.20-reasoning` | Long-context Grok reasoning model for agent workflows. |
+| `xai/grok-4.20-non-reasoning` | Long-context Grok model for direct tool-using tasks. |
+| `xai/grok-4.1-fast-reasoning` | Fast, low-cost Grok reasoning model with 1M context. |
+| `xai/grok-4.1-fast-non-reasoning` | Fast, low-cost Grok model for direct answers. |
+| `xai/grok-build-0.1` | xAI coding model for fast agentic software development. |
 | `zai/glm-5.1` | Latest GLM for coding-heavy and agentic engineering tasks. |
 | `zai/glm-5-turbo` | Faster GLM 5 variant for production agent workflows. |
 | `zai/glm-5v-turbo` | Multimodal GLM 5 model for visual coding and GUI tasks. |
@@ -84,14 +103,21 @@ tools:
   - id: amp
     type: coding_agent
     provider: amp
-    repository: opencompany-web
     prCapable: true
 ```
+
+Attaching a GitHub repository (via `integrations.github.repositories`) is what grants
+repository access — not the `amp` tool. Any agent with an attached repository gets
+repo-scoped `git`/`gh` credentials in the `shell` tool plus a dedicated `gh` tool, and
+can clone on demand into `work/`. `amp` is just one consumer of attached repositories;
+when more than one is attached, pass the target to `amp_coder` via its `repository`
+argument.
 
 | ID | What it does |
 | --- | --- |
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
-| `amp` | Coding work delegated into a sandboxed runtime. |
+| `x` | Read public X posts, profiles, timelines, discussions, and trends through the official X API. |
+| `amp` | Coding work delegated into a sandboxed runtime, operating on an attached repository. |
 | `linear` | Workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Workspace MCP access to Slack search, messages, files, emoji, and users. |
 
@@ -148,6 +174,22 @@ integrations:
 
 `fullName` remains the readable reference shown in body mentions. `binding` is optional normalized runtime data that identifies the concrete provider resource and parent connection without making opaque database IDs part of the human-authored reference. Unknown or unauthorized repository mentions stay in the body as text, but they do not contribute to the saved config.
 
+### `triggers`
+
+Triggers describe external or scheduled ways to start an agent. Scheduled runs use generated preset cron expressions, not natural-language parsing:
+
+```yaml
+triggers:
+  - id: weekday-brief
+    type: agent.schedule
+    cron: "0 9 * * 1-5"
+    timezone: America/Los_Angeles
+    prompt: Review open priorities and write a concise status brief.
+    enabled: true
+```
+
+The editor creates these from **Run every...**. The prompt is submitted as the first user message whenever the schedule fires.
+
 ## The body
 
 The body is plain Markdown. Whatever you write here, the model reads as its instructions. Treat it like an SOP for a new hire: describe the outcome, the constraints, and the style.
@@ -162,11 +204,10 @@ There's no length limit, but shorter is usually better. If the instructions are 
 
 ## Mentions
 
-Inside the body you can write `@something` to attach a model, tool, Brain path, workspace agent, or GitHub repository. opencompany reads these mentions out of the body and uses them to fill in the header — so the body is always the source of truth.
+Inside the body you can write `@something` to attach a tool, Brain path, workspace agent, or GitHub repository. opencompany reads these mentions out of the body and uses them to fill in those header fields — so the body is the source of truth for tools and context. The model is explicit per-agent config in the header.
 
 ```text
 Find investors with @exa.        ← tool: exa
-Use @deep for the write-up.      ← model: openai/gpt-5.4
 Read @brain/product/ first.      ← Brain folder
 Work in @opencompany/web.        ← GitHub repository
 Read @brain/ first.              ← Brain root folder
@@ -176,11 +217,9 @@ Ask @agent/sales-research.       ← workspace agent
 This is what mentions can be:
 
 - A tool ID, like `@exa`
-- A model ID, like `@openai/gpt-5.4` or `@anthropic/claude-sonnet-4.6`
 - A Brain path, like `@brain/`, `@brain/docs/README.md`, or `@brain/product/`
 - A workspace agent, like `@agent/sales-research`
 - A GitHub `owner/repo`, like `@opencompany/web`
-- A shortcut name (see below)
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
 
@@ -194,28 +233,9 @@ Help with customer calls. #after-session Update @brain/memory.md with durable pr
 
 The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update mounted Brain files when there is useful long-lived context to save.
 
-### Shortcuts
-
-You don't have to type the full model name every time. These shortcuts work inside the body:
-
-| Shortcut | Stands for |
-| --- | --- |
-| `@fast` or `@default` | `openai/gpt-5.4-mini` |
-| `@deep` | `openai/gpt-5.4` |
-
-So writing "Use `@deep` for the summary" is the same as setting `model: openai/gpt-5.4` in the header.
-
-### What happens if the body has no model mention
-
-The agent runs on `openai/gpt-5.4-mini`. That's the default.
-
-### What happens if the body mentions two different models
-
-The last one wins. If you write "Start with `@fast`, then switch to `@deep`," the agent will run on `@deep`. (The model itself can't actually switch mid-run — the mention controls the configuration, not the runtime behavior.)
-
 ### Tiptap content is not the contract
 
-The web editor stores Tiptap JSON so mentions can render as chips when you reopen an agent. That JSON is only a presentation cache. The `.agent` body text is the contract, and saved runtime config is derived from the body text that will be written to GitHub.
+The web editor stores Tiptap JSON so mentions can render as chips when you reopen an agent. That JSON is only a presentation cache. The `.agent` body text is the contract, and mention-backed runtime config is derived from the body text that will be written to GitHub.
 
 If body text and Tiptap JSON ever disagree, the body wins. This keeps stale editor state from removing repository bindings or tool config during a save.
 
@@ -287,15 +307,15 @@ You can write only the instructions and let opencompany figure out the header:
 ```yaml
 ---
 title: "Research"
-model: openai/gpt-5.4
+model: openai/gpt-5.4-mini
 tools:
   - exa
 ---
 
-Find investors with @exa. Run a deep pass with @deep before writing.
+Find investors with @exa. Write a concise brief before sending.
 ```
 
-After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The `@deep` mention set the model.
+After saving, the header above is what ends up in the file — even though you only wrote the body. The `@exa` mention added the tool. The model remains explicit per-agent config.
 
 ### A coding agent for a repo
 
@@ -307,7 +327,6 @@ tools:
   - id: amp
     type: coding_agent
     provider: amp
-    repository: opencompany-web
     prCapable: true
 integrations:
   github:

@@ -1,9 +1,10 @@
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type AgentSessionDetailPayload,
   addUserMessageToSessionDetail,
   applyRuntimeEventToSessionDetail,
+  archiveSidebarSessionOptimistically,
   invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
   parseAgentSessionDetailResponse,
@@ -789,6 +790,125 @@ describe("session payload cache helpers", () => {
         },
       }),
     ).toThrow("Invalid status.");
+  });
+});
+
+describe("archiveSidebarSessionOptimistically", () => {
+  it("removes the session from the sidebar before the archive resolves", async () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    queryClient.setQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId), [
+      sidebarSession("ses_keep", "Keep"),
+      sidebarSession("ses_archive", "Archive"),
+    ]);
+
+    let listDuringArchive: SidebarSessionPayload[] | undefined;
+    const archive = vi.fn(async () => {
+      // Capture the cache state while the server action is still in flight: the optimistic
+      // update must have already removed the session at this point.
+      listDuringArchive = queryClient.getQueryData<SidebarSessionPayload[]>(
+        sessionQueryKeys.list(workspaceId),
+      );
+      return { ok: true } as const;
+    });
+
+    const result = await archiveSidebarSessionOptimistically({
+      queryClient,
+      workspaceId,
+      sessionId: "ses_archive",
+      archive,
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(listDuringArchive?.map((session) => session.id)).toEqual(["ses_keep"]);
+    expect(
+      queryClient
+        .getQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId))
+        ?.map((session) => session.id),
+    ).toEqual(["ses_keep"]);
+  });
+
+  it("rolls back the sidebar when the archive action returns an error", async () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    const initialList = [
+      sidebarSession("ses_keep", "Keep"),
+      sidebarSession("ses_archive", "Archive"),
+    ];
+    queryClient.setQueryData<SidebarSessionPayload[]>(
+      sessionQueryKeys.list(workspaceId),
+      initialList,
+    );
+
+    const archive = vi.fn(async () => ({ ok: false, error: "Session not found." }) as const);
+
+    const result = await archiveSidebarSessionOptimistically({
+      queryClient,
+      workspaceId,
+      sessionId: "ses_archive",
+      archive,
+    });
+
+    expect(result).toEqual({ ok: false, error: "Session not found." });
+    expect(
+      queryClient
+        .getQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId))
+        ?.map((session) => session.id),
+    ).toEqual(["ses_keep", "ses_archive"]);
+  });
+
+  it("rolls back the sidebar when the archive action throws", async () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    queryClient.setQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId), [
+      sidebarSession("ses_keep", "Keep"),
+      sidebarSession("ses_archive", "Archive"),
+    ]);
+
+    const archive = vi.fn(async () => {
+      throw new Error("Network down");
+    });
+
+    const result = await archiveSidebarSessionOptimistically({
+      queryClient,
+      workspaceId,
+      sessionId: "ses_archive",
+      archive,
+    });
+
+    expect(result).toEqual({ ok: false, error: "Network down" });
+    expect(
+      queryClient
+        .getQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId))
+        ?.map((session) => session.id),
+    ).toEqual(["ses_keep", "ses_archive"]);
+  });
+
+  it("drops the detail cache and refetches the list after a successful archive", async () => {
+    const queryClient = new QueryClient();
+    const workspaceId = "wks_123";
+    queryClient.setQueryData<SidebarSessionPayload[]>(sessionQueryKeys.list(workspaceId), [
+      sidebarSession("ses_archive", "Archive"),
+    ]);
+    queryClient.setQueryData(sessionQueryKeys.detail(workspaceId, "ses_archive"), detail());
+
+    const invalidated: unknown[][] = [];
+    queryClient.invalidateQueries = (filters) => {
+      invalidated.push((filters as { queryKey: unknown[] }).queryKey);
+      return Promise.resolve();
+    };
+
+    await archiveSidebarSessionOptimistically({
+      queryClient,
+      workspaceId,
+      sessionId: "ses_archive",
+      archive: async () => ({ ok: true }) as const,
+    });
+
+    expect(
+      queryClient.getQueryData(sessionQueryKeys.detail(workspaceId, "ses_archive")),
+    ).toBeUndefined();
+    expect(invalidated).toEqual([sessionQueryKeys.list(workspaceId)]);
   });
 });
 

@@ -31,8 +31,8 @@ import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
 import {
+  archiveSidebarSessionOptimistically,
   fetchSidebarSessions,
-  removeSidebarSession,
   SESSIONS_QUERY_STALE_TIME_MS,
   type SidebarSessionPayload,
   sessionQueryKeys,
@@ -43,6 +43,8 @@ const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 // Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
+// How long the red highlight shows on a session row before it is optimistically removed.
+const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
 
 export type SidebarSession = SidebarSessionPayload;
 
@@ -125,6 +127,7 @@ function SessionHistoryItem({
   const queryClient = useQueryClient();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
+  const [archiving, setArchiving] = useState(false);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const schedulePrefetch = useCallback(() => {
@@ -149,9 +152,9 @@ function SessionHistoryItem({
 
   return (
     <div
-      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+      className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-      } ${isPending ? "opacity-60" : ""}`}
+      } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : isPending ? "opacity-60" : ""}`}
     >
       <Link
         href={`/session/${session.id}`}
@@ -192,25 +195,28 @@ function SessionHistoryItem({
         type="button"
         title="Archive session"
         aria-label={`Archive ${session.title}`}
+        aria-busy={archiving}
         disabled={isPending}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
 
+          // Brief red highlight as feedback before the session is optimistically removed.
+          setArchiving(true);
+
           startTransition(async () => {
-            const result = await archiveAgentSession(session.id);
+            await new Promise((resolve) => setTimeout(resolve, ARCHIVE_HIGHLIGHT_DELAY_MS));
+            const result = await archiveSidebarSessionOptimistically({
+              queryClient,
+              workspaceId,
+              sessionId: session.id,
+              archive: archiveAgentSession,
+            });
             if (!result.ok) {
+              setArchiving(false);
               showError(result.error, "Could not archive session");
               return;
             }
-            queryClient.setQueryData<SidebarSession[]>(
-              sessionQueryKeys.list(workspaceId),
-              (sessions) => removeSidebarSession(sessions, session.id),
-            );
-            queryClient.removeQueries({
-              queryKey: sessionQueryKeys.detail(workspaceId, session.id),
-            });
-            void queryClient.invalidateQueries({ queryKey: sessionQueryKeys.list(workspaceId) });
             if (active) {
               router.replace("/");
             }

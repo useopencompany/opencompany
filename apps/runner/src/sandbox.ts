@@ -55,6 +55,7 @@ export function sandboxLayout(workdir: string) {
     workspaceRoot: workdir,
     brainRoot: `${workdir}/brain`,
     workRoot: `${workdir}/work`,
+    skillsRoot: `${workdir}/skills`,
     metadataRoot: METADATA_ROOT,
     agentFile: `${METADATA_ROOT}/agent.agent`,
     brainManifest: `${METADATA_ROOT}/brain-manifest.json`,
@@ -139,9 +140,6 @@ export async function prepareWorkspace(input: {
   sandbox: SandboxHandle;
   workdir: string;
   agentFile: string;
-  repositoryFullName?: string | null | undefined;
-  repositoryDefaultBranch?: string | null | undefined;
-  githubToken?: string | null | undefined;
 }) {
   const layout = sandboxLayout(input.workdir);
 
@@ -157,26 +155,18 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
-  if (input.repositoryFullName && input.githubToken) {
-    await prepareGitHubRepository({
-      sandbox: input.sandbox,
-      workdir: layout.workRoot,
-      repositoryFullName: input.repositoryFullName,
-      defaultBranch: input.repositoryDefaultBranch ?? "main",
-      githubToken: input.githubToken,
-    });
-  } else {
-    await runSandboxPreparationCommand({
-      sandbox: input.sandbox,
-      stage: "initialize_empty_work_repository",
-      commandName: "git_init",
-      command: `git -C ${shellQuote(layout.workRoot)} init -q`,
-      options: {
-        user: SANDBOX_USER,
-        timeoutMs: 30_000,
-      },
-    });
-  }
+  // The session starts with an empty work/ directory. Repositories are cloned on
+  // demand by the agent (git/gh in the shell) or by amp; nothing is cloned here.
+  await runSandboxPreparationCommand({
+    sandbox: input.sandbox,
+    stage: "initialize_empty_work_repository",
+    commandName: "git_init",
+    command: `git -C ${shellQuote(layout.workRoot)} init -q`,
+    options: {
+      user: SANDBOX_USER,
+      timeoutMs: 30_000,
+    },
+  });
   await input.sandbox.files.write(layout.agentFile, input.agentFile, {
     user: SANDBOX_ROOT_USER,
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
@@ -214,7 +204,7 @@ async function runSandboxPreparationCommand(input: {
   }
 }
 
-async function prepareGitHubRepository(input: {
+export async function cloneGitHubRepositoryIntoWorkdir(input: {
   sandbox: SandboxHandle;
   workdir: string;
   repositoryFullName: string;
@@ -302,8 +292,29 @@ export async function runSandboxTool(input: {
   if (input.name === "shell") {
     const command = readString(args, "command");
     const layout = sandboxLayout(input.workdir);
-    const result = await input.sandbox.commands.run(command, {
+    const result = await runCommandWithExitResult(input.sandbox, command, {
       cwd: layout.workspaceRoot,
+      ...(input.envs ? { envs: input.envs } : {}),
+      timeoutMs: 120_000,
+      onStdout: async (data: string) => {
+        await input.onOutput?.("stdout", redact(data));
+      },
+      onStderr: async (data: string) => {
+        await input.onOutput?.("stderr", redact(data));
+      },
+    });
+    return truncate({
+      stdout: redact(String(result.stdout ?? "")),
+      stderr: redact(String(result.stderr ?? "")),
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+    });
+  }
+
+  if (input.name === "gh") {
+    const ghArgs = readString(args, "args");
+    const layout = sandboxLayout(input.workdir);
+    const result = await runCommandWithExitResult(input.sandbox, `gh ${ghArgs}`, {
+      cwd: layout.workRoot,
       ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
       onStdout: async (data: string) => {
@@ -326,6 +337,23 @@ export async function runSandboxTool(input: {
       path: relativePath(input.workdir, filePath),
       content: await input.sandbox.files.read(filePath),
     });
+  }
+
+  if (input.name === "read_skill") {
+    const filePath = resolveSandboxSkillPath(
+      input.workdir,
+      readString(args, "skillId"),
+      readOptionalString(args, "path"),
+    );
+    const toolRelativePath = relativePath(input.workdir, filePath);
+    try {
+      return truncate({
+        path: toolRelativePath,
+        content: await input.sandbox.files.read(filePath),
+      });
+    } catch {
+      throw new Error(`Skill file not found or unreadable: ${toolRelativePath}.`);
+    }
   }
 
   if (input.name === "write_file") {
@@ -421,40 +449,138 @@ export async function runSandboxTool(input: {
 
   if (input.name === "git_diff") {
     const layout = sandboxLayout(input.workdir);
-    const result = await input.sandbox.commands.run(
-      [
-        `git -C ${shellQuote(layout.workRoot)} diff --`,
-        `git -C ${shellQuote(layout.workRoot)} ls-files --others --exclude-standard | while IFS= read -r file; do git -C ${shellQuote(layout.workRoot)} diff --no-index -- /dev/null "$file" || true; done`,
-      ].join(" && "),
-      {
-        timeoutMs: 60_000,
-      },
-    );
+    const result = await input.sandbox.commands.run(gitDiffCommand(layout.workRoot), {
+      timeoutMs: 60_000,
+    });
     return truncate({ diff: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") });
   }
 
   throw new Error(`Unknown tool: ${input.name}`);
 }
 
+async function runCommandWithExitResult(
+  sandbox: SandboxHandle,
+  command: string,
+  options: Parameters<SandboxHandle["commands"]["run"]>[1],
+) {
+  try {
+    return await sandbox.commands.run(command, options);
+  } catch (error) {
+    const exitResult = commandExitResult(error);
+    if (exitResult) return exitResult;
+    throw error;
+  }
+}
+
+function commandExitResult(error: unknown) {
+  if (!error || typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  if (record.name !== "CommandExitError") return null;
+  if (typeof record.exitCode !== "number") return null;
+
+  return {
+    stdout: typeof record.stdout === "string" ? record.stdout : "",
+    stderr: typeof record.stderr === "string" ? record.stderr : "",
+    exitCode: record.exitCode,
+  };
+}
+
+function gitDiffCommand(workRoot: string) {
+  return [
+    `WORK=${shellQuote(workRoot)}`,
+    "emit_repo_diff() {",
+    '  repo="$1"',
+    '  label="$2"',
+    '  skip_nested="${3:-0}"',
+    '  [ -d "$repo/.git" ] || return 0',
+    '  body="$(',
+    '    git -C "$repo" status --short | while IFS= read -r line; do',
+    '      if [ "$skip_nested" = "1" ]; then',
+    '        path="${line#?? }"',
+    '        first="${path%%/*}"',
+    '        if [ -n "$first" ] && [ -d "$repo/$first/.git" ]; then',
+    "          continue",
+    "        fi",
+    "      fi",
+    '      printf "%s\\n" "$line"',
+    "    done",
+    '    git -C "$repo" diff --cached --',
+    '    git -C "$repo" diff --',
+    '    git -C "$repo" ls-files --others --exclude-standard | while IFS= read -r file; do',
+    '      [ -n "$file" ] || continue',
+    '      if [ "$skip_nested" = "1" ]; then',
+    '        first="${file%%/*}"',
+    '        if [ -n "$first" ] && [ -d "$repo/$first/.git" ]; then',
+    "          continue",
+    "        fi",
+    "      fi",
+    '      if [ -f "$repo/$file" ]; then',
+    '        git -C "$repo" diff --no-index -- /dev/null "$file" || true',
+    "      fi",
+    "    done",
+    '  )"',
+    '  if [ -n "$body" ]; then',
+    '    printf -- "--- %s ---\\n%s\\n" "$label" "$body"',
+    "  fi",
+    "}",
+    'emit_repo_diff "$WORK" "work/" "1"',
+    'find "$WORK" -mindepth 2 -maxdepth 2 -type d -name .git -print | sort | while IFS= read -r git_dir; do',
+    '  repo_dir="$(dirname "$git_dir")"',
+    '  repo_name="${repo_dir##*/}"',
+    '  emit_repo_diff "$repo_dir" "work/$repo_name/"',
+    "done",
+  ].join("\n");
+}
+
 export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
+  const allowedRootsMessage = "Path must be inside work/ or brain/ for this session.";
   let resolved: string;
   try {
     resolved = resolveWorkspacePath(workdir, inputPath);
   } catch {
-    throw new Error("Path must be inside work/ or brain/ for this session.");
+    throw new Error(allowedRootsMessage);
   }
   const relative = relativePath(workdir, resolved);
 
-  if (
+  const inAllowedRoot =
     relative === "work" ||
     relative.startsWith("work/") ||
     relative === "brain" ||
-    relative.startsWith("brain/")
-  ) {
+    relative.startsWith("brain/");
+
+  if (inAllowedRoot) {
     return resolved;
   }
 
-  throw new Error("Path must be inside work/ or brain/ for this session.");
+  throw new Error(allowedRootsMessage);
+}
+
+export function resolveSandboxSkillPath(workdir: string, skillId: string, inputPath = "SKILL.md") {
+  const id = skillId.trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(id) || id.includes("--")) {
+    throw new Error("Skill id must be a valid mounted skill id.");
+  }
+
+  const relativeFilePath = inputPath.trim() || "SKILL.md";
+  if (
+    relativeFilePath.includes("\0") ||
+    path.posix.isAbsolute(relativeFilePath) ||
+    relativeFilePath === "." ||
+    relativeFilePath.split("/").includes("..") ||
+    relativeFilePath.endsWith("/")
+  ) {
+    throw new Error("Skill path must be a relative file path inside the skill directory.");
+  }
+
+  const resolved = resolveWorkspacePath(workdir, path.posix.join("skills", id, relativeFilePath));
+  const relative = relativePath(workdir, resolved);
+  const skillRoot = `skills/${id}`;
+
+  if (relative !== skillRoot && relative.startsWith(`${skillRoot}/`)) {
+    return resolved;
+  }
+
+  throw new Error("Skill path must stay inside the requested skill directory.");
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
