@@ -73,8 +73,40 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).toContain("gh");
     expect(resolved.systemPrompt).toContain("Attached GitHub repositories: opencompany/web.");
     expect(resolved.systemPrompt).toContain("git and gh (GitHub CLI) access");
-    expect(resolved.systemPrompt).toContain("Clone a repository into work/ on demand");
+    expect(resolved.systemPrompt).toContain("gh commands default to the attached repository");
+    expect(resolved.systemPrompt).toContain(
+      "--repo is not needed when targeting this attached repository",
+    );
+    expect(resolved.systemPrompt).toContain("Clone a repository into work/<repo> on demand");
     expect(resolved.systemPrompt).toContain("All session work must happen under work/");
+  });
+
+  it("requires explicit repo selection for multi-repo gh commands", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Repo agent",
+      instructions: "Work across repos.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [],
+      integrations: {
+        github: {
+          repositories: [
+            { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
+            { id: "opencompany-api", fullName: "opencompany/api", defaultBranch: "main" },
+          ],
+        },
+      },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.systemPrompt).toContain(
+      "Attached GitHub repositories: opencompany/web, opencompany/api.",
+    );
+    expect(resolved.systemPrompt).toContain("Use --repo owner/repo with gh commands");
+    expect(resolved.systemPrompt).not.toContain("gh commands default to the attached repository");
   });
 
   it("omits GitHub repository context and the gh tool when no repository is attached", () => {
@@ -283,6 +315,8 @@ describe("resolveAgentRuntimeConfig", () => {
     "mistral/mistral-medium-3.5",
     "moonshotai/kimi-k2-turbo",
     "moonshotai/kimi-k2",
+    "xai/grok-4.1-fast-non-reasoning",
+    "xai/grok-4.20-non-reasoning",
   ] as const)("keeps %s on AI Gateway without provider-specific options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -321,6 +355,10 @@ describe("resolveAgentRuntimeConfig", () => {
     "moonshotai/kimi-k2.5",
     "moonshotai/kimi-k2-thinking",
     "moonshotai/kimi-k2-thinking-turbo",
+    "xai/grok-4.3",
+    "xai/grok-4.20-reasoning",
+    "xai/grok-4.1-fast-reasoning",
+    "xai/grok-build-0.1",
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",

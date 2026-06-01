@@ -63,6 +63,14 @@ describe("extractConfigFromMentions", () => {
     expect(config.model).toBe("minimax/minimax-m3");
   });
 
+  it("resolves xAI Grok model mentions", () => {
+    const config = extractConfigFromMentions(
+      "Use @xai/grok-4.1-fast-reasoning first, then @xai/grok-4.3.",
+    );
+
+    expect(config.model).toBe("xai/grok-4.3");
+  });
+
   it("resolves tool ids and labels", () => {
     const config = extractConfigFromMentions(
       "Research with @exa, @slack, and implement with @AMP.",

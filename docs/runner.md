@@ -102,14 +102,18 @@ Important details:
   matching assistant tool calls.
 - The runner does not clone the full workspace repo into E2B. It materializes only configured
   Brain files under `/home/user/workspace/brain` plus a session-local
-  `/home/user/workspace/work` directory. For regular sessions, `work/` is initialized as an empty
-  git repository so `git_diff` can report session-local scratch changes without exposing the
-  managed workspace repo. For AMP sessions, `work/` contains the selected connected GitHub
-  repository.
-- When AMP runs against a connected GitHub repository, the runner mints a repository-scoped GitHub
-  App installation token and passes it only to that AMP command through `GH_TOKEN`, a temporary
-  `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config. This lets AMP use `gh` and
-  `git push` without persisting credentials in the sandbox home directory or repository remote.
+  `/home/user/workspace/work` directory. `work/` is initialized as an empty scratch git repository
+  so `git_diff` can report session-local scratch changes without exposing the managed workspace
+  repo. Connected GitHub repositories are cloned lazily into `work/<repo>` only when code or files
+  are needed; `gh` can still run metadata commands before a clone.
+- For shell, `gh`, and AMP commands that need connected GitHub repositories, the runner mints a
+  repository-scoped GitHub App installation token and passes it only to that command through
+  `GH_TOKEN`, a temporary `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config. When
+  exactly one repository is attached, the command env also includes `GH_REPO`; multi-repo sessions
+  must pass `--repo owner/repo` to `gh` commands. This avoids persisting credentials in the sandbox
+  home directory or repository remote.
+- AMP owns its coding checkout and may clone the selected connected repository directly into
+  `work/` for that tool run.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest.
@@ -137,6 +141,8 @@ V1 tools:
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
 `/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
 Keep path validation in the runtime/sandbox layer rather than relying on model behavior.
+For connected GitHub code edits, clone the target repository into `work/<repo>` first unless the
+workflow is delegated to `amp_coder`.
 
 ## Event model
 
