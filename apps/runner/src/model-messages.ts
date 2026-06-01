@@ -59,6 +59,7 @@ export function buildModelMessages(
       }
     }
 
+    if (isToolModelMessage(modelMessage)) continue;
     if (modelMessage) messages.push(modelMessage);
   }
 

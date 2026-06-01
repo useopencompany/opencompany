@@ -46,19 +46,22 @@ export async function createAgentSession(idOrPath: string) {
     workspaceId: workspace.id,
   });
 
-  await captureServerEvent("session_started", user.id, {
-    user_id: user.id,
-    workspace_id: workspace.id,
-    agent_id: agent.id,
-    session_id: sessionId,
-    model_provider: agent.config.model.provider,
-    model_name: agent.config.model.name,
-    source: "agent",
-  });
-
-  after(async () => {
-    await dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id });
-  });
+  // Analytics is a network flush (PostHog) that must not sit on the critical path, so it
+  // runs concurrently with the session-start dispatch inside `after()`.
+  after(() =>
+    Promise.all([
+      dispatchAgentSessionStarted({ sessionId, workspaceId: workspace.id }),
+      captureServerEvent("session_started", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        session_id: sessionId,
+        model_provider: agent.config.model.provider,
+        model_name: agent.config.model.name,
+        source: "agent",
+      }),
+    ]),
+  );
 
   return loadCreatedSessionResult(sessionId, user.id, workspace.id);
 }
@@ -90,31 +93,35 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
   });
   const messageId = await insertUserMessage(sessionId, trimmed);
 
-  await captureServerEvent("session_started", user.id, {
-    user_id: user.id,
-    workspace_id: workspace.id,
-    agent_id: agent.id,
-    session_id: sessionId,
-    model_provider: agent.config.model.provider,
-    model_name: agent.config.model.name,
-    source: "prompt",
-  });
-  await captureServerEvent("session_message_sent", user.id, {
-    user_id: user.id,
-    workspace_id: workspace.id,
-    agent_id: agent.id,
-    session_id: sessionId,
-    message_id: messageId,
-    model_provider: agent.config.model.provider,
-    model_name: agent.config.model.name,
-    is_initial_message: true,
-    message_length: trimmed.length,
-  });
-
-  after(async () => {
-    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
-    await dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id });
-  });
+  // Analytics is a network flush (PostHog) that previously blocked this action's return
+  // and therefore the runner dispatch. Run dispatch and analytics concurrently in
+  // `after()` so neither sits on the time-to-first-token path.
+  after(() =>
+    Promise.all([
+      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
+      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      captureServerEvent("session_started", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        session_id: sessionId,
+        model_provider: agent.config.model.provider,
+        model_name: agent.config.model.name,
+        source: "prompt",
+      }),
+      captureServerEvent("session_message_sent", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        session_id: sessionId,
+        message_id: messageId,
+        model_provider: agent.config.model.provider,
+        model_name: agent.config.model.name,
+        is_initial_message: true,
+        message_length: trimmed.length,
+      }),
+    ]),
+  );
 
   return loadCreatedSessionResult(sessionId, user.id, workspace.id);
 }
@@ -125,51 +132,62 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   if (!trimmed) {
     return { ok: false, error: "Message is required." } as const;
   }
-  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
-    return { ok: false, error: "Add workspace credits to continue this session." } as const;
-  }
 
   const db = getDb();
-  const [session] = await db
-    .select({
-      id: agentSessions.id,
-      agentId: agentSessions.agentId,
-      modelProvider: agentSessions.modelProvider,
-      modelName: agentSessions.modelName,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.id, sessionId),
-        eq(agentSessions.workspaceId, workspace.id),
-        eq(agentSessions.userId, user.id),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .limit(1);
+  // The balance check and the session-authz lookup are independent reads, so run them
+  // concurrently — one round-trip on the message path instead of two.
+  const [hasBalance, sessionRows] = await Promise.all([
+    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+    db
+      .select({
+        id: agentSessions.id,
+        agentId: agentSessions.agentId,
+        modelProvider: agentSessions.modelProvider,
+        modelName: agentSessions.modelName,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      )
+      .limit(1),
+  ]);
 
+  // Preserve the prior error precedence: credits before session existence.
+  if (!hasBalance) {
+    return { ok: false, error: "Add workspace credits to continue this session." } as const;
+  }
+  const session = sessionRows[0];
   if (!session) {
     return { ok: false, error: "Session not found." } as const;
   }
 
   const messageId = await insertUserMessage(sessionId, trimmed);
 
-  await captureServerEvent("session_message_sent", user.id, {
-    user_id: user.id,
-    workspace_id: workspace.id,
-    agent_id: session.agentId,
-    session_id: sessionId,
-    message_id: messageId,
-    model_provider: session.modelProvider,
-    model_name: session.modelName,
-    is_initial_message: false,
-    message_length: trimmed.length,
-  });
-
-  after(async () => {
-    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id });
-    await dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id });
-  });
+  // Analytics is a network flush (PostHog) that previously blocked this action's return
+  // and therefore the runner dispatch. Run dispatch and analytics concurrently in
+  // `after()` so neither sits on the time-to-first-token path.
+  after(() =>
+    Promise.all([
+      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
+      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      captureServerEvent("session_message_sent", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: session.agentId,
+        session_id: sessionId,
+        message_id: messageId,
+        model_provider: session.modelProvider,
+        model_name: session.modelName,
+        is_initial_message: false,
+        message_length: trimmed.length,
+      }),
+    ]),
+  );
 
   return { ok: true, messageId } as const;
 }

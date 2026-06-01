@@ -363,7 +363,7 @@ function AgentDetailContent({
                   staleTime: AGENTS_QUERY_STALE_TIME_MS,
                 });
               }}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-[#ececea]/70"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-surface-subtle/70"
             >
               <ChevronLeft size={12} strokeWidth={1.9} />
               Agents
@@ -387,7 +387,7 @@ function AgentDetailContent({
                     router.push(`/session/${result.session.id}`);
                   });
                 }}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#e4e4e0] bg-white px-2 py-1 text-[12px] text-ink/85 hover:bg-[#fafaf8]"
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-[12px] text-ink/85 hover:bg-surface-muted"
               >
                 <Play size={11} strokeWidth={2} />
                 Start session
@@ -422,7 +422,7 @@ function AgentDetailContent({
                 schedule();
               }}
             >
-              <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-[#ececea]/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
+              <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-surface-subtle/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <SelectedModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
                   <span className="truncate">{selectedModel.displayLabel}</span>
@@ -484,13 +484,13 @@ function AgentDetailContent({
         <button
           type="button"
           aria-label="Collapse agent details"
-          className="fixed inset-0 z-30 bg-black/[0.06] lg:hidden"
+          className="fixed inset-0 z-30 bg-ink/[0.06] lg:hidden"
           onClick={() => updateInspectorCollapsed(true)}
         />
       )}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-[#e4e4e0] bg-[#fbfbf9]/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-[#fbfbf9]/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
+        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed
             ? "hidden"
             : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"
@@ -563,7 +563,7 @@ function AgentDetailContent({
         aria-label={inspectorCollapsed ? "Expand agent details" : "Collapse agent details"}
         aria-expanded={!inspectorCollapsed}
         onClick={() => updateInspectorCollapsed(!inspectorCollapsed)}
-        className="fixed right-6 top-10 z-50 rounded-md border border-[#e6e6e3] bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="fixed right-6 top-10 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <PanelRight size={15} strokeWidth={1.75} />
       </button>
@@ -670,7 +670,7 @@ function AgentInspector({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
             No brain paths mounted
           </div>
         )}
@@ -694,7 +694,7 @@ function AgentInspector({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
             No agents selected
           </div>
         )}
@@ -718,7 +718,7 @@ function AgentInspector({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
             No tools selected
           </div>
         )}
@@ -732,7 +732,7 @@ function AgentInspector({
         {afterSession?.enabled ? (
           <AfterSessionConfigItem prompt={afterSession.prompt} />
         ) : (
-          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
             Add #after-session to enable an idle memory update
           </div>
         )}
@@ -748,11 +748,11 @@ function AgentInspector({
 
       <FullConfigPanel value={fullConfig} />
 
-      <div className="border-t border-[#e4e4e0] pt-6">
+      <div className="border-t border-border pt-6">
         <button
           type="button"
           onClick={onDeleteClick}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-[#9f2f24] hover:bg-[#fff0ed]"
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] font-medium text-danger hover:bg-danger-bg"
         >
           <Trash2 size={13} strokeWidth={1.9} />
           Delete agent
@@ -764,9 +764,9 @@ function AgentInspector({
 
 function AfterSessionConfigItem({ prompt }: { prompt: string }) {
   return (
-    <div className="rounded-lg border border-[#d8e1d7] bg-[#f5faf6] px-3 py-3">
+    <div className="rounded-lg border border-success-border bg-success-bg px-3 py-3">
       <div className="flex min-w-0 items-start gap-2">
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/70 bg-white/70 text-ink-muted">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-surface/70 bg-surface/70 text-ink-muted">
           <Clock3 size={14} strokeWidth={1.9} />
         </span>
         <div className="min-w-0 whitespace-pre-wrap break-words text-[12.5px] leading-5 text-ink">
@@ -781,7 +781,7 @@ function InspectorHeader({ label, countLabel }: { label: string; countLabel: str
   return (
     <div className="mb-3 flex items-center justify-between">
       <span className="text-[12px] font-medium text-ink">{label}</span>
-      <span className="rounded-full border border-[#e3e3df] bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
+      <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
         {countLabel}
       </span>
     </div>
@@ -822,15 +822,15 @@ function ConfigItem({
 }) {
   const toneClass =
     tone === "model"
-      ? "border-[#d6dde9] bg-[#f4f7fb]"
+      ? "border-info-border bg-info-bg"
       : tone === "tool"
-        ? "border-[#d8e1d7] bg-[#f5faf6]"
-        : "border-[#e2e2de] bg-white/55";
+        ? "border-success-border bg-success-bg"
+        : "border-border bg-surface/55";
 
   return (
     <div className={`rounded-lg border px-3 py-3 ${toneClass}`}>
       <div className="flex min-w-0 items-center gap-2">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/70 bg-white/70 text-ink-muted">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-surface/70 bg-surface/70 text-ink-muted">
           <Icon size={14} strokeWidth={1.9} />
         </span>
         <div className="min-w-0">
@@ -875,7 +875,7 @@ function GitHubSyncPanel({
         </span>
       </div>
 
-      <div className="rounded-lg border border-[#e2e2de] bg-white/60 p-3">
+      <div className="rounded-lg border border-border bg-surface/60 p-3">
         <SyncTrack saveState={saveState} status={status} />
         <div className="mt-4 space-y-2 text-[12px] text-ink-muted">
           <div className="flex items-center gap-2">
@@ -890,7 +890,7 @@ function GitHubSyncPanel({
           ) : null}
         </div>
         {error ? (
-          <div className="mt-3 rounded-md border border-[#f1b8ae] bg-[#fff7f5] px-3 py-2 text-[11.5px] leading-4 text-[#9f2f21]">
+          <div className="mt-3 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
             {error}
           </div>
         ) : null}
@@ -903,7 +903,7 @@ function FullConfigPanel({ value }: { value: string }) {
   return (
     <div>
       <div className="mb-3 text-[12px] font-medium text-ink">Full config</div>
-      <pre className="max-h-[360px] overflow-auto rounded-lg border border-[#e2e2de] bg-white/60 p-3 text-[11px] leading-5 text-ink-muted">
+      <pre className="max-h-[360px] overflow-auto rounded-lg border border-border bg-surface/60 p-3 text-[11px] leading-5 text-ink-muted">
         <code>{value}</code>
       </pre>
     </div>
@@ -951,12 +951,12 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
           <div
             className={`h-1 rounded-full ${
               step.state === "done"
-                ? "bg-[#2f7d46]"
+                ? "bg-success"
                 : step.state === "active"
-                  ? "bg-[#9b7a2d]"
+                  ? "bg-warning"
                   : step.state === "danger"
-                    ? "bg-[#c2412d]"
-                    : "bg-[#deded9]"
+                    ? "bg-danger"
+                    : "bg-border"
             }`}
           />
           <div className="mt-1 truncate text-[9.5px] font-medium text-ink-subtle">{step.label}</div>
@@ -1088,10 +1088,10 @@ function syncMeta(status: string): {
 }
 
 function syncToneClass(tone: SyncTone) {
-  if (tone === "success") return "border-[#cfe5d5] bg-[#f0f8f2] text-[#216b35]";
-  if (tone === "danger") return "border-[#f0c0b8] bg-[#fff5f3] text-[#a33929]";
-  if (tone === "progress") return "border-[#eadcb6] bg-[#fff8e7] text-[#795b19]";
-  return "border-[#e3e3df] bg-white text-ink-muted";
+  if (tone === "success") return "border-success-border bg-success-bg text-success";
+  if (tone === "danger") return "border-danger-border bg-danger-bg text-danger";
+  if (tone === "progress") return "border-warning-border bg-warning-bg text-warning";
+  return "border-border bg-surface text-ink-muted";
 }
 
 function formatSyncDate(value: string) {
