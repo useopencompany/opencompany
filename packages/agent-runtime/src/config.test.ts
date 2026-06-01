@@ -283,6 +283,8 @@ describe("resolveAgentRuntimeConfig", () => {
     "mistral/mistral-medium-3.5",
     "moonshotai/kimi-k2-turbo",
     "moonshotai/kimi-k2",
+    "xai/grok-4.1-fast-non-reasoning",
+    "xai/grok-4.20-non-reasoning",
   ] as const)("keeps %s on AI Gateway without provider-specific options", (modelName) => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
@@ -321,6 +323,10 @@ describe("resolveAgentRuntimeConfig", () => {
     "moonshotai/kimi-k2.5",
     "moonshotai/kimi-k2-thinking",
     "moonshotai/kimi-k2-thinking-turbo",
+    "xai/grok-4.3",
+    "xai/grok-4.20-reasoning",
+    "xai/grok-4.1-fast-reasoning",
+    "xai/grok-build-0.1",
     "zai/glm-5.1",
     "zai/glm-5-turbo",
     "zai/glm-5v-turbo",
