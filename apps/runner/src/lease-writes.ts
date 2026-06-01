@@ -83,6 +83,16 @@ export type ModelUsageInsert = {
   providerCreatedAt: Date | null;
 };
 
+type ToolApprovalInsert = {
+  sessionId: string;
+  messageId: string;
+  toolCallId: string;
+  toolName: string;
+  providerKey: string;
+  permissionGroup: "read" | "post" | "modify" | "admin";
+  inputPreview: string | null;
+};
+
 export type ToolUsageInsert = {
   sessionId: string;
   messageId: string;
@@ -114,6 +124,10 @@ export type LeaseWriteStore = {
     lease: LeaseIdentity,
   ): Promise<boolean>;
   insertToolMessage(input: ToolMessageInsert, lease: LeaseIdentity): Promise<boolean>;
+  insertToolApproval(
+    input: ToolApprovalInsert,
+    lease: LeaseIdentity,
+  ): Promise<AssistantInsertOutcome | null>;
   insertModelUsage(input: ModelUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
   insertToolUsage(input: ToolUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
 };
@@ -207,6 +221,42 @@ export function createDbLeaseWriteStore(): LeaseWriteStore {
         RETURNING id
       `);
       return rowsFromExecute(result).length > 0;
+    },
+
+    async insertToolApproval(input, lease) {
+      // Idempotent on (session_id, tool_call_id): a crash-recovery re-run resumes the
+      // existing approval row (and its decided status) rather than resetting it to
+      // pending. The CTE reports lease state and insert result together so the caller
+      // tells "lease lost" (no row) apart from "row already existed" (conflict).
+      const result = await getDb().execute(sql`
+        WITH lease AS (
+          SELECT 1
+          FROM agent_sessions s
+          WHERE s.id = ${lease.sessionId}
+            AND s.run_lease_id = ${lease.leaseId}
+            AND s.run_lease_owner = ${lease.leaseOwner}
+            AND s.archived_at IS NULL
+        ),
+        ins AS (
+          INSERT INTO agent_tool_approvals (
+            session_id, message_id, tool_call_id, tool_name, provider_key, permission_group, status, input_preview
+          )
+          SELECT
+            ${input.sessionId}, ${input.messageId}, ${input.toolCallId}, ${input.toolName},
+            ${input.providerKey}, ${input.permissionGroup}, 'pending', ${input.inputPreview}
+          WHERE EXISTS (SELECT 1 FROM lease)
+          ON CONFLICT (session_id, tool_call_id) DO NOTHING
+          RETURNING id
+        )
+        SELECT
+          EXISTS (SELECT 1 FROM lease) AS lease_current,
+          (SELECT id FROM ins) AS inserted_id
+      `);
+      const row = rowsFromExecute<{ lease_current: boolean; inserted_id: number | null }>(
+        result,
+      )[0];
+      if (!row || !row.lease_current) return null;
+      return row.inserted_id ? "inserted" : "conflict";
     },
 
     async insertModelUsage(input, lease) {
@@ -429,6 +479,41 @@ export async function insertToolMessageForLease(
     },
     { sessionId: input.sessionId, leaseId: input.leaseId, leaseOwner: input.leaseOwner },
   );
+}
+
+export async function insertToolApprovalForLease(
+  input: {
+    sessionId: string;
+    messageId: string;
+    toolCallId: string;
+    toolName: string;
+    providerKey: string;
+    permissionGroup: "read" | "post" | "modify" | "admin";
+    inputPreview?: string | null;
+    leaseId: string;
+    leaseOwner: string;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
+  const outcome = await store.insertToolApproval(
+    {
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+      providerKey: input.providerKey,
+      permissionGroup: input.permissionGroup,
+      inputPreview: input.inputPreview ?? null,
+    },
+    { sessionId: input.sessionId, leaseId: input.leaseId, leaseOwner: input.leaseOwner },
+  );
+  // Lease lost — the guard rejected the write. Throw so the run aborts cleanly rather
+  // than waiting on an approval row that was never created. A conflict (idempotent
+  // re-entry) is success: the row already exists with whatever status it holds.
+  if (outcome === null) {
+    throw new StaleRunLeaseError();
+  }
+  return outcome;
 }
 
 export async function appendRuntimeEventForLease(

@@ -4,6 +4,7 @@ import {
   newRunLeaseId,
   normalizeAgentConfig,
   resolveAgentRuntimeConfig,
+  type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import type { AgentReference } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
@@ -90,6 +91,7 @@ import {
 import { rowsFromExecute } from "./sql-exec";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createHostedToolBudget, createToolSet, pickRuntimeTools } from "./tool-dispatcher";
+import { loadWorkspaceToolPolicy } from "./tool-policies";
 import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
 
 export {
@@ -387,6 +389,14 @@ async function runMessageWithContext(
       }),
     });
 
+    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
+      loadWorkspaceToolPolicy(row.workspace.id),
+    );
+    // Only a top-level, user-initiated session has a human watching who can approve an
+    // "ask" tool call. Delegated children and agent/scheduled runs can't, so their
+    // "ask" decisions collapse to "deny" (resolved inside collectAssistantStream).
+    const interactive = row.session.source === "user" && (input.delegationDepth ?? 0) === 0;
+
     const streamResult = await streamAssistantResponse({
       ctx,
       runtime,
@@ -403,6 +413,8 @@ async function runMessageWithContext(
       assistantMessageId,
       toolStartCoordinator,
       checkAbort,
+      policy: toolPolicy,
+      interactive,
       // Stop at the next model-step boundary if the user steered this run with a new
       // message. In-flight tool calls in the current step still finish and persist.
       extraStopConditions: [
@@ -909,6 +921,11 @@ async function runAfterSessionWithContext(
         assistantMessageId,
         toolStartCoordinator,
         checkAbort,
+        policy: await observeRunStep(ctx, "load_tool_policy", () =>
+          loadWorkspaceToolPolicy(row.workspace.id),
+        ),
+        // After-session runs are autonomous; "ask" tools collapse to "deny".
+        interactive: false,
       });
 
     if (sandboxAcquirer.current) {
@@ -2204,6 +2221,8 @@ async function streamAssistantResponse(input: {
   assistantMessageId: string;
   toolStartCoordinator: ToolStartCoordinator;
   checkAbort: RunControlCheck;
+  policy: WorkspaceToolPolicyMap;
+  interactive: boolean;
   extraStopConditions?: StopCondition<ToolSet>[];
 }) {
   const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
@@ -2272,6 +2291,8 @@ async function streamAssistantResponse(input: {
           signal: input.ctx.controller.signal,
           checkAbort: input.checkAbort,
           toolStartCoordinator: input.toolStartCoordinator,
+          policy: input.policy,
+          interactive: input.interactive,
         });
         // Log on the explicit span object (not `currentSpan()`): the AI SDK stream consumption can
         // run outside this span's async-context, which would silently drop a `currentSpan()` log

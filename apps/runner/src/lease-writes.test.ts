@@ -80,6 +80,10 @@ function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: str
       message.content = input.content;
       return true;
     },
+    async insertToolApproval(_input, guard) {
+      if (!isCurrent(guard)) return null;
+      return "inserted";
+    },
     async insertToolMessage(input, guard) {
       if (!isCurrent(guard)) return false;
       messages.push({

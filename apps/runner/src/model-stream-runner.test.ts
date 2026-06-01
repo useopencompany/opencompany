@@ -42,6 +42,69 @@ describe("collectAssistantStream", () => {
     expect(stream.return).not.toHaveBeenCalled();
   });
 
+  it("releases a denied tool call with a deny verdict and never starts the body unguarded", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_1",
+        toolName: "slack__chat_postMessage",
+        input: { text: "hi" },
+      }),
+    ]);
+
+    await collect(stream, {
+      toolStartCoordinator: coordinator,
+      policy: new Map([["slack:post", "deny"]]),
+    });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_1",
+      expect.objectContaining({ decision: "deny", providerKey: "slack", group: "post" }),
+    );
+  });
+
+  it("releases an allowed tool call with an allow verdict", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_read",
+        toolName: "slack__search",
+        input: { query: "launch" },
+      }),
+    ]);
+
+    await collect(stream, { toolStartCoordinator: coordinator });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_read",
+      expect.objectContaining({ decision: "allow", providerKey: "slack", group: "read" }),
+    );
+  });
+
+  it("collapses an ask decision to deny in a non-interactive run", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_ask",
+        toolName: "slack__chat_postMessage",
+        input: { text: "hi" },
+      }),
+    ]);
+
+    await collect(stream, { toolStartCoordinator: coordinator, interactive: false });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_ask",
+      expect.objectContaining({ decision: "deny", providerKey: "slack", group: "post" }),
+    );
+  });
+
   it("closes the iterator when run control fails after a streamed part", async () => {
     const stream = createStream([
       streamPart({ type: "text-delta", text: "partial" }),
@@ -259,6 +322,8 @@ function collect(
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator: createToolStartCoordinator(),
+    policy: new Map(),
+    interactive: true,
     ...overrides,
   });
 }

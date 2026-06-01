@@ -62,6 +62,13 @@ export type SessionRuntimeState = {
   lastError: string | null;
 };
 
+export type RuntimeToolApprovalState = {
+  status: "required" | "approved" | "denied";
+  providerKey: string;
+  permissionGroup: "read" | "post" | "modify" | "admin";
+  decisionSource?: "user" | "timeout" | "abort" | undefined;
+};
+
 export type RuntimeToolCall = {
   id: string;
   name: string;
@@ -71,6 +78,7 @@ export type RuntimeToolCall = {
   activityPreview: string;
   outputPreview: string;
   brainPath?: string | undefined;
+  approval?: RuntimeToolApprovalState | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
 };
@@ -709,6 +717,31 @@ export function buildRuntimeToolCallsForMessage(
       }
     }
 
+    if (event.type === "tool.approval_required") {
+      const call = getCall(toolCallId);
+      call.name = readString(event.payload.name) || call.name;
+      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
+      call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;
+      call.approval = {
+        status: "required",
+        providerKey: readString(event.payload.providerKey),
+        permissionGroup: readPermissionGroup(event.payload.permissionGroup),
+      };
+    }
+
+    if (event.type === "tool.approval_resolved") {
+      const call = getCall(toolCallId);
+      const decision = readString(event.payload.decision) === "approved" ? "approved" : "denied";
+      const decisionSource = readString(event.payload.decisionSource);
+      call.approval = {
+        status: decision,
+        providerKey: call.approval?.providerKey ?? "",
+        permissionGroup: call.approval?.permissionGroup ?? "admin",
+        decisionSource:
+          decisionSource === "timeout" || decisionSource === "abort" ? decisionSource : "user",
+      };
+    }
+
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
@@ -928,6 +961,12 @@ function formatToolResultOutput(output: unknown) {
 
 export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" {
+  return value === "read" || value === "post" || value === "modify" || value === "admin"
+    ? value
+    : "admin";
 }
 
 export function optionalString(value: unknown) {

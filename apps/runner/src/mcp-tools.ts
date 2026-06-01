@@ -32,7 +32,7 @@ import {
   toPersistedModelMessage,
 } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
-import { formatRuntimePreview } from "./tool-dispatcher";
+import { formatRuntimePreview, persistDeniedToolResult } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
@@ -184,7 +184,22 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
             });
           },
           execute: async (toolInput: unknown, options: { toolCallId: string }) => {
-            await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+            const verdict = await input.toolStartCoordinator.waitForStarted(
+              options.toolCallId,
+              input.signal,
+            );
+            if (verdict.decision === "deny") {
+              return persistDeniedToolResult({
+                sessionId: input.sessionId,
+                assistantMessageId: input.assistantMessageId,
+                runLeaseId: input.runLeaseId,
+                runLeaseOwner: input.runLeaseOwner,
+                internalMessages: input.internalMessages,
+                toolCallId: options.toolCallId,
+                toolName: prefixedName,
+                verdict,
+              });
+            }
             return executeMcpTool({
               ...input,
               mcpServer: provider.key,

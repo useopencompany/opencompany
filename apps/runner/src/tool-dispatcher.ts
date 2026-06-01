@@ -1,5 +1,6 @@
 import {
   type AgentConfig,
+  buildDeniedToolOutput,
   newAgentSessionMessageId,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
@@ -47,7 +48,7 @@ import {
   withRunControlChecks,
 } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
-import type { ToolStartCoordinator } from "./tool-start-coordinator";
+import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
@@ -132,7 +133,22 @@ export function createToolSet(input: {
         });
       },
       execute: async (toolInput, options) => {
-        await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+        const verdict = await input.toolStartCoordinator.waitForStarted(
+          options.toolCallId,
+          input.signal,
+        );
+        if (verdict.decision === "deny") {
+          return persistDeniedToolResult({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            internalMessages: input.internalMessages,
+            toolCallId: options.toolCallId,
+            toolName: definition.name,
+            verdict,
+          });
+        }
         return executeRuntimeTool({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
@@ -712,6 +728,66 @@ function isFatalToolError(
   if (error instanceof MissingEnvError) return true;
   if (error instanceof RecoverableToolError) return false;
   return toolKind === "sandbox" && !sandboxIdForCapture;
+}
+
+// A denied tool call still needs a persisted tool result (the model requires one
+// result per tool call) and a tool.failed event for the UI, but it never runs the
+// real tool body. This mirrors the persistence tail of executeRuntimeTool.
+export async function persistDeniedToolResult(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean | undefined;
+  toolCallId: string;
+  toolName: string;
+  verdict: ToolStartVerdict;
+}) {
+  const output = buildDeniedToolOutput({
+    toolName: input.toolName,
+    providerKey: input.verdict.providerKey,
+    group: input.verdict.group,
+    source: input.verdict.source,
+  });
+
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          output,
+        }),
+      ),
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: input.toolName,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+      },
+    }),
+  );
+
+  return output;
 }
 
 function buildFailedToolOutput(error: unknown): FailedToolOutput {

@@ -1793,6 +1793,8 @@ describe("stream error handling", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       toolStartCoordinator: createToolStartCoordinator(),
+      policy: new Map(),
+      interactive: true,
     });
 
     expect(result).toMatchObject({
@@ -1837,6 +1839,8 @@ describe("stream error handling", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       toolStartCoordinator,
+      policy: new Map(),
+      interactive: true,
     });
 
     const transientEvents = vi
@@ -2686,6 +2690,10 @@ function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseWriteSto
         toolCallId: input.toolCallId,
       });
       return true;
+    },
+    async insertToolApproval(_input, lease) {
+      if (!leaseCurrent(lease)) return null;
+      return "inserted" as const;
     },
     async insertModelUsage(input, lease) {
       if (!leaseCurrent(lease)) return null;

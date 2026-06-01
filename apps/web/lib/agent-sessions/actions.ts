@@ -10,6 +10,7 @@ import {
   agentSessionMessages,
   agentSessions,
   agents,
+  agentToolApprovals,
 } from "@opencompany/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
@@ -224,6 +225,60 @@ export async function abortAgentSession(sessionId: string) {
   after(async () => {
     await dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id });
   });
+
+  return { ok: true } as const;
+}
+
+// Approve or deny a paused tool call. The runner is polling the approval row and acts
+// on the decision; it (not this action) emits the durable tool.approval_resolved event,
+// so the event stream stays single-writer and ordered. The `status = 'pending'` guard
+// makes this idempotent and prevents overriding a row the runner already auto-denied on
+// timeout.
+export async function resolveToolApproval(input: {
+  sessionId: string;
+  toolCallId: string;
+  decision: "approved" | "denied";
+}) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, input.sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  const updated = await db
+    .update(agentToolApprovals)
+    .set({
+      status: input.decision,
+      decidedAt: new Date(),
+      decidedByUserId: user.id,
+      decisionSource: "user",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentToolApprovals.sessionId, input.sessionId),
+        eq(agentToolApprovals.toolCallId, input.toolCallId),
+        eq(agentToolApprovals.status, "pending"),
+      ),
+    )
+    .returning({ id: agentToolApprovals.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "This request is no longer awaiting approval." } as const;
+  }
 
   return { ok: true } as const;
 }

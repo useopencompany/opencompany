@@ -1,10 +1,17 @@
+import { resolveToolDecision, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
-import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
+import {
+  appendRuntimeEventForLease,
+  insertToolApprovalForLease,
+  requireLeaseWrite,
+} from "./lease-writes";
 import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
-import type { ToolStartCoordinator } from "./tool-start-coordinator";
+import { awaitToolApproval } from "./tool-approvals";
+import { formatRuntimePreview } from "./tool-dispatcher";
+import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordStepUsage } from "./usage-recorder";
 
 // Live assistant text is transient-only, so publish model deltas as they arrive.
@@ -25,6 +32,10 @@ export async function collectAssistantStream(input: {
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
+  policy: WorkspaceToolPolicyMap;
+  // Whether a human can approve "ask" tool calls in this run. Autonomous runs
+  // (schedules, after-session) pass false so "ask" collapses to "deny" and never hangs.
+  interactive: boolean;
   onFirstOutputPart?: () => void;
 }) {
   let assistantContent = "";
@@ -167,22 +178,108 @@ export async function collectAssistantStream(input: {
           name: part.toolName,
           input: part.input,
         };
-        await requireLeaseWrite(
-          appendRuntimeEventForLease({
-            sessionId: input.sessionId,
-            messageId: input.assistantMessageId,
-            leaseId: input.runLeaseId,
-            leaseOwner: input.runLeaseOwner,
-            type: "tool.started",
-            payload: {
+
+        // Evaluate the workspace permission policy for this tool call. This is the
+        // hard gate: the tool's execute() is parked on waitForStarted() and only the
+        // verdict we attach via markStarted() decides whether the real body runs.
+        const { decision, providerKey, group } = resolveToolDecision({
+          toolName: toolStart.name,
+          policy: input.policy,
+          interactive: input.interactive,
+        });
+
+        // Emit tool.started + release execute() with the resolved verdict. For a
+        // denied call, execute() returns a permission_denied result instead of running.
+        const releaseToolCall = async (verdict: ToolStartVerdict) => {
+          await requireLeaseWrite(
+            appendRuntimeEventForLease({
+              sessionId: input.sessionId,
+              messageId: input.assistantMessageId,
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+              type: "tool.started",
+              payload: {
+                messageId: input.assistantMessageId,
+                toolCallId: part.toolCallId,
+                name: toolStart.name,
+                input: toolStart.input,
+              },
+            }),
+          );
+          input.toolStartCoordinator.markStarted(part.toolCallId, verdict);
+        };
+
+        if (decision === "ask") {
+          // Pause the run for an in-chat decision. The approval row is the durable
+          // source of truth the web action updates; the event drives the UI buttons.
+          await requireLeaseWrite(
+            insertToolApprovalForLease({
+              sessionId: input.sessionId,
               messageId: input.assistantMessageId,
               toolCallId: part.toolCallId,
-              name: toolStart.name,
-              input: toolStart.input,
-            },
-          }),
-        );
-        input.toolStartCoordinator.markStarted(part.toolCallId);
+              toolName: toolStart.name,
+              providerKey,
+              permissionGroup: group,
+              inputPreview: formatRuntimePreview(toolStart.input),
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+            }).then(() => true),
+          );
+          const requestedAtMs = Date.now();
+          await requireLeaseWrite(
+            appendRuntimeEventForLease({
+              sessionId: input.sessionId,
+              messageId: input.assistantMessageId,
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+              type: "tool.approval_required",
+              payload: {
+                messageId: input.assistantMessageId,
+                toolCallId: part.toolCallId,
+                name: toolStart.name,
+                providerKey,
+                permissionGroup: group,
+                inputPreview: formatRuntimePreview(toolStart.input),
+                requestedAt: new Date(requestedAtMs).toISOString(),
+              },
+            }),
+          );
+
+          const resolution = await awaitToolApproval({
+            sessionId: input.sessionId,
+            toolCallId: part.toolCallId,
+            requestedAtMs,
+            checkAbort: input.checkAbort,
+            signal: input.signal,
+          });
+
+          await requireLeaseWrite(
+            appendRuntimeEventForLease({
+              sessionId: input.sessionId,
+              messageId: input.assistantMessageId,
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+              type: "tool.approval_resolved",
+              payload: {
+                messageId: input.assistantMessageId,
+                toolCallId: part.toolCallId,
+                name: toolStart.name,
+                decision: resolution.decision,
+                decisionSource: resolution.source,
+              },
+            }),
+          );
+
+          await releaseToolCall({
+            decision: resolution.decision === "approved" ? "allow" : "deny",
+            providerKey,
+            group,
+            source: resolution.source === "timeout" ? "timeout" : "user",
+          });
+        } else {
+          await releaseToolCall({ decision, providerKey, group, source: "policy" });
+        }
+
         assistantReplayParts.push({
           type: "tool-call",
           toolCallId: part.toolCallId,
