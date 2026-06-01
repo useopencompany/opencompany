@@ -305,8 +305,8 @@ function AgentDetailContent({
       serverPatch.name === undefined &&
       serverPatch.body === undefined &&
       serverPatch.content === undefined &&
-      !serverPatch.model &&
-      !serverPatch.config
+      serverPatch.model === undefined &&
+      serverPatch.config === undefined
     ) {
       return;
     }

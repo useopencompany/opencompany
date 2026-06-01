@@ -127,7 +127,8 @@ export async function updateAgent(
 ) {
   // A rename with an empty/whitespace-only name should not override the stored
   // name. Treat blank patch.name the same as a missing name (no rename intent).
-  const effectiveName = patch.name?.trim() ? patch.name.trim() : undefined;
+  const trimmedName = patch.name?.trim();
+  const effectiveName = trimmedName ? trimmedName : undefined;
   const trace = startTimingTrace("agents.update", {
     hasName: effectiveName !== undefined,
     hasBody: typeof patch.body === "string",
