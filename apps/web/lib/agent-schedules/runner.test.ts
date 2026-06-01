@@ -69,6 +69,10 @@ describe("sweepAgentSchedules", () => {
       triggerId: "weekday-brief",
       scheduledFor: new Date("2026-06-01T09:00:00.000Z"),
     });
+    expect(db.insertedScheduleRun).toMatchObject({
+      reservationToken: expect.any(String),
+      pendingExpiresAt: expect.any(Date),
+    });
   });
 
   it("does not dispatch duplicate schedule runs", async () => {
@@ -81,11 +85,56 @@ describe("sweepAgentSchedules", () => {
     expect(db.batch).not.toHaveBeenCalled();
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
+
+  it("marks a reserved run failed when the workspace has no credits", async () => {
+    const db = fakeDb({ reserveRows: [{ id: 1, reservationToken: "claim_123" }] });
+    getDbMock.mockReturnValue(db as never);
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+
+    const result = await sweepAgentSchedules(new Date("2026-06-01T09:00:00.000Z"));
+
+    expect(result).toMatchObject({ dueRuns: 1, startedRuns: 0, failedRuns: 1 });
+    expect(db.batch).not.toHaveBeenCalled();
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+    expect(db.scheduleRunUpdates).toContainEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: "Workspace has no credits.",
+        reservationToken: null,
+        pendingExpiresAt: null,
+      }),
+    );
+  });
+
+  it("keeps a started run started when follow-up dispatch fails", async () => {
+    const db = fakeDb({ reserveRows: [{ id: 1, reservationToken: "claim_123" }] });
+    getDbMock.mockReturnValue(db as never);
+    dispatchAgentAfterSessionCheckMock.mockRejectedValueOnce(new Error("follow-up failed"));
+
+    const result = await sweepAgentSchedules(new Date("2026-06-01T09:00:00.000Z"));
+
+    expect(result).toMatchObject({ dueRuns: 1, startedRuns: 1, failedRuns: 0 });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledOnce();
+    expect(db.scheduleRunUpdates).toContainEqual(
+      expect.objectContaining({
+        status: "started",
+        sessionId: "ses_schedule",
+        reservationToken: null,
+        pendingExpiresAt: null,
+      }),
+    );
+    expect(db.scheduleRunUpdates).not.toContainEqual(expect.objectContaining({ status: "failed" }));
+  });
 });
 
-function fakeDb({ reserveRows }: { reserveRows: Array<{ id: number }> }) {
+function fakeDb({
+  reserveRows,
+}: {
+  reserveRows: Array<{ id: number; reservationToken?: string | null }>;
+}) {
   const db = {
     insertedScheduleRun: null as unknown,
+    scheduleRunUpdates: [] as unknown[],
     batch: vi.fn().mockResolvedValue(undefined),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
@@ -129,18 +178,28 @@ function fakeDb({ reserveRows }: { reserveRows: Array<{ id: number }> }) {
         if (table === agentScheduleRuns) {
           db.insertedScheduleRun = value;
           return {
-            onConflictDoNothing: vi.fn(() => ({
-              returning: vi.fn().mockResolvedValue(reserveRows),
+            onConflictDoUpdate: vi.fn(() => ({
+              returning: vi.fn().mockResolvedValue(
+                reserveRows.map((row) => ({
+                  ...row,
+                  reservationToken: row.reservationToken ?? value.reservationToken,
+                })),
+              ),
             })),
           };
         }
         return { table, value };
       }),
     })),
-    update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: vi.fn(() => ({})),
-      })),
+    update: vi.fn((table) => ({
+      set: vi.fn((value) => {
+        if (table === agentScheduleRuns) {
+          db.scheduleRunUpdates.push(value);
+        }
+        return {
+          where: vi.fn(() => ({})),
+        };
+      }),
     })),
   };
 

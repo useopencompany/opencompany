@@ -364,7 +364,11 @@ function AgentDetailContent({
   };
 
   const removeScheduleTrigger = (triggerId: string) => {
-    updateTriggers(triggers.filter((trigger) => trigger.id !== triggerId));
+    updateTriggers(
+      triggers.filter(
+        (trigger) => !(trigger.type === "agent.schedule" && trigger.id === triggerId),
+      ),
+    );
     setShowScheduleDialog(false);
     setEditingSchedule(null);
   };
@@ -1498,7 +1502,9 @@ function upsertScheduleTrigger(
   triggers: AgentTriggerConfig[],
   next: AgentScheduleTriggerConfig,
 ): AgentTriggerConfig[] {
-  const index = triggers.findIndex((trigger) => trigger.id === next.id);
+  const index = triggers.findIndex(
+    (trigger) => trigger.type === "agent.schedule" && trigger.id === next.id,
+  );
   if (index === -1) return [...triggers, next];
   return triggers.map((trigger, triggerIndex) => (triggerIndex === index ? next : trigger));
 }

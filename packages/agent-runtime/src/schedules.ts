@@ -11,13 +11,17 @@ export type AgentSchedulePreset =
 
 const MINUTE_INTERVAL_RE = /^\*\/([1-9]|[1-5][0-9]) \* \* \* \*$/;
 const HOUR_INTERVAL_RE = /^0 \*\/([1-9]|1[0-9]|2[0-3]) \* \* \*$/;
+const HOUR_LIST_RE = /^0 ((?:[0-9]|1[0-9]|2[0-3])(?:,(?:[0-9]|1[0-9]|2[0-3]))+) \* \* \*$/;
 const DAILY_RE = /^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* \*$/;
 const WEEKDAYS_RE = /^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* 1-5$/;
 const WEEKLY_RE = /^([0-9]|[1-5][0-9]) ([0-9]|1[0-9]|2[0-3]) \* \* ([0-6])$/;
+const SUPPORTED_HOUR_INTERVALS = [1, 2, 3, 4, 6, 8, 12] as const;
 
 export function cronForSchedulePreset(preset: AgentSchedulePreset) {
   if (preset.kind === "minutes") return `*/${clampInt(preset.interval, 1, 59)} * * * *`;
-  if (preset.kind === "hours") return `0 */${clampInt(preset.interval, 1, 23)} * * *`;
+  if (preset.kind === "hours") {
+    return `0 ${hourListForInterval(normalizeHourInterval(preset.interval))} * * *`;
+  }
   if (preset.kind === "weekdays") {
     return `${clampInt(preset.minute, 0, 59)} ${clampInt(preset.hour, 0, 23)} * * 1-5`;
   }
@@ -40,7 +44,14 @@ export function schedulePresetFromCron(cron: string): AgentSchedulePreset | null
 
   const hourInterval = HOUR_INTERVAL_RE.exec(trimmed);
   if (hourInterval) {
-    return { kind: "hours", interval: Number.parseInt(hourInterval[1]!, 10) };
+    const interval = Number.parseInt(hourInterval[1]!, 10);
+    return isSupportedHourInterval(interval) ? { kind: "hours", interval } : null;
+  }
+
+  const hourList = HOUR_LIST_RE.exec(trimmed);
+  if (hourList) {
+    const interval = intervalFromHourList(hourList[1]!);
+    return interval ? { kind: "hours", interval } : null;
   }
 
   const weekdays = WEEKDAYS_RE.exec(trimmed);
@@ -182,4 +193,46 @@ function weekdayName(dayOfWeek: number) {
 function clampInt(value: number, min: number, max: number) {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function normalizeHourInterval(value: number) {
+  const interval = clampInt(value, 1, 23);
+  for (let index = SUPPORTED_HOUR_INTERVALS.length - 1; index >= 0; index -= 1) {
+    const supported = SUPPORTED_HOUR_INTERVALS[index]!;
+    if (supported <= interval) return supported;
+  }
+  return 1;
+}
+
+function isSupportedHourInterval(
+  value: number,
+): value is (typeof SUPPORTED_HOUR_INTERVALS)[number] {
+  return SUPPORTED_HOUR_INTERVALS.includes(value as (typeof SUPPORTED_HOUR_INTERVALS)[number]);
+}
+
+function hourListForInterval(interval: number) {
+  const hours = [];
+  for (let hour = 0; hour < 24; hour += interval) {
+    hours.push(hour);
+  }
+  return hours.join(",");
+}
+
+function intervalFromHourList(value: string) {
+  const hours = value.split(",").map((part) => Number.parseInt(part, 10));
+  if (hours.some((hour) => !Number.isInteger(hour))) return null;
+
+  for (const interval of SUPPORTED_HOUR_INTERVALS) {
+    const expected = hourListForInterval(interval)
+      .split(",")
+      .map((part) => Number.parseInt(part, 10));
+    if (
+      hours.length === expected.length &&
+      hours.every((hour, index) => hour === expected[index])
+    ) {
+      return interval;
+    }
+  }
+
+  return null;
 }

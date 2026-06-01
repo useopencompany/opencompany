@@ -306,6 +306,8 @@ export const agentScheduleRuns = pgTable(
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
     sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
     status: text("status").notNull().default("pending"),
+    reservationToken: text("reservation_token"),
+    pendingExpiresAt: timestamp("pending_expires_at", { withTimezone: true }),
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

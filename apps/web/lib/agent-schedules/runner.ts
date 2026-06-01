@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   newAgentSessionId,
   newAgentSessionMessageId,
@@ -17,11 +18,17 @@ import {
   agents,
   workspaces,
 } from "@opencompany/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, gt, lt } from "drizzle-orm";
 import { dispatchAgentAfterSessionCheck } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
 
 export const AGENT_SCHEDULE_SWEEP_CRON = "* * * * *";
+const PENDING_RESERVATION_TTL_MS = 10 * 60 * 1000;
+
+type ScheduleRunReservation = {
+  id: AgentScheduleRun["id"];
+  reservationToken: string;
+};
 
 export async function sweepAgentSchedules(now = new Date()) {
   const db = getDb();
@@ -73,7 +80,7 @@ async function runScheduledAgent(input: {
 
   try {
     if (!(await hasPositiveWorkspaceBalance({ db, workspaceId: input.agent.workspaceId }))) {
-      await failScheduleRun(reserved.id, "Workspace has no credits.");
+      await failScheduleRun(reserved, "Workspace has no credits.");
       return { status: "failed" as const, reason: "insufficient_credits" };
     }
 
@@ -129,12 +136,26 @@ async function runScheduledAgent(input: {
       }),
       db
         .update(agentScheduleRuns)
-        .set({ status: "started", sessionId, updatedAt: now })
-        .where(eq(agentScheduleRuns.id, reserved.id)),
+        .set({
+          status: "started",
+          sessionId,
+          reservationToken: null,
+          pendingExpiresAt: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(agentScheduleRuns.id, reserved.id),
+            eq(agentScheduleRuns.status, "pending"),
+            eq(agentScheduleRuns.reservationToken, reserved.reservationToken),
+            gt(agentScheduleRuns.pendingExpiresAt, now),
+          ),
+        ),
     ]);
 
-    await Promise.all([
-      triggerAgentMessageRun({ sessionId, messageId, workspaceId: input.agent.workspaceId }),
+    await triggerAgentMessageRun({ sessionId, messageId, workspaceId: input.agent.workspaceId });
+
+    await Promise.allSettled([
       dispatchAgentAfterSessionCheck({
         sessionId,
         messageId,
@@ -155,7 +176,7 @@ async function runScheduledAgent(input: {
     return { status: "started" as const, sessionId };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Scheduled run failed.";
-    await failScheduleRun(reserved.id, message);
+    await failScheduleRun(reserved, message);
     return { status: "failed" as const, reason: message };
   }
 }
@@ -164,7 +185,10 @@ async function reserveScheduleRun(input: {
   agent: Agent;
   trigger: AgentScheduleTriggerConfig;
   scheduledFor: Date;
-}): Promise<Pick<AgentScheduleRun, "id"> | null> {
+}): Promise<ScheduleRunReservation | null> {
+  const now = new Date();
+  const pendingExpiresAt = new Date(now.getTime() + PENDING_RESERVATION_TTL_MS);
+  const reservationToken = randomUUID();
   const [run] = await getDb()
     .insert(agentScheduleRuns)
     .values({
@@ -173,24 +197,56 @@ async function reserveScheduleRun(input: {
       triggerId: input.trigger.id,
       scheduledFor: input.scheduledFor,
       status: "pending",
+      reservationToken,
+      pendingExpiresAt,
+      error: null,
+      updatedAt: now,
     })
-    .onConflictDoNothing({
+    .onConflictDoUpdate({
       target: [
         agentScheduleRuns.agentId,
         agentScheduleRuns.triggerId,
         agentScheduleRuns.scheduledFor,
       ],
+      set: {
+        status: "pending",
+        sessionId: null,
+        reservationToken,
+        pendingExpiresAt,
+        error: null,
+        updatedAt: now,
+      },
+      where: and(
+        eq(agentScheduleRuns.status, "pending"),
+        lt(agentScheduleRuns.pendingExpiresAt, now),
+      )!,
     })
-    .returning({ id: agentScheduleRuns.id });
+    .returning({
+      id: agentScheduleRuns.id,
+      reservationToken: agentScheduleRuns.reservationToken,
+    });
 
-  return run ?? null;
+  if (!run?.reservationToken) return null;
+  return { id: run.id, reservationToken: run.reservationToken };
 }
 
-async function failScheduleRun(id: number, error: string) {
+async function failScheduleRun(run: ScheduleRunReservation, error: string) {
   await getDb()
     .update(agentScheduleRuns)
-    .set({ status: "failed", error, updatedAt: new Date() })
-    .where(eq(agentScheduleRuns.id, id));
+    .set({
+      status: "failed",
+      error,
+      reservationToken: null,
+      pendingExpiresAt: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentScheduleRuns.id, run.id),
+        eq(agentScheduleRuns.status, "pending"),
+        eq(agentScheduleRuns.reservationToken, run.reservationToken),
+      ),
+    );
 }
 
 function titleFromPrompt(content: string) {
