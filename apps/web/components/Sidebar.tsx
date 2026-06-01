@@ -30,8 +30,8 @@ import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { archiveAgentSession } from "@/lib/agent-sessions/actions";
 import {
+  archiveSidebarSessionOptimistically,
   fetchSidebarSessions,
-  removeSidebarSession,
   SESSIONS_QUERY_STALE_TIME_MS,
   type SidebarSessionPayload,
   sessionQueryKeys,
@@ -172,19 +172,16 @@ function SessionHistoryItem({
           event.stopPropagation();
 
           startTransition(async () => {
-            const result = await archiveAgentSession(session.id);
+            const result = await archiveSidebarSessionOptimistically({
+              queryClient,
+              workspaceId,
+              sessionId: session.id,
+              archive: archiveAgentSession,
+            });
             if (!result.ok) {
               showError(result.error, "Could not archive session");
               return;
             }
-            queryClient.setQueryData<SidebarSession[]>(
-              sessionQueryKeys.list(workspaceId),
-              (sessions) => removeSidebarSession(sessions, session.id),
-            );
-            queryClient.removeQueries({
-              queryKey: sessionQueryKeys.detail(workspaceId, session.id),
-            });
-            void queryClient.invalidateQueries({ queryKey: sessionQueryKeys.list(workspaceId) });
             if (active) {
               router.replace("/");
             }
