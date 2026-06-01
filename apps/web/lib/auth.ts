@@ -145,37 +145,27 @@ export async function loadCurrentWorkspaceContextReadOnly(
   organizationId: string,
 ): Promise<CurrentWorkspaceContext | null> {
   const db = getDb();
-  const [userRows, workspaceRows] = await Promise.all([
-    db.select().from(users).where(eq(users.workosUserId, authUser.id)).limit(1),
-    db
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.workosOrganizationId, organizationId))
-      .limit(1),
-  ]);
-  const user = userRows[0];
-  const workspace = workspaceRows[0];
-
-  if (!user || !workspace) return null;
-
-  const [membership] = await db
-    .select({ userId: workspaceMemberships.userId, role: workspaceMemberships.role })
-    .from(workspaceMemberships)
+  // One joined read instead of (user ∥ workspace) then membership: the membership row
+  // links the WorkOS-identified user to the WorkOS-identified workspace, so a single
+  // round-trip resolves the whole context. A missing user, workspace, or membership
+  // yields no row, which keeps the prior "return null → sync" fallback semantics.
+  const [row] = await db
+    .select({ user: users, workspace: workspaces, role: workspaceMemberships.role })
+    .from(users)
+    .innerJoin(workspaceMemberships, eq(workspaceMemberships.userId, users.id))
+    .innerJoin(workspaces, eq(workspaces.id, workspaceMemberships.workspaceId))
     .where(
-      and(
-        eq(workspaceMemberships.workspaceId, workspace.id),
-        eq(workspaceMemberships.userId, user.id),
-      ),
+      and(eq(users.workosUserId, authUser.id), eq(workspaces.workosOrganizationId, organizationId)),
     )
     .limit(1);
 
-  if (!membership) return null;
+  if (!row) return null;
 
   return {
     authUser,
-    user,
-    workspace,
-    role: normalizeMembershipRole(membership.role),
+    user: row.user,
+    workspace: row.workspace,
+    role: normalizeMembershipRole(row.role),
     isNewUser: false,
   };
 }
