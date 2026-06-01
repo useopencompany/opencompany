@@ -60,7 +60,7 @@ const steps = [
   },
   {
     title: "Book your onboarding call",
-    subtitle: "Pick a time with the opencompany team, then finish setup.",
+    subtitle: "Pick a time with the opencompany team — or skip for now and finish setup.",
   },
 ] as const;
 
@@ -464,7 +464,12 @@ export default function OnboardingForm({
 
           <div className="mt-5 space-y-3">
             {isLastStep ? (
-              <SubmitButton label="Finish onboarding" />
+              <div className="space-y-2">
+                <SubmitButton label="Finish onboarding" />
+                <p className="text-center text-[12px] leading-4 text-ink-muted">
+                  Booking is optional — you can finish now and schedule later.
+                </p>
+              </div>
             ) : (
               <button
                 type="button"
