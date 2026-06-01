@@ -132,6 +132,26 @@ describe("applyRuntimeEventToState", () => {
     );
   });
 
+  it("applies repeated transient message deltas with null ids", () => {
+    let state = initialState();
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_assistant",
+        role: "assistant",
+      }),
+    );
+    const delta = event(null, "message.delta", {
+      messageId: "msg_assistant",
+      delta: "ha",
+    });
+
+    state = applyRuntimeEventToState(state, delta);
+    state = applyRuntimeEventToState(state, delta);
+
+    expect(state.messages.find((message) => message.id === "msg_assistant")?.content).toBe("haha");
+  });
+
   it("uses content and completed status from user message created events", () => {
     const state = applyRuntimeEventToState(
       initialState(),
@@ -200,10 +220,10 @@ describe("applyRuntimeEventToState", () => {
     });
   });
 
-  it("subtracts tool durations from thinking time on the abort path (session.error with stamped tool events)", () => {
+  it("does not invent thinking time from tool duration on the abort path", () => {
     // Build a state where message.created gives the message a createdAt, then two tool
-    // events with explicit createdAt timestamps are added (simulating post-fix runner SSE),
-    // and then a session.error aborts before message.completed fires.
+    // events with explicit createdAt timestamps are added, and then a session.error aborts
+    // before message.completed fires.
     let state = applyRuntimeEventToState(
       initialState(),
       event(1, "message.created", {
@@ -238,17 +258,10 @@ describe("applyRuntimeEventToState", () => {
       createdAt: toolEnd,
     });
 
-    // Abort before message.completed — should still subtract tool time.
     state = applyRuntimeEventToState(state, event(4, "session.error", { message: "Aborted" }));
 
     const msg = state.messages.find((m) => m.id === "msg_assistant");
-    expect(msg).toMatchObject({ status: "failed", thinkingDurationSeconds: expect.any(Number) });
-
-    // thinkingDurationSeconds must not equal the full wall-clock duration (≥ 5s)
-    // because the 4-second tool interval should have been subtracted.
-    // The message was aborted immediately after message.created so wall-clock ≈ 0s,
-    // which clamps to 1 (minimum floor). Either way it must be < 5 if subtraction worked.
-    expect(msg!.thinkingDurationSeconds!).toBeLessThan(5);
+    expect(msg).toMatchObject({ status: "failed", thinkingDurationSeconds: undefined });
   });
 
   it("adds live usage events to the session usage summary", () => {
@@ -417,6 +430,21 @@ describe("isReasoningInProgress", () => {
     expect(isReasoningInProgress(runningMessage, events)).toBe(true);
   });
 
+  it("is true between durable reasoning start and completion events", () => {
+    const events = [
+      event(1, "message.created", { messageId: "msg_assistant", role: "assistant" }),
+      event(2, "message.reasoning_started", { messageId: "msg_assistant" }),
+    ];
+    expect(isReasoningInProgress(runningMessage, events)).toBe(true);
+
+    expect(
+      isReasoningInProgress(runningMessage, [
+        ...events,
+        event(3, "message.reasoning_completed", { messageId: "msg_assistant" }),
+      ]),
+    ).toBe(false);
+  });
+
   it("is false once visible text or a tool call follows the reasoning", () => {
     const withText = [
       event(1, "message.reasoning_delta", { messageId: "msg_assistant", delta: "Weighing…" }),
@@ -429,6 +457,18 @@ describe("isReasoningInProgress", () => {
       event(2, "tool.started", { messageId: "msg_assistant", toolCallId: "call_1" }),
     ];
     expect(isReasoningInProgress(runningMessage, withTool)).toBe(false);
+  });
+
+  it("uses arrival order for repeated transient reasoning and text deltas", () => {
+    const events = [
+      event(null, "message.reasoning_delta", {
+        messageId: "msg_assistant",
+        delta: "Weighing…",
+      }),
+      event(null, "message.delta", { messageId: "msg_assistant", delta: "Here is" }),
+    ];
+
+    expect(isReasoningInProgress(runningMessage, events)).toBe(false);
   });
 
   it("is false when the message is no longer running", () => {
@@ -841,13 +881,12 @@ describe("buildAssistantTurnParts", () => {
       {
         type: "reasoning",
         text: "Checked the relevant files first.",
-        durationSeconds: 1,
       },
       { type: "text", text: "Final answer" },
     ]);
   });
 
-  it("falls back to message duration when usage has reasoning tokens but no timed reasoning events", () => {
+  it("does not render a reasoning part for reasoning tokens without real reasoning evidence", () => {
     const parts = buildAssistantTurnParts(
       {
         id: "msg_assistant",
@@ -865,8 +904,34 @@ describe("buildAssistantTurnParts", () => {
       [],
     );
 
+    expect(parts).toEqual([{ type: "text", text: "Final answer" }]);
+  });
+
+  it("renders a summary without duration when no timed reasoning events exist", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        outputReasoningTokens: 74,
+        createdAt: "2026-05-22T13:00:00.000Z",
+        completedAt: "2026-05-22T13:00:03.400Z",
+        modelMessage: {
+          role: "assistant",
+          content: [{ type: "text", text: "Final answer" }],
+        },
+      },
+      [
+        event(1, "message.reasoning_summary", {
+          messageId: "msg_assistant",
+          summary: "Reviewed the request.",
+        }),
+      ],
+    );
+
     expect(parts).toEqual([
-      { type: "reasoning", durationSeconds: 3, text: undefined },
+      { type: "reasoning", text: "Reviewed the request." },
       { type: "text", text: "Final answer" },
     ]);
   });
@@ -1309,94 +1374,101 @@ describe("computeThinkingDurationSeconds", () => {
     return { id, type, payload, messageId: null, createdAt };
   }
 
-  it("returns message duration when there are no tool calls", () => {
+  it("returns undefined when there are no timed reasoning windows", () => {
     const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:05.000Z");
-    expect(computeThinkingDurationSeconds(msg, [])).toBe(5);
+    expect(computeThinkingDurationSeconds(msg, [])).toBeUndefined();
   });
 
-  it("subtracts a single tool interval from the message duration", () => {
+  it("measures one durable reasoning window", () => {
     const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:10.000Z");
     const events: RuntimeEvent[] = [
       timedEvent(
         1,
-        "tool.started",
-        { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", input: {} },
+        "message.reasoning_started",
+        { messageId: "msg_assistant" },
         "2026-05-28T10:00:02.000Z",
       ),
       timedEvent(
         2,
-        "tool.completed",
-        { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", output: {} },
+        "message.reasoning_completed",
+        { messageId: "msg_assistant" },
         "2026-05-28T10:00:06.000Z",
       ),
     ];
-    // total=10s, tool=4s → thinking=6s
-    expect(computeThinkingDurationSeconds(msg, events)).toBe(6);
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(4);
   });
 
-  it("sums multiple non-overlapping tool intervals and subtracts them", () => {
+  it("sums multiple durable reasoning windows", () => {
     const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:20.000Z");
     const events: RuntimeEvent[] = [
       timedEvent(
         1,
-        "tool.started",
-        { messageId: "msg_assistant", toolCallId: "call_1", name: "tool_a", input: {} },
+        "message.reasoning_started",
+        { messageId: "msg_assistant" },
         "2026-05-28T10:00:02.000Z",
       ),
       timedEvent(
         2,
-        "tool.completed",
-        { messageId: "msg_assistant", toolCallId: "call_1", name: "tool_a", output: {} },
+        "message.reasoning_completed",
+        { messageId: "msg_assistant" },
         "2026-05-28T10:00:07.000Z",
       ),
       timedEvent(
         3,
-        "tool.started",
-        { messageId: "msg_assistant", toolCallId: "call_2", name: "tool_b", input: {} },
+        "message.reasoning_started",
+        { messageId: "msg_assistant" },
         "2026-05-28T10:00:10.000Z",
       ),
       timedEvent(
         4,
-        "tool.failed",
-        { messageId: "msg_assistant", toolCallId: "call_2", name: "tool_b", error: "oops" },
+        "message.reasoning_completed",
+        { messageId: "msg_assistant" },
         "2026-05-28T10:00:15.000Z",
       ),
     ];
-    // total=20s, tool_a=5s, tool_b=5s → thinking=10s
     expect(computeThinkingDurationSeconds(msg, events)).toBe(10);
   });
 
   it("returns at least 1 when the message duration is sub-second", () => {
     const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:00.400Z");
-    expect(computeThinkingDurationSeconds(msg, [])).toBe(1);
+    const events: RuntimeEvent[] = [
+      timedEvent(
+        1,
+        "message.reasoning_started",
+        { messageId: "msg_assistant" },
+        "2026-05-28T10:00:00.000Z",
+      ),
+      timedEvent(
+        2,
+        "message.reasoning_completed",
+        { messageId: "msg_assistant" },
+        "2026-05-28T10:00:00.400Z",
+      ),
+    ];
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(1);
   });
 
-  it("ignores orphan tool.started events (no completed/failed) and never goes negative", () => {
+  it("uses message completion to close an open reasoning window", () => {
     const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:03.000Z");
     const events: RuntimeEvent[] = [
       timedEvent(
         1,
-        "tool.started",
-        { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", input: {} },
-        // tool started 1 second before message even began — pathological, should not go negative
-        "2026-05-28T09:59:59.000Z",
+        "message.reasoning_started",
+        { messageId: "msg_assistant" },
+        "2026-05-28T10:00:01.000Z",
       ),
-      // No corresponding tool.completed or tool.failed — orphan.
     ];
-    const result = computeThinkingDurationSeconds(msg, events);
-    expect(result).toBeGreaterThanOrEqual(1);
-    // Orphan must be ignored → full message duration (3s) returned.
-    expect(result).toBe(3);
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(2);
   });
 
-  it("returns 1 when createdAt or completedAt is missing", () => {
+  it("returns undefined when completion is missing and no completed reasoning window exists", () => {
     const noCreatedAt: SessionMessage = {
       id: "msg_assistant",
       role: "assistant",
       content: "",
       status: "running",
     };
-    expect(computeThinkingDurationSeconds(noCreatedAt, [])).toBe(1);
+    expect(computeThinkingDurationSeconds(noCreatedAt, [])).toBeUndefined();
 
     const noCompletedAt: SessionMessage = {
       id: "msg_assistant",
@@ -1405,41 +1477,45 @@ describe("computeThinkingDurationSeconds", () => {
       status: "running",
       createdAt: "2026-05-28T10:00:00.000Z",
     };
-    expect(computeThinkingDurationSeconds(noCompletedAt, [])).toBe(1);
+    expect(
+      computeThinkingDurationSeconds(noCompletedAt, [
+        timedEvent(
+          1,
+          "message.reasoning_started",
+          { messageId: "msg_assistant" },
+          "2026-05-28T10:00:01.000Z",
+        ),
+      ]),
+    ).toBeUndefined();
   });
 
-  it("returns full message duration when tool events have no createdAt (backward compat with old runner)", () => {
-    // Old runners don't emit createdAt on SSE events. The web client should still
-    // handle this gracefully: tool intervals are skipped (null timestamps), and the
-    // result equals the full message wall-clock duration.
+  it("uses old transient reasoning deltas as backward-compatible timing input", () => {
     const msg = completedMessage("2026-05-28T10:00:00.000Z", "2026-05-28T10:00:08.000Z");
-    // Events without createdAt — simulating old runner payloads.
     const events: RuntimeEvent[] = [
-      {
-        id: 1,
-        type: "tool.started",
-        messageId: "msg_assistant",
-        payload: { messageId: "msg_assistant", toolCallId: "call_1", name: "read_file", input: {} },
-      },
-      {
-        id: 2,
-        type: "tool.completed",
-        messageId: "msg_assistant",
-        payload: {
+      timedEvent(
+        1,
+        "message.reasoning_delta",
+        { messageId: "msg_assistant", delta: "Thinking" },
+        "2026-05-28T10:00:02.000Z",
+      ),
+      timedEvent(
+        2,
+        "tool.started",
+        {
           messageId: "msg_assistant",
           toolCallId: "call_1",
           name: "read_file",
-          output: {},
+          input: {},
         },
-      },
+        "2026-05-28T10:00:05.000Z",
+      ),
     ];
-    // No createdAt → toolMs = 0 → thinkingMs = totalMs = 8s
-    expect(computeThinkingDurationSeconds(msg, events)).toBe(8);
+    expect(computeThinkingDurationSeconds(msg, events)).toBe(3);
   });
 });
 
 function event(
-  id: number,
+  id: number | null,
   type: string,
   payload: Record<string, unknown>,
   createdAt?: string,

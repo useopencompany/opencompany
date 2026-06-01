@@ -197,7 +197,6 @@ export function buildAgentMentionItems(
   });
 
   return [
-    ...AGENT_MODELS,
     ...AGENT_TOOLS.filter(
       (tool) =>
         tool.kind !== "tool" ||

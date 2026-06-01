@@ -16,7 +16,7 @@ const aiMocks = vi.hoisted(() => ({
   generateText: vi.fn(),
 }));
 
-vi.mock("@opencompany/db/client", () => ({
+vi.mock("./db", () => ({
   getDb: dbMocks.getDb,
 }));
 

@@ -62,7 +62,7 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
   return (
     <form
       ref={formRef}
-      className="w-full max-w-[520px] overflow-hidden rounded-lg border border-black/[0.1] bg-[#fbfbfa] shadow-[0_24px_64px_rgba(0,0,0,0.2),0_4px_14px_rgba(0,0,0,0.1)]"
+      className="w-full max-w-[520px] overflow-hidden rounded-lg border border-black/[0.1] bg-surface-raised shadow-[0_24px_64px_rgba(0,0,0,0.2),0_4px_14px_rgba(0,0,0,0.1)]"
       action={formAction}
     >
       {sessionId && <input type="hidden" name="sessionId" value={sessionId} />}
@@ -75,7 +75,7 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
           type="button"
           aria-label="Close feedback"
           onClick={onClose}
-          className="rounded-md p-1 text-ink/55 transition-colors hover:bg-[#eeeeeb] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="rounded-md p-1 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <X size={16} strokeWidth={1.8} />
         </button>
@@ -90,7 +90,7 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
             name="kind"
             defaultValue="bug"
             disabled={isPending}
-            className="h-8 rounded-md border border-[#deded9] bg-white px-2 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15 disabled:opacity-60"
+            className="h-8 rounded-md border border-border bg-surface px-2 text-[13px] text-ink outline-none transition-colors focus:border-ink/30 focus:ring-1 focus:ring-ink/15 disabled:opacity-60"
           >
             {kindOptions.map((option) => (
               <option key={option.value} value={option.value}>
@@ -112,18 +112,18 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
             maxLength={4000}
             disabled={isPending}
             placeholder="Tell us what happened, what you expected, or what you want to see."
-            className="min-h-[184px] resize-y rounded-md border border-[#deded9] bg-white px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 focus:ring-1 focus:ring-ink/15 disabled:opacity-60"
+            className="min-h-[184px] resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 focus:ring-1 focus:ring-ink/15 disabled:opacity-60"
           />
         </label>
 
         {state && !state.ok && (
-          <div className="rounded-md border border-[#f4c7c2] bg-[#fff4f2] px-3 py-2 text-[12.5px] text-[#b42318]">
+          <div className="rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] text-danger">
             {state.error}
           </div>
         )}
 
         {state?.ok && (
-          <div className="rounded-md border border-[#badbcc] bg-[#f0fdf4] px-3 py-2 text-[12.5px] text-[#1f7a3a]">
+          <div className="rounded-md border border-success-border bg-success-bg px-3 py-2 text-[12.5px] text-success">
             <span>Thanks, we are on it.</span>
           </div>
         )}
@@ -133,14 +133,14 @@ function FeedbackForm({ onClose }: { onClose: () => void }) {
         <button
           type="button"
           onClick={onClose}
-          className="inline-flex h-8 items-center rounded-md border border-[#deded9] bg-white px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-[#f5f5f1] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="inline-flex h-8 items-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-surface-muted focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           Close
         </button>
         <button
           type="submit"
           disabled={isPending}
-          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#111] px-3 text-[12.5px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-black disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-45 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
           <Send size={13} strokeWidth={1.9} />
           {isPending ? "Sending..." : "Send"}
@@ -155,7 +155,7 @@ export default function FeedbackDialog({ open, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/20 px-4 py-8 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-ink/20 px-4 py-8 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       aria-labelledby="feedback-title"

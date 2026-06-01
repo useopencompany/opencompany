@@ -70,45 +70,45 @@ const tasks: Task[] = [
 
 function ChatBox() {
   return (
-    <div className="rounded-xl border border-[#e4e4e0] bg-white px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]">
+    <div className="rounded-xl border border-border bg-surface px-4 pt-3.5 pb-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03),0_0_0_1px_rgba(15,15,15,0.01)] transition-shadow duration-200 focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.04)]">
       <input
         type="text"
         placeholder="Ask, triage, or delegate from your inbox"
         className="w-full bg-transparent text-[14px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
       />
       <div className="mt-6 flex items-center gap-2">
-        <button className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12.5px] text-ink/90 transition-colors duration-150 hover:bg-[#f3f3f0] hover:text-ink">
+        <button className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12.5px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink">
           <span>GPT-5.5 High</span>
           <ChevronDown size={12} strokeWidth={1.75} className="text-ink-muted" />
         </button>
 
         <div className="flex items-center">
-          <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full border border-white bg-[#0e1320] text-white shadow-[0_1px_2px_rgba(0,0,0,0.12)]">
+          <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full border border-surface bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.12)]">
             <Plus size={11} strokeWidth={2.25} />
           </span>
           <span
             aria-hidden
-            className="-ml-1.5 h-5 w-5 rounded-full border border-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+            className="-ml-1.5 h-5 w-5 rounded-full border border-surface shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
             style={{
               background:
                 "radial-gradient(circle at 35% 30%, #ffffff 0%, #d0d0cf 30%, #1a1a1a 80%)",
             }}
           />
-          <button className="ml-1 rounded p-0.5 text-ink-muted transition-colors duration-150 hover:bg-[#f3f3f0] hover:text-ink">
+          <button className="ml-1 rounded p-0.5 text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink">
             <ChevronDown size={12} strokeWidth={1.75} />
           </button>
         </div>
 
-        <button className="ml-1 flex items-center gap-1.5 rounded-full bg-[#eef0ec] px-2.5 py-1 text-[12px] font-medium text-ink/85 ring-1 ring-inset ring-[#dfe1dc] transition-colors duration-150 hover:bg-[#e5e8e2]">
+        <button className="ml-1 flex items-center gap-1.5 rounded-full bg-surface-selected px-2.5 py-1 text-[12px] font-medium text-ink/85 ring-1 ring-inset ring-border transition-colors duration-150 hover:bg-surface-active">
           <Sparkles size={11} strokeWidth={2} />
           <span>Triage inbox</span>
         </button>
 
         <div className="ml-auto flex items-center gap-1">
-          <button className="rounded-md p-1.5 text-ink-muted transition-colors duration-150 hover:bg-[#f3f3f0] hover:text-ink">
+          <button className="rounded-md p-1.5 text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink">
             <ImageIcon size={14} strokeWidth={1.75} />
           </button>
-          <button className="flex h-7 w-7 items-center justify-center rounded-full bg-[#111] text-white shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-black">
+          <button className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85">
             <ArrowUp size={13} strokeWidth={2.25} />
           </button>
         </div>
@@ -118,10 +118,10 @@ function ChatBox() {
 }
 
 const priorityStyles: Record<Priority, { label: string; dot: string; text: string }> = {
-  urgent: { label: "Urgent", dot: "#dc2626", text: "text-[#b91c1c]" },
-  high: { label: "High", dot: "#ea580c", text: "text-[#c2410c]" },
-  med: { label: "Med", dot: "#ca8a04", text: "text-ink/80" },
-  low: { label: "Low", dot: "#9ca3af", text: "text-ink-muted" },
+  urgent: { label: "Urgent", dot: "var(--color-danger)", text: "text-danger" },
+  high: { label: "High", dot: "var(--color-warning)", text: "text-warning" },
+  med: { label: "Med", dot: "var(--color-warning)", text: "text-ink/80" },
+  low: { label: "Low", dot: "var(--color-ink-subtle)", text: "text-ink-muted" },
 };
 
 function PriorityPill({ priority }: { priority: Priority }) {
@@ -138,7 +138,7 @@ function PriorityPill({ priority }: { priority: Priority }) {
 
 function StatusGlyph({ status }: { status: Status }) {
   if (status === "in_progress") {
-    return <CircleDot size={14} strokeWidth={1.75} className="text-[#ca8a04]" />;
+    return <CircleDot size={14} strokeWidth={1.75} className="text-warning" />;
   }
   return <Circle size={14} strokeWidth={1.75} className="text-ink/40" />;
 }
@@ -156,8 +156,8 @@ function ActionButton({
     "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11.5px] font-medium tracking-[-0.005em] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/15";
   const variant =
     tone === "primary"
-      ? "border border-[#dcdcd6] bg-white text-ink hover:bg-[#fafaf7]"
-      : "text-ink-muted hover:bg-[#ececea] hover:text-ink";
+      ? "border border-border-strong bg-surface text-ink hover:bg-surface-muted"
+      : "text-ink-muted hover:bg-surface-subtle hover:text-ink";
   return (
     <button className={`${base} ${variant}`}>
       <Icon size={12} strokeWidth={1.85} />
@@ -168,10 +168,10 @@ function ActionButton({
 
 function TaskRow({ task }: { task: Task }) {
   return (
-    <div className="group relative flex items-center gap-3 border-b border-[#efefec] px-3 py-2 last:border-b-0 hover:bg-[#fafaf7]">
+    <div className="group relative flex items-center gap-3 border-b border-border-subtle px-3 py-2 last:border-b-0 hover:bg-surface-muted">
       <button
         aria-label="Toggle status"
-        className="flex shrink-0 items-center justify-center rounded-sm p-0.5 hover:bg-[#ececea]"
+        className="flex shrink-0 items-center justify-center rounded-sm p-0.5 hover:bg-surface-subtle"
       >
         <StatusGlyph status={task.status} />
       </button>
@@ -186,7 +186,7 @@ function TaskRow({ task }: { task: Task }) {
 
       <div className="hidden shrink-0 items-center gap-3 text-[11.5px] text-ink-muted transition-opacity duration-150 group-hover:opacity-0 md:flex">
         <span className="inline-flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#cfd1cb]" />
+          <span className="h-1.5 w-1.5 rounded-full bg-ink-subtle/45" />
           {task.project}
         </span>
         <span className="text-ink-subtle">{task.source}</span>
@@ -197,7 +197,7 @@ function TaskRow({ task }: { task: Task }) {
       <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1 pl-6 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100">
         <div
           aria-hidden
-          className="absolute inset-y-0 -left-8 right-0 bg-gradient-to-l from-[#fafaf7] via-[#fafaf7] to-transparent"
+          className="absolute inset-y-0 -left-8 right-0 bg-gradient-to-l from-surface-muted via-surface-muted to-transparent"
         />
         <div className="relative flex items-center gap-1">
           <ActionButton icon={Check} label="Done" tone="primary" />
@@ -205,7 +205,7 @@ function TaskRow({ task }: { task: Task }) {
           <ActionButton icon={Bot} label="Delegate" />
           <button
             aria-label="More"
-            className="ml-0.5 rounded-md p-1 text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink"
+            className="ml-0.5 rounded-md p-1 text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink"
           >
             <MoreHorizontal size={14} strokeWidth={1.75} />
           </button>
@@ -225,13 +225,13 @@ function TaskList() {
             {tasks.length} items pulled in from connected tools
           </p>
         </div>
-        <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink">
+        <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink">
           <span>All projects</span>
           <ChevronDown size={12} strokeWidth={1.75} />
         </button>
       </div>
 
-      <div className="mt-3 overflow-hidden rounded-lg border border-[#e6e6e3] bg-white shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="mt-3 overflow-hidden rounded-lg border border-border bg-surface shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
         {tasks.map((task) => (
           <TaskRow key={task.id} task={task} />
         ))}
@@ -243,7 +243,7 @@ function TaskList() {
 function Sparkline({ tone }: { tone: "up" | "down" }) {
   const up = "M0,18 L8,15 L16,16 L24,11 L32,12 L40,8 L48,9 L56,4 L64,5";
   const down = "M0,6 L8,8 L16,7 L24,10 L32,11 L40,9 L48,13 L56,12 L64,16";
-  const color = tone === "up" ? "#16a34a" : "#dc2626";
+  const color = tone === "up" ? "var(--color-success)" : "var(--color-danger)";
   return (
     <svg viewBox="0 0 64 22" className="h-7 w-full" preserveAspectRatio="none" aria-hidden>
       <path
@@ -272,9 +272,9 @@ function KpiCard({
   note: string;
 }) {
   const TrendIcon = tone === "up" ? TrendingUp : TrendingDown;
-  const trendColor = tone === "up" ? "text-[#16a34a]" : "text-[#dc2626]";
+  const trendColor = tone === "up" ? "text-success" : "text-danger";
   return (
-    <div className="rounded-lg border border-[#e4e4e0] bg-white p-3.5 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+    <div className="rounded-lg border border-border bg-surface p-3.5 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
           {label}
@@ -304,7 +304,7 @@ function KpiGrid() {
     <section className="mt-8">
       <div className="flex items-end justify-between">
         <h2 className="text-[13.5px] font-semibold tracking-[-0.005em] text-ink">This week</h2>
-        <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors duration-150 hover:bg-[#ececea] hover:text-ink">
+        <button className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink">
           <span>Last 7 days</span>
           <ChevronDown size={12} strokeWidth={1.75} />
         </button>
@@ -334,8 +334,8 @@ export default function InboxView() {
               One place to triage everything that needs your attention.
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11.5px] font-medium text-ink-muted ring-1 ring-inset ring-[#e6e6e3]">
-            <AlertCircle size={11} strokeWidth={1.85} className="text-[#ca8a04]" />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-muted ring-1 ring-inset ring-border">
+            <AlertCircle size={11} strokeWidth={1.85} className="text-warning" />
             {tasks.length} open
           </span>
         </div>

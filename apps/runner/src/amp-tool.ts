@@ -1,12 +1,12 @@
 import { type AgentConfig, shellQuote } from "@opencompany/agent-runtime";
 import type { AgentGitHubRepositoryConfig } from "@opencompany/agent-runtime/types";
-import { getDb } from "@opencompany/db/client";
 import {
   agentSessionArtifacts,
   workspaceIntegrationResources,
   workspaceIntegrations,
 } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
+import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createDraftPullRequest, getGitHubWorkInstallationToken } from "./github";
 import type { HostedToolUsage } from "./hosted-tools";

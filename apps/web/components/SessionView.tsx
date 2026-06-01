@@ -72,7 +72,7 @@ const MARKDOWN_COMPONENTS: Components = {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="font-medium text-ink underline decoration-[#c7c7c2] underline-offset-2 transition-colors hover:decoration-ink/70"
+      className="font-medium text-ink underline decoration-border-strong underline-offset-2 transition-colors hover:decoration-ink/70"
     >
       {children}
     </a>
@@ -108,8 +108,8 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     return (
       <main className="relative flex h-full flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 items-center justify-center px-6">
-          <div className="max-w-sm rounded-lg border border-[#f0d2d2] bg-[#fff6f6] px-5 py-6 text-center">
-            <p className="text-[13.5px] font-medium text-[#9f1d1d]">Could not load session</p>
+          <div className="max-w-sm rounded-lg border border-danger-border bg-danger-bg px-5 py-6 text-center">
+            <p className="text-[13.5px] font-medium text-danger">Could not load session</p>
             <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
               {error instanceof Error
                 ? error.message
@@ -121,7 +121,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
               onClick={() => {
                 void refetch();
               }}
-              className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-[#e4e4e0] bg-white px-3 text-[12.5px] font-medium text-ink hover:bg-[#fafaf8] disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-4 inline-flex h-7 items-center justify-center rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isRefetching ? "Retrying..." : "Try again"}
             </button>
@@ -135,7 +135,7 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     return (
       <main className="relative flex h-full flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 items-center justify-center px-6">
-          <div className="max-w-sm rounded-lg border border-dashed border-[#deded9] bg-white/45 px-5 py-6 text-center">
+          <div className="max-w-sm rounded-lg border border-dashed border-border bg-surface/45 px-5 py-6 text-center">
             <p className="text-[13.5px] font-medium text-ink">Session not found</p>
             <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
               This session may have been archived or is no longer available.
@@ -186,8 +186,10 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     }),
     [detail],
   );
-  const lastEventId = useMemo(() => runtime.events.at(-1)?.id ?? 0, [runtime.events]);
-  const knownEventIds = useMemo(() => runtime.events.map((event) => event.id), [runtime.events]);
+  const knownEventIds = useMemo(
+    () => runtime.events.flatMap((event) => (typeof event.id === "number" ? [event.id] : [])),
+    [runtime.events],
+  );
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -271,17 +273,28 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
       invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event, {
         sessionId: session.id,
       });
+      if (
+        event.type === "message.completed" ||
+        event.type === "tool.completed" ||
+        event.type === "tool.failed"
+      ) {
+        void queryClient.invalidateQueries({ queryKey: detailKey });
+      }
     },
     [detailKey, queryClient, workspaceId, session.agentId, session.id],
   );
+
+  const refetchSessionDetail = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: detailKey });
+  }, [detailKey, queryClient]);
 
   const stream = useSessionEventStream({
     runnerUrl,
     streamToken,
     sessionId: session.id,
-    afterId: lastEventId,
     knownEventIds,
     onEvent: applyRuntimeEvent,
+    onOpen: refetchSessionDetail,
   });
 
   // Data-freshness staleness detection: derive the timestamp of the last runtime event
@@ -398,7 +411,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="border-b border-[#eaeae6] bg-canvas/90 px-6 py-3">
+        <div className="border-b border-border-subtle bg-canvas/90 px-6 py-3">
           <div className="mx-auto flex w-full max-w-[960px] items-center gap-3">
             <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
             <div className="min-w-0 pr-10">
@@ -410,7 +423,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         </div>
 
         <div
-          className="relative flex-1 overflow-y-auto px-8 lg:px-12 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain px-8 lg:px-12 py-6"
           onDragEnter={(event) => {
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
@@ -446,7 +459,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center"
               aria-hidden="true"
             >
-              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-[#9a9a96] bg-canvas/85 px-8 py-6 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
                 <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
                 <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
                 <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
@@ -455,14 +468,14 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
           ) : null}
           <div className="mx-auto max-w-[960px] space-y-5">
             {runtime.lastError ? (
-              <div className="flex items-start gap-2 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[12.5px] leading-5 text-[#9f1d1d]">
+              <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
                 <span>{runtime.lastError}</span>
               </div>
             ) : null}
 
             {visibleMessages.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-[#deded9] bg-white/40 px-6 py-12 text-center">
+              <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
                 <p className="mt-1 text-[12.5px] text-ink-muted">
@@ -482,7 +495,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         setInput(chip);
                         textareaRef.current?.focus();
                       }}
-                      className="rounded-full border border-[#e6e6e3] bg-white px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-surface-muted"
                     >
                       {chip}
                     </button>
@@ -507,7 +520,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   <div
                     className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
                       message.role === "user"
-                        ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-[#eef0ec] px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+                        ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
                         : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
                     }`}
                   >
@@ -517,6 +530,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         parts={assistantParts}
                         sessionCanGenerate={sessionCanGenerate}
                         reasoningActive={isReasoningInProgress(message, runtime.events)}
+                        activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
                       />
                     ) : (
                       message.content
@@ -564,7 +578,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               <div
                 role="status"
                 aria-live="polite"
-                className="mb-3 flex items-center justify-between gap-3 rounded-md border border-[#e4d9a8] bg-[#fdfbf0] px-3 py-2 text-[12.5px] text-[#7a6120]"
+                className="mb-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[12.5px] text-warning"
               >
                 <span>Connection idle — waiting for updates…</span>
                 <button
@@ -573,14 +587,14 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                     void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
                     void queryClient.invalidateQueries({ queryKey: detailKey });
                   }}
-                  className="shrink-0 rounded border border-[#d4c47c] bg-white px-2.5 py-1 text-[11.5px] font-medium text-[#7a6120] hover:bg-[#fdf8e1]"
+                  className="shrink-0 rounded border border-warning-border bg-surface px-2.5 py-1 text-[11.5px] font-medium text-warning hover:bg-warning-bg"
                 >
                   Retry
                 </button>
               </div>
             ) : null}
-            {formError ? <p className="mb-2 text-[12px] text-[#b42318]">{formError}</p> : null}
-            <div className="flex items-center gap-2 rounded-xl border border-[#e4e4e0] bg-white px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-[#d4d4cf] focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+            {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               <div ref={attachMenuRef} className="relative">
                 <button
                   type="button"
@@ -588,14 +602,14 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   aria-label="Attach file"
                   aria-expanded={attachMenuOpen}
                   aria-haspopup="menu"
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-[#6b6b6b] hover:bg-[#f3f3f0] hover:text-[#111]"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
                 >
                   <Plus size={15} strokeWidth={1.75} />
                 </button>
                 {attachMenuOpen ? (
                   <div
                     role="menu"
-                    className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-[#e4e4e0] bg-white shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                    className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
                   >
                     <button
                       type="button"
@@ -608,7 +622,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         });
                         setAttachMenuOpen(false);
                       }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-[#fafaf7]"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
                     >
                       <Upload size={13} strokeWidth={1.75} />
                       Upload file
@@ -661,7 +675,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   onClick={requestAbort}
                   aria-label="Stop generating"
                   title="Stop generating"
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[#f0c0b8] bg-[#fff5f3] text-[#9f2f21] transition-colors hover:bg-[#ffebe7] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   <CircleStop size={16} strokeWidth={1.9} />
                 </button>
@@ -671,7 +685,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   disabled={isBusy || !input.trim()}
                   onClick={submit}
                   aria-label="Send message"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-[#111] text-white transition-opacity hover:bg-black disabled:opacity-40"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
                 >
                   <ArrowUp size={13} strokeWidth={2} />
                 </button>
@@ -679,13 +693,13 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
             </div>
             <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/composer:opacity-100">
               <span>
-                <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
                   ↵
                 </kbd>{" "}
                 send
               </span>
               <span>
-                <kbd className="rounded border border-[#e6e6e3] bg-[#fafaf7] px-1 font-mono text-[10px] text-ink-muted">
+                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
                   ⇧↵
                 </kbd>{" "}
                 new line
@@ -699,13 +713,13 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         <button
           type="button"
           aria-label="Collapse runtime details"
-          className="fixed inset-0 z-30 bg-black/[0.06] lg:hidden"
+          className="fixed inset-0 z-30 bg-ink/[0.06] lg:hidden"
           onClick={() => updateInspectorCollapsed(true)}
         />
       )}
 
       <aside
-        className={`shrink-0 overflow-y-auto border-l border-[#e4e4e0] bg-[#fbfbf9]/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-[#fbfbf9]/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
+        className={`shrink-0 overflow-y-auto border-l border-border bg-surface-raised/95 px-5 py-4 shadow-[-16px_0_36px_rgba(0,0,0,0.08)] backdrop-blur-md transition-transform duration-200 ease-out lg:bg-surface-raised/80 lg:py-8 lg:shadow-none lg:backdrop-blur-0 ${
           inspectorCollapsed
             ? "hidden"
             : "fixed inset-y-0 right-0 z-40 block w-[min(328px,calc(100vw-24px))] lg:static lg:z-auto lg:w-[328px]"
@@ -739,7 +753,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
         aria-expanded={!inspectorCollapsed}
         onClick={() => updateInspectorCollapsed(!inspectorCollapsed)}
-        className="fixed right-2 top-3 z-50 rounded-md border border-[#e6e6e3] bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-[#ebebe8] hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        className="fixed right-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
         <PanelRight size={15} strokeWidth={1.75} />
       </button>
@@ -860,10 +874,10 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
       onClick={handleCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className={`absolute ${positionClasses} z-10 inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 pointer-events-none transition-opacity hover:bg-[#f0f0ec] hover:text-ink focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
+      className={`absolute ${positionClasses} z-10 inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 pointer-events-none transition-opacity hover:bg-surface-subtle hover:text-ink focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
     >
       {copied ? (
-        <Check size={10} strokeWidth={2} className="text-[#16a34a]" />
+        <Check size={10} strokeWidth={2} className="text-success" />
       ) : (
         <Copy size={10} strokeWidth={1.75} />
       )}
@@ -876,11 +890,13 @@ export function AssistantMessageContent({
   parts,
   sessionCanGenerate,
   reasoningActive = false,
+  activeStartedAt,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
   reasoningActive?: boolean;
+  activeStartedAt?: string | undefined;
 }) {
   const hasParts = parts.length > 0;
   const isRunning = message.status === "running" && sessionCanGenerate;
@@ -987,7 +1003,10 @@ export function AssistantMessageContent({
       })}
       {!hasParts ? (
         isRunning ? (
-          <WorkingIndicator startedAt={message.createdAt} thinking={reasoningActive} />
+          <WorkingIndicator
+            startedAt={activeStartedAt ?? message.createdAt}
+            thinking={reasoningActive}
+          />
         ) : isStopped ? (
           <AssistantStoppedNotice />
         ) : (
@@ -996,11 +1015,37 @@ export function AssistantMessageContent({
       ) : isRunning ? (
         // Keep a live indicator at the tail so the UI never goes silent between a tool
         // result and the model's next output (thinking phases included).
-        <WorkingIndicator startedAt={message.createdAt} thinking={reasoningActive} />
+        <WorkingIndicator
+          startedAt={activeStartedAt ?? message.createdAt}
+          thinking={reasoningActive}
+        />
       ) : null}
       {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
     </div>
   );
+}
+
+function activeStartForAssistantMessage(
+  message: SessionMessage,
+  visibleMessages: SessionMessage[],
+) {
+  if (message.role !== "assistant" || message.status !== "running") return undefined;
+  if (message.responseToMessageId) {
+    const responseToMessage = visibleMessages.find(
+      (item) => item.id === message.responseToMessageId,
+    );
+    if (responseToMessage?.createdAt) return responseToMessage.createdAt;
+  }
+
+  const messageIndex = visibleMessages.findIndex((item) => item.id === message.id);
+  if (messageIndex > 0) {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const previous = visibleMessages[index];
+      if (previous?.role === "user" && previous.createdAt) return previous.createdAt;
+    }
+  }
+
+  return message.createdAt;
 }
 
 function findLatestTextGroupKey(
@@ -1047,7 +1092,7 @@ function CompletedStepGroup({
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
-        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-[#efefeb]/65 hover:text-ink/75"
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
       >
         <ChevronRight
           size={11}
@@ -1060,7 +1105,7 @@ function CompletedStepGroup({
         <span className="min-w-0 truncate font-medium text-ink/65">{summary}</span>
       </button>
       {expanded ? (
-        <div className="ml-2 mt-1 space-y-1.5 border-l border-[#e3e3df] pl-3">
+        <div className="ml-2 mt-1 space-y-1.5 border-l border-border pl-3">
           {parts.map((part, index) =>
             part.type === "tool-call" ? (
               <ToolCallCard key={part.toolCall.id} toolCall={part.toolCall} />
@@ -1091,11 +1136,11 @@ function formatStepDuration(seconds: number) {
 
 function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
   return (
-    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-[#9f2f21]">
+    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
       {typeof elapsedSeconds === "number" ? (
-        <span className="text-[12px] font-normal tabular-nums text-[#9f2f21]/70">
+        <span className="text-[12px] font-normal tabular-nums text-danger/70">
           {formatElapsed(elapsedSeconds)}
         </span>
       ) : null}
@@ -1138,7 +1183,7 @@ function ReasoningSummaryCard({
         </span>
       </button>
       {expanded && text ? (
-        <div className="mt-1 border-l border-[#e3e3df] pl-3">
+        <div className="mt-1 border-l border-border pl-3">
           <div className="py-1 text-[11.5px] leading-5 text-ink/65">
             <AssistantMarkdown content={text} />
           </div>
@@ -1160,7 +1205,7 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
-        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-[#efefeb]/65 hover:text-ink/75"
+        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
       >
         <ChevronRight
           size={11}
@@ -1176,21 +1221,21 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         {toolCall.brainPath ? (
           <span
             title={`Updated brain/${toolCall.brainPath}`}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#d7e4cf] bg-[#f3f8ef] px-1.5 py-px text-[10.5px] font-medium text-[#4d6f35]"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
           >
             <Brain size={9} strokeWidth={1.9} />
             Brain updated
           </span>
         ) : null}
         {isFailed ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-[#a33a2d]">
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-danger">
             <AlertCircle size={9} strokeWidth={1.9} />
             failed
           </span>
         ) : null}
         {!isCompleted && !isFailed ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
-            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-[#9b8a64]" />
+            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
             running
           </span>
         ) : null}
@@ -1204,7 +1249,7 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
         </div>
       ) : null}
       {expanded ? (
-        <div className="ml-6 mt-1 border-l border-[#e3e3df] pl-3">
+        <div className="ml-6 mt-1 border-l border-border pl-3">
           {toolCall.inputPreview ? (
             <ToolCallPreview label="Input" value={toolCall.inputPreview} />
           ) : null}
@@ -1350,11 +1395,11 @@ function SessionInspector({
           <InspectorField label="Activity events" value={String(eventCount)} />
         </div>
         {lastError ? (
-          <div className="mt-4 rounded-md border border-[#f0d2d2] bg-[#fff6f6] px-3 py-2 text-[11.5px] leading-4 text-[#9f1d1d]">
+          <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
             {lastError}
           </div>
         ) : streamErrorMessage || streamStatus === "stale" ? (
-          <div className="mt-4 rounded-md border border-[#ead9b8] bg-[#fffaf0] px-3 py-2 text-[11.5px] leading-4 text-[#8a5a00]">
+          <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
             {streamStatus === "stale"
               ? "The live session stream is not responding. Reloading will show persisted events."
               : streamErrorMessage}
@@ -1380,7 +1425,7 @@ function SessionInspector({
               value={formatTokenCount(usage.inputCacheWriteTokens)}
             />
           </div>
-          <div className="space-y-4 border-t border-[#e5e5e1] pt-4">
+          <div className="space-y-4 border-t border-border pt-4">
             <InspectorField label="Output total" value={formatTokenCount(usage.outputTokens)} />
             <InspectorField label="Output text" value={formatTokenCount(usage.outputTextTokens)} />
             <InspectorField
@@ -1433,7 +1478,7 @@ function SessionInspector({
           type="button"
           disabled={isPending || !canAbort}
           onClick={onAbort}
-          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-[#f0c0b8] bg-[#fff5f3] px-3 text-[12px] font-medium text-[#9f2f21] transition-colors hover:bg-[#ffebe7] disabled:cursor-not-allowed disabled:opacity-45"
+          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-danger-border bg-danger-bg px-3 text-[12px] font-medium text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
         >
           <CircleStop size={13} strokeWidth={1.9} />
           Abort session
@@ -1444,10 +1489,10 @@ function SessionInspector({
         <InspectorHeader label="Recent events" countLabel={`${recentEvents.length} shown`} />
         {recentEvents.length > 0 ? (
           <div className="space-y-1.5">
-            {recentEvents.map((event) => (
+            {recentEvents.map((event, index) => (
               <div
-                key={event.id}
-                className="rounded-md border border-[#e5e5e1] bg-white/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
+                key={event.id ?? `transient-${index}`}
+                className="rounded-md border border-border bg-surface/55 px-2.5 py-2 text-[11.5px] text-ink-muted"
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <TerminalSquare
@@ -1466,7 +1511,7 @@ function SessionInspector({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[#deded9] bg-white/45 px-3 py-3 text-[12px] text-ink-muted">
+          <div className="rounded-lg border border-dashed border-border bg-surface/45 px-3 py-3 text-[12px] text-ink-muted">
             No runtime events yet
           </div>
         )}
@@ -1479,7 +1524,7 @@ function InspectorHeader({ label, countLabel }: { label: string; countLabel: str
   return (
     <div className="mb-3 flex items-center justify-between">
       <span className="text-[12px] font-medium text-ink">{label}</span>
-      <span className="rounded-full border border-[#e3e3df] bg-white px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
+      <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
         {countLabel}
       </span>
     </div>
@@ -1547,7 +1592,7 @@ function RelatedSessionLink({
       target="_blank"
       rel="noreferrer"
       title={session.title}
-      className="group flex min-w-0 items-center gap-2 rounded-md border border-[#e6e6e2] bg-white/45 px-2.5 py-2 text-[12.5px] text-ink transition-colors hover:bg-white"
+      className="group flex min-w-0 items-center gap-2 rounded-md border border-border bg-surface/45 px-2.5 py-2 text-[12.5px] text-ink transition-colors hover:bg-surface"
     >
       <SessionStatusDot status={session.status} />
       <span className="min-w-0 flex-1">
@@ -1657,6 +1702,8 @@ function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "after_session.failed") {
     return `After-session failed: ${readString(event.payload.message)}`;
   }
+  if (event.type === "message.reasoning_started") return "Thinking started";
+  if (event.type === "message.reasoning_completed") return "Thinking completed";
   if (event.type === "message.reasoning_summary") return "Thinking summary";
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
