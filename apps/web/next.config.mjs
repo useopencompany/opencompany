@@ -7,6 +7,7 @@ const release =
   process.env.NEXT_PUBLIC_OBSERVABILITY_RELEASE ||
   process.env.OBSERVABILITY_RELEASE ||
   "";
+const deploymentId = release.slice(0, 32);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -15,9 +16,11 @@ const nextConfig = {
   // the build output (routes-manifest.json) and stamps it on client requests, so a
   // stale client's Server Actions/assets route to the deployment that served its
   // page instead of throwing into the error boundary. Must be unique per release
-  // and must not start with `dpl_`; the commit SHA satisfies both. Only set when
-  // present so local `next dev`/`next build` are unaffected.
-  ...(release ? { deploymentId: release } : {}),
+  // and must not start with `dpl_`. Vercel caps custom IDs at 32 characters, so
+  // use the commit prefix for skew protection while preserving the full release
+  // value for observability. Only set when present so local `next dev`/`next build`
+  // are unaffected.
+  ...(deploymentId ? { deploymentId } : {}),
   env: {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
   },
