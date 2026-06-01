@@ -272,10 +272,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     (event: RuntimeEvent) => {
       // Felt TTFT: the first delta (text or visible reasoning) ends the timer.
       const pending = pendingTtftRef.current;
-      if (
-        pending &&
-        (event.type === "message.delta" || event.type === "message.reasoning_delta")
-      ) {
+      if (pending && (event.type === "message.delta" || event.type === "message.reasoning_delta")) {
         if (pending.messageId) {
           captureEvent("session_first_token", {
             workspace_id: workspaceId,
