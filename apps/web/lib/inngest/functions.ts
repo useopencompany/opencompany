@@ -298,6 +298,7 @@ export const inngestFunctions = [
   syncAgentToGitHub,
   syncBrainToGitHub,
   sweepAgentSyncOutbox,
+  sweepAgentFileSyncOutbox,
   sweepBrainSyncOutbox,
   startAgentSession,
   runAgentSessionMessage,
