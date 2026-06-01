@@ -232,25 +232,7 @@ describe("AgentDetail", () => {
 describe("AgentDetail – rename behaviour", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Provide a minimal localStorage stub — the jsdom environment used in this
-    // project does not ship with a working localStorage implementation.
-    const store: Record<string, string> = {};
-    Object.defineProperty(window, "localStorage", {
-      value: {
-        getItem: (key: string) => store[key] ?? null,
-        setItem: (key: string, value: string) => {
-          store[key] = value;
-        },
-        removeItem: (key: string) => {
-          delete store[key];
-        },
-        clear: () => {
-          for (const key of Object.keys(store)) delete store[key];
-        },
-      },
-      writable: true,
-      configurable: true,
-    });
+    window.localStorage.clear();
   });
 
   it("does not save an empty name when the name field is cleared mid-rename", async () => {
