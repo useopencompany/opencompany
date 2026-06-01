@@ -10,8 +10,8 @@ const repositories = [
   { fullName: "opencompany/runner", defaultBranch: "develop" },
 ];
 const agents = [
-  { path: "agents/research/agent.agent", name: "Research" },
-  { path: "agents/writer/agent.agent", name: "Writer" },
+  { path: "agents/research/research.agent", name: "Research" },
+  { path: "agents/writer/writer.agent", name: "Writer" },
 ];
 const boundRepositories = [
   {
@@ -99,15 +99,17 @@ describe("extractConfigFromMentions", () => {
 
 describe("agentMentionIdForPath", () => {
   it("derives mention ids from bundle directory names", () => {
+    expect(agentMentionIdForPath("agents/research/research.agent")).toBe("agent/research");
     expect(agentMentionIdForPath("agents/research/agent.agent")).toBe("agent/research");
-    expect(agentMentionIdForPath("agents/research-2/agent.agent")).toBe("agent/research-2");
-    expect(agentMentionIdForPath("agents/customer-success/agent.agent")).toBe(
+    expect(agentMentionIdForPath("agents/research-2/research-2.agent")).toBe("agent/research-2");
+    expect(agentMentionIdForPath("agents/customer-success/customer-success.agent")).toBe(
       "agent/customer-success",
     );
   });
 
-  it("rejects direct single-file agent paths", () => {
+  it("rejects direct single-file and mismatched bundle paths", () => {
     expect(agentMentionIdForPath("agents/research.agent")).toBeNull();
+    expect(agentMentionIdForPath("agents/research/other.agent")).toBeNull();
     expect(agentMentionIdForPath("research.agent")).toBeNull();
   });
 });
@@ -252,8 +254,8 @@ describe("deriveAgentConfigFromBody", () => {
     });
 
     expect(config.agents).toEqual([
-      { path: "agents/research/agent.agent", name: "Research" },
-      { path: "agents/writer/agent.agent", name: "Writer" },
+      { path: "agents/research/research.agent", name: "Research" },
+      { path: "agents/writer/writer.agent", name: "Writer" },
     ]);
   });
 
@@ -262,10 +264,12 @@ describe("deriveAgentConfigFromBody", () => {
       title: "Coordinator",
       body: "Ask @agent/research-2 for a second pass.",
       repositories: [],
-      agents: [{ path: "agents/research-2/agent.agent", name: "Research 2" }],
+      agents: [{ path: "agents/research-2/research-2.agent", name: "Research 2" }],
     });
 
-    expect(config.agents).toEqual([{ path: "agents/research-2/agent.agent", name: "Research 2" }]);
+    expect(config.agents).toEqual([
+      { path: "agents/research-2/research-2.agent", name: "Research 2" },
+    ]);
   });
 
   it("ignores unknown workspace agent mentions", () => {
@@ -276,6 +280,6 @@ describe("deriveAgentConfigFromBody", () => {
       agents,
     });
 
-    expect(config.agents).toEqual([{ path: "agents/research/agent.agent", name: "Research" }]);
+    expect(config.agents).toEqual([{ path: "agents/research/research.agent", name: "Research" }]);
   });
 });

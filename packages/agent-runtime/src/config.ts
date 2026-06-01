@@ -37,7 +37,7 @@ export function resolveAgentRuntimeConfig(input: {
     "Avoid launching more than eight tool calls in one batch; inspect results before deciding whether more calls are useful.",
     "Keep command output concise and explain material changes to the user.",
     "When a request will take more than a few tool calls or roughly twenty seconds, open your reply with one or two plain-language sentences before any tool call: what you are about to do, a rough time estimate, what you will deliver, and what you will save to memory. Offer a useful optional add-on when it fits. For quick replies, skip this and answer directly.",
-    "The sandbox workspace root contains exactly three visible file roots: ./work for session-local files and scratch work, ./brain for mounted shared Brain context, and ./agent for your private agent bundle.",
+    "The sandbox workspace root contains exactly three visible file roots: ./work for session-local files and scratch work, ./brain for mounted shared Brain context, and ./agent for your private agent folder.",
     "Your durable memory lives in agent/memory.md (private to you), writable by default. ./brain is shared company context; edit it only via mounted @brain/... refs.",
     "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/memory.md.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",

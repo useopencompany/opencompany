@@ -1,6 +1,10 @@
 "use client";
 
-import { serializeAgentFrontmatter } from "@opencompany/agent-runtime";
+import {
+  agentBundleDir,
+  agentDefinitionFileNameForPath,
+  serializeAgentFrontmatter,
+} from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
   AgentModelId,
@@ -18,6 +22,7 @@ import {
   Cloud,
   FileCode2,
   FileText,
+  Folder,
   GitBranch,
   Loader2,
   type LucideIcon,
@@ -28,7 +33,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
 import {
   AGENT_MODELS,
@@ -55,8 +60,7 @@ import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { deleteAgent, updateAgent } from "@/lib/agents/actions";
-import { updateAgentBundleFile } from "@/lib/agents/bundle-file-actions";
-import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
+import type { AgentBundleFilePayload as AgentFolderFilePayload } from "@/lib/agents/bundle-files";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
@@ -86,7 +90,6 @@ type OptimisticGitHubSync = {
 
 const INSPECTOR_STORAGE_KEY = "opencompany-agent-inspector-collapsed";
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
-const BUNDLE_FILE_SAVE_DELAY_MS = 800;
 
 // Duplicated from AgentsView.tsx — extracting to a shared module is tracked
 // as a follow-up cleanup. Without this re-throw, Next.js never gets to
@@ -141,10 +144,10 @@ export default function AgentDetail({ initialAgent, idOrPath }: Props) {
       const data = query.state.data;
       const agentSyncing =
         data?.githubSyncStatus === "pending" || data?.githubSyncStatus === "syncing";
-      const bundleSyncing = data?.bundleFiles.some(
+      const folderSyncing = data?.bundleFiles.some(
         (file) => file.githubSyncStatus === "pending" || file.githubSyncStatus === "syncing",
       );
-      return agentSyncing || bundleSyncing ? 2500 : false;
+      return agentSyncing || folderSyncing ? 2500 : false;
     },
   });
 
@@ -476,8 +479,6 @@ function AgentDetailContent({
               }}
             />
           </div>
-
-          <AgentBundleFilesPanel agentId={agent.id} files={agent.bundleFiles} />
         </div>
       </div>
 
@@ -516,6 +517,7 @@ function AgentDetailContent({
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          folderFiles={agent.bundleFiles}
           onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
@@ -597,232 +599,115 @@ function walkPreviewDocument(node: TiptapPreviewNode, visit: (node: TiptapPrevie
   node.content?.forEach((child) => walkPreviewDocument(child, visit));
 }
 
-function AgentBundleFilesPanel({
-  agentId,
-  files: serverFiles,
-}: {
-  agentId: string;
-  files: AgentBundleFilePayload[];
-}) {
-  const router = useRouter();
-  const [files, setFiles] = useState(serverFiles);
-  const [selectedPath, setSelectedPath] = useState(serverFiles[0]?.path ?? "");
-  const selected = files.find((file) => file.path === selectedPath) ?? null;
-  const [draftContent, setDraftContent] = useState(selected?.content ?? "");
-  const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "error">("idle");
-  const [error, setError] = useState<string | null>(null);
-  const saveInFlightRef = useRef(false);
-  const selectedPathRef = useRef(selectedPath);
-
-  const dirty = Boolean(selected && draftContent !== selected.content);
-
-  useEffect(() => {
-    selectedPathRef.current = selectedPath;
-  }, [selectedPath]);
-
-  useEffect(() => {
-    setFiles(serverFiles);
-    setSelectedPath((current) => {
-      if (serverFiles.some((file) => file.path === current)) return current;
-      return serverFiles[0]?.path ?? "";
-    });
-  }, [serverFiles]);
-
-  useEffect(() => {
-    const nextSelected = files.find((file) => file.path === selectedPath) ?? null;
-    if (!nextSelected) {
-      setDraftContent("");
-      return;
-    }
-    if (saveState === "dirty" || saveState === "saving") return;
-    setDraftContent(nextSelected.content);
-  }, [files, saveState, selectedPath]);
-
-  const saveDraft = useCallback(
-    async (path: string, content: string) => {
-      if (saveInFlightRef.current) return false;
-      saveInFlightRef.current = true;
-      setSaveState("saving");
-      setError(null);
-
-      let result: Awaited<ReturnType<typeof updateAgentBundleFile>>;
-      try {
-        result = await updateAgentBundleFile(agentId, path, content);
-      } catch (error) {
-        result = {
-          ok: false,
-          error: error instanceof Error ? error.message : "Save failed.",
-        };
-      }
-
-      saveInFlightRef.current = false;
-      if (!result.ok) {
-        setSaveState("error");
-        setError(result.error);
-        return false;
-      }
-
-      setFiles((current) =>
-        current.map((file) => (file.path === result.file.path ? result.file : file)),
-      );
-      setSaveState("idle");
-      router.refresh();
-      return true;
-    },
-    [agentId, router],
-  );
-
-  useEffect(() => {
-    if (!selected || !dirty) return;
-    setSaveState("dirty");
-    const timeout = setTimeout(() => {
-      void saveDraft(selected.path, draftContent);
-    }, BUNDLE_FILE_SAVE_DELAY_MS);
-    return () => clearTimeout(timeout);
-  }, [dirty, draftContent, saveDraft, selected]);
-
-  function selectBundleFile(file: AgentBundleFilePayload) {
-    if (selected && dirty) void saveDraft(selected.path, draftContent);
-    selectedPathRef.current = file.path;
-    setSelectedPath(file.path);
-    setDraftContent(file.content);
-    setSaveState("idle");
-    setError(null);
-  }
-
-  if (serverFiles.length === 0) {
-    return (
-      <section className="mt-10 border-t border-border pt-8">
-        <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
-          <FileCode2 size={14} strokeWidth={1.9} className="text-ink-muted" />
-          Bundle files
-        </div>
-        <div className="mt-3 rounded-lg border border-dashed border-border bg-surface/45 px-3 py-4 text-[12.5px] text-ink-muted">
-          No bundle files yet.
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="mt-10 border-t border-border pt-8">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-[13px] font-medium text-ink">
-          <FileCode2 size={14} strokeWidth={1.9} className="text-ink-muted" />
-          <span>Bundle files</span>
-          <span className="text-[11.5px] font-normal text-ink-muted">
-            {files.length} {files.length === 1 ? "file" : "files"}
-          </span>
-        </div>
-        <BundleSaveStatus state={saveState} selected={selected} />
-      </div>
-
-      {error ? (
-        <div className="mb-3 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12px] text-danger">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="grid min-h-[420px] overflow-hidden rounded-lg border border-border bg-surface lg:grid-cols-[220px_minmax(0,1fr)]">
-        <div className="border-b border-border bg-surface-muted p-2 lg:border-b-0 lg:border-r">
-          <div className="space-y-px">
-            {files.map((file) => {
-              const active = file.path === selected?.path;
-              return (
-                <button
-                  key={file.path}
-                  type="button"
-                  onClick={() => selectBundleFile(file)}
-                  className={`flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] transition-colors duration-150 ${
-                    active
-                      ? "bg-surface-active text-ink"
-                      : "text-ink-muted hover:bg-surface-subtle hover:text-ink"
-                  }`}
-                >
-                  <BundleFileIcon path={file.relativePath} />
-                  <span className="min-w-0 flex-1 truncate" title={file.relativePath}>
-                    {file.relativePath}
-                  </span>
-                  {file.githubSyncStatus === "pending" || file.githubSyncStatus === "syncing" ? (
-                    <Loader2 size={12} strokeWidth={1.9} className="shrink-0 animate-spin" />
-                  ) : null}
-                  {file.githubSyncStatus === "failed" ? (
-                    <CircleAlert size={12} strokeWidth={1.9} className="shrink-0 text-danger" />
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="min-w-0 bg-canvas">
-          {selected ? (
-            <div className="min-h-[420px] px-5 py-4">
-              <div className="mb-3 flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
-                <BundleFileIcon path={selected.relativePath} />
-                <span className="min-w-0 truncate font-medium text-ink" title={selected.path}>
-                  agent/{selected.relativePath}
-                </span>
-              </div>
-              <BundleFileEditor content={draftContent} onChange={setDraftContent} />
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function BundleSaveStatus({
-  state,
-  selected,
-}: {
-  state: "idle" | "dirty" | "saving" | "error";
-  selected: AgentBundleFilePayload | null;
-}) {
-  if (state === "saving") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[11.5px] text-warning">
-        <Loader2 size={12} strokeWidth={1.9} className="animate-spin" />
-        Saving
-      </span>
-    );
-  }
-  if (state === "dirty") return <span className="text-[11.5px] text-ink-muted">Unsaved</span>;
-  if (state === "error") return <span className="text-[11.5px] text-danger">Save failed</span>;
-  if (selected?.githubSyncStatus === "failed") {
-    return <span className="text-[11.5px] text-danger">GitHub sync failed</span>;
-  }
-  if (selected?.githubSyncStatus === "pending" || selected?.githubSyncStatus === "syncing") {
-    return <span className="text-[11.5px] text-warning">Queued for GitHub</span>;
-  }
-  return <span className="text-[11.5px] text-ink-subtle">Saved</span>;
-}
-
-function BundleFileIcon({ path }: { path: string }) {
+function AgentFolderIcon({ path }: { path: string }) {
   const Icon = isCodePath(path) ? FileCode2 : FileText;
   return <Icon size={13} strokeWidth={1.85} className="shrink-0 text-ink-muted" />;
 }
 
-function BundleFileEditor({
-  content,
-  onChange,
+function isCodePath(path: string) {
+  return /\.(ts|tsx|js|jsx|json|css|html|yaml|yml)$/i.test(path);
+}
+
+type AgentFolderRow =
+  | { kind: "folder"; path: string; name: string; depth: number }
+  | { kind: "file"; file: AgentFolderFilePayload; depth: number };
+
+function AgentFolderPanel({
+  bundleDir,
+  definitionFileName,
+  files,
 }: {
-  content: string;
-  onChange: (content: string) => void;
+  bundleDir: string;
+  definitionFileName: string;
+  files: AgentFolderFilePayload[];
 }) {
+  const rows = useMemo(() => buildAgentFolderRows(files), [files]);
+  const fileCount = files.length + 1;
+
   return (
-    <textarea
-      value={content}
-      onChange={(event) => onChange(event.target.value)}
-      spellCheck={false}
-      className="min-h-[360px] w-full resize-y rounded-md border border-border bg-surface px-4 py-3 font-mono text-[12.5px] leading-6 text-ink outline-none focus:border-border-strong"
-    />
+    <div>
+      <InspectorHeader
+        label="Agent folder"
+        countLabel={`${fileCount} ${fileCount === 1 ? "file" : "files"}`}
+      />
+      <div className="overflow-hidden rounded-lg border border-border bg-surface/60 py-1">
+        <div className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-2 text-[12px] font-medium text-ink">
+          <Folder size={13} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+          <span className="truncate font-mono text-[11.5px]">{bundleDir}/</span>
+        </div>
+        <div className="py-1">
+          <div className="flex min-w-0 items-center gap-2 px-3 py-1 text-[12px] text-ink">
+            <AgentFolderIcon path={definitionFileName} />
+            <span className="min-w-0 flex-1 truncate" title={`${bundleDir}/${definitionFileName}`}>
+              {definitionFileName}
+            </span>
+          </div>
+          {rows.map((row) =>
+            row.kind === "folder" ? (
+              <div
+                key={row.path}
+                className="flex min-w-0 items-center gap-2 px-3 py-1 text-[12px] text-ink-muted"
+                style={{ paddingLeft: `${12 + row.depth * 16}px` }}
+              >
+                <Folder size={13} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+                <span className="truncate font-medium" title={row.path}>
+                  {row.name}
+                </span>
+              </div>
+            ) : (
+              <div
+                key={row.file.path}
+                className="flex min-w-0 items-center gap-2 px-3 py-1 text-[12px] text-ink"
+                style={{ paddingLeft: `${12 + row.depth * 16}px` }}
+              >
+                <AgentFolderIcon path={row.file.relativePath} />
+                <span
+                  className="min-w-0 flex-1 truncate"
+                  title={`${bundleDir}/${row.file.relativePath}`}
+                >
+                  {fileName(row.file.relativePath)}
+                </span>
+                {row.file.githubSyncStatus === "pending" ||
+                row.file.githubSyncStatus === "syncing" ? (
+                  <Loader2 size={12} strokeWidth={1.9} className="shrink-0 animate-spin" />
+                ) : null}
+                {row.file.githubSyncStatus === "failed" ? (
+                  <CircleAlert size={12} strokeWidth={1.9} className="shrink-0 text-danger" />
+                ) : null}
+              </div>
+            ),
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function isCodePath(path: string) {
-  return /\.(ts|tsx|js|jsx|json|css|html|yaml|yml)$/i.test(path);
+function buildAgentFolderRows(files: AgentFolderFilePayload[]): AgentFolderRow[] {
+  const rows: AgentFolderRow[] = [];
+  const seenFolders = new Set<string>();
+
+  for (const file of files.toSorted((left, right) =>
+    left.relativePath.localeCompare(right.relativePath),
+  )) {
+    const parts = file.relativePath.split("/").filter(Boolean);
+    let currentPath = "";
+
+    for (const [index, part] of parts.slice(0, -1).entries()) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      if (seenFolders.has(currentPath)) continue;
+      seenFolders.add(currentPath);
+      rows.push({ kind: "folder", path: currentPath, name: part, depth: index });
+    }
+
+    rows.push({ kind: "file", file, depth: Math.max(parts.length - 1, 0) });
+  }
+
+  return rows;
+}
+
+function fileName(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 function AgentInspector({
@@ -840,6 +725,7 @@ function AgentInspector({
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  folderFiles,
   onDeleteClick,
 }: {
   name: string;
@@ -856,6 +742,7 @@ function AgentInspector({
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  folderFiles: AgentFolderFilePayload[];
   onDeleteClick: () => void;
 }) {
   return (
@@ -976,6 +863,12 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+
+      <AgentFolderPanel
+        bundleDir={path ? agentBundleDir(path) : "agents/agent"}
+        definitionFileName={path ? agentDefinitionFileNameForPath(path) : "agent.agent"}
+        files={folderFiles}
+      />
 
       <div className="border-t border-border pt-6">
         <button

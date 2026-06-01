@@ -1,4 +1,4 @@
-import { agentBundleDir } from "@opencompany/agent-runtime";
+import { agentBundleDir, agentDefinitionFileNameForPath } from "@opencompany/agent-runtime";
 import type { AgentFile } from "@opencompany/db/schema";
 
 export type AgentBundleFilePayload = {
@@ -17,10 +17,13 @@ export type AgentBundleFilePayload = {
 export function serializeAgentBundleFiles(agentPath: string | null, files: AgentFile[]) {
   if (!agentPath) return [];
   const bundleDir = agentBundleDir(agentPath);
+  const definitionFileName = agentDefinitionFileNameForPath(agentPath);
   return files
     .flatMap((file) => {
       const relativePath = agentBundleRelativePath(file.path, bundleDir);
-      if (!relativePath || relativePath === "agent.agent") return [];
+      if (!relativePath || relativePath === "agent.agent" || relativePath === definitionFileName) {
+        return [];
+      }
       return [
         {
           path: file.path,

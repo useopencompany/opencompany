@@ -1,20 +1,20 @@
-# Agent Rework: Folder-Backed Agent Bundles
+# Agent Rework: Folder-Backed Agents
 
 **Status:** Plan — execute steps top to bottom, one at a time.
-**Scope note:** MVP. **No legacy support.** Agents are *always* folder bundles. There is no feature flag,
-no `agents/{slug}.agent` single-file fallback, no migration path, and no "legacy vs bundle" branching.
-The single-file format is replaced outright.
+**Scope note:** MVP. Agents are *always* folders. Legacy `agents/{slug}.agent` single-file paths
+are not canonical; legacy `agents/{slug}/agent.agent` folder definitions are accepted only as
+transition input and canonicalized to `agents/{slug}/{slug}.agent`.
 
 ---
 
 ## Goal
 
-Each agent becomes a folder bundle in the GitHub-backed workspace repo:
+Each agent becomes a folder in the GitHub-backed workspace repo:
 
 ```
 agents/
   sales/
-    agent.agent      # the agent definition (instructions)
+    <slug>.agent    # the agent definition (instructions)
     memory.md        # durable private memory — always present, writable by default
     sessions.md      # rolling session notes
     playbooks/  examples/  templates/   # advanced, optional (later step)
@@ -24,7 +24,7 @@ brain/               # shared company context ONLY
 Runtime shape inside the E2B sandbox:
 
 ```
-./agent/   # the current agent's bundle — writable by default (memory.md always exists)
+./agent/   # the current agent's folder — writable by default (memory.md always exists)
 ./brain/   # explicitly-mounted shared Brain refs (unchanged, still via @brain/...)
 ./work/    # ephemeral scratch + cloned repos (unchanged)
 ```
@@ -34,43 +34,43 @@ Runtime shape inside the E2B sandbox:
 - `./brain` = ours: shared company knowledge, explicit/mention-gated, unchanged.
 - `./work` = ephemeral.
 - Durable memory default target is `agent/memory.md` (was `@brain/memory.md`).
-- An agent only ever sees its **own** bundle. Delegation exposes another agent's *instructions* only,
+- An agent only ever sees its **own** folder. Delegation exposes another agent's *instructions* only,
   never its memory — this falls out of the architecture for free (see Step 4 isolation note).
 
 ### Key facts that shape the work (verified)
 - `agents.path` stores the `.agent` **file** path and is UNIQUE per workspace (`agents_workspace_path_idx`).
-  We keep `path` pointing at the file (`agents/{slug}/agent.agent`) to minimize churn; the bundle dir is
+  We keep `path` pointing at the file (`agents/{slug}/{slug}.agent`) to minimize churn; the agent dir is
   always `dirname(path)`.
 - `agentMentionIdForPath` (`packages/agent-runtime/src/mentions.ts`) derives the `@agent/{slug}` mention
   from the path — must be updated for the new shape, this is the highest-leverage correctness point
   (delegation + `@agent/...` both flow through it).
-- `listWorkspaceAgentFiles` already accepts `agents/**/*.agent`, so `agents/sales/agent.agent` is
+- `listWorkspaceAgentFiles` already accepts `agents/**/*.agent`, so `agents/sales/sales.agent` is
   discovered on GitHub re-import with no change. `memory.md`/`sessions.md` end in `.md` and are correctly
   ignored as agent files.
 - The Brain sync pipeline (`apps/runner/src/brain.ts`) is prefix-agnostic except for three hardcoded
-  `brain/` strings. Bundle files are just repo paths under `agents/{slug}/`, so the machinery is reusable.
+  `brain/` strings. Agent folder files are just repo paths under `agents/{slug}/`, so the machinery is reusable.
 
 ---
 
 ## Step 1 — Path & slug helpers (agent-runtime)
 
-**Goal:** Agents are created and addressed as `agents/{slug}/agent.agent`.
+**Goal:** Agents are created and addressed as `agents/{slug}/{slug}.agent`.
 
 **Changes**
 - `packages/agent-runtime/src/agent-file.ts`
-  - `agentPathForSlug(slug)` → return `agents/${slug}/agent.agent` (was `agents/${slug}.agent`).
+  - `agentPathForSlug(slug)` → return `agents/${slug}/${slug}.agent` (was `agents/${slug}.agent`).
   - Audit `normalizeAgentPath` / serialize / parse for any assumption that the path is `agents/<x>.agent`
     directly under `agents/`. Add `agentBundleDir(path)` = `dirname(path)` helper for downstream use.
 - `packages/agent-runtime/src/mentions.ts`
-  - `agentMentionIdForPath`: derive slug from `agents/{slug}/agent.agent` → mention `agent/{slug}`
+  - `agentMentionIdForPath`: derive slug from `agents/{slug}/{slug}.agent` → mention `agent/{slug}`
     (the directory name, NOT a naive strip-`.agent` which would yield `agent/{slug}/agent`).
-  - `normalizeAgentPath` (mentions side): a bare `@agent/{slug}` resolves to `agents/{slug}/agent.agent`.
+  - `normalizeAgentPath` (mentions side): a bare `@agent/{slug}` resolves to `agents/{slug}/{slug}.agent`.
 - `apps/web/lib/agents/paths.ts`
-  - `resolveAgentPath`: collision candidates become `agents/${slug}/agent.agent`,
-    `agents/${slug}-2/agent.agent`, … (uniqueness still holds on the file path).
+  - `resolveAgentPath`: collision candidates become `agents/${slug}/${slug}.agent`,
+    `agents/${slug}-2/${slug}-2.agent`, … (uniqueness still holds on the file path).
 
 **Acceptance**
-- Creating an agent titled "Sales" writes `agents/sales/agent.agent`.
+- Creating an agent titled "Sales" writes `agents/sales/sales.agent`.
 - `@agent/sales` in another agent's body resolves to that agent; delegation lookup
   (`eq(agents.path, ...)`) succeeds.
 - Unit tests: mention-id round-trip for several slugs incl. collisions (`-2`), and delegation reference
@@ -78,9 +78,9 @@ Runtime shape inside the E2B sandbox:
 
 ---
 
-## Step 2 — DB schema for agent bundle files
+## Step 2 — DB schema for agent folder files
 
-**Goal:** A place to store per-agent bundle files, namespaced and owned by the agent.
+**Goal:** A place to store per-agent folder files, namespaced and owned by the agent.
 
 **Changes** — `packages/db/src/schema.ts` (+ generated migration)
 - `agentFiles` — clone of `brainFiles`, plus `agentId` FK (`ON DELETE CASCADE`). Columns:
@@ -99,7 +99,7 @@ Runtime shape inside the E2B sandbox:
 
 ## Step 3 — Factor a prefix-agnostic repo-file sync core
 
-**Goal:** Reuse the exact Brain sync algorithm for bundle files without duplicating it; no behavior change
+**Goal:** Reuse the exact Brain sync algorithm for agent folder files without duplicating it; no behavior change
 to Brain.
 
 **Changes**
@@ -114,9 +114,9 @@ to Brain.
 
 ---
 
-## Step 4 — Mount `./agent` bundle in the sandbox
+## Step 4 — Mount `./agent` folder in the sandbox
 
-**Goal:** Every session mounts the agent's own bundle at `./agent`, writable, with `memory.md` guaranteed
+**Goal:** Every session mounts the agent's own folder at `./agent`, writable, with `memory.md` guaranteed
 to exist.
 
 **Changes**
@@ -135,16 +135,16 @@ to exist.
   - `syncAgentBundleFromSandbox(...)`: mirror of `syncBrainFromSandbox` — read changed files under
     `./agent`, re-prefix back to `agents/{slug}/...`, upsert `agentFiles`, write to GitHub via the Step 3
     core, conflict copies, async retry via `agentFileSyncJobs`. Defensive guard: the resolved repo path
-    must `startsWith(bundleDir + "/")`.
+    must `startsWith(agentDir + "/")`.
 - `apps/runner/src/session-lifecycle.ts` `ensureSandbox`: after `materializeBrainForSession`, call
   `materializeAgentBundleForSession`.
 - `apps/runner/src/agent-loop.ts`: call `syncAgentBundleFromSandbox` in both run paths (after the existing
   `sync_brain_after_message` and `sync_brain_after_session` points).
 
 **Isolation note (no extra work, just don't regress):** only this `agentId`'s files are ever written into
-`./agent`; tools are confined to `work/ | brain/ | agent/`. Other agents' bundles are never materialized
+`./agent`; tools are confined to `work/ | brain/ | agent/`. Other agents' folders are never materialized
 into the sandbox, so there is no path to read them. Delegation already loads only the target's
-`config.instructions` and runs the child in its own sandbox with its own bundle.
+`config.instructions` and runs the child in its own sandbox with its own folder.
 
 **Acceptance**
 - Start a session for agent "sales": `./agent/memory.md` exists and is writable.
@@ -172,41 +172,41 @@ into the sandbox, so there is no path to read them. Delegation already loads onl
 
 **Acceptance**
 - A fresh agent with the default after-session prompt writes to `agent/memory.md` (not Brain) and it
-  persists to GitHub under the bundle.
+  persists to GitHub under the agent folder.
 
 ---
 
-## Step 6 — Rename moves the whole bundle folder
+## Step 6 — Rename moves the whole agent folder
 
 **Goal:** Changing an agent's title moves `agents/{old}/ → agents/{new}/`, memory included.
 
 **Changes**
 - `apps/web/lib/agents/actions.ts` `updateAgent` + `apps/web/lib/agents/sync-job.ts`
-  `resolveAgentSyncRename`: on title change, compute the new bundle path and record the old path as today,
-  but extend so the sync worker moves *all* bundle files (`memory.md`, `sessions.md`, `playbooks/**`),
-  not just `agent.agent`.
+  `resolveAgentSyncRename`: on title change, compute the new folder path and record the old path as today,
+  but extend so the sync worker moves *all* agent folder files (`memory.md`, `sessions.md`, `playbooks/**`),
+  not just the definition `.agent` file.
 - Re-key `agentFiles` rows from the old `agents/{old}/` prefix to `agents/{new}/` and enqueue GitHub moves
   via `agentFileSyncJobs` (write-new + delete-old, conflict-safe — worst case lands at a conflict path,
   never lost).
 - `apps/web/lib/agents/materialize.ts` / sync worker: handle the multi-file move.
 
 **Acceptance**
-- Rename "Sales" → "Revenue": GitHub shows `agents/revenue/agent.agent` + `agents/revenue/memory.md`,
+- Rename "Sales" → "Revenue": GitHub shows `agents/revenue/revenue.agent` + `agents/revenue/memory.md`,
   `agents/sales/` is gone, and `@agent/revenue` resolves. Memory content is preserved.
 
 ---
 
-## Step 7 (optional, later) — Full bundle tree + web UI
+## Step 7 (optional, later) — Full agent folder tree + web UI
 
-**Goal:** Support `playbooks/`, `examples/`, `templates/` and surface bundle files in the app.
+**Goal:** Support `playbooks/`, `examples/`, `templates/` and surface the agent folder in the app.
 
 **Changes**
 - `materializeAgentBundleForSession` / `syncAgentBundleFromSandbox`: handle the whole tree with
   brain-equivalent size/count limits (mirror `MAX_BRAIN_FILE_BYTES`, `MAX_BRAIN_MOUNT_FILES`, etc.).
-- Web Agent detail UI: list/edit bundle files, reusing the Brain file viewing patterns.
+- Web Agent detail UI: show the agent folder, reusing the Brain file viewing patterns.
 
 **Acceptance**
-- An agent can read/write nested bundle files; they round-trip to GitHub and back into the next session.
+- An agent can read/write nested agent folder files; they round-trip to GitHub and back into the next session.
 
 ---
 
@@ -218,4 +218,4 @@ into the sandbox, so there is no path to read them. Delegation already loads onl
 
 ## Suggested execution order
 Steps 1 → 5 deliver the core UX (folder agents + always-on private memory). Step 6 (rename) and Step 7
-(full bundle + UI) can follow once the core is verified.
+(full agent folder + UI) can follow once the core is verified.

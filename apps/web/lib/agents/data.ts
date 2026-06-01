@@ -1,3 +1,4 @@
+import { agentPathForSlug, agentSlugFromPath } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   agentFiles,
@@ -118,6 +119,8 @@ export async function loadAgentForWorkspace(
   idOrPath: string,
 ): Promise<AgentDetailPayload | null> {
   const db = getDb();
+  const slug = agentSlugFromPath(idOrPath);
+  const canonicalPath = slug ? agentPathForSlug(slug) : null;
   const [[agent], brainPaths, githubIntegrationRepositories, agentReferences, mcpSettings] =
     await Promise.all([
       db
@@ -126,7 +129,13 @@ export async function loadAgentForWorkspace(
         .where(
           and(
             eq(agents.workspaceId, workspaceId),
-            or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
+            canonicalPath
+              ? or(
+                  eq(agents.id, idOrPath),
+                  eq(agents.path, idOrPath),
+                  eq(agents.path, canonicalPath),
+                )
+              : or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
           ),
         )
         .limit(1),

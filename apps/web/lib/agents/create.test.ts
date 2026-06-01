@@ -67,10 +67,10 @@ describe("agent sync job logging", () => {
       {
         agentId: "agt_123",
         workspaceId: "wks_123",
-        path: "agents/leo/agent.agent",
+        path: "agents/leo/leo.agent",
         desiredHash: "hash_123",
         desiredVersion: 4,
-        previousPath: "agents/old/agent.agent",
+        previousPath: "agents/old/old.agent",
         previousBlobSha: "blob_123",
       },
       { now },
@@ -80,10 +80,10 @@ describe("agent sync job logging", () => {
     expect(insertedValues[0]).toMatchObject({
       agentId: "agt_123",
       workspaceId: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       desiredHash: "hash_123",
       desiredVersion: 4,
-      previousPath: "agents/old/agent.agent",
+      previousPath: "agents/old/old.agent",
       previousBlobSha: "blob_123",
       status: "pending",
       attempts: 0,
@@ -92,10 +92,10 @@ describe("agent sync job logging", () => {
       updatedAt: now,
     });
     expect(conflictSets[0]).toMatchObject({
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       desiredHash: "hash_123",
       desiredVersion: 4,
-      previousPath: "agents/old/agent.agent",
+      previousPath: "agents/old/old.agent",
       previousBlobSha: "blob_123",
       status: "pending",
       attempts: 0,
@@ -106,7 +106,7 @@ describe("agent sync job logging", () => {
     expect(result.metadata).toEqual({
       agent_id: "agt_123",
       workspace_id: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       desired_hash: "hash_123",
       desired_version: 4,
       next_run_at: "2026-05-24T12:00:10.000Z",
@@ -119,7 +119,7 @@ describe("agent sync job logging", () => {
     logAgentSyncJobQueued({
       agent_id: "agt_123",
       workspace_id: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       desired_hash: "hash_123",
       desired_version: 4,
       next_run_at: "2026-05-24T12:00:10.000Z",
@@ -131,7 +131,7 @@ describe("agent sync job logging", () => {
       event: "opencompany.agent_sync_job_queued",
       agent_id: "agt_123",
       workspace_id: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       desired_hash: "hash_123",
       desired_version: 4,
       next_run_at: "2026-05-24T12:00:10.000Z",
@@ -152,7 +152,7 @@ describe("agent sync dispatch scheduling", () => {
     scheduleAgentSyncDispatch({
       id: "agt_123",
       workspaceId: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
     });
 
     const callback = afterMock.mock.calls[0]?.[0];
@@ -167,7 +167,7 @@ describe("agent sync dispatch scheduling", () => {
       event: "opencompany.agent_sync_dispatch_succeeded",
       agent_id: "agt_123",
       workspace_id: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       inngest_event_ids: ["evt_123"],
     });
   });
@@ -179,7 +179,7 @@ describe("agent sync dispatch scheduling", () => {
     scheduleAgentSyncDispatch({
       id: "agt_123",
       workspaceId: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
     });
 
     const callback = afterMock.mock.calls[0]?.[0];
@@ -190,14 +190,14 @@ describe("agent sync dispatch scheduling", () => {
       event: "opencompany.agent_sync_dispatch_failed",
       agent_id: "agt_123",
       workspace_id: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       dispatch_status_marked_failed: false,
     });
     expect(mocks.logger.error).toHaveBeenCalledWith("Failed to dispatch agent GitHub sync event", {
       event: "opencompany.agent_sync_dispatch_failed",
       agent_id: "agt_123",
       workspace_id: "wks_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
       dispatch_status_marked_failed: false,
       error_name: "Error",
       error_message: "Inngest API Error: 401 Event key not found",

@@ -153,7 +153,7 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     expect(
       resolveRuntimeToolNamesForConfigTools({
         tools: [],
-        agents: [{ path: "agents/x/agent.agent" }],
+        agents: [{ path: "agents/x/x.agent" }],
       }),
     ).toContain("delegate_to_agent");
   });

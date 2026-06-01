@@ -11,9 +11,9 @@ import { extractConfigFromMentions } from "./mentions";
 
 describe(".agent files", () => {
   test("builds bundle-backed agent paths from slugs", () => {
-    expect(agentPathForSlug("research")).toBe("agents/research/agent.agent");
-    expect(agentPathForSlug("research-2")).toBe("agents/research-2/agent.agent");
-    expect(agentBundleDir("agents/research-2/agent.agent")).toBe("agents/research-2");
+    expect(agentPathForSlug("research")).toBe("agents/research/research.agent");
+    expect(agentPathForSlug("research-2")).toBe("agents/research-2/research-2.agent");
+    expect(agentBundleDir("agents/research-2/research-2.agent")).toBe("agents/research-2");
   });
 
   test("round-trips deterministic frontmatter and markdown body", () => {
@@ -267,13 +267,34 @@ describe(".agent files", () => {
     const source = serializeAgentFile({
       title: "Coordinator",
       body: "Delegate research to @agent/research.",
-      agents: [{ path: "agents/research/agent.agent", name: "Research" }],
+      agents: [{ path: "agents/research/research.agent", name: "Research" }],
     });
     const parsed = parseAgentFile(source);
 
-    expect(source).toContain("agents:\n  - path: agents/research/agent.agent\n    name: Research");
+    expect(source).toContain(
+      "agents:\n  - path: agents/research/research.agent\n    name: Research",
+    );
     expect(parsed.config.agents).toEqual([
-      { path: "agents/research/agent.agent", name: "Research" },
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
+  });
+
+  test("canonicalizes legacy delegated agent frontmatter paths", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Coordinator"',
+        "agents:",
+        "  - path: agents/research/agent.agent",
+        "    name: Research",
+        "---",
+        "",
+        "Delegate research to @agent/research.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
     ]);
   });
 
@@ -283,7 +304,7 @@ describe(".agent files", () => {
         "---",
         'title: "Coordinator"',
         "agents:",
-        "  - path: agents/research/agent.agent",
+        "  - path: agents/research/research.agent",
         "    name: Research",
         "  - path: ../secret.agent",
         "    name: Missing",
@@ -294,7 +315,7 @@ describe(".agent files", () => {
     );
 
     expect(parsed.config.agents).toEqual([
-      { path: "agents/research/agent.agent", name: "Research" },
+      { path: "agents/research/research.agent", name: "Research" },
     ]);
   });
 

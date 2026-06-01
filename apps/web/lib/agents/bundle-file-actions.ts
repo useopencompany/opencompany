@@ -1,6 +1,6 @@
 "use server";
 
-import { agentBundleDir } from "@opencompany/agent-runtime";
+import { agentBundleDir, agentDefinitionFileNameForPath } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { agentFiles, agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -40,21 +40,22 @@ export async function updateAgentBundleFile(
     const bundleDir = agentBundleDir(agent.path);
     const prefix = `${bundleDir}/`;
     if (!path.startsWith(prefix)) {
-      return { ok: false, error: "Bundle file is outside this agent." };
+      return { ok: false, error: "File is outside this agent folder." };
     }
 
     const relativePath = normalizeAgentBundleRelativePath(path.slice(prefix.length));
-    if (!relativePath || relativePath === "agent.agent") {
-      return { ok: false, error: "Bundle file path is invalid." };
+    const definitionFileName = agentDefinitionFileNameForPath(agent.path);
+    if (!relativePath || relativePath === "agent.agent" || relativePath === definitionFileName) {
+      return { ok: false, error: "Agent folder path is invalid." };
     }
     if (!isAgentBundleTextFile(relativePath)) {
-      return { ok: false, error: "Only text bundle files are supported." };
+      return { ok: false, error: "Only text files are supported." };
     }
 
     const normalizedPath = `${bundleDir}/${relativePath}`;
     const sizeBytes = brainContentSize(content);
     if (sizeBytes > MAX_BRAIN_FILE_BYTES) {
-      return { ok: false, error: "Agent bundle files must be 256 KB or smaller." };
+      return { ok: false, error: "Agent folder files must be 256 KB or smaller." };
     }
 
     const [existing] = await db
@@ -68,7 +69,7 @@ export async function updateAgentBundleFile(
         ),
       )
       .limit(1);
-    if (!existing) return { ok: false, error: "Bundle file not found." };
+    if (!existing) return { ok: false, error: "Agent folder file not found." };
 
     const contentHash = hashBrainContent(content);
     const now = new Date();
@@ -114,7 +115,7 @@ export async function updateAgentBundleFile(
       )
       .limit(1);
     const [file] = serializeAgentBundleFiles(agent.path, updated ? [updated] : []);
-    if (!file) return { ok: false, error: "Bundle file not found after save." };
+    if (!file) return { ok: false, error: "Agent folder file not found after save." };
     return { ok: true, file };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Save failed." };

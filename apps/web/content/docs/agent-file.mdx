@@ -17,7 +17,7 @@ brain:
   - /
   - docs/README.md
 agents:
-  - path: agents/sales-research.agent
+  - path: agents/sales-research/sales-research.agent
     name: Sales research
 integrations:
   github:
@@ -141,11 +141,11 @@ A list of other agents in the same workspace that this agent can delegate work t
 
 ```yaml
 agents:
-  - path: agents/sales-research.agent
+  - path: agents/sales-research/sales-research.agent
     name: Sales research
 ```
 
-The body mention is `@agent/<slug>`, where `<slug>` is the filename without `agents/` or `.agent`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
+The body mention is `@agent/<slug>`, where `<slug>` is the agent folder name under `agents/`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
 The result also includes `childSessionId`; passing that id back as `sessionId` with a new prompt continues the same delegated child session.
 
 ### `integrations.github.repositories`
@@ -261,9 +261,9 @@ In your workspace's GitHub repo, agents live under `agents/`:
 ```text
 your-workspace-repo/
 ├── agents/
-│   ├── fundraising-copilot.agent
-│   ├── ops-triage.agent
-│   └── sales-research.agent
+│   ├── fundraising-copilot/fundraising-copilot.agent
+│   ├── ops-triage/ops-triage.agent
+│   └── sales-research/sales-research.agent
 └── brain/
     ├── docs/README.md
     └── product/positioning.md

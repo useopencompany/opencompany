@@ -78,7 +78,7 @@ describe("completeOnboarding", () => {
     ensureUserOnboardingScaffoldMock.mockResolvedValue({
       created: true,
       agentId: "agt_123",
-      path: "agents/leo/agent.agent",
+      path: "agents/leo/leo.agent",
     });
   });
 

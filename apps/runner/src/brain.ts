@@ -101,7 +101,7 @@ export async function materializeBrainForSession(input: {
       });
   }
 
-  // The manifest is OpenCompany metadata. The agent sees Brain refs in agent.agent instead.
+  // The manifest is OpenCompany metadata. The agent sees Brain refs in its .agent file instead.
   await input.sandbox.files.write(
     layout.brainManifest,
     JSON.stringify(

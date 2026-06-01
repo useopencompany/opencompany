@@ -3,6 +3,8 @@
 import {
   type AgentConfigPatch,
   agentBundleDir,
+  agentPathForSlug,
+  agentSlugFromPath,
   collectBodyRepositoryMentions,
   deriveAgentConfigFromBody,
   normalizeAgentBody,
@@ -44,6 +46,7 @@ import {
 import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
+import { selectCanonicalAgentRepositoryFiles } from "@/lib/agents/paths";
 import {
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
@@ -179,8 +182,12 @@ export async function updateAgent(
 
   const currentConfig = normalizeAgentConfig(agent.config);
   const title = patch.name ?? agent.name;
+  const currentSlug = agent.path ? agentSlugFromPath(agent.path) : null;
+  const canonicalCurrentPath = currentSlug ? agentPathForSlug(currentSlug) : null;
   const path =
-    typeof patch.name === "string" || !agent.path
+    typeof patch.name === "string" ||
+    !agent.path ||
+    Boolean(canonicalCurrentPath && agent.path !== canonicalCurrentPath)
       ? await timeAsync(trace, "db.nextAvailableAgentPath", () =>
           nextAvailableAgentPath(db, workspace.id, title, agent.path),
         )
@@ -334,11 +341,11 @@ export async function updateAgent(
     renamePreviousPath: pathChanged ? previousPath : null,
     renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
   });
+  const previousBundleDir = previousPath ? agentBundleDir(previousPath) : null;
+  const nextBundleDir = agentBundleDir(path);
   const bundleFileMoves =
-    pathChanged && previousPath
+    previousBundleDir && previousBundleDir !== nextBundleDir
       ? await timeAsync(trace, "db.prepareAgentBundleFileMoves", async () => {
-          const oldBundleDir = agentBundleDir(previousPath);
-          const newBundleDir = agentBundleDir(path);
           const [files, existingFileSyncJobs] = await Promise.all([
             db
               .select({
@@ -362,8 +369,8 @@ export async function updateAgent(
           return prepareAgentBundleFileMoves({
             files,
             existingFileSyncJobs,
-            oldBundleDir,
-            newBundleDir,
+            oldBundleDir: previousBundleDir,
+            newBundleDir: nextBundleDir,
           });
         })
       : [];
@@ -827,8 +834,9 @@ export async function syncAgentsFromWorkspaceRepository() {
   const files = await timeAsync(trace, "github.listWorkspaceAgentFiles", () =>
     listWorkspaceAgentFiles({ repository }),
   );
+  const canonicalFiles = selectCanonicalAgentRepositoryFiles(files);
 
-  for (const file of files) {
+  for (const file of canonicalFiles) {
     const { content, sha } = await timeAsync(
       trace,
       "github.readWorkspaceFile",
@@ -856,12 +864,22 @@ export async function syncAgentsFromWorkspaceRepository() {
       "db.selectAgentByPath",
       () =>
         db
-          .select({ id: agents.id })
+          .select({ id: agents.id, path: agents.path, version: agents.version })
           .from(agents)
-          .where(and(eq(agents.workspaceId, workspace.id), eq(agents.path, file.path)))
+          .where(
+            and(
+              eq(agents.workspaceId, workspace.id),
+              file.legacyPath
+                ? or(eq(agents.path, file.canonicalPath), eq(agents.path, file.legacyPath))
+                : eq(agents.path, file.canonicalPath),
+            ),
+          )
           .limit(1),
-      { path: file.path },
+      { path: file.canonicalPath },
     );
+    const shouldCanonicalize = Boolean(file.previousPath);
+    const pathChangedInDb = Boolean(existing && existing.path !== file.canonicalPath);
+    const nextVersion = (existing?.version ?? 0) + (shouldCanonicalize || pathChangedInDb ? 1 : 0);
 
     if (existing) {
       await timeAsync(
@@ -871,6 +889,7 @@ export async function syncAgentsFromWorkspaceRepository() {
           db
             .update(agents)
             .set({
+              path: file.canonicalPath,
               name: parsed.title,
               body: parsed.body,
               commitSha: sha ?? file.sha,
@@ -879,25 +898,47 @@ export async function syncAgentsFromWorkspaceRepository() {
               githubCommitSha: null,
               githubSyncedHash: contentHash,
               githubSyncedAt: new Date(),
-              githubSyncStatus: "synced",
+              githubSyncStatus: shouldCanonicalize ? "pending" : "synced",
               githubSyncError: null,
               config: parsed.config,
+              version: nextVersion,
               updatedAt: new Date(),
             })
             .where(and(eq(agents.id, existing.id), eq(agents.workspaceId, workspace.id))),
-        { path: file.path },
+        { path: file.canonicalPath },
       );
+      if (shouldCanonicalize) {
+        const syncJob = prepareAgentSyncJobUpsert(db, {
+          agentId: existing.id,
+          workspaceId: workspace.id,
+          path: file.canonicalPath,
+          desiredHash: contentHash,
+          desiredVersion: nextVersion,
+          previousPath: file.previousPath,
+          previousBlobSha: sha ?? file.sha,
+        });
+        await timeAsync(trace, "db.upsertCanonicalAgentSyncJob", () => syncJob.query, {
+          path: file.canonicalPath,
+        });
+        logAgentSyncJobQueued(syncJob.metadata);
+        scheduleAgentSyncDispatch({
+          id: existing.id,
+          workspaceId: workspace.id,
+          path: file.canonicalPath,
+        });
+      }
       continue;
     }
 
+    const id = newAgentId();
     await timeAsync(
       trace,
       "db.insertAgent",
       () =>
         db.insert(agents).values({
-          id: newAgentId(),
+          id,
           workspaceId: workspace.id,
-          path: file.path,
+          path: file.canonicalPath,
           name: parsed.title,
           body: parsed.body,
           commitSha: sha ?? file.sha,
@@ -905,15 +946,35 @@ export async function syncAgentsFromWorkspaceRepository() {
           githubBlobSha: sha ?? file.sha,
           githubSyncedHash: contentHash,
           githubSyncedAt: new Date(),
-          githubSyncStatus: "synced",
+          githubSyncStatus: shouldCanonicalize ? "pending" : "synced",
           config: parsed.config,
         }),
-      { path: file.path },
+      { path: file.canonicalPath },
     );
+    if (shouldCanonicalize) {
+      const syncJob = prepareAgentSyncJobUpsert(db, {
+        agentId: id,
+        workspaceId: workspace.id,
+        path: file.canonicalPath,
+        desiredHash: contentHash,
+        desiredVersion: 1,
+        previousPath: file.previousPath,
+        previousBlobSha: sha ?? file.sha,
+      });
+      await timeAsync(trace, "db.upsertCanonicalAgentSyncJob", () => syncJob.query, {
+        path: file.canonicalPath,
+      });
+      logAgentSyncJobQueued(syncJob.metadata);
+      scheduleAgentSyncDispatch({
+        id,
+        workspaceId: workspace.id,
+        path: file.canonicalPath,
+      });
+    }
   }
 
   revalidatePath("/agents");
-  endTimingTrace(trace, { count: files.length });
+  endTimingTrace(trace, { count: canonicalFiles.length });
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

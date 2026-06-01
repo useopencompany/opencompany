@@ -178,11 +178,33 @@ export function slugifyAgentTitle(title: string) {
 }
 
 export function agentPathForSlug(slug: string) {
-  return `agents/${slug}/agent.agent`;
+  return `agents/${slug}/${slug}.agent`;
 }
 
 export function agentBundleDir(path: string) {
   return path.replace(/\/[^/]+$/g, "");
+}
+
+export function agentSlugFromPath(path: string) {
+  const normalized = path
+    .trim()
+    .replace(/^@/, "")
+    .replace(/^\/+/, "")
+    .replace(/\/{2,}/g, "/");
+  const parts = normalized.split("/");
+  if (parts.length !== 3 || parts[0] !== "agents") return null;
+
+  const [, slug, fileName] = parts;
+  if (!slug || !/^[a-z0-9-]+$/.test(slug) || slug.includes("..") || slug.startsWith(".")) {
+    return null;
+  }
+  if (fileName !== `${slug}.agent` && fileName !== "agent.agent") return null;
+  return slug;
+}
+
+export function agentDefinitionFileNameForPath(path: string) {
+  const slug = agentSlugFromPath(path);
+  return slug ? `${slug}.agent` : "agent.agent";
 }
 
 function buildAgentConfig(input: {
@@ -384,10 +406,10 @@ function normalizeAgentPath(value: string) {
     : trimmed;
   const normalized = withoutAgentPrefix.startsWith("agents/")
     ? withoutAgentPrefix.replace(/\/{2,}/g, "/")
-    : `agents/${withoutAgentPrefix.replace(/\/{2,}/g, "/")}/agent.agent`;
-  const mentionId = agentMentionIdForPath(normalized);
-  if (!mentionId) return null;
-  return normalized;
+    : agentPathForSlug(withoutAgentPrefix.replace(/\/{2,}/g, "/"));
+  const slug = agentSlugFromPath(normalized);
+  if (!slug || !agentMentionIdForPath(normalized)) return null;
+  return agentPathForSlug(slug);
 }
 
 function normalizeAgentName(value: string) {

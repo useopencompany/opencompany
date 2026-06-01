@@ -16,7 +16,7 @@ brain:
   - docs/README.md
   - product/
 agents:
-  - path: agents/sales-research.agent
+  - path: agents/sales-research/sales-research.agent
     name: Sales research
 ---
 
@@ -28,7 +28,7 @@ A `.agent` file has two parts:
 1. **Frontmatter** — a YAML block fenced by `---` lines. Deterministic metadata the runtime needs to dispatch the agent.
 2. **Body** — Markdown that the model receives as its instructions. `@mention` tokens inside the body declaratively bind models, tools, and Brain files/folders.
 
-Files live at `agents/<slug>.agent` in the workspace's GitHub repo, where `<slug>` is the lowercased, dash-joined title.
+Files live at `agents/<slug>/<slug>.agent` in the workspace's GitHub repo, where `<slug>` is the lowercased, dash-joined title.
 
 ## Mentions are the source of truth
 
@@ -156,7 +156,7 @@ editor and runtime prompt.
 
 ```yaml
 agents:
-  - path: agents/sales-research.agent
+  - path: agents/sales-research/sales-research.agent
     name: Sales research
 ```
 
@@ -253,14 +253,14 @@ The after-session run is not a visible chat turn. It reuses the agent loop, can 
 ```text
 workspace-repo/
 └── agents/
-    ├── fundraising-copilot.agent
-    ├── ops-triage.agent
-    └── sales-research.agent
+    ├── fundraising-copilot/fundraising-copilot.agent
+    ├── ops-triage/ops-triage.agent
+    └── sales-research/sales-research.agent
 ```
 
 One agent per file. The slug must match the filename; the platform regenerates it from the title on every save.
 
-If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix (`agents/research.agent`, `agents/research-2.agent`).
+If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix (`agents/research/research.agent`, `agents/research-2/research-2.agent`).
 
 ### Renames
 
@@ -360,7 +360,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
     { path: "product/", type: "folder" },
   ],
   agents: [
-    { path: "agents/sales-research.agent", name: "Sales research" },
+    { path: "agents/sales-research/sales-research.agent", name: "Sales research" },
   ],
   afterSession: {
     enabled: true,

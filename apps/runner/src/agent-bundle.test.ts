@@ -35,7 +35,7 @@ describe("materializeAgentBundleForSession", () => {
   it("mounts only files under the current agent bundle and preserves relative structure", async () => {
     const db = createAgentBundleDb({
       selectResults: [
-        [{ path: "agents/sales/agent.agent" }],
+        [{ path: "agents/sales/sales.agent" }],
         [
           {
             path: "agents/sales/memory.md",
@@ -104,7 +104,7 @@ describe("materializeAgentBundleForSession", () => {
 
   it("creates empty memory.md and records a mount when no memory row exists", async () => {
     const db = createAgentBundleDb({
-      selectResults: [[{ path: "agents/sales/agent.agent" }], []],
+      selectResults: [[{ path: "agents/sales/sales.agent" }], []],
     });
     dbMocks.getDb.mockReturnValue(db);
     const sandbox = createSandbox({
@@ -155,7 +155,7 @@ describe("materializeAgentBundleForSession", () => {
       })),
     ];
     const db = createAgentBundleDb({
-      selectResults: [[{ path: "agents/sales/agent.agent" }], bundleRows],
+      selectResults: [[{ path: "agents/sales/sales.agent" }], bundleRows],
     });
     dbMocks.getDb.mockReturnValue(db);
     const sandbox = createSandbox({
@@ -194,7 +194,7 @@ describe("syncAgentBundleFromSandbox", () => {
   it("upserts a changed memory file and writes it to GitHub at the bundle path", async () => {
     const db = createAgentBundleDb({
       selectResults: [
-        [{ path: "agents/sales/agent.agent" }],
+        [{ path: "agents/sales/sales.agent" }],
         [
           {
             sessionId: "ses_123",
@@ -270,7 +270,7 @@ describe("syncAgentBundleFromSandbox", () => {
   it("round-trips changed nested files back to the matching bundle path", async () => {
     const db = createAgentBundleDb({
       selectResults: [
-        [{ path: "agents/sales/agent.agent" }],
+        [{ path: "agents/sales/sales.agent" }],
         [
           {
             sessionId: "ses_123",
@@ -334,7 +334,7 @@ describe("syncAgentBundleFromSandbox", () => {
   it("applies Brain-equivalent file, count, and byte limits while syncing", async () => {
     const db = createAgentBundleDb({
       selectResults: [
-        [{ path: "agents/sales/agent.agent" }],
+        [{ path: "agents/sales/sales.agent" }],
         [
           {
             sessionId: "ses_123",
@@ -402,7 +402,7 @@ describe("syncAgentBundleFromSandbox", () => {
   it("writes a conflict copy inside the current bundle when the DB row changed since mount", async () => {
     const db = createAgentBundleDb({
       selectResults: [
-        [{ path: "agents/sales/agent.agent" }],
+        [{ path: "agents/sales/sales.agent" }],
         [
           {
             sessionId: "ses_123",
@@ -460,7 +460,7 @@ describe("syncAgentBundleFromSandbox", () => {
   it("ignores malformed sandbox paths before reading or writing", async () => {
     const db = createAgentBundleDb({
       selectResults: [
-        [{ path: "agents/sales/agent.agent" }],
+        [{ path: "agents/sales/sales.agent" }],
         [
           {
             sessionId: "ses_123",

@@ -82,7 +82,7 @@ export const syncAgentFileToGitHub = inngest.createFunction(
   async ({ event, step }) => {
     await step.sleep("coalesce agent file edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
 
-    return step.run("materialize latest agent bundle file", async () => {
+    return step.run("materialize latest agent folder file", async () => {
       return materializeAgentFileToGitHub({
         workspaceId: event.data.workspaceId,
         path: event.data.path,

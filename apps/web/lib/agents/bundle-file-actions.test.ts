@@ -75,7 +75,7 @@ describe("updateAgentBundleFile", () => {
   it("updates agentFiles and queues an agentFileSyncJobs upsert for the same bundle path", async () => {
     const { db, batch, insertedValues, updatedValues } = createDbMock({
       selectResults: [
-        [{ id: "agt_123", path: "agents/sales/agent.agent" }],
+        [{ id: "agt_123", path: "agents/sales/sales.agent" }],
         [
           {
             path: "agents/sales/playbooks/discovery.md",
@@ -139,6 +139,20 @@ describe("updateAgentBundleFile", () => {
     expect(scheduleAgentFileSyncDispatchMock).toHaveBeenCalledWith({
       workspaceId: "wks_123",
       path: "agents/sales/playbooks/discovery.md",
+    });
+  });
+
+  it("rejects edits to the slug-matched agent definition file", async () => {
+    const { db } = createDbMock({
+      selectResults: [[{ id: "agt_123", path: "agents/sales/sales.agent" }]],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(
+      updateAgentBundleFile("agt_123", "agents/sales/sales.agent", "Updated"),
+    ).resolves.toEqual({
+      ok: false,
+      error: "Agent folder path is invalid.",
     });
   });
 });

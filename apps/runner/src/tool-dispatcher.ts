@@ -688,7 +688,7 @@ function preflightSandboxToolArgs(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     throw new RecoverableToolError(
-      `${message} Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent bundle.`,
+      `${message} Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.`,
       "invalid_sandbox_path",
     );
   }
