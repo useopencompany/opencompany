@@ -64,6 +64,9 @@ export function resolveAgentRuntimeConfig(input: {
             "; ",
           )}. Skill files are mounted read-only under ./skills; read them with read_skill.`
       : null,
+    skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
+      ? "You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first."
+      : null,
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,

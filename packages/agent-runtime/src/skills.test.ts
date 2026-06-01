@@ -48,6 +48,14 @@ describe("skill catalog", () => {
     expect(skillMd).toMatch(/GitHub repository attached/i);
   });
 
+  test("the self-edit SKILL.md documents the read-before-edit gate", () => {
+    const [skill] = resolveEnabledSkills(baseConfig());
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+
+    expect(skillMd).toMatch(/requires that you have read this skill/i);
+    expect(skillMd).toContain("read_skill");
+  });
+
   test("normalizeAgentSkills keeps known ids and drops unknown ones", () => {
     expect(
       normalizeAgentSkills([AGENT_SELF_EDIT_SKILL_ID, "made-up-skill", { id: "also-fake" }]),

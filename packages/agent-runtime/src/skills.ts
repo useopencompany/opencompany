@@ -92,6 +92,10 @@ stays inert until the prerequisite is satisfied.
 
 ## How to make a change
 
+> The runner requires that you have read this skill (via \`read_skill\`) before it will accept
+> \`update_agent_file\`. If you call the tool without having read this skill in the current
+> session, it returns \`ok: false\` and saves nothing — read this skill, then retry.
+
 1. Read your current definition. It is not in \`work/\` or \`brain/\`; use the description the
    runner gave you in the system prompt, and ask the user what they want changed if it is
    not obvious.

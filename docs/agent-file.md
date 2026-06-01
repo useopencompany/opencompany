@@ -190,6 +190,9 @@ strictly (rejecting empty bodies, unknown models, or malformed content rather th
 falling back to defaults), persists it with a version bump, and queues the same async
 GitHub sync as an editor save. Changes apply to the agent's next session. Title/slug,
 repositories, triggers, and delegated agents are preserved and cannot be changed this way.
+As a guardrail, the runner rejects `update_agent_file` until the agent has read the
+`agent-self-edit` SKILL.md (via `read_skill`) in the current session, so the edit is always
+made with the skill's guidance in context.
 
 ### `integrations.github.repositories` — list of repository objects
 

@@ -101,6 +101,21 @@ describe("runtime tool definitions", () => {
     expect(listFiles.description).not.toContain("skills");
   });
 
+  it("requires reading the self-edit skill and points to it instead of duplicating it", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("update_agent_file");
+
+    if (!definition) {
+      throw new Error("Expected update_agent_file runtime tool definition to exist");
+    }
+
+    expect(definition.description).toContain('read_skill({skillId:"agent-self-edit"})');
+    expect(definition.help).toContain('read_skill({skillId:"agent-self-edit"})');
+    // The help is a pointer to the skill, not a second copy of the protocol.
+    expect(definition.help).toContain("source of truth");
+    expect(definition.help).toContain("COMPLETE new Markdown body");
+    expect(definition.help).toContain("next session");
+  });
+
   it("keeps Exa category compatibility guidance in the visible search schema", () => {
     const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("exa_search");
 

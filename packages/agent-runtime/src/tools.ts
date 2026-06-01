@@ -326,7 +326,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "update_agent_file",
     kind: "internal",
     description:
-      "Update your own .agent definition (your instructions, explicitly selected model, and the tools you reference). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Read the agent-self-edit SKILL.md before using this.",
+      'Update your own .agent definition (your instructions, explicitly selected model, and the tools you reference). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.',
     parameters: {
       type: "object",
       properties: {
@@ -349,11 +349,9 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
     help: [
-      "Use update_agent_file to durably change how you work: sharpen instructions, switch model, add or drop a tool.",
-      "Always pass the COMPLETE new body. The body is the source of truth for tools and brain mounts; the optional model argument is the only way this tool changes model config.",
-      "Your title/name, attached repositories, triggers, and delegated agents are preserved automatically and cannot be changed here.",
-      "If the tool returns ok:false, read errors, fix the body (common issues: empty body, unknown model), and call again.",
-      "Tell the user the change applies to the next session, and offer to start one.",
+      'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
+      "Pass the COMPLETE new Markdown body, not a diff.",
+      "Changes apply on your next session, not the current one — offer to start one.",
     ].join("\n"),
   },
   {
