@@ -146,14 +146,16 @@ developer terms.
 **Reconsider if:** Official API cost, rate limits, coverage, compliance requirements, or customer
 credential needs make workspace-owned credentials or another licensed data provider a better fit.
 
-## Supadata (YouTube)
+## Supadata (YouTube, TikTok, Instagram)
 
-**What it is:** A hosted API for YouTube search, video and channel metadata, and — most importantly —
-video transcripts, with AI-generated transcription as a fallback when a video has no captions.
+**What it is:** A hosted API for YouTube search, YouTube video/channel metadata, universal social
+media metadata, and — most importantly — video transcripts, with AI-generated transcription as a
+fallback when a video has no captions.
 
-**What it does for us:** Powers the optional `@youtube` hosted agent tool. Agents can search
-YouTube, read a video's transcript as text (so the model can "watch" it), inspect video and channel
-metadata, and enumerate a channel's recent uploads.
+**What it does for us:** Powers the optional `@youtube`, `@tiktok`, and `@instagram` hosted agent
+tools. Agents can search YouTube, read a video's transcript as text (so the model can "watch" it),
+inspect YouTube video/channel metadata, enumerate a channel's recent uploads, and inspect/read
+public TikTok and Instagram media via Supadata's universal metadata and transcript endpoints.
 
 **Where it is used:**
 
@@ -167,8 +169,8 @@ metadata, and enumerate a channel's recent uploads.
 scrapers are blocked from datacenter IPs. Supadata gives reliable server-side transcripts plus
 search and metadata behind one `x-api-key` GET API, matching the existing hosted-tool pattern.
 
-**Status:** Optional. Agents can run without YouTube unless they enable `@youtube`. Comments are not
-covered — Supadata has no comments endpoint.
+**Status:** Optional. Agents can run without Supadata unless they enable `@youtube`, `@tiktok`, or
+`@instagram`. Comments are not covered — Supadata has no comments endpoint.
 
 **Owner:** AI Platform.
 
@@ -214,6 +216,10 @@ Hosted tools are enabled by agent configuration:
 - `youtube_get_transcript`
 - `youtube_get_channel`
 - `youtube_list_channel_videos`
+- `tiktok_get_metadata`
+- `tiktok_get_transcript`
+- `instagram_get_metadata`
+- `instagram_get_transcript`
 - `web_fetch`
 
 Internal delegation tools are enabled by agent configuration:
