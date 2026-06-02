@@ -150,7 +150,7 @@ describe("prepareWorkspace", () => {
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       [
-        "mkdir -p '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
+        "mkdir -p '/home/user/workspace/agent' '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
         "chown -R user:user '/home/user/workspace'",
         "chown root:root '/home/user/.opencompany'",
         "chmod 700 '/home/user/.opencompany'",
@@ -317,12 +317,15 @@ describe("cloneGitHubRepositoryIntoWorkdir", () => {
 });
 
 describe("resolveSandboxToolPath", () => {
-  it("allows work and brain paths", () => {
+  it("allows work, brain, and agent paths", () => {
     expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
       "/home/user/workspace/work/foo.txt",
     );
     expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
       "/home/user/workspace/brain/foo.md",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "agent/memory.md")).toBe(
+      "/home/user/workspace/agent/memory.md",
     );
   });
 
@@ -332,10 +335,10 @@ describe("resolveSandboxToolPath", () => {
       "../.opencompany/agent.agent",
       "/home/user/.opencompany/agent.agent",
       "notes.md",
-      "agents/foo.agent",
+      "agents/foo/agent.agent",
     ]) {
       expect(() => resolveSandboxToolPath("/home/user/workspace", candidate)).toThrow(
-        /work\/ or brain\//,
+        /work\/, brain\/, or agent\//,
       );
     }
   });
@@ -343,7 +346,7 @@ describe("resolveSandboxToolPath", () => {
   it("rejects skills paths for generic file tools", () => {
     expect(() =>
       resolveSandboxToolPath("/home/user/workspace", "skills/agent-self-edit/SKILL.md"),
-    ).toThrow(/work\/ or brain\//);
+    ).toThrow(/work\/, brain\/, or agent\//);
   });
 
   it("allows work and brain paths for generic file tools", () => {

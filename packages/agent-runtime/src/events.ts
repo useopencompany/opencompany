@@ -95,6 +95,18 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "agent_bundle.file_changed";
+      payload: { path: string; savedPath?: string; operation: "write" | "delete" };
+    }
+  | {
+      type: "agent_bundle.conflict";
+      payload: {
+        path: string;
+        savedPath?: string;
+        operation: "conflict_copy" | "delete_conflict";
+      };
+    }
+  | {
       type: "agent.self_updated";
       payload: {
         version: number;

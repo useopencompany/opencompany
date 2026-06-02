@@ -1,8 +1,11 @@
 import { getDb } from "@opencompany/db/client";
-import { agentSyncJobs, brainSyncJobs } from "@opencompany/db/schema";
+import { agentFileSyncJobs, agentSyncJobs, brainSyncJobs } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, inArray, lte } from "drizzle-orm";
-import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
+import {
+  AGENT_FILE_SYNC_REQUESTED_EVENT,
+  AGENT_SYNC_REQUESTED_EVENT,
+} from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import { SYNC_OUTBOX_MAX_ATTEMPTS } from "@/lib/sync-outbox/retry";
 
@@ -14,7 +17,7 @@ export {
 } from "@/lib/sync-outbox/retry";
 
 type Db = ReturnType<typeof getDb>;
-type SyncResourceType = "agent" | "brain";
+type SyncResourceType = "agent" | "agent_file" | "brain";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
@@ -39,6 +42,11 @@ type BrainSyncJobCandidate = SyncJobCandidate & {
   path: string;
 };
 
+type AgentFileSyncJobCandidate = SyncJobCandidate & {
+  workspaceId: string;
+  path: string;
+};
+
 export type AgentSyncDispatch = {
   agentId: string;
   workspaceId: string;
@@ -49,8 +57,17 @@ export type BrainSyncDispatch = {
   path: string;
 };
 
+export type AgentFileSyncDispatch = {
+  workspaceId: string;
+  path: string;
+};
+
 type SyncOutboxEvent =
   | { name: typeof AGENT_SYNC_REQUESTED_EVENT; data: AgentSyncDispatch }
+  | {
+      name: typeof AGENT_FILE_SYNC_REQUESTED_EVENT;
+      data: AgentFileSyncDispatch;
+    }
   | { name: typeof BRAIN_SYNC_REQUESTED_EVENT; data: BrainSyncDispatch };
 
 type SyncOutboxStep = {
@@ -73,6 +90,17 @@ export function filterDueBrainSyncJobs(
   rows: BrainSyncJobCandidate[],
   options: { now?: Date; limit?: number } = {},
 ): BrainSyncDispatch[] {
+  const now = options.now ?? new Date();
+  return filterDueSyncJobs(rows, now, options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT).map((row) => ({
+    workspaceId: row.workspaceId,
+    path: row.path,
+  }));
+}
+
+export function filterDueAgentFileSyncJobs(
+  rows: AgentFileSyncJobCandidate[],
+  options: { now?: Date; limit?: number } = {},
+): AgentFileSyncDispatch[] {
   const now = options.now ?? new Date();
   return filterDueSyncJobs(rows, now, options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT).map((row) => ({
     workspaceId: row.workspaceId,
@@ -134,6 +162,33 @@ export async function loadDueBrainSyncDispatches(
   return filterDueBrainSyncJobs(rows, { now, limit });
 }
 
+export async function loadDueAgentFileSyncDispatches(
+  options: { db?: Db; now?: Date; limit?: number } = {},
+): Promise<AgentFileSyncDispatch[]> {
+  const db = options.db ?? getDb();
+  const now = options.now ?? new Date();
+  const limit = options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT;
+  const rows = await db
+    .select({
+      workspaceId: agentFileSyncJobs.workspaceId,
+      path: agentFileSyncJobs.path,
+      status: agentFileSyncJobs.status,
+      attempts: agentFileSyncJobs.attempts,
+      nextRunAt: agentFileSyncJobs.nextRunAt,
+    })
+    .from(agentFileSyncJobs)
+    .where(
+      and(
+        inArray(agentFileSyncJobs.status, RETRYABLE_SYNC_JOB_STATUSES),
+        lte(agentFileSyncJobs.nextRunAt, now),
+      ),
+    )
+    .orderBy(asc(agentFileSyncJobs.nextRunAt))
+    .limit(limit);
+
+  return filterDueAgentFileSyncJobs(rows, { now, limit });
+}
+
 export async function sweepAgentSyncOutbox(
   step: SyncOutboxStep,
   options: { loadDueDispatches?: () => Promise<AgentSyncDispatch[]> } = {},
@@ -175,6 +230,29 @@ export async function sweepBrainSyncOutbox(
     "dispatch brain sync requests",
     events,
     "brain",
+    dueJobs.length,
+  );
+  return { dispatched: dueJobs.length };
+}
+
+export async function sweepAgentFileSyncOutbox(
+  step: SyncOutboxStep,
+  options: { loadDueDispatches?: () => Promise<AgentFileSyncDispatch[]> } = {},
+) {
+  const dueJobs = (await step.run("load due agent file sync jobs", () =>
+    (options.loadDueDispatches ?? loadDueAgentFileSyncDispatches)(),
+  )) as AgentFileSyncDispatch[];
+  if (dueJobs.length === 0) return { dispatched: 0 };
+
+  const events: SyncOutboxEvent[] = dueJobs.map((job) => ({
+    name: AGENT_FILE_SYNC_REQUESTED_EVENT,
+    data: job,
+  }));
+  await dispatchRecoveryEvents(
+    step,
+    "dispatch agent file sync requests",
+    events,
+    "agent_file",
     dueJobs.length,
   );
   return { dispatched: dueJobs.length };

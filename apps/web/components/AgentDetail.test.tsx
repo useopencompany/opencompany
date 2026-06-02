@@ -95,7 +95,7 @@ const config: AgentConfig = {
 const listAgent: AgentListItemPayload = {
   id: "agt_123",
   workspaceId: "wks_123",
-  path: "agents/leo.agent",
+  path: "agents/leo/leo.agent",
   name: "Leo",
   config,
   githubSyncStatus: "synced",
@@ -129,6 +129,20 @@ const detailAgent: AgentDetailPayload = {
   githubCommitSha: "abc123",
   githubSyncedAt: "2026-05-24T10:05:00.000Z",
   brainPaths: [],
+  bundleFiles: [
+    {
+      path: "agents/leo/memory.md",
+      relativePath: "memory.md",
+      content: "Private notes",
+      sizeBytes: 13,
+      contentHash: "hash_memory",
+      githubCommitSha: "def456",
+      githubSyncedAt: "2026-05-24T10:06:00.000Z",
+      githubSyncStatus: "synced",
+      githubSyncError: null,
+      updatedAt: "2026-05-24T10:06:00.000Z",
+    },
+  ],
   githubIntegrationRepositories: [
     {
       fullName: "opencompany/web",
@@ -149,7 +163,7 @@ const detailAgent: AgentDetailPayload = {
       binding,
     },
   ],
-  workspaceAgents: [{ path: "agents/research.agent", name: "Research" }],
+  workspaceAgents: [{ path: "agents/research/research.agent", name: "Research" }],
   mcp: {
     mcpEnabled: false,
     linearConfigured: false,
@@ -207,20 +221,20 @@ describe("AgentDetail", () => {
     queryClient.setQueryData(agentQueryKeys.list("wks_123"), [listAgent]);
     fetchAgentMock.mockReturnValue(new Promise(() => {}) as Promise<AgentDetailPayload>);
 
-    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" />, queryClient);
+    renderWithProviders(<AgentDetail idOrPath="agents/leo/leo.agent" />, queryClient);
 
     expect(screen.getByRole("status", { name: /loading agent/i })).toBeInTheDocument();
     expect(screen.queryByText("@opencompany/web")).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchAgentMock).toHaveBeenCalledWith("agents/leo.agent"));
+    await waitFor(() => expect(fetchAgentMock).toHaveBeenCalledWith("agents/leo/leo.agent"));
   });
 
   it("mounts with highlighted mentions from full detail cache", async () => {
     const queryClient = createQueryClient();
-    queryClient.setQueryData(agentQueryKeys.detail("wks_123", "agents/leo.agent"), detailAgent);
+    queryClient.setQueryData(agentQueryKeys.detail("wks_123", "agents/leo/leo.agent"), detailAgent);
     fetchAgentMock.mockResolvedValue(detailAgent);
 
     const { container } = renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" />,
+      <AgentDetail idOrPath="agents/leo/leo.agent" />,
       queryClient,
     );
 
@@ -228,10 +242,23 @@ describe("AgentDetail", () => {
     expect(container.querySelector(".agent-mention[data-kind='integration']")).toBeInTheDocument();
   });
 
+  it("shows the agent folder in the detail inspector", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentDetail idOrPath="agents/leo/leo.agent" initialAgent={detailAgent} />);
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+
+    expect(await screen.findByText("Agent folder")).toBeInTheDocument();
+    expect(screen.getByText("agents/leo/")).toBeInTheDocument();
+    expect(screen.getByText("leo.agent")).toBeInTheDocument();
+    expect(screen.getByText("memory.md")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Private notes")).not.toBeInTheDocument();
+  });
+
   it("preserves a saved GitHub repository binding in the detail view", async () => {
     const user = userEvent.setup();
     const { container } = renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
+      <AgentDetail idOrPath="agents/leo/leo.agent" initialAgent={detailAgent} />,
     );
 
     expect(await screen.findByText("@opencompany/web")).toBeInTheDocument();
