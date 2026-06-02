@@ -59,6 +59,7 @@ export async function streamAssistantResponse(input: {
       runLeaseId: input.ctx.leaseId,
       runLeaseOwner: input.ctx.leaseOwner,
       ...input.mcpContext,
+      integrationCredentialEncryptionKey: input.ctx.env.integrationCredentialEncryptionKey,
       toolStartCoordinator: input.toolStartCoordinator,
       policy: input.policy,
       suspendable: input.suspendable,

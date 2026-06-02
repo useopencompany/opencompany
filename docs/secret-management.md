@@ -121,6 +121,8 @@ For Infisical `dev`, `/web` should include:
   `GITHUB_INTEGRATION_APP_CLIENT_ID`, and `GITHUB_INTEGRATION_APP_CLIENT_SECRET`
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` for encrypted workspace provider credentials stored in
   Neon
+- `MCP_OAUTH_STATE_SECRET` for signing MCP OAuth setup state (web only; separate from the
+  credential encryption key)
 - runner connection vars
 - optional Linear, analytics, and observability vars
 
