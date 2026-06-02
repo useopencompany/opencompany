@@ -607,7 +607,11 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                     )}
                     {canCopy && message.status !== "running" ? (
                       <div
-                        className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 opacity-70 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100`}
+                        className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
+                          message.role === "assistant"
+                            ? "opacity-100"
+                            : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+                        }`}
                       >
                         <CopyMessageButton text={copyText} />
                         {duration > 0 ? (
