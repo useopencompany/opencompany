@@ -354,6 +354,23 @@ export const agentSessions = pgTable(
   }),
 );
 
+export const sessionStars = pgTable(
+  "session_stars",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    starredAt: timestamp("starred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userSessionIdx: uniqueIndex("session_stars_user_session_idx").on(table.userId, table.sessionId),
+    sessionIdx: index("session_stars_session_idx").on(table.sessionId),
+  }),
+);
+
 export const agentScheduleRuns = pgTable(
   "agent_schedule_runs",
   {
@@ -1119,6 +1136,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
   agentSessions: many(agentSessions),
+  sessionStars: many(sessionStars),
   onboardingResponses: many(onboardingResponses),
   creditLedger: many(workspaceCreditLedger),
   stripeCheckoutSessions: many(stripeCheckoutSessions),
@@ -1230,6 +1248,18 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   bundleMounts: many(agentSessionBundleMounts),
   artifacts: many(agentSessionArtifacts),
   runJobs: many(agentSessionRunJobs),
+  stars: many(sessionStars),
+}));
+
+export const sessionStarsRelations = relations(sessionStars, ({ one }) => ({
+  user: one(users, {
+    fields: [sessionStars.userId],
+    references: [users.id],
+  }),
+  session: one(agentSessions, {
+    fields: [sessionStars.sessionId],
+    references: [agentSessions.id],
+  }),
 }));
 
 export const agentSessionBrainMountsRelations = relations(agentSessionBrainMounts, ({ one }) => ({
@@ -1517,6 +1547,7 @@ export type BrainSyncJob = typeof brainSyncJobs.$inferSelect;
 export type AgentFile = typeof agentFiles.$inferSelect;
 export type AgentFileSyncJob = typeof agentFileSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
+export type SessionStar = typeof sessionStars.$inferSelect;
 export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect;
 export type AgentSessionBundleMount = typeof agentSessionBundleMounts.$inferSelect;
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
