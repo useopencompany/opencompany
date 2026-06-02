@@ -654,8 +654,9 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         maxResults: {
           type: "number",
-          description: "Number of posts to return. Defaults to 20. Maximum 100.",
-          default: 20,
+          description:
+            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
         },
         paginationToken: {
           type: "string",
@@ -667,8 +668,8 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_search_posts to discover current public X conversations, hashtags, mentions, links, and posts from specific users.",
-      'Prefer mode="recent". Use mode="all" only when the token has full-archive search access and older posts are required.',
-      "Keep maxResults small unless the user asks for breadth. The X API bills per returned Post.",
+      'Start with maxResults=10 and mode="recent". Use larger values, pagination, or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
+      "The X API bills per returned Post and expanded User.",
       "The output includes normalized posts, author profiles, result count, and an optional nextToken for pagination.",
     ].join("\n"),
   },
@@ -707,8 +708,9 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         maxResults: {
           type: "number",
-          description: "Number of posts to return. Defaults to 20. Maximum 100.",
-          default: 20,
+          description:
+            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
         },
         paginationToken: {
           type: "string",
@@ -725,6 +727,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_user_posts to understand what a public profile has been posting recently.",
+      "Start with maxResults=10. Use larger values or pagination only when the user explicitly asks for broader coverage.",
       "Set excludeReplies=true for a cleaner top-level timeline.",
       "The tool first resolves the username to a user id, then fetches that user's public posts.",
     ].join("\n"),
@@ -752,8 +755,8 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         maxResults: {
           type: "number",
           description:
-            "Maximum replies and maximum quote posts to return per collection. Defaults to 50. Maximum 100.",
-          default: 50,
+            "Maximum replies and maximum quote posts to return per collection. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
         },
       },
       required: ["postIdOrUrl"],
@@ -761,7 +764,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_discussion when the user provides a post URL/id or asks what people are saying around one post.",
-      'Prefer mode="recent". Use mode="all" only when the token has full-archive search access and older replies are required.',
+      'Start with maxResults=10 per collection and mode="recent". Use larger values or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
       "The result includes the target post, replies from the same conversation, quote posts, and author profiles.",
       "This can be more expensive than a simple lookup because it may return many Posts.",
     ].join("\n"),
@@ -782,14 +785,16 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         maxResults: {
           type: "number",
-          description: "Number of trends to return. Defaults to 25. Maximum 50.",
-          default: 25,
+          description:
+            "Number of trends to return. Defaults to 10; ask the user before using larger values. Maximum 50.",
+          default: 10,
         },
       },
       additionalProperties: false,
     },
     help: [
       "Use x_get_trends to answer what is currently trending on X in a broad location.",
+      "Start with maxResults=10. Use larger values only when the user explicitly asks for broader coverage.",
       "Common WOEIDs: worldwide=1, United States=23424977, United Kingdom=23424975, New York=2459115, London=44418.",
     ].join("\n"),
   },
