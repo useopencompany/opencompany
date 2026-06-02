@@ -63,7 +63,7 @@ export type AgentModelId =
   | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
-  id: "exa" | "x";
+  id: "exa" | "x" | "youtube";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;

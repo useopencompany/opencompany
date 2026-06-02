@@ -1271,6 +1271,9 @@ async function executeYoutubeGetTranscript(
   if (!videoUrl && !videoId) {
     throw new Error("YouTube get_transcript requires either url or videoId.");
   }
+  if (videoUrl && videoId) {
+    throw new Error("YouTube get_transcript accepts either url or videoId, not both.");
+  }
   const lang = readOptionalString(record, "lang");
   const text = readOptionalBoolean(record, "text") ?? true;
 
@@ -1418,7 +1421,12 @@ function getYoutubeFailureContext(operation: string, args: unknown, error: unkno
     };
   }
 
-  if (message.startsWith("YouTube") && message.includes("requires")) {
+  if (
+    message.startsWith("YouTube") &&
+    (message.includes("requires") ||
+      message.includes("accepts either") ||
+      message.includes("must not be empty"))
+  ) {
     return {
       ...context,
       tool_error_stage: "request_validation",
@@ -1426,11 +1434,26 @@ function getYoutubeFailureContext(operation: string, args: unknown, error: unkno
     };
   }
 
-  if (message.includes("(404)")) {
+  if (message.startsWith("YouTube") && message.includes("failed (")) {
+    const status = readHttpStatusFromMessage(message);
     return {
       ...context,
       tool_error_stage: "provider_response",
-      tool_error_code: "youtube_not_found",
+      tool_error_code:
+        status.provider_status === 404
+          ? "youtube_not_found"
+          : status.provider_status === 429
+            ? "youtube_rate_limited"
+            : "youtube_http_error",
+      ...status,
+    };
+  }
+
+  if (message.includes("unexpected response shape") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_malformed_response",
     };
   }
 

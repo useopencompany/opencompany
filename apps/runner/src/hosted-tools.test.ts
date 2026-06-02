@@ -1073,6 +1073,80 @@ describe("getHostedToolFailureContext", () => {
       tool_error_code: "x_malformed_response",
     });
   });
+
+  it("classifies YouTube validation, HTTP, rate-limit, missing-key, and malformed-response failures", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_transcript",
+        args: { url: "https://youtube.com/watch?v=abc", videoId: "def" },
+        error: new Error("YouTube get_transcript accepts either url or videoId, not both."),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "get_transcript",
+      tool_error_stage: "request_validation",
+      tool_error_code: "youtube_invalid_request",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_video",
+        args: { id: "missing" },
+        error: new Error("YouTube get_video failed (404): Not Found"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "get_video",
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_not_found",
+      provider_status: 404,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_search",
+        args: { query: "test" },
+        error: new Error("YouTube search failed (429): Too Many Requests"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "search",
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_rate_limited",
+      provider_status: 429,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_channel",
+        args: { id: "channel" },
+        error: new Error("YouTube get_channel failed (503): Service Unavailable"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "get_channel",
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_http_error",
+      provider_status: 503,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_transcript",
+        args: {},
+        error: new Error("SUPADATA_API_KEY is required for youtube get_transcript."),
+      }),
+    ).toMatchObject({
+      tool_error_stage: "configuration",
+      tool_error_code: "youtube_missing_api_key",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_list_channel_videos",
+        args: { id: "channel" },
+        error: new Error("YouTube list_channel_videos returned an unexpected response shape."),
+      }),
+    ).toMatchObject({
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_malformed_response",
+    });
+  });
 });
 
 describe("executeHostedTool (YouTube)", () => {
@@ -1177,6 +1251,22 @@ describe("executeHostedTool (YouTube)", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow(/requires either url or videoId/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects transcript requests that pass both url and videoId", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "youtube_get_transcript",
+        args: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", videoId: "different" },
+        env: env(),
+        enabledTools: ["tool_help", "youtube_get_transcript"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/accepts either url or videoId, not both/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
