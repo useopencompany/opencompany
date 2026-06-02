@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
 ### Added
 - Guided first-run setup — after signing up you land in a live setup conversation that helps configure your workspace, instead of an empty editor (#241).
 - New `/btw` command to start a new session without leaving your current view (#243).
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When you send a message, it scrolls to the top of the chat, matching the ChatGPT/Claude experience (#219).
 - The copy button now stays visible on assistant replies and appears on hover for your own messages (#222).
 - The onboarding call step now has a clear "Skip for now" button (#220).
+- The "reconnecting" banner no longer appears in chat during normal streaming; connection status now lives in the inspector instead (#242).
 
 ### Fixed
 - Linear no longer shows as disconnected after you reconnect with valid credentials (#234).
