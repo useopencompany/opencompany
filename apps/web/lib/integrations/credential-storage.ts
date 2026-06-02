@@ -1,4 +1,12 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import {
+  buildAad,
+  decryptJson,
+  ENCRYPTION_ALGORITHM,
+  encryptJson,
+  loadEncryptionKey,
+  UnsupportedKeyVersionError,
+} from "@opencompany/crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   type WorkspaceIntegrationConnectionStatus,
@@ -10,14 +18,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { sanitizeIntegrationStatusReason } from "@/lib/integrations/status";
 
-const ENCRYPTION_KEY_ENV = "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY";
 const ENCRYPTION_KEY_VERSION = 1;
-const ENCRYPTION_KEY_ENV_BY_VERSION: Record<number, string> = {
-  [ENCRYPTION_KEY_VERSION]: ENCRYPTION_KEY_ENV,
-};
-const ENCRYPTION_ALGORITHM = "aes-256-gcm";
-const IV_BYTE_LENGTH = 12;
-const ENCRYPTION_KEY_BYTE_LENGTH = 32;
 type CredentialDb = Pick<ReturnType<typeof getDb>, "delete" | "insert" | "select" | "update">;
 type CredentialRootDb = CredentialDb & Pick<ReturnType<typeof getDb>, "transaction">;
 
@@ -224,21 +225,10 @@ function encryptPayload(
   context: IntegrationCredentialContext,
   keyVersion: number,
 ): WorkspaceIntegrationCredentialEncryptedPayload {
-  const key = loadEncryptionKey(keyVersion);
-  const iv = randomBytes(IV_BYTE_LENGTH);
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
-  cipher.setAAD(authenticatedData(context, keyVersion));
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(payload), "utf8"),
-    cipher.final(),
-  ]);
-
-  return {
-    algorithm: ENCRYPTION_ALGORITHM,
-    iv: iv.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-    authTag: cipher.getAuthTag().toString("base64"),
-  };
+  return encryptJson(payload, {
+    key: loadEncryptionKey(keyVersion),
+    aad: authenticatedData(context, keyVersion),
+  });
 }
 
 function decryptPayload(
@@ -252,42 +242,35 @@ function decryptPayload(
     );
   }
 
+  let key: Buffer;
   try {
-    const decipher = createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      loadEncryptionKey(keyVersion),
-      Buffer.from(encryptedPayload.iv, "base64"),
-    );
-    decipher.setAAD(authenticatedData(context, keyVersion));
-    decipher.setAuthTag(Buffer.from(encryptedPayload.authTag, "base64"));
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(encryptedPayload.ciphertext, "base64")),
-      decipher.final(),
-    ]).toString("utf8");
-    const payload = JSON.parse(plaintext) as unknown;
-    if (!isRecord(payload)) {
-      throw new Error("Decrypted integration credential payload is invalid.");
-    }
-    return payload;
+    key = loadEncryptionKey(keyVersion);
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Unsupported integration credential")) {
-      throw error;
+    if (error instanceof UnsupportedKeyVersionError) {
+      throw new Error(`Unsupported integration credential encryption key version ${keyVersion}.`);
     }
+    // EncryptionKeyConfigError (missing/malformed key env) surfaces as-is rather than
+    // being masked as a decrypt failure.
+    throw error;
+  }
+
+  try {
+    return decryptJson(encryptedPayload, { key, aad: authenticatedData(context, keyVersion) });
+  } catch {
     throw new Error("Integration credential could not be decrypted.");
   }
 }
 
+// Field order is significant — it must stay byte-identical to previously stored
+// credentials (see buildAad in @opencompany/crypto).
 function authenticatedData(context: IntegrationCredentialContext, keyVersion: number) {
-  return Buffer.from(
-    JSON.stringify({
-      workspaceId: context.workspaceId,
-      integrationId: context.integrationId,
-      provider: context.provider,
-      kind: context.kind,
-      keyVersion,
-    }),
-    "utf8",
-  );
+  return buildAad({
+    workspaceId: context.workspaceId,
+    integrationId: context.integrationId,
+    provider: context.provider,
+    kind: context.kind,
+    keyVersion,
+  });
 }
 
 function assertCredentialContextMatchesRequest(
@@ -302,35 +285,6 @@ function assertCredentialContextMatchesRequest(
   ) {
     throw new Error("Integration credential row did not match the requested context.");
   }
-}
-
-function loadEncryptionKey(keyVersion: number) {
-  const envName = encryptionKeyEnvForVersion(keyVersion);
-  const raw = process.env[envName]?.trim();
-  if (!raw) {
-    throw new Error(`${envName} is required for integration credential storage.`);
-  }
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) {
-    throw new Error(`${envName} must be a base64-encoded 32-byte key.`);
-  }
-
-  const key = Buffer.from(raw, "base64");
-  if (key.length !== ENCRYPTION_KEY_BYTE_LENGTH) {
-    throw new Error(`${envName} must be a base64-encoded 32-byte key.`);
-  }
-
-  return key;
-}
-
-function encryptionKeyEnvForVersion(keyVersion: number) {
-  const envName = ENCRYPTION_KEY_ENV_BY_VERSION[keyVersion];
-  if (envName) return envName;
-
-  throw new Error(`Unsupported integration credential encryption key version ${keyVersion}.`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function newWorkspaceIntegrationCredentialId() {

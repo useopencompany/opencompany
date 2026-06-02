@@ -234,7 +234,7 @@ Required environment variables:
 - `SUPADATA_API_KEY` (optional; required only for agents that enable the YouTube hosted tool)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
-- `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
+- `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
 - optional GitHub App env vars used for Brain sync back to the managed workspace repo:

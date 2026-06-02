@@ -35,6 +35,7 @@ const env = {
   streamTokenSecret: "stream-secret",
   e2bApiKey: "e2b",
   vercelAiGatewayApiKey: "gateway",
+  integrationCredentialEncryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
   exaApiKey: undefined,
   xApiBearerToken: undefined,
   supadataApiKey: undefined,

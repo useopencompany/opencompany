@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   createMCPClient,
   type MCPClient,
@@ -16,6 +16,15 @@ import {
   PERMISSION_GROUP_LABELS,
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
+import {
+  buildAad,
+  decryptJson,
+  ENCRYPTION_ALGORITHM,
+  type EncryptedPayload,
+  EncryptionKeyConfigError,
+  encryptJson,
+  loadEncryptionKey,
+} from "@opencompany/crypto";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
@@ -71,11 +80,7 @@ const SLACK_READ_SCOPES = [
   "groups:read",
   "mpim:read",
 ];
-const ENCRYPTION_KEY_ENV = "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY";
-const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 const ENCRYPTION_KEY_VERSION = 1;
-const ENCRYPTION_KEY_BYTE_LENGTH = 32;
-const IV_BYTE_LENGTH = 12;
 const logger = createLogger({ service: "opencompany-runner" });
 
 type McpProviderKey = typeof LINEAR_MCP_SERVER_KEY | typeof SLACK_MCP_SERVER_KEY;
@@ -811,12 +816,7 @@ function omitOAuthPayload<TKey extends keyof McpOAuthPayload>(
 }
 
 function decryptPayload(
-  encryptedPayload: {
-    algorithm: string;
-    iv: string;
-    ciphertext: string;
-    authTag: string;
-  },
+  encryptedPayload: EncryptedPayload,
   context: { workspaceId: string; serverId: string; kind: string; keyVersion: number },
 ) {
   if (context.keyVersion !== ENCRYPTION_KEY_VERSION) {
@@ -828,38 +828,12 @@ function decryptPayload(
     );
   }
 
+  // Loaded before the try so a missing/malformed key env (EncryptionKeyConfigError)
+  // surfaces as a configuration error rather than a generic decrypt failure.
+  const key = loadEncryptionKey();
   try {
-    const decipher = createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      loadEncryptionKey(),
-      Buffer.from(encryptedPayload.iv, "base64"),
-    );
-    decipher.setAAD(
-      Buffer.from(
-        JSON.stringify({
-          workspaceId: context.workspaceId,
-          serverId: context.serverId,
-          kind: context.kind,
-          keyVersion: context.keyVersion,
-        }),
-        "utf8",
-      ),
-    );
-    decipher.setAuthTag(Buffer.from(encryptedPayload.authTag, "base64"));
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(encryptedPayload.ciphertext, "base64")),
-      decipher.final(),
-    ]).toString("utf8");
-    const payload = JSON.parse(plaintext) as unknown;
-    if (!isRecord(payload)) throw new Error("Decrypted MCP credential payload is invalid.");
-    return payload;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("Unsupported MCP credential")) {
-      throw error;
-    }
-    if (isEncryptionKeyConfigurationError(error)) {
-      throw error;
-    }
+    return decryptJson(encryptedPayload, { key, aad: mcpCredentialAuthenticatedData(context) });
+  } catch {
     throw new McpCredentialDecryptionError({
       kind: context.kind,
       keyVersion: context.keyVersion,
@@ -871,51 +845,27 @@ function decryptPayload(
 function encryptPayload(
   payload: Record<string, unknown>,
   context: { workspaceId: string; serverId: string; kind: string; keyVersion: number },
-) {
-  const iv = randomBytes(IV_BYTE_LENGTH);
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, loadEncryptionKey(), iv);
-  cipher.setAAD(mcpCredentialAuthenticatedData(context));
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(payload), "utf8"),
-    cipher.final(),
-  ]);
-
-  return {
-    algorithm: ENCRYPTION_ALGORITHM as "aes-256-gcm",
-    iv: iv.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-    authTag: cipher.getAuthTag().toString("base64"),
-  };
+): EncryptedPayload {
+  return encryptJson(payload, {
+    key: loadEncryptionKey(),
+    aad: mcpCredentialAuthenticatedData(context),
+  });
 }
 
+// Field order is significant — it must stay byte-identical to previously stored
+// credentials (see buildAad in @opencompany/crypto).
 function mcpCredentialAuthenticatedData(context: {
   workspaceId: string;
   serverId: string;
   kind: string;
   keyVersion: number;
 }) {
-  return Buffer.from(
-    JSON.stringify({
-      workspaceId: context.workspaceId,
-      serverId: context.serverId,
-      kind: context.kind,
-      keyVersion: context.keyVersion,
-    }),
-    "utf8",
-  );
-}
-
-function loadEncryptionKey() {
-  const raw = process.env[ENCRYPTION_KEY_ENV]?.trim();
-  if (!raw) throw new Error(`${ENCRYPTION_KEY_ENV} is required for MCP credential storage.`);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) {
-    throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
-  }
-  const key = Buffer.from(raw, "base64");
-  if (key.length !== ENCRYPTION_KEY_BYTE_LENGTH) {
-    throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
-  }
-  return key;
+  return buildAad({
+    workspaceId: context.workspaceId,
+    serverId: context.serverId,
+    kind: context.kind,
+    keyVersion: context.keyVersion,
+  });
 }
 
 type McpConnectionErrorDiagnostic = {
@@ -954,7 +904,7 @@ class McpCredentialDecryptionError extends Error {
 }
 
 function isEncryptionKeyConfigurationError(error: unknown) {
-  return error instanceof Error && error.message.includes(ENCRYPTION_KEY_ENV);
+  return error instanceof EncryptionKeyConfigError;
 }
 
 function newWorkspaceMcpCredentialId() {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
+import { loadEncryptionKey } from "@opencompany/crypto";
 
 export type RunnerEnv = {
   databaseUrl: string;
@@ -7,6 +8,7 @@ export type RunnerEnv = {
   streamTokenSecret: string;
   e2bApiKey: string;
   vercelAiGatewayApiKey: string;
+  integrationCredentialEncryptionKey: string;
   exaApiKey: string | undefined;
   xApiBearerToken: string | undefined;
   supadataApiKey: string | undefined;
@@ -26,6 +28,7 @@ export function loadEnv(): RunnerEnv {
     streamTokenSecret: requiredEnv("RUNNER_STREAM_TOKEN_SECRET"),
     e2bApiKey: requiredEnv("E2B_API_KEY"),
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
+    integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
     supadataApiKey: optionalEnv("SUPADATA_API_KEY"),
@@ -47,6 +50,15 @@ function requiredEnv(name: string) {
   if (!value) {
     throw new Error(`${name} is required.`);
   }
+  return value;
+}
+
+// Required at boot: the runner cannot decrypt MCP credentials without it. Calling
+// loadEncryptionKey validates presence + base64 + 32-byte length so a misconfigured
+// runner fails at startup instead of at the first MCP tool call.
+function requiredEncryptionKey() {
+  const value = requiredEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY");
+  loadEncryptionKey();
   return value;
 }
 

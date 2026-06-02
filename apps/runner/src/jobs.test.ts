@@ -541,6 +541,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     streamTokenSecret: "stream",
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
+    integrationCredentialEncryptionKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     exaApiKey: "exa_test",
     xApiBearerToken: "x_test",
     supadataApiKey: "supadata_test",

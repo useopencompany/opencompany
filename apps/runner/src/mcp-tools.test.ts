@@ -136,7 +136,7 @@ describe("createMcpToolSet", () => {
     vi.unstubAllEnvs();
 
     await expect(createMcpToolSet(baseInput())).rejects.toThrow(
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required.",
     );
     expect(observability.logger.error).toHaveBeenCalledWith(
       "Linear MCP connection setup failed",
