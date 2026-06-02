@@ -8,10 +8,13 @@ import {
   agentSessions,
   agents,
 } from "@opencompany/db/schema";
+import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, or } from "drizzle-orm";
 import { after } from "next/server";
 import { dispatchAgentAfterSessionCheck } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 function titleFromPrompt(content: string) {
   const firstLine = content
@@ -35,6 +38,20 @@ async function loadAgent(idOrPath: string, workspaceId: string): Promise<Agent |
     )
     .limit(1);
   return agent ?? null;
+}
+
+function errorLogFields(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      error_name: error.name,
+      error_message: error.message,
+    };
+  }
+
+  return {
+    error_name: typeof error,
+    error_message: typeof error === "string" ? error : "Unknown error",
+  };
 }
 
 /**
@@ -92,21 +109,70 @@ export async function startSeededAgentSession(input: {
     }),
   ]);
 
-  after(() =>
-    Promise.all([
-      triggerAgentMessageRun({ sessionId, messageId, workspaceId: input.workspaceId }),
-      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: input.workspaceId }),
-      captureServerEvent("session_started", input.userId, {
-        user_id: input.userId,
+  after(async () => {
+    const sideEffects = [
+      {
+        name: "message_run",
+        run: () =>
+          triggerAgentMessageRun({
+            sessionId,
+            messageId,
+            workspaceId: input.workspaceId,
+          }),
+      },
+      {
+        name: "after_session_check",
+        run: () =>
+          dispatchAgentAfterSessionCheck({
+            sessionId,
+            messageId,
+            workspaceId: input.workspaceId,
+          }),
+      },
+      {
+        name: "analytics",
+        run: () =>
+          captureServerEvent("session_started", input.userId, {
+            user_id: input.userId,
+            workspace_id: input.workspaceId,
+            agent_id: agent.id,
+            session_id: sessionId,
+            model_provider: agent.config.model.provider,
+            model_name: agent.config.model.name,
+            source: input.source,
+          }),
+      },
+    ];
+
+    const results = await Promise.allSettled(
+      sideEffects.map(async (sideEffect) => {
+        await sideEffect.run();
+      }),
+    );
+
+    for (const [index, result] of results.entries()) {
+      if (result.status === "fulfilled") continue;
+
+      const sideEffect = sideEffects[index];
+      captureException(result.reason, {
+        event: "opencompany.seeded_agent_session_side_effect_failed",
+        side_effect: sideEffect?.name,
         workspace_id: input.workspaceId,
         agent_id: agent.id,
         session_id: sessionId,
-        model_provider: agent.config.model.provider,
-        model_name: agent.config.model.name,
-        source: input.source,
-      }),
-    ]),
-  );
+        message_id: messageId,
+      });
+      logger.error("Failed seeded agent session side effect", {
+        event: "opencompany.seeded_agent_session_side_effect_failed",
+        side_effect: sideEffect?.name,
+        workspace_id: input.workspaceId,
+        agent_id: agent.id,
+        session_id: sessionId,
+        message_id: messageId,
+        ...errorLogFields(result.reason),
+      });
+    }
+  });
 
   return sessionId;
 }

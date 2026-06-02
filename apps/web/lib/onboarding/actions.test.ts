@@ -14,6 +14,17 @@ vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
 }));
 
+const loggerMock = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: vi.fn(),
+  createLogger: vi.fn(() => loggerMock),
+}));
+
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((path: string) => {
     throw new Error(`redirect:${path}`);
@@ -141,6 +152,27 @@ describe("completeOnboarding", () => {
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
 
     expect(startSeededAgentSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("redirects home when first-run session startup fails", async () => {
+    const { db } = createDbMock();
+    getDbMock.mockReturnValue(db as never);
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+    startSeededAgentSessionMock.mockRejectedValue(new Error("session failed"));
+
+    await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
+
+    expect(startSeededAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agt_123",
+        userId: "usr_123",
+        workspaceId: "wks_123",
+        source: "onboarding",
+      }),
+    );
   });
 
   it("does not scaffold when onboarding values are invalid", async () => {
