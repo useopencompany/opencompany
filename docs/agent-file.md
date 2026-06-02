@@ -113,6 +113,7 @@ details are catalog data in code, not `.agent` file data.
 | ----- | ------------------------------------------------ |
 | `exa` | Web research with search, content extraction, people lookup, and cited answers. |
 | `x` | Read public X posts, profiles, timelines, discussions, and trends through the official X API. |
+| `youtube` | Search YouTube, inspect video/channel metadata, list channel videos, and fetch transcripts through Supadata. |
 | `amp` | Coding agent delegated into a sandboxed runtime. |
 | `linear` | Experimental workspace MCP access to Linear issues, projects, and comments. |
 | `slack` | Experimental workspace MCP access to Slack search, messages, files, emoji, and users. |

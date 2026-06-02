@@ -493,6 +493,7 @@ export function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
     xApiBearerToken: "x_test",
+    supadataApiKey: "supadata_test",
     ampApiKey: "amp_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
