@@ -125,6 +125,30 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
     groups: ["read"],
     gated: false,
   },
+  x: {
+    providerKey: "x",
+    displayName: "X",
+    groups: ["read"],
+    gated: false,
+  },
+  youtube: {
+    providerKey: "youtube",
+    displayName: "YouTube",
+    groups: ["read"],
+    gated: false,
+  },
+  tiktok: {
+    providerKey: "tiktok",
+    displayName: "TikTok",
+    groups: ["read"],
+    gated: false,
+  },
+  instagram: {
+    providerKey: "instagram",
+    displayName: "Instagram",
+    groups: ["read"],
+    gated: false,
+  },
   [SYSTEM_PROVIDER_KEY]: {
     providerKey: SYSTEM_PROVIDER_KEY,
     displayName: "Sandbox",
@@ -150,6 +174,22 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   exa_contents: { providerKey: "exa", group: "read" },
   exa_answer: { providerKey: "exa", group: "read" },
   web_fetch: { providerKey: "exa", group: "read" },
+  // X hosted social tools — read-only external lookups.
+  x_search_posts: { providerKey: "x", group: "read" },
+  x_get_profile: { providerKey: "x", group: "read" },
+  x_get_user_posts: { providerKey: "x", group: "read" },
+  x_get_discussion: { providerKey: "x", group: "read" },
+  x_get_trends: { providerKey: "x", group: "read" },
+  // Supadata-backed hosted media tools — read-only external lookups.
+  youtube_search: { providerKey: "youtube", group: "read" },
+  youtube_get_video: { providerKey: "youtube", group: "read" },
+  youtube_get_transcript: { providerKey: "youtube", group: "read" },
+  youtube_get_channel: { providerKey: "youtube", group: "read" },
+  youtube_list_channel_videos: { providerKey: "youtube", group: "read" },
+  tiktok_get_metadata: { providerKey: "tiktok", group: "read" },
+  tiktok_get_transcript: { providerKey: "tiktok", group: "read" },
+  instagram_get_metadata: { providerKey: "instagram", group: "read" },
+  instagram_get_transcript: { providerKey: "instagram", group: "read" },
   // Sandbox-local file IO.
   read_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   list_files: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },

@@ -1147,6 +1147,92 @@ describe("getHostedToolFailureContext", () => {
       tool_error_code: "youtube_malformed_response",
     });
   });
+
+  it("classifies TikTok and Instagram Supadata failures", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "tiktok_get_transcript",
+        args: {},
+        error: new Error("TikTok get_transcript requires either url or jobId."),
+      }),
+    ).toMatchObject({
+      hosted_provider: "tiktok",
+      hosted_operation: "get_transcript",
+      tool_error_stage: "request_validation",
+      tool_error_code: "tiktok_invalid_request",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "instagram_get_metadata",
+        args: { url: "https://www.tiktok.com/@user/video/1" },
+        error: new Error("Instagram URL must be a public Instagram URL."),
+      }),
+    ).toMatchObject({
+      hosted_provider: "instagram",
+      hosted_operation: "get_metadata",
+      tool_error_stage: "request_validation",
+      tool_error_code: "instagram_invalid_request",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "tiktok_get_metadata",
+        args: { url: "https://www.tiktok.com/@user/video/1" },
+        error: new Error("TikTok get_metadata failed (404): Not Found"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "tiktok",
+      hosted_operation: "get_metadata",
+      tool_error_stage: "provider_response",
+      tool_error_code: "tiktok_not_found",
+      provider_status: 404,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "instagram_get_transcript",
+        args: { url: "https://www.instagram.com/reel/ABC123/" },
+        error: new Error("Instagram get_transcript failed (429): Too Many Requests"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "instagram",
+      hosted_operation: "get_transcript",
+      tool_error_stage: "provider_response",
+      tool_error_code: "instagram_rate_limited",
+      provider_status: 429,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "instagram_get_metadata",
+        args: { url: "https://www.instagram.com/reel/ABC123/" },
+        error: new Error("Instagram get_metadata failed (503): Service Unavailable"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "instagram",
+      hosted_operation: "get_metadata",
+      tool_error_stage: "provider_response",
+      tool_error_code: "instagram_http_error",
+      provider_status: 503,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "tiktok_get_transcript",
+        args: {},
+        error: new Error("SUPADATA_API_KEY is required for tiktok get_transcript."),
+      }),
+    ).toMatchObject({
+      tool_error_stage: "configuration",
+      tool_error_code: "tiktok_missing_api_key",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "instagram_get_metadata",
+        args: { url: "https://www.instagram.com/reel/ABC123/" },
+        error: new Error("Instagram get_metadata returned an unexpected response shape."),
+      }),
+    ).toMatchObject({
+      tool_error_stage: "provider_response",
+      tool_error_code: "instagram_malformed_response",
+    });
+  });
 });
 
 describe("executeHostedTool (YouTube)", () => {
@@ -1271,6 +1357,182 @@ describe("executeHostedTool (YouTube)", () => {
   });
 });
 
+describe("executeHostedTool (TikTok and Instagram)", () => {
+  it("fetches TikTok metadata through Supadata's universal metadata endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            platform: "tiktok",
+            type: "video",
+            id: "123",
+            url: "https://www.tiktok.com/@user/video/123",
+            title: null,
+            description: "Launch recap",
+            author: {
+              displayName: "User",
+              username: "user",
+              avatarUrl: "https://example.com/avatar.jpg",
+              verified: true,
+            },
+            stats: { views: 1000, likes: 100, comments: 10, shares: 5 },
+            media: { type: "video", duration: 30, thumbnailUrl: "https://example.com/thumb.jpg" },
+            tags: ["launch"],
+            createdAt: "2026-01-01T00:00:00Z",
+            additionalData: { music: "original" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "tiktok_get_metadata",
+      args: { url: "https://www.tiktok.com/@user/video/123" },
+      env: env(),
+      enabledTools: ["tool_help", "tiktok_get_metadata"],
+      signal: new AbortController().signal,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toContain("https://api.supadata.ai/v1/metadata?");
+    expect(url.searchParams.get("url")).toBe("https://www.tiktok.com/@user/video/123");
+    expect(init.headers).toMatchObject({ "x-api-key": "supadata_test" });
+    expect(result.output).toMatchObject({
+      metadata: {
+        platform: "tiktok",
+        type: "video",
+        id: "123",
+        description: "Launch recap",
+        author: { username: "user", verified: true },
+        stats: { views: 1000, likes: 100 },
+        tags: ["launch"],
+      },
+    });
+    expect(result.usage).toMatchObject({ provider: "tiktok", operation: "get_metadata" });
+  });
+
+  it("fetches an Instagram transcript and passes transcript options", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            content: [{ text: "Welcome", offset: 0, duration: 500, lang: "en" }],
+            lang: "en",
+            availableLangs: ["en"],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "instagram_get_transcript",
+      args: {
+        url: "https://www.instagram.com/reel/ABC123/",
+        text: false,
+        lang: "en",
+        mode: "native",
+        chunkSize: 40,
+      },
+      env: env(),
+      enabledTools: ["tool_help", "instagram_get_transcript"],
+      signal: new AbortController().signal,
+    });
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toContain("https://api.supadata.ai/v1/transcript?");
+    expect(url.searchParams.get("url")).toBe("https://www.instagram.com/reel/ABC123/");
+    expect(url.searchParams.get("text")).toBe("false");
+    expect(url.searchParams.get("lang")).toBe("en");
+    expect(url.searchParams.get("mode")).toBe("native");
+    expect(url.searchParams.get("chunkSize")).toBe("50");
+    expect(result.output).toEqual({
+      content: [{ text: "Welcome", offset: 0, duration: 500, lang: "en" }],
+      lang: "en",
+      availableLangs: ["en"],
+    });
+    expect(result.usage).toMatchObject({ provider: "instagram", operation: "get_transcript" });
+  });
+
+  it("returns Supadata transcript job IDs and polls job results", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jobId: "job_123" }), {
+          status: 202,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "completed",
+            content: "Generated transcript",
+            lang: "en",
+            availableLangs: ["en"],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const created = await executeHostedTool({
+      name: "tiktok_get_transcript",
+      args: { url: "https://vm.tiktok.com/abc/", mode: "generate" },
+      env: env(),
+      enabledTools: ["tool_help", "tiktok_get_transcript"],
+      signal: new AbortController().signal,
+    });
+    const polled = await executeHostedTool({
+      name: "tiktok_get_transcript",
+      args: { jobId: "job_123" },
+      env: env(),
+      enabledTools: ["tool_help", "tiktok_get_transcript"],
+      signal: new AbortController().signal,
+    });
+
+    const [createUrl] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    const [pollUrl] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
+    expect(createUrl.pathname).toBe("/v1/transcript");
+    expect(createUrl.searchParams.get("mode")).toBe("generate");
+    expect(pollUrl.pathname).toBe("/v1/transcript/job_123");
+    expect(created.output).toEqual({ status: "processing", jobId: "job_123" });
+    expect(polled.output).toEqual({
+      status: "completed",
+      content: "Generated transcript",
+      lang: "en",
+      availableLangs: ["en"],
+    });
+    expect(polled.usage).toMatchObject({ provider: "tiktok", operation: "poll_transcript" });
+  });
+
+  it("rejects wrong-platform and ambiguous transcript requests before calling Supadata", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "instagram_get_metadata",
+        args: { url: "https://www.tiktok.com/@user/video/123" },
+        env: env(),
+        enabledTools: ["tool_help", "instagram_get_metadata"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/Instagram URL must be a public Instagram URL/);
+    await expect(
+      executeHostedTool({
+        name: "tiktok_get_transcript",
+        args: { url: "https://www.tiktok.com/@user/video/123", jobId: "job_123" },
+        env: env(),
+        enabledTools: ["tool_help", "tiktok_get_transcript"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/accepts either url or jobId, not both/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("validateHostedToolEnvironment", () => {
   it("requires EXA_API_KEY only when an Exa provider tool is enabled", () => {
     expect(() =>
@@ -1314,7 +1576,7 @@ describe("validateHostedToolEnvironment", () => {
     ).toThrow(MissingEnvError);
   });
 
-  it("requires SUPADATA_API_KEY only when a YouTube provider tool is enabled", () => {
+  it("requires SUPADATA_API_KEY only when a Supadata-backed provider tool is enabled", () => {
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help"],
@@ -1330,6 +1592,18 @@ describe("validateHostedToolEnvironment", () => {
     expect(() =>
       validateHostedToolEnvironment({
         enabledTools: ["tool_help", "youtube_get_transcript"],
+        env: env({ supadataApiKey: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "tiktok_get_metadata"],
+        env: env({ supadataApiKey: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "instagram_get_transcript"],
         env: env({ supadataApiKey: undefined }),
       }),
     ).toThrow(MissingEnvError);

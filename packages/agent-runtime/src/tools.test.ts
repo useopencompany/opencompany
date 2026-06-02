@@ -84,6 +84,21 @@ describe("AGENT_TOOL_CATALOG", () => {
       "x_get_trends",
     ]);
   });
+
+  it("documents platform-only credentials for TikTok and Instagram through Supadata", () => {
+    const tiktok = AGENT_TOOL_DEFINITION_BY_ID.get("tiktok");
+    const instagram = AGENT_TOOL_DEFINITION_BY_ID.get("instagram");
+
+    expect(tiktok?.credentialSource).toBe("platform");
+    expect(tiktok?.requiredPlatformEnvVars).toEqual(["SUPADATA_API_KEY"]);
+    expect(tiktok?.requiredWorkspaceResource).toBeUndefined();
+    expect(tiktok?.runtimeTools).toEqual(["tiktok_get_metadata", "tiktok_get_transcript"]);
+
+    expect(instagram?.credentialSource).toBe("platform");
+    expect(instagram?.requiredPlatformEnvVars).toEqual(["SUPADATA_API_KEY"]);
+    expect(instagram?.requiredWorkspaceResource).toBeUndefined();
+    expect(instagram?.runtimeTools).toEqual(["instagram_get_metadata", "instagram_get_transcript"]);
+  });
 });
 
 describe("runtime tool definitions", () => {

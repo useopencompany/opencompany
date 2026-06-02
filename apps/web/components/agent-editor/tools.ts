@@ -20,6 +20,7 @@ import {
   type LucideIcon,
   MessageSquare,
   MessagesSquare,
+  Music2,
   Search,
   Sparkles,
   SquarePlay,
@@ -35,6 +36,7 @@ import {
   XaiIcon,
   ZaiIcon,
 } from "@/components/icons/model-provider-icons";
+import { InstagramIcon } from "@/components/icons/social-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
 type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent" | "schedule";
@@ -113,6 +115,8 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   x: AtSign,
   youtube: SquarePlay,
+  tiktok: Music2,
+  instagram: InstagramIcon,
   amp: Code2,
   linear: ListTodo,
   slack: MessageSquare,
