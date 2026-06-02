@@ -6,8 +6,9 @@ import {
   agentSessions,
   agentSessionUsage,
   agents,
+  sessionStars,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
   type SessionStreamCredentialPayload,
@@ -18,34 +19,64 @@ import {
 import { getRunnerPublicUrl, getRunnerStreamTokenSecret } from "@/lib/agent-sessions/runner";
 import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 
+const SIDEBAR_RECENCY_LIMIT = 50;
+
 export async function loadSidebarSessionsForWorkspace(
   userId: string,
   workspaceId: string,
 ): Promise<SidebarSessionPayload[]> {
   const db = getDb();
-  const sessions = await db
-    .select({
-      id: agentSessions.id,
-      title: agentSessions.title,
-      status: agentSessions.status,
-      modelName: agentSessions.modelName,
-      lastError: agentSessions.lastError,
-      createdAt: agentSessions.createdAt,
-      updatedAt: agentSessions.updatedAt,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.workspaceId, workspaceId),
-        eq(agentSessions.userId, userId),
-        eq(agentSessions.source, "user"),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .orderBy(desc(agentSessions.updatedAt))
-    .limit(50);
 
-  return sessions.map(serializeSidebarSession);
+  const baseColumns = {
+    id: agentSessions.id,
+    title: agentSessions.title,
+    status: agentSessions.status,
+    modelName: agentSessions.modelName,
+    lastError: agentSessions.lastError,
+    createdAt: agentSessions.createdAt,
+    updatedAt: agentSessions.updatedAt,
+    starredAt: sessionStars.starredAt,
+  };
+
+  const visibilityFilter = and(
+    eq(agentSessions.workspaceId, workspaceId),
+    eq(agentSessions.userId, userId),
+    eq(agentSessions.source, "user"),
+    isNull(agentSessions.archivedAt),
+  );
+
+  // Star state is per user; join only the current user's star rows.
+  const starJoin = and(
+    eq(sessionStars.sessionId, agentSessions.id),
+    eq(sessionStars.userId, userId),
+  );
+
+  // The recency window is capped, so a starred-but-stale session can fall
+  // outside it. Fetch starred sessions explicitly and union them in so a pinned
+  // session always renders regardless of how far down the recency list it sits.
+  const [recent, starred] = await Promise.all([
+    db
+      .select(baseColumns)
+      .from(agentSessions)
+      .leftJoin(sessionStars, starJoin)
+      .where(visibilityFilter)
+      .orderBy(desc(agentSessions.updatedAt))
+      .limit(SIDEBAR_RECENCY_LIMIT),
+    db
+      .select(baseColumns)
+      .from(agentSessions)
+      .innerJoin(sessionStars, starJoin)
+      .where(and(visibilityFilter, isNotNull(sessionStars.starredAt)))
+      .orderBy(desc(agentSessions.updatedAt)),
+  ]);
+
+  const byId = new Map<string, (typeof recent)[number]>();
+  for (const row of recent) byId.set(row.id, row);
+  for (const row of starred) byId.set(row.id, row);
+
+  return Array.from(byId.values())
+    .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+    .map(serializeSidebarSession);
 }
 
 export async function loadAgentSessionDetailForWorkspace(

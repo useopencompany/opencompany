@@ -228,7 +228,7 @@ describe("resolveAgentRuntimeConfig", () => {
       },
       tools: [],
       brain: [],
-      agents: [{ path: "agents/research.agent", name: "Research" }],
+      agents: [{ path: "agents/research/research.agent", name: "Research" }],
       integrations: { github: { repositories: [] } },
       triggers: [],
     };

@@ -14,6 +14,7 @@ import { currentWorkspace } from "@/lib/auth";
 import {
   createAgentSession,
   createAgentSessionFromPrompt,
+  setSessionStar,
   submitAgentSessionMessage,
 } from "./actions";
 
@@ -78,7 +79,7 @@ function fakeAgent() {
   return {
     id: "agt_123",
     name: "Leo",
-    path: "agents/leo.agent",
+    path: "agents/leo/leo.agent",
     workspaceId: "wks_123",
     config: { model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" } },
   };
@@ -90,7 +91,7 @@ function fakeDetail(): AgentSessionDetailPayload {
       id: "ses_123",
       agentId: "agt_123",
       agentName: "Leo",
-      agentPath: "agents/leo.agent",
+      agentPath: "agents/leo/leo.agent",
       title: "Untitled",
       status: "created",
       source: "user",
@@ -196,6 +197,7 @@ describe("createAgentSession", () => {
         lastError: detail.session.lastError,
         createdAt: detail.session.createdAt,
         updatedAt: detail.session.updatedAt,
+        starredAt: null,
       },
     });
     expect(loadAgentSessionDetailForWorkspaceMock).toHaveBeenCalledWith(
@@ -318,6 +320,70 @@ describe("createAgentSessionFromPrompt", () => {
       is_initial_message: true,
       message_length: "Ship it".length,
     });
+  });
+});
+
+describe("setSessionStar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  function dbForStar(session: { id: string } | null) {
+    const limit = vi.fn().mockResolvedValue(session ? [session] : []);
+    const selectWhere = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where: selectWhere }));
+    const select = vi.fn(() => ({ from }));
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insert = vi.fn(() => ({ values }));
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const del = vi.fn(() => ({ where: deleteWhere }));
+    return {
+      db: { select, insert, delete: del } as never,
+      values,
+      onConflictDoUpdate,
+      del,
+      deleteWhere,
+    };
+  }
+
+  it("rejects starring a session the user cannot see", async () => {
+    getDbMock.mockReturnValue(dbForStar(null).db);
+
+    const result = await setSessionStar("ses_missing", true);
+
+    expect(result).toEqual({ ok: false, error: "Session not found." });
+  });
+
+  it("upserts a star row and returns the new starredAt", async () => {
+    const { db, values, onConflictDoUpdate, del } = dbForStar({ id: "ses_123" });
+    getDbMock.mockReturnValue(db);
+
+    const result = await setSessionStar("ses_123", true);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && typeof result.starredAt === "string").toBe(true);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "usr_123", sessionId: "ses_123" }),
+    );
+    expect(onConflictDoUpdate).toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("deletes the star row when unstarring", async () => {
+    const { db, del, deleteWhere, values } = dbForStar({ id: "ses_123" });
+    getDbMock.mockReturnValue(db);
+
+    const result = await setSessionStar("ses_123", false);
+
+    expect(result).toEqual({ ok: true, starredAt: null });
+    expect(del).toHaveBeenCalled();
+    expect(deleteWhere).toHaveBeenCalled();
+    expect(values).not.toHaveBeenCalled();
   });
 });
 

@@ -179,13 +179,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "read_file",
     kind: "sandbox",
-    description: "Read a UTF-8 text file from ./work or ./brain.",
+    description:
+      "Read a UTF-8 text file from ./work, ./brain, or ./agent. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Relative path starting with work/ or brain/.",
+          description: "Relative path starting with work/, brain/, or agent/.",
         },
       },
       required: ["path"],
@@ -218,11 +219,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "edit_file",
     kind: "sandbox",
     description:
-      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work or ./brain. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
+      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
         instructions: {
           type: "string",
           description:
@@ -270,11 +274,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "write_file",
     kind: "sandbox",
     description:
-      "Create or overwrite a UTF-8 text file inside ./work or ./brain. Use edit_file for targeted changes to existing files. The path must start with work/ or brain/.",
+      "Create or overwrite a UTF-8 text file inside ./work, ./brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
         content: { type: "string", description: "Full file content." },
       },
       required: ["path", "content"],
@@ -284,13 +291,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "list_files",
     kind: "sandbox",
-    description: "List files and directories below ./work or ./brain.",
+    description:
+      "List files and directories below ./work, ./brain, or ./agent. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Relative path starting with work/ or brain/.",
+          description: "Relative path starting with work/, brain/, or agent/.",
           default: "work",
         },
         depth: { type: "number", description: "Maximum traversal depth.", default: 2 },
@@ -319,7 +327,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         agent: {
           type: "string",
           description:
-            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research.agent. Omit when continuing a prior child session by sessionId.",
+            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research/research.agent. Omit when continuing a prior child session by sessionId.",
         },
         sessionId: {
           type: "string",
@@ -680,8 +688,9 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         maxResults: {
           type: "number",
-          description: "Number of posts to return. Defaults to 20. Maximum 100.",
-          default: 20,
+          description:
+            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
         },
         paginationToken: {
           type: "string",
@@ -693,8 +702,8 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_search_posts to discover current public X conversations, hashtags, mentions, links, and posts from specific users.",
-      'Prefer mode="recent". Use mode="all" only when the token has full-archive search access and older posts are required.',
-      "Keep maxResults small unless the user asks for breadth. The X API bills per returned Post.",
+      'Start with maxResults=10 and mode="recent". Use larger values, pagination, or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
+      "The X API bills per returned Post and expanded User.",
       "The output includes normalized posts, author profiles, result count, and an optional nextToken for pagination.",
     ].join("\n"),
   },
@@ -733,8 +742,9 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         maxResults: {
           type: "number",
-          description: "Number of posts to return. Defaults to 20. Maximum 100.",
-          default: 20,
+          description:
+            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
         },
         paginationToken: {
           type: "string",
@@ -751,6 +761,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_user_posts to understand what a public profile has been posting recently.",
+      "Start with maxResults=10. Use larger values or pagination only when the user explicitly asks for broader coverage.",
       "Set excludeReplies=true for a cleaner top-level timeline.",
       "The tool first resolves the username to a user id, then fetches that user's public posts.",
     ].join("\n"),
@@ -778,8 +789,8 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         maxResults: {
           type: "number",
           description:
-            "Maximum replies and maximum quote posts to return per collection. Defaults to 50. Maximum 100.",
-          default: 50,
+            "Maximum replies and maximum quote posts to return per collection. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
         },
       },
       required: ["postIdOrUrl"],
@@ -787,7 +798,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_discussion when the user provides a post URL/id or asks what people are saying around one post.",
-      'Prefer mode="recent". Use mode="all" only when the token has full-archive search access and older replies are required.',
+      'Start with maxResults=10 per collection and mode="recent". Use larger values or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
       "The result includes the target post, replies from the same conversation, quote posts, and author profiles.",
       "This can be more expensive than a simple lookup because it may return many Posts.",
     ].join("\n"),
@@ -808,14 +819,16 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         maxResults: {
           type: "number",
-          description: "Number of trends to return. Defaults to 25. Maximum 50.",
-          default: 25,
+          description:
+            "Number of trends to return. Defaults to 10; ask the user before using larger values. Maximum 50.",
+          default: 10,
         },
       },
       additionalProperties: false,
     },
     help: [
       "Use x_get_trends to answer what is currently trending on X in a broad location.",
+      "Start with maxResults=10. Use larger values only when the user explicitly asks for broader coverage.",
       "Common WOEIDs: worldwide=1, United States=23424977, United Kingdom=23424975, New York=2459115, London=44418.",
     ].join("\n"),
   },

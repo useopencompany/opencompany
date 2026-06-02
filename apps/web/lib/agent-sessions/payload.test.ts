@@ -16,6 +16,7 @@ import {
   seedSessionQueries,
   serializeAgentSessionDetail,
   sessionQueryKeys,
+  setSidebarSessionStar,
   upsertSidebarSession,
 } from "@/lib/agent-sessions/payload";
 import { agentQueryKeys } from "@/lib/agents/payload";
@@ -55,6 +56,38 @@ describe("session payload cache helpers", () => {
         "ses_archive",
       ),
     ).toEqual([sidebarSession("ses_keep", "Keep")]);
+  });
+
+  it("sets and clears server-truth star state on a sidebar session", () => {
+    const sessions = [sidebarSession("ses_1", "One"), sidebarSession("ses_2", "Two")];
+
+    const starred = setSidebarSessionStar(sessions, "ses_2", "2026-05-29T10:00:00.000Z");
+    expect(starred.find((session) => session.id === "ses_2")?.starredAt).toBe(
+      "2026-05-29T10:00:00.000Z",
+    );
+    expect(starred.find((session) => session.id === "ses_1")?.starredAt).toBeNull();
+
+    const unstarred = setSidebarSessionStar(starred, "ses_2", null);
+    expect(unstarred.find((session) => session.id === "ses_2")?.starredAt).toBeNull();
+  });
+
+  it("preserves an existing star when a detail projection upserts the same session", () => {
+    const starred: SidebarSessionPayload = {
+      ...sidebarSession("ses_1", "One"),
+      starredAt: "2026-05-29T10:00:00.000Z",
+      updatedAt: "2026-05-24T09:00:00.000Z",
+    };
+
+    // Detail projections always carry starredAt = null; the upsert must not clobber the star.
+    const next = upsertSidebarSession([starred], {
+      ...sidebarSession("ses_1", "One updated"),
+      updatedAt: "2026-05-24T11:00:00.000Z",
+    });
+
+    expect(next.find((session) => session.id === "ses_1")?.starredAt).toBe(
+      "2026-05-29T10:00:00.000Z",
+    );
+    expect(next.find((session) => session.id === "ses_1")?.title).toBe("One updated");
   });
 
   it("does not add agent-generated sessions to the sidebar cache", () => {
@@ -473,6 +506,7 @@ describe("session payload cache helpers", () => {
         lastError: initialDetail.session.lastError,
         createdAt: initialDetail.session.createdAt,
         updatedAt: initialDetail.session.updatedAt,
+        starredAt: null,
       },
     ];
     queryClient.setQueryData(sessionQueryKeys.list(workspaceId), sidebarSeed);
@@ -717,7 +751,7 @@ describe("session payload cache helpers", () => {
             title: "Parent",
             status: "completed",
             agentName: "Leo",
-            agentPath: "agents/leo.agent",
+            agentPath: "agents/leo/leo.agent",
             parentMessageId: null,
             parentToolCallId: null,
             createdAt: "2026-05-24T09:00:00.000Z",
@@ -729,7 +763,7 @@ describe("session payload cache helpers", () => {
               title: "Child",
               status: "running",
               agentName: "Research",
-              agentPath: "agents/research.agent",
+              agentPath: "agents/research/research.agent",
               parentMessageId: "msg_parent",
               parentToolCallId: "call_delegate",
               createdAt: "2026-05-24T10:00:00.000Z",
@@ -887,6 +921,7 @@ function sidebarSession(id: string, title: string) {
     lastError: null,
     createdAt: "2026-05-24T10:00:00.000Z",
     updatedAt: "2026-05-24T10:00:00.000Z",
+    starredAt: null,
   };
 }
 
@@ -898,7 +933,7 @@ function detail(
       id: "ses_123",
       agentId: "agt_123",
       agentName: "Leo",
-      agentPath: "agents/leo.agent",
+      agentPath: "agents/leo/leo.agent",
       title: "Original",
       status: "created",
       source: "user",

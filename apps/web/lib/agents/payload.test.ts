@@ -38,7 +38,7 @@ const config: AgentConfig = {
 const agent = {
   id: "agt_123",
   workspaceId: "wks_123",
-  path: "agents/leo.agent",
+  path: "agents/leo/leo.agent",
   name: "Leo",
   body: "Use @opencompany/web and @brain/product/brief.md.",
   content: {
@@ -65,7 +65,7 @@ describe("agent payload serializers", () => {
 
     expect(payload).toMatchObject({
       id: "agt_123",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
       githubSyncStatus: "synced",
       updatedAt: "2026-05-24T10:10:00.000Z",
     });

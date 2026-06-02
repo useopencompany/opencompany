@@ -168,21 +168,50 @@ describe("runtime tool definitions", () => {
 
   it("exposes read-only X tools with visible schemas and help", () => {
     const search = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_search_posts");
+    const userPosts = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_user_posts");
     const discussion = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_discussion");
+    const trends = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_trends");
 
-    if (!search || !discussion) {
+    if (!search || !userPosts || !discussion || !trends) {
       throw new Error("Expected X runtime tool definitions to exist");
     }
+
+    const maxResultsFor = (tool: NonNullable<typeof search>) =>
+      tool.parameters.properties.maxResults as { default?: number; description?: string };
 
     expect(search.configToolId).toBe("x");
     expect(search.parameters.required).toEqual(["query"]);
     expect(search.parameters.properties).toHaveProperty("mode");
     expect(search.parameters.properties).toHaveProperty("paginationToken");
     expect(search.description).toContain("official X API");
+    const searchMaxResults = maxResultsFor(search);
+    expect(searchMaxResults.default).toBe(10);
+    expect(String(searchMaxResults.description)).toContain("Defaults to 10");
+    expect(String(searchMaxResults.description)).toContain(
+      "ask the user before using larger values",
+    );
+    expect(search.help).toContain("Start with maxResults=10");
+    expect(search.help).toContain("explicitly asks for broader coverage");
+
+    const userPostsMaxResults = maxResultsFor(userPosts);
+    expect(userPostsMaxResults.default).toBe(10);
+    expect(String(userPostsMaxResults.description)).toContain("Defaults to 10");
+    expect(userPosts.help).toContain("Start with maxResults=10");
 
     expect(discussion.configToolId).toBe("x");
     expect(discussion.parameters.required).toEqual(["postIdOrUrl"]);
     expect(discussion.help).toContain("target post");
+    const discussionMaxResults = maxResultsFor(discussion);
+    expect(discussionMaxResults.default).toBe(10);
+    expect(String(discussionMaxResults.description)).toContain("Defaults to 10");
+    expect(discussion.help).toContain("Start with maxResults=10");
+    expect(discussion.parameters.properties).not.toHaveProperty("paginationToken");
+    expect(discussion.help).not.toContain("pagination");
+
+    const trendsMaxResults = maxResultsFor(trends);
+    expect(trendsMaxResults.default).toBe(10);
+    expect(String(trendsMaxResults.description)).toContain("Defaults to 10");
+    expect(trends.help).toContain("Start with maxResults=10");
   });
 });
 
@@ -217,7 +246,10 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
   it("adds delegate_to_agent only when delegatable agents are present", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
     expect(
-      resolveRuntimeToolNamesForConfigTools({ tools: [], agents: [{ path: "agents/x.agent" }] }),
+      resolveRuntimeToolNamesForConfigTools({
+        tools: [],
+        agents: [{ path: "agents/x/x.agent" }],
+      }),
     ).toContain("delegate_to_agent");
   });
 

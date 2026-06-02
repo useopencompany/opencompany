@@ -1,4 +1,8 @@
-import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-runtime";
+import {
+  AFTER_SESSION_TAG,
+  agentMentionIdForPath,
+  repositoryIdForFullName,
+} from "@opencompany/agent-runtime";
 import type {
   AgentGitHubRepositoryBinding,
   AgentModelId,
@@ -252,11 +256,7 @@ export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): Agent
 }
 
 function agentMentionId(path: string) {
-  const normalized = path.trim();
-  if (!normalized.startsWith("agents/") || !normalized.endsWith(".agent")) return null;
-  const slug = normalized.slice("agents/".length, -".agent".length);
-  if (!slug || slug.includes("/")) return null;
-  return `agent/${slug}`;
+  return agentMentionIdForPath(path);
 }
 
 function isMcpToolId(id: AgentToolId) {

@@ -1027,7 +1027,7 @@ function buildXSearchPostsRequest(args: unknown) {
   return {
     query,
     mode: readOptionalEnum(record, "mode", ["recent", "all"] as const) ?? "recent",
-    maxResults: readXMaxResults(record, 20, 100, 10),
+    maxResults: readXMaxResults(record, 10, 100, 10),
     paginationToken: readOptionalString(record, "paginationToken"),
   };
 }
@@ -1036,7 +1036,7 @@ function buildXGetUserPostsRequest(args: unknown) {
   const record = asRecord(args);
   return {
     username: readXUsername(record),
-    maxResults: readXMaxResults(record, 20, 100, 10),
+    maxResults: readXMaxResults(record, 10, 100, 10),
     paginationToken: readOptionalString(record, "paginationToken"),
     excludeReplies: readOptionalBoolean(record, "excludeReplies") ?? false,
   };
@@ -1047,7 +1047,7 @@ function buildXDiscussionRequest(args: unknown) {
   return {
     postId: readXPostId(record),
     mode: readOptionalEnum(record, "mode", ["recent", "all"] as const) ?? "recent",
-    maxResults: readXMaxResults(record, 50, 100, 10),
+    maxResults: readXMaxResults(record, 10, 100, 10),
   };
 }
 
@@ -1060,7 +1060,7 @@ function buildXTrendsRequest(args: unknown) {
   }
   return {
     woeid,
-    maxResults: readXMaxResults(record, 25, 50, 1),
+    maxResults: readXMaxResults(record, 10, 50, 1),
   };
 }
 

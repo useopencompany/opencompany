@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { deriveAgentConfigFromBody, extractConfigFromMentions } from "./mentions";
+import {
+  agentMentionIdForPath,
+  deriveAgentConfigFromBody,
+  extractConfigFromMentions,
+} from "./mentions";
 
 const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },
   { fullName: "opencompany/runner", defaultBranch: "develop" },
 ];
 const agents = [
-  { path: "agents/research.agent", name: "Research" },
-  { path: "agents/writer.agent", name: "Writer" },
+  { path: "agents/research/research.agent", name: "Research" },
+  { path: "agents/writer/writer.agent", name: "Writer" },
 ];
 const boundRepositories = [
   {
@@ -64,6 +68,23 @@ describe("extractConfigFromMentions", () => {
     const config = extractConfigFromMentions("Ask @agent/research to summarize the findings.");
 
     expect(config.agents).toEqual([]);
+  });
+});
+
+describe("agentMentionIdForPath", () => {
+  it("derives mention ids from bundle directory names", () => {
+    expect(agentMentionIdForPath("agents/research/research.agent")).toBe("agent/research");
+    expect(agentMentionIdForPath("agents/research/agent.agent")).toBe("agent/research");
+    expect(agentMentionIdForPath("agents/research-2/research-2.agent")).toBe("agent/research-2");
+    expect(agentMentionIdForPath("agents/customer-success/customer-success.agent")).toBe(
+      "agent/customer-success",
+    );
+  });
+
+  it("rejects direct single-file and mismatched bundle paths", () => {
+    expect(agentMentionIdForPath("agents/research.agent")).toBeNull();
+    expect(agentMentionIdForPath("agents/research/other.agent")).toBeNull();
+    expect(agentMentionIdForPath("research.agent")).toBeNull();
   });
 });
 
@@ -207,8 +228,21 @@ describe("deriveAgentConfigFromBody", () => {
     });
 
     expect(config.agents).toEqual([
-      { path: "agents/research.agent", name: "Research" },
-      { path: "agents/writer.agent", name: "Writer" },
+      { path: "agents/research/research.agent", name: "Research" },
+      { path: "agents/writer/writer.agent", name: "Writer" },
+    ]);
+  });
+
+  it("binds collided workspace agent mentions by bundle directory", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Coordinator",
+      body: "Ask @agent/research-2 for a second pass.",
+      repositories: [],
+      agents: [{ path: "agents/research-2/research-2.agent", name: "Research 2" }],
+    });
+
+    expect(config.agents).toEqual([
+      { path: "agents/research-2/research-2.agent", name: "Research 2" },
     ]);
   });
 
@@ -220,6 +254,6 @@ describe("deriveAgentConfigFromBody", () => {
       agents,
     });
 
-    expect(config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(config.agents).toEqual([{ path: "agents/research/research.agent", name: "Research" }]);
   });
 });

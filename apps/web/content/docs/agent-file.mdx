@@ -17,7 +17,7 @@ brain:
   - /
   - docs/README.md
 agents:
-  - path: agents/sales-research.agent
+  - path: agents/sales-research/sales-research.agent
     name: Sales research
 integrations:
   github:
@@ -142,11 +142,11 @@ A list of other agents in the same workspace that this agent can delegate work t
 
 ```yaml
 agents:
-  - path: agents/sales-research.agent
+  - path: agents/sales-research/sales-research.agent
     name: Sales research
 ```
 
-The body mention is `@agent/<slug>`, where `<slug>` is the filename without `agents/` or `.agent`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
+The body mention is `@agent/<slug>`, where `<slug>` is the agent folder name under `agents/`. During a run, these references expose a delegation tool. The child agent runs in an inspectable child session hidden from sidebar history, and its answer is returned to the parent as a tool result.
 The result also includes `childSessionId`; passing that id back as `sessionId` with a new prompt continues the same delegated child session.
 
 ### `integrations.github.repositories`
@@ -228,10 +228,10 @@ If you write `@something` that doesn't match anything, opencompany leaves it as 
 Add `#after-session` to run a background memory pass after a session has been idle for 3 minutes:
 
 ```text
-Help with customer calls. #after-session Update @brain/memory.md with durable preferences and decisions from the transcript.
+Help with customer calls. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
 ```
 
-The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update mounted Brain files when there is useful long-lived context to save.
+The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update `agent/memory.md` when there is useful long-lived context to save. Use Brain only for shared company knowledge.
 
 ### Tiptap content is not the contract
 
@@ -256,9 +256,9 @@ In your workspace's GitHub repo, agents live under `agents/`:
 ```text
 your-workspace-repo/
 ├── agents/
-│   ├── fundraising-copilot.agent
-│   ├── ops-triage.agent
-│   └── sales-research.agent
+│   ├── fundraising-copilot/fundraising-copilot.agent
+│   ├── ops-triage/ops-triage.agent
+│   └── sales-research/sales-research.agent
 └── brain/
     ├── docs/README.md
     └── product/positioning.md
