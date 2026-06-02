@@ -283,7 +283,7 @@ Add `#after-session` inside the body to enable a background pass after a session
 Help the user during the session. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
 ```
 
-The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should update `agent/memory.md` when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
+The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward in the agent folder (`agent/memory.md` for durable learnings) when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
 
 ## Storage layout
 

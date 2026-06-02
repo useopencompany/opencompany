@@ -1091,7 +1091,7 @@ async function runAfterSessionWithContext(
         ...runtime,
         tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
       },
-      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture durable learnings from the transcript in agent/memory.md when worthwhile, and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward in your agent folder (agent/memory.md for durable learnings), and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
       messages,
       tools,
       mcpContext: {
