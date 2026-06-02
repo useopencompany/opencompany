@@ -492,6 +492,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
   });
 
   afterEach(() => {
+    setVisibility("visible");
     vi.useRealTimers();
   });
 

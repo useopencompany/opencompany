@@ -395,7 +395,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   useEffect(() => {
     if (!showStaleBanner) return;
     refetchSessionProgress({ refreshStreamCredential: stream.status === "stale" });
-  }, [now, refetchSessionProgress, showStaleBanner, stream.status]);
+  }, [refetchSessionProgress, showStaleBanner, stream.status]);
 
   useEffect(() => {
     if (!awaitingAssistantWork) return;
