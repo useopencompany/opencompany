@@ -234,8 +234,8 @@ export async function abortAgentSession(sessionId: string) {
 
 // Approve or deny a paused tool call. The approval row is the source of truth: the
 // runner no longer polls it. This action records the user's decision and then drives
-// the resume by calling the runner's resume endpoint (via `triggerAgentApprovalResume`
-// inside `after()`). The `status = 'pending'` guard makes this idempotent and ensures
+// the resume by calling the runner's resume endpoint. The `status = 'pending'` guard
+// makes this idempotent and ensures
 // only the winning caller proceeds — a row the backstop sweep already auto-denied on
 // timeout, or a concurrent duplicate decision, flips nothing and triggers no resume.
 export async function resolveToolApproval(input: {
@@ -285,14 +285,14 @@ export async function resolveToolApproval(input: {
   }
 
   // Only the caller that actually flipped the row drives the resume, so a duplicate or
-  // already-resolved decision can't double-trigger the runner.
-  after(() =>
-    triggerAgentApprovalResume({
-      sessionId: input.sessionId,
-      toolCallId: input.toolCallId,
-      workspaceId: workspace.id,
-    }),
-  );
+  // already-resolved decision can't double-trigger the runner. This must be awaited:
+  // otherwise the UI can optimistically show "denying..." after the approval row was
+  // decided, while no resume job/event was actually produced.
+  await triggerAgentApprovalResume({
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    workspaceId: workspace.id,
+  });
 
   return { ok: true } as const;
 }
