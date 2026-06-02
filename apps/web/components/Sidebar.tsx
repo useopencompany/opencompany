@@ -411,6 +411,10 @@ export default function Sidebar({
   const queryClient = useQueryClient();
   const { showError } = useToast();
   const footerRef = useRef<HTMLDivElement>(null);
+  // Sessions with an in-flight pin toggle. Guards against rapid re-clicks firing
+  // overlapping setSessionStar requests that can race and leave the UI out of sync
+  // with the server (a slower earlier response overwriting a newer intent).
+  const pinTogglesInFlight = useRef<Set<string>>(new Set());
   const { data: queriedSessions, isPending } = useQuery({
     queryKey: sessionQueryKeys.list(workspaceId),
     queryFn: fetchSidebarSessions,
@@ -428,6 +432,11 @@ export default function Sidebar({
   // optimistic cache update so the UI reflects the change immediately.
   const handleToggleStar = useCallback(
     (sessionId: string) => {
+      // Serialize toggles per session: ignore re-clicks until the current request
+      // settles, so overlapping requests can't race the UI out of sync.
+      if (pinTogglesInFlight.current.has(sessionId)) return;
+      pinTogglesInFlight.current.add(sessionId);
+
       const queryKey = sessionQueryKeys.list(workspaceId);
       const current = queryClient.getQueryData<SidebarSession[]>(queryKey);
       const previousStarredAt =
@@ -465,6 +474,9 @@ export default function Sidebar({
             error instanceof Error ? error.message : "Could not reach the server.",
             nextStarred ? "Could not pin session" : "Could not unpin session",
           );
+        } finally {
+          // Allow the next toggle for this session once this request settles.
+          pinTogglesInFlight.current.delete(sessionId);
         }
       })();
     },
