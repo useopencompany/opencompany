@@ -201,40 +201,28 @@ describe("createMcpToolSet", () => {
     });
   });
 
-  it("surfaces missing encryption key configuration for Linear MCP credentials", async () => {
+  it("uses the validated encryption key when process env is later unset", async () => {
     db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
     vi.unstubAllEnvs();
 
-    // Infra misconfig (missing encryption key) also degrades to a stub rather than
-    // killing the turn — but it is still logged + reported so ops gets alerted.
-    const mcpTools = await createMcpToolSet(baseInput());
-    const stubOutput = await mcpTools.tools.linear__get_connection_status?.execute?.(
-      {},
-      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    await createMcpToolSet(baseInput());
+
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          headers: {
+            Authorization: "Bearer lin_api_secret",
+          },
+        }),
+      }),
     );
-    expect(stubOutput).toMatchObject({
-      ok: false,
-      error: {
-        code: "mcp_not_connected",
-        message: "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
-      },
-    });
-    expect(observability.logger.error).toHaveBeenCalledWith(
+    expect(observability.logger.error).not.toHaveBeenCalledWith(
       "Linear MCP connection setup failed",
       expect.objectContaining({
         event: "opencompany.runner_mcp_connection_failed",
-        mcp_failure_reason: "encryption_key_configuration",
-        mcp_server: "linear",
-        workspace_id: "wks_123",
       }),
     );
-    expect(observability.captureException).toHaveBeenCalledWith(
-      expect.any(Error),
-      expect.objectContaining({
-        event: "opencompany.runner_mcp_connection_failed",
-        mcp_failure_reason: "encryption_key_configuration",
-      }),
-    );
+    expect(observability.captureException).not.toHaveBeenCalled();
   });
 
   it("wraps discovered Linear MCP tools with runtime lifecycle writes", async () => {
@@ -507,6 +495,7 @@ function baseInput(
     runLeaseOwner: "runner_123",
     workspaceId: "wks_123",
     agentConfig: config,
+    integrationCredentialEncryptionKey: Buffer.from(credentialKey(), "base64"),
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator,

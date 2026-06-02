@@ -21,6 +21,7 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
+    "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@radix-ui/react-select": "^2.2.6",
