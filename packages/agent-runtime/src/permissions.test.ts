@@ -5,6 +5,7 @@ import {
   classifyMcpTool,
   classifyRuntimeTool,
   classifyTool,
+  formatWorkspaceToolPolicyContext,
   policyMapKey,
   resolveToolDecision,
   type WorkspaceToolPolicyMap,
@@ -136,6 +137,48 @@ describe("resolveToolDecision", () => {
       resolveToolDecision({ toolName: "slack__search", policy: empty, suspendable: false })
         .decision,
     ).toBe("allow");
+  });
+});
+
+describe("formatWorkspaceToolPolicyContext", () => {
+  it("summarizes effective Linear policy decisions for the model", () => {
+    const policy: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("linear", "read"), "ask"],
+      [policyMapKey("linear", "post"), "deny"],
+      [policyMapKey("linear", "modify"), "deny"],
+      [policyMapKey("linear", "admin"), "deny"],
+    ]);
+
+    expect(
+      formatWorkspaceToolPolicyContext({
+        providerKeys: ["linear"],
+        policy,
+        suspendable: true,
+      }),
+    ).toContain("Linear: Read=ask first, Post=deny, Modify=deny, Admin=deny.");
+  });
+
+  it("describes ask policies as denied for non-suspendable runs", () => {
+    const policy: WorkspaceToolPolicyMap = new Map([[policyMapKey("linear", "read"), "ask"]]);
+
+    const context = formatWorkspaceToolPolicyContext({
+      providerKeys: ["linear"],
+      policy,
+      suspendable: false,
+    });
+
+    expect(context).toContain("Ask-first permissions cannot pause this run");
+    expect(context).toContain("Linear: Read=deny");
+  });
+
+  it("omits ungated or unavailable providers", () => {
+    expect(
+      formatWorkspaceToolPolicyContext({
+        providerKeys: ["exa", "missing"],
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toBeNull();
   });
 });
 

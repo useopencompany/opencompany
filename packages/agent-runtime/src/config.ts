@@ -3,6 +3,11 @@ import {
   type ModelProviderOptions,
   type ReasoningExposure,
 } from "./models";
+import {
+  formatWorkspaceToolPolicyContext,
+  PROVIDER_PERMISSION_REGISTRY,
+  type WorkspaceToolPolicyMap,
+} from "./permissions";
 import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkills } from "./skills";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
@@ -33,10 +38,21 @@ export function resolveAgentRuntimeConfig(input: {
   workspaceName?: string;
   sessionTitle?: string;
   userName?: string;
+  toolPolicy?: {
+    policy: WorkspaceToolPolicyMap;
+    suspendable: boolean;
+  };
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
   const skills = resolveEnabledSkills(input.agent);
+  const toolPolicyContext = input.toolPolicy
+    ? formatWorkspaceToolPolicyContext({
+        providerKeys: enabledGatedProviderKeys(input.agent, repositories),
+        policy: input.toolPolicy.policy,
+        suspendable: input.toolPolicy.suspendable,
+      })
+    : null;
   const context = [
     "You are an OpenCompany agent running in an isolated cloud sandbox.",
     "Use tools when you need to inspect or change files, run commands, or verify work.",
@@ -72,6 +88,7 @@ export function resolveAgentRuntimeConfig(input: {
     skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
       ? "You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first."
       : null,
+    toolPolicyContext,
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
@@ -121,6 +138,25 @@ export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
 
 export function agentGitHubRepositories(config: AgentConfig): AgentGitHubRepositoryConfig[] {
   return normalizeAgentConfig(config).integrations.github.repositories;
+}
+
+function enabledGatedProviderKeys(
+  config: AgentConfig,
+  repositories: AgentGitHubRepositoryConfig[],
+) {
+  const providerKeys = new Set<string>();
+  for (const tool of config.tools) {
+    if (tool.type === "mcp") {
+      providerKeys.add(tool.server);
+    }
+    if (tool.type === "coding_agent") {
+      providerKeys.add("github");
+    }
+  }
+  if (repositories.length > 0) {
+    providerKeys.add("github");
+  }
+  return [...providerKeys].filter((providerKey) => PROVIDER_PERMISSION_REGISTRY[providerKey]);
 }
 
 function formatBrainReferencePath(path: string) {

@@ -251,6 +251,70 @@ export function policyMapKey(providerKey: string, group: PermissionGroup) {
   return `${providerKey}:${group}`;
 }
 
+export function effectivePolicyDecisionForGroup(input: {
+  providerKey: string;
+  group: PermissionGroup;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
+}): PolicyDecision {
+  let decision =
+    input.policy.get(policyMapKey(input.providerKey, input.group)) ??
+    DEFAULT_GROUP_STANCE[input.group];
+  if (!input.suspendable && decision === "ask") {
+    decision = "deny";
+  }
+  return decision;
+}
+
+export function formatWorkspaceToolPolicyContext(input: {
+  providerKeys: Iterable<string>;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
+}) {
+  const providerKeys = [...new Set(input.providerKeys)].filter((providerKey) => {
+    const spec = PROVIDER_PERMISSION_REGISTRY[providerKey];
+    return spec?.gated;
+  });
+  if (providerKeys.length === 0) return null;
+
+  const providerLines = providerKeys.map((providerKey) => {
+    const spec = PROVIDER_PERMISSION_REGISTRY[providerKey];
+    if (!spec) return null;
+    const decisions = spec.groups
+      .map((group) => {
+        const decision = effectivePolicyDecisionForGroup({
+          providerKey,
+          group,
+          policy: input.policy,
+          suspendable: input.suspendable,
+        });
+        return `${PERMISSION_GROUP_LABELS[group]}=${formatPolicyDecision(decision)}`;
+      })
+      .join(", ");
+    return `- ${spec.displayName}: ${decisions}.`;
+  });
+
+  return [
+    "Workspace tool permissions:",
+    "Follow these permissions before choosing tools. Denied permissions must not be attempted. If the user's requested outcome requires a denied permission, explain that workspace settings block it. Do not call read or ask-first prerequisite tools only to prepare for an action that is already denied.",
+    input.suspendable
+      ? "Ask-first permissions may pause the visible session for user approval."
+      : "Ask-first permissions cannot pause this run and are treated as denied.",
+    ...providerLines.filter((line): line is string => Boolean(line)),
+  ].join("\n");
+}
+
+export function formatPolicyDecision(decision: PolicyDecision) {
+  switch (decision) {
+    case "allow":
+      return "allow";
+    case "ask":
+      return "ask first";
+    case "deny":
+      return "deny";
+  }
+}
+
 export type ToolDecision = {
   decision: PolicyDecision;
   providerKey: string;
@@ -279,11 +343,12 @@ export function resolveToolDecision(input: {
     return { decision: "allow", providerKey, group };
   }
 
-  const configured = input.policy.get(policyMapKey(providerKey, group));
-  let decision = configured ?? DEFAULT_GROUP_STANCE[group];
-  if (!input.suspendable && decision === "ask") {
-    decision = "deny";
-  }
+  const decision = effectivePolicyDecisionForGroup({
+    providerKey,
+    group,
+    policy: input.policy,
+    suspendable: input.suspendable,
+  });
   return { decision, providerKey, group };
 }
 
