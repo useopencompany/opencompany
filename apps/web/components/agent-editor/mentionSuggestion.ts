@@ -103,41 +103,12 @@ export function createMentionSuggestion({
     },
   };
 
-  if (char === "#") {
-    // Don't intercept `#` when it could be a markdown heading shortcut.
-    // The heading input rule fires on the current visual line, so a `#`
-    // that sits right after a hard break should pass through. We walk the
-    // current text block manually: text nodes contribute their characters,
-    // hard breaks reset the "current line" buffer, and other leaf nodes
-    // (mentions etc.) count as non-empty content so an inline mention
-    // before the `#` still suppresses the heading rule.
-    base.allow = ({ state, range }) => {
-      const $from = state.doc.resolve(range.from);
-      const parent = $from.parent;
-      const parentStart = $from.start();
-      let currentLine = "";
-      parent.descendants((node, offset) => {
-        const absoluteStart = parentStart + offset;
-        if (absoluteStart >= range.from) return false;
-        if (node.type.name === "hardBreak") {
-          currentLine = "";
-          return false;
-        }
-        if (node.isText && typeof node.text === "string") {
-          const available = range.from - absoluteStart;
-          currentLine += node.text.slice(0, Math.max(0, available));
-          return false;
-        }
-        if (node.isLeaf) {
-          // Mentions and other inline atoms count as non-whitespace content.
-          currentLine += "x";
-          return false;
-        }
-        return true;
-      });
-      return currentLine.trim().length > 0;
-    };
-  }
+  // `#` opens the hook menu (`#after-session`) and also prefixes markdown
+  // headings (`# `). We deliberately let `#` open the hook menu everywhere,
+  // including a lone `#` at the start of a line, so the hooks stay discoverable.
+  // The two don't collide: a heading needs a trailing space, and typing that
+  // space closes the suggestion (allowSpaces is off) so the heading input rule
+  // still fires. So `#` shows the menu and `# ` still turns into a heading.
 
   return base;
 }
