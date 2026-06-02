@@ -65,11 +65,11 @@ Start dev normally:
 bun run dev
 ```
 
-`bun run dev` starts ngrok first when the local ngrok CLI is authenticated, writes the public origin
-to `.env.local`, then starts the normal Turbo dev stack with that same origin in the child process
-environment. If `OPENCOMPANY_NGROK_URL` / `NGROK_URL` is unset, the helper also accepts a fixed
-`url`, `hostname`, or `domain` from the local ngrok config. When a fixed URL is configured, ngrok is
-treated as required and `bun run dev` exits instead of silently starting without a tunnel.
+`bun run dev` starts ngrok first when the local ngrok CLI is authenticated, then starts the normal
+Turbo dev stack with the public origin injected into the child process environment. It does not
+change `.env.local`. If `OPENCOMPANY_NGROK_URL` / `NGROK_URL` is unset, the helper also accepts a
+fixed `url`, `hostname`, or `domain` from the local ngrok config. When a fixed URL is configured,
+ngrok is treated as required and `bun run dev` exits instead of silently starting without a tunnel.
 
 To run only the tunnel:
 
@@ -84,8 +84,9 @@ The tunnel helper writes these local values to `.env.local`:
 - `RUNNER_ALLOWED_ORIGINS` with the ngrok origin appended
 
 When using `bun run github:tunnel` separately, restart `bun run dev` after starting the tunnel so
-Next.js and the runner reload env vars. Then open the app through the ngrok URL, sign in through
-WorkOS with the localhost callback, and start the GitHub integration from `/settings/integrations`.
+Next.js and the runner reload persisted env vars. Then open the app through the ngrok URL, sign in
+through WorkOS with the localhost callback, and start the GitHub integration from
+`/settings/integrations`.
 
 Set `OPENCOMPANY_NGROK_DISABLED=1` to skip ngrok for a dev session.
 
