@@ -160,12 +160,27 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   >();
   try {
     for (const provider of requestedProviders) {
-      const connection = await loadMcpConnection(input.workspaceId, provider).catch(
-        (error: unknown) => {
-          logMcpConnectionSetupFailure({ error, input, provider });
-          throw error;
-        },
-      );
+      let connection: Awaited<ReturnType<typeof loadMcpConnection>>;
+      try {
+        connection = await loadMcpConnection(input.workspaceId, provider);
+      } catch (error: unknown) {
+        // The integration is enabled on the agent but not set up in the workspace
+        // (no credential, beta off, etc.). Don't abort the whole turn — register a
+        // stub tool that returns the reason to the model so it can ask the user to
+        // connect it. The real tool names can't be listed without a live connection,
+        // so a single stub per failed provider is the right granularity.
+        logMcpConnectionSetupFailure({ error, input, provider });
+        const stubName = uniqueToolName(
+          `${provider.key}__${NOT_CONNECTED_STUB_RAW_NAME}`,
+          usedNames,
+        );
+        tools[stubName] = buildNotConnectedStubTool({
+          provider,
+          error,
+          checkAbort: input.checkAbort,
+        });
+        continue;
+      }
       const client = await createMCPClient({
         clientName: "opencompany-runner",
         version: "0.2.0",
@@ -558,6 +573,47 @@ function buildMcpFailedToolOutput(error: unknown) {
       recoverable: true,
     },
   };
+}
+
+// Raw (un-prefixed) name for the not-connected stub tool. The prefixed name
+// (`${provider}__${this}`) is classified by the permission system via a read-verb
+// heuristic — "get" resolves the stub to the `read` group, which defaults to "allow".
+// This is deliberate: the stub has no side effects, so it must never trigger an
+// approval gate (an "ask" would suspend the run, or on non-suspendable scheduled
+// runs collapse to "deny" — defeating the graceful message). Keep a read verb here.
+const NOT_CONNECTED_STUB_RAW_NAME = "get_connection_status";
+
+// A placeholder tool for an integration that is enabled on the agent but not set up
+// in the workspace. Calling it performs no action and returns the connection reason
+// so the model can ask the user to connect the integration in Settings. It has no
+// side effects, so it skips the permission/approval gate entirely.
+function buildNotConnectedStubTool(input: {
+  provider: McpProvider;
+  error: unknown;
+  checkAbort: RunControlCheck;
+}): ToolSet[string] {
+  const reason =
+    input.error instanceof Error
+      ? input.error.message
+      : `${input.provider.displayName} is not connected.`;
+  return tool({
+    description:
+      `${input.provider.displayName} is enabled for this agent but not connected. ` +
+      `Calling this performs no action — instead tell the user to connect ` +
+      `${input.provider.displayName} in Settings → Integrations.`,
+    inputSchema: jsonSchema({ type: "object", properties: {} } as never),
+    onInputAvailable: async () => {
+      await input.checkAbort();
+    },
+    execute: async () => ({
+      ok: false,
+      error: {
+        message: reason,
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    }),
+  } as never) as ToolSet[string];
 }
 
 function braintrustError(error: unknown) {

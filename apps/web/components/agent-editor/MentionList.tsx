@@ -210,9 +210,16 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
                   className="ml-1 shrink-0 text-ink-subtle"
                 />
               ) : (
-                <span className="ml-1 shrink-0 rounded-[4px] bg-surface-subtle px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
-                  {row.item.kind}
-                </span>
+                <>
+                  {row.item.needsSetup && (
+                    <span className="ml-1 shrink-0 rounded-[4px] border border-warning-border bg-warning-bg px-1 py-0.5 text-[9.5px] font-medium text-warning">
+                      Needs setup
+                    </span>
+                  )}
+                  <span className="ml-1 shrink-0 rounded-[4px] bg-surface-subtle px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
+                    {row.item.kind}
+                  </span>
+                </>
               )}
             </button>
           </div>
