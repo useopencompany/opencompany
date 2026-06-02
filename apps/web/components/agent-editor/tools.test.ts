@@ -129,6 +129,24 @@ describe("agent editor mention tools", () => {
     ).toBe(true);
   });
 
+  test("shows not-connected MCP tools with a needs-setup badge when the beta is on", () => {
+    const items = buildAgentMentionItems([], [], {
+      mcpEnabled: true,
+      enabledMcpToolIds: ["linear"],
+    });
+    const linear = items.find((item) => item.mentionId === "tool:linear");
+    const slack = items.find((item) => item.mentionId === "tool:slack");
+
+    // Connected provider behaves normally.
+    expect(linear).toBeDefined();
+    expect(linear?.needsSetup).toBeFalsy();
+
+    // Not-connected provider stays selectable but is flagged + linkable.
+    expect(slack).toBeDefined();
+    expect(slack?.needsSetup).toBe(true);
+    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=/settings");
+  });
+
   test("exposes workspace agents as stable agent slug mentions", () => {
     const items = buildWorkspaceAgentMentionItems([
       { path: "agents/research/research.agent", name: "Research" },

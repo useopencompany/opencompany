@@ -235,12 +235,14 @@ function AgentDetailContent({
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
         triggers,
+        mcp: agent.mcp,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
       }),
     [
       agent.config,
       agent.githubIntegrationRepositories,
       agent.workspaceAgents,
+      agent.mcp,
       content,
       hasEditorDraft,
       name,
@@ -270,6 +272,7 @@ function AgentDetailContent({
     if (agent.mcp.mcpEnabled && agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
     return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
       enabledMcpToolIds,
+      mcpEnabled: agent.mcp.mcpEnabled,
       agents: agent.workspaceAgents,
     });
   }, [
@@ -937,6 +940,8 @@ function AgentInspector({
                 label={tool.label}
                 description={tool.description}
                 tone="tool"
+                needsSetup={tool.needsSetup}
+                connectUrl={tool.connectUrl}
               />
             ))}
           </div>
@@ -1424,14 +1429,19 @@ function ConfigItem({
   label,
   description,
   tone,
+  needsSetup,
+  connectUrl,
 }: {
   icon: LucideIcon;
   label: string;
   description: string;
   tone: "model" | "tool" | "muted";
+  needsSetup?: boolean | undefined;
+  connectUrl?: string | undefined;
 }) {
-  const toneClass =
-    tone === "model"
+  const toneClass = needsSetup
+    ? "border-warning-border bg-warning-bg"
+    : tone === "model"
       ? "border-info-border bg-info-bg"
       : tone === "tool"
         ? "border-success-border bg-success-bg"
@@ -1443,10 +1453,23 @@ function ConfigItem({
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-surface/70 bg-surface/70 text-ink-muted">
           <Icon size={14} strokeWidth={1.9} />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="truncate text-[12.5px] font-medium text-ink">{label}</div>
           <div className="mt-0.5 text-[11.5px] leading-4 text-ink-muted">{description}</div>
         </div>
+        {needsSetup &&
+          (connectUrl ? (
+            <a
+              href={connectUrl}
+              className="shrink-0 rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning transition-opacity hover:opacity-80"
+            >
+              Needs setup
+            </a>
+          ) : (
+            <span className="shrink-0 rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning">
+              Needs setup
+            </span>
+          ))}
       </div>
     </div>
   );
@@ -1576,6 +1599,21 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
   );
 }
 
+// Flags an MCP-backed tool that is enabled on the agent but not connected in the
+// workspace, so the inspector can show a "Needs setup" badge linking to the connect
+// flow. Mirrors the picker logic in agent-editor/tools.ts.
+function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"]): AgentTool {
+  const connected =
+    (tool.id === "linear" && mcp.linearConfigured) ||
+    (tool.id === "slack" && mcp.slackConfigured);
+  if ((tool.id !== "linear" && tool.id !== "slack") || connected) return tool;
+  return {
+    ...tool,
+    needsSetup: true,
+    connectUrl: `/api/mcp/${tool.id}/start?returnTo=/settings`,
+  };
+}
+
 function buildConfigPreview({
   title,
   content,
@@ -1584,6 +1622,7 @@ function buildConfigPreview({
   repositories,
   agents,
   triggers,
+  mcp,
   useDerivedConfig,
 }: {
   title: string;
@@ -1593,6 +1632,7 @@ function buildConfigPreview({
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
   agents: AgentReference[];
   triggers: AgentConfig["triggers"];
+  mcp: AgentDetailPayload["mcp"];
   useDerivedConfig: boolean;
 }) {
   const config = useDerivedConfig
@@ -1620,7 +1660,8 @@ function buildConfigPreview({
     findModel(config.model.name) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
   const tools = config.tools.flatMap((toolConfig) => {
     const tool = findTool(toolConfig.id);
-    return tool ? [tool] : [];
+    if (!tool) return [];
+    return [enrichToolWithSetupState(tool, mcp)];
   });
 
   return {

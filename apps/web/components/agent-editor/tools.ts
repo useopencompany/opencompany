@@ -49,6 +49,11 @@ type BaseAgentMentionItem = {
   icon: LucideIcon;
   category?: "Fast" | "Deep";
   supportsReasoning?: boolean;
+  // Set on integrations that are enabled on the agent but not yet set up in the
+  // workspace. The mention stays selectable; the UI shows a "Needs setup" badge
+  // linking to `connectUrl` (Settings → Integrations connect flow).
+  needsSetup?: boolean;
+  connectUrl?: string;
 };
 
 export type AgentTool = BaseAgentMentionItem & {
@@ -196,6 +201,7 @@ export function buildAgentMentionItems(
   options: {
     enabledMcpToolIds?: AgentToolId[];
     includeMcpTools?: boolean;
+    mcpEnabled?: boolean;
     agents?: AgentReference[];
   } = {},
 ): AgentMentionItem[] {
@@ -228,18 +234,43 @@ export function buildAgentMentionItems(
 
   return [
     ...AGENT_SCHEDULE_MENTION_ITEMS,
-    ...AGENT_TOOLS.filter(
-      (tool) =>
-        tool.kind !== "tool" ||
-        !isMcpToolId(tool.id) ||
-        options.includeMcpTools ||
-        Boolean(options.enabledMcpToolIds?.includes(tool.id)),
-    ),
+    ...buildToolMentionItems(options),
     ...buildWorkspaceAgentMentionItems(options.agents ?? []),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+// Non-MCP tools are always available. MCP-backed tools (Linear, Slack) are shown
+// whenever the workspace MCP beta is on: connected ones behave normally, while
+// not-yet-connected ones stay selectable but carry `needsSetup`/`connectUrl` so
+// the UI can flag them and link to the connect flow. With the beta off they are
+// hidden entirely (matching the runtime's "beta is off" guard).
+function buildToolMentionItems(options: {
+  enabledMcpToolIds?: AgentToolId[];
+  includeMcpTools?: boolean;
+  mcpEnabled?: boolean;
+}): AgentTool[] {
+  return AGENT_TOOLS.flatMap((tool) => {
+    if (tool.kind !== "tool" || !isMcpToolId(tool.id)) return [tool];
+    const connected = Boolean(options.enabledMcpToolIds?.includes(tool.id));
+    const visible = options.includeMcpTools || options.mcpEnabled || connected;
+    if (!visible) return [];
+    if (connected) return [tool];
+    return [
+      {
+        ...tool,
+        description: "Not connected — set up in Settings → Integrations.",
+        needsSetup: true,
+        connectUrl: mcpConnectUrl(tool.id),
+      },
+    ];
+  });
+}
+
+function mcpConnectUrl(toolId: AgentToolId) {
+  return `/api/mcp/${toolId}/start?returnTo=/settings`;
 }
 
 export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): AgentWorkspaceMention[] {
