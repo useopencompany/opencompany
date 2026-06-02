@@ -22,6 +22,7 @@ import {
   MessagesSquare,
   Search,
   Sparkles,
+  SquarePlay,
 } from "lucide-react";
 import {
   AnthropicIcon,
@@ -106,6 +107,7 @@ export type AgentMentionItem =
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   x: AtSign,
+  youtube: SquarePlay,
   amp: Code2,
   linear: ListTodo,
   slack: MessageSquare,
