@@ -67,6 +67,7 @@ export type RuntimeToolApprovalState = {
   providerKey: string;
   permissionGroup: "read" | "post" | "modify" | "admin";
   decisionSource?: "user" | "timeout" | "abort" | undefined;
+  requestedAt?: string | undefined;
 };
 
 export type RuntimeToolCall = {
@@ -726,6 +727,7 @@ export function buildRuntimeToolCallsForMessage(
         status: "required",
         providerKey: readString(event.payload.providerKey),
         permissionGroup: readPermissionGroup(event.payload.permissionGroup),
+        requestedAt: readString(event.payload.requestedAt) || undefined,
       };
     }
 
@@ -737,6 +739,7 @@ export function buildRuntimeToolCallsForMessage(
         status: decision,
         providerKey: call.approval?.providerKey ?? "",
         permissionGroup: call.approval?.permissionGroup ?? "admin",
+        requestedAt: call.approval?.requestedAt,
         decisionSource:
           decisionSource === "timeout" || decisionSource === "abort" ? decisionSource : "user",
       };
@@ -830,6 +833,8 @@ function buildEventAssistantTurnParts(
 
     if (
       event.type === "tool.delta" ||
+      event.type === "tool.approval_required" ||
+      event.type === "tool.approval_resolved" ||
       event.type === "tool.started" ||
       event.type === "tool.completed" ||
       event.type === "tool.failed"

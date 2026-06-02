@@ -2,12 +2,12 @@
 
 import {
   DEFAULT_GROUP_STANCE,
-  PERMISSION_GROUP_DESCRIPTIONS,
   PERMISSION_GROUP_LABELS,
   type PermissionGroup,
   POLICY_DECISIONS,
   type PolicyDecision,
   PROVIDER_PERMISSION_REGISTRY,
+  permissionDescriptionFor,
 } from "@opencompany/agent-runtime";
 import { useState, useTransition } from "react";
 import { useToast } from "@/components/ToastProvider";
@@ -68,7 +68,7 @@ export function ToolPolicyEditor({ providerKey, overrides }: ToolPolicyEditorPro
               {PERMISSION_GROUP_LABELS[group]}
             </div>
             <div className="text-[11px] leading-4 text-ink-subtle">
-              {PERMISSION_GROUP_DESCRIPTIONS[group]}
+              {permissionDescriptionFor(providerKey, group)}
             </div>
           </div>
           <div

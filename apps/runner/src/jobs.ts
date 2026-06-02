@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { runAfterSession, runMessage, startSession } from "./agent-loop";
+import { resumeApproval, runAfterSession, runMessage, startSession } from "./agent-loop";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { isNonRetryableRunnerError } from "./runner-errors";
@@ -24,7 +24,7 @@ export const RUNNER_JOB_MAX_ATTEMPTS = 5;
 const DEFAULT_WORKER_CONCURRENCY = 2;
 const DEFAULT_WORKER_POLL_INTERVAL_MS = 1_000;
 
-export type RunnerJobKind = "start" | "message" | "title" | "after_session";
+export type RunnerJobKind = "start" | "message" | "title" | "after_session" | "resume_approval";
 export type RunnerJobStatus = "pending" | "running" | "completed" | "failed";
 
 export type RunnerJob = {
@@ -440,6 +440,7 @@ export type RunnerJobHandlers = {
   runMessage: typeof runMessage;
   generateSessionTitleForMessage: typeof generateSessionTitleForMessage;
   runAfterSession: typeof runAfterSession;
+  resumeApproval: typeof resumeApproval;
 };
 
 const defaultRunnerJobHandlers: RunnerJobHandlers = {
@@ -447,6 +448,7 @@ const defaultRunnerJobHandlers: RunnerJobHandlers = {
   runMessage,
   generateSessionTitleForMessage,
   runAfterSession,
+  resumeApproval,
 };
 
 async function dispatchRunnerJob(
@@ -467,6 +469,16 @@ async function dispatchRunnerJob(
   }
   if (job.kind === "title") {
     await handlers.generateSessionTitleForMessage({ sessionId: job.sessionId, messageId, env });
+    return;
+  }
+  if (job.kind === "resume_approval") {
+    // The toolCallId rides in the message_id column for this job kind.
+    await handlers.resumeApproval({
+      sessionId: job.sessionId,
+      toolCallId: messageId,
+      env,
+      externalSignal,
+    });
     return;
   }
   await handlers.runAfterSession({ sessionId: job.sessionId, messageId, env, externalSignal });

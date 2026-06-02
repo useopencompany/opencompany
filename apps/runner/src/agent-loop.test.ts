@@ -1794,7 +1794,7 @@ describe("stream error handling", () => {
       checkAbort: async () => {},
       toolStartCoordinator: createToolStartCoordinator(),
       policy: new Map(),
-      interactive: true,
+      suspendable: true,
     });
 
     expect(result).toMatchObject({
@@ -1840,7 +1840,7 @@ describe("stream error handling", () => {
       checkAbort: async () => {},
       toolStartCoordinator,
       policy: new Map(),
-      interactive: true,
+      suspendable: true,
     });
 
     const transientEvents = vi

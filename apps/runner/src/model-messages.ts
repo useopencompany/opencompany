@@ -154,8 +154,21 @@ function splitAssistantToolReplay(
   message: AssistantToolReplayMessage,
   toolMessagesByCallId: Map<string, ToolModelMessage>,
 ): ModelMessage[] | null {
-  const toolCallIds = message.content.filter(isToolCallPart).map((part) => part.toolCallId);
-  if (toolCallIds.some((toolCallId) => !toolMessagesByCallId.has(toolCallId))) return null;
+  // Drop tool-call parts with no matching tool-result. A turn that suspended at an "ask"
+  // gate (or was aborted while paused) leaves the assistant message ending in a dangling
+  // tool-call; replaying it verbatim would send the provider a tool_use with no following
+  // tool_result and error the next turn. The normal case (every tool-call has a result)
+  // is unaffected.
+  const content = message.content.filter(
+    (part) => !isToolCallPart(part) || toolMessagesByCallId.has(part.toolCallId),
+  );
+  if (!content.some(isToolCallPart)) {
+    const text = content
+      .filter(isTextPart)
+      .map((part) => part.text)
+      .join("");
+    return text ? [validateModelMessage({ role: "assistant", content: text })] : [];
+  }
 
   const messages: ModelMessage[] = [];
   let assistantParts: AssistantReplayPart[] = [];
@@ -172,7 +185,7 @@ function splitAssistantToolReplay(
     pendingToolCallIds = [];
   };
 
-  for (const part of message.content) {
+  for (const part of content) {
     if (isToolCallPart(part)) {
       assistantParts.push(part);
       pendingToolCallIds.push(part.toolCallId);

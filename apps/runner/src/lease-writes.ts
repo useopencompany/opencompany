@@ -550,6 +550,19 @@ export async function failRunLease(
   return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: message });
 }
 
+// Park the run for a human approval decision: set `awaiting_approval` and release the
+// lease (clears lease fields) so no runner sits idle holding a stream. The session
+// resumes in a fresh `resume_approval` run once the approval row is decided.
+export async function suspendRunLease(sessionId: string, leaseId: string, leaseOwner: string) {
+  return finishDbRunLease({
+    sessionId,
+    leaseId,
+    leaseOwner,
+    status: "awaiting_approval",
+    lastError: null,
+  });
+}
+
 export async function requireLeaseWrite(write: Promise<boolean> | boolean) {
   if (!(await write)) {
     throw new StaleRunLeaseError();

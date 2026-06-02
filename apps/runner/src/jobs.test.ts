@@ -175,6 +175,32 @@ describe("runner job execution", () => {
     });
   });
 
+  it("dispatches resume_approval with the toolCallId carried in messageId", async () => {
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "resume_approval",
+        messageId: "call_ask",
+        status: "running",
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+    const resumeApproval = vi.fn(async () => undefined);
+
+    await runClaimedRunnerJob({
+      job: firstJob(store),
+      env: env(),
+      store,
+      handlers: handlers({ resumeApproval }),
+    });
+
+    expect(resumeApproval).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "ses_123", toolCallId: "call_ask", env: env() }),
+    );
+    expect(firstJob(store)).toMatchObject({ status: "completed" });
+  });
+
   it("requeues failed jobs with backoff until the max attempt", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
@@ -493,6 +519,7 @@ function handlers(overrides: Partial<RunnerJobHandlers> = {}): RunnerJobHandlers
     runMessage: async () => undefined,
     generateSessionTitleForMessage: async () => ({ ok: true as const, title: "Generated title" }),
     runAfterSession: async () => undefined,
+    resumeApproval: async () => undefined,
   };
   return { ...base, ...overrides };
 }

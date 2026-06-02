@@ -26,6 +26,8 @@ export const PERMISSION_GROUP_DESCRIPTIONS: Record<PermissionGroup, string> = {
 
 export const POLICY_DECISIONS: readonly PolicyDecision[] = ["allow", "ask", "deny"];
 
+export const TOOL_APPROVAL_BACKSTOP_MS = 7 * 24 * 60 * 60 * 1000;
+
 // Hybrid default stance: reads flow freely, everything with an external side effect
 // asks for approval the first time until the workspace opts into "allow".
 export const DEFAULT_GROUP_STANCE: Record<PermissionGroup, PolicyDecision> = {
@@ -50,6 +52,7 @@ export type ProviderPermissionSpec = {
   // Static map from a concrete (raw, un-prefixed) tool/action name to its group.
   // Anything not listed falls back to the verb heuristic.
   toolGroups?: Record<string, PermissionGroup>;
+  permissionDescriptions?: Partial<Record<PermissionGroup, string>>;
 };
 
 // Provider key used for sandbox-internal/built-in tools (file IO, shell). Not gated
@@ -86,6 +89,10 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
     displayName: "Linear",
     groups: ["read", "post", "modify", "admin"],
     gated: true,
+    permissionDescriptions: {
+      post: "Create issues and add comments",
+      modify: "Edit existing issues, projects, or comments",
+    },
     toolGroups: {
       list_issues: "read",
       get_issue: "read",
@@ -96,6 +103,7 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       list_comments: "read",
       create_issue: "post",
       create_comment: "post",
+      save_comment: "post",
       update_issue: "modify",
       update_project: "modify",
       update_comment: "modify",
@@ -124,6 +132,13 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
     gated: false,
   },
 };
+
+export function permissionDescriptionFor(providerKey: string, group: PermissionGroup) {
+  return (
+    PROVIDER_PERMISSION_REGISTRY[providerKey]?.permissionDescriptions?.[group] ??
+    PERMISSION_GROUP_DESCRIPTIONS[group]
+  );
+}
 
 // First-party / built-in runtime tools mapped to a provider + group. Returning null
 // means the tool is never gated (always allowed) — e.g. delegation and tool help.
@@ -243,13 +258,15 @@ export type ToolDecision = {
 };
 
 // The single resolver the runner gate calls per tool call. Ungated tools (system,
-// exa, delegation, tool help) short-circuit to "allow". When `interactive` is false
-// (autonomous / after-session runs with no user to approve), "ask" collapses to
-// "deny" so the run never hangs waiting for an approval that can't come.
+// exa, delegation, tool help) short-circuit to "allow". When `suspendable` is false
+// (delegated children with a parent blocking on them, or after-session/background runs
+// with no resumable user-facing turn), "ask" collapses to "deny" so the run never hangs
+// waiting for an approval that can't be resumed. Suspendable runs keep "ask" and pause
+// durably (see RunSuspendedError).
 export function resolveToolDecision(input: {
   toolName: string;
   policy: WorkspaceToolPolicyMap;
-  interactive: boolean;
+  suspendable: boolean;
 }): ToolDecision {
   const classification = classifyTool(input.toolName);
   if (!classification) {
@@ -264,7 +281,7 @@ export function resolveToolDecision(input: {
 
   const configured = input.policy.get(policyMapKey(providerKey, group));
   let decision = configured ?? DEFAULT_GROUP_STANCE[group];
-  if (!input.interactive && decision === "ask") {
+  if (!input.suspendable && decision === "ask") {
     decision = "deny";
   }
   return { decision, providerKey, group };

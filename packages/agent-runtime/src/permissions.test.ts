@@ -46,6 +46,7 @@ describe("classifyMcpTool", () => {
       group: "post",
     });
     expect(classifyTool("linear__create_issue")).toEqual({ providerKey: "linear", group: "post" });
+    expect(classifyTool("linear__save_comment")).toEqual({ providerKey: "linear", group: "post" });
     expect(classifyTool("linear__update_issue")).toEqual({
       providerKey: "linear",
       group: "modify",
@@ -66,22 +67,22 @@ describe("resolveToolDecision", () => {
 
   it("allows ungated providers regardless of policy", () => {
     expect(
-      resolveToolDecision({ toolName: "read_file", policy: empty, interactive: true }),
+      resolveToolDecision({ toolName: "read_file", policy: empty, suspendable: true }),
     ).toEqual({ decision: "allow", providerKey: "system", group: "read" });
     expect(
-      resolveToolDecision({ toolName: "shell", policy: empty, interactive: true }).decision,
+      resolveToolDecision({ toolName: "shell", policy: empty, suspendable: true }).decision,
     ).toBe("allow");
     expect(
-      resolveToolDecision({ toolName: "exa_search", policy: empty, interactive: true }).decision,
+      resolveToolDecision({ toolName: "exa_search", policy: empty, suspendable: true }).decision,
     ).toBe("allow");
   });
 
   it("applies the default hybrid stance for gated providers", () => {
     expect(
-      resolveToolDecision({ toolName: "slack__search", policy: empty, interactive: true }).decision,
+      resolveToolDecision({ toolName: "slack__search", policy: empty, suspendable: true }).decision,
     ).toBe("allow");
     expect(
-      resolveToolDecision({ toolName: "slack__chat_postMessage", policy: empty, interactive: true })
+      resolveToolDecision({ toolName: "slack__chat_postMessage", policy: empty, suspendable: true })
         .decision,
     ).toBe("ask");
   });
@@ -89,28 +90,50 @@ describe("resolveToolDecision", () => {
   it("honors configured policy over the default stance", () => {
     const policy: WorkspaceToolPolicyMap = new Map([[policyMapKey("slack", "post"), "allow"]]);
     expect(
-      resolveToolDecision({ toolName: "slack__chat_postMessage", policy, interactive: true })
+      resolveToolDecision({ toolName: "slack__chat_postMessage", policy, suspendable: true })
         .decision,
     ).toBe("allow");
 
     const denyRead: WorkspaceToolPolicyMap = new Map([[policyMapKey("slack", "read"), "deny"]]);
     expect(
-      resolveToolDecision({ toolName: "slack__search", policy: denyRead, interactive: true })
+      resolveToolDecision({ toolName: "slack__search", policy: denyRead, suspendable: true })
         .decision,
+    ).toBe("deny");
+
+    const denyLinearModify: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("linear", "modify"), "deny"],
+    ]);
+    expect(
+      resolveToolDecision({
+        toolName: "linear__save_comment",
+        policy: denyLinearModify,
+        suspendable: true,
+      }).decision,
+    ).toBe("ask");
+
+    const denyLinearPost: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("linear", "post"), "deny"],
+    ]);
+    expect(
+      resolveToolDecision({
+        toolName: "linear__save_comment",
+        policy: denyLinearPost,
+        suspendable: true,
+      }).decision,
     ).toBe("deny");
   });
 
-  it("collapses ask to deny in non-interactive runs", () => {
+  it("collapses ask to deny in non-suspendable runs", () => {
     expect(
       resolveToolDecision({
         toolName: "slack__chat_postMessage",
         policy: empty,
-        interactive: false,
+        suspendable: false,
       }).decision,
     ).toBe("deny");
     // deny stays deny; allow stays allow.
     expect(
-      resolveToolDecision({ toolName: "slack__search", policy: empty, interactive: false })
+      resolveToolDecision({ toolName: "slack__search", policy: empty, suspendable: false })
         .decision,
     ).toBe("allow");
   });

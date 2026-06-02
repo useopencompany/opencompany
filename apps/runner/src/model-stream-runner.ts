@@ -8,10 +8,10 @@ import {
 } from "./lease-writes";
 import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
+import { RunSuspendedError } from "./runner-errors";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
-import { awaitToolApproval } from "./tool-approvals";
 import { formatRuntimePreview } from "./tool-dispatcher";
-import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
+import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordStepUsage } from "./usage-recorder";
 
 // Live assistant text is transient-only, so publish model deltas as they arrive.
@@ -33,9 +33,10 @@ export async function collectAssistantStream(input: {
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
   policy: WorkspaceToolPolicyMap;
-  // Whether a human can approve "ask" tool calls in this run. Autonomous runs
-  // (schedules, after-session) pass false so "ask" collapses to "deny" and never hangs.
-  interactive: boolean;
+  // Whether this run can durably suspend for an "ask" approval. Top-level user and
+  // scheduled runs can (they have a resumable session a human can approve in). Delegated
+  // children and after-session/background runs cannot, so their "ask" collapses to "deny".
+  suspendable: boolean;
   onFirstOutputPart?: () => void;
 }) {
   let assistantContent = "";
@@ -185,33 +186,22 @@ export async function collectAssistantStream(input: {
         const { decision, providerKey, group } = resolveToolDecision({
           toolName: toolStart.name,
           policy: input.policy,
-          interactive: input.interactive,
+          suspendable: input.suspendable,
         });
 
-        // Emit tool.started + release execute() with the resolved verdict. For a
-        // denied call, execute() returns a permission_denied result instead of running.
-        const releaseToolCall = async (verdict: ToolStartVerdict) => {
-          await requireLeaseWrite(
-            appendRuntimeEventForLease({
-              sessionId: input.sessionId,
-              messageId: input.assistantMessageId,
-              leaseId: input.runLeaseId,
-              leaseOwner: input.runLeaseOwner,
-              type: "tool.started",
-              payload: {
-                messageId: input.assistantMessageId,
-                toolCallId: part.toolCallId,
-                name: toolStart.name,
-                input: toolStart.input,
-              },
-            }),
-          );
-          input.toolStartCoordinator.markStarted(part.toolCallId, verdict);
+        const toolCallReplayPart: AssistantReplayPart = {
+          type: "tool-call",
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          input: part.input,
         };
 
         if (decision === "ask") {
-          // Pause the run for an in-chat decision. The approval row is the durable
-          // source of truth the web action updates; the event drives the UI buttons.
+          // Durably suspend the run for a human decision. Persist the approval row (the
+          // source of truth the web action / backstop update) and emit the event that
+          // drives the in-chat Approve/Deny buttons. We do NOT block here: the run unwinds
+          // via RunSuspendedError, the lease is released, and the tool body runs later in
+          // a fresh resume run once the approval is decided.
           await requireLeaseWrite(
             insertToolApprovalForLease({
               sessionId: input.sessionId,
@@ -245,47 +235,47 @@ export async function collectAssistantStream(input: {
             }),
           );
 
-          const resolution = await awaitToolApproval({
-            sessionId: input.sessionId,
+          // The persisted assistant message must end in this pending tool-call so the
+          // resume run can pair it with the tool-result. Release every parked tool call
+          // (this one + any concurrent siblings of the step) with a no-op suspend verdict
+          // so none hang, then unwind to suspend the run.
+          assistantReplayParts.push(toolCallReplayPart);
+          input.toolStartCoordinator.suspend();
+          throw new RunSuspendedError({
             toolCallId: part.toolCallId,
-            requestedAtMs,
-            checkAbort: input.checkAbort,
-            signal: input.signal,
-          });
-
-          await requireLeaseWrite(
-            appendRuntimeEventForLease({
-              sessionId: input.sessionId,
-              messageId: input.assistantMessageId,
-              leaseId: input.runLeaseId,
-              leaseOwner: input.runLeaseOwner,
-              type: "tool.approval_resolved",
-              payload: {
-                messageId: input.assistantMessageId,
-                toolCallId: part.toolCallId,
-                name: toolStart.name,
-                decision: resolution.decision,
-                decisionSource: resolution.source,
-              },
-            }),
-          );
-
-          await releaseToolCall({
-            decision: resolution.decision === "approved" ? "allow" : "deny",
             providerKey,
             group,
-            source: resolution.source === "timeout" ? "timeout" : "user",
+            assistantContent,
+            assistantReplayParts,
+            reasoningSummary,
           });
-        } else {
-          await releaseToolCall({ decision, providerKey, group, source: "policy" });
         }
 
-        assistantReplayParts.push({
-          type: "tool-call",
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          input: part.input,
+        // allow / deny: emit tool.started and release execute() with the verdict. A
+        // denied call returns a permission_denied result instead of running its body.
+        await requireLeaseWrite(
+          appendRuntimeEventForLease({
+            sessionId: input.sessionId,
+            messageId: input.assistantMessageId,
+            leaseId: input.runLeaseId,
+            leaseOwner: input.runLeaseOwner,
+            type: "tool.started",
+            payload: {
+              messageId: input.assistantMessageId,
+              toolCallId: part.toolCallId,
+              name: toolStart.name,
+              input: toolStart.input,
+            },
+          }),
+        );
+        input.toolStartCoordinator.markStarted(part.toolCallId, {
+          decision,
+          providerKey,
+          group,
+          source: "policy",
         });
+
+        assistantReplayParts.push(toolCallReplayPart);
       }
 
       next = await iterator.next();

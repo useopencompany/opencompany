@@ -3,6 +3,7 @@ export type AgentSessionStatus =
   | "provisioning"
   | "ready"
   | "running"
+  | "awaiting_approval"
   | "aborting"
   | "archiving"
   | "archived"

@@ -60,6 +60,11 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
 const COMMAND_OUTPUT_FLUSH_CHARS = 1024;
 
+// Returned by a tool's execute() when the run is suspending at an "ask" gate. The stream
+// is torn down immediately after, so this value is discarded — it is never persisted as a
+// tool-result nor sent to the model. The real body runs in the resume run.
+export const SUSPENDED_TOOL_OUTPUT = { ok: false, suspended: true } as const;
+
 type ToolObservabilityContext = {
   workspaceId?: string;
   userId?: string;
@@ -137,6 +142,12 @@ export function createToolSet(input: {
           options.toolCallId,
           input.signal,
         );
+        // The run is unwinding to wait for an approval decision. Return a discarded
+        // no-op: the stream is being torn down and this result is never persisted or
+        // sent to the model. The body runs later in the resume run.
+        if (verdict.decision === "suspend") {
+          return SUSPENDED_TOOL_OUTPUT;
+        }
         if (verdict.decision === "deny") {
           return persistDeniedToolResult({
             sessionId: input.sessionId,

@@ -7,6 +7,7 @@ import {
   type RunControlStore,
   type RunLeaseState,
 } from "./run-control";
+import { RunSuspendedError } from "./runner-errors";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
 const usageRecorder = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const eventMocks = vi.hoisted(() => ({
 }));
 const leaseWrites = vi.hoisted(() => ({
   appendRuntimeEventForLease: vi.fn(async () => true),
+  insertToolApprovalForLease: vi.fn(async () => "inserted"),
   requireLeaseWrite: vi.fn(async (value: unknown) => value),
 }));
 
@@ -85,7 +87,7 @@ describe("collectAssistantStream", () => {
     );
   });
 
-  it("collapses an ask decision to deny in a non-interactive run", async () => {
+  it("collapses an ask decision to deny in a non-suspendable run", async () => {
     const coordinator = createToolStartCoordinator();
     const markStarted = vi.spyOn(coordinator, "markStarted");
     const stream = createStream([
@@ -97,12 +99,51 @@ describe("collectAssistantStream", () => {
       }),
     ]);
 
-    await collect(stream, { toolStartCoordinator: coordinator, interactive: false });
+    await collect(stream, { toolStartCoordinator: coordinator, suspendable: false });
 
     expect(markStarted).toHaveBeenCalledWith(
       "call_ask",
       expect.objectContaining({ decision: "deny", providerKey: "slack", group: "post" }),
     );
+  });
+
+  it("suspends the run at an ask gate in a suspendable run", async () => {
+    const coordinator = createToolStartCoordinator();
+    const suspend = vi.spyOn(coordinator, "suspend");
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "I'll post that." }),
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_ask",
+        toolName: "slack__chat_postMessage",
+        input: { text: "hi" },
+      }),
+    ]);
+
+    const error = await collect(stream, {
+      toolStartCoordinator: coordinator,
+      suspendable: true,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(RunSuspendedError);
+    const suspended = error as RunSuspendedError;
+    expect(suspended.toolCallId).toBe("call_ask");
+    expect(suspended.providerKey).toBe("slack");
+    expect(suspended.group).toBe("post");
+    // The partial assistant turn ends in the pending tool-call so resume can pair it.
+    expect(suspended.assistantReplayParts.at(-1)).toEqual({
+      type: "tool-call",
+      toolCallId: "call_ask",
+      toolName: "slack__chat_postMessage",
+      input: { text: "hi" },
+    });
+    // The approval row + event are persisted, and parked siblings are released.
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tool.approval_required" }),
+    );
+    expect(suspend).toHaveBeenCalledTimes(1);
+    // The stream is torn down on the way out.
+    expect(stream.return).toHaveBeenCalledTimes(1);
   });
 
   it("closes the iterator when run control fails after a streamed part", async () => {
@@ -323,7 +364,7 @@ function collect(
     checkAbort: async () => {},
     toolStartCoordinator: createToolStartCoordinator(),
     policy: new Map(),
-    interactive: true,
+    suspendable: true,
     ...overrides,
   });
 }

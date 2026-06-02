@@ -27,6 +27,7 @@ import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import type {
   AssistantTurnPart,
   RuntimeEvent,
+  RuntimeToolCall,
   SessionMessage,
 } from "@/lib/agent-sessions/runtime-events";
 import { AssistantMessageContent, SessionViewContent } from "./SessionView";
@@ -65,9 +66,16 @@ vi.mock("@/components/useSessionEventStream", () => ({
   useSessionEventStream: () => ({ status: mockStreamStatus.value, errorMessage: null }),
 }));
 
-vi.mock("@/lib/agent-sessions/actions", () => ({
+const actionMocks = vi.hoisted(() => ({
   abortAgentSession: vi.fn(),
+  resolveToolApproval: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/agent-sessions/actions", () => ({
+  abortAgentSession: actionMocks.abortAgentSession,
+  resolveToolApproval: actionMocks.resolveToolApproval,
+  submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
 }));
 
 vi.mock("@/lib/agent-sessions/payload", () => ({
@@ -85,6 +93,10 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
   updateSessionStatusInDetail: vi.fn(),
   SESSIONS_QUERY_STALE_TIME_MS: 30_000,
 }));
+
+afterEach(() => {
+  actionMocks.resolveToolApproval.mockReset();
+});
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -110,6 +122,26 @@ function makeToolCallPart(status: "running" | "completed" = "running"): Assistan
       outputPreview: status === "completed" ? "3 files found" : "",
       startedEventId: 1,
       completedEventId: status === "completed" ? 2 : null,
+    },
+  };
+}
+
+function makeApprovalToolCallPart(
+  approval: NonNullable<RuntimeToolCall["approval"]>,
+): AssistantTurnPart {
+  return {
+    type: "tool-call",
+    toolCall: {
+      id: "call_approval",
+      name: "linear__save_comment",
+      label: "Saving Linear comment",
+      status: "running",
+      inputPreview: '{\n  "issueId": "OC-222"\n}',
+      activityPreview: "",
+      outputPreview: "",
+      approval,
+      startedEventId: null,
+      completedEventId: null,
     },
   };
 }
@@ -187,6 +219,95 @@ describe("AssistantMessageContent — Phase B: running with parts renders all pa
     expect(screen.getByText("Thought for 5 seconds")).toBeInTheDocument();
     // WorkingIndicator still visible as footer
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+});
+
+describe("AssistantMessageContent — tool approvals", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-02T08:51:35.162Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders a pending approval with clear copy", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "required",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // The pause is durable (7-day backstop), so there is no short auto-deny countdown.
+    expect(screen.getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(screen.getByText("Create issues and add comments.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+  });
+
+  it("keeps a disabled resolving state after the user denies", async () => {
+    vi.useRealTimers();
+    actionMocks.resolveToolApproval.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_approval" }),
+      messages: [makeRunningAssistantMessage({ id: "msg_approval", content: "" })],
+      events: [
+        {
+          id: 1,
+          type: "tool.approval_required",
+          messageId: "msg_approval",
+          createdAt: "2026-06-02T08:51:35.162Z",
+          payload: {
+            messageId: "msg_approval",
+            toolCallId: "call_approval",
+            name: "linear__save_comment",
+            providerKey: "linear",
+            permissionGroup: "post",
+            inputPreview: '{\n  "issueId": "OC-222"\n}',
+            requestedAt: "2026-06-02T08:51:35.162Z",
+          },
+        },
+      ],
+      runnerUrl: null,
+    });
+
+    renderSessionViewContent(detail);
+    await user.click(screen.getByRole("button", { name: "Deny" }));
+
+    expect(actionMocks.resolveToolApproval).toHaveBeenCalledWith({
+      sessionId: "sess_approval",
+      toolCallId: "call_approval",
+      decision: "denied",
+    });
+    expect(screen.getByText("Denying...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+  });
+
+  it("renders a timeout-resolved approval as timed out instead of running", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "denied",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+        decisionSource: "timeout",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("timed out")).toBeInTheDocument();
+    expect(screen.queryByText("running")).not.toBeInTheDocument();
   });
 });
 

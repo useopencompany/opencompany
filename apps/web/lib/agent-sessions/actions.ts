@@ -20,7 +20,10 @@ import {
   dispatchAgentSessionAbortRequested,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
-import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
+import {
+  triggerAgentApprovalResume,
+  triggerAgentMessageRun,
+} from "@/lib/agent-sessions/message-runner";
 import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
@@ -229,11 +232,12 @@ export async function abortAgentSession(sessionId: string) {
   return { ok: true } as const;
 }
 
-// Approve or deny a paused tool call. The runner is polling the approval row and acts
-// on the decision; it (not this action) emits the durable tool.approval_resolved event,
-// so the event stream stays single-writer and ordered. The `status = 'pending'` guard
-// makes this idempotent and prevents overriding a row the runner already auto-denied on
-// timeout.
+// Approve or deny a paused tool call. The approval row is the source of truth: the
+// runner no longer polls it. This action records the user's decision and then drives
+// the resume by calling the runner's resume endpoint (via `triggerAgentApprovalResume`
+// inside `after()`). The `status = 'pending'` guard makes this idempotent and ensures
+// only the winning caller proceeds — a row the backstop sweep already auto-denied on
+// timeout, or a concurrent duplicate decision, flips nothing and triggers no resume.
 export async function resolveToolApproval(input: {
   sessionId: string;
   toolCallId: string;
@@ -279,6 +283,16 @@ export async function resolveToolApproval(input: {
   if (updated.length === 0) {
     return { ok: false, error: "This request is no longer awaiting approval." } as const;
   }
+
+  // Only the caller that actually flipped the row drives the resume, so a duplicate or
+  // already-resolved decision can't double-trigger the runner.
+  after(() =>
+    triggerAgentApprovalResume({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCallId,
+      workspaceId: workspace.id,
+    }),
+  );
 
   return { ok: true } as const;
 }
