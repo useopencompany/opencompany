@@ -37,6 +37,18 @@ export type ToolUsageState = {
   costUsdMicros: number;
 };
 
+export type ToolApprovalState = {
+  id: number;
+  sessionId: string;
+  messageId: string;
+  toolCallId: string;
+  toolName: string;
+  providerKey: string;
+  permissionGroup: "read" | "post" | "modify" | "admin";
+  status: "pending" | "approved" | "denied";
+  inputPreview: string | null;
+};
+
 export type DelegationSessionState = {
   id: string;
   workspaceId: string;
@@ -61,6 +73,7 @@ export type LeaseDbState = {
   messages: MessageState[];
   usage: UsageState[];
   toolUsage: ToolUsageState[];
+  approvals: ToolApprovalState[];
 };
 
 // In-memory `LeaseWriteStore` that mirrors the atomic SQL semantics against the fake
@@ -125,8 +138,22 @@ export function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseW
       });
       return true;
     },
-    async insertToolApproval(_input, lease) {
+    async insertToolApproval(input, lease) {
       if (!leaseCurrent(lease)) return null;
+      const { approvals } = getState();
+      if (
+        approvals.some(
+          (approval) =>
+            approval.sessionId === input.sessionId && approval.toolCallId === input.toolCallId,
+        )
+      ) {
+        return "conflict";
+      }
+      approvals.push({
+        id: approvals.length + 1,
+        ...input,
+        status: "pending",
+      });
       return "inserted" as const;
     },
     async insertModelUsage(input, lease) {
@@ -164,6 +191,7 @@ export function createLeaseDb(input: {
     messages: [...(input.messages ?? [])],
     usage: [] as UsageState[],
     toolUsage: [] as ToolUsageState[],
+    approvals: [] as ToolApprovalState[],
     ledgerDebits: 0,
   };
 

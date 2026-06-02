@@ -1158,9 +1158,17 @@ export const agentToolApprovals = pgTable(
       table.sessionId,
       table.status,
     ),
+    groupCheck: check(
+      "agent_tool_approvals_group_check",
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+    ),
     statusCheck: check(
       "agent_tool_approvals_status_check",
       sql`${table.status} IN ('pending', 'approved', 'denied')`,
+    ),
+    decisionSourceCheck: check(
+      "agent_tool_approvals_decision_source_check",
+      sql`${table.decisionSource} IS NULL OR ${table.decisionSource} IN ('user', 'timeout', 'abort')`,
     ),
   }),
 );

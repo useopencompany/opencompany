@@ -65,7 +65,7 @@ export type SessionRuntimeState = {
 export type RuntimeToolApprovalState = {
   status: "required" | "approved" | "denied";
   providerKey: string;
-  permissionGroup: "read" | "post" | "modify" | "admin";
+  permissionGroup?: "read" | "post" | "modify" | "admin" | undefined;
   decisionSource?: "user" | "timeout" | "abort" | undefined;
   requestedAt?: string | undefined;
 };
@@ -747,7 +747,7 @@ export function buildRuntimeToolCallsForMessage(
       call.approval = {
         status: decision,
         providerKey: call.approval?.providerKey ?? "",
-        permissionGroup: call.approval?.permissionGroup ?? "admin",
+        permissionGroup: call.approval?.permissionGroup,
         requestedAt: call.approval?.requestedAt,
         decisionSource:
           decisionSource === "timeout" || decisionSource === "abort" ? decisionSource : "user",
@@ -977,10 +977,10 @@ export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" {
+function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" | undefined {
   return value === "read" || value === "post" || value === "modify" || value === "admin"
     ? value
-    : "admin";
+    : undefined;
 }
 
 export function optionalString(value: unknown) {

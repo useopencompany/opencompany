@@ -5,7 +5,12 @@ import {
   normalizeAgentConfig,
 } from "@opencompany/agent-runtime";
 import type { AgentReference } from "@opencompany/agent-runtime/types";
-import { agentSessionEvents, agentSessionMessages, agentSessions, agents } from "@opencompany/db/schema";
+import {
+  agentSessionEvents,
+  agentSessionMessages,
+  agentSessions,
+  agents,
+} from "@opencompany/db/schema";
 import { traceBraintrustStep } from "@opencompany/observability/braintrust";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";

@@ -14,6 +14,8 @@ CREATE TABLE "agent_tool_approvals" (
 	"decision_source" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "agent_tool_approvals_group_check" CHECK ("agent_tool_approvals"."permission_group" IN ('read', 'post', 'modify', 'admin')),
+	CONSTRAINT "agent_tool_approvals_decision_source_check" CHECK ("agent_tool_approvals"."decision_source" IS NULL OR "agent_tool_approvals"."decision_source" IN ('user', 'timeout', 'abort')),
 	CONSTRAINT "agent_tool_approvals_status_check" CHECK ("agent_tool_approvals"."status" IN ('pending', 'approved', 'denied'))
 );
 --> statement-breakpoint

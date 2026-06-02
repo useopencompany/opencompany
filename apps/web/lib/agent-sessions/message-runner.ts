@@ -82,14 +82,11 @@ export async function triggerAgentApprovalResume(input: TriggerAgentApprovalResu
   }
 
   try {
-    await callRunner(
-      `/internal/sessions/${input.sessionId}/approvals/${input.toolCallId}/resume`,
-      {
-        event: "opencompany.direct_resume_approval_failed",
-        session_id: input.sessionId,
-        ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
-      },
-    );
+    await callRunner(`/internal/sessions/${input.sessionId}/approvals/${input.toolCallId}/resume`, {
+      event: "opencompany.direct_resume_approval_failed",
+      session_id: input.sessionId,
+      ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+    });
   } catch (error) {
     logger.warn("Falling back to Inngest runner dispatch", {
       event: "opencompany.runner_request_fallback",

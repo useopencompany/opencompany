@@ -343,11 +343,9 @@ export const sweepExpiredToolApprovals = inngest.createFunction(
         })
         .from(agentToolApprovals)
         .where(
-          and(
-            eq(agentToolApprovals.status, "pending"),
-            lt(agentToolApprovals.requestedAt, cutoff),
-          ),
-        );
+          and(eq(agentToolApprovals.status, "pending"), lt(agentToolApprovals.requestedAt, cutoff)),
+        )
+        .limit(100);
     });
 
     let denied = 0;
@@ -362,10 +360,7 @@ export const sweepExpiredToolApprovals = inngest.createFunction(
             updatedAt: new Date(),
           })
           .where(
-            and(
-              eq(agentToolApprovals.id, approval.id),
-              eq(agentToolApprovals.status, "pending"),
-            ),
+            and(eq(agentToolApprovals.id, approval.id), eq(agentToolApprovals.status, "pending")),
           )
           .returning({ id: agentToolApprovals.id });
         return updated.length > 0;

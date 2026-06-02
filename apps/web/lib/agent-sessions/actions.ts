@@ -28,6 +28,7 @@ import {
 import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
+import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {
   const { user, workspace } = await currentWorkspace();
@@ -281,19 +282,28 @@ export async function resolveToolApproval(input: {
     )
     .returning({ id: agentToolApprovals.id });
 
-  if (updated.length === 0) {
-    return { ok: false, error: "This request is no longer awaiting approval." } as const;
+  const resolution = determineApprovalResolution({
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    decision: input.decision,
+    workspaceId: workspace.id,
+    updatedRows: updated,
+  });
+  if (!resolution.ok) {
+    return { ok: false, error: resolution.error } as const;
   }
 
   // Only the caller that actually flipped the row drives the resume, so a duplicate or
   // already-resolved decision can't double-trigger the runner. This must be awaited:
   // otherwise the UI can optimistically show "denying..." after the approval row was
   // decided, while no resume job/event was actually produced.
-  await triggerAgentApprovalResume({
-    sessionId: input.sessionId,
-    toolCallId: input.toolCallId,
-    workspaceId: workspace.id,
-  });
+  if (resolution.shouldResume) {
+    await triggerAgentApprovalResume({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCallId,
+      workspaceId: workspace.id,
+    });
+  }
 
   return { ok: true } as const;
 }

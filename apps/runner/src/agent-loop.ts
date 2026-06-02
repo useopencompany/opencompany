@@ -7,7 +7,12 @@ import {
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { agentSessionMessages } from "@opencompany/db/schema";
-import { captureException, createLogger, startTimingTrace, timeAsync } from "@opencompany/observability";
+import {
+  captureException,
+  createLogger,
+  startTimingTrace,
+  timeAsync,
+} from "@opencompany/observability";
 import {
   type BraintrustSpan,
   flushBraintrust,
@@ -44,7 +49,6 @@ import {
   persistAssistantCompletion,
   streamAssistantResponse,
 } from "./model-turn";
-import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
 import {
   braintrustError,
   captureTurnCompletedAnalytics,
@@ -54,6 +58,7 @@ import {
   observeRunStep,
   type RunContext,
 } from "./run-context";
+import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
 import { RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
@@ -90,13 +95,13 @@ export {
   createKnownSecretRedactor,
   selectPublishBranch,
 } from "./amp-tool";
+export { createAgentDelegationHandler } from "./delegation";
 export {
   acquireRunLease,
   appendRuntimeEventForLease,
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
 } from "./lease-writes";
-export { createAgentDelegationHandler } from "./delegation";
 export { collectAssistantStream } from "./model-stream-runner";
 export { assertTurnComplete, MAX_MODEL_STEPS } from "./model-turn";
 export { ToolStepLimitExceededError } from "./runner-errors";

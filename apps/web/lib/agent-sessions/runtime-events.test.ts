@@ -935,6 +935,26 @@ describe("buildAssistantTurnParts", () => {
     ).toBe("user");
   });
 
+  it("does not coerce malformed approval permission groups to admin", () => {
+    const parts = buildAssistantTurnParts(
+      { id: "msg_assistant", role: "assistant", content: "", status: "running" },
+      [
+        event(1, "tool.approval_required", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "linear__save_comment",
+          providerKey: "linear",
+          permissionGroup: "owner",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    expect(
+      toolPart?.type === "tool-call" ? toolPart.toolCall.approval?.permissionGroup : null,
+    ).toBeUndefined();
+  });
+
   it("splits streamed text at step boundaries and repositions leading punctuation", () => {
     const parts = buildAssistantTurnParts(
       { id: "msg_assistant", role: "assistant", content: "", status: "running" },

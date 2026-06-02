@@ -2877,6 +2877,14 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "agent_tool_approvals_group_check": {
+          "name": "agent_tool_approvals_group_check",
+          "value": "\"agent_tool_approvals\".\"permission_group\" IN ('read', 'post', 'modify', 'admin')"
+        },
+        "agent_tool_approvals_decision_source_check": {
+          "name": "agent_tool_approvals_decision_source_check",
+          "value": "\"agent_tool_approvals\".\"decision_source\" IS NULL OR \"agent_tool_approvals\".\"decision_source\" IN ('user', 'timeout', 'abort')"
+        },
         "agent_tool_approvals_status_check": {
           "name": "agent_tool_approvals_status_check",
           "value": "\"agent_tool_approvals\".\"status\" IN ('pending', 'approved', 'denied')"

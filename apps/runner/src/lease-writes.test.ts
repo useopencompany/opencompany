@@ -10,10 +10,11 @@ import {
   appendRuntimeEventForLease,
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
+  insertToolApprovalForLease,
   insertToolMessageForLease,
   type LeaseWriteStore,
-  setLeaseWriteStoreForTests,
   StaleRunLeaseError,
+  setLeaseWriteStoreForTests,
 } from "./lease-writes";
 
 const dbMocks = vi.hoisted(() => ({
@@ -381,6 +382,37 @@ describe("lease-guarded writes", () => {
     expect(appendRuntimeEvent).toHaveBeenCalledTimes(1);
   });
 
+  it("deduplicates tool approvals for the same session tool call", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_current" });
+    dbMocks.getDb.mockReturnValue(db);
+    const input = {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      toolCallId: "call_123",
+      toolName: "linear__create_issue",
+      providerKey: "linear",
+      permissionGroup: "post" as const,
+      inputPreview: '{ "title": "Bug" }',
+      leaseId: "run_current",
+      leaseOwner: "runner-test",
+    };
+
+    await expect(insertToolApprovalForLease(input)).resolves.toBe("inserted");
+    await expect(insertToolApprovalForLease(input)).resolves.toBe("conflict");
+
+    expect(db.state.approvals).toHaveLength(1);
+    expect(db.state.approvals[0]).toMatchObject({
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      toolCallId: "call_123",
+      toolName: "linear__create_issue",
+      providerKey: "linear",
+      permissionGroup: "post",
+      status: "pending",
+      inputPreview: '{ "title": "Bug" }',
+    });
+  });
+
   it("rejects event writes when the lease guard writes no row", async () => {
     const db = createLeaseDb({ runLeaseId: "run_current" });
     dbMocks.getDb.mockReturnValue(db);
@@ -421,4 +453,3 @@ describe("lease-guarded writes", () => {
     expect(db.state.messages[0]?.status).toBe("running");
   });
 });
-

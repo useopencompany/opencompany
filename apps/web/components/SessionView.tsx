@@ -1747,7 +1747,7 @@ function ToolApprovalPrompt({
   onDeny,
 }: {
   approval: RuntimeToolCall["approval"];
-  inputPreview: string;
+  inputPreview: string | undefined;
   disabled: boolean;
   optimisticDecision: "approved" | "denied" | null;
   onApprove: () => void;
@@ -1756,8 +1756,12 @@ function ToolApprovalPrompt({
   const providerName = approval
     ? (PROVIDER_PERMISSION_REGISTRY[approval.providerKey]?.displayName ?? approval.providerKey)
     : "";
-  const groupLabel = approval ? PERMISSION_GROUP_LABELS[approval.permissionGroup] : "";
-  const permissionDescription = approval
+  const groupLabel = approval
+    ? approval.permissionGroup
+      ? PERMISSION_GROUP_LABELS[approval.permissionGroup]
+      : "Unknown permission"
+    : "";
+  const permissionDescription = approval?.permissionGroup
     ? permissionDescriptionFor(approval.providerKey, approval.permissionGroup)
     : "";
   const pendingMessage =

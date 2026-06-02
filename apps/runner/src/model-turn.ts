@@ -1,9 +1,6 @@
 import { resolveAgentRuntimeConfig, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
 import type { LogFields } from "@opencompany/observability";
-import {
-  logBraintrustCurrentSpan,
-  logBraintrustSpan,
-} from "@opencompany/observability/braintrust";
+import { logBraintrustCurrentSpan, logBraintrustSpan } from "@opencompany/observability/braintrust";
 import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
 import {

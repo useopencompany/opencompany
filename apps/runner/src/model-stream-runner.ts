@@ -214,19 +214,17 @@ export async function collectAssistantStream(input: {
           // drives the in-chat Approve/Deny buttons. We do NOT block here: the run unwinds
           // via RunSuspendedError, the lease is released, and the tool body runs later in
           // a fresh resume run once the approval is decided.
-          await requireLeaseWrite(
-            insertToolApprovalForLease({
-              sessionId: input.sessionId,
-              messageId: input.assistantMessageId,
-              toolCallId: part.toolCallId,
-              toolName: toolStart.name,
-              providerKey,
-              permissionGroup: group,
-              inputPreview: formatRuntimePreview(toolStart.input),
-              leaseId: input.runLeaseId,
-              leaseOwner: input.runLeaseOwner,
-            }).then(() => true),
-          );
+          await insertToolApprovalForLease({
+            sessionId: input.sessionId,
+            messageId: input.assistantMessageId,
+            toolCallId: part.toolCallId,
+            toolName: toolStart.name,
+            providerKey,
+            permissionGroup: group,
+            inputPreview: formatRuntimePreview(toolStart.input),
+            leaseId: input.runLeaseId,
+            leaseOwner: input.runLeaseOwner,
+          });
           const requestedAtMs = Date.now();
           await requireLeaseWrite(
             appendRuntimeEventForLease({
