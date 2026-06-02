@@ -10,6 +10,7 @@ import {
   // CircleEqual,
   CircleHelp,
   // Download,
+  ExternalLink,
   Inbox,
   ListFilter,
   LogOut,
@@ -45,6 +46,79 @@ const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 // How long the red highlight shows on a session row before it is optimistically removed.
 const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
+const STATUS_PAGE_URL = "https://myopencompany.betteruptime.com";
+const STATUS_PAGE_JSON_URL = `${STATUS_PAGE_URL}/index.json`;
+const STATUS_PAGE_QUERY_STALE_TIME_MS = 60 * 1000;
+const ACCOUNT_MENU_ITEM_CLASS =
+  "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
+
+type StatusPageAggregateState = "operational" | "degraded" | "downtime" | "maintenance";
+
+async function fetchStatusPageAggregateState(): Promise<StatusPageAggregateState> {
+  const response = await fetch(STATUS_PAGE_JSON_URL, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Status page request failed with ${response.status}.`);
+  }
+
+  const payload: unknown = await response.json();
+  const aggregateState = readAggregateState(payload);
+  if (!aggregateState) {
+    throw new Error("Status page response did not include a recognized aggregate state.");
+  }
+  return aggregateState;
+}
+
+function readAggregateState(payload: unknown): StatusPageAggregateState | null {
+  if (!isRecord(payload)) return null;
+  const data = payload.data;
+  if (!isRecord(data)) return null;
+  const attributes = data.attributes;
+  if (!isRecord(attributes)) return null;
+  const aggregateState = attributes.aggregate_state;
+  if (
+    aggregateState === "operational" ||
+    aggregateState === "degraded" ||
+    aggregateState === "downtime" ||
+    aggregateState === "maintenance"
+  ) {
+    return aggregateState;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function statusPageMeta({
+  aggregateState,
+  pending,
+  error,
+}: {
+  aggregateState: StatusPageAggregateState | undefined;
+  pending: boolean;
+  error: boolean;
+}) {
+  if (pending) {
+    return { label: "Checking status", dotClassName: "bg-ink-subtle/45" };
+  }
+  if (error || !aggregateState) {
+    return { label: "Status unavailable", dotClassName: "bg-ink-subtle/45" };
+  }
+  if (aggregateState === "operational") {
+    return { label: "All systems operational", dotClassName: "bg-success" };
+  }
+  if (aggregateState === "downtime") {
+    return { label: "Service disruption", dotClassName: "bg-danger" };
+  }
+  return {
+    label: aggregateState === "maintenance" ? "Maintenance" : "Service degraded",
+    dotClassName: "bg-warning",
+  };
+}
 
 export type SidebarSession = SidebarSessionPayload;
 
@@ -291,6 +365,38 @@ function SessionHistorySkeleton() {
   );
 }
 
+function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
+  const statusQuery = useQuery({
+    queryKey: ["status-page", STATUS_PAGE_JSON_URL],
+    queryFn: fetchStatusPageAggregateState,
+    staleTime: STATUS_PAGE_QUERY_STALE_TIME_MS,
+    retry: false,
+  });
+  const meta = statusPageMeta({
+    aggregateState: statusQuery.data,
+    pending: statusQuery.isPending,
+    error: statusQuery.isError,
+  });
+
+  return (
+    <a
+      href={STATUS_PAGE_URL}
+      target="_blank"
+      rel="noreferrer"
+      onClick={onClose}
+      className={ACCOUNT_MENU_ITEM_CLASS}
+    >
+      <span
+        aria-hidden="true"
+        className={`h-2 w-2 shrink-0 rounded-full shadow-[0_0_0_2px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
+      />
+      <span className="min-w-0 flex-1 truncate">Status</span>
+      <span className="max-w-[118px] truncate text-ink-subtle">{meta.label}</span>
+      <ExternalLink size={13} strokeWidth={1.85} className="shrink-0 text-ink/35" />
+    </a>
+  );
+}
+
 function AccountMenu({
   userName,
   userEmail,
@@ -335,6 +441,7 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
+        <StatusPageMenuItem onClose={onClose} />
         {menuItems.map(({ icon: Icon, label, detail, href, action }) => {
           const inner = (
             <>
@@ -346,12 +453,10 @@ function AccountMenu({
               )}
             </>
           );
-          const className =
-            "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
 
           if (href) {
             return (
-              <Link key={label} href={href} onClick={onClose} className={className}>
+              <Link key={label} href={href} onClick={onClose} className={ACCOUNT_MENU_ITEM_CLASS}>
                 {inner}
               </Link>
             );
@@ -364,7 +469,7 @@ function AccountMenu({
                 action?.();
                 onClose();
               }}
-              className={className}
+              className={ACCOUNT_MENU_ITEM_CLASS}
             >
               {inner}
             </button>
@@ -373,11 +478,7 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        <a
-          href="/auth/sign-out"
-          onClick={onClose}
-          className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
-        >
+        <a href="/auth/sign-out" onClick={onClose} className={ACCOUNT_MENU_ITEM_CLASS}>
           <LogOut size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
           <span>Log Out</span>
         </a>
