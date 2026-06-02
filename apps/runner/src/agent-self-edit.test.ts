@@ -166,6 +166,152 @@ describe("applyAgentSelfUpdate", () => {
     expect(calls.update).toHaveLength(0);
   });
 
+  it("adds a schedule trigger and reports triggers as changed", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({
+        body: "Keep helping.",
+        triggers: [
+          {
+            cron: "0 9 * * 1-5",
+            prompt: "Review yesterday's PRs.",
+            timezone: "America/New_York",
+            enabled: true,
+          },
+        ],
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.changedFields).toContain("triggers");
+    const config = (calls.update[0] as { config: AgentConfig }).config;
+    expect(config.triggers).toEqual([
+      expect.objectContaining({
+        type: "agent.schedule",
+        cron: "0 9 * * 1-5",
+        prompt: "Review yesterday's PRs.",
+        timezone: "America/New_York",
+        enabled: true,
+        id: expect.any(String),
+      }),
+    ]);
+  });
+
+  it("preserves current triggers when triggers is omitted", async () => {
+    const existing: AgentConfig = agentConfig({
+      triggers: [
+        {
+          id: "schedule-1",
+          type: "agent.schedule",
+          cron: "0 9 * * *",
+          timezone: "UTC",
+          prompt: "Daily standup.",
+          enabled: true,
+        },
+      ],
+    });
+    const { db, calls } = createDb({ row: { ...baseRow, config: existing } });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Sharper instructions." }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.changedFields).not.toContain("triggers");
+    const config = (calls.update[0] as { config: AgentConfig }).config;
+    expect(config.triggers).toHaveLength(1);
+    expect(config.triggers[0]).toMatchObject({ id: "schedule-1", cron: "0 9 * * *" });
+  });
+
+  it("clears schedules with [] while preserving a GitHub PR trigger", async () => {
+    const existing: AgentConfig = agentConfig({
+      integrations: {
+        github: {
+          repositories: [{ id: "octo-repo", fullName: "octo/repo", defaultBranch: "main" }],
+        },
+      },
+      triggers: [
+        {
+          id: "schedule-1",
+          type: "agent.schedule",
+          cron: "0 9 * * *",
+          timezone: "UTC",
+          prompt: "Daily standup.",
+          enabled: true,
+        },
+        {
+          id: "octo-repo-pr",
+          type: "github.pull_request",
+          repository: "octo-repo",
+          events: ["opened"],
+          branches: ["main"],
+          enabled: true,
+        },
+      ],
+    });
+    const { db, calls } = createDb({ row: { ...baseRow, config: existing } });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping.", triggers: [] }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.changedFields).toContain("triggers");
+    const config = (calls.update[0] as { config: AgentConfig }).config;
+    expect(config.triggers).toHaveLength(1);
+    expect(config.triggers[0]).toMatchObject({
+      type: "github.pull_request",
+      repository: "octo-repo",
+    });
+  });
+
+  it("rejects an unsupported cron without writing", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({ body: "Keep helping.", triggers: [{ cron: "5 4 * * 0,3", prompt: "Hi." }] }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/unsupported cron/i);
+    expect(calls.update).toHaveLength(0);
+    expect(calls.insert).toHaveLength(0);
+  });
+
+  it("rejects a schedule with an empty prompt without writing", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({ body: "Keep helping.", triggers: [{ cron: "0 9 * * *", prompt: "  " }] }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/prompt/i);
+    expect(calls.update).toHaveLength(0);
+  });
+
+  it("rejects schedule ids that collide with generated ids without writing", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({
+        body: "Keep helping.",
+        triggers: [
+          { cron: "0 9 * * *", prompt: "Daily standup." },
+          { id: "schedule-1", cron: "0 10 * * *", prompt: "Daily follow-up." },
+        ],
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/duplicate trigger id "schedule-1"/i);
+    expect(calls.update).toHaveLength(0);
+    expect(calls.insert).toHaveLength(0);
+  });
+
   it("reports a concurrent modification when the version guard misses", async () => {
     const { db, calls } = createDb({ row: baseRow, updateReturning: [] });
     dbMocks.getDb.mockReturnValue(db);

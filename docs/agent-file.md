@@ -186,11 +186,13 @@ usually omitted and only appears once additional opt-in skills exist.
 
 The first built-in skill, `agent-self-edit`, teaches the agent to evolve its own `.agent`
 definition. With it enabled, the runtime exposes an internal `update_agent_file` tool: the
-agent submits a complete new body (and optionally a new model), the runner validates it
-strictly (rejecting empty bodies, unknown models, or malformed content rather than silently
-falling back to defaults), persists it with a version bump, and queues the same async
-GitHub sync as an editor save. Changes apply to the agent's next session. Title/slug,
-repositories, triggers, and delegated agents are preserved and cannot be changed this way.
+agent submits a complete new body and can optionally provide a new model and the complete
+replacement list of recurring schedule triggers. The runner validates the request strictly
+(rejecting empty bodies, unknown models, malformed content, or invalid schedule trigger
+data rather than silently falling back to defaults), persists it with a version bump, and
+queues the same async GitHub sync as an editor save. Changes apply to the agent's next
+session. Title/slug, repositories, GitHub pull request triggers, and delegated agents are
+preserved and cannot be changed this way.
 As a guardrail, the runner rejects `update_agent_file` until the agent has read the
 `agent-self-edit` SKILL.md (via `read_skill`) in the current session, so the edit is always
 made with the skill's guidance in context.
@@ -239,7 +241,10 @@ triggers:
 
 Scheduled run triggers store a generated preset cron expression, an IANA timezone,
 and the prompt to submit when the schedule fires. The editor generates these from
-the "Run every..." UI; arbitrary cron text is not part of the MVP.
+the "Run every..." UI; arbitrary cron text is not part of the MVP. Agents with the
+`agent-self-edit` skill can replace their complete schedule-trigger list through
+`update_agent_file`; omitting `triggers` preserves current schedules, and passing
+`[]` removes all schedules. GitHub pull request triggers are preserved automatically.
 
 ```yaml
 triggers:

@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import {
+  AGENT_SCHEDULE_TRIGGER_TYPE,
   type AgentConfig,
   type AgentModelId,
+  type AgentScheduleTriggerConfig,
   getAgentModelDefinition,
+  isSupportedScheduleCron,
   normalizeAgentConfig,
+  normalizeScheduleTimezone,
   serializeAgentFile,
   validateAgentFileSource,
 } from "@opencompany/agent-runtime";
@@ -16,7 +20,15 @@ export type AgentSelfUpdateResult =
   | { ok: true; version: number; changedFields: string[]; summary?: string; appliesTo: string }
   | { ok: false; errors: string[] };
 
-type ParsedArgs = { body: string; model?: AgentModelId; summary?: string };
+type ParsedArgs = {
+  body: string;
+  model?: AgentModelId;
+  summary?: string;
+  // Present only when the caller passed `triggers`. Undefined means "keep current schedules";
+  // an empty array means "remove all schedules". Holds only schedule triggers — GitHub PR
+  // triggers are preserved separately and cannot be set through self-edit.
+  scheduleTriggers?: AgentScheduleTriggerConfig[];
+};
 
 // Apply an agent's self-edit of its own .agent definition. Validates synchronously, persists
 // to the authoritative DB row with an optimistic version guard, queues the async GitHub sync
@@ -32,7 +44,7 @@ export async function applyAgentSelfUpdate(input: {
 }): Promise<AgentSelfUpdateResult> {
   const parsed = parseArgs(input.args);
   if (!parsed.ok) return { ok: false, errors: parsed.errors };
-  const { body, model, summary } = parsed.value;
+  const { body, model, summary, scheduleTriggers } = parsed.value;
 
   const db = getDb();
   const [row] = await db
@@ -56,9 +68,19 @@ export async function applyAgentSelfUpdate(input: {
   const current = normalizeAgentConfig(row.config);
 
   // The body is the source of truth: tools and brain follow its @mentions. Title/path,
-  // delegated agents, repositories, triggers, and skills are preserved — they cannot be
-  // changed through self-edit in this version. The model changes only via the explicit
-  // `model` argument; otherwise the current model is kept.
+  // delegated agents, repositories, and skills are preserved — they cannot be changed
+  // through self-edit in this version. The model changes only via the explicit `model`
+  // argument; otherwise the current model is kept. Schedule triggers are replaced wholesale
+  // when `triggers` is provided (omitted = keep current); GitHub PR triggers are always
+  // preserved, since they reference repositories the agent cannot manage here.
+  const preservedNonScheduleTriggers = current.triggers.filter(
+    (trigger) => trigger.type !== AGENT_SCHEDULE_TRIGGER_TYPE,
+  );
+  const nextTriggers =
+    scheduleTriggers === undefined
+      ? current.triggers
+      : [...scheduleTriggers, ...preservedNonScheduleTriggers];
+
   const source = serializeAgentFile({
     title: row.name,
     body,
@@ -66,7 +88,7 @@ export async function applyAgentSelfUpdate(input: {
     agents: current.agents ?? [],
     skills: current.skills ?? [],
     integrations: current.integrations,
-    triggers: current.triggers,
+    triggers: nextTriggers,
   });
 
   const validation = validateAgentFileSource(source);
@@ -189,11 +211,98 @@ function parseArgs(
   const summary =
     typeof record.summary === "string" && record.summary.trim() ? record.summary.trim() : undefined;
 
+  let scheduleTriggers: AgentScheduleTriggerConfig[] | undefined;
+  if (record.triggers !== undefined) {
+    const result = parseScheduleTriggers(record.triggers);
+    if (result.ok) scheduleTriggers = result.value;
+    else errors.push(...result.errors);
+  }
+
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { body, ...(model ? { model } : {}), ...(summary ? { summary } : {}) },
+    value: {
+      body,
+      ...(model ? { model } : {}),
+      ...(summary ? { summary } : {}),
+      ...(scheduleTriggers ? { scheduleTriggers } : {}),
+    },
   };
+}
+
+const CRON_SHAPES_HINT =
+  "Supported shapes: '*/N * * * *' (every N minutes, N=1-59), '0 */N * * *' (every N hours, N in {1,2,3,4,6,8,12}), 'M H * * *' (daily), 'M H * * 1-5' (weekdays), or 'M H * * D' (weekly, D=0-6).";
+
+// Validate the caller's `triggers` argument into schedule triggers, reporting errors instead
+// of silently dropping malformed entries (serializeAgentFile's normalizeTriggers would drop
+// them). Returns an array (possibly empty) so the caller can distinguish "clear all" from the
+// "keep current" case, which is signaled by `triggers` being absent entirely.
+function parseScheduleTriggers(
+  value: unknown,
+): { ok: true; value: AgentScheduleTriggerConfig[] } | { ok: false; errors: string[] } {
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      errors: [
+        "`triggers` must be an array of schedule triggers, or omit it to keep your current schedules.",
+      ],
+    };
+  }
+
+  const errors: string[] = [];
+  const triggers: AgentScheduleTriggerConfig[] = [];
+  const seenIds = new Set<string>();
+
+  value.forEach((item, index) => {
+    const label = `triggers[${index}]`;
+    if (!item || typeof item !== "object") {
+      errors.push(`${label} must be an object with \`cron\` and \`prompt\`.`);
+      return;
+    }
+    const record = item as Record<string, unknown>;
+
+    const cron = typeof record.cron === "string" ? record.cron.trim() : "";
+    if (!cron) {
+      errors.push(`${label}: \`cron\` is required.`);
+    } else if (!isSupportedScheduleCron(cron)) {
+      errors.push(`${label}: unsupported cron "${cron}". ${CRON_SHAPES_HINT}`);
+    }
+
+    const prompt = typeof record.prompt === "string" ? record.prompt.trim() : "";
+    if (!prompt) {
+      errors.push(`${label}: \`prompt\` is required and must be a non-empty string.`);
+    }
+
+    let id = `schedule-${index + 1}`;
+    if (record.id !== undefined) {
+      if (typeof record.id !== "string" || !record.id.trim()) {
+        errors.push(`${label}: \`id\` must be a non-empty string when provided.`);
+      } else {
+        id = record.id.trim();
+      }
+    }
+    if (seenIds.has(id)) {
+      errors.push(`${label}: duplicate trigger id "${id}".`);
+    } else {
+      seenIds.add(id);
+    }
+
+    if (cron && isSupportedScheduleCron(cron) && prompt) {
+      triggers.push({
+        id,
+        type: AGENT_SCHEDULE_TRIGGER_TYPE,
+        cron,
+        timezone: normalizeScheduleTimezone(
+          typeof record.timezone === "string" ? record.timezone : undefined,
+        ),
+        prompt,
+        enabled: record.enabled === true,
+      });
+    }
+  });
+
+  if (errors.length > 0) return { ok: false, errors };
+  return { ok: true, value: triggers };
 }
 
 function diffChangedFields(previous: AgentConfig, next: AgentConfig): string[] {
@@ -202,7 +311,19 @@ function diffChangedFields(previous: AgentConfig, next: AgentConfig): string[] {
   if (previous.model.name !== next.model.name) changed.push("model");
   if (toolIdSignature(previous) !== toolIdSignature(next)) changed.push("tools");
   if (brainSignature(previous) !== brainSignature(next)) changed.push("brain");
+  if (triggerSignature(previous) !== triggerSignature(next)) changed.push("triggers");
   return changed;
+}
+
+function triggerSignature(config: AgentConfig) {
+  return [...config.triggers]
+    .map((trigger) =>
+      trigger.type === AGENT_SCHEDULE_TRIGGER_TYPE
+        ? `schedule:${trigger.id}|${trigger.cron}|${trigger.timezone}|${trigger.enabled}|${trigger.prompt}`
+        : `${trigger.type}:${trigger.id}`,
+    )
+    .sort()
+    .join(",");
 }
 
 function toolIdSignature(config: AgentConfig) {

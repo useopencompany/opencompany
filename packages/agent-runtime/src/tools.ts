@@ -355,8 +355,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "update_agent_file",
     kind: "internal",
-    description:
-      'Update your own .agent definition (your instructions, explicitly selected model, and the tools you reference). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.',
+    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
     parameters: {
       type: "object",
       properties: {
@@ -369,6 +368,41 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           enum: AGENT_MODEL_CATALOG.map((model) => model.id),
           description: "Optional model id to switch to. If omitted, your current model is kept.",
+        },
+        triggers: {
+          type: "array",
+          description:
+            "Optional. The COMPLETE list of your recurring schedule triggers — this replaces all current schedules. Omit to keep your current schedules unchanged; pass [] to remove them all. Only schedule (cron) triggers can be set here; any GitHub PR triggers are preserved automatically.",
+          items: {
+            type: "object",
+            properties: {
+              cron: {
+                type: "string",
+                description:
+                  "Cron expression. Supported shapes only: '*/N * * * *' (every N minutes, N=1-59), '0 */N * * *' (every N hours, N in {1,2,3,4,6,8,12}), 'M H * * *' (daily at H:M), 'M H * * 1-5' (weekdays at H:M), or 'M H * * D' (weekly on day D=0-6 at H:M).",
+              },
+              prompt: {
+                type: "string",
+                description:
+                  "The kickoff message for each scheduled run; a fresh session starts with this as its first user message.",
+              },
+              timezone: {
+                type: "string",
+                description: "Optional IANA timezone (e.g. 'America/New_York'). Defaults to UTC.",
+              },
+              enabled: {
+                type: "boolean",
+                description: "Whether the schedule is active. Defaults to false.",
+              },
+              id: {
+                type: "string",
+                description:
+                  "Optional stable id. Auto-assigned (schedule-1, schedule-2, …) if omitted.",
+              },
+            },
+            required: ["cron", "prompt"],
+            additionalProperties: false,
+          },
         },
         summary: {
           type: "string",
