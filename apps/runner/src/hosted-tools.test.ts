@@ -590,7 +590,7 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const [url] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
     expect(url.searchParams.get("max_results")).toBe("10");
   });
 
@@ -707,7 +707,7 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const [timelineUrl] = fetchMock.mock.calls[1] as [URL, RequestInit];
+    const [timelineUrl] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
     expect(timelineUrl.searchParams.get("max_results")).toBe("10");
   });
 
@@ -772,8 +772,8 @@ describe("executeHostedTool", () => {
       signal: new AbortController().signal,
     });
 
-    const repliesUrl = fetchMock.mock.calls[1]?.[0] as URL;
-    const quotesUrl = fetchMock.mock.calls[2]?.[0] as URL;
+    const [repliesUrl] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
+    const [quotesUrl] = fetchMock.mock.calls[2] as unknown as [URL, RequestInit];
     expect(repliesUrl.searchParams.get("query")).toBe("conversation_id:111 -is:retweet");
     expect(quotesUrl.toString()).toContain("/2/tweets/111/quote_tweets?");
     expect(result.output).toMatchObject({
