@@ -49,6 +49,7 @@ import {
   buildAgentMentionItems,
   findModel,
   findTool,
+  mcpConnectUrl,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -63,6 +64,7 @@ import {
 } from "@/components/ui/select";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
+import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { deleteAgent, updateAgent } from "@/lib/agents/actions";
@@ -212,6 +214,7 @@ function AgentDetailContent({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
+  const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
@@ -235,12 +238,14 @@ function AgentDetailContent({
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
         triggers,
+        mcp: agent.mcp,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
       }),
     [
       agent.config,
       agent.githubIntegrationRepositories,
       agent.workspaceAgents,
+      agent.mcp,
       content,
       hasEditorDraft,
       name,
@@ -270,6 +275,7 @@ function AgentDetailContent({
     if (agent.mcp.mcpEnabled && agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
     return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
       enabledMcpToolIds,
+      mcpEnabled: agent.mcp.mcpEnabled,
       agents: agent.workspaceAgents,
     });
   }, [
@@ -400,6 +406,27 @@ function AgentDetailContent({
     );
     setShowScheduleDialog(false);
     setEditingSchedule(null);
+  };
+
+  const runScheduleNow = (triggerId: string) => {
+    startTransition(async () => {
+      setRunningScheduleId(triggerId);
+      try {
+        const result = await runAgentScheduleNow(agent.id, triggerId);
+        if (!result.ok) {
+          if ("redirectTo" in result) {
+            router.push(result.redirectTo);
+            return;
+          }
+          showError(result.error, "Could not run schedule");
+          return;
+        }
+        seedSessionQueries(queryClient, workspaceId, result.detail);
+        router.push(`/session/${result.session.id}`);
+      } finally {
+        setRunningScheduleId(null);
+      }
+    });
   };
 
   useEffect(() => {
@@ -586,6 +613,10 @@ function AgentDetailContent({
           schedules={configPreview.config.triggers.filter(
             (trigger): trigger is AgentScheduleTriggerConfig => trigger.type === "agent.schedule",
           )}
+          savedSchedules={agent.config.triggers.filter(
+            (trigger): trigger is AgentScheduleTriggerConfig => trigger.type === "agent.schedule",
+          )}
+          runningScheduleId={runningScheduleId}
           saveState={saveState}
           githubStatus={githubSyncStatus}
           githubError={githubSyncError}
@@ -602,6 +633,7 @@ function AgentDetailContent({
             setShowScheduleDialog(true);
           }}
           onRemoveSchedule={removeScheduleTrigger}
+          onRunSchedule={runScheduleNow}
           onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
@@ -819,6 +851,8 @@ function AgentInspector({
   agents,
   afterSession,
   schedules,
+  savedSchedules,
+  runningScheduleId,
   saveState,
   githubStatus,
   githubError,
@@ -829,6 +863,7 @@ function AgentInspector({
   onAddSchedule,
   onEditSchedule,
   onRemoveSchedule,
+  onRunSchedule,
   onDeleteClick,
 }: {
   name: string;
@@ -840,6 +875,8 @@ function AgentInspector({
   agents: AgentReference[];
   afterSession: AgentConfig["afterSession"];
   schedules: AgentScheduleTriggerConfig[];
+  savedSchedules: AgentScheduleTriggerConfig[];
+  runningScheduleId: string | null;
   saveState: SaveState;
   githubStatus: string;
   githubError: string | null;
@@ -850,6 +887,7 @@ function AgentInspector({
   onAddSchedule: () => void;
   onEditSchedule: (trigger: AgentScheduleTriggerConfig) => void;
   onRemoveSchedule: (triggerId: string) => void;
+  onRunSchedule: (triggerId: string) => void;
   onDeleteClick: () => void;
 }) {
   return (
@@ -937,6 +975,8 @@ function AgentInspector({
                 label={tool.label}
                 description={tool.description}
                 tone="tool"
+                needsSetup={tool.needsSetup}
+                connectUrl={tool.connectUrl}
               />
             ))}
           </div>
@@ -963,9 +1003,12 @@ function AgentInspector({
 
       <ScheduleConfigPanel
         schedules={schedules}
+        savedSchedules={savedSchedules}
+        runningScheduleId={runningScheduleId}
         onAdd={onAddSchedule}
         onEdit={onEditSchedule}
         onRemove={onRemoveSchedule}
+        onRun={onRunSchedule}
       />
 
       <GitHubSyncPanel
@@ -1015,14 +1058,20 @@ function AfterSessionConfigItem({ prompt }: { prompt: string }) {
 
 function ScheduleConfigPanel({
   schedules,
+  savedSchedules,
+  runningScheduleId,
   onAdd,
   onEdit,
   onRemove,
+  onRun,
 }: {
   schedules: AgentScheduleTriggerConfig[];
+  savedSchedules: AgentScheduleTriggerConfig[];
+  runningScheduleId: string | null;
   onAdd: () => void;
   onEdit: (trigger: AgentScheduleTriggerConfig) => void;
   onRemove: (triggerId: string) => void;
+  onRun: (triggerId: string) => void;
 }) {
   return (
     <div>
@@ -1059,6 +1108,21 @@ function ScheduleConfigPanel({
                   {trigger.prompt}
                 </div>
                 <div className="mt-3 flex gap-2">
+                  {savedSchedules.some((saved) => scheduleTriggerEquals(saved, trigger)) ? (
+                    <button
+                      type="button"
+                      onClick={() => onRun(trigger.id)}
+                      disabled={runningScheduleId === trigger.id}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[11.5px] font-medium text-ink-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {runningScheduleId === trigger.id ? (
+                        <Loader2 size={11} strokeWidth={2} className="animate-spin" />
+                      ) : (
+                        <Play size={11} strokeWidth={2} />
+                      )}
+                      Run now
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onEdit(trigger)}
@@ -1093,6 +1157,19 @@ function ScheduleConfigPanel({
         </button>
       </div>
     </div>
+  );
+}
+
+function scheduleTriggerEquals(
+  left: AgentScheduleTriggerConfig,
+  right: AgentScheduleTriggerConfig,
+) {
+  return (
+    left.id === right.id &&
+    left.cron === right.cron &&
+    left.timezone === right.timezone &&
+    left.prompt === right.prompt &&
+    left.enabled === right.enabled
   );
 }
 
@@ -1424,14 +1501,19 @@ function ConfigItem({
   label,
   description,
   tone,
+  needsSetup,
+  connectUrl,
 }: {
   icon: LucideIcon;
   label: string;
   description: string;
   tone: "model" | "tool" | "muted";
+  needsSetup?: boolean | undefined;
+  connectUrl?: string | undefined;
 }) {
-  const toneClass =
-    tone === "model"
+  const toneClass = needsSetup
+    ? "border-warning-border bg-warning-bg"
+    : tone === "model"
       ? "border-info-border bg-info-bg"
       : tone === "tool"
         ? "border-success-border bg-success-bg"
@@ -1443,10 +1525,25 @@ function ConfigItem({
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-surface/70 bg-surface/70 text-ink-muted">
           <Icon size={14} strokeWidth={1.9} />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="truncate text-[12.5px] font-medium text-ink">{label}</div>
           <div className="mt-0.5 text-[11.5px] leading-4 text-ink-muted">{description}</div>
         </div>
+        {needsSetup &&
+          (connectUrl ? (
+            // Plain anchor (not next/link): the MCP start route issues an external
+            // OAuth redirect, which needs a full-page navigation. Matches SettingsView.
+            <a
+              href={connectUrl}
+              className="shrink-0 rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning transition-opacity hover:opacity-80"
+            >
+              Needs setup
+            </a>
+          ) : (
+            <span className="shrink-0 rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning">
+              Needs setup
+            </span>
+          ))}
       </div>
     </div>
   );
@@ -1576,6 +1673,20 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
   );
 }
 
+// Flags an MCP-backed tool that is enabled on the agent but not connected in the
+// workspace, so the inspector can show a "Needs setup" badge linking to the connect
+// flow. Mirrors the picker logic in agent-editor/tools.ts.
+function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"]): AgentTool {
+  const connected =
+    (tool.id === "linear" && mcp.linearConfigured) || (tool.id === "slack" && mcp.slackConfigured);
+  if ((tool.id !== "linear" && tool.id !== "slack") || connected) return tool;
+  return {
+    ...tool,
+    needsSetup: true,
+    connectUrl: mcpConnectUrl(tool.id),
+  };
+}
+
 function buildConfigPreview({
   title,
   content,
@@ -1584,6 +1695,7 @@ function buildConfigPreview({
   repositories,
   agents,
   triggers,
+  mcp,
   useDerivedConfig,
 }: {
   title: string;
@@ -1593,6 +1705,7 @@ function buildConfigPreview({
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
   agents: AgentReference[];
   triggers: AgentConfig["triggers"];
+  mcp: AgentDetailPayload["mcp"];
   useDerivedConfig: boolean;
 }) {
   const config = useDerivedConfig
@@ -1620,7 +1733,8 @@ function buildConfigPreview({
     findModel(config.model.name) ?? findModel(fallback.model.name) ?? findModel(DEFAULT_MODEL_ID);
   const tools = config.tools.flatMap((toolConfig) => {
     const tool = findTool(toolConfig.id);
-    return tool ? [tool] : [];
+    if (!tool) return [];
+    return [enrichToolWithSetupState(tool, mcp)];
   });
 
   return {

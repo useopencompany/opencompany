@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { createMCPClient } from "@ai-sdk/mcp";
-import { type AgentConfig, policyMapKey } from "@opencompany/agent-runtime";
+import { type AgentConfig, policyMapKey, resolveToolDecision } from "@opencompany/agent-runtime";
 import { jsonSchema, type ToolSet } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpToolSet } from "./mcp-tools";
@@ -125,19 +125,100 @@ afterEach(() => {
 });
 
 describe("createMcpToolSet", () => {
-  it("fails clearly when Linear MCP is enabled on the agent but not configured", async () => {
-    await expect(createMcpToolSet(baseInput())).rejects.toThrow(
-      "Linear MCP is enabled on this agent, but the workspace MCP beta is off.",
+  it("registers a not-connected stub tool instead of aborting the turn when an integration is not set up", async () => {
+    // MCP beta is off (no experiment row), so Linear can't connect.
+    const mcpTools = await createMcpToolSet(baseInput());
+    const stub = (mcpTools.tools as ToolSet).linear__get_connection_status;
+    expect(stub).toBeDefined();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
     );
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message: "Linear MCP is enabled on this agent, but the workspace MCP beta is off.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+    // Failure is still observed.
+    expect(observability.logger.error).toHaveBeenCalledWith(
+      "Linear MCP connection setup failed",
+      expect.objectContaining({ mcp_server: "linear" }),
+    );
+  });
+
+  it("names the stub so it is auto-allowed (no approval suspend for a no-op)", async () => {
+    const mcpTools = await createMcpToolSet(baseInput());
+    const stubName = Object.keys(mcpTools.tools).find((name) => name.startsWith("linear__"))!;
+    // The stub must resolve to "allow"; an "ask" would suspend the run to approve a no-op.
+    expect(
+      resolveToolDecision({ toolName: stubName, policy: new Map(), suspendable: true }).decision,
+    ).toBe("allow");
+  });
+
+  it("keeps a healthy provider when another provider in the same agent is not set up", async () => {
+    const mixedConfig: AgentConfig = {
+      ...agentConfig,
+      tools: [...agentConfig.tools, ...slackAgentConfig.tools],
+    };
+    // Linear: beta on but no server row -> not configured (fails). Slack: fully connected.
+    db.queryResults = [
+      [{ enabled: true }],
+      [],
+      [{ enabled: true }],
+      [slackServerRow()],
+      [slackOAuthConnectionRow()],
+    ];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      search: {
+        description: "Search Slack",
+        inputSchema: jsonSchema({ type: "object", properties: {} }),
+        execute: vi.fn(async () => ({ messages: [] })),
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(mixedConfig));
+    const tools = mcpTools.tools as ToolSet;
+
+    // Linear degrades to a stub, Slack builds its real tool.
+    expect(tools.linear__get_connection_status).toBeDefined();
+    expect(tools.slack__search).toBeDefined();
+
+    const stubOutput = await tools.linear__get_connection_status?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(stubOutput).toMatchObject({
+      ok: false,
+      error: {
+        code: "mcp_not_connected",
+        message: "Linear MCP is enabled on this agent, but Linear is not configured.",
+      },
+    });
   });
 
   it("surfaces missing encryption key configuration for Linear MCP credentials", async () => {
     db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
     vi.unstubAllEnvs();
 
-    await expect(createMcpToolSet(baseInput())).rejects.toThrow(
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+    // Infra misconfig (missing encryption key) also degrades to a stub rather than
+    // killing the turn — but it is still logged + reported so ops gets alerted.
+    const mcpTools = await createMcpToolSet(baseInput());
+    const stubOutput = await mcpTools.tools.linear__get_connection_status?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
     );
+    expect(stubOutput).toMatchObject({
+      ok: false,
+      error: {
+        code: "mcp_not_connected",
+        message: "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+      },
+    });
     expect(observability.logger.error).toHaveBeenCalledWith(
       "Linear MCP connection setup failed",
       expect.objectContaining({
