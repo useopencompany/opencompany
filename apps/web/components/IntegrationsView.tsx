@@ -13,10 +13,12 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
+import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import {
   disconnectGitHubIntegrationAction,
   refreshGitHubRepositories,
 } from "@/lib/integrations/actions";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 type IntegrationStatus =
   | "not_connected"
@@ -86,8 +88,10 @@ const INTEGRATIONS: IntegrationDefinition[] = [
 
 export default function IntegrationsView({
   integrations,
+  toolPolicies,
 }: {
   integrations: WorkspaceIntegrationState;
+  toolPolicies: WorkspaceToolPolicyOverrides;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -166,6 +170,7 @@ export default function IntegrationsView({
                 integration={integration}
                 state={integrationState(integration.id, integrations)}
                 integrations={integrations}
+                policyOverrides={toolPolicies[integration.id]}
               />
             ))}
           </div>
@@ -188,10 +193,12 @@ function IntegrationCard({
   integration,
   state,
   integrations,
+  policyOverrides,
 }: {
   integration: IntegrationDefinition;
   state: IntegrationCardState;
   integrations: WorkspaceIntegrationState;
+  policyOverrides: WorkspaceToolPolicyOverrides[string] | undefined;
 }) {
   const Icon = integration.icon;
   const StatusIcon = state.status === "connected" ? CheckCircle2 : ShieldAlert;
@@ -230,6 +237,9 @@ function IntegrationCard({
       <div className="mt-4 border-t border-border-subtle pt-4">
         <IntegrationControls provider={integration.id} integrations={integrations} />
       </div>
+      {state.status === "connected" ? (
+        <ToolPolicyEditor providerKey={integration.id} overrides={policyOverrides} />
+      ) : null}
     </section>
   );
 }

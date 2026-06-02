@@ -3,6 +3,7 @@ export type AgentSessionStatus =
   | "provisioning"
   | "ready"
   | "running"
+  | "awaiting_approval"
   | "aborting"
   | "archiving"
   | "archived"
@@ -82,6 +83,28 @@ export type AgentRuntimeEvent =
         outputPreview?: string;
         output?: unknown;
         error: { message: string; code: string; recoverable: boolean };
+      };
+    }
+  | {
+      type: "tool.approval_required";
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        name: string;
+        providerKey: string;
+        permissionGroup: "read" | "post" | "modify" | "admin";
+        inputPreview?: string;
+        requestedAt: string;
+      };
+    }
+  | {
+      type: "tool.approval_resolved";
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        name: string;
+        decision: "approved" | "denied";
+        decisionSource: "user" | "timeout" | "abort";
       };
     }
   | {
