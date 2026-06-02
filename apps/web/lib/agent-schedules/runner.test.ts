@@ -4,7 +4,7 @@ import { agentScheduleRuns } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatchAgentAfterSessionCheck } from "@/lib/agent-sessions/events";
 import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
-import { sweepAgentSchedules } from "./runner";
+import { runScheduledAgent, sweepAgentSchedules } from "./runner";
 
 vi.mock("@opencompany/agent-runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/agent-runtime")>();
@@ -75,6 +75,53 @@ describe("sweepAgentSchedules", () => {
     });
   });
 
+  it("creates a visible session and schedule run for a manual scheduledFor time", async () => {
+    const db = fakeDb({ reserveRows: [{ id: 1, reservationToken: "claim_123" }] });
+    getDbMock.mockReturnValue(db as never);
+    const scheduledFor = new Date("2026-06-01T12:34:56.789Z");
+
+    const result = await runScheduledAgent({
+      agent: fakeAgent(),
+      trigger: fakeScheduleTrigger(),
+      scheduledFor,
+      userId: "usr_clicked",
+    });
+
+    expect(result).toMatchObject({ status: "started", sessionId: "ses_schedule" });
+    expect(db.insertedScheduleRun).toMatchObject({
+      agentId: "agt_123",
+      triggerId: "weekday-brief",
+      scheduledFor,
+    });
+    expect(db.batch).toHaveBeenCalledOnce();
+    expect(db.batch.mock.calls[0]?.[0]).toContainEqual(
+      expect.objectContaining({
+        value: expect.objectContaining({
+          id: "ses_schedule",
+          userId: "usr_clicked",
+          title: "Scheduled: Review open priorities.",
+        }),
+      }),
+    );
+    expect(db.batch.mock.calls[0]?.[0]).toContainEqual(
+      expect.objectContaining({
+        value: expect.objectContaining({
+          sessionId: "ses_schedule",
+          type: "session.scheduled",
+          payload: expect.objectContaining({
+            triggerId: "weekday-brief",
+            scheduledFor: scheduledFor.toISOString(),
+          }),
+        }),
+      }),
+    );
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_schedule",
+      messageId: "msg_schedule",
+      workspaceId: "wks_123",
+    });
+  });
+
   it("does not dispatch duplicate schedule runs", async () => {
     const db = fakeDb({ reserveRows: [] });
     getDbMock.mockReturnValue(db as never);
@@ -127,6 +174,51 @@ describe("sweepAgentSchedules", () => {
   });
 });
 
+function fakeScheduleTrigger() {
+  return {
+    id: "weekday-brief",
+    type: "agent.schedule" as const,
+    cron: "0 9 * * 1-5",
+    timezone: "UTC",
+    prompt: "Review open priorities.",
+    enabled: true,
+  };
+}
+
+function fakeAgent() {
+  const now = new Date("2026-06-01T00:00:00.000Z");
+  return {
+    id: "agt_123",
+    workspaceId: "wks_123",
+    path: "agents/briefing/briefing.agent",
+    name: "Briefing",
+    body: "Prepare updates.",
+    commitSha: null,
+    contentHash: "hash_123",
+    version: 1,
+    githubBlobSha: null,
+    githubCommitSha: null,
+    githubSyncedHash: null,
+    githubSyncedAt: null,
+    githubSyncStatus: "synced",
+    githubSyncError: null,
+    content: { type: "doc", content: [] },
+    config: {
+      schemaVersion: "agent.v1" as const,
+      title: "Briefing",
+      instructions: "Prepare updates.",
+      model: { provider: "vercel-ai-gateway" as const, name: "openai/gpt-5.4-mini" as const },
+      tools: [],
+      brain: [],
+      agents: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [fakeScheduleTrigger()],
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function fakeDb({
   reserveRows,
 }: {
@@ -140,31 +232,7 @@ function fakeDb({
       from: vi.fn(() => ({
         innerJoin: vi.fn().mockResolvedValue([
           {
-            agent: {
-              id: "agt_123",
-              workspaceId: "wks_123",
-              name: "Briefing",
-              config: {
-                schemaVersion: "agent.v1",
-                title: "Briefing",
-                instructions: "Prepare updates.",
-                model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
-                tools: [],
-                brain: [],
-                agents: [],
-                integrations: { github: { repositories: [] } },
-                triggers: [
-                  {
-                    id: "weekday-brief",
-                    type: "agent.schedule",
-                    cron: "0 9 * * 1-5",
-                    timezone: "UTC",
-                    prompt: "Review open priorities.",
-                    enabled: true,
-                  },
-                ],
-              },
-            },
+            agent: fakeAgent(),
             workspace: {
               id: "wks_123",
               createdByUserId: "usr_123",

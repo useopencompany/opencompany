@@ -68,6 +68,10 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   youtube_get_transcript: 6,
   youtube_get_channel: 6,
   youtube_list_channel_videos: 4,
+  tiktok_get_metadata: 8,
+  tiktok_get_transcript: 6,
+  instagram_get_metadata: 8,
+  instagram_get_transcript: 6,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;

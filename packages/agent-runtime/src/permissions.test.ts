@@ -18,6 +18,19 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("shell")).toEqual({ providerKey: "system", group: "admin" });
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
     expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "modify" });
+    expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
+    expect(classifyRuntimeTool("youtube_get_transcript")).toEqual({
+      providerKey: "youtube",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("tiktok_get_metadata")).toEqual({
+      providerKey: "tiktok",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("instagram_get_transcript")).toEqual({
+      providerKey: "instagram",
+      group: "read",
+    });
   });
 
   it("treats delegation and tool help as never gated", () => {

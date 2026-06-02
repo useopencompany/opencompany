@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { Eraser, type LucideIcon } from "lucide-react";
+import { Eraser, type LucideIcon, MessageSquarePlus } from "lucide-react";
 import type { useRouter } from "next/navigation";
 import type { useToast } from "@/components/ToastProvider";
 import { createAgentSession, createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
@@ -66,6 +66,46 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       setInput("");
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(`/session/${result.session.id}`);
+    },
+  },
+  {
+    id: "btw",
+    trigger: "/btw",
+    title: "Start a session on the side",
+    description: "Spin up a new session with this agent without leaving this one",
+    icon: MessageSquarePlus,
+    keywords: ["background", "side", "parallel", "by the way", "new", "spawn", "aside"],
+    run: async ({ session, workspaceId, router, queryClient, setInput, showToast, args }) => {
+      // Same as /clear (fresh session with this agent), but we stay put instead of
+      // navigating: the new session surfaces in the sidebar and via the toast's "Open".
+      // Text after the command becomes the new session's first message; no text → a
+      // clean empty session you can open later.
+      const prompt = args.trim();
+      const result = prompt
+        ? await createAgentSessionFromPrompt(session.agentId, prompt)
+        : await createAgentSession(session.agentId);
+      if (!result.ok) {
+        // Unlike /clear, never redirect (e.g. to billing) — a /btw user is mid-flow and
+        // staying put is the point. The error message already says what to do.
+        showToast({
+          title: "Couldn't start a new session",
+          description: result.error,
+          tone: "error",
+        });
+        return;
+      }
+      setInput("");
+      // Surfaces the new session in the sidebar list without navigating to it.
+      seedSessionQueries(queryClient, workspaceId, result.detail);
+      const sessionId = result.session.id;
+      showToast({
+        title: prompt ? "Working on it in a new session" : "New session started",
+        ...(prompt ? { description: prompt } : {}),
+        action: {
+          label: "Open",
+          onClick: () => router.push(`/session/${sessionId}`),
+        },
+      });
     },
   },
 ];
