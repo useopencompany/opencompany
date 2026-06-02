@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import type { IconComponent } from "@/components/agent-editor/provider-icons";
 import {
   AGENT_MODELS,
   type AgentMentionItem,
@@ -180,6 +181,7 @@ function AgentDetailContent({
     ],
   );
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
+  const SelectedModelIcon = selectedModel.icon;
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
     agent.githubSyncStatus === optimisticGitHubSync.baseStatus &&
@@ -385,7 +387,7 @@ function AgentDetailContent({
             >
               <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-[#ececea]/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <Brain size={12} strokeWidth={1.9} className="shrink-0" />
+                  <SelectedModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
                   <span className="truncate">{selectedModel.displayLabel}</span>
                 </span>
               </SelectTrigger>
@@ -399,11 +401,17 @@ function AgentDetailContent({
                   return (
                     <SelectGroup key={group}>
                       <SelectLabel>{group}</SelectLabel>
-                      {models.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          {model.displayLabel}
-                        </SelectItem>
-                      ))}
+                      {models.map((model) => {
+                        const ModelIcon = model.icon;
+                        return (
+                          <SelectItem key={model.id} value={model.id}>
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <ModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
+                              <span className="truncate">{model.displayLabel}</span>
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                       {index === 0 ? <SelectSeparator /> : null}
                     </SelectGroup>
                   );
@@ -686,7 +694,7 @@ function ConfigItem({
   description,
   tone,
 }: {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
   description: string;
   tone: "model" | "tool" | "muted";
