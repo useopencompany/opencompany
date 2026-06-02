@@ -60,7 +60,7 @@ describe("Sidebar status menu item", () => {
     renderSidebar();
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
 
-    const statusLink = screen.getByRole("link", { name: /status/i });
+    const statusLink = screen.getByRole("link", { name: /all systems operational/i });
     expect(statusLink).toHaveAttribute("href", statusPageUrl);
     expect(statusLink).toHaveAttribute("target", "_blank");
     expect(statusLink).toHaveAttribute("rel", "noreferrer");
@@ -73,7 +73,7 @@ describe("Sidebar status menu item", () => {
     renderSidebar();
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
 
-    expect(await screen.findByText("Operational")).toBeInTheDocument();
+    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
   });
 
   it("keeps the status link available when the status fetch fails", async () => {
@@ -83,8 +83,8 @@ describe("Sidebar status menu item", () => {
     renderSidebar();
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
 
-    expect(await screen.findByText("Unavailable")).toBeInTheDocument();
-    const statusLink = screen.getByRole("link", { name: /status/i });
+    expect(await screen.findByText("Status unavailable")).toBeInTheDocument();
+    const statusLink = screen.getByRole("link", { name: /status unavailable/i });
     expect(statusLink).toHaveAttribute("href", statusPageUrl);
   });
 });

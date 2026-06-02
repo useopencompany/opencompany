@@ -10,7 +10,6 @@ import {
   // CircleEqual,
   CircleHelp,
   // Download,
-  ExternalLink,
   Inbox,
   ListFilter,
   LogOut,
@@ -104,28 +103,28 @@ function statusPageMeta({
 }) {
   if (pending) {
     return {
-      label: "Checking",
+      label: "Checking status",
       description: "Checking status",
       dotClassName: "bg-ink-subtle/45",
     };
   }
   if (error || !aggregateState) {
     return {
-      label: "Unavailable",
+      label: "Status unavailable",
       description: "Status unavailable",
       dotClassName: "bg-ink-subtle/45",
     };
   }
   if (aggregateState === "operational") {
     return {
-      label: "Operational",
+      label: "All systems operational",
       description: "All systems operational",
       dotClassName: "bg-success",
     };
   }
   if (aggregateState === "downtime") {
     return {
-      label: "Disruption",
+      label: "Service disruption",
       description: "Service disruption",
       dotClassName: "bg-danger",
     };
@@ -138,7 +137,7 @@ function statusPageMeta({
     };
   }
   return {
-    label: "Degraded",
+    label: "Service degraded",
     description: "Service degraded",
     dotClassName: "bg-warning",
   };
@@ -408,16 +407,14 @@ function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
       target="_blank"
       rel="noreferrer"
       onClick={onClose}
-      className={ACCOUNT_MENU_ITEM_CLASS}
+      className="mt-3 flex min-w-0 items-center gap-2 rounded-md py-1 text-[12.5px] leading-4 text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       title={meta.description}
     >
       <span
         aria-hidden="true"
-        className={`h-2 w-2 shrink-0 rounded-full shadow-[0_0_0_3px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
+        className={`h-1.5 w-1.5 shrink-0 rounded-full shadow-[0_0_0_2px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
       />
-      <span className="shrink-0">System status</span>
-      <span className="ml-auto shrink-0 text-[12.5px] text-ink-subtle">{meta.label}</span>
-      <ExternalLink size={13} strokeWidth={1.85} className="shrink-0 text-ink/35" />
+      <span className="truncate">{meta.label}</span>
     </a>
   );
 }
@@ -449,12 +446,13 @@ function AccountMenu({
   ];
 
   return (
-    <div className="absolute bottom-[52px] left-3 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
+    <div className="absolute bottom-[60px] left-1 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
       <div className="px-3 pb-3 pt-3">
         <div className="text-[13.5px] font-medium leading-[1.2] tracking-[-0.01em] text-ink">
           {userName}
         </div>
         <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
+        <StatusPageMenuItem onClose={onClose} />
         {/* <button
           type="button"
           onClick={onClose}
@@ -466,7 +464,6 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        <StatusPageMenuItem onClose={onClose} />
         {menuItems.map(({ icon: Icon, label, detail, href, action }) => {
           const inner = (
             <>
