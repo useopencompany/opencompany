@@ -1,22 +1,48 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createLeaseDb,
+  createStateLeaseWriteStore,
+  type LeaseDbState,
+} from "./agent-loop-test-support";
+import { appendRuntimeEvent } from "./events";
+import {
+  acquireRunLease,
   appendRuntimeEventForLease,
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
   insertToolMessageForLease,
   type LeaseWriteStore,
+  setLeaseWriteStoreForTests,
   StaleRunLeaseError,
 } from "./lease-writes";
+
+const dbMocks = vi.hoisted(() => ({
+  getDb: vi.fn(),
+}));
 
 // The lease-guarded helpers route their durable event append through
 // `events.appendRuntimeEvent` (mocked here so it never touches a database) and their
 // row writes through an injected `LeaseWriteStore`. That lets us reproduce the exact
 // TOCTOU the atomic statements close: reclaim the lease on another owner, then attempt
 // a guarded write under the old lease, and assert the database refused it.
-vi.mock("./db", () => ({ getDb: () => ({}) }));
+vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
 vi.mock("./events", () => ({
   appendRuntimeEvent: vi.fn(async () => ({ id: 1 })),
+  publishTransientRuntimeEvent: vi.fn((event) => ({ ...event, id: null, transient: true })),
 }));
+
+beforeEach(() => {
+  setLeaseWriteStoreForTests(
+    createStateLeaseWriteStore(() => (dbMocks.getDb() as { state: LeaseDbState }).state),
+  );
+});
+
+afterEach(() => {
+  setLeaseWriteStoreForTests(undefined);
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
 
 type StoredMessage = {
   id: string;
@@ -271,3 +297,128 @@ describe("atomic lease-guarded writes", () => {
     ).resolves.toBe(false);
   });
 });
+
+describe("run lease acquisition", () => {
+  it("blocks acquisition while a non-expired lease is active", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T12:00:00.000Z"));
+    const db = createLeaseDb({
+      runLeaseId: "run_active",
+      runLeaseExpiresAt: new Date("2026-05-22T12:05:00.000Z"),
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      acquireRunLease({
+        sessionId: "ses_123",
+        messageId: "msg_user",
+        leaseId: "run_next",
+        leaseOwner: "runner-test",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+      }),
+    ).resolves.toBe(false);
+
+    expect(db.state.session.runLeaseId).toBe("run_active");
+  });
+
+  it("replaces an expired lease", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T12:00:00.000Z"));
+    const db = createLeaseDb({
+      runLeaseId: "run_stale",
+      runLeaseExpiresAt: new Date("2026-05-22T11:59:00.000Z"),
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      acquireRunLease({
+        sessionId: "ses_123",
+        messageId: "msg_user",
+        leaseId: "run_next",
+        leaseOwner: "runner-test",
+        modelProvider: "vercel-ai-gateway",
+        modelName: "openai/gpt-5.4-mini",
+      }),
+    ).resolves.toBe(true);
+
+    expect(db.state.session.runLeaseId).toBe("run_next");
+    expect(db.state.session.runLeaseOwner).toBe("runner-test");
+    expect(db.state.session.runLeaseMessageId).toBe("msg_user");
+    expect(db.state.session.runLeaseExpiresAt).toEqual(new Date("2026-05-22T12:15:00.000Z"));
+  });
+});
+
+describe("lease-guarded writes", () => {
+  it("deduplicates assistant responses for the same user message", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      createAssistantMessageForLease({
+        id: "msg_assistant_1",
+        sessionId: "ses_123",
+        responseToMessageId: "msg_user",
+        leaseId: "run_123",
+        leaseOwner: "runner-test",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      createAssistantMessageForLease({
+        id: "msg_assistant_2",
+        sessionId: "ses_123",
+        responseToMessageId: "msg_user",
+        leaseId: "run_123",
+        leaseOwner: "runner-test",
+      }),
+    ).resolves.toBe(false);
+
+    expect(db.state.messages).toHaveLength(1);
+    expect(db.state.messages[0]).toMatchObject({
+      id: "msg_assistant_1",
+      responseToMessageId: "msg_user",
+    });
+    expect(appendRuntimeEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects event writes when the lease guard writes no row", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_current" });
+    dbMocks.getDb.mockReturnValue(db);
+    // The atomic append inserts only while the lease is current; a lost lease writes
+    // nothing and resolves to null. appendRuntimeEventForLease must surface that as a
+    // rejected lease write rather than a success.
+    vi.mocked(appendRuntimeEvent).mockResolvedValueOnce(null);
+
+    await expect(
+      appendRuntimeEventForLease({
+        sessionId: "ses_123",
+        leaseId: "run_stale",
+        leaseOwner: "runner-test",
+        type: "session.status",
+        payload: { status: "running" },
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("rejects assistant completion under the wrong lease", async () => {
+    const db = createLeaseDb({
+      runLeaseId: "run_current",
+      messages: [{ id: "msg_assistant", sessionId: "ses_123", status: "running" }],
+    });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await expect(
+      completeAssistantMessageForLease({
+        sessionId: "ses_123",
+        assistantMessageId: "msg_assistant",
+        leaseId: "run_stale",
+        leaseOwner: "runner-test",
+        content: "done",
+        modelMessage: { role: "assistant", content: "done" },
+      }),
+    ).rejects.toThrow("Run lease is no longer current.");
+
+    expect(db.state.messages[0]?.status).toBe("running");
+  });
+});
+

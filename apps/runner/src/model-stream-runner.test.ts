@@ -1,27 +1,39 @@
 import type { TextStreamPart, ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLeaseDb, usage } from "./agent-loop-test-support";
+import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { collectAssistantStream } from "./model-stream-runner";
+import { assertTurnComplete, MAX_MODEL_STEPS } from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
   type RunControlStore,
   type RunLeaseState,
 } from "./run-control";
-import { RunSuspendedError } from "./runner-errors";
+import { RunSuspendedError, ToolStepLimitExceededError } from "./runner-errors";
+import { throwIfStreamErrorPart } from "./stream-helpers";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
+const dbMocks = vi.hoisted(() => ({
+  getDb: vi.fn(),
+}));
 const usageRecorder = vi.hoisted(() => ({
   recordStepUsage: vi.fn(async () => {}),
 }));
 const eventMocks = vi.hoisted(() => ({
-  publishTransientRuntimeEvent: vi.fn(),
+  appendRuntimeEvent: vi.fn(async (_db: unknown, _event: unknown) => ({ id: 1 })),
+  publishTransientRuntimeEvent: vi.fn((event: unknown) => event),
 }));
 const leaseWrites = vi.hoisted(() => ({
-  appendRuntimeEventForLease: vi.fn(async () => true),
+  appendRuntimeEventForLease: vi.fn(async (event: unknown) => {
+    await eventMocks.appendRuntimeEvent(undefined, event);
+    return true;
+  }),
   insertToolApprovalForLease: vi.fn(async () => "inserted"),
   requireLeaseWrite: vi.fn(async (value: unknown) => value),
 }));
 
+vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
 vi.mock("./usage-recorder", () => usageRecorder);
 vi.mock("./events", () => eventMocks);
 vi.mock("./lease-writes", () => leaseWrites);
@@ -426,3 +438,151 @@ function createStream(
 function streamPart(part: Record<string, unknown>) {
   return part as TextStreamPart<ToolSet>;
 }
+
+describe("stream error handling", () => {
+  it("records terminal stream metadata from finish-step parts", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    async function* stream() {
+      yield { type: "text-delta", text: "Working" } as never;
+      yield {
+        type: "finish-step",
+        finishReason: "tool-calls",
+        rawFinishReason: "tool_calls",
+        response: {
+          id: "response_123",
+          timestamp: new Date("2026-05-22T12:00:00.000Z"),
+          modelId: "openai/gpt-5.4-mini",
+        },
+        usage: usage(100, 20),
+      } as never;
+    }
+
+    const result = await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      exposeReasoningSummary: false,
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      toolStartCoordinator: createToolStartCoordinator(),
+      policy: new Map(),
+      suspendable: true,
+    });
+
+    expect(result).toMatchObject({
+      assistantContent: "Working",
+      stepCount: 1,
+      lastFinishReason: "tool-calls",
+      lastRawFinishReason: "tool_calls",
+      lastStepEndedWithToolCalls: true,
+    });
+  });
+
+  it("persists pending text before tool starts even when tool input arrives first", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const toolStartCoordinator = createToolStartCoordinator();
+    toolStartCoordinator.record({
+      toolCallId: "call_search",
+      name: "exa_search",
+      input: { query: "YC agent discussion" },
+    });
+
+    async function* stream() {
+      yield { type: "text-delta", text: "I'll search, then distill the" } as never;
+      yield {
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "exa_search",
+        input: { query: "fallback input" },
+      } as never;
+      yield { type: "text-delta", text: " themes." } as never;
+    }
+
+    await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      exposeReasoningSummary: false,
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      toolStartCoordinator,
+      policy: new Map(),
+      suspendable: true,
+    });
+
+    const transientEvents = vi
+      .mocked(publishTransientRuntimeEvent)
+      .mock.calls.map((call) => call[0]);
+    const durableEvents = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
+    expect(transientEvents.map((event) => event.type)).toEqual(["message.delta", "message.delta"]);
+    expect(durableEvents.map((event) => event.type)).toEqual(["tool.started"]);
+    expect(transientEvents[0]).toMatchObject({
+      payload: { delta: "I'll search, then distill the" },
+    });
+    expect(durableEvents[0]).toMatchObject({
+      payload: {
+        toolCallId: "call_search",
+        name: "exa_search",
+        input: { query: "YC agent discussion" },
+      },
+    });
+  });
+
+  it("rejects turn completion when the model is still requesting tools at the step cap", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Partial progress.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "list_files",
+            input: {},
+          },
+        ],
+        lastStepEndedWithToolCalls: true,
+        stepCount: MAX_MODEL_STEPS,
+      }),
+    ).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("allows normal turns that end with final assistant text", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Done.",
+        assistantReplayParts: [{ type: "text", text: "Done." }],
+        lastStepEndedWithToolCalls: false,
+        stepCount: 2,
+      }),
+    ).not.toThrow();
+  });
+
+  it("throws model stream errors instead of allowing blank completions", () => {
+    expect(() =>
+      throwIfStreamErrorPart({ type: "error", error: new Error("gateway failed") } as never),
+    ).toThrow("gateway failed");
+  });
+
+  it("throws tool stream errors with a fallback message", () => {
+    expect(() =>
+      throwIfStreamErrorPart({
+        type: "tool-error",
+        toolName: "list_files",
+        toolCallId: "tool_123",
+        input: {},
+        error: null,
+      } as never),
+    ).toThrow("Tool list_files failed.");
+  });
+});

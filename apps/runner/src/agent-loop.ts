@@ -1,31 +1,13 @@
 import {
-  newAgentSessionId,
   newAgentSessionMessageId,
-  newRunLeaseId,
   normalizeAgentConfig,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   resolveAgentRuntimeConfig,
-  type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
-import type { AgentReference } from "@opencompany/agent-runtime/types";
-import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import {
-  agentSessionEvents,
-  agentSessionMessages,
-  agentSessions,
-  agents,
-  workspaceCreditLedger,
-} from "@opencompany/db/schema";
-import {
-  captureException,
-  createLogger,
-  endTimingTrace,
-  type LogFields,
-  startTimingTrace,
-  timeAsync,
-} from "@opencompany/observability";
+import { agentSessionMessages } from "@opencompany/db/schema";
+import { captureException, createLogger, startTimingTrace, timeAsync } from "@opencompany/observability";
 import {
   type BraintrustSpan,
   flushBraintrust,
@@ -34,19 +16,17 @@ import {
   traceBraintrust,
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
-import type { ModelMessage, StopCondition, ToolSet } from "ai";
-import * as ai from "ai";
-import { and, asc, eq, sql } from "drizzle-orm";
-import { clearActiveRun, setActiveRun } from "./active-runs";
+import type { ModelMessage } from "ai";
+import { asc, eq } from "drizzle-orm";
+import { setActiveRun } from "./active-runs";
 import { syncBrainFromSandbox } from "./brain";
-import { getDb } from "./db";
+import { createAgentDelegationHandler } from "./delegation";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import { validateHostedToolEnvironment } from "./hosted-tools";
 import {
   acquireRunLease,
   appendRuntimeEventForLease,
-  completeAssistantMessageForLease,
   createAssistantMessageForLease,
   failRunLease,
   releaseRunLease,
@@ -56,25 +36,26 @@ import {
   updateSandboxForLease,
 } from "./lease-writes";
 import { createMcpToolSet } from "./mcp-tools";
+import { appendAssistantTextPart, buildModelMessages } from "./model-messages";
 import {
-  appendAssistantTextPart,
-  buildAssistantModelMessage,
-  buildModelMessages,
-  toPersistedModelMessage,
-} from "./model-messages";
-import { collectAssistantStream } from "./model-stream-runner";
+  assertTurnComplete,
+  persistAssistantCompletion,
+  streamAssistantResponse,
+} from "./model-turn";
+import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
 import {
-  createRunControlGate,
-  RunAbortError,
-  type RunControlCheck,
-  RunLeaseLostError,
-} from "./run-control";
-import { RunSuspendedError, ToolStepLimitExceededError } from "./runner-errors";
+  braintrustError,
+  captureTurnCompletedAnalytics,
+  createLeaseAbortCheck,
+  createRunContext,
+  finalizeRun,
+  observeRunStep,
+  type RunContext,
+} from "./run-context";
+import { RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
-  abortSession,
   appendAfterSessionSkipped,
-  archiveSession,
   buildAfterSessionPrompt,
   completeAfterSessionRun,
   createAfterSessionRun,
@@ -87,22 +68,17 @@ import {
   loadSession,
   loadUserMessage,
   optionalUserName,
-  parkSandboxWhenIdle,
   setStatus,
-  startSession,
 } from "./session-lifecycle";
-import { rowsFromExecute } from "./sql-exec";
-import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { loadToolApproval } from "./tool-approvals";
 import {
   createHostedToolBudget,
   createToolSet,
   executeRuntimeTool,
   persistDeniedToolResult,
-  pickRuntimeTools,
 } from "./tool-dispatcher";
 import { loadWorkspaceToolPolicy } from "./tool-policies";
-import { createToolStartCoordinator, type ToolStartCoordinator } from "./tool-start-coordinator";
+import { createToolStartCoordinator } from "./tool-start-coordinator";
 
 export {
   buildAmpCommand,
@@ -118,7 +94,9 @@ export {
   completeAssistantMessageForLease,
   createAssistantMessageForLease,
 } from "./lease-writes";
+export { createAgentDelegationHandler } from "./delegation";
 export { collectAssistantStream } from "./model-stream-runner";
+export { assertTurnComplete, MAX_MODEL_STEPS } from "./model-turn";
 export { ToolStepLimitExceededError } from "./runner-errors";
 export { abortSession, archiveSession, startSession } from "./session-lifecycle";
 export {
@@ -131,8 +109,6 @@ export { createToolStartCoordinator } from "./tool-start-coordinator";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
-const MAX_AGENT_DELEGATION_DEPTH = 2;
-export const MAX_MODEL_STEPS = 16;
 
 export async function runMessage(input: {
   sessionId: string;
@@ -396,6 +372,7 @@ async function runMessageWithContext(
         checkAbort,
         depth: input.delegationDepth ?? 0,
         agentReferences: agentConfig.agents ?? [],
+        runChildMessage: runDelegatedChildMessage,
       }),
     });
 
@@ -408,97 +385,53 @@ async function runMessageWithContext(
     // collectAssistantStream / resolveToolDecision).
     const suspendable = (input.delegationDepth ?? 0) === 0;
 
-    let streamResult: Awaited<ReturnType<typeof streamAssistantResponse>>;
-    try {
-      streamResult = await streamAssistantResponse({
-        ctx,
-        runtime,
-        system: runtime.systemPrompt,
-        messages,
-        tools,
-        mcpContext: {
-          workspaceId: row.workspace.id,
-          agentConfig: row.agent.config,
-          signal: ctx.controller.signal,
-          checkAbort,
-          observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
-        },
-        assistantMessageId,
-        toolStartCoordinator,
+    const turn = await executeStreamingTurn({
+      ctx,
+      row,
+      runtime,
+      system: runtime.systemPrompt,
+      messages,
+      tools,
+      mcpContext: {
+        workspaceId: row.workspace.id,
+        agentConfig: row.agent.config,
+        signal: ctx.controller.signal,
         checkAbort,
-        policy: toolPolicy,
-        suspendable,
-        // Stop at the next model-step boundary if the user steered this run with a new
-        // message. In-flight tool calls in the current step still finish and persist.
-        extraStopConditions: [
-          async () =>
-            Boolean(
-              await loadNextSteerMessage({
-                sessionId: input.sessionId,
-                afterCreatedAt: userMessage.createdAt,
-              }),
-            ),
-        ],
-      });
-    } catch (error) {
-      if (error instanceof RunSuspendedError) {
-        // An "ask" gate fired. Persist the partial assistant turn (ending in the pending
-        // tool-call), park the session as `awaiting_approval`, and release the lease. The
-        // run resumes in a fresh resume_approval job once the approval is decided.
-        await suspendRunForApproval({
-          ctx,
-          row,
-          sandbox: sandboxAcquirer.current,
-          assistantMessageId,
-          error,
-        });
-        outcome = "suspended";
-        return;
-      }
-      throw error;
-    }
-    const { assistantContent, assistantReplayParts, reasoningSummary } = streamResult;
-
-    if (sandboxAcquirer.current) {
-      const activeSandbox = sandboxAcquirer.current;
-      await observeRunStep(ctx, "sync_brain_after_message", () =>
-        syncBrainFromSandbox({
-          sandbox: activeSandbox,
-          sessionId: input.sessionId,
-          workspaceId: row.workspace.id,
-          workdir: row.session.workdir,
-          repository: row.repository,
-        }),
-      );
-    }
-
-    await checkAbort({ force: true });
-    assertTurnComplete(streamResult);
-
-    await persistAssistantCompletion({
-      sessionId: input.sessionId,
+        observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+      },
       assistantMessageId,
-      leaseId: ctx.leaseId,
-      leaseOwner: ctx.leaseOwner,
-      assistantContent,
-      assistantReplayParts,
-      reasoningSummary,
+      toolStartCoordinator,
+      checkAbort,
+      policy: toolPolicy,
+      suspendable,
+      sandboxAcquirer,
       internal: false,
+      brainStep: "sync_brain_after_message",
+      appendCompletedEvent: () =>
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.status",
+          payload: { status: "completed", message: "Agent completed" },
+        }),
+      // Stop at the next model-step boundary if the user steered this run with a new
+      // message. In-flight tool calls in the current step still finish and persist.
+      extraStopConditions: [
+        async () =>
+          Boolean(
+            await loadNextSteerMessage({
+              sessionId: input.sessionId,
+              afterCreatedAt: userMessage.createdAt,
+            }),
+          ),
+      ],
     });
-
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: null,
-        leaseId: ctx.leaseId,
-        leaseOwner: ctx.leaseOwner,
-        type: "session.status",
-        payload: { status: "completed", message: "Agent completed" },
-      }),
-    );
-    await requireLeaseWrite(
-      releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
-    );
+    if (turn.outcome === "suspended") {
+      outcome = "suspended";
+      return;
+    }
     outcome = "completed";
     // If the user steered mid-run, answer that message as the next turn. The lease
     // is already released, so the next turn acquires its own. See
@@ -653,21 +586,6 @@ async function runMessageWithContext(
   return { nextSteerMessageId };
 }
 
-export function assertTurnComplete(
-  streamResult: Pick<
-    Awaited<ReturnType<typeof collectAssistantStream>>,
-    "assistantContent" | "assistantReplayParts" | "lastStepEndedWithToolCalls" | "stepCount"
-  >,
-) {
-  if (!streamResult.assistantContent && streamResult.assistantReplayParts.length === 0) {
-    throw new Error("Model stream completed without text or tool calls.");
-  }
-
-  if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
-    throw new ToolStepLimitExceededError();
-  }
-}
-
 // Persist a clean suspension point when a run unwinds at an "ask" gate, then park the
 // session as `awaiting_approval` and release the lease. The partial assistant message
 // (ending in the pending tool-call) is persisted from the error payload so the resume
@@ -718,6 +636,116 @@ async function suspendRunForApproval(input: {
     }),
   );
   await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner));
+}
+
+// Shared "model turn" middle used by the message, after-session, and resume runs: stream the
+// model (suspending durably at an "ask" gate when `suspendable`), sync brain, persist the
+// assistant completion, emit the caller's completed event, and release the lease. Returns the
+// outcome so the caller can run its own tail. The gating, lease acquisition, and per-run-type
+// tail (steer chaining, analytics, after-session bookkeeping) stay in the callers, which is why
+// those still differ between the three entry points.
+async function executeStreamingTurn(input: {
+  ctx: RunContext;
+  row: LoadedSession;
+  runtime: ReturnType<typeof resolveAgentRuntimeConfig>;
+  system: string;
+  messages: ModelMessage[];
+  tools: ReturnType<typeof createToolSet>;
+  mcpContext: Parameters<typeof streamAssistantResponse>[0]["mcpContext"];
+  assistantMessageId: string;
+  toolStartCoordinator: ReturnType<typeof createToolStartCoordinator>;
+  checkAbort: RunControlCheck;
+  policy: Awaited<ReturnType<typeof loadWorkspaceToolPolicy>>;
+  suspendable: boolean;
+  sandboxAcquirer: ReturnType<typeof createSandboxAcquirer>;
+  internal: boolean;
+  brainStep: string;
+  appendCompletedEvent: () => Promise<boolean>;
+  emptyOutputFallback?: string;
+  beforeRelease?: () => Promise<void>;
+  extraStopConditions?: Parameters<typeof streamAssistantResponse>[0]["extraStopConditions"];
+}): Promise<{ outcome: "completed" | "suspended" }> {
+  const { ctx, row, sandboxAcquirer, assistantMessageId } = input;
+
+  let streamResult: Awaited<ReturnType<typeof streamAssistantResponse>>;
+  try {
+    streamResult = await streamAssistantResponse({
+      ctx,
+      runtime: input.runtime,
+      system: input.system,
+      messages: input.messages,
+      tools: input.tools,
+      mcpContext: input.mcpContext,
+      assistantMessageId,
+      toolStartCoordinator: input.toolStartCoordinator,
+      checkAbort: input.checkAbort,
+      policy: input.policy,
+      suspendable: input.suspendable,
+      ...(input.extraStopConditions ? { extraStopConditions: input.extraStopConditions } : {}),
+    });
+  } catch (error) {
+    if (error instanceof RunSuspendedError) {
+      // An "ask" gate fired. Persist the partial assistant turn (ending in the pending
+      // tool-call), park the session as `awaiting_approval`, and release the lease. The run
+      // resumes in a fresh resume_approval job once the approval is decided. Only reachable
+      // when `suspendable` is true.
+      await suspendRunForApproval({
+        ctx,
+        row,
+        sandbox: sandboxAcquirer.current,
+        assistantMessageId,
+        error,
+      });
+      return { outcome: "suspended" };
+    }
+    throw error;
+  }
+
+  let { assistantContent } = streamResult;
+  const { assistantReplayParts, reasoningSummary } = streamResult;
+
+  if (sandboxAcquirer.current) {
+    const activeSandbox = sandboxAcquirer.current;
+    await observeRunStep(ctx, input.brainStep, () =>
+      syncBrainFromSandbox({
+        sandbox: activeSandbox,
+        sessionId: ctx.sessionId,
+        workspaceId: row.workspace.id,
+        workdir: row.session.workdir,
+        repository: row.repository,
+      }),
+    );
+  }
+
+  await input.checkAbort({ force: true });
+
+  if (input.emptyOutputFallback !== undefined) {
+    if (!assistantContent && assistantReplayParts.length === 0) {
+      assistantContent = input.emptyOutputFallback;
+      appendAssistantTextPart(assistantReplayParts, assistantContent);
+    }
+  } else {
+    assertTurnComplete(streamResult);
+  }
+
+  await persistAssistantCompletion({
+    sessionId: ctx.sessionId,
+    assistantMessageId,
+    leaseId: ctx.leaseId,
+    leaseOwner: ctx.leaseOwner,
+    assistantContent,
+    assistantReplayParts,
+    reasoningSummary,
+    internal: input.internal,
+  });
+
+  await requireLeaseWrite(input.appendCompletedEvent());
+
+  if (input.beforeRelease) await input.beforeRelease();
+
+  await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
+
+  return { outcome: "completed" };
 }
 
 export async function runAfterSession(input: {
@@ -982,79 +1010,57 @@ async function runAfterSessionWithContext(
       toolBudget: createHostedToolBudget(),
     });
 
-    let { assistantContent, assistantReplayParts, reasoningSummary } =
-      await streamAssistantResponse({
-        ctx,
-        runtime: {
-          ...runtime,
-          tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
-        },
-        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
-        messages,
-        tools,
-        mcpContext: {
-          internalMessages: true,
-          workspaceId: row.workspace.id,
-          agentConfig: row.agent.config,
-          signal: ctx.controller.signal,
-          checkAbort,
-          observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
-        },
-        assistantMessageId,
-        toolStartCoordinator,
+    // Snapshot the now-resolved run id into a const so the closures below capture a narrowed
+    // `number` (a captured `let` would widen back to `number | undefined`).
+    const completedRunId = afterSessionRunId;
+    const turn = await executeStreamingTurn({
+      ctx,
+      row,
+      runtime: {
+        ...runtime,
+        tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
+      },
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+      messages,
+      tools,
+      mcpContext: {
+        internalMessages: true,
+        workspaceId: row.workspace.id,
+        agentConfig: row.agent.config,
+        signal: ctx.controller.signal,
         checkAbort,
-        policy: await observeRunStep(ctx, "load_tool_policy", () =>
-          loadWorkspaceToolPolicy(row.workspace.id),
-        ),
-        // After-session runs are background brain updates with no resumable user-facing
-        // turn, so they cannot suspend; "ask" tools collapse to "deny".
-        suspendable: false,
-      });
-
-    if (sandboxAcquirer.current) {
-      const activeSandbox = sandboxAcquirer.current;
-      await observeRunStep(ctx, "sync_brain_after_session", () =>
-        syncBrainFromSandbox({
-          sandbox: activeSandbox,
-          sessionId: input.sessionId,
-          workspaceId: row.workspace.id,
-          workdir: row.session.workdir,
-          repository: row.repository,
-        }),
-      );
-    }
-
-    await checkAbort({ force: true });
-    if (!assistantContent && assistantReplayParts.length === 0) {
-      assistantContent = "After-session run completed without changes.";
-      appendAssistantTextPart(assistantReplayParts, assistantContent);
-    }
-
-    await persistAssistantCompletion({
-      sessionId: input.sessionId,
+        observabilityContext: { workspaceId, userId, agentId, modelProvider, modelName },
+      },
       assistantMessageId,
-      leaseId: ctx.leaseId,
-      leaseOwner: ctx.leaseOwner,
-      assistantContent,
-      assistantReplayParts,
-      reasoningSummary,
+      toolStartCoordinator,
+      checkAbort,
+      policy: await observeRunStep(ctx, "load_tool_policy", () =>
+        loadWorkspaceToolPolicy(row.workspace.id),
+      ),
+      // After-session runs are background brain updates with no resumable user-facing
+      // turn, so they cannot suspend; "ask" tools collapse to "deny".
+      suspendable: false,
+      sandboxAcquirer,
       internal: true,
+      brainStep: "sync_brain_after_session",
+      emptyOutputFallback: "After-session run completed without changes.",
+      appendCompletedEvent: () =>
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "after_session.completed",
+          payload: { runId: completedRunId, messageId: input.messageId },
+        }),
+      beforeRelease: async () => {
+        await completeAfterSessionRun(completedRunId, { status: "completed" });
+      },
     });
-
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: null,
-        leaseId: ctx.leaseId,
-        leaseOwner: ctx.leaseOwner,
-        type: "after_session.completed",
-        payload: { runId: afterSessionRunId, messageId: input.messageId },
-      }),
-    );
-    await completeAfterSessionRun(afterSessionRunId, { status: "completed" });
-    await requireLeaseWrite(
-      releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
-    );
+    if (turn.outcome === "suspended") {
+      outcome = "suspended";
+      return;
+    }
     outcome = "completed";
     logger.info("Runner after-session completed", {
       event: "opencompany.runner_after_session_completed",
@@ -1463,80 +1469,42 @@ export async function resumeApproval(input: {
       loadWorkspaceToolPolicy(row.workspace.id),
     );
 
-    let streamResult: Awaited<ReturnType<typeof streamAssistantResponse>>;
-    try {
-      streamResult = await streamAssistantResponse({
-        ctx,
-        runtime,
-        system: runtime.systemPrompt,
-        messages: continuationMessages,
-        tools,
-        mcpContext: {
-          workspaceId: row.workspace.id,
-          agentConfig: row.agent.config,
-          signal: ctx.controller.signal,
-          checkAbort,
-          observabilityContext,
-        },
-        assistantMessageId: continuationAssistantMessageId,
-        toolStartCoordinator,
+    const turn = await executeStreamingTurn({
+      ctx,
+      row,
+      runtime,
+      system: runtime.systemPrompt,
+      messages: continuationMessages,
+      tools,
+      mcpContext: {
+        workspaceId: row.workspace.id,
+        agentConfig: row.agent.config,
+        signal: ctx.controller.signal,
         checkAbort,
-        policy: toolPolicy,
-        suspendable: true,
-      });
-    } catch (error) {
-      if (error instanceof RunSuspendedError) {
-        await suspendRunForApproval({
-          ctx,
-          row,
-          sandbox: sandboxAcquirer.current,
-          assistantMessageId: continuationAssistantMessageId,
-          error,
-        });
-        outcome = "suspended";
-        return;
-      }
-      throw error;
-    }
-
-    if (sandboxAcquirer.current) {
-      const activeSandbox = sandboxAcquirer.current;
-      await observeRunStep(ctx, "sync_brain_after_resume", () =>
-        syncBrainFromSandbox({
-          sandbox: activeSandbox,
-          sessionId: input.sessionId,
-          workspaceId: row.workspace.id,
-          workdir: row.session.workdir,
-          repository: row.repository,
-        }),
-      );
-    }
-
-    await checkAbort({ force: true });
-    assertTurnComplete(streamResult);
-    await persistAssistantCompletion({
-      sessionId: input.sessionId,
+        observabilityContext,
+      },
       assistantMessageId: continuationAssistantMessageId,
-      leaseId: ctx.leaseId,
-      leaseOwner: ctx.leaseOwner,
-      assistantContent: streamResult.assistantContent,
-      assistantReplayParts: streamResult.assistantReplayParts,
-      reasoningSummary: streamResult.reasoningSummary,
+      toolStartCoordinator,
+      checkAbort,
+      policy: toolPolicy,
+      suspendable: true,
+      sandboxAcquirer,
       internal: false,
+      brainStep: "sync_brain_after_resume",
+      appendCompletedEvent: () =>
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.status",
+          payload: { status: "completed", message: "Agent completed" },
+        }),
     });
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: null,
-        leaseId: ctx.leaseId,
-        leaseOwner: ctx.leaseOwner,
-        type: "session.status",
-        payload: { status: "completed", message: "Agent completed" },
-      }),
-    );
-    await requireLeaseWrite(
-      releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"),
-    );
+    if (turn.outcome === "suspended") {
+      outcome = "suspended";
+      return;
+    }
     outcome = "completed";
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
@@ -1614,945 +1582,6 @@ function findSuspendedToolCall(
   return null;
 }
 
-type RunContext = {
-  sessionId: string;
-  env: RunnerEnv;
-  db: ReturnType<typeof getDb>;
-  trace: ReturnType<typeof startTimingTrace>;
-  controller: AbortController;
-  leaseId: string;
-  leaseOwner: string;
-  runLease: { sessionId: string; leaseId: string; leaseOwner: string };
-};
-
-function createRunContext(
-  traceName: string,
-  input: { sessionId: string; messageId: string; env: RunnerEnv; externalSignal?: AbortSignal },
-): RunContext {
-  const controller = new AbortController();
-  linkExternalAbortSignal(controller, input.externalSignal);
-  const leaseId = newRunLeaseId();
-  const leaseOwner = input.env.instanceId;
-  return {
-    sessionId: input.sessionId,
-    env: input.env,
-    db: getDb(),
-    trace: startTimingTrace(traceName, {
-      session_id: input.sessionId,
-      message_id: input.messageId,
-      runner_instance_id: input.env.instanceId,
-    }),
-    controller,
-    leaseId,
-    leaseOwner,
-    runLease: { sessionId: input.sessionId, leaseId, leaseOwner },
-  };
-}
-
-async function observeRunStep<T>(
-  ctx: RunContext,
-  step: string,
-  run: (span: BraintrustSpan | undefined) => Promise<T>,
-  metadata?: LogFields,
-  options?: Parameters<typeof traceBraintrustStep>[3],
-) {
-  return traceBraintrustStep(
-    step,
-    (span) => timeAsync(ctx.trace, step, () => run(span), metadata),
-    metadata,
-    options,
-  );
-}
-
-function createLeaseAbortCheck(ctx: RunContext): RunControlCheck {
-  return createRunControlGate({ runLease: ctx.runLease, controller: ctx.controller });
-}
-
-export function createAgentDelegationHandler(input: {
-  parentSessionId: string;
-  parentMessageId: string;
-  parentRunLeaseId: string;
-  parentRunLeaseOwner: string;
-  workspaceId: string;
-  userId: string;
-  env: RunnerEnv;
-  signal: AbortSignal;
-  checkAbort: RunControlCheck;
-  depth: number;
-  agentReferences: AgentReference[];
-  runChildMessage?: typeof runDelegatedChildMessage;
-}) {
-  const runChildMessage = input.runChildMessage ?? runDelegatedChildMessage;
-  return async ({
-    agent,
-    sessionId,
-    prompt,
-    toolCallId,
-  }: {
-    agent?: string;
-    sessionId?: string;
-    prompt: string;
-    toolCallId: string;
-  }) => {
-    if (input.depth >= MAX_AGENT_DELEGATION_DEPTH) {
-      return {
-        ok: false,
-        status: "failed",
-        error: `Agent delegation depth limit of ${MAX_AGENT_DELEGATION_DEPTH} was reached.`,
-      };
-    }
-
-    if (sessionId) {
-      return resumeDelegatedAgentSession({
-        childSessionId: sessionId,
-        prompt,
-        parentSessionId: input.parentSessionId,
-        parentMessageId: input.parentMessageId,
-        parentRunLeaseId: input.parentRunLeaseId,
-        parentRunLeaseOwner: input.parentRunLeaseOwner,
-        parentToolCallId: toolCallId,
-        workspaceId: input.workspaceId,
-        userId: input.userId,
-        env: input.env,
-        signal: input.signal,
-        checkAbort: input.checkAbort,
-        depth: input.depth,
-        runChildMessage,
-      });
-    }
-
-    if (!agent) {
-      return {
-        ok: false,
-        status: "failed",
-        error: "Agent is required when starting a delegated session.",
-      };
-    }
-
-    const targetReference = resolveDelegatedAgentReference(agent, input.agentReferences);
-    if (!targetReference) {
-      return {
-        ok: false,
-        status: "failed",
-        error: `Agent ${agent} is not configured for delegation in this agent.`,
-      };
-    }
-
-    const target = await loadDelegatedAgent(input.workspaceId, targetReference.path);
-    if (!target) {
-      return {
-        ok: false,
-        status: "failed",
-        agentPath: targetReference.path,
-        error: `Agent ${targetReference.path} was not found in this workspace.`,
-      };
-    }
-
-    const childSessionId = newAgentSessionId();
-    const childMessageId = newAgentSessionMessageId();
-    await createDelegatedAgentSession({
-      sessionId: childSessionId,
-      messageId: childMessageId,
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      agentId: target.id,
-      agentName: target.name,
-      modelProvider: target.config.model.provider,
-      modelName: target.config.model.name,
-      prompt,
-      parentSessionId: input.parentSessionId,
-      parentMessageId: input.parentMessageId,
-      toolCallId,
-    });
-
-    const runResult = await traceBraintrustStep(
-      "delegate_to_agent.run_child_message",
-      () =>
-        runChildMessage({
-          sessionId: childSessionId,
-          messageId: childMessageId,
-          env: input.env,
-          signal: input.signal,
-          checkAbort: input.checkAbort,
-          depth: input.depth,
-        }),
-      {
-        parent_session_id: input.parentSessionId,
-        parent_message_id: input.parentMessageId,
-        child_session_id: childSessionId,
-        child_message_id: childMessageId,
-        child_agent_id: target.id,
-        child_agent_path: target.path,
-        tool_call_id: toolCallId,
-        delegation_depth: input.depth + 1,
-      },
-    );
-    if (runResult) {
-      await emitDelegatedUsageRollupForLease({
-        parentSessionId: input.parentSessionId,
-        parentMessageId: input.parentMessageId,
-        parentRunLeaseId: input.parentRunLeaseId,
-        parentRunLeaseOwner: input.parentRunLeaseOwner,
-        childSessionId,
-        parentToolCallId: toolCallId,
-      });
-      return {
-        ...runResult,
-        childSessionId,
-        agentName: target.name,
-        agentPath: target.path,
-      };
-    }
-
-    const assistant = await loadAssistantResponseForMessage(childSessionId, childMessageId);
-    if (!assistant?.content.trim()) {
-      await emitDelegatedUsageRollupForLease({
-        parentSessionId: input.parentSessionId,
-        parentMessageId: input.parentMessageId,
-        parentRunLeaseId: input.parentRunLeaseId,
-        parentRunLeaseOwner: input.parentRunLeaseOwner,
-        childSessionId,
-        parentToolCallId: toolCallId,
-      });
-      return {
-        ok: false,
-        status: "failed",
-        childSessionId,
-        agentName: target.name,
-        agentPath: target.path,
-        error: "Delegated agent completed without a final answer.",
-      };
-    }
-
-    await emitDelegatedUsageRollupForLease({
-      parentSessionId: input.parentSessionId,
-      parentMessageId: input.parentMessageId,
-      parentRunLeaseId: input.parentRunLeaseId,
-      parentRunLeaseOwner: input.parentRunLeaseOwner,
-      childSessionId,
-      parentToolCallId: toolCallId,
-    });
-
-    return {
-      ok: true,
-      status: "completed",
-      childSessionId,
-      agentName: target.name,
-      agentPath: target.path,
-      answer: assistant.content,
-    };
-  };
-}
-
-async function resumeDelegatedAgentSession(input: {
-  childSessionId: string;
-  prompt: string;
-  parentSessionId: string;
-  parentMessageId: string;
-  parentRunLeaseId: string;
-  parentRunLeaseOwner: string;
-  parentToolCallId: string;
-  workspaceId: string;
-  userId: string;
-  env: RunnerEnv;
-  signal: AbortSignal;
-  checkAbort: RunControlCheck;
-  depth: number;
-  runChildMessage: typeof runDelegatedChildMessage;
-}) {
-  const child = await loadDelegatedChildSession({
-    sessionId: input.childSessionId,
-    workspaceId: input.workspaceId,
-    userId: input.userId,
-  });
-  if (!child) {
-    return {
-      ok: false,
-      status: "failed",
-      childSessionId: input.childSessionId,
-      error: `Delegated child session ${input.childSessionId} was not found.`,
-    };
-  }
-  if (child.parentSessionId !== input.parentSessionId) {
-    return {
-      ok: false,
-      status: "failed",
-      childSessionId: input.childSessionId,
-      error: `Session ${input.childSessionId} is not a child session of this agent session.`,
-    };
-  }
-  if (child.archivedAt) {
-    return {
-      ok: false,
-      status: "failed",
-      childSessionId: input.childSessionId,
-      agentName: child.agentName,
-      agentPath: child.agentPath,
-      error: `Delegated child session ${input.childSessionId} is archived.`,
-    };
-  }
-  if (isDelegatedChildSessionBusy(child)) {
-    return {
-      ok: false,
-      status: "failed",
-      childSessionId: input.childSessionId,
-      agentName: child.agentName,
-      agentPath: child.agentPath,
-      error: `Delegated child session ${input.childSessionId} is already running.`,
-    };
-  }
-
-  const childMessageId = await appendDelegatedChildUserMessage({
-    sessionId: input.childSessionId,
-    prompt: input.prompt,
-  });
-
-  const runResult = await traceBraintrustStep(
-    "delegate_to_agent.resume_child_message",
-    () =>
-      input.runChildMessage({
-        sessionId: input.childSessionId,
-        messageId: childMessageId,
-        env: input.env,
-        signal: input.signal,
-        checkAbort: input.checkAbort,
-        depth: input.depth,
-      }),
-    {
-      parent_session_id: input.parentSessionId,
-      parent_message_id: input.parentMessageId,
-      child_session_id: input.childSessionId,
-      child_message_id: childMessageId,
-      tool_call_id: input.parentToolCallId,
-      delegation_depth: input.depth + 1,
-    },
-  );
-  if (runResult) {
-    await emitDelegatedUsageRollupForLease({
-      parentSessionId: input.parentSessionId,
-      parentMessageId: input.parentMessageId,
-      parentRunLeaseId: input.parentRunLeaseId,
-      parentRunLeaseOwner: input.parentRunLeaseOwner,
-      childSessionId: input.childSessionId,
-      parentToolCallId: input.parentToolCallId,
-    });
-    return {
-      ...runResult,
-      childSessionId: input.childSessionId,
-      agentName: child.agentName,
-      agentPath: child.agentPath,
-    };
-  }
-
-  const assistant = await loadAssistantResponseForMessage(input.childSessionId, childMessageId);
-  if (!assistant?.content.trim()) {
-    await emitDelegatedUsageRollupForLease({
-      parentSessionId: input.parentSessionId,
-      parentMessageId: input.parentMessageId,
-      parentRunLeaseId: input.parentRunLeaseId,
-      parentRunLeaseOwner: input.parentRunLeaseOwner,
-      childSessionId: input.childSessionId,
-      parentToolCallId: input.parentToolCallId,
-    });
-    return {
-      ok: false,
-      status: "failed",
-      resumed: true,
-      childSessionId: input.childSessionId,
-      messageId: childMessageId,
-      agentName: child.agentName,
-      agentPath: child.agentPath,
-      error: "Delegated agent completed without a final answer.",
-    };
-  }
-
-  await emitDelegatedUsageRollupForLease({
-    parentSessionId: input.parentSessionId,
-    parentMessageId: input.parentMessageId,
-    parentRunLeaseId: input.parentRunLeaseId,
-    parentRunLeaseOwner: input.parentRunLeaseOwner,
-    childSessionId: input.childSessionId,
-    parentToolCallId: input.parentToolCallId,
-  });
-
-  return {
-    ok: true,
-    status: "completed",
-    resumed: true,
-    childSessionId: input.childSessionId,
-    messageId: childMessageId,
-    agentName: child.agentName,
-    agentPath: child.agentPath,
-    answer: assistant.content,
-  };
-}
-
-async function emitDelegatedUsageRollupForLease(input: {
-  parentSessionId: string;
-  parentMessageId: string;
-  parentRunLeaseId: string;
-  parentRunLeaseOwner: string;
-  childSessionId: string;
-  parentToolCallId: string;
-}) {
-  const rollup = await loadSessionTreeUsageRollup(input.childSessionId);
-  if (!hasUsageRollupValue(rollup)) return;
-  const alreadyEmitted = await loadEmittedDelegatedUsageRollup({
-    parentSessionId: input.parentSessionId,
-    childSessionId: input.childSessionId,
-  });
-  const delta = subtractSessionTreeUsageRollup(rollup, alreadyEmitted);
-  if (!hasUsageRollupValue(delta)) return;
-
-  await requireLeaseWrite(
-    appendRuntimeEventForLease({
-      sessionId: input.parentSessionId,
-      messageId: input.parentMessageId,
-      leaseId: input.parentRunLeaseId,
-      leaseOwner: input.parentRunLeaseOwner,
-      type: "session.delegated_usage",
-      payload: {
-        childSessionId: input.childSessionId,
-        parentToolCallId: input.parentToolCallId,
-        usage: delta.usage,
-        toolUsage: delta.toolUsage,
-        cost: delta.cost,
-      },
-    }),
-  );
-}
-
-type SessionTreeUsageRollup = {
-  usage: {
-    inputTokens: number;
-    inputNoCacheTokens: number;
-    inputCacheReadTokens: number;
-    inputCacheWriteTokens: number;
-    outputTokens: number;
-    outputTextTokens: number;
-    outputReasoningTokens: number;
-    totalTokens: number;
-  };
-  toolUsage: {
-    totalCostUsdMicros: number;
-    byProviderOperation: Array<{
-      provider: string;
-      operation: string;
-      costUsdMicros: number;
-      calls: number;
-    }>;
-  };
-  cost: {
-    providerCostUsdMicros: number;
-    platformFeeUsdMicros: number;
-    totalCostUsdMicros: number;
-    modelCostUsdMicros: number;
-    toolCostUsdMicros: number;
-  };
-};
-
-async function loadEmittedDelegatedUsageRollup(input: {
-  parentSessionId: string;
-  childSessionId: string;
-}): Promise<SessionTreeUsageRollup> {
-  const result = await getDb().execute(sql`
-    SELECT payload AS "payload"
-    FROM agent_session_events
-    WHERE session_id = ${input.parentSessionId}
-      AND type = 'session.delegated_usage'
-      AND payload->>'childSessionId' = ${input.childSessionId}
-  `);
-
-  return rowsFromExecute<{ payload?: unknown }>(result).reduce(
-    (total, row) => addSessionTreeUsageRollup(total, parseDelegatedUsagePayload(row.payload)),
-    emptySessionTreeUsageRollup(),
-  );
-}
-
-function parseDelegatedUsagePayload(value: unknown): SessionTreeUsageRollup {
-  const payload = readJsonObject(value);
-  const usage = readJsonObject(payload.usage);
-  const toolUsage = readJsonObject(payload.toolUsage);
-  const cost = readJsonObject(payload.cost);
-  return {
-    usage: {
-      inputTokens: readNumber(usage.inputTokens),
-      inputNoCacheTokens: readNumber(usage.inputNoCacheTokens),
-      inputCacheReadTokens: readNumber(usage.inputCacheReadTokens),
-      inputCacheWriteTokens: readNumber(usage.inputCacheWriteTokens),
-      outputTokens: readNumber(usage.outputTokens),
-      outputTextTokens: readNumber(usage.outputTextTokens),
-      outputReasoningTokens: readNumber(usage.outputReasoningTokens),
-      totalTokens: readNumber(usage.totalTokens),
-    },
-    toolUsage: {
-      totalCostUsdMicros: readNumber(toolUsage.totalCostUsdMicros),
-      byProviderOperation: readToolUsageOperations(toolUsage.byProviderOperation),
-    },
-    cost: {
-      providerCostUsdMicros: readNumber(cost.providerCostUsdMicros),
-      platformFeeUsdMicros: readNumber(cost.platformFeeUsdMicros),
-      totalCostUsdMicros: readNumber(cost.totalCostUsdMicros),
-      modelCostUsdMicros: readNumber(cost.modelCostUsdMicros),
-      toolCostUsdMicros: readNumber(cost.toolCostUsdMicros),
-    },
-  };
-}
-
-function emptySessionTreeUsageRollup(): SessionTreeUsageRollup {
-  return {
-    usage: {
-      inputTokens: 0,
-      inputNoCacheTokens: 0,
-      inputCacheReadTokens: 0,
-      inputCacheWriteTokens: 0,
-      outputTokens: 0,
-      outputTextTokens: 0,
-      outputReasoningTokens: 0,
-      totalTokens: 0,
-    },
-    toolUsage: {
-      totalCostUsdMicros: 0,
-      byProviderOperation: [],
-    },
-    cost: {
-      providerCostUsdMicros: 0,
-      platformFeeUsdMicros: 0,
-      totalCostUsdMicros: 0,
-      modelCostUsdMicros: 0,
-      toolCostUsdMicros: 0,
-    },
-  };
-}
-
-function addSessionTreeUsageRollup(
-  left: SessionTreeUsageRollup,
-  right: SessionTreeUsageRollup,
-): SessionTreeUsageRollup {
-  return {
-    usage: {
-      inputTokens: left.usage.inputTokens + right.usage.inputTokens,
-      inputNoCacheTokens: left.usage.inputNoCacheTokens + right.usage.inputNoCacheTokens,
-      inputCacheReadTokens: left.usage.inputCacheReadTokens + right.usage.inputCacheReadTokens,
-      inputCacheWriteTokens: left.usage.inputCacheWriteTokens + right.usage.inputCacheWriteTokens,
-      outputTokens: left.usage.outputTokens + right.usage.outputTokens,
-      outputTextTokens: left.usage.outputTextTokens + right.usage.outputTextTokens,
-      outputReasoningTokens: left.usage.outputReasoningTokens + right.usage.outputReasoningTokens,
-      totalTokens: left.usage.totalTokens + right.usage.totalTokens,
-    },
-    toolUsage: {
-      totalCostUsdMicros: left.toolUsage.totalCostUsdMicros + right.toolUsage.totalCostUsdMicros,
-      byProviderOperation: addToolUsageOperations(
-        left.toolUsage.byProviderOperation,
-        right.toolUsage.byProviderOperation,
-      ),
-    },
-    cost: {
-      providerCostUsdMicros: left.cost.providerCostUsdMicros + right.cost.providerCostUsdMicros,
-      platformFeeUsdMicros: left.cost.platformFeeUsdMicros + right.cost.platformFeeUsdMicros,
-      totalCostUsdMicros: left.cost.totalCostUsdMicros + right.cost.totalCostUsdMicros,
-      modelCostUsdMicros: left.cost.modelCostUsdMicros + right.cost.modelCostUsdMicros,
-      toolCostUsdMicros: left.cost.toolCostUsdMicros + right.cost.toolCostUsdMicros,
-    },
-  };
-}
-
-function subtractSessionTreeUsageRollup(
-  total: SessionTreeUsageRollup,
-  emitted: SessionTreeUsageRollup,
-): SessionTreeUsageRollup {
-  return {
-    usage: {
-      inputTokens: subtractMetric(total.usage.inputTokens, emitted.usage.inputTokens),
-      inputNoCacheTokens: subtractMetric(
-        total.usage.inputNoCacheTokens,
-        emitted.usage.inputNoCacheTokens,
-      ),
-      inputCacheReadTokens: subtractMetric(
-        total.usage.inputCacheReadTokens,
-        emitted.usage.inputCacheReadTokens,
-      ),
-      inputCacheWriteTokens: subtractMetric(
-        total.usage.inputCacheWriteTokens,
-        emitted.usage.inputCacheWriteTokens,
-      ),
-      outputTokens: subtractMetric(total.usage.outputTokens, emitted.usage.outputTokens),
-      outputTextTokens: subtractMetric(
-        total.usage.outputTextTokens,
-        emitted.usage.outputTextTokens,
-      ),
-      outputReasoningTokens: subtractMetric(
-        total.usage.outputReasoningTokens,
-        emitted.usage.outputReasoningTokens,
-      ),
-      totalTokens: subtractMetric(total.usage.totalTokens, emitted.usage.totalTokens),
-    },
-    toolUsage: {
-      totalCostUsdMicros: subtractMetric(
-        total.toolUsage.totalCostUsdMicros,
-        emitted.toolUsage.totalCostUsdMicros,
-      ),
-      byProviderOperation: subtractToolUsageOperations(
-        total.toolUsage.byProviderOperation,
-        emitted.toolUsage.byProviderOperation,
-      ),
-    },
-    cost: {
-      providerCostUsdMicros: subtractMetric(
-        total.cost.providerCostUsdMicros,
-        emitted.cost.providerCostUsdMicros,
-      ),
-      platformFeeUsdMicros: subtractMetric(
-        total.cost.platformFeeUsdMicros,
-        emitted.cost.platformFeeUsdMicros,
-      ),
-      totalCostUsdMicros: subtractMetric(
-        total.cost.totalCostUsdMicros,
-        emitted.cost.totalCostUsdMicros,
-      ),
-      modelCostUsdMicros: subtractMetric(
-        total.cost.modelCostUsdMicros,
-        emitted.cost.modelCostUsdMicros,
-      ),
-      toolCostUsdMicros: subtractMetric(
-        total.cost.toolCostUsdMicros,
-        emitted.cost.toolCostUsdMicros,
-      ),
-    },
-  };
-}
-
-function addToolUsageOperations(
-  left: SessionTreeUsageRollup["toolUsage"]["byProviderOperation"],
-  right: SessionTreeUsageRollup["toolUsage"]["byProviderOperation"],
-) {
-  const byKey = new Map<string, (typeof left)[number]>();
-  for (const row of [...left, ...right]) {
-    const key = `${row.provider}:${row.operation}`;
-    const current = byKey.get(key) ?? {
-      provider: row.provider,
-      operation: row.operation,
-      costUsdMicros: 0,
-      calls: 0,
-    };
-    current.costUsdMicros += row.costUsdMicros;
-    current.calls += row.calls;
-    byKey.set(key, current);
-  }
-  return Array.from(byKey.values()).sort((leftRow, rightRow) =>
-    `${leftRow.provider}:${leftRow.operation}`.localeCompare(
-      `${rightRow.provider}:${rightRow.operation}`,
-    ),
-  );
-}
-
-function subtractToolUsageOperations(
-  total: SessionTreeUsageRollup["toolUsage"]["byProviderOperation"],
-  emitted: SessionTreeUsageRollup["toolUsage"]["byProviderOperation"],
-) {
-  const emittedByKey = new Map(
-    emitted.map((row) => [`${row.provider}:${row.operation}`, row] as const),
-  );
-  return total
-    .map((row) => {
-      const emittedRow = emittedByKey.get(`${row.provider}:${row.operation}`);
-      return {
-        provider: row.provider,
-        operation: row.operation,
-        costUsdMicros: subtractMetric(row.costUsdMicros, emittedRow?.costUsdMicros ?? 0),
-        calls: subtractMetric(row.calls, emittedRow?.calls ?? 0),
-      };
-    })
-    .filter((row) => row.costUsdMicros > 0 || row.calls > 0);
-}
-
-function subtractMetric(total: number, emitted: number) {
-  return Math.max(total - emitted, 0);
-}
-
-async function loadSessionTreeUsageRollup(sessionId: string): Promise<SessionTreeUsageRollup> {
-  const result = await getDb().execute(sql`
-    WITH RECURSIVE session_tree(id, path) AS (
-      SELECT id, ARRAY[id]::text[]
-      FROM agent_sessions
-      WHERE id = ${sessionId}
-      UNION ALL
-      SELECT child.id, session_tree.path || child.id
-      FROM agent_sessions child
-      INNER JOIN session_tree ON child.parent_session_id = session_tree.id
-      WHERE NOT child.id = ANY(session_tree.path)
-    ),
-    usage_totals AS (
-      SELECT
-        COALESCE(SUM(input_tokens), 0) AS input_tokens,
-        COALESCE(SUM(input_no_cache_tokens), 0) AS input_no_cache_tokens,
-        COALESCE(SUM(input_cache_read_tokens), 0) AS input_cache_read_tokens,
-        COALESCE(SUM(input_cache_write_tokens), 0) AS input_cache_write_tokens,
-        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-        COALESCE(SUM(output_text_tokens), 0) AS output_text_tokens,
-        COALESCE(SUM(output_reasoning_tokens), 0) AS output_reasoning_tokens,
-        COALESCE(SUM(total_tokens), 0) AS total_tokens
-      FROM agent_session_usage
-      WHERE session_id IN (SELECT id FROM session_tree)
-    ),
-    cost_totals AS (
-      SELECT
-        COALESCE(SUM(provider_cost_usd_micros), 0) AS provider_cost_usd_micros,
-        COALESCE(SUM(platform_fee_usd_micros), 0) AS platform_fee_usd_micros,
-        COALESCE(SUM(-amount_usd_micros), 0) AS total_cost_usd_micros,
-        COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'model_usage'), 0) AS model_cost_usd_micros,
-        COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'tool_usage'), 0) AS tool_cost_usd_micros
-      FROM workspace_credit_ledger
-      WHERE session_id IN (SELECT id FROM session_tree)
-        AND amount_usd_micros < 0
-    ),
-    tool_usage_rows AS (
-      SELECT
-        provider,
-        operation,
-        COALESCE(SUM(cost_usd_micros), 0) AS cost_usd_micros,
-        COUNT(*)::int AS calls
-      FROM agent_session_tool_usage
-      WHERE session_id IN (SELECT id FROM session_tree)
-      GROUP BY provider, operation
-    ),
-    tool_totals AS (
-      SELECT
-        COALESCE(SUM(cost_usd_micros), 0) AS tool_usage_cost_usd_micros,
-        COALESCE(
-          jsonb_agg(
-            jsonb_build_object(
-              'provider', provider,
-              'operation', operation,
-              'costUsdMicros', cost_usd_micros,
-              'calls', calls
-            )
-            ORDER BY provider, operation
-          ),
-          '[]'::jsonb
-        ) AS tool_usage_by_provider_operation
-      FROM tool_usage_rows
-    )
-    SELECT
-      usage_totals.input_tokens AS "inputTokens",
-      usage_totals.input_no_cache_tokens AS "inputNoCacheTokens",
-      usage_totals.input_cache_read_tokens AS "inputCacheReadTokens",
-      usage_totals.input_cache_write_tokens AS "inputCacheWriteTokens",
-      usage_totals.output_tokens AS "outputTokens",
-      usage_totals.output_text_tokens AS "outputTextTokens",
-      usage_totals.output_reasoning_tokens AS "outputReasoningTokens",
-      usage_totals.total_tokens AS "totalTokens",
-      cost_totals.provider_cost_usd_micros AS "providerCostUsdMicros",
-      cost_totals.platform_fee_usd_micros AS "platformFeeUsdMicros",
-      cost_totals.total_cost_usd_micros AS "totalCostUsdMicros",
-      cost_totals.model_cost_usd_micros AS "modelCostUsdMicros",
-      cost_totals.tool_cost_usd_micros AS "toolCostUsdMicros",
-      tool_totals.tool_usage_cost_usd_micros AS "toolUsageTotalCostUsdMicros",
-      tool_totals.tool_usage_by_provider_operation AS "toolUsageByProviderOperation"
-    FROM usage_totals
-    CROSS JOIN cost_totals
-    CROSS JOIN tool_totals
-  `);
-
-  const row = rowsFromExecute<Record<string, unknown>>(result)[0] ?? {};
-  return parseSessionTreeUsageRollup(row);
-}
-
-function parseSessionTreeUsageRollup(row: Record<string, unknown>): SessionTreeUsageRollup {
-  return {
-    usage: {
-      inputTokens: readNumber(row.inputTokens),
-      inputNoCacheTokens: readNumber(row.inputNoCacheTokens),
-      inputCacheReadTokens: readNumber(row.inputCacheReadTokens),
-      inputCacheWriteTokens: readNumber(row.inputCacheWriteTokens),
-      outputTokens: readNumber(row.outputTokens),
-      outputTextTokens: readNumber(row.outputTextTokens),
-      outputReasoningTokens: readNumber(row.outputReasoningTokens),
-      totalTokens: readNumber(row.totalTokens),
-    },
-    toolUsage: {
-      totalCostUsdMicros: readNumber(row.toolUsageTotalCostUsdMicros),
-      byProviderOperation: readToolUsageOperations(row.toolUsageByProviderOperation),
-    },
-    cost: {
-      providerCostUsdMicros: readNumber(row.providerCostUsdMicros),
-      platformFeeUsdMicros: readNumber(row.platformFeeUsdMicros),
-      totalCostUsdMicros: readNumber(row.totalCostUsdMicros),
-      modelCostUsdMicros: readNumber(row.modelCostUsdMicros),
-      toolCostUsdMicros: readNumber(row.toolCostUsdMicros),
-    },
-  };
-}
-
-function hasUsageRollupValue(rollup: SessionTreeUsageRollup) {
-  return (
-    rollup.usage.totalTokens > 0 ||
-    rollup.cost.totalCostUsdMicros > 0 ||
-    rollup.toolUsage.byProviderOperation.length > 0
-  );
-}
-
-function readToolUsageOperations(value: unknown) {
-  return readJsonArray(value)
-    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object"))
-    .map((row) => ({
-      provider: typeof row.provider === "string" ? row.provider : "",
-      operation: typeof row.operation === "string" ? row.operation : "",
-      costUsdMicros: readNumber(row.costUsdMicros),
-      calls: readNumber(row.calls),
-    }))
-    .filter((row) => row.provider && row.operation);
-}
-
-function readJsonArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value !== "string") return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function readJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  if (typeof value !== "string") return {};
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function readNumber(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
-function resolveDelegatedAgentReference(agent: string, references: AgentReference[]) {
-  const normalized = normalizeDelegatedAgentKey(agent);
-  return references.find((reference) => {
-    const path = reference.path;
-    const slug =
-      path.startsWith("agents/") && path.endsWith(".agent")
-        ? path.slice("agents/".length, -".agent".length)
-        : "";
-    const mention = path.startsWith("agents/") && path.endsWith(".agent") ? `agent/${slug}` : "";
-    return (
-      normalizeDelegatedAgentKey(path) === normalized ||
-      normalizeDelegatedAgentKey(mention) === normalized ||
-      normalizeDelegatedAgentKey(slug) === normalized ||
-      normalizeDelegatedAgentKey(reference.name) === normalized
-    );
-  });
-}
-
-function normalizeDelegatedAgentKey(value: string) {
-  return value
-    .trim()
-    .replace(/^@/, "")
-    .replace(/\.agent$/i, "")
-    .toLowerCase();
-}
-
-async function loadDelegatedAgent(workspaceId: string, path: string) {
-  const [agent] = await getDb()
-    .select({
-      id: agents.id,
-      name: agents.name,
-      path: agents.path,
-      config: agents.config,
-    })
-    .from(agents)
-    .where(and(eq(agents.workspaceId, workspaceId), eq(agents.path, path)))
-    .limit(1);
-
-  return agent ? { ...agent, config: normalizeAgentConfig(agent.config) } : null;
-}
-
-async function loadDelegatedChildSession(input: {
-  sessionId: string;
-  workspaceId: string;
-  userId: string;
-}) {
-  const [session] = await getDb()
-    .select({
-      id: agentSessions.id,
-      workspaceId: agentSessions.workspaceId,
-      userId: agentSessions.userId,
-      agentId: agentSessions.agentId,
-      agentName: agents.name,
-      agentPath: agents.path,
-      status: agentSessions.status,
-      source: agentSessions.source,
-      parentSessionId: agentSessions.parentSessionId,
-      runLeaseId: agentSessions.runLeaseId,
-      archivedAt: agentSessions.archivedAt,
-    })
-    .from(agentSessions)
-    .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-    .where(
-      and(
-        eq(agentSessions.id, input.sessionId),
-        eq(agentSessions.workspaceId, input.workspaceId),
-        eq(agentSessions.userId, input.userId),
-        eq(agentSessions.source, "agent"),
-      ),
-    )
-    .limit(1);
-
-  return session ?? null;
-}
-
-function isDelegatedChildSessionBusy(
-  session: NonNullable<Awaited<ReturnType<typeof loadDelegatedChildSession>>>,
-) {
-  return (
-    Boolean(session.runLeaseId) ||
-    ["provisioning", "running", "aborting", "archiving"].includes(session.status)
-  );
-}
-
-async function appendDelegatedChildUserMessage(input: { sessionId: string; prompt: string }) {
-  const now = new Date();
-  const messageId = newAgentSessionMessageId();
-
-  await getDb().transaction(async (tx) => {
-    await tx.insert(agentSessionMessages).values({
-      id: messageId,
-      sessionId: input.sessionId,
-      role: "user",
-      status: "completed",
-      content: input.prompt,
-      modelMessage: { role: "user", content: input.prompt },
-      completedAt: now,
-    });
-    await tx.insert(agentSessionEvents).values({
-      sessionId: input.sessionId,
-      messageId,
-      type: "message.created",
-      payload: {
-        messageId,
-        role: "user",
-        content: input.prompt,
-        status: "completed",
-      },
-    });
-  });
-
-  return messageId;
-}
-
 async function runDelegatedChildMessage(input: {
   sessionId: string;
   messageId: string;
@@ -2586,79 +1615,6 @@ async function runDelegatedChildMessage(input: {
   }
 
   return null;
-}
-
-async function createDelegatedAgentSession(input: {
-  sessionId: string;
-  messageId: string;
-  workspaceId: string;
-  userId: string;
-  agentId: string;
-  agentName: string;
-  modelProvider: string;
-  modelName: string;
-  prompt: string;
-  parentSessionId: string;
-  parentMessageId: string;
-  toolCallId: string;
-}) {
-  const now = new Date();
-  await getDb().transaction(async (tx) => {
-    await tx.insert(agentSessions).values({
-      id: input.sessionId,
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      agentId: input.agentId,
-      title: delegationSessionTitle(input.agentName, input.prompt),
-      source: "agent",
-      modelProvider: input.modelProvider,
-      modelName: input.modelName,
-      parentSessionId: input.parentSessionId,
-      parentMessageId: input.parentMessageId,
-      parentToolCallId: input.toolCallId,
-    });
-    await tx.insert(agentSessionMessages).values({
-      id: input.messageId,
-      sessionId: input.sessionId,
-      role: "user",
-      status: "completed",
-      content: input.prompt,
-      modelMessage: { role: "user", content: input.prompt },
-      completedAt: now,
-    });
-    await tx.insert(agentSessionEvents).values({
-      sessionId: input.sessionId,
-      type: "session.status",
-      payload: {
-        status: "created",
-        message: "Delegated agent session created",
-        parentSessionId: input.parentSessionId,
-        parentMessageId: input.parentMessageId,
-        toolCallId: input.toolCallId,
-      },
-    });
-    await tx.insert(agentSessionEvents).values({
-      sessionId: input.sessionId,
-      messageId: input.messageId,
-      type: "message.created",
-      payload: {
-        messageId: input.messageId,
-        role: "user",
-        content: input.prompt,
-        status: "completed",
-      },
-    });
-  });
-}
-
-function delegationSessionTitle(agentName: string, prompt: string) {
-  const firstLine = prompt
-    .split("\n")
-    .map((line) => line.trim())
-    .find(Boolean);
-  const suffix = firstLine ? `: ${firstLine}` : "";
-  const title = `${agentName}${suffix}`;
-  return title.length > 80 ? `${title.slice(0, 77)}...` : title;
 }
 
 type SandboxAcquirer = {
@@ -2733,352 +1689,4 @@ function createSandboxAcquirer(input: {
       return sandbox;
     },
   };
-}
-
-async function streamAssistantResponse(input: {
-  ctx: RunContext;
-  runtime: ReturnType<typeof resolveAgentRuntimeConfig>;
-  system: string;
-  messages: ModelMessage[];
-  tools: ReturnType<typeof createToolSet>;
-  mcpContext: {
-    internalMessages?: boolean;
-    workspaceId: string;
-    agentConfig: LoadedSession["agent"]["config"];
-    signal: AbortSignal;
-    checkAbort: RunControlCheck;
-    observabilityContext?: {
-      workspaceId?: string;
-      userId?: string;
-      agentId?: string;
-      modelProvider?: string;
-      modelName?: string;
-    };
-  };
-  assistantMessageId: string;
-  toolStartCoordinator: ToolStartCoordinator;
-  checkAbort: RunControlCheck;
-  policy: WorkspaceToolPolicyMap;
-  suspendable: boolean;
-  extraStopConditions?: StopCondition<ToolSet>[];
-}) {
-  const gateway = ai.createGateway({ apiKey: input.ctx.env.vercelAiGatewayApiKey });
-  const mcpToolSet = await observeRunStep(input.ctx, "create_mcp_tool_set", () =>
-    createMcpToolSet({
-      sessionId: input.ctx.sessionId,
-      assistantMessageId: input.assistantMessageId,
-      runLeaseId: input.ctx.leaseId,
-      runLeaseOwner: input.ctx.leaseOwner,
-      ...input.mcpContext,
-      toolStartCoordinator: input.toolStartCoordinator,
-    }),
-  );
-  const modelSystem = buildCacheableSystemPrompt(input.system, input.runtime.model.name);
-  const selectedTools = {
-    ...pickRuntimeTools(input.tools, input.runtime.tools),
-    ...mcpToolSet.tools,
-  };
-  // Instrument the model call as an `llm` span manually rather than via Braintrust's `wrapAISDK`.
-  // wrapAISDK closes the streaming span only when its patched result stream drains to completion
-  // (there is no error/cancel handler on that path), so any abort, tool/stream error, or early
-  // exit while we consume `result.fullStream` ourselves leaves the span stuck "in progress" with
-  // no usage logged. `observeRunStep` -> `traceBraintrustStep` always calls `span.end()` in a
-  // finally, so the span closes deterministically and we log usage/cost from data we collect.
-  const modelInput = [
-    ...(modelSystem ? [{ role: "system", content: modelSystem }] : []),
-    ...input.messages,
-  ];
-  try {
-    const streamStartedAt = Date.now();
-    let firstStreamPartAt: number | undefined;
-    return await observeRunStep(
-      input.ctx,
-      "model_stream_total",
-      async (span) => {
-        const result = ai.streamText({
-          model: gateway(input.runtime.model.name),
-          system: modelSystem,
-          messages: input.messages,
-          tools: selectedTools,
-          stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
-          abortSignal: input.ctx.controller.signal,
-          ...(input.runtime.model.providerOptions
-            ? { providerOptions: input.runtime.model.providerOptions }
-            : {}),
-        });
-
-        const collected = await collectAssistantStream({
-          stream: result.fullStream,
-          readFirstPart: async (iterator) => {
-            return observeRunStep(input.ctx, "model_first_stream_part", () => iterator.next(), {
-              model_provider: input.runtime.model.provider,
-              model_name: input.runtime.model.name,
-            });
-          },
-          onFirstOutputPart: () => {
-            firstStreamPartAt ??= Date.now();
-          },
-          sessionId: input.ctx.sessionId,
-          assistantMessageId: input.assistantMessageId,
-          runLeaseId: input.ctx.leaseId,
-          runLeaseOwner: input.ctx.leaseOwner,
-          modelProvider: input.runtime.model.provider,
-          modelName: input.runtime.model.name,
-          exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
-          signal: input.ctx.controller.signal,
-          checkAbort: input.checkAbort,
-          toolStartCoordinator: input.toolStartCoordinator,
-          policy: input.policy,
-          suspendable: input.suspendable,
-        });
-        // Log on the explicit span object (not `currentSpan()`): the AI SDK stream consumption can
-        // run outside this span's async-context, which would silently drop a `currentSpan()` log
-        // to a no-op span — leaving the span with no output/usage and stuck "in progress".
-        logBraintrustSpan(span, {
-          output: collected.reasoningSummary
-            ? {
-                role: "assistant",
-                content: collected.assistantContent,
-                reasoning: collected.reasoningSummary,
-              }
-            : { role: "assistant", content: collected.assistantContent },
-          metrics: modelStreamMetrics(collected.modelSteps, streamStartedAt, firstStreamPartAt),
-          metadata: {
-            // Braintrust derives estimated cost from `metadata.model` + token metrics.
-            model: input.runtime.model.name,
-            assistant_message_id: input.assistantMessageId,
-            model_provider: input.runtime.model.provider,
-            model_name: input.runtime.model.name,
-          },
-        });
-        return collected;
-      },
-      {
-        model_provider: input.runtime.model.provider,
-        model_name: input.runtime.model.name,
-        assistant_message_id: input.assistantMessageId,
-      },
-      { type: "llm", input: modelInput },
-    );
-  } finally {
-    await mcpToolSet.close();
-  }
-}
-
-async function persistAssistantCompletion(input: {
-  sessionId: string;
-  assistantMessageId: string;
-  leaseId: string;
-  leaseOwner: string;
-  assistantContent: string;
-  assistantReplayParts: Awaited<ReturnType<typeof collectAssistantStream>>["assistantReplayParts"];
-  reasoningSummary: Awaited<ReturnType<typeof collectAssistantStream>>["reasoningSummary"];
-  internal: boolean;
-}) {
-  const persistedAssistantModelMessage = toPersistedModelMessage(
-    buildAssistantModelMessage({
-      content: input.assistantContent,
-      parts: input.assistantReplayParts,
-    }),
-  );
-  await requireLeaseWrite(
-    completeAssistantMessageForLease({
-      sessionId: input.sessionId,
-      assistantMessageId: input.assistantMessageId,
-      leaseId: input.leaseId,
-      leaseOwner: input.leaseOwner,
-      content: input.assistantContent,
-      modelMessage: persistedAssistantModelMessage,
-    }),
-  );
-  const normalizedReasoningSummary = normalizeReasoningSummary(input.reasoningSummary);
-  logBraintrustCurrentSpan({
-    output: {
-      content: input.assistantContent,
-      replayParts: input.assistantReplayParts,
-      ...(normalizedReasoningSummary ? { reasoningSummary: normalizedReasoningSummary } : {}),
-    },
-    metadata: {
-      assistant_message_id: input.assistantMessageId,
-      internal: input.internal,
-    },
-  });
-  if (normalizedReasoningSummary) {
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: input.assistantMessageId,
-        leaseId: input.leaseId,
-        leaseOwner: input.leaseOwner,
-        type: "message.reasoning_summary",
-        payload: { messageId: input.assistantMessageId, summary: normalizedReasoningSummary },
-      }),
-    );
-  }
-  await requireLeaseWrite(
-    appendRuntimeEventForLease({
-      sessionId: input.sessionId,
-      messageId: input.assistantMessageId,
-      leaseId: input.leaseId,
-      leaseOwner: input.leaseOwner,
-      type: "message.completed",
-      payload: {
-        messageId: input.assistantMessageId,
-        ...(input.internal ? { internal: true } : {}),
-      },
-    }),
-  );
-}
-
-function modelStreamMetrics(
-  modelSteps: Awaited<ReturnType<typeof collectAssistantStream>>["modelSteps"],
-  streamStartedAt: number,
-  firstStreamPartAt: number | undefined,
-): LogFields {
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let totalTokens = 0;
-  let cachedTokens = 0;
-  let reasoningTokens = 0;
-
-  for (const step of modelSteps) {
-    const usage = isRecord(step.usage) ? step.usage : {};
-    inputTokens += readMetricNumber(usage.inputTokens) ?? readMetricNumber(usage.promptTokens) ?? 0;
-    outputTokens +=
-      readMetricNumber(usage.outputTokens) ?? readMetricNumber(usage.completionTokens) ?? 0;
-    totalTokens += readMetricNumber(usage.totalTokens) ?? 0;
-    cachedTokens += readMetricNumber(usage.cachedInputTokens) ?? 0;
-    reasoningTokens += readMetricNumber(usage.reasoningTokens) ?? 0;
-  }
-
-  if (totalTokens === 0) totalTokens = inputTokens + outputTokens;
-
-  return {
-    ...(firstStreamPartAt
-      ? { time_to_first_token: (firstStreamPartAt - streamStartedAt) / 1000 }
-      : {}),
-    ...(totalTokens ? { tokens: totalTokens } : {}),
-    ...(inputTokens ? { prompt_tokens: inputTokens } : {}),
-    ...(outputTokens ? { completion_tokens: outputTokens } : {}),
-    ...(cachedTokens ? { prompt_cached_tokens: cachedTokens } : {}),
-    ...(reasoningTokens ? { completion_reasoning_tokens: reasoningTokens } : {}),
-    steps: modelSteps.length,
-  };
-}
-
-function readMetricNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object");
-}
-
-async function finalizeRun(input: {
-  ctx: RunContext;
-  outcome: string;
-  modelProvider: string | undefined;
-  modelName: string | undefined;
-  sandbox: SandboxHandle | null;
-}) {
-  clearActiveRun(input.ctx.sessionId, input.ctx.controller);
-  logBraintrustCurrentSpan({
-    metadata: {
-      outcome: input.outcome,
-      model_provider: input.modelProvider,
-      model_name: input.modelName,
-      sandbox_id: input.sandbox?.sandboxId,
-      sandbox_hydrated: Boolean(input.sandbox),
-    },
-  });
-  endTimingTrace(input.ctx.trace, {
-    outcome: input.outcome,
-    model_provider: input.modelProvider,
-    model_name: input.modelName,
-    sandbox_hydrated: Boolean(input.sandbox),
-  });
-  if (input.sandbox) {
-    const sandbox = input.sandbox;
-    await observeRunStep(
-      input.ctx,
-      "park_sandbox",
-      () => parkSandboxWhenIdle(sandbox, input.ctx.env),
-      { sandbox_id: sandbox.sandboxId },
-    );
-  }
-}
-
-async function captureTurnCompletedAnalytics(input: {
-  ctx: RunContext;
-  userId: string | undefined;
-  workspaceId: string | undefined;
-  agentId: string | undefined;
-  sessionId: string;
-  userMessageId: string;
-  assistantMessageId: string;
-  modelProvider: string | undefined;
-  modelName: string | undefined;
-}) {
-  if (
-    !input.userId ||
-    !input.workspaceId ||
-    !input.agentId ||
-    !input.modelProvider ||
-    !input.modelName
-  ) {
-    return;
-  }
-
-  const [cost] = await input.ctx.db
-    .select({
-      providerCostUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.providerCostUsdMicros}), 0)`,
-      platformFeeUsdMicros: sql<number>`COALESCE(SUM(${workspaceCreditLedger.platformFeeUsdMicros}), 0)`,
-      totalCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}), 0)`,
-      modelCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'model_usage'), 0)`,
-      toolCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'tool_usage'), 0)`,
-    })
-    .from(workspaceCreditLedger)
-    .where(
-      and(
-        eq(workspaceCreditLedger.workspaceId, input.workspaceId),
-        eq(workspaceCreditLedger.sessionId, input.sessionId),
-        eq(workspaceCreditLedger.messageId, input.assistantMessageId),
-      ),
-    );
-
-  await captureServerEvent("session_turn_completed", input.userId, {
-    user_id: input.userId,
-    workspace_id: input.workspaceId,
-    agent_id: input.agentId,
-    session_id: input.sessionId,
-    user_message_id: input.userMessageId,
-    assistant_message_id: input.assistantMessageId,
-    model_provider: input.modelProvider,
-    model_name: input.modelName,
-    provider_cost_usd_micros: cost?.providerCostUsdMicros ?? 0,
-    platform_fee_usd_micros: cost?.platformFeeUsdMicros ?? 0,
-    total_cost_usd_micros: cost?.totalCostUsdMicros ?? 0,
-    model_cost_usd_micros: cost?.modelCostUsdMicros ?? 0,
-    tool_cost_usd_micros: cost?.toolCostUsdMicros ?? 0,
-  });
-}
-
-function linkExternalAbortSignal(controller: AbortController, signal: AbortSignal | undefined) {
-  if (!signal) return;
-  if (signal.aborted) {
-    controller.abort();
-    return;
-  }
-  signal.addEventListener("abort", () => controller.abort(), { once: true });
-}
-
-function braintrustError(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      ...(error.stack ? { stack: error.stack } : {}),
-    };
-  }
-  return { message: String(error) };
 }
