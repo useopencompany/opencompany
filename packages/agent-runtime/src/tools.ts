@@ -28,6 +28,11 @@ export type RuntimeToolName =
   | "x_get_user_posts"
   | "x_get_discussion"
   | "x_get_trends"
+  | "youtube_search"
+  | "youtube_get_video"
+  | "youtube_get_transcript"
+  | "youtube_get_channel"
+  | "youtube_list_channel_videos"
   | "web_fetch"
   | "tool_help";
 
@@ -91,6 +96,23 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "platform",
     requiredPlatformEnvVars: ["X_API_BEARER_TOKEN"],
+  },
+  {
+    id: "youtube",
+    type: "hosted_tool",
+    label: "youtube",
+    description:
+      "Search YouTube and read video transcripts, plus video and channel metadata, via Supadata.",
+    runtimeTools: [
+      "youtube_search",
+      "youtube_get_video",
+      "youtube_get_transcript",
+      "youtube_get_channel",
+      "youtube_list_channel_videos",
+    ],
+    defaultEnabled: true,
+    credentialSource: "platform",
+    requiredPlatformEnvVars: ["SUPADATA_API_KEY"],
   },
   {
     id: "amp",
@@ -830,6 +852,169 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Use x_get_trends to answer what is currently trending on X in a broad location.",
       "Start with maxResults=10. Use larger values only when the user explicitly asks for broader coverage.",
       "Common WOEIDs: worldwide=1, United States=23424977, United Kingdom=23424975, New York=2459115, London=44418.",
+    ].join("\n"),
+  },
+  {
+    name: "youtube_search",
+    kind: "hosted",
+    configToolId: "youtube",
+    description:
+      "Search YouTube for videos, channels, and playlists by keyword, with optional filters for upload date, duration, and sort order.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Search query, e.g. 'transformer architecture explained'.",
+        },
+        type: {
+          type: "string",
+          enum: ["all", "video", "channel", "playlist", "movie"],
+          description: "Restrict results to a content type. Defaults to video.",
+          default: "video",
+        },
+        uploadDate: {
+          type: "string",
+          enum: ["all", "hour", "today", "week", "month", "year"],
+          description: "Filter videos by upload recency. Only applies to videos.",
+        },
+        duration: {
+          type: "string",
+          enum: ["short", "medium", "long"],
+          description:
+            "Filter videos by length: short (<4min), medium (4-20min), long (>20min). Only applies to videos.",
+        },
+        sortBy: {
+          type: "string",
+          enum: ["relevance", "rating", "date", "views"],
+          description: "Sort order of results. Defaults to relevance.",
+          default: "relevance",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Number of results to return. Defaults to 10; ask the user before requesting larger values. Maximum 50.",
+          default: 10,
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use youtube_search to discover videos, channels, or playlists for a topic before fetching transcripts or metadata.",
+      "Start with type='video' and limit=10. Narrow with uploadDate and duration when the user wants recent or long-form content.",
+      "Each result includes its id, title, channel, and (for videos) viewCount and uploadDate. Pass a video id to youtube_get_transcript or youtube_get_video next.",
+    ].join("\n"),
+  },
+  {
+    name: "youtube_get_video",
+    kind: "hosted",
+    configToolId: "youtube",
+    description:
+      "Get metadata for a single YouTube video: title, description, channel, duration, view and like counts, tags, and available transcript languages.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "YouTube video URL or 11-character video id (e.g. dQw4w9WgXcQ).",
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use youtube_get_video to inspect a single video's metadata before deciding whether to read its transcript.",
+      "transcriptLanguages lists the languages available to youtube_get_transcript.",
+    ].join("\n"),
+  },
+  {
+    name: "youtube_get_transcript",
+    kind: "hosted",
+    configToolId: "youtube",
+    description:
+      "Get the full transcript of a YouTube video as text so you can read what was said. Falls back to AI-generated transcription when no captions exist.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "YouTube video URL. Provide either url or videoId.",
+        },
+        videoId: {
+          type: "string",
+          description: "YouTube video id. Provide either url or videoId.",
+        },
+        lang: {
+          type: "string",
+          description:
+            "Preferred transcript language as an ISO 639-1 code (e.g. 'en'). Defaults to the first available language.",
+        },
+        text: {
+          type: "boolean",
+          description:
+            "When true (default), return one plain-text transcript. When false, return timestamped chunks.",
+          default: true,
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    help: [
+      "Use youtube_get_transcript to read the spoken content of a video. This is the main way to 'watch' a video as text.",
+      "Provide either url or videoId (one is required). Use lang when you need a specific language; check transcriptLanguages from youtube_get_video first.",
+      "Keep text=true for summarization. Set text=false only when you need timestamps to cite specific moments.",
+      "When the video has no captions, Supadata generates a transcript, which costs more and may take longer.",
+    ].join("\n"),
+  },
+  {
+    name: "youtube_get_channel",
+    kind: "hosted",
+    configToolId: "youtube",
+    description:
+      "Get metadata for a YouTube channel: name, description, subscriber count, video count, total views, and thumbnails.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "YouTube channel URL, @handle, or channel id.",
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use youtube_get_channel to look up a creator's audience size and focus.",
+      "Pair with youtube_list_channel_videos to see what the channel has published recently.",
+    ].join("\n"),
+  },
+  {
+    name: "youtube_list_channel_videos",
+    kind: "hosted",
+    configToolId: "youtube",
+    description:
+      "List recent video ids for a YouTube channel so you can fetch their metadata or transcripts.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "YouTube channel URL, @handle, or channel id.",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Number of video ids to return. Defaults to 20; ask the user before requesting larger values. Maximum 50.",
+          default: 20,
+        },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use youtube_list_channel_videos to enumerate a channel's latest uploads, then pass each id to youtube_get_video or youtube_get_transcript.",
+      "This returns ids only; call youtube_get_video for titles and metadata.",
     ].join("\n"),
   },
   {

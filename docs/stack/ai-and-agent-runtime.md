@@ -146,6 +146,35 @@ developer terms.
 **Reconsider if:** Official API cost, rate limits, coverage, compliance requirements, or customer
 credential needs make workspace-owned credentials or another licensed data provider a better fit.
 
+## Supadata (YouTube)
+
+**What it is:** A hosted API for YouTube search, video and channel metadata, and — most importantly —
+video transcripts, with AI-generated transcription as a fallback when a video has no captions.
+
+**What it does for us:** Powers the optional `@youtube` hosted agent tool. Agents can search
+YouTube, read a video's transcript as text (so the model can "watch" it), inspect video and channel
+metadata, and enumerate a channel's recent uploads.
+
+**Where it is used:**
+
+- `packages/agent-runtime/src/tools.ts`.
+- `apps/runner/src/hosted-tools.ts`.
+- `apps/web/components/agent-editor/tools.ts`.
+- `SUPADATA_API_KEY` in `.env.example`.
+
+**Why we use it:** The official YouTube Data API cannot return transcripts for arbitrary videos
+(captions download requires OAuth and only works for videos you own), and open-source transcript
+scrapers are blocked from datacenter IPs. Supadata gives reliable server-side transcripts plus
+search and metadata behind one `x-api-key` GET API, matching the existing hosted-tool pattern.
+
+**Status:** Optional. Agents can run without YouTube unless they enable `@youtube`. Comments are not
+covered — Supadata has no comments endpoint.
+
+**Owner:** AI Platform.
+
+**Reconsider if:** Transcript reliability, cost, coverage (e.g. comments), or compliance needs make
+another provider or first-party infrastructure a better fit.
+
 ## Runtime tools
 
 A runtime tool is a callable capability exposed to the model during a session. Integrations are the
@@ -180,6 +209,11 @@ Hosted tools are enabled by agent configuration:
 - `x_get_user_posts`
 - `x_get_discussion`
 - `x_get_trends`
+- `youtube_search`
+- `youtube_get_video`
+- `youtube_get_transcript`
+- `youtube_get_channel`
+- `youtube_list_channel_videos`
 - `web_fetch`
 
 Internal delegation tools are enabled by agent configuration:
