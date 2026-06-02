@@ -26,11 +26,13 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -39,6 +41,7 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
@@ -77,6 +80,12 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import {
+  getSlashContext,
+  matchSlashCommands,
+  parseSlashCommand,
+  type SlashCommand,
+} from "@/lib/slash-commands/registry";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
@@ -188,6 +197,7 @@ export function SessionViewContent(props: SessionViewContentProps) {
 
 function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
@@ -208,7 +218,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [isPending, startTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+  // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  // Caret position, tracked so the slash menu can open on a `/token` mid-message.
+  const [caret, setCaret] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashMenuId = useId();
+  const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
@@ -686,6 +703,85 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     [],
   );
 
+  // Command mode is active while the caret sits on a `/token` (at the start of the
+  // input or after whitespace). The token after the slash is the live filter query.
+  const slashContext = useMemo(() => getSlashContext(input, caret), [input, caret]);
+  const slashQuery = slashContext?.query ?? null;
+  const slashCommands = useMemo(
+    () => (slashQuery !== null ? matchSlashCommands(slashQuery) : []),
+    [slashQuery],
+  );
+  const slashMenuOpen = slashQuery !== null && !slashDismissed && slashCommands.length > 0;
+  const slashActiveId = slashCommands[slashActiveIndex]?.id ?? null;
+  const slashActiveOptionId =
+    slashMenuOpen && slashActiveId ? `${slashMenuId}-option-${slashActiveId}` : undefined;
+  // Reset highlight + un-dismiss whenever the query changes, so typing after
+  // Escape reopens the menu and a changed list always starts at the top. Done as
+  // a render-time adjustment (not an effect) per the "you might not need an
+  // effect" pattern — avoids a cascading-render lint error and an extra paint.
+  const [prevSlashQuery, setPrevSlashQuery] = useState(slashQuery);
+  if (slashQuery !== prevSlashQuery) {
+    setPrevSlashQuery(slashQuery);
+    setSlashActiveIndex(0);
+    setSlashDismissed(false);
+  }
+
+  const runSlashCommand = (command: SlashCommand, args = "") => {
+    const commandKey = command.id;
+    if (slashCommandInFlightRef.current.has(commandKey)) return;
+    slashCommandInFlightRef.current.add(commandKey);
+    startTransition(async () => {
+      try {
+        await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+      } finally {
+        slashCommandInFlightRef.current.delete(commandKey);
+      }
+    });
+  };
+
+  // Selecting a command from the menu inserts its trigger into the input (it does not
+  // run yet) — the trailing space ends the `/token` so the menu closes on its own, and
+  // the user runs it by pressing Enter to send. Keeps the textarea focused.
+  const insertSlashCommand = (command: SlashCommand) => {
+    const ctx = slashContext;
+    if (!ctx) return;
+    const before = input.slice(0, ctx.start);
+    const after = input.slice(ctx.end);
+    const next = `${before}${command.trigger} ${after}`;
+    const nextCaret = before.length + command.trigger.length + 1;
+    setInput(next);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
+    });
+  };
+
+  // Land the cursor in the composer when arriving at a fresh, empty session (e.g.
+  // right after `/clear` navigates here), so the user can start typing immediately.
+  const didAutofocusRef = useRef(false);
+  useEffect(() => {
+    if (didAutofocusRef.current) return;
+    didAutofocusRef.current = true;
+    if (visibleMessages.length === 0) textareaRef.current?.focus();
+  }, [visibleMessages.length]);
+
+  // Enter/send entrypoint: if the message carries a command token, run it (passing the
+  // text after the token as its args); otherwise send a normal chat message. Commands
+  // may run even while busy (they navigate away).
+  const handleSend = () => {
+    if (isPending) return;
+    const parsed = parseSlashCommand(input);
+    if (parsed) {
+      runSlashCommand(parsed.command, parsed.args);
+      return;
+    }
+    if (isBusy) return;
+    submit();
+  };
+
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
@@ -957,7 +1053,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               </div>
             ) : null}
             {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+            <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+              {slashMenuOpen ? (
+                <SlashCommandMenu
+                  id={slashMenuId}
+                  commands={slashCommands}
+                  activeId={slashActiveId}
+                  onSelect={(command) => insertSlashCommand(command)}
+                  onHover={(id) => {
+                    const idx = slashCommands.findIndex((command) => command.id === id);
+                    if (idx >= 0) setSlashActiveIndex(idx);
+                  }}
+                />
+              ) : null}
               <div ref={attachMenuRef} className="relative">
                 <button
                   type="button"
@@ -996,12 +1104,48 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(event) => setInput(event.target.value)}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  setCaret(event.target.selectionStart ?? event.target.value.length);
+                }}
+                onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
                 onKeyDown={(event) => {
+                  // While the slash menu is open it owns navigation keys; focus
+                  // stays in the textarea so typing keeps filtering the list.
+                  if (slashMenuOpen && !event.nativeEvent.isComposing) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setSlashActiveIndex(
+                        (i) => (i - 1 + slashCommands.length) % slashCommands.length,
+                      );
+                      return;
+                    }
+                    // Enter and Tab both insert the highlighted command into the input
+                    // (they do not run it) — the user runs it by then pressing Enter to send.
+                    if (event.key === "Enter" || event.key === "Tab") {
+                      if (event.key === "Enter" && event.shiftKey) {
+                        // shift+Enter falls through to a normal newline.
+                      } else {
+                        event.preventDefault();
+                        const command = slashCommands[slashActiveIndex];
+                        if (command) insertSlashCommand(command);
+                        return;
+                      }
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSlashDismissed(true);
+                      return;
+                    }
+                  }
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                     event.preventDefault();
-                    if (isBusy) return;
-                    submit();
+                    handleSend();
                   }
                 }}
                 onPaste={(event) => {
@@ -1027,6 +1171,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   });
                 }}
                 placeholder="Ask this agent to do something"
+                role="combobox"
+                aria-expanded={slashMenuOpen}
+                aria-controls={slashMenuOpen ? slashMenuId : undefined}
+                aria-activedescendant={slashActiveOptionId}
+                aria-haspopup="listbox"
                 rows={1}
                 className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
@@ -1045,8 +1194,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               ) : (
                 <button
                   type="button"
-                  disabled={isBusy || !input.trim()}
-                  onClick={submit}
+                  disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
+                  onClick={handleSend}
                   aria-label="Send message"
                   className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
                 >
@@ -1054,19 +1203,48 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 </button>
               )}
             </div>
-            <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/composer:opacity-100">
-              <span>
-                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                  ↵
-                </kbd>{" "}
-                send
-              </span>
-              <span>
-                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                  ⇧↵
-                </kbd>{" "}
-                new line
-              </span>
+            <div
+              className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
+                slashMenuOpen ? "opacity-100" : "opacity-0 group-focus-within/composer:opacity-100"
+              }`}
+            >
+              {slashMenuOpen ? (
+                <>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ↑↓
+                    </kbd>{" "}
+                    navigate
+                  </span>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ↵
+                    </kbd>{" "}
+                    insert
+                  </span>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      esc
+                    </kbd>{" "}
+                    dismiss
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ↵
+                    </kbd>{" "}
+                    send
+                  </span>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ⇧↵
+                    </kbd>{" "}
+                    new line
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
