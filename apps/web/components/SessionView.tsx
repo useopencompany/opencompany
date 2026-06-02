@@ -306,9 +306,14 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
 
   const applyRuntimeEvent = useCallback(
     (event: RuntimeEvent) => {
-      // Felt TTFT: the first delta (text or visible reasoning) ends the timer.
+      // Felt TTFT: the first visible assistant activity (text or reasoning) ends the timer.
       const pending = pendingTtftRef.current;
-      if (pending && (event.type === "message.delta" || event.type === "message.reasoning_delta")) {
+      if (
+        pending &&
+        (event.type === "message.delta" ||
+          event.type === "message.reasoning_delta" ||
+          event.type === "message.reasoning_started")
+      ) {
         if (pending.messageId) {
           captureEvent("session_first_token", {
             workspace_id: workspaceId,
@@ -318,7 +323,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
             model_provider: session.modelProvider,
             model_name: session.modelName,
             ttft_ms: Math.round(performance.now() - pending.startedAt),
-            first_token_kind: event.type === "message.reasoning_delta" ? "reasoning" : "text",
+            first_token_kind: event.type === "message.delta" ? "text" : "reasoning",
           });
         }
         pendingTtftRef.current = null;
@@ -1153,9 +1158,8 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
   return ref;
 }
 
-// Copy only the user-visible answer text — reasoning is hidden by default in
-// the UI and ChatGPT/Claude both exclude it from clipboard copies. Tool calls
-// are also intentionally excluded so what you paste matches what you read.
+// Copy only the user-visible answer text. Reasoning and tool calls are
+// intentionally excluded so what you paste matches the final assistant answer.
 function extractAssistantText(parts: AssistantTurnPart[]): string {
   return parts
     .map((part) => (part.type === "text" ? part.text : ""))
@@ -1291,7 +1295,7 @@ export function AssistantMessageContent({
           }
           if (part.type === "reasoning") {
             return (
-              <ReasoningSummaryCard
+              <ReasoningCard
                 key={group.key}
                 text={part.text}
                 durationSeconds={part.durationSeconds}
@@ -1466,7 +1470,7 @@ function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | 
   );
 }
 
-function ReasoningSummaryCard({
+function ReasoningCard({
   text,
   durationSeconds,
 }: {
@@ -2023,6 +2027,7 @@ function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "message.reasoning_started") return "Thinking started";
   if (event.type === "message.reasoning_completed") return "Thinking completed";
   if (event.type === "message.reasoning_summary") return "Thinking summary";
+  if (event.type === "message.reasoning_content") return "Reasoning content";
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
   if (event.type === "session.tool_usage") {

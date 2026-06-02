@@ -18,6 +18,7 @@
  * SSE reconnects keep flipping stream.status away from "stale".
  */
 
+import { captureEvent } from "@opencompany/analytics/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -61,11 +62,21 @@ vi.mock("@/components/ToastProvider", () => ({
   useToast: () => ({ showError: vi.fn() }),
 }));
 
-// Phase C: useSessionEventStream mock — controlled per-test via the exported setter.
-const mockStreamStatus = { value: "idle" as string };
+vi.mock("@opencompany/analytics/client", () => ({
+  captureEvent: vi.fn(),
+}));
+
+// Phase C: useSessionEventStream mock — controlled per-test via streamMock.
+const streamMock = vi.hoisted(() => ({
+  status: "idle" as string,
+  input: null as null | { onEvent: (event: RuntimeEvent) => void },
+}));
 const STALE_BANNER_TEXT = "Connection idle — reconnecting and refreshing progress…";
 vi.mock("@/components/useSessionEventStream", () => ({
-  useSessionEventStream: () => ({ status: mockStreamStatus.value, errorMessage: null }),
+  useSessionEventStream: (input: { onEvent: (event: RuntimeEvent) => void }) => {
+    streamMock.input = input;
+    return { status: streamMock.status, errorMessage: null };
+  },
 }));
 
 vi.mock("@/lib/agent-sessions/actions", () => ({
@@ -170,7 +181,7 @@ describe("AssistantMessageContent — Phase B: running with parts renders all pa
     const parts = [makeReasoningPart()];
     render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
 
-    // ReasoningSummaryCard renders the formatted duration (formatThinkingDuration: "Thought for N seconds")
+    // ReasoningCard renders the formatted duration (formatThinkingDuration: "Thought for N seconds")
     expect(screen.getByText("Thought for 5 seconds")).toBeInTheDocument();
     // WorkingIndicator footer persists
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -354,7 +365,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
 }
 
 function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatus = "idle") {
-  mockStreamStatus.value = streamStatus;
+  streamMock.status = streamStatus;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -398,6 +409,137 @@ describe("SessionViewContent — active turn timer", () => {
 
     expect(screen.getByText("5s")).toBeInTheDocument();
     expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionViewContent — live reasoning rendering", () => {
+  it("shows live reasoning delta text inside the expandable reasoning card", async () => {
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      messages: [makeRunningAssistantMessage({ content: "" })],
+      events: [
+        {
+          id: null,
+          type: "message.reasoning_delta",
+          messageId: "msg_running",
+          payload: { messageId: "msg_running", delta: "Considering constraints." },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail, "open");
+
+    await user.click(screen.getByRole("button", { name: /Thought/ }));
+
+    expect(screen.getByText("Considering constraints.")).toBeInTheDocument();
+  });
+
+  it("copies only assistant answer text when live reasoning is present", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      const detail = makeDetail({
+        messages: [
+          {
+            id: "msg_done",
+            role: "assistant",
+            content: "Final answer",
+            status: "completed",
+          },
+        ],
+        events: [
+          {
+            id: null,
+            type: "message.reasoning_delta",
+            messageId: "msg_done",
+            payload: { messageId: "msg_done", delta: "Do not copy this reasoning." },
+          },
+        ],
+      });
+
+      renderSessionViewContent(detail, "open");
+
+      await user.click(screen.getByRole("button", { name: "Copy message" }));
+
+      expect(writeText).toHaveBeenCalledWith("Final answer");
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    }
+  });
+});
+
+describe("SessionViewContent — felt TTFT", () => {
+  beforeEach(() => {
+    streamMock.status = "idle";
+    streamMock.input = null;
+    vi.mocked(captureEvent).mockReset();
+    vi.mocked(submitAgentSessionMessage).mockReset();
+  });
+
+  it("records reasoning as the first visible assistant activity", async () => {
+    const user = userEvent.setup();
+    let now = 1_000;
+    const performanceNowSpy = vi.spyOn(performance, "now").mockImplementation(() => now);
+    vi.mocked(submitAgentSessionMessage).mockResolvedValue({
+      ok: true,
+      messageId: "msg_user_new",
+    });
+
+    try {
+      const detail = makeDetail({
+        session: makeSession({
+          status: "ready",
+          modelProvider: "openrouter",
+          modelName: "moonshotai/kimi-k2.6",
+        }),
+      });
+      renderSessionViewContent(detail, "open");
+
+      await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "continue");
+      await user.click(screen.getByRole("button", { name: "Send message" }));
+
+      await waitFor(() =>
+        expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "continue"),
+      );
+      await waitFor(() =>
+        expect(screen.getByPlaceholderText("Ask this agent to do something")).toHaveValue(""),
+      );
+
+      now = 1_240;
+      act(() => {
+        streamMock.input?.onEvent({
+          id: null,
+          type: "message.reasoning_delta",
+          messageId: "msg_assistant",
+          payload: { messageId: "msg_assistant", delta: "Considering the next step." },
+        });
+      });
+
+      expect(captureEvent).toHaveBeenCalledWith(
+        "session_first_token",
+        expect.objectContaining({
+          workspace_id: "wks_test",
+          agent_id: "agent_001",
+          session_id: "sess_001",
+          message_id: "msg_user_new",
+          model_provider: "openrouter",
+          model_name: "moonshotai/kimi-k2.6",
+          ttft_ms: 240,
+          first_token_kind: "reasoning",
+        }),
+      );
+    } finally {
+      performanceNowSpy.mockRestore();
+    }
   });
 });
 
@@ -458,7 +600,7 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    mockStreamStatus.value = "stale";
+    streamMock.status = "stale";
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
 
     render(
@@ -512,7 +654,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [makeEventFixture(1)],
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
@@ -542,7 +684,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [], // No events yet; component falls back to session.updatedAt.
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
@@ -570,7 +712,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [],
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     render(
@@ -602,7 +744,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [],
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
@@ -650,7 +792,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     });
 
     // Force status to stale (SSE path).
-    mockStreamStatus.value = "stale";
+    streamMock.status = "stale";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
@@ -673,7 +815,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [makeEventFixture(100)],
     });
 
-    mockStreamStatus.value = "stale";
+    streamMock.status = "stale";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     render(
@@ -701,7 +843,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [makeEventFixture(101)],
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     render(
@@ -733,7 +875,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       events: [makeEventFixture(102)],
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     render(
@@ -842,7 +984,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       ],
     });
 
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
@@ -920,7 +1062,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       },
     ];
     const detail = makeDetail({ messages: baseMessages });
-    mockStreamStatus.value = "open";
+    streamMock.status = "open";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = render(
       <QueryClientProvider client={queryClient}>

@@ -35,7 +35,7 @@ describe("resolveAgentRuntimeConfig", () => {
           reasoningSummary: "concise",
         },
       },
-      exposeReasoningSummary: true,
+      reasoningExposure: "summary",
     });
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
     expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
@@ -325,7 +325,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: "anthropic/claude-haiku-4.5",
       supportsReasoning: false,
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
     });
   });
 
@@ -359,7 +359,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: false,
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
     });
   });
 
@@ -372,10 +372,6 @@ describe("resolveAgentRuntimeConfig", () => {
     "minimax/minimax-m2.1",
     "minimax/minimax-m2.1-lightning",
     "minimax/minimax-m2",
-    "moonshotai/kimi-k2.6",
-    "moonshotai/kimi-k2.5",
-    "moonshotai/kimi-k2-thinking",
-    "moonshotai/kimi-k2-thinking-turbo",
     "xai/grok-4.3",
     "xai/grok-4.20-reasoning",
     "xai/grok-4.1-fast-reasoning",
@@ -404,7 +400,37 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: true,
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
+    });
+  });
+
+  it.each([
+    "moonshotai/kimi-k2.6",
+    "moonshotai/kimi-k2.5",
+    "moonshotai/kimi-k2-thinking",
+    "moonshotai/kimi-k2-thinking-turbo",
+  ] as const)("exposes raw reasoning content for %s", (modelName) => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Kimi agent",
+      instructions: "Plan carefully.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: modelName,
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.model).toEqual({
+      provider: "vercel-ai-gateway",
+      name: modelName,
+      supportsReasoning: true,
+      reasoningExposure: "raw",
     });
   });
 
@@ -435,7 +461,7 @@ describe("resolveAgentRuntimeConfig", () => {
           reasoningSummary: "concise",
         },
       },
-      exposeReasoningSummary: true,
+      reasoningExposure: "summary",
     });
   });
 });
