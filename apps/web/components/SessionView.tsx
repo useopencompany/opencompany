@@ -243,12 +243,13 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Whether the user is "pinned" at the bottom of the scroll container. Drives the
   // streaming bottom-follow.
   const isPinnedAtBottomRef = useRef(true);
-  // True only briefly after a genuine USER scroll input (wheel / trackpad / touch /
-  // scrollbar-drag pointerdown). onScroll only updates isPinnedAtBottom while this is set,
-  // so it ignores BOTH our own programmatic scrolls (snap + follow) AND layout-driven
-  // scroll events (reflow, overflow-anchor). Crucial because with the reserved min-height
-  // the snapped position reads as "near the bottom" — a stray non-user scroll there would
-  // otherwise flip isPinnedAtBottom on and the follow would yank the message up and out of
+  // True only briefly after a genuine USER scroll input (wheel / trackpad / touch).
+  // onScroll only updates isPinnedAtBottom while this is set, so it ignores BOTH our own
+  // programmatic scrolls (snap + follow) AND layout-driven scroll events (reflow,
+  // overflow-anchor) AND non-scroll pointer interactions (clicks/selection). Crucial
+  // because with the reserved min-height the snapped position reads as "near the bottom" —
+  // a stray non-user scroll there would otherwise flip isPinnedAtBottom on and the follow
+  // would yank the message up and out of
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -315,6 +316,13 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
   const showStoppedAfterUser =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
+  // The last turn is "active" only while a reply is being awaited or streamed (or the
+  // user just sent). The reserved min-height below the turn is applied only then, so a
+  // settled / freshly-opened conversation does not carry a half-viewport void under its
+  // last bubble — the reserve exists to give a just-sent message room to snap to the top,
+  // which is meaningless once the turn is complete.
+  const activeTurn =
+    showWaitingForAssistant || hasRunningAssistantMessage || lastVisibleMessage?.role === "user";
   // Abort stays available while paused so the user can cancel a parked run without
   // having to approve or deny the pending tool call first.
   const canAbort = sessionCanGenerate || sessionIsPaused;
@@ -827,7 +835,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           className="relative flex-1 overflow-y-auto overscroll-contain px-8 lg:px-12 py-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
-          onPointerDown={markUserScrollIntent}
           onScroll={(event) => {
             // Only a genuine user scroll (flagged by the wheel/touch/pointer handlers
             // above) updates the pinned-at-bottom state. Programmatic scrolls (snap +
@@ -929,7 +936,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             <div
               className="space-y-5"
               style={
-                lastUserTurnStart >= 0
+                lastUserTurnStart >= 0 && activeTurn
                   ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
                   : undefined
               }

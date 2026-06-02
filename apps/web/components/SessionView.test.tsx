@@ -1418,21 +1418,17 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     });
   });
 
-  // A scrollbar-thumb drag fires a `pointerdown` (flagging user intent) then a `scroll`,
-  // with NO wheel/touch. It must be honoured like any other user scroll: scrolling up to
-  // read releases the bottom-pin so the streaming follow does not yank the message back
-  // down on the next render.
-  it("respects a scrollbar drag (pointerdown) scroll up mid-generation — no re-pin", async () => {
+  // A layout-driven scroll (reflow / overflow-anchor adjustment) fires a bare `scroll`
+  // with NO wheel/touch gesture, and with the reserved min-height it can land within the
+  // bottom threshold. It must NOT be mistaken for the user reaching the bottom — otherwise
+  // the streaming follow engages and yanks the just-snapped message away. (A real scrollbar
+  // drag / keyboard scroll without wheel is the same, accepted, minor edge.)
+  it("ignores a non-user (layout-driven) scroll near the bottom — does not engage the follow", async () => {
     const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
 
-    // Scrolled up to read, far from the bottom (distanceFromBottom = 1000 - 0 - 800 = 200
-    // > threshold), via a scrollbar drag: pointerdown + scroll, no wheel.
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get: () => 1000,
-    });
+    // Bare scroll, no wheel/touch → not flagged as user intent. Default scrollHeight 860
+    // gives distanceFromBottom = 60 ≤ threshold, so it WOULD pin if wrongly treated as user.
     if (scroller) {
-      fireEvent.pointerDown(scroller);
       fireEvent.scroll(scroller);
     }
     scrollToSpy.mockClear();
