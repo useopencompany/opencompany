@@ -241,7 +241,12 @@ function parseScheduleTriggers(
   value: unknown,
 ): { ok: true; value: AgentScheduleTriggerConfig[] } | { ok: false; errors: string[] } {
   if (!Array.isArray(value)) {
-    return { ok: false, errors: ["`triggers` must be an array of schedule triggers, or omit it to keep your current schedules."] };
+    return {
+      ok: false,
+      errors: [
+        "`triggers` must be an array of schedule triggers, or omit it to keep your current schedules.",
+      ],
+    };
   }
 
   const errors: string[] = [];

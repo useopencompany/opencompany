@@ -389,7 +389,8 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
               },
               id: {
                 type: "string",
-                description: "Optional stable id. Auto-assigned (schedule-1, schedule-2, …) if omitted.",
+                description:
+                  "Optional stable id. Auto-assigned (schedule-1, schedule-2, …) if omitted.",
               },
             },
             required: ["cron", "prompt"],
