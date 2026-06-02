@@ -347,8 +347,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "update_agent_file",
     kind: "internal",
-    description:
-      'Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.',
+    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
     parameters: {
       type: "object",
       properties: {

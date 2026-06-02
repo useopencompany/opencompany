@@ -292,6 +292,26 @@ describe("applyAgentSelfUpdate", () => {
     expect(calls.update).toHaveLength(0);
   });
 
+  it("rejects schedule ids that collide with generated ids without writing", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({
+        body: "Keep helping.",
+        triggers: [
+          { cron: "0 9 * * *", prompt: "Daily standup." },
+          { id: "schedule-1", cron: "0 10 * * *", prompt: "Daily follow-up." },
+        ],
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/duplicate trigger id "schedule-1"/i);
+    expect(calls.update).toHaveLength(0);
+    expect(calls.insert).toHaveLength(0);
+  });
+
   it("reports a concurrent modification when the version guard misses", async () => {
     const { db, calls } = createDb({ row: baseRow, updateReturning: [] });
     dbMocks.getDb.mockReturnValue(db);

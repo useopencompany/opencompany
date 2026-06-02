@@ -273,20 +273,23 @@ function parseScheduleTriggers(
       errors.push(`${label}: \`prompt\` is required and must be a non-empty string.`);
     }
 
-    let id: string | undefined;
+    let id = `schedule-${index + 1}`;
     if (record.id !== undefined) {
       if (typeof record.id !== "string" || !record.id.trim()) {
         errors.push(`${label}: \`id\` must be a non-empty string when provided.`);
       } else {
         id = record.id.trim();
-        if (seenIds.has(id)) errors.push(`${label}: duplicate trigger id "${id}".`);
-        seenIds.add(id);
       }
+    }
+    if (seenIds.has(id)) {
+      errors.push(`${label}: duplicate trigger id "${id}".`);
+    } else {
+      seenIds.add(id);
     }
 
     if (cron && isSupportedScheduleCron(cron) && prompt) {
       triggers.push({
-        ...(id ? { id } : { id: `schedule-${index + 1}` }),
+        id,
         type: AGENT_SCHEDULE_TRIGGER_TYPE,
         cron,
         timezone: normalizeScheduleTimezone(
