@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseSlashCommand } from "@/lib/slash-commands/registry";
+import { matchSlashCommands, parseSlashCommand } from "@/lib/slash-commands/registry";
 
 // These dependencies are stubbed only to satisfy imports used by registry command definitions.
 vi.mock("@/lib/agent-sessions/actions", () => ({
@@ -56,5 +56,27 @@ describe("parseSlashCommand", () => {
   it("handles whitespace between command and args", () => {
     expect(parseSlashCommand("/clear    extra spaces")?.args).toBe("extra spaces");
     expect(parseSlashCommand("\t/clear\twith tab\t")?.args).toBe("with tab");
+  });
+
+  it("parses /btw with and without a prompt", () => {
+    expect(parseSlashCommand("  /btw  ")?.command.id).toBe("btw");
+    expect(parseSlashCommand("/btw")?.args).toBe("");
+
+    const parsed = parseSlashCommand("/btw draft the notes");
+    expect(parsed?.command.id).toBe("btw");
+    expect(parsed?.args).toBe("draft the notes");
+  });
+
+  it("requires /btw to be a clean token", () => {
+    expect(parseSlashCommand("/btweet a thread")).toBeNull();
+    expect(parseSlashCommand("/btw-now")).toBeNull();
+  });
+});
+
+describe("matchSlashCommands", () => {
+  it("finds /btw by id, keyword, and phrase", () => {
+    for (const query of ["btw", "side", "background", "by the way"]) {
+      expect(matchSlashCommands(query).some((command) => command.id === "btw")).toBe(true);
+    }
   });
 });
