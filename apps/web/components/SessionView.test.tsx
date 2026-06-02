@@ -252,6 +252,35 @@ describe("AssistantMessageContent — tool approvals", () => {
     expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
   });
 
+  it("keeps showing the approval prompt once the run has durably paused", () => {
+    // Regression: after suspend the assistant message is `completed` and the session is
+    // `awaiting_approval` (sessionCanGenerate=false). The pending tool call is still
+    // status "running" — it must NOT be flipped to "Stopped before finishing"; the
+    // approval prompt must stay rendered.
+    const message = makeMessage({ status: "completed" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "required",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+      }),
+    ];
+
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={parts}
+        sessionCanGenerate={false}
+        sessionIsPaused={true}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped before finishing.")).not.toBeInTheDocument();
+    expect(screen.queryByText("failed")).not.toBeInTheDocument();
+  });
+
   it("keeps a disabled resolving state after the user denies", async () => {
     vi.useRealTimers();
     actionMocks.resolveToolApproval.mockResolvedValue({ ok: true });

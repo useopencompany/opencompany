@@ -993,8 +993,14 @@ export function AssistantMessageContent({
   const awaitingApproval = (isRunning || sessionIsPaused) && hasPendingApproval;
 
   // A still-running tool call on a stopped session reads as failed — it never returned.
+  // A tool call awaiting an approval decision is the exception: the run paused on purpose
+  // (session is `awaiting_approval`, not generating), so it must keep rendering its
+  // approval prompt rather than flipping to "Stopped before finishing".
   const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
-    part.type === "tool-call" && part.toolCall.status === "running" && !sessionCanGenerate
+    part.type === "tool-call" &&
+    part.toolCall.status === "running" &&
+    !sessionCanGenerate &&
+    part.toolCall.approval?.status !== "required"
       ? {
           type: "tool-call",
           toolCall: {
