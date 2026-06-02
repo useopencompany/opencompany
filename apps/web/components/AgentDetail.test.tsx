@@ -6,6 +6,8 @@ import type { ComponentProps, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
+import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { updateAgent } from "@/lib/agents/actions";
 import {
   type AgentDetailPayload,
@@ -16,11 +18,17 @@ import {
 } from "@/lib/agents/payload";
 import AgentDetail from "./AgentDetail";
 
+const routerMocks = vi.hoisted(() => ({
+  prefetch: vi.fn(),
+  push: vi.fn(),
+  replace: vi.fn(),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
-    prefetch: vi.fn(),
-    push: vi.fn(),
-    replace: vi.fn(),
+    prefetch: routerMocks.prefetch,
+    push: routerMocks.push,
+    replace: routerMocks.replace,
   }),
 }));
 
@@ -42,6 +50,10 @@ vi.mock("@/lib/agents/actions", () => ({
 
 vi.mock("@/lib/agent-sessions/actions", () => ({
   createAgentSession: vi.fn(),
+}));
+
+vi.mock("@/lib/agent-schedules/actions", () => ({
+  runAgentScheduleNow: vi.fn(),
 }));
 
 vi.mock("@/lib/agent-sessions/payload", () => ({
@@ -174,6 +186,8 @@ const detailAgent: AgentDetailPayload = {
 const fetchAgentMock = vi.mocked(fetchAgent);
 const fetchAgentsMock = vi.mocked(fetchAgents);
 const updateAgentMock = vi.mocked(updateAgent);
+const runAgentScheduleNowMock = vi.mocked(runAgentScheduleNow);
+const seedSessionQueriesMock = vi.mocked(seedSessionQueries);
 
 const existingListAgent: AgentListItemPayload = {
   id: "agt_existing",
@@ -387,6 +401,67 @@ describe("AgentDetail", () => {
         },
       }),
     );
+  });
+
+  it("runs a saved schedule from the inspector", async () => {
+    const user = userEvent.setup();
+    const scheduledAgent = {
+      ...detailAgent,
+      config: {
+        ...detailAgent.config,
+        triggers: [
+          {
+            id: "weekday-brief",
+            type: "agent.schedule" as const,
+            cron: "0 9 * * 1-5",
+            timezone: "UTC",
+            prompt: "Review priorities.",
+            enabled: false,
+          },
+        ],
+      },
+    };
+    const detail = {
+      session: {
+        id: "ses_schedule",
+        source: "user",
+      },
+    };
+    runAgentScheduleNowMock.mockResolvedValue({
+      ok: true,
+      session: { id: "ses_schedule" },
+      detail,
+    } as never);
+
+    const { queryClient } = renderWithProviders(
+      <AgentDetail idOrPath="agents/leo.agent" initialAgent={scheduledAgent} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+    await user.click(screen.getByRole("button", { name: /run now/i }));
+
+    await waitFor(() =>
+      expect(runAgentScheduleNowMock).toHaveBeenCalledWith("agt_123", "weekday-brief"),
+    );
+    expect(seedSessionQueriesMock).toHaveBeenCalledWith(queryClient, "wks_123", detail);
+    expect(routerMocks.push).toHaveBeenCalledWith("/session/ses_schedule");
+  });
+
+  it("does not expose Run now for an unsaved schedule", async () => {
+    const user = userEvent.setup();
+    updateAgentMock.mockReturnValue(new Promise(() => {}) as never);
+
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+    await user.click(screen.getByRole("button", { name: /run every/i }));
+    await user.clear(screen.getByLabelText(/timezone/i));
+    await user.type(screen.getByLabelText(/timezone/i), "UTC");
+    await user.type(screen.getByLabelText(/prompt/i), "Review priorities.");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    expect(screen.queryByRole("button", { name: /run now/i })).not.toBeInTheDocument();
+    expect(runAgentScheduleNowMock).not.toHaveBeenCalled();
   });
 });
 
