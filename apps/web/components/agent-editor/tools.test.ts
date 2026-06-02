@@ -144,7 +144,7 @@ describe("agent editor mention tools", () => {
     // Not-connected provider stays selectable but is flagged + linkable.
     expect(slack).toBeDefined();
     expect(slack?.needsSetup).toBe(true);
-    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=/settings");
+    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fsettings");
   });
 
   test("exposes workspace agents as stable agent slug mentions", () => {

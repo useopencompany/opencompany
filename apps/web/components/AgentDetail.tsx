@@ -49,6 +49,7 @@ import {
   buildAgentMentionItems,
   findModel,
   findTool,
+  mcpConnectUrl,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useToast } from "@/components/ToastProvider";
@@ -1530,6 +1531,8 @@ function ConfigItem({
         </div>
         {needsSetup &&
           (connectUrl ? (
+            // Plain anchor (not next/link): the MCP start route issues an external
+            // OAuth redirect, which needs a full-page navigation. Matches SettingsView.
             <a
               href={connectUrl}
               className="shrink-0 rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning transition-opacity hover:opacity-80"
@@ -1680,7 +1683,7 @@ function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"
   return {
     ...tool,
     needsSetup: true,
-    connectUrl: `/api/mcp/${tool.id}/start?returnTo=/settings`,
+    connectUrl: mcpConnectUrl(tool.id),
   };
 }
 
