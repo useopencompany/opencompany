@@ -102,14 +102,18 @@ Important details:
   matching assistant tool calls.
 - The runner does not clone the full workspace repo into E2B. It materializes only configured
   Brain files under `/home/user/workspace/brain` plus a session-local
-  `/home/user/workspace/work` directory. For regular sessions, `work/` is initialized as an empty
-  git repository so `git_diff` can report session-local scratch changes without exposing the
-  managed workspace repo. For AMP sessions, `work/` contains the selected connected GitHub
-  repository.
-- When AMP runs against a connected GitHub repository, the runner mints a repository-scoped GitHub
-  App installation token and passes it only to that AMP command through `GH_TOKEN`, a temporary
-  `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config. This lets AMP use `gh` and
-  `git push` without persisting credentials in the sandbox home directory or repository remote.
+  `/home/user/workspace/work` directory. `work/` is initialized as an empty scratch git repository
+  so `git_diff` can report session-local scratch changes without exposing the managed workspace
+  repo. Connected GitHub repositories are cloned lazily into `work/<repo>` only when code or files
+  are needed; `gh` can still run metadata commands before a clone.
+- For shell, `gh`, and AMP commands that need connected GitHub repositories, the runner mints a
+  repository-scoped GitHub App installation token and passes it only to that command through
+  `GH_TOKEN`, a temporary `GH_CONFIG_DIR`, and process-scoped Git HTTP extraheader config. When
+  exactly one repository is attached, the command env also includes `GH_REPO`; multi-repo sessions
+  must pass `--repo owner/repo` to `gh` commands. This avoids persisting credentials in the sandbox
+  home directory or repository remote.
+- AMP owns its coding checkout and may clone the selected connected repository directly into
+  `work/` for that tool run.
 - Shell commands run from `/home/user/workspace`, where `work/` and `brain/` are visible.
 - OpenCompany-owned metadata lives outside the tool roots under `/home/user/.opencompany`, including
   the full serialized `.agent` source and Brain manifest.
@@ -118,6 +122,7 @@ V1 tools:
 
 - `shell`
 - `read_file`
+- `read_skill`
 - `edit_file`
 - `write_file`
 - `list_files`
@@ -125,6 +130,8 @@ V1 tools:
 - `delegate_to_agent` when the saved agent references other workspace agents; pass `agent` to
   start an inspectable child session hidden from sidebar history, or pass a returned
   `childSessionId` as `sessionId` to continue that child session
+- `update_agent_file` when the saved agent enables the `agent-self-edit` skill; validates and
+  persists version-guarded changes to the agent's own `.agent` configuration and queues GitHub sync
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has workspace OAuth or bearer-token credentials configured
@@ -136,7 +143,12 @@ V1 tools:
 
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
 `/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
+Enabled skills are also materialized as read-only files under `/home/user/workspace/skills/<id>/`;
+use `read_skill` with the skill id and an optional path inside that skill directory rather than
+generic file tools.
 Keep path validation in the runtime/sandbox layer rather than relying on model behavior.
+For connected GitHub code edits, clone the target repository into `work/<repo>` first unless the
+workflow is delegated to `amp_coder`.
 
 ## Event model
 
@@ -213,6 +225,7 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
+- `X_API_BEARER_TOKEN` (optional; required only for agents that enable the X hosted tool)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
@@ -237,7 +250,7 @@ retrying the stale id.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
 also merges the runner env vars from Infisical `dev` + `/runner` into `.env.local`, including
-hosted-tool secrets like `EXA_API_KEY` when they are present.
+hosted-tool secrets like `EXA_API_KEY` and `X_API_BEARER_TOKEN` when they are present.
 
 Run the app, Inngest dev server, and runner together:
 

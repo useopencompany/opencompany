@@ -34,7 +34,7 @@ Agents are one instance of the broader [synced workspace resource](#synced-works
 
 ## Agent File Format
 
-Workspace backing repos store agents as `agents/<slug>.agent` files. The format is a Markdown body
+Workspace backing repos store agents as `agents/<slug>/<slug>.agent` files. The format is a Markdown body
 with a YAML frontmatter header. In version `2`, saved frontmatter is the runtime contract, while
 the web editor derives tool and integration frontmatter deterministically from rich mention nodes.
 

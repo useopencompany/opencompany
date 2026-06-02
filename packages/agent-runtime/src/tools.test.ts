@@ -3,6 +3,7 @@ import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
+  resolveRuntimeToolNamesForConfigTools,
 } from "./tools";
 
 describe("AGENT_TOOL_CATALOG", () => {
@@ -40,7 +41,7 @@ describe("AGENT_TOOL_CATALOG", () => {
       expect.objectContaining({
         name: "amp_coder",
         configToolId: "amp",
-        requiresRepositoryBinding: true,
+        requiresAttachedRepository: true,
       }),
     );
   });
@@ -68,6 +69,21 @@ describe("AGENT_TOOL_CATALOG", () => {
     expect(exa?.requiredPlatformEnvVars).toEqual(["EXA_API_KEY"]);
     expect(exa?.requiredWorkspaceResource).toBeUndefined();
   });
+
+  it("documents platform-only credentials for X without workspace resource requirements", () => {
+    const x = AGENT_TOOL_DEFINITION_BY_ID.get("x");
+
+    expect(x?.credentialSource).toBe("platform");
+    expect(x?.requiredPlatformEnvVars).toEqual(["X_API_BEARER_TOKEN"]);
+    expect(x?.requiredWorkspaceResource).toBeUndefined();
+    expect(x?.runtimeTools).toEqual([
+      "x_search_posts",
+      "x_get_profile",
+      "x_get_user_posts",
+      "x_get_discussion",
+      "x_get_trends",
+    ]);
+  });
 });
 
 describe("runtime tool definitions", () => {
@@ -83,6 +99,36 @@ describe("runtime tool definitions", () => {
     expect(definition.parameters.properties).toHaveProperty("sessionId");
     expect(definition.description).toContain("continue a prior delegated child session");
     expect(definition.help).toContain("childSessionId");
+  });
+
+  it("exposes read_skill for mounted skill files and keeps generic file tools out of skills", () => {
+    const readSkill = RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_skill");
+    const readFile = RUNTIME_TOOL_DEFINITION_BY_NAME.get("read_file");
+    const listFiles = RUNTIME_TOOL_DEFINITION_BY_NAME.get("list_files");
+
+    if (!readSkill || !readFile || !listFiles) {
+      throw new Error("Expected read_skill, read_file, and list_files definitions to exist");
+    }
+
+    expect(readSkill.parameters.required).toEqual(["skillId"]);
+    expect(readSkill.parameters.properties).toHaveProperty("path");
+    expect(readFile.description).not.toContain("skills");
+    expect(listFiles.description).not.toContain("skills");
+  });
+
+  it("requires reading the self-edit skill and points to it instead of duplicating it", () => {
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get("update_agent_file");
+
+    if (!definition) {
+      throw new Error("Expected update_agent_file runtime tool definition to exist");
+    }
+
+    expect(definition.description).toContain('read_skill({skillId:"agent-self-edit"})');
+    expect(definition.help).toContain('read_skill({skillId:"agent-self-edit"})');
+    // The help is a pointer to the skill, not a second copy of the protocol.
+    expect(definition.help).toContain("source of truth");
+    expect(definition.help).toContain("COMPLETE new Markdown body");
+    expect(definition.help).toContain("next session");
   });
 
   it("keeps Exa category compatibility guidance in the visible search schema", () => {
@@ -117,6 +163,106 @@ describe("runtime tool definitions", () => {
     );
     expect(descriptionFor("endPublishedDate")).toContain(
       "Not supported with category=people or category=company",
+    );
+  });
+
+  it("exposes read-only X tools with visible schemas and help", () => {
+    const search = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_search_posts");
+    const userPosts = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_user_posts");
+    const discussion = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_discussion");
+    const trends = RUNTIME_TOOL_DEFINITION_BY_NAME.get("x_get_trends");
+
+    if (!search || !userPosts || !discussion || !trends) {
+      throw new Error("Expected X runtime tool definitions to exist");
+    }
+
+    const maxResultsFor = (tool: NonNullable<typeof search>) =>
+      tool.parameters.properties.maxResults as { default?: number; description?: string };
+
+    expect(search.configToolId).toBe("x");
+    expect(search.parameters.required).toEqual(["query"]);
+    expect(search.parameters.properties).toHaveProperty("mode");
+    expect(search.parameters.properties).toHaveProperty("paginationToken");
+    expect(search.description).toContain("official X API");
+    const searchMaxResults = maxResultsFor(search);
+    expect(searchMaxResults.default).toBe(10);
+    expect(String(searchMaxResults.description)).toContain("Defaults to 10");
+    expect(String(searchMaxResults.description)).toContain(
+      "ask the user before using larger values",
+    );
+    expect(search.help).toContain("Start with maxResults=10");
+    expect(search.help).toContain("explicitly asks for broader coverage");
+
+    const userPostsMaxResults = maxResultsFor(userPosts);
+    expect(userPostsMaxResults.default).toBe(10);
+    expect(String(userPostsMaxResults.description)).toContain("Defaults to 10");
+    expect(userPosts.help).toContain("Start with maxResults=10");
+
+    expect(discussion.configToolId).toBe("x");
+    expect(discussion.parameters.required).toEqual(["postIdOrUrl"]);
+    expect(discussion.help).toContain("target post");
+    const discussionMaxResults = maxResultsFor(discussion);
+    expect(discussionMaxResults.default).toBe(10);
+    expect(String(discussionMaxResults.description)).toContain("Defaults to 10");
+    expect(discussion.help).toContain("Start with maxResults=10");
+    expect(discussion.parameters.properties).not.toHaveProperty("paginationToken");
+    expect(discussion.help).not.toContain("pagination");
+
+    const trendsMaxResults = maxResultsFor(trends);
+    expect(trendsMaxResults.default).toBe(10);
+    expect(String(trendsMaxResults.description)).toContain("Defaults to 10");
+    expect(trends.help).toContain("Start with maxResults=10");
+  });
+});
+
+describe("resolveRuntimeToolNamesForConfigTools", () => {
+  const repo = { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" };
+
+  it("always exposes the core file/shell tools and tool_help", () => {
+    const names = resolveRuntimeToolNamesForConfigTools({ tools: [] });
+    expect(names).toEqual(
+      expect.arrayContaining(["shell", "read_file", "read_skill", "tool_help"]),
+    );
+  });
+
+  it("gates the gh tool on an attached repository, independent of amp", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("gh");
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] })).toContain(
+      "gh",
+    );
+  });
+
+  it("enables amp_coder only when amp is selected and a repository is attached", () => {
+    const ampTool = { id: "amp" };
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [ampTool] })).not.toContain("amp_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [ampTool], repositories: [repo] }),
+    ).toContain("amp_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
+    ).not.toContain("amp_coder");
+  });
+
+  it("adds delegate_to_agent only when delegatable agents are present", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({
+        tools: [],
+        agents: [{ path: "agents/x/x.agent" }],
+      }),
+    ).toContain("delegate_to_agent");
+  });
+
+  it("enables X hosted tools only when x is selected", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("x_search_posts");
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "x" }] })).toEqual(
+      expect.arrayContaining([
+        "x_search_posts",
+        "x_get_profile",
+        "x_get_user_posts",
+        "x_get_discussion",
+        "x_get_trends",
+      ]),
     );
   });
 });

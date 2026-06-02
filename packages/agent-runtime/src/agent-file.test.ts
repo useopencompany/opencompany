@@ -1,13 +1,22 @@
 import { describe, expect, test } from "vitest";
 import {
+  agentBundleDir,
+  agentPathForSlug,
   buildAgentFile,
   parseAgentFile,
   serializeAgentFile,
   serializeAgentFrontmatter,
+  validateAgentFileSource,
 } from "./agent-file";
 import { extractConfigFromMentions } from "./mentions";
 
 describe(".agent files", () => {
+  test("builds bundle-backed agent paths from slugs", () => {
+    expect(agentPathForSlug("research")).toBe("agents/research/research.agent");
+    expect(agentPathForSlug("research-2")).toBe("agents/research-2/research-2.agent");
+    expect(agentBundleDir("agents/research-2/research-2.agent")).toBe("agents/research-2");
+  });
+
   test("round-trips deterministic frontmatter and markdown body", () => {
     const source = [
       "---",
@@ -47,24 +56,27 @@ describe(".agent files", () => {
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa"]);
   });
 
-  test("round-trips newly supported AI Gateway models", () => {
+  test.each([
+    "google/gemini-3-flash",
+    "minimax/minimax-m3",
+    "moonshotai/kimi-k2-thinking",
+  ] as const)("round-trips newly supported AI Gateway model %s", (model) => {
     const source = serializeAgentFile({
-      title: "Gemini agent",
+      title: "Gateway agent",
       body: "Use the selected gateway model.",
-      model: "google/gemini-3-flash",
+      model,
     });
 
-    expect(source).toContain("model: google/gemini-3-flash");
-    expect(parseAgentFile(source).config.model.name).toBe("google/gemini-3-flash");
+    expect(source).toContain(`model: ${model}`);
+    expect(parseAgentFile(source).config.model.name).toBe(model);
   });
 
-  test("syncs config from markdown mentions", () => {
+  test("syncs tool and brain config from markdown mentions", () => {
     const config = extractConfigFromMentions(
-      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa and @exa. Read @brain/docs/README.md and @brain/product/.",
+      "Use @openai/gpt-5.4-mini first, then @openai/gpt-5.4 with @exa, @x, and @exa. Read @brain/docs/README.md and @brain/product/.",
     );
 
-    expect(config.model).toBe("openai/gpt-5.4");
-    expect(config.tools).toEqual(["exa"]);
+    expect(config.tools).toEqual(["exa", "x"]);
     expect(config.brain).toEqual([
       { path: "docs/README.md", type: "file" },
       { path: "product/", type: "folder" },
@@ -119,6 +131,26 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips X hosted tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "X research",
+      body: "Research public conversations with @x.",
+    });
+
+    expect(source).toContain("id: x");
+    expect(source).toContain("type: hosted_tool");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "x",
+        type: "hosted_tool",
+        label: "x",
+        description:
+          "Read public X posts, profiles, timelines, discussions, and trends through the official X API.",
+      },
+    ]);
+  });
+
   test("syncs the root Brain folder from markdown mentions", () => {
     const config = extractConfigFromMentions("Use all shared context in @brain/.");
 
@@ -141,7 +173,7 @@ describe(".agent files", () => {
     const agent = buildAgentFile({
       title: "Memory",
       body: [
-        "Help with onboarding. #after-session Update @brain/memory.md with durable customer preferences.",
+        "Help with onboarding. #after-session Update agent/memory.md with durable customer preferences.",
         "Keep this line in the same after-session paragraph.",
         "",
         "This paragraph is normal instructions.",
@@ -151,7 +183,7 @@ describe(".agent files", () => {
     expect(agent.config.afterSession).toEqual({
       enabled: true,
       prompt:
-        "Update @brain/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
+        "Update agent/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
       idleDelaySeconds: 180,
     });
   });
@@ -188,7 +220,7 @@ describe(".agent files", () => {
     });
 
     expect(source).toContain("title: Research");
-    expect(source).toContain("model: openai/gpt-5.4");
+    expect(source).toContain("model: openai/gpt-5.4-mini");
     expect(source).toContain("id: exa");
     expect(source).toContain("brain:\n  - docs/README.md");
     expect(
@@ -199,12 +231,12 @@ describe(".agent files", () => {
   test("round-trips after-session tags through serialization", () => {
     const source = serializeAgentFile({
       title: "Memory",
-      body: "Help users. #after-session Save durable facts in @brain/memory.md.",
+      body: "Help users. #after-session Save durable facts in agent/memory.md.",
     });
 
     expect(parseAgentFile(source).config.afterSession).toEqual({
       enabled: true,
-      prompt: "Save durable facts in @brain/memory.md.",
+      prompt: "Save durable facts in agent/memory.md.",
       idleDelaySeconds: 180,
     });
   });
@@ -255,12 +287,35 @@ describe(".agent files", () => {
     const source = serializeAgentFile({
       title: "Coordinator",
       body: "Delegate research to @agent/research.",
-      agents: [{ path: "agents/research.agent", name: "Research" }],
+      agents: [{ path: "agents/research/research.agent", name: "Research" }],
     });
     const parsed = parseAgentFile(source);
 
-    expect(source).toContain("agents:\n  - path: agents/research.agent\n    name: Research");
-    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(source).toContain(
+      "agents:\n  - path: agents/research/research.agent\n    name: Research",
+    );
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
+  });
+
+  test("canonicalizes legacy delegated agent frontmatter paths", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Coordinator"',
+        "agents:",
+        "  - path: agents/research/agent.agent",
+        "    name: Research",
+        "---",
+        "",
+        "Delegate research to @agent/research.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
   });
 
   test("drops invalid delegated agent frontmatter entries", () => {
@@ -269,7 +324,7 @@ describe(".agent files", () => {
         "---",
         'title: "Coordinator"',
         "agents:",
-        "  - path: agents/research.agent",
+        "  - path: agents/research/research.agent",
         "    name: Research",
         "  - path: ../secret.agent",
         "    name: Missing",
@@ -279,7 +334,9 @@ describe(".agent files", () => {
       ].join("\n"),
     );
 
-    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
   });
 
   test("does not derive unknown delegated agent mentions without a catalog", () => {
@@ -291,7 +348,7 @@ describe(".agent files", () => {
     expect(parseAgentFile(source).config.agents).toEqual([]);
   });
 
-  test("serializes explicit model selection ahead of legacy model mentions", () => {
+  test("serializes explicit model selection and ignores legacy model mentions", () => {
     const source = serializeAgentFile({
       title: "Research",
       body: "Find people with @exa and use @deep.",
@@ -326,7 +383,6 @@ describe(".agent files", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],
@@ -353,12 +409,110 @@ describe(".agent files", () => {
     expect(parsed.config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
-    expect(parsed.config.tools).toEqual([
-      expect.objectContaining({ id: "amp", repository: "opencompany-web" }),
-    ]);
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(parsed.config.tools[0]).not.toHaveProperty("repository");
     expect(parsed.config.triggers).toEqual([
       expect.objectContaining({ id: "opencompany-web-pr", repository: "opencompany-web" }),
     ]);
+  });
+
+  test("round-trips supported schedule triggers through frontmatter", () => {
+    const source = serializeAgentFile({
+      title: "Briefing",
+      body: "Prepare recurring status updates.",
+      triggers: [
+        {
+          id: "weekday-brief",
+          type: "agent.schedule",
+          cron: "0 9 * * 1-5",
+          timezone: "America/Los_Angeles",
+          prompt: "Review open priorities and write a concise status brief.",
+          enabled: true,
+        },
+      ],
+    });
+    const parsed = parseAgentFile(source);
+
+    expect(source).toContain("type: agent.schedule");
+    expect(source).toContain("cron: 0 9 * * 1-5");
+    expect(parsed.config.triggers).toEqual([
+      {
+        id: "weekday-brief",
+        type: "agent.schedule",
+        cron: "0 9 * * 1-5",
+        timezone: "America/Los_Angeles",
+        prompt: "Review open priorities and write a concise status brief.",
+        enabled: true,
+      },
+    ]);
+  });
+
+  test("drops unsupported schedule trigger shapes", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Briefing"',
+        "triggers:",
+        "  - id: ok",
+        "    type: agent.schedule",
+        "    cron: '*/15 * * * *'",
+        "    timezone: America/New_York",
+        "    prompt: Run the briefing.",
+        "    enabled: true",
+        "  - id: arbitrary-cron",
+        "    type: agent.schedule",
+        "    cron: '13 9 1 * *'",
+        "    timezone: America/New_York",
+        "    prompt: Run the briefing.",
+        "    enabled: true",
+        "  - id: missing-prompt",
+        "    type: agent.schedule",
+        "    cron: '0 9 * * *'",
+        "    timezone: America/New_York",
+        "---",
+        "",
+        "Prepare recurring status updates.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.triggers).toEqual([
+      {
+        id: "ok",
+        type: "agent.schedule",
+        cron: "*/15 * * * *",
+        timezone: "America/New_York",
+        prompt: "Run the briefing.",
+        enabled: true,
+      },
+    ]);
+  });
+
+  test("ignores a legacy amp.repository field when parsing", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Code"',
+        "model: openai/gpt-5.4-mini",
+        "tools:",
+        "  - id: amp",
+        "    type: coding_agent",
+        "    provider: amp",
+        "    repository: opencompany-web",
+        "    prCapable: true",
+        "integrations:",
+        "  github:",
+        "    repositories:",
+        "      - id: opencompany-web",
+        "        fullName: opencompany/web",
+        "        defaultBranch: main",
+        "---",
+        "",
+        "Work in @opencompany/web with @amp.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
+    expect(parsed.config.tools[0]).not.toHaveProperty("repository");
   });
 
   test("round-trips optional GitHub repository connection binding", () => {
@@ -424,5 +578,57 @@ describe(".agent files", () => {
     expect(parsed.config.integrations.github.repositories).toEqual([
       { id: "opencompany-web", fullName: "opencompany/web", defaultBranch: "main" },
     ]);
+  });
+});
+
+describe("validateAgentFileSource", () => {
+  const goodSource = serializeAgentFile({
+    title: "Agent",
+    body: "Help the user with @exa.",
+    model: "openai/gpt-5.4",
+  });
+
+  test("accepts a well-formed source and returns the parsed file", () => {
+    const result = validateAgentFileSource(goodSource);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.parsed.title).toBe("Agent");
+      expect(result.parsed.config.model.name).toBe("openai/gpt-5.4");
+    }
+  });
+
+  test("rejects a missing frontmatter fence", () => {
+    const result = validateAgentFileSource("Just a body, no frontmatter.");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/frontmatter/i);
+  });
+
+  test("rejects an empty title", () => {
+    const result = validateAgentFileSource('---\ntitle: ""\nmodel: openai/gpt-5.4\n---\n\nBody.');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/title/i);
+  });
+
+  test("rejects an unknown model instead of silently defaulting", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent"\nmodel: openai/not-a-real-model\n---\n\nBody.',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/model/i);
+  });
+
+  test("rejects an empty body", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent"\nmodel: openai/gpt-5.4\n---\n\n   ',
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/body/i);
+  });
+
+  test("rejects malformed frontmatter YAML", () => {
+    const result = validateAgentFileSource(
+      '---\ntitle: "Agent\nmodel: openai/gpt-5.4\n---\n\nBody.',
+    );
+    expect(result.ok).toBe(false);
   });
 });

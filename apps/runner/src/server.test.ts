@@ -29,6 +29,7 @@ const env = {
   e2bApiKey: "e2b",
   vercelAiGatewayApiKey: "gateway",
   exaApiKey: undefined,
+  xApiBearerToken: undefined,
   ampApiKey: undefined,
   e2bTemplate: undefined,
   ampE2bTemplate: undefined,

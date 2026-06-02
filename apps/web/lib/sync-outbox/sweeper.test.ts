@@ -1,11 +1,16 @@
 import { captureException } from "@opencompany/observability";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
+import {
+  AGENT_FILE_SYNC_REQUESTED_EVENT,
+  AGENT_SYNC_REQUESTED_EVENT,
+} from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import {
+  filterDueAgentFileSyncJobs,
   filterDueAgentSyncJobs,
   filterDueBrainSyncJobs,
   nextSyncRetryAt,
+  sweepAgentFileSyncOutbox,
   sweepAgentSyncOutbox,
   sweepBrainSyncOutbox,
 } from "./sweeper";
@@ -127,6 +132,37 @@ describe("sync outbox due-job filtering", () => {
     ).toEqual([{ workspaceId: "wks_123", path: "a.md" }]);
   });
 
+  it("selects due pending and failed agent file jobs", () => {
+    expect(
+      filterDueAgentFileSyncJobs(
+        [
+          {
+            workspaceId: "wks_123",
+            path: "agents/sales/future.md",
+            status: "pending",
+            attempts: 0,
+            nextRunAt: new Date("2026-05-27T12:00:01.000Z"),
+          },
+          {
+            workspaceId: "wks_123",
+            path: "agents/sales/syncing.md",
+            status: "syncing",
+            attempts: 0,
+            nextRunAt: new Date("2026-05-27T11:59:00.000Z"),
+          },
+          {
+            workspaceId: "wks_123",
+            path: "agents/sales/memory.md",
+            status: "failed",
+            attempts: 1,
+            nextRunAt: new Date("2026-05-27T11:58:00.000Z"),
+          },
+        ],
+        { now },
+      ),
+    ).toEqual([{ workspaceId: "wks_123", path: "agents/sales/memory.md" }]);
+  });
+
   it("backs off failed sync retries exponentially with a cap", () => {
     expect(nextSyncRetryAt(now, 1)).toEqual(new Date("2026-05-27T12:01:00.000Z"));
     expect(nextSyncRetryAt(now, 3)).toEqual(new Date("2026-05-27T12:04:00.000Z"));
@@ -195,6 +231,36 @@ describe("sync outbox sweepers", () => {
     expect(mocks.logger.warn).toHaveBeenCalledWith("Dispatched sync outbox recovery events", {
       event: "opencompany.sync_outbox_recovery_dispatched",
       resource_type: "brain",
+      dispatched_count: 2,
+    });
+  });
+
+  it("dispatches one agent file sync event for each due job", async () => {
+    const step = createStepMock();
+
+    await expect(
+      sweepAgentFileSyncOutbox(step, {
+        loadDueDispatches: async () => [
+          { workspaceId: "wks_123", path: "agents/sales/memory.md" },
+          { workspaceId: "wks_123", path: "agents/sales/sessions.md" },
+        ],
+      }),
+    ).resolves.toEqual({ dispatched: 2 });
+
+    expect(step.run).toHaveBeenCalledWith("load due agent file sync jobs", expect.any(Function));
+    expect(step.sendEvent).toHaveBeenCalledWith("dispatch agent file sync requests", [
+      {
+        name: AGENT_FILE_SYNC_REQUESTED_EVENT,
+        data: { workspaceId: "wks_123", path: "agents/sales/memory.md" },
+      },
+      {
+        name: AGENT_FILE_SYNC_REQUESTED_EVENT,
+        data: { workspaceId: "wks_123", path: "agents/sales/sessions.md" },
+      },
+    ]);
+    expect(mocks.logger.warn).toHaveBeenCalledWith("Dispatched sync outbox recovery events", {
+      event: "opencompany.sync_outbox_recovery_dispatched",
+      resource_type: "agent_file",
       dispatched_count: 2,
     });
   });

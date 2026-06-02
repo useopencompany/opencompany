@@ -60,7 +60,7 @@ hide it; write `Engineering / unassigned` so we can fix it.
 | PostHog | Product analytics | Optional | Client/server analytics through `@opencompany/analytics` | Product | [Product integrations](./product-integrations.md#posthog) |
 | Vercel AI Gateway | Model gateway | Active | Provider-neutral model calls for agent runs | AI Platform | [AI and agent runtime](./ai-and-agent-runtime.md#vercel-ai-gateway) |
 | AI SDK | Model orchestration library | Active | `generateText`, gateway client, usage accounting | AI Platform | [AI and agent runtime](./ai-and-agent-runtime.md#ai-sdk) |
-| OpenAI + Anthropic | Model providers | Active | Fast/deep model families exposed through AI Gateway | AI Platform | [AI and agent runtime](./ai-and-agent-runtime.md#openai-and-anthropic) |
+| Gateway model providers | Model providers | Active | Fast/deep model families exposed through AI Gateway | AI Platform | [AI and agent runtime](./ai-and-agent-runtime.md#gateway-model-providers) |
 | E2B | Agent sandboxes | Active | Isolated runtime workspaces for shell/file/git tools | AI Platform | [AI and agent runtime](./ai-and-agent-runtime.md#e2b) |
 | Exa | Hosted web search | Optional | Agent `@exa` search and web fetch tooling | AI Platform | [AI and agent runtime](./ai-and-agent-runtime.md#exa) |
 

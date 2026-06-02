@@ -472,7 +472,6 @@ describe("usage recording", () => {
         provider: "amp",
         label: "Amp",
         description: "Delegate coding work to Amp.",
-        repository: "opencompany-web",
         prCapable: false,
       },
     ];
@@ -616,7 +615,7 @@ describe("usage recording", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -630,7 +629,7 @@ describe("usage recording", () => {
       ok: true,
       status: "completed",
       agentName: "Research",
-      agentPath: "agents/research.agent",
+      agentPath: "agents/research/research.agent",
       answer: "Research complete.",
     });
     expect(db.state.sessions[0]).toMatchObject({
@@ -708,7 +707,7 @@ describe("usage recording", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -794,7 +793,7 @@ describe("usage recording", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -887,7 +886,7 @@ describe("usage recording", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -908,7 +907,7 @@ describe("usage recording", () => {
       childSessionId: "ses_child",
       messageId: resumedUserMessage?.id,
       agentName: "Research",
-      agentPath: "agents/research.agent",
+      agentPath: "agents/research/research.agent",
       answer: "Follow-up complete.",
     });
     expect(runChildMessage).toHaveBeenCalledWith(
@@ -948,7 +947,7 @@ describe("usage recording", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -997,7 +996,7 @@ describe("usage recording", () => {
         signal: new AbortController().signal,
         checkAbort: async () => {},
         depth: 0,
-        agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+        agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
         runChildMessage,
       });
 
@@ -1058,7 +1057,7 @@ describe("usage recording", () => {
       signal: controller.signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -1411,7 +1410,6 @@ describe("usage recording", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],
@@ -1466,6 +1464,7 @@ describe("usage recording", () => {
         GH_TOKEN: "github_token_123",
         GH_PROMPT_DISABLED: "1",
         GH_NO_UPDATE_NOTIFIER: "1",
+        GH_REPO: "opencompany/web",
         GH_CONFIG_DIR: "/tmp/opencompany-gh-toolu-with-spaces",
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
@@ -1474,7 +1473,7 @@ describe("usage recording", () => {
     });
     expect(githubMocks.getGitHubWorkInstallationToken).toHaveBeenCalledWith({
       installationId: "install_123",
-      repositoryFullName: "opencompany/web",
+      repositoryFullNames: ["opencompany/web"],
     });
     expect(JSON.parse(db.state.messages.at(-1)?.content ?? "{}")).toEqual({
       stdout: "done [redacted]",
@@ -1572,7 +1571,6 @@ describe("usage recording", () => {
           provider: "amp",
           label: "AMP",
           description: "Delegate coding work to Amp inside an E2B sandbox.",
-          repository: "opencompany-web",
           prCapable: true,
         },
       ],
@@ -2050,7 +2048,25 @@ describe("Amp stream parsing", () => {
       GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
       GIT_CONFIG_VALUE_0: "Authorization: Basic github_basic_secret",
     });
+    expect(env).not.toHaveProperty("GH_REPO");
     expect(buildAmpCommand({ task: "open a pr" })).not.toContain("github_token_123");
+  });
+
+  it("adds GitHub default repo context when an env builder receives one", () => {
+    const env = buildAmpCommandEnv({
+      ampApiKey: "amp_secret_123",
+      githubAuthHeader: "Authorization: Basic github_basic_secret",
+      githubToken: "github_token_123",
+      repositoryFullName: "opencompany/web",
+      toolCallId: "toolu/with spaces",
+    });
+
+    expect(env).toMatchObject({
+      GH_REPO: "opencompany/web",
+      GH_TOKEN: "github_token_123",
+      GH_PROMPT_DISABLED: "1",
+      GH_NO_UPDATE_NOTIFIER: "1",
+    });
   });
 
   it("redacts known Amp and GitHub secrets from streamed or saved text", () => {
@@ -2845,7 +2861,7 @@ function createDelegationDb(
     agent: {
       id: "agt_research",
       name: "Research",
-      path: "agents/research.agent",
+      path: "agents/research/research.agent",
       config: {
         ...agentConfig(),
         title: "Research",
@@ -3006,6 +3022,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
+    xApiBearerToken: "x_test",
     ampApiKey: "amp_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,

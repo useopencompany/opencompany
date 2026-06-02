@@ -33,6 +33,7 @@ describe("sessions API route", () => {
         lastError: null,
         createdAt: "2026-05-24T10:00:00.000Z",
         updatedAt: "2026-05-24T10:01:00.000Z",
+        starredAt: null,
       },
     ]);
 

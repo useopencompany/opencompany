@@ -55,6 +55,36 @@ describe("AgentEditor", () => {
     });
   });
 
+  it("opens schedule actions without inserting a blank mention", async () => {
+    const user = userEvent.setup();
+    const captured: Array<{ body: string; content: unknown }> = [];
+    const onMentionSelect = vi.fn();
+
+    const { container } = render(
+      <AgentEditor
+        initialBody=""
+        mentionItems={buildAgentMentionItems()}
+        onMentionSelect={onMentionSelect}
+        onChange={(body, content) =>
+          captured.push({ body, content: JSON.parse(JSON.stringify(content)) })
+        }
+      />,
+    );
+    const editor = container.querySelector(".ProseMirror");
+    expect(editor).toBeInstanceOf(HTMLElement);
+
+    (editor as HTMLElement).focus();
+    await user.keyboard("@run");
+    await user.click(await screen.findByRole("option", { name: /run every/i }));
+
+    expect(onMentionSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "schedule", mentionId: "schedule:run-every" }),
+    );
+    expect(screen.queryByText("@run-every")).not.toBeInTheDocument();
+    expect(container.querySelector(".agent-mention[data-kind='schedule']")).not.toBeInTheDocument();
+    expect(captured.at(-1)?.body ?? "").toBe("");
+  });
+
   it("persists selected repository mention attrs and body text", async () => {
     const user = userEvent.setup();
     const captured: Array<{ body: string; content: unknown }> = [];

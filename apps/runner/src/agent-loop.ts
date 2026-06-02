@@ -1,4 +1,5 @@
 import {
+  agentMentionIdForPath,
   newAgentSessionId,
   newAgentSessionMessageId,
   newRunLeaseId,
@@ -35,6 +36,7 @@ import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { clearActiveRun, setActiveRun } from "./active-runs";
+import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { syncBrainFromSandbox } from "./brain";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -428,6 +430,28 @@ async function runMessageWithContext(
           repository: row.repository,
         }),
       );
+      // Bundle sync is best-effort: a DB/GitHub failure here must not fail the
+      // turn or drop the assistant response (persistAssistantCompletion runs
+      // below). The next turn re-syncs from the sandbox.
+      try {
+        await observeRunStep(ctx, "sync_agent_bundle_after_message", () =>
+          syncAgentBundleFromSandbox({
+            sandbox: activeSandbox,
+            sessionId: input.sessionId,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+            workdir: row.session.workdir,
+            repository: row.repository,
+          }),
+        );
+      } catch (error) {
+        logger.error("Agent bundle sync failed after message", {
+          session_id: input.sessionId,
+          workspace_id: row.workspace.id,
+          agent_id: row.agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     await checkAbort({ force: true });
@@ -895,7 +919,7 @@ async function runAfterSessionWithContext(
           ...runtime,
           tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
         },
-        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+        system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture durable learnings from the transcript in agent/memory.md when worthwhile, and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
         messages,
         tools,
         mcpContext: {
@@ -922,6 +946,27 @@ async function runAfterSessionWithContext(
           repository: row.repository,
         }),
       );
+      // Best-effort: an after-session run (which writes agent/memory.md) must
+      // not be marked failed because the bundle sync hit a DB/GitHub error.
+      try {
+        await observeRunStep(ctx, "sync_agent_bundle_after_session", () =>
+          syncAgentBundleFromSandbox({
+            sandbox: activeSandbox,
+            sessionId: input.sessionId,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+            workdir: row.session.workdir,
+            repository: row.repository,
+          }),
+        );
+      } catch (error) {
+        logger.error("Agent bundle sync failed after session", {
+          session_id: input.sessionId,
+          workspace_id: row.workspace.id,
+          agent_id: row.agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     await checkAbort({ force: true });
@@ -1889,11 +1934,8 @@ function resolveDelegatedAgentReference(agent: string, references: AgentReferenc
   const normalized = normalizeDelegatedAgentKey(agent);
   return references.find((reference) => {
     const path = reference.path;
-    const slug =
-      path.startsWith("agents/") && path.endsWith(".agent")
-        ? path.slice("agents/".length, -".agent".length)
-        : "";
-    const mention = path.startsWith("agents/") && path.endsWith(".agent") ? `agent/${slug}` : "";
+    const mention = agentMentionIdForPath(path) ?? "";
+    const slug = mention.startsWith("agent/") ? mention.slice("agent/".length) : "";
     return (
       normalizeDelegatedAgentKey(path) === normalized ||
       normalizeDelegatedAgentKey(mention) === normalized ||
@@ -1907,7 +1949,8 @@ function normalizeDelegatedAgentKey(value: string) {
   return value
     .trim()
     .replace(/^@/, "")
-    .replace(/\.agent$/i, "")
+    .replace(/^agents\//, "agent/")
+    .replace(/\/agent\.agent$/i, "")
     .toLowerCase();
 }
 

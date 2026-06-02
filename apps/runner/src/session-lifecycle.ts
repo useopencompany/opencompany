@@ -17,12 +17,11 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
-import { loadGitHubWorkRepository } from "./amp-tool";
+import { materializeAgentBundleForSession } from "./agent-bundle";
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
-import { getGitHubWorkInstallationToken } from "./github";
 import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
@@ -31,12 +30,12 @@ import {
   type SandboxHandle,
   sandboxPreparationErrorFields,
 } from "./sandbox";
+import { materializeSkillsForSession } from "./skills";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
-  let sessionRepository: ReturnType<typeof resolveSessionRepository> = null;
   const agentConfig = normalizeAgentConfig(row.agent.config);
   try {
     sandbox = await createOrConnectSandbox({
@@ -48,8 +47,6 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       },
       idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
     });
-    sessionRepository = resolveSessionRepository(agentConfig);
-    const githubToken = await resolveGitHubToken(row, sessionRepository);
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
@@ -62,9 +59,6 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
         integrations: agentConfig.integrations,
         triggers: agentConfig.triggers,
       }),
-      repositoryFullName: sessionRepository?.fullName,
-      repositoryDefaultBranch: sessionRepository?.defaultBranch,
-      githubToken,
     });
     await materializeBrainForSession({
       sandbox,
@@ -72,6 +66,18 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       workspaceId: row.workspace.id,
       workdir: row.session.workdir,
       references: agentConfig.brain,
+    });
+    await materializeAgentBundleForSession({
+      sandbox,
+      sessionId: row.session.id,
+      workspaceId: row.workspace.id,
+      agentId: row.agent.id,
+      workdir: row.session.workdir,
+    });
+    await materializeSkillsForSession({
+      sandbox,
+      workdir: row.session.workdir,
+      config: agentConfig,
     });
     return sandbox;
   } catch (error) {
@@ -83,8 +89,6 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       session_id: row.session.id,
       sandbox_id: sandbox?.sandboxId ?? row.session.e2bSandboxId,
       existing_sandbox: Boolean(row.session.e2bSandboxId),
-      repository_full_name: sessionRepository?.fullName,
-      repository_default_branch: sessionRepository?.defaultBranch,
       ...sandboxPreparationErrorFields(error),
     });
     if (sandbox) {
@@ -94,35 +98,14 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   }
 }
 
+// The richer sandbox template (with git, gh, and amp installed) is used whenever
+// the agent has at least one GitHub repository attached or amp enabled; plain chat
+// agents get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
-  return agentConfig.tools.some(
-    (tool) => tool.id === "amp" && typeof tool.repository === "string" && tool.repository,
-  )
-    ? (env.ampE2bTemplate ?? "amp")
-    : env.e2bTemplate;
-}
-
-function resolveSessionRepository(agentConfig: AgentConfig) {
-  const ampTool = agentConfig.tools.find((tool) => tool.id === "amp");
-  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
-  return (
-    agentConfig.integrations.github.repositories.find(
-      (repository) => repository.id === ampTool.repository,
-    ) ?? null
-  );
-}
-
-async function resolveGitHubToken(
-  row: LoadedSession,
-  sessionRepository: ReturnType<typeof resolveSessionRepository>,
-) {
-  if (!sessionRepository) return null;
-
-  const integrationRepository = await loadGitHubWorkRepository(row.workspace.id, sessionRepository);
-  return getGitHubWorkInstallationToken({
-    installationId: integrationRepository.installationId,
-    repositoryFullName: sessionRepository.fullName,
-  });
+  const needsCodingTemplate =
+    agentConfig.integrations.github.repositories.length > 0 ||
+    agentConfig.tools.some((tool) => tool.id === "amp");
+  return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
 
 export async function parkSandboxWhenIdle(sandbox: SandboxHandle, env: RunnerEnv) {
