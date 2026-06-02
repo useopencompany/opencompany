@@ -26,6 +26,23 @@ type LinearIssueResponse = {
   } | null;
 };
 
+type LinearFileUploadResponse = {
+  fileUpload?: {
+    success: boolean;
+    uploadFile?: {
+      uploadUrl: string;
+      assetUrl: string;
+      headers: Array<{ key: string; value: string }>;
+    } | null;
+  } | null;
+};
+
+type LinearAttachmentCreateResponse = {
+  attachmentCreate?: {
+    success: boolean;
+  } | null;
+};
+
 type LinearLabelsResponse = {
   team?: {
     labels: {
@@ -111,12 +128,14 @@ function buildDescription({
   user,
   workspace,
   sessionId,
+  screenshotUrl,
 }: {
   message: string;
   kind: FeedbackKind;
   user: { email: string; firstName?: string | null; lastName?: string | null };
   workspace: { id: string; name: string };
   sessionId?: string | null;
+  screenshotUrl?: string | null;
 }) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const submittedBy = name ? `${name} <${user.email}>` : user.email;
@@ -131,6 +150,7 @@ function buildDescription({
     `Workspace: ${workspace.name} (${workspace.id})`,
     ...(sessionId ? [`Session ID: ${sessionId}`] : []),
     `Type: ${kind}`,
+    ...(screenshotUrl ? ["", `![Screenshot](${screenshotUrl})`] : []),
   ];
 
   return context.join("\n");
@@ -310,6 +330,78 @@ async function resolveLinearLabelIds(teamId: string, names: string[]) {
   return labelIds;
 }
 
+/**
+ * Uploads a screenshot to Linear's file storage and returns the public asset URL.
+ * Returns null without throwing if the upload fails — a screenshot is non-critical.
+ */
+async function uploadScreenshotToLinear(file: File): Promise<string | null> {
+  try {
+    const data = await linearGraphql<LinearFileUploadResponse>(
+      `
+        mutation FeedbackFileUpload($contentType: String!, $size: Int!) {
+          fileUpload(contentType: $contentType, size: $size) {
+            success
+            uploadFile {
+              uploadUrl
+              assetUrl
+              headers {
+                key
+                value
+              }
+            }
+          }
+        }
+      `,
+      { contentType: file.type, size: file.size },
+    );
+
+    const upload = data.fileUpload?.uploadFile;
+    if (!data.fileUpload?.success || !upload) return null;
+
+    const extraHeaders: Record<string, string> = {};
+    for (const { key, value } of upload.headers) {
+      extraHeaders[key] = value;
+    }
+
+    const putResponse = await fetch(upload.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": file.type,
+        ...extraHeaders,
+      },
+      body: file,
+    });
+
+    if (!putResponse.ok) return null;
+
+    return upload.assetUrl;
+  } catch {
+    // Screenshot upload should never block feedback submission.
+    return null;
+  }
+}
+
+/**
+ * Links a previously-uploaded file as an attachment on a Linear issue.
+ * Silently ignores failures — an attachment is supplementary.
+ */
+async function attachScreenshotToIssue(issueId: string, assetUrl: string): Promise<void> {
+  try {
+    await linearGraphql<LinearAttachmentCreateResponse>(
+      `
+        mutation FeedbackAttachmentCreate($issueId: String!, $url: String!, $title: String!) {
+          attachmentCreate(input: { issueId: $issueId, url: $url, title: $title }) {
+            success
+          }
+        }
+      `,
+      { issueId, url: assetUrl, title: "Screenshot" },
+    );
+  } catch {
+    // Non-critical; do not surface to user.
+  }
+}
+
 export async function submitFeedback(
   _previousState: FeedbackActionState | null,
   formData: FormData,
@@ -317,6 +409,7 @@ export async function submitFeedback(
   const rawKind = readString(formData, "kind");
   const message = readString(formData, "message");
   const rawSessionId = readString(formData, "sessionId");
+  const screenshotFile = formData.get("screenshot");
 
   const kind = isFeedbackKind(rawKind) ? rawKind : "feedback";
 
@@ -328,6 +421,12 @@ export async function submitFeedback(
     return { ok: false, error: "Keep feedback under 4,000 characters." };
   }
 
+  const screenshot =
+    screenshotFile instanceof File && screenshotFile.size > 0 ? screenshotFile : null;
+
+  // Upload screenshot before creating the issue so we can embed the URL in the description.
+  const screenshotUrl = screenshot ? await uploadScreenshotToLinear(screenshot) : null;
+
   const { authUser, user, workspace } = await currentWorkspace();
   const sessionId = await resolveFeedbackSessionId(rawSessionId, user.id, workspace.id);
   const title = titleFromMessage(kind, message);
@@ -337,14 +436,20 @@ export async function submitFeedback(
     user: authUser,
     workspace,
     sessionId,
+    screenshotUrl,
   });
 
   try {
-    await createLinearIssue({
+    const issue = await createLinearIssue({
       title,
       description,
       kind,
     });
+
+    // Attach the screenshot as a Linear attachment in addition to the inline image.
+    if (screenshotUrl) {
+      await attachScreenshotToIssue(issue.id, screenshotUrl);
+    }
 
     return { ok: true };
   } catch (error) {
