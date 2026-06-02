@@ -12,6 +12,7 @@ import {
   type AgentListItemPayload,
   agentQueryKeys,
   fetchAgent,
+  fetchAgents,
 } from "@/lib/agents/payload";
 import AgentDetail from "./AgentDetail";
 
@@ -94,7 +95,7 @@ const config: AgentConfig = {
 const listAgent: AgentListItemPayload = {
   id: "agt_123",
   workspaceId: "wks_123",
-  path: "agents/leo.agent",
+  path: "agents/leo/leo.agent",
   name: "Leo",
   config,
   githubSyncStatus: "synced",
@@ -128,6 +129,20 @@ const detailAgent: AgentDetailPayload = {
   githubCommitSha: "abc123",
   githubSyncedAt: "2026-05-24T10:05:00.000Z",
   brainPaths: [],
+  bundleFiles: [
+    {
+      path: "agents/leo/memory.md",
+      relativePath: "memory.md",
+      content: "Private notes",
+      sizeBytes: 13,
+      contentHash: "hash_memory",
+      githubCommitSha: "def456",
+      githubSyncedAt: "2026-05-24T10:06:00.000Z",
+      githubSyncStatus: "synced",
+      githubSyncError: null,
+      updatedAt: "2026-05-24T10:06:00.000Z",
+    },
+  ],
   githubIntegrationRepositories: [
     {
       fullName: "opencompany/web",
@@ -148,7 +163,7 @@ const detailAgent: AgentDetailPayload = {
       binding,
     },
   ],
-  workspaceAgents: [{ path: "agents/research.agent", name: "Research" }],
+  workspaceAgents: [{ path: "agents/research/research.agent", name: "Research" }],
   mcp: {
     mcpEnabled: false,
     linearConfigured: false,
@@ -157,7 +172,20 @@ const detailAgent: AgentDetailPayload = {
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
+const fetchAgentsMock = vi.mocked(fetchAgents);
 const updateAgentMock = vi.mocked(updateAgent);
+
+const existingListAgent: AgentListItemPayload = {
+  id: "agt_existing",
+  workspaceId: "wks_123",
+  path: "agents/research.agent",
+  name: "Research",
+  config,
+  githubSyncStatus: "synced",
+  githubSyncError: null,
+  createdAt: "2026-05-20T10:00:00.000Z",
+  updatedAt: "2026-05-20T10:10:00.000Z",
+};
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
@@ -193,20 +221,20 @@ describe("AgentDetail", () => {
     queryClient.setQueryData(agentQueryKeys.list("wks_123"), [listAgent]);
     fetchAgentMock.mockReturnValue(new Promise(() => {}) as Promise<AgentDetailPayload>);
 
-    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" />, queryClient);
+    renderWithProviders(<AgentDetail idOrPath="agents/leo/leo.agent" />, queryClient);
 
     expect(screen.getByRole("status", { name: /loading agent/i })).toBeInTheDocument();
     expect(screen.queryByText("@opencompany/web")).not.toBeInTheDocument();
-    await waitFor(() => expect(fetchAgentMock).toHaveBeenCalledWith("agents/leo.agent"));
+    await waitFor(() => expect(fetchAgentMock).toHaveBeenCalledWith("agents/leo/leo.agent"));
   });
 
   it("mounts with highlighted mentions from full detail cache", async () => {
     const queryClient = createQueryClient();
-    queryClient.setQueryData(agentQueryKeys.detail("wks_123", "agents/leo.agent"), detailAgent);
+    queryClient.setQueryData(agentQueryKeys.detail("wks_123", "agents/leo/leo.agent"), detailAgent);
     fetchAgentMock.mockResolvedValue(detailAgent);
 
     const { container } = renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" />,
+      <AgentDetail idOrPath="agents/leo/leo.agent" />,
       queryClient,
     );
 
@@ -214,10 +242,23 @@ describe("AgentDetail", () => {
     expect(container.querySelector(".agent-mention[data-kind='integration']")).toBeInTheDocument();
   });
 
+  it("shows the agent folder in the detail inspector", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AgentDetail idOrPath="agents/leo/leo.agent" initialAgent={detailAgent} />);
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+
+    expect(await screen.findByText("Agent folder")).toBeInTheDocument();
+    expect(screen.getByText("agents/leo/")).toBeInTheDocument();
+    expect(screen.getByText("leo.agent")).toBeInTheDocument();
+    expect(screen.getByText("memory.md")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Private notes")).not.toBeInTheDocument();
+  });
+
   it("preserves a saved GitHub repository binding in the detail view", async () => {
     const user = userEvent.setup();
     const { container } = renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
+      <AgentDetail idOrPath="agents/leo/leo.agent" initialAgent={detailAgent} />,
     );
 
     expect(await screen.findByText("@opencompany/web")).toBeInTheDocument();
@@ -226,6 +267,71 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
+  });
+
+  it("keeps pre-existing agents in the list after saving a freshly created agent (PRO-94)", async () => {
+    // Reproduces PRO-94: after creating a new agent and editing it, the
+    // detail page's list-cache update must not clobber the agents the user
+    // hasn't loaded into the client cache yet. The new agent reaches the
+    // detail view via a server redirect, so the client list query has not
+    // been populated with it (and may not be populated at all). The server
+    // (fetchAgents) remains the source of truth and still has every agent.
+    const user = userEvent.setup();
+    const queryClient = createQueryClient();
+
+    // The server-side list always returns both the pre-existing agent and the
+    // freshly created one. AgentsView reads it through this query.
+    fetchAgentsMock.mockResolvedValue([detailAgent, existingListAgent]);
+
+    updateAgentMock.mockResolvedValue({
+      id: detailAgent.id,
+      workspaceId: detailAgent.workspaceId,
+      path: detailAgent.path ?? detailAgent.id,
+      pathChanged: false,
+      agent: { ...detailAgent, name: "Leo renamed" },
+    });
+
+    // Seed the list cache the way AgentsView would after loading it, so the
+    // test exercises the invalidate->refetch path. With an empty cache,
+    // ensureQueryData would fetch anyway — even if the fix were removed.
+    queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list("wks_123"), [
+      existingListAgent,
+    ]);
+
+    renderWithProviders(
+      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
+      queryClient,
+    );
+
+    // Editing the freshly created agent's name and blurring triggers a save.
+    const nameInput = await screen.findByPlaceholderText(/untitled agent/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, "Leo renamed");
+    await user.tab();
+
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
+
+    // The fix must mark the seeded list query stale so a remount refetches the
+    // authoritative server list. Without it the seeded [existingListAgent]
+    // cache stays fresh and the freshly created agent / full list never reload.
+    await waitFor(() => {
+      expect(queryClient.getQueryState(agentQueryKeys.list("wks_123"))?.isInvalidated).toBe(true);
+    });
+
+    // Navigating back remounts AgentsView's useQuery, which revalidates the
+    // now-stale list and refetches via fetchAgents. Prove the stale mark
+    // actually triggers that refetch and that it surfaces every agent.
+    fetchAgentsMock.mockClear();
+    const list = await queryClient.ensureQueryData({
+      queryKey: agentQueryKeys.list("wks_123"),
+      queryFn: fetchAgents,
+      staleTime: 30_000,
+      revalidateIfStale: true,
+    });
+
+    expect(fetchAgentsMock).toHaveBeenCalled();
+    expect(list.map((agent) => agent.id)).toContain(existingListAgent.id);
+    expect(list.map((agent) => agent.id)).toContain(detailAgent.id);
   });
 
   it("saves a preset schedule from the inspector", async () => {
@@ -281,5 +387,63 @@ describe("AgentDetail", () => {
         },
       }),
     );
+  });
+});
+
+describe("AgentDetail – rename behaviour", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("does not save an empty name when the name field is cleared mid-rename", async () => {
+    const user = userEvent.setup({ delay: null });
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    const nameInput = await screen.findByPlaceholderText("Untitled agent");
+
+    // Clear the field — mimics the user clearing the field before typing the new name.
+    await user.clear(nameInput);
+
+    expect(nameInput).toHaveValue("");
+
+    // Blur triggers flush; the server should not receive an empty name.
+    await user.tab();
+
+    // updateAgent should not have been called with an empty/whitespace name.
+    for (const [, patch] of updateAgentMock.mock.calls) {
+      const name = (patch as { name?: string }).name;
+      if (name !== undefined) {
+        expect(name.trim()).not.toBe("");
+      }
+    }
+  });
+
+  it("saves the new name when the user renames an agent", async () => {
+    const user = userEvent.setup({ delay: null });
+    updateAgentMock.mockResolvedValue({
+      id: "agt_123",
+      workspaceId: "wks_123",
+      path: "agents/louis.agent",
+      pathChanged: true,
+      agent: {
+        ...detailAgent,
+        name: "louis",
+        path: "agents/louis.agent",
+        config: { ...detailAgent.config, title: "louis" },
+      },
+    });
+
+    renderWithProviders(<AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />);
+
+    const nameInput = await screen.findByPlaceholderText("Untitled agent");
+
+    await user.clear(nameInput);
+    await user.type(nameInput, "louis");
+    await user.tab();
+
+    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
+    const [, patch] = updateAgentMock.mock.calls[0]!;
+    expect((patch as { name?: string }).name).toBe("louis");
   });
 });

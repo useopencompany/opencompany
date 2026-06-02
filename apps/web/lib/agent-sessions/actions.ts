@@ -11,6 +11,7 @@ import {
   agentSessions,
   agents,
   agentToolApprovals,
+  sessionStars,
 } from "@opencompany/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
@@ -365,6 +366,46 @@ export async function archiveAgentSession(sessionId: string) {
   }
 
   return { ok: true } as const;
+}
+
+export async function setSessionStar(sessionId: string, starred: boolean) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  // Guard: only the owning user may star a session they can actually see.
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  if (starred) {
+    const starredAt = new Date();
+    await db
+      .insert(sessionStars)
+      .values({ userId: user.id, sessionId, starredAt })
+      .onConflictDoUpdate({
+        target: [sessionStars.userId, sessionStars.sessionId],
+        set: { starredAt },
+      });
+    return { ok: true, starredAt: starredAt.toISOString() } as const;
+  }
+
+  await db
+    .delete(sessionStars)
+    .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId)));
+  return { ok: true, starredAt: null } as const;
 }
 
 async function loadCreatedSessionResult(sessionId: string, userId: string, workspaceId: string) {

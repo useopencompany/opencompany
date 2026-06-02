@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  agentBundleDir,
+  agentDefinitionFileNameForPath,
   cronForSchedulePreset,
   normalizeScheduleTimezone,
   schedulePresetFromCron,
@@ -25,6 +27,8 @@ import {
   Clock3,
   Cloud,
   FileCode2,
+  FileText,
+  Folder,
   GitBranch,
   Loader2,
   type LucideIcon,
@@ -62,6 +66,7 @@ import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { deleteAgent, updateAgent } from "@/lib/agents/actions";
+import type { AgentBundleFilePayload as AgentFolderFilePayload } from "@/lib/agents/bundle-files";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
@@ -133,13 +138,26 @@ function updateAgentQueries(
   }
   const listItem = agentDetailToListItem(agent);
   queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
-    if (!agents) return [listItem];
+    // The list cache may be empty here when the agent was reached through the
+    // create→redirect flow (the client never fetched the list with this agent
+    // in it) or after the unobserved list query was garbage-collected. Seeding
+    // it with only this agent would hide every other agent until a manual
+    // refresh (PRO-94), so leave the cache untouched and let the invalidation
+    // below trigger an authoritative refetch when the list is next viewed.
+    if (!agents) return agents;
 
     const next = agents.map((item) => (item.id === agent.id ? listItem : item));
     if (!next.some((item) => item.id === agent.id)) next.unshift(listItem);
     return next.toSorted(
       (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
     );
+  });
+  // Mark the list stale regardless of the optimistic update so a remount of the
+  // agents list (e.g. navigating back after editing a new agent) refetches the
+  // full server-side list rather than trusting a partial client cache.
+  void queryClient.invalidateQueries({
+    queryKey: agentQueryKeys.list(workspaceId),
+    refetchType: "none",
   });
 }
 
@@ -152,9 +170,12 @@ export default function AgentDetail({ initialAgent, idOrPath }: Props) {
     staleTime: AGENTS_QUERY_STALE_TIME_MS,
     refetchInterval: (query) => {
       const data = query.state.data;
-      return data?.githubSyncStatus === "pending" || data?.githubSyncStatus === "syncing"
-        ? 2500
-        : false;
+      const agentSyncing =
+        data?.githubSyncStatus === "pending" || data?.githubSyncStatus === "syncing";
+      const folderSyncing = data?.bundleFiles.some(
+        (file) => file.githubSyncStatus === "pending" || file.githubSyncStatus === "syncing",
+      );
+      return agentSyncing || folderSyncing ? 2500 : false;
     },
   });
 
@@ -293,12 +314,20 @@ function AgentDetailContent({
 
   const flush = () => {
     const patch = { ...pendingRef.current };
+    // Drop an empty/whitespace-only name from the server patch so a blank
+    // input never overwrites the stored name with "Untitled agent". We still
+    // clear it from pendingRef below so the useEffect doesn't clobber the
+    // in-progress typed value.
+    const serverPatch = { ...patch };
+    if (typeof serverPatch.name === "string" && !serverPatch.name.trim()) {
+      delete serverPatch.name;
+    }
     if (
-      typeof patch.name !== "string" &&
-      patch.body === undefined &&
-      patch.content === undefined &&
-      !patch.model &&
-      !patch.config
+      serverPatch.name === undefined &&
+      serverPatch.body === undefined &&
+      serverPatch.content === undefined &&
+      serverPatch.model === undefined &&
+      serverPatch.config === undefined
     ) {
       return;
     }
@@ -326,7 +355,7 @@ function AgentDetailContent({
             : Promise.resolve(),
         ]);
 
-        const result = await updateAgent(agent.id, patch);
+        const result = await updateAgent(agent.id, serverPatch);
         if (!result?.agent) {
           throw new Error("Agent save did not return an updated agent.");
         }
@@ -563,6 +592,7 @@ function AgentDetailContent({
           githubCommitSha={githubCommitSha}
           githubSyncedAt={githubSyncedAt}
           fullConfig={configPreview.fullConfig}
+          folderFiles={agent.bundleFiles}
           onAddSchedule={() => {
             setEditingSchedule(null);
             setShowScheduleDialog(true);
@@ -668,6 +698,117 @@ function walkPreviewDocument(node: TiptapPreviewNode, visit: (node: TiptapPrevie
   node.content?.forEach((child) => walkPreviewDocument(child, visit));
 }
 
+function AgentFolderIcon({ path }: { path: string }) {
+  const Icon = isCodePath(path) ? FileCode2 : FileText;
+  return <Icon size={13} strokeWidth={1.85} className="shrink-0 text-ink-muted" />;
+}
+
+function isCodePath(path: string) {
+  return /\.(ts|tsx|js|jsx|json|css|html|yaml|yml)$/i.test(path);
+}
+
+type AgentFolderRow =
+  | { kind: "folder"; path: string; name: string; depth: number }
+  | { kind: "file"; file: AgentFolderFilePayload; depth: number };
+
+function AgentFolderPanel({
+  bundleDir,
+  definitionFileName,
+  files,
+}: {
+  bundleDir: string;
+  definitionFileName: string;
+  files: AgentFolderFilePayload[];
+}) {
+  const rows = useMemo(() => buildAgentFolderRows(files), [files]);
+  const fileCount = files.length + 1;
+
+  return (
+    <div>
+      <InspectorHeader
+        label="Agent folder"
+        countLabel={`${fileCount} ${fileCount === 1 ? "file" : "files"}`}
+      />
+      <div className="overflow-hidden rounded-lg border border-border bg-surface/60 py-1">
+        <div className="flex min-w-0 items-center gap-2 border-b border-border px-3 py-2 text-[12px] font-medium text-ink">
+          <Folder size={13} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+          <span className="truncate font-mono text-[11.5px]">{bundleDir}/</span>
+        </div>
+        <div className="py-1">
+          <div className="flex min-w-0 items-center gap-2 px-3 py-1 text-[12px] text-ink">
+            <AgentFolderIcon path={definitionFileName} />
+            <span className="min-w-0 flex-1 truncate" title={`${bundleDir}/${definitionFileName}`}>
+              {definitionFileName}
+            </span>
+          </div>
+          {rows.map((row) =>
+            row.kind === "folder" ? (
+              <div
+                key={row.path}
+                className="flex min-w-0 items-center gap-2 px-3 py-1 text-[12px] text-ink-muted"
+                style={{ paddingLeft: `${12 + row.depth * 16}px` }}
+              >
+                <Folder size={13} strokeWidth={1.9} className="shrink-0 text-ink-muted" />
+                <span className="truncate font-medium" title={row.path}>
+                  {row.name}
+                </span>
+              </div>
+            ) : (
+              <div
+                key={row.file.path}
+                className="flex min-w-0 items-center gap-2 px-3 py-1 text-[12px] text-ink"
+                style={{ paddingLeft: `${12 + row.depth * 16}px` }}
+              >
+                <AgentFolderIcon path={row.file.relativePath} />
+                <span
+                  className="min-w-0 flex-1 truncate"
+                  title={`${bundleDir}/${row.file.relativePath}`}
+                >
+                  {fileName(row.file.relativePath)}
+                </span>
+                {row.file.githubSyncStatus === "pending" ||
+                row.file.githubSyncStatus === "syncing" ? (
+                  <Loader2 size={12} strokeWidth={1.9} className="shrink-0 animate-spin" />
+                ) : null}
+                {row.file.githubSyncStatus === "failed" ? (
+                  <CircleAlert size={12} strokeWidth={1.9} className="shrink-0 text-danger" />
+                ) : null}
+              </div>
+            ),
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildAgentFolderRows(files: AgentFolderFilePayload[]): AgentFolderRow[] {
+  const rows: AgentFolderRow[] = [];
+  const seenFolders = new Set<string>();
+
+  for (const file of files.toSorted((left, right) =>
+    left.relativePath.localeCompare(right.relativePath),
+  )) {
+    const parts = file.relativePath.split("/").filter(Boolean);
+    let currentPath = "";
+
+    for (const [index, part] of parts.slice(0, -1).entries()) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      if (seenFolders.has(currentPath)) continue;
+      seenFolders.add(currentPath);
+      rows.push({ kind: "folder", path: currentPath, name: part, depth: index });
+    }
+
+    rows.push({ kind: "file", file, depth: Math.max(parts.length - 1, 0) });
+  }
+
+  return rows;
+}
+
+function fileName(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
 function AgentInspector({
   name,
   path,
@@ -684,6 +825,7 @@ function AgentInspector({
   githubCommitSha,
   githubSyncedAt,
   fullConfig,
+  folderFiles,
   onAddSchedule,
   onEditSchedule,
   onRemoveSchedule,
@@ -704,6 +846,7 @@ function AgentInspector({
   githubCommitSha: string | null;
   githubSyncedAt: string | null;
   fullConfig: string;
+  folderFiles: AgentFolderFilePayload[];
   onAddSchedule: () => void;
   onEditSchedule: (trigger: AgentScheduleTriggerConfig) => void;
   onRemoveSchedule: (triggerId: string) => void;
@@ -834,6 +977,12 @@ function AgentInspector({
       />
 
       <FullConfigPanel value={fullConfig} />
+
+      <AgentFolderPanel
+        bundleDir={path ? agentBundleDir(path) : "agents/agent"}
+        definitionFileName={path ? agentDefinitionFileNameForPath(path) : "agent.agent"}
+        files={folderFiles}
+      />
 
       <div className="border-t border-border pt-6">
         <button

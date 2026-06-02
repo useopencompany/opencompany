@@ -22,6 +22,7 @@ import {
   createOrConnectSandbox,
   githubRemoteMatches,
   prepareWorkspace,
+  resolveSandboxSkillPath,
   resolveSandboxToolPath,
   runSandboxTool,
   SandboxPreparationError,
@@ -149,7 +150,7 @@ describe("prepareWorkspace", () => {
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
       [
-        "mkdir -p '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
+        "mkdir -p '/home/user/workspace/agent' '/home/user/workspace/brain' '/home/user/workspace/work' '/home/user/.opencompany'",
         "chown -R user:user '/home/user/workspace'",
         "chown root:root '/home/user/.opencompany'",
         "chmod 700 '/home/user/.opencompany'",
@@ -316,12 +317,15 @@ describe("cloneGitHubRepositoryIntoWorkdir", () => {
 });
 
 describe("resolveSandboxToolPath", () => {
-  it("allows work and brain paths", () => {
+  it("allows work, brain, and agent paths", () => {
     expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
       "/home/user/workspace/work/foo.txt",
     );
     expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
       "/home/user/workspace/brain/foo.md",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "agent/memory.md")).toBe(
+      "/home/user/workspace/agent/memory.md",
     );
   });
 
@@ -331,12 +335,45 @@ describe("resolveSandboxToolPath", () => {
       "../.opencompany/agent.agent",
       "/home/user/.opencompany/agent.agent",
       "notes.md",
-      "agents/foo.agent",
+      "agents/foo/agent.agent",
     ]) {
       expect(() => resolveSandboxToolPath("/home/user/workspace", candidate)).toThrow(
-        /work\/ or brain\//,
+        /work\/, brain\/, or agent\//,
       );
     }
+  });
+
+  it("rejects skills paths for generic file tools", () => {
+    expect(() =>
+      resolveSandboxToolPath("/home/user/workspace", "skills/agent-self-edit/SKILL.md"),
+    ).toThrow(/work\/, brain\/, or agent\//);
+  });
+
+  it("allows work and brain paths for generic file tools", () => {
+    expect(resolveSandboxToolPath("/home/user/workspace", "work/foo.txt")).toBe(
+      "/home/user/workspace/work/foo.txt",
+    );
+    expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
+      "/home/user/workspace/brain/foo.md",
+    );
+  });
+
+  it("resolves skill file paths only inside the requested skill directory", () => {
+    expect(resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", undefined)).toBe(
+      "/home/user/workspace/skills/agent-self-edit/SKILL.md",
+    );
+    expect(
+      resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", "references/help.md"),
+    ).toBe("/home/user/workspace/skills/agent-self-edit/references/help.md");
+    expect(() =>
+      resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", "../other/SKILL.md"),
+    ).toThrow(/relative file path/);
+    expect(() =>
+      resolveSandboxSkillPath("/home/user/workspace", "agent-self-edit", "refs/../SKILL.md"),
+    ).toThrow(/relative file path/);
+    expect(() =>
+      resolveSandboxSkillPath("/home/user/workspace", "agent/self-edit", "SKILL.md"),
+    ).toThrow(/valid mounted skill id/);
   });
 });
 
@@ -510,6 +547,55 @@ describe("runSandboxTool", () => {
       "/home/user/workspace/work/sub/new/file.txt",
       "content",
     );
+  });
+
+  it("reads mounted skill files through read_skill", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockResolvedValue("---\nname: agent-self-edit\n---\n"),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "read_skill",
+      args: { skillId: "agent-self-edit" },
+    });
+
+    expect(sandbox.files.read).toHaveBeenCalledWith(
+      "/home/user/workspace/skills/agent-self-edit/SKILL.md",
+    );
+    expect(result).toEqual({
+      path: "skills/agent-self-edit/SKILL.md",
+      content: "---\nname: agent-self-edit\n---\n",
+    });
+  });
+
+  it("rejects invalid read_skill paths and missing files", async () => {
+    const sandbox = {
+      files: {
+        read: vi.fn().mockRejectedValue(new Error("not found")),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "read_skill",
+        args: { skillId: "agent-self-edit", path: "/SKILL.md" },
+      }),
+    ).rejects.toThrow(/relative file path/);
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "read_skill",
+        args: { skillId: "agent-self-edit", path: "missing.md" },
+      }),
+    ).rejects.toThrow(/Skill file not found/);
   });
 
   it("applies ordered exact edits atomically", async () => {

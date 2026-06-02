@@ -5,21 +5,29 @@ export type JsonSchema = {
   additionalProperties?: boolean;
 };
 
+import { AGENT_MODEL_CATALOG } from "./models";
 import type { AgentConfigTool, AgentMcpToolConfig, AgentToolId } from "./types";
 
 export type RuntimeToolName =
   | "shell"
   | "gh"
   | "read_file"
+  | "read_skill"
   | "edit_file"
   | "write_file"
   | "list_files"
   | "git_diff"
   | "delegate_to_agent"
+  | "update_agent_file"
   | "amp_coder"
   | "exa_search"
   | "exa_contents"
   | "exa_answer"
+  | "x_search_posts"
+  | "x_get_profile"
+  | "x_get_user_posts"
+  | "x_get_discussion"
+  | "x_get_trends"
   | "web_fetch"
   | "tool_help";
 
@@ -66,6 +74,23 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "platform",
     requiredPlatformEnvVars: ["EXA_API_KEY"],
+  },
+  {
+    id: "x",
+    type: "hosted_tool",
+    label: "x",
+    description:
+      "Read public X posts, profiles, timelines, discussions, and trends through the official X API.",
+    runtimeTools: [
+      "x_search_posts",
+      "x_get_profile",
+      "x_get_user_posts",
+      "x_get_discussion",
+      "x_get_trends",
+    ],
+    defaultEnabled: true,
+    credentialSource: "platform",
+    requiredPlatformEnvVars: ["X_API_BEARER_TOKEN"],
   },
   {
     id: "amp",
@@ -155,13 +180,38 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "read_file",
     kind: "sandbox",
     description:
-      "Read a UTF-8 text file from ./work or ./brain. The path must start with work/ or brain/.",
+      "Read a UTF-8 text file from ./work, ./brain, or ./agent. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
       },
       required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_skill",
+    kind: "sandbox",
+    description:
+      "Read a UTF-8 text file from a mounted read-only skill directory. Use this instead of read_file for SKILL.md and supporting skill files.",
+    parameters: {
+      type: "object",
+      properties: {
+        skillId: {
+          type: "string",
+          description: "Mounted skill id, such as agent-self-edit.",
+        },
+        path: {
+          type: "string",
+          description: "Path inside the skill directory. Defaults to SKILL.md.",
+          default: "SKILL.md",
+        },
+      },
+      required: ["skillId"],
       additionalProperties: false,
     },
   },
@@ -169,11 +219,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "edit_file",
     kind: "sandbox",
     description:
-      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work or ./brain. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
+      "Apply targeted exact-string replacements to an existing UTF-8 text file inside ./work, ./brain, or ./agent. Use this for partial edits; use write_file only for new files or intentional full overwrites.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
         instructions: {
           type: "string",
           description:
@@ -221,11 +274,14 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "write_file",
     kind: "sandbox",
     description:
-      "Create or overwrite a UTF-8 text file inside ./work or ./brain. Use edit_file for targeted changes to existing files. The path must start with work/ or brain/.",
+      "Create or overwrite a UTF-8 text file inside ./work, ./brain, or ./agent. Use edit_file for targeted changes to existing files. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Relative path starting with work/ or brain/." },
+        path: {
+          type: "string",
+          description: "Relative path starting with work/, brain/, or agent/.",
+        },
         content: { type: "string", description: "Full file content." },
       },
       required: ["path", "content"],
@@ -236,13 +292,13 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "list_files",
     kind: "sandbox",
     description:
-      "List files and directories below ./work or ./brain. The path must start with work/ or brain/.",
+      "List files and directories below ./work, ./brain, or ./agent. The path must start with work/, brain/, or agent/.",
     parameters: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Relative path starting with work/ or brain/.",
+          description: "Relative path starting with work/, brain/, or agent/.",
           default: "work",
         },
         depth: { type: "number", description: "Maximum traversal depth.", default: 2 },
@@ -271,7 +327,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         agent: {
           type: "string",
           description:
-            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research.agent. Omit when continuing a prior child session by sessionId.",
+            "Target agent mention or path for a new delegated session, such as agent/research, @agent/research, research, or agents/research/research.agent. Omit when continuing a prior child session by sessionId.",
         },
         sessionId: {
           type: "string",
@@ -294,6 +350,72 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool blocks until the child session completes or fails, then returns the child answer and session id.",
       "Resume a child session only when continuity matters; start a new delegated session for independent subtasks.",
       "Keep delegated prompts bounded; do not delegate recursively unless the user's task clearly requires it.",
+    ].join("\n"),
+  },
+  {
+    name: "update_agent_file",
+    kind: "internal",
+    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
+    parameters: {
+      type: "object",
+      properties: {
+        body: {
+          type: "string",
+          description:
+            "The full new Markdown instructions body. Keep any @mentions for tools and @brain/... paths you still want active; tools and brain follow the mentions in this body.",
+        },
+        model: {
+          type: "string",
+          enum: AGENT_MODEL_CATALOG.map((model) => model.id),
+          description: "Optional model id to switch to. If omitted, your current model is kept.",
+        },
+        triggers: {
+          type: "array",
+          description:
+            "Optional. The COMPLETE list of your recurring schedule triggers — this replaces all current schedules. Omit to keep your current schedules unchanged; pass [] to remove them all. Only schedule (cron) triggers can be set here; any GitHub PR triggers are preserved automatically.",
+          items: {
+            type: "object",
+            properties: {
+              cron: {
+                type: "string",
+                description:
+                  "Cron expression. Supported shapes only: '*/N * * * *' (every N minutes, N=1-59), '0 */N * * *' (every N hours, N in {1,2,3,4,6,8,12}), 'M H * * *' (daily at H:M), 'M H * * 1-5' (weekdays at H:M), or 'M H * * D' (weekly on day D=0-6 at H:M).",
+              },
+              prompt: {
+                type: "string",
+                description:
+                  "The kickoff message for each scheduled run; a fresh session starts with this as its first user message.",
+              },
+              timezone: {
+                type: "string",
+                description: "Optional IANA timezone (e.g. 'America/New_York'). Defaults to UTC.",
+              },
+              enabled: {
+                type: "boolean",
+                description: "Whether the schedule is active. Defaults to false.",
+              },
+              id: {
+                type: "string",
+                description:
+                  "Optional stable id. Auto-assigned (schedule-1, schedule-2, …) if omitted.",
+              },
+            },
+            required: ["cron", "prompt"],
+            additionalProperties: false,
+          },
+        },
+        summary: {
+          type: "string",
+          description: "One-line description of what changed and why, for the activity log.",
+        },
+      },
+      required: ["body"],
+      additionalProperties: false,
+    },
+    help: [
+      'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
+      "Pass the COMPLETE new Markdown body, not a diff.",
+      "Changes apply on your next session, not the current one — offer to start one.",
     ].join("\n"),
   },
   {
@@ -544,6 +666,173 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     ].join("\n"),
   },
   {
+    name: "x_search_posts",
+    kind: "hosted",
+    configToolId: "x",
+    description:
+      'Search public X posts through the official X API. Use recent search first for current conversations; mode="all" uses full-archive search and requires elevated X API access.',
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            'X search query using X operators, such as "AI agents lang:en -is:retweet" or "from:openai".',
+        },
+        mode: {
+          type: "string",
+          enum: ["recent", "all"],
+          description:
+            'Search recent posts or the full archive. Defaults to recent. mode="all" requires elevated X API access and may fail with standard bearer tokens.',
+          default: "recent",
+        },
+        maxResults: {
+          type: "number",
+          description:
+            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
+        },
+        paginationToken: {
+          type: "string",
+          description: "Optional next_token from a previous search result.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_search_posts to discover current public X conversations, hashtags, mentions, links, and posts from specific users.",
+      'Start with maxResults=10 and mode="recent". Use larger values, pagination, or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
+      "The X API bills per returned Post and expanded User.",
+      "The output includes normalized posts, author profiles, result count, and an optional nextToken for pagination.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_profile",
+    kind: "hosted",
+    configToolId: "x",
+    description: "Look up a public X profile by username through the official X API.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description: "X username, with or without a leading @.",
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_profile to inspect a public X account's bio, verification flags, profile images, and public metrics.",
+      "Protected or suspended accounts may return limited data or provider errors.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_user_posts",
+    kind: "hosted",
+    configToolId: "x",
+    description: "Fetch recent public posts from an X user timeline by username.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description: "X username, with or without a leading @.",
+        },
+        maxResults: {
+          type: "number",
+          description:
+            "Number of posts to return. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
+        },
+        paginationToken: {
+          type: "string",
+          description: "Optional pagination_token from a previous timeline result.",
+        },
+        excludeReplies: {
+          type: "boolean",
+          description: "Whether to exclude reply posts. Defaults to false.",
+          default: false,
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_user_posts to understand what a public profile has been posting recently.",
+      "Start with maxResults=10. Use larger values or pagination only when the user explicitly asks for broader coverage.",
+      "Set excludeReplies=true for a cleaner top-level timeline.",
+      "The tool first resolves the username to a user id, then fetches that user's public posts.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_discussion",
+    kind: "hosted",
+    configToolId: "x",
+    description:
+      'Inspect a public X post discussion by fetching the target post, replies in its conversation, and quote posts. mode="all" requires elevated X API access for full-archive reply search.',
+    parameters: {
+      type: "object",
+      properties: {
+        postIdOrUrl: {
+          type: "string",
+          description: "X post ID or URL, such as https://x.com/user/status/123.",
+        },
+        mode: {
+          type: "string",
+          enum: ["recent", "all"],
+          description:
+            'Search recent replies or the full archive. Defaults to recent. mode="all" requires elevated X API access and may fail with standard bearer tokens.',
+          default: "recent",
+        },
+        maxResults: {
+          type: "number",
+          description:
+            "Maximum replies and maximum quote posts to return per collection. Defaults to 10; ask the user before using larger values. Maximum 100.",
+          default: 10,
+        },
+      },
+      required: ["postIdOrUrl"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_discussion when the user provides a post URL/id or asks what people are saying around one post.",
+      'Start with maxResults=10 per collection and mode="recent". Use larger values or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
+      "The result includes the target post, replies from the same conversation, quote posts, and author profiles.",
+      "This can be more expensive than a simple lookup because it may return many Posts.",
+    ].join("\n"),
+  },
+  {
+    name: "x_get_trends",
+    kind: "hosted",
+    configToolId: "x",
+    description: "Fetch current X trending topics for a WOEID location.",
+    parameters: {
+      type: "object",
+      properties: {
+        woeid: {
+          type: "number",
+          description:
+            "Yahoo Where On Earth ID. Defaults to 1 for worldwide; United States is 23424977.",
+          default: 1,
+        },
+        maxResults: {
+          type: "number",
+          description:
+            "Number of trends to return. Defaults to 10; ask the user before using larger values. Maximum 50.",
+          default: 10,
+        },
+      },
+      additionalProperties: false,
+    },
+    help: [
+      "Use x_get_trends to answer what is currently trending on X in a broad location.",
+      "Start with maxResults=10. Use larger values only when the user explicitly asks for broader coverage.",
+      "Common WOEIDs: worldwide=1, United States=23424977, United Kingdom=23424975, New York=2459115, London=44418.",
+    ].join("\n"),
+  },
+  {
     name: "web_fetch",
     kind: "hosted",
     configToolId: "exa",
@@ -610,11 +899,14 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   tools: ReadonlyArray<{ id?: unknown }> | undefined;
   agents?: ReadonlyArray<unknown> | undefined;
   repositories?: ReadonlyArray<unknown> | undefined;
+  // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on.
+  selfEditEnabled?: boolean;
 }) {
   const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
-    if (tool.name === "delegate_to_agent") continue;
+    // Skill- and reference-gated tools are added below, not unconditionally.
+    if (tool.name === "delegate_to_agent" || tool.name === "update_agent_file") continue;
     // Unconditional core tools (no configToolId) are always available, except
     // those gated on an attached repository (e.g. gh).
     if (tool.configToolId) continue;
@@ -622,6 +914,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     names.add(tool.name);
   }
   names.add("tool_help");
+  if (input.selfEditEnabled) {
+    names.add("update_agent_file");
+  }
 
   const selectedToolIds = new Set(
     (input.tools ?? []).flatMap((tool) => (typeof tool.id === "string" ? [tool.id] : [])),

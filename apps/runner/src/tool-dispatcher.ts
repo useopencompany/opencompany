@@ -1,4 +1,5 @@
 import {
+  AGENT_SELF_EDIT_SKILL_ID,
   type AgentConfig,
   buildDeniedToolOutput,
   newAgentSessionMessageId,
@@ -13,6 +14,7 @@ import {
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
+import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
@@ -48,6 +50,7 @@ import {
   withRunControlChecks,
 } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
+import { hasReadSkill, markSkillRead } from "./self-edit-gate";
 import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
@@ -55,6 +58,11 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   exa_search: 8,
   exa_contents: 8,
   exa_answer: 4,
+  x_search_posts: 4,
+  x_get_profile: 8,
+  x_get_user_posts: 4,
+  x_get_discussion: 3,
+  x_get_trends: 4,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
@@ -305,6 +313,23 @@ async function executeRuntimeToolWithTracing(input: {
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "update_agent_file") {
+          if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {
+            return {
+              ok: false,
+              errors: [
+                'Read the agent-self-edit skill first: call read_skill({skillId:"agent-self-edit"}) and follow it, then call update_agent_file again. Nothing was saved.',
+              ],
+            };
+          }
+          return applyAgentSelfUpdate({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            args: input.args,
+          });
+        }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
         }
@@ -376,6 +401,12 @@ async function executeRuntimeToolWithTracing(input: {
           commandOutput.push(stream, delta);
         },
       });
+      // Reaching here means the read succeeded (read_skill throws on a missing file), so the
+      // session can be credited with having read this skill — clearing skill-gated tools.
+      if (input.definition.name === "read_skill" && isRecord(input.args)) {
+        const skillId = input.args.skillId;
+        if (typeof skillId === "string") markSkillRead(input.sessionId, skillId);
+      }
       if (
         input.definition.name === "shell" &&
         brainSnapshotBefore !== null &&
@@ -715,7 +746,7 @@ function preflightSandboxToolArgs(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     throw new RecoverableToolError(
-      `${message} Use paths prefixed with work/ for scratch files or brain/ for mounted Brain files.`,
+      `${message} Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.`,
       "invalid_sandbox_path",
     );
   }

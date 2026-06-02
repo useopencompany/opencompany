@@ -80,6 +80,19 @@ describe("agent editor mention tools", () => {
     expect(items.some((item) => item.mentionId.startsWith("model:"))).toBe(false);
   });
 
+  test("includes the X hosted tool in the mention suggestion menu", () => {
+    expect(buildAgentMentionItems()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "x",
+          kind: "tool",
+          mentionId: "tool:x",
+          displayLabel: "x",
+        }),
+      ]),
+    );
+  });
+
   test("exposes schedule creation as an action mention", () => {
     expect(buildAgentMentionItems()).toEqual(
       expect.arrayContaining([
@@ -118,7 +131,7 @@ describe("agent editor mention tools", () => {
 
   test("exposes workspace agents as stable agent slug mentions", () => {
     const items = buildWorkspaceAgentMentionItems([
-      { path: "agents/research.agent", name: "Research" },
+      { path: "agents/research/research.agent", name: "Research" },
     ]);
 
     expect(items).toEqual([
@@ -128,12 +141,12 @@ describe("agent editor mention tools", () => {
         kind: "agent",
         label: "agent/research",
         displayLabel: "Research",
-        description: "agents/research.agent",
+        description: "agents/research/research.agent",
       }),
     ]);
     expect(
       buildAgentMentionItems([], [], {
-        agents: [{ path: "agents/research.agent", name: "Research" }],
+        agents: [{ path: "agents/research/research.agent", name: "Research" }],
       }).some((item) => item.mentionId === "agent/research"),
     ).toBe(true);
   });

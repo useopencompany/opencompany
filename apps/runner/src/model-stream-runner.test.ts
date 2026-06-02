@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { collectAssistantStream } from "./model-stream-runner";
-import { assertTurnComplete, MAX_MODEL_STEPS } from "./model-turn";
+import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
@@ -244,11 +244,12 @@ describe("collectAssistantStream", () => {
 
   it("publishes reasoning deltas as transient runtime events as they arrive", async () => {
     const stream = createStream([
-      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", text: "Thinking" }),
       streamPart({ type: "reasoning-delta", delta: "..." }),
+      streamPart({ type: "reasoning", text: " done" }),
     ]);
 
-    await collect(stream, { exposeReasoningSummary: true });
+    await collect(stream, { reasoningExposure: "summary" });
 
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
       sessionId: "ses_123",
@@ -261,6 +262,12 @@ describe("collectAssistantStream", () => {
       messageId: "msg_assistant",
       type: "message.reasoning_delta",
       payload: { messageId: "msg_assistant", delta: "..." },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(3, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: " done" },
     });
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(1, {
       sessionId: "ses_123",
@@ -325,13 +332,122 @@ describe("collectAssistantStream", () => {
     expect(heartbeatAndLoadState).not.toHaveBeenCalled();
   });
 
-  it("persists reasoning phase boundaries without exposing deltas when summaries are hidden", async () => {
+  it("publishes and stores raw reasoning when raw exposure is enabled", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", delta: "..." }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await expect(collect(stream, { reasoningExposure: "raw" })).resolves.toMatchObject({
+      assistantContent: "Visible answer",
+      assistantReplayParts: [
+        { type: "reasoning", text: "Thinking..." },
+        { type: "text", text: "Visible answer" },
+      ],
+      reasoningContent: "Thinking...",
+      reasoningSummary: "",
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Thinking" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "..." },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(3, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Visible answer" },
+    });
+  });
+
+  it("converts raw Moonshot reasoning_content chunks into raw reasoning deltas", async () => {
+    const stream = createStream([
+      streamPart({
+        type: "raw",
+        rawValue: {
+          choices: [{ delta: { reasoning_content: "Inspecting" } }],
+        },
+      }),
+      streamPart({
+        type: "raw",
+        rawValue: {
+          choices: [{ delta: { reasoning_content: " constraints." } }],
+        },
+      }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await expect(collect(stream, { reasoningExposure: "raw" })).resolves.toMatchObject({
+      assistantContent: "Visible answer",
+      assistantReplayParts: [
+        { type: "reasoning", text: "Inspecting constraints." },
+        { type: "text", text: "Visible answer" },
+      ],
+      reasoningContent: "Inspecting constraints.",
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Inspecting" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: " constraints." },
+    });
+  });
+
+  it("deduplicates overlapping raw and normalized reasoning chunks", async () => {
+    const stream = createStream([
+      streamPart({
+        type: "raw",
+        rawValue: {
+          choices: [{ delta: { reasoning_content: "Inspecting constraints." } }],
+        },
+      }),
+      streamPart({ type: "reasoning-delta", text: "Inspecting constraints." }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await expect(collect(stream, { reasoningExposure: "raw" })).resolves.toMatchObject({
+      assistantReplayParts: [
+        { type: "reasoning", text: "Inspecting constraints." },
+        { type: "text", text: "Visible answer" },
+      ],
+      reasoningContent: "Inspecting constraints.",
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledTimes(2);
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Inspecting constraints." },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Visible answer" },
+    });
+  });
+
+  it("persists reasoning phase boundaries without exposing deltas when reasoning is hidden", async () => {
     const stream = createStream([
       streamPart({ type: "reasoning-delta", delta: "Hidden thinking" }),
       streamPart({ type: "text-delta", text: "Visible answer" }),
     ]);
 
-    await collect(stream, { exposeReasoningSummary: false });
+    await collect(stream, { reasoningExposure: "hidden" });
 
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledTimes(1);
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledWith({
@@ -371,7 +487,7 @@ function collect(
     runLeaseOwner: "runner-test",
     modelProvider: "vercel-ai-gateway",
     modelName: "openai/gpt-5.4-mini",
-    exposeReasoningSummary: false,
+    reasoningExposure: "hidden",
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator: createToolStartCoordinator(),
@@ -467,7 +583,7 @@ describe("stream error handling", () => {
       runLeaseOwner: "runner-test",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
       signal: new AbortController().signal,
       checkAbort: async () => {},
       toolStartCoordinator: createToolStartCoordinator(),
@@ -513,7 +629,7 @@ describe("stream error handling", () => {
       runLeaseOwner: "runner-test",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
       signal: new AbortController().signal,
       checkAbort: async () => {},
       toolStartCoordinator,
@@ -566,6 +682,75 @@ describe("stream error handling", () => {
         stepCount: 2,
       }),
     ).not.toThrow();
+  });
+
+  it("flags a tool-driven turn that stops after announcing an unexecuted action", () => {
+    const result = detectIncompleteTurn({
+      assistantContent:
+        "I scanned the open PRs.\n\nNow let me check the files changed in each PR to assess complexity:",
+      assistantReplayParts: [
+        { type: "text", text: "I scanned the open PRs." },
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "shell",
+          input: { cmd: "gh pr list" },
+        },
+        {
+          type: "text",
+          text: "Now let me check the files changed in each PR to assess complexity:",
+        },
+      ],
+      lastFinishReason: "stop",
+      lastStepEndedWithToolCalls: false,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.reason).toBe("announced_unexecuted_next_action");
+    expect(result?.reasonDetail).toMatch(/never took/);
+  });
+
+  it("does not flag a genuine completion that used tools and ends with a real answer", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Done — 3 PRs reviewed and the Slack notification was sent.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "slack_post",
+            input: { text: "report" },
+          },
+          { type: "text", text: "Done — 3 PRs reviewed and the Slack notification was sent." },
+        ],
+        lastFinishReason: "stop",
+        lastStepEndedWithToolCalls: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not flag a colon-terminated reply when the turn never drove a tool", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Here are the three options I'd consider:",
+        assistantReplayParts: [{ type: "text", text: "Here are the three options I'd consider:" }],
+        lastFinishReason: "stop",
+        lastStepEndedWithToolCalls: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not flag while the model is still requesting tools", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Let me check the files changed:",
+        assistantReplayParts: [
+          { type: "text", text: "Let me check the files changed:" },
+          { type: "tool-call", toolCallId: "call_1", toolName: "shell", input: {} },
+        ],
+        lastFinishReason: "tool-calls",
+        lastStepEndedWithToolCalls: true,
+      }),
+    ).toBeNull();
   });
 
   it("throws model stream errors instead of allowing blank completions", () => {

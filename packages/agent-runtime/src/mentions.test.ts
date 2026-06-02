@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { deriveAgentConfigFromBody, extractConfigFromMentions } from "./mentions";
+import {
+  agentMentionIdForPath,
+  deriveAgentConfigFromBody,
+  extractConfigFromMentions,
+} from "./mentions";
 
 const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },
   { fullName: "opencompany/runner", defaultBranch: "develop" },
 ];
 const agents = [
-  { path: "agents/research.agent", name: "Research" },
-  { path: "agents/writer.agent", name: "Writer" },
+  { path: "agents/research/research.agent", name: "Research" },
+  { path: "agents/writer/writer.agent", name: "Writer" },
 ];
 const boundRepositories = [
   {
@@ -29,50 +33,24 @@ const boundRepositories = [
 ];
 
 describe("extractConfigFromMentions", () => {
-  it("resolves model aliases and lets the last model win", () => {
-    const config = extractConfigFromMentions("Use @fast, then switch to @deep.");
-
-    expect(config.model).toBe("openai/gpt-5.4");
-  });
-
-  it("resolves supported AI Gateway model mentions", () => {
+  it("leaves model-looking mentions out of derived config", () => {
     const config = extractConfigFromMentions(
-      "Use @google/gemini-3-flash first, then @deepseek/deepseek-v4-flash.",
+      "Use @fast, then @deep, then @openai/gpt-5.4, then @xai/grok-4.3.",
     );
 
-    expect(config.model).toBe("deepseek/deepseek-v4-flash");
-  });
-
-  it("resolves Kimi and GLM model mentions", () => {
-    const config = extractConfigFromMentions(
-      "Use @moonshotai/kimi-k2.6 first, then @moonshotai/kimi-k2-thinking-turbo, then @zai/glm-5.1.",
-    );
-
-    expect(config.model).toBe("zai/glm-5.1");
-  });
-
-  it("resolves MiniMax model mentions", () => {
-    const config = extractConfigFromMentions(
-      "Use @minimax/minimax-m2.7 first, then @minimax/minimax-m3.",
-    );
-
-    expect(config.model).toBe("minimax/minimax-m3");
-  });
-
-  it("resolves xAI Grok model mentions", () => {
-    const config = extractConfigFromMentions(
-      "Use @xai/grok-4.1-fast-reasoning first, then @xai/grok-4.3.",
-    );
-
-    expect(config.model).toBe("xai/grok-4.3");
+    expect(config).toMatchObject({
+      tools: [],
+      brain: [],
+      agents: [],
+    });
   });
 
   it("resolves tool ids and labels", () => {
     const config = extractConfigFromMentions(
-      "Research with @exa, @slack, and implement with @AMP.",
+      "Research with @exa, @x, @slack, and implement with @AMP.",
     );
 
-    expect(config.tools).toEqual(["exa", "slack", "amp"]);
+    expect(config.tools).toEqual(["exa", "x", "slack", "amp"]);
   });
 
   it("normalizes Brain file and folder paths", () => {
@@ -90,6 +68,23 @@ describe("extractConfigFromMentions", () => {
     const config = extractConfigFromMentions("Ask @agent/research to summarize the findings.");
 
     expect(config.agents).toEqual([]);
+  });
+});
+
+describe("agentMentionIdForPath", () => {
+  it("derives mention ids from bundle directory names", () => {
+    expect(agentMentionIdForPath("agents/research/research.agent")).toBe("agent/research");
+    expect(agentMentionIdForPath("agents/research/agent.agent")).toBe("agent/research");
+    expect(agentMentionIdForPath("agents/research-2/research-2.agent")).toBe("agent/research-2");
+    expect(agentMentionIdForPath("agents/customer-success/customer-success.agent")).toBe(
+      "agent/customer-success",
+    );
+  });
+
+  it("rejects direct single-file and mismatched bundle paths", () => {
+    expect(agentMentionIdForPath("agents/research.agent")).toBeNull();
+    expect(agentMentionIdForPath("agents/research/other.agent")).toBeNull();
+    expect(agentMentionIdForPath("research.agent")).toBeNull();
   });
 });
 
@@ -233,8 +228,21 @@ describe("deriveAgentConfigFromBody", () => {
     });
 
     expect(config.agents).toEqual([
-      { path: "agents/research.agent", name: "Research" },
-      { path: "agents/writer.agent", name: "Writer" },
+      { path: "agents/research/research.agent", name: "Research" },
+      { path: "agents/writer/writer.agent", name: "Writer" },
+    ]);
+  });
+
+  it("binds collided workspace agent mentions by bundle directory", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Coordinator",
+      body: "Ask @agent/research-2 for a second pass.",
+      repositories: [],
+      agents: [{ path: "agents/research-2/research-2.agent", name: "Research 2" }],
+    });
+
+    expect(config.agents).toEqual([
+      { path: "agents/research-2/research-2.agent", name: "Research 2" },
     ]);
   });
 
@@ -246,6 +254,6 @@ describe("deriveAgentConfigFromBody", () => {
       agents,
     });
 
-    expect(config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(config.agents).toEqual([{ path: "agents/research/research.agent", name: "Research" }]);
   });
 });

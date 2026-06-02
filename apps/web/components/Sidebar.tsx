@@ -15,6 +15,7 @@ import {
   LogOut,
   MessageSquarePlus,
   PanelLeft,
+  Pin,
   ScrollText,
   Search,
   Settings,
@@ -28,19 +29,119 @@ import FeedbackDialog from "@/components/FeedbackDialog";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
-import { archiveAgentSession } from "@/lib/agent-sessions/actions";
+import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
 import {
+  archiveSidebarSessionOptimistically,
   fetchSidebarSessions,
-  removeSidebarSession,
   SESSIONS_QUERY_STALE_TIME_MS,
   type SidebarSessionPayload,
   sessionQueryKeys,
+  setSidebarSessionStar,
 } from "@/lib/agent-sessions/payload";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 // Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
+// How long the red highlight shows on a session row before it is optimistically removed.
+const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
+const STATUS_PAGE_URL = "https://myopencompany.betteruptime.com";
+const STATUS_PAGE_JSON_URL = `${STATUS_PAGE_URL}/index.json`;
+const STATUS_PAGE_QUERY_STALE_TIME_MS = 60 * 1000;
+const ACCOUNT_MENU_ITEM_CLASS =
+  "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
+
+type StatusPageAggregateState = "operational" | "degraded" | "downtime" | "maintenance";
+
+async function fetchStatusPageAggregateState(): Promise<StatusPageAggregateState> {
+  const response = await fetch(STATUS_PAGE_JSON_URL, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Status page request failed with ${response.status}.`);
+  }
+
+  const payload: unknown = await response.json();
+  const aggregateState = readAggregateState(payload);
+  if (!aggregateState) {
+    throw new Error("Status page response did not include a recognized aggregate state.");
+  }
+  return aggregateState;
+}
+
+function readAggregateState(payload: unknown): StatusPageAggregateState | null {
+  if (!isRecord(payload)) return null;
+  const data = payload.data;
+  if (!isRecord(data)) return null;
+  const attributes = data.attributes;
+  if (!isRecord(attributes)) return null;
+  const aggregateState = attributes.aggregate_state;
+  if (
+    aggregateState === "operational" ||
+    aggregateState === "degraded" ||
+    aggregateState === "downtime" ||
+    aggregateState === "maintenance"
+  ) {
+    return aggregateState;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function statusPageMeta({
+  aggregateState,
+  pending,
+  error,
+}: {
+  aggregateState: StatusPageAggregateState | undefined;
+  pending: boolean;
+  error: boolean;
+}) {
+  if (pending) {
+    return {
+      label: "Checking status",
+      description: "Checking status",
+      dotClassName: "bg-ink-subtle/45",
+    };
+  }
+  if (error || !aggregateState) {
+    return {
+      label: "Status unavailable",
+      description: "Status unavailable",
+      dotClassName: "bg-ink-subtle/45",
+    };
+  }
+  if (aggregateState === "operational") {
+    return {
+      label: "All systems operational",
+      description: "All systems operational",
+      dotClassName: "bg-success",
+    };
+  }
+  if (aggregateState === "downtime") {
+    return {
+      label: "Service disruption",
+      description: "Service disruption",
+      dotClassName: "bg-danger",
+    };
+  }
+  if (aggregateState === "maintenance") {
+    return {
+      label: "Maintenance",
+      description: "Maintenance",
+      dotClassName: "bg-warning",
+    };
+  }
+  return {
+    label: "Service degraded",
+    description: "Service degraded",
+    dotClassName: "bg-warning",
+  };
+}
 
 export type SidebarSession = SidebarSessionPayload;
 
@@ -110,15 +211,20 @@ function SessionHistoryItem({
   session,
   active,
   workspaceId,
+  starred,
+  onToggleStar,
 }: {
   session: SidebarSession;
   active?: boolean;
   workspaceId: string;
+  starred?: boolean;
+  onToggleStar?: (sessionId: string) => void;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showError } = useToast();
   const [isPending, startTransition] = useTransition();
+  const [archiving, setArchiving] = useState(false);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const schedulePrefetch = useCallback(() => {
@@ -143,9 +249,9 @@ function SessionHistoryItem({
 
   return (
     <div
-      className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
+      className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-      } ${isPending ? "opacity-60" : ""}`}
+      } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : isPending ? "opacity-60" : ""}`}
     >
       <Link
         href={`/session/${session.id}`}
@@ -164,29 +270,52 @@ function SessionHistoryItem({
         ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
+      {onToggleStar && (
+        <button
+          type="button"
+          title={starred ? "Unpin session" : "Pin session"}
+          aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
+          aria-pressed={starred}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onToggleStar(session.id);
+          }}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            starred
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+          }`}
+        >
+          <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+        </button>
+      )}
       <button
         type="button"
         title="Archive session"
         aria-label={`Archive ${session.title}`}
+        aria-busy={archiving}
         disabled={isPending}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
 
+          // Brief red highlight as feedback before the session is optimistically removed.
+          setArchiving(true);
+
           startTransition(async () => {
-            const result = await archiveAgentSession(session.id);
+            await new Promise((resolve) => setTimeout(resolve, ARCHIVE_HIGHLIGHT_DELAY_MS));
+            const result = await archiveSidebarSessionOptimistically({
+              queryClient,
+              workspaceId,
+              sessionId: session.id,
+              archive: archiveAgentSession,
+            });
             if (!result.ok) {
+              setArchiving(false);
               showError(result.error, "Could not archive session");
               return;
             }
-            queryClient.setQueryData<SidebarSession[]>(
-              sessionQueryKeys.list(workspaceId),
-              (sessions) => removeSidebarSession(sessions, session.id),
-            );
-            queryClient.removeQueries({
-              queryKey: sessionQueryKeys.detail(workspaceId, session.id),
-            });
-            void queryClient.invalidateQueries({ queryKey: sessionQueryKeys.list(workspaceId) });
             if (active) {
               router.replace("/");
             }
@@ -261,6 +390,37 @@ function SessionHistorySkeleton() {
   );
 }
 
+function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
+  const statusQuery = useQuery({
+    queryKey: ["status-page", STATUS_PAGE_JSON_URL],
+    queryFn: fetchStatusPageAggregateState,
+    staleTime: STATUS_PAGE_QUERY_STALE_TIME_MS,
+    retry: false,
+  });
+  const meta = statusPageMeta({
+    aggregateState: statusQuery.data,
+    pending: statusQuery.isPending,
+    error: statusQuery.isError,
+  });
+
+  return (
+    <a
+      href={STATUS_PAGE_URL}
+      target="_blank"
+      rel="noreferrer"
+      onClick={onClose}
+      className="mt-3 flex min-w-0 items-center gap-2 rounded-md py-1 text-[12.5px] leading-4 text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      title={meta.description}
+    >
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full shadow-[0_0_0_2px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
+      />
+      <span className="truncate">{meta.label}</span>
+    </a>
+  );
+}
+
 function AccountMenu({
   userName,
   userEmail,
@@ -288,12 +448,13 @@ function AccountMenu({
   ];
 
   return (
-    <div className="absolute bottom-[52px] left-3 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
+    <div className="absolute bottom-[60px] left-1 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
       <div className="px-3 pb-3 pt-3">
         <div className="text-[13.5px] font-medium leading-[1.2] tracking-[-0.01em] text-ink">
           {userName}
         </div>
         <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
+        <StatusPageMenuItem onClose={onClose} />
         {/* <button
           type="button"
           onClick={onClose}
@@ -316,12 +477,10 @@ function AccountMenu({
               )}
             </>
           );
-          const className =
-            "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
 
           if (href) {
             return (
-              <Link key={label} href={href} onClick={onClose} className={className}>
+              <Link key={label} href={href} onClick={onClose} className={ACCOUNT_MENU_ITEM_CLASS}>
                 {inner}
               </Link>
             );
@@ -334,7 +493,7 @@ function AccountMenu({
                 action?.();
                 onClose();
               }}
-              className={className}
+              className={ACCOUNT_MENU_ITEM_CLASS}
             >
               {inner}
             </button>
@@ -343,11 +502,7 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        <a
-          href="/auth/sign-out"
-          onClick={onClose}
-          className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
-        >
+        <a href="/auth/sign-out" onClick={onClose} className={ACCOUNT_MENU_ITEM_CLASS}>
           <LogOut size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
           <span>Log Out</span>
         </a>
@@ -378,7 +533,13 @@ export default function Sidebar({
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
+  const queryClient = useQueryClient();
+  const { showError } = useToast();
   const footerRef = useRef<HTMLDivElement>(null);
+  // Sessions with an in-flight pin toggle. Guards against rapid re-clicks firing
+  // overlapping setSessionStar requests that can race and leave the UI out of sync
+  // with the server (a slower earlier response overwriting a newer intent).
+  const pinTogglesInFlight = useRef<Set<string>>(new Set());
   const { data: queriedSessions, isPending } = useQuery({
     queryKey: sessionQueryKeys.list(workspaceId),
     queryFn: fetchSidebarSessions,
@@ -390,11 +551,84 @@ export default function Sidebar({
   const showSessionsLoading = sessionsLoading || (isPending && sessions.length === 0);
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+
+  // Star state is server-truth (per user, persisted, cross-device) and lives on
+  // the session payload. Toggling writes through a server action with an
+  // optimistic cache update so the UI reflects the change immediately.
+  const handleToggleStar = useCallback(
+    (sessionId: string) => {
+      // Serialize toggles per session: ignore re-clicks until the current request
+      // settles, so overlapping requests can't race the UI out of sync.
+      if (pinTogglesInFlight.current.has(sessionId)) return;
+      pinTogglesInFlight.current.add(sessionId);
+
+      const queryKey = sessionQueryKeys.list(workspaceId);
+      const current = queryClient.getQueryData<SidebarSession[]>(queryKey);
+      const previousStarredAt =
+        current?.find((session) => session.id === sessionId)?.starredAt ?? null;
+      const nextStarred = previousStarredAt === null;
+      const optimisticStarredAt = nextStarred ? new Date().toISOString() : null;
+
+      queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+        setSidebarSessionStar(entries, sessionId, optimisticStarredAt),
+      );
+
+      void (async () => {
+        try {
+          const result = await setSessionStar(sessionId, nextStarred);
+          if (!result.ok) {
+            // Roll back to the server-truth value we captured before the toggle.
+            queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+              setSidebarSessionStar(entries, sessionId, previousStarredAt),
+            );
+            showError(
+              result.error,
+              nextStarred ? "Could not pin session" : "Could not unpin session",
+            );
+            return;
+          }
+          queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+            setSidebarSessionStar(entries, sessionId, result.starredAt),
+          );
+        } catch (error) {
+          // Unexpected throw (network/server exception) — roll back and surface it.
+          queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
+            setSidebarSessionStar(entries, sessionId, previousStarredAt),
+          );
+          showError(
+            error instanceof Error ? error.message : "Could not reach the server.",
+            nextStarred ? "Could not pin session" : "Could not unpin session",
+          );
+        } finally {
+          // Allow the next toggle for this session once this request settles.
+          pinTogglesInFlight.current.delete(sessionId);
+        }
+      })();
+    },
+    [queryClient, showError, workspaceId],
+  );
+
   const filteredSessions = useMemo(
     () => filterSessions(sessions, sessionQuery),
     [sessions, sessionQuery],
   );
-  const groupedSessions = useMemo(() => groupSessions(filteredSessions), [filteredSessions]);
+
+  // Partition into starred (ordered by most-recently-starred) and unstarred (ordered by recency).
+  const { starredSessions, unstarredSessions } = useMemo(() => {
+    const starred: SidebarSession[] = [];
+    const unstarred: SidebarSession[] = [];
+    for (const session of filteredSessions) {
+      if (session.starredAt) {
+        starred.push(session);
+      } else {
+        unstarred.push(session);
+      }
+    }
+    starred.sort((a, b) => Date.parse(b.starredAt ?? "0") - Date.parse(a.starredAt ?? "0"));
+    return { starredSessions: starred, unstarredSessions: unstarred };
+  }, [filteredSessions]);
+
+  const groupedSessions = useMemo(() => groupSessions(unstarredSessions), [unstarredSessions]);
 
   function updateCollapsed(nextCollapsed: boolean) {
     setCollapsed(nextCollapsed);
@@ -505,23 +739,57 @@ export default function Sidebar({
                 No sessions match this filter.
               </div>
             ) : (
-              groupedSessions.map((group, index) => (
-                <div key={group.label} className={index === 0 ? "" : "pt-3"}>
-                  <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
-                    {group.label}
-                  </div>
-                  <div className="flex flex-col gap-px">
-                    {group.sessions.map((session) => (
-                      <SessionHistoryItem
-                        key={session.id}
-                        session={session}
-                        workspaceId={workspaceId}
-                        active={pathname === `/session/${session.id}`}
+              <>
+                {starredSessions.length > 0 && (
+                  <div className="pb-3">
+                    <div className="flex items-center gap-1 px-2 pb-1">
+                      <Pin
+                        size={9}
+                        strokeWidth={2}
+                        fill="currentColor"
+                        className="text-ink-subtle"
                       />
-                    ))}
+                      <span className="text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                        Pinned
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-px">
+                      {starredSessions.map((session) => (
+                        <SessionHistoryItem
+                          key={session.id}
+                          session={session}
+                          workspaceId={workspaceId}
+                          active={pathname === `/session/${session.id}`}
+                          starred
+                          onToggleStar={handleToggleStar}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                )}
+                {groupedSessions.map((group, index) => (
+                  <div
+                    key={group.label}
+                    className={index === 0 && starredSessions.length === 0 ? "" : "pt-3"}
+                  >
+                    <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+                      {group.label}
+                    </div>
+                    <div className="flex flex-col gap-px">
+                      {group.sessions.map((session) => (
+                        <SessionHistoryItem
+                          key={session.id}
+                          session={session}
+                          workspaceId={workspaceId}
+                          active={pathname === `/session/${session.id}`}
+                          starred={false}
+                          onToggleStar={handleToggleStar}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
             )}
           </div>
 

@@ -10,6 +10,8 @@ export type AgentSessionStatus =
   | "completed"
   | "failed";
 
+export type AgentRuntimeIncompleteReason = "announced_unexecuted_next_action";
+
 export type AgentRuntimeEvent =
   | {
       type: "session.status";
@@ -53,6 +55,10 @@ export type AgentRuntimeEvent =
   | {
       type: "message.reasoning_summary";
       payload: { messageId: string; summary: string };
+    }
+  | {
+      type: "message.reasoning_content";
+      payload: { messageId: string; text: string; format: "raw" };
     }
   | {
       type: "tool.started";
@@ -118,6 +124,26 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "agent_bundle.file_changed";
+      payload: { path: string; savedPath?: string; operation: "write" | "delete" };
+    }
+  | {
+      type: "agent_bundle.conflict";
+      payload: {
+        path: string;
+        savedPath?: string;
+        operation: "conflict_copy" | "delete_conflict";
+      };
+    }
+  | {
+      type: "agent.self_updated";
+      payload: {
+        version: number;
+        changedFields: string[];
+        summary?: string;
+      };
+    }
+  | {
       type: "command.output";
       payload: {
         command: string;
@@ -129,6 +155,15 @@ export type AgentRuntimeEvent =
   | {
       type: "session.error";
       payload: { message: string };
+    }
+  | {
+      // The model ended its turn under the step limit and with no pending tool
+      // calls, but it looks like it stopped mid-task rather than genuinely
+      // finishing (e.g. it announced a next action and never took it). The turn
+      // still completes, but this distinct event keeps unattended runs from
+      // looking cleanly green when the work was actually abandoned.
+      type: "session.incomplete";
+      payload: { messageId: string; reason: AgentRuntimeIncompleteReason };
     }
   | {
       type: "session.title_updated";

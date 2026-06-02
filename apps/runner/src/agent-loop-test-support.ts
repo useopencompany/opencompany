@@ -303,7 +303,7 @@ export function createDelegationDb(
     agent: {
       id: "agt_research",
       name: "Research",
-      path: "agents/research.agent",
+      path: "agents/research/research.agent",
       config: {
         ...agentConfig(),
         title: "Research",
@@ -464,6 +464,7 @@ export function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bApiKey: "e2b",
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
+    xApiBearerToken: "x_test",
     ampApiKey: "amp_test",
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,

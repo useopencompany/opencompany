@@ -1,4 +1,8 @@
-import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-runtime";
+import {
+  AFTER_SESSION_TAG,
+  agentMentionIdForPath,
+  repositoryIdForFullName,
+} from "@opencompany/agent-runtime";
 import type {
   AgentGitHubRepositoryBinding,
   AgentModelId,
@@ -6,6 +10,7 @@ import type {
   AgentToolId,
 } from "@opencompany/agent-runtime/types";
 import {
+  AtSign,
   Clock3,
   Code2,
   FileText,
@@ -98,6 +103,7 @@ export type AgentMentionItem =
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
+  x: AtSign,
   amp: Code2,
   linear: ListTodo,
   slack: MessageSquare,
@@ -250,11 +256,7 @@ export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): Agent
 }
 
 function agentMentionId(path: string) {
-  const normalized = path.trim();
-  if (!normalized.startsWith("agents/") || !normalized.endsWith(".agent")) return null;
-  const slug = normalized.slice("agents/".length, -".agent".length);
-  if (!slug || slug.includes("/")) return null;
-  return `agent/${slug}`;
+  return agentMentionIdForPath(path);
 }
 
 function isMcpToolId(id: AgentToolId) {

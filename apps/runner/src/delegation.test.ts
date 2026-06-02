@@ -83,7 +83,7 @@ describe("agent delegation", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -97,7 +97,7 @@ describe("agent delegation", () => {
       ok: true,
       status: "completed",
       agentName: "Research",
-      agentPath: "agents/research.agent",
+      agentPath: "agents/research/research.agent",
       answer: "Research complete.",
     });
     expect(db.state.sessions[0]).toMatchObject({
@@ -175,7 +175,7 @@ describe("agent delegation", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -261,7 +261,7 @@ describe("agent delegation", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -354,7 +354,7 @@ describe("agent delegation", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -375,7 +375,7 @@ describe("agent delegation", () => {
       childSessionId: "ses_child",
       messageId: resumedUserMessage?.id,
       agentName: "Research",
-      agentPath: "agents/research.agent",
+      agentPath: "agents/research/research.agent",
       answer: "Follow-up complete.",
     });
     expect(runChildMessage).toHaveBeenCalledWith(
@@ -415,7 +415,7 @@ describe("agent delegation", () => {
       signal: new AbortController().signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 
@@ -464,7 +464,7 @@ describe("agent delegation", () => {
         signal: new AbortController().signal,
         checkAbort: async () => {},
         depth: 0,
-        agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+        agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
         runChildMessage,
       });
 
@@ -525,7 +525,7 @@ describe("agent delegation", () => {
       signal: controller.signal,
       checkAbort: async () => {},
       depth: 0,
-      agentReferences: [{ path: "agents/research.agent", name: "Research" }],
+      agentReferences: [{ path: "agents/research/research.agent", name: "Research" }],
       runChildMessage,
     });
 

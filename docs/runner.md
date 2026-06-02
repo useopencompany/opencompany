@@ -122,6 +122,7 @@ V1 tools:
 
 - `shell`
 - `read_file`
+- `read_skill`
 - `edit_file`
 - `write_file`
 - `list_files`
@@ -129,6 +130,8 @@ V1 tools:
 - `delegate_to_agent` when the saved agent references other workspace agents; pass `agent` to
   start an inspectable child session hidden from sidebar history, or pass a returned
   `childSessionId` as `sessionId` to continue that child session
+- `update_agent_file` when the saved agent enables the `agent-self-edit` skill; validates and
+  persists version-guarded changes to the agent's own `.agent` configuration and queues GitHub sync
 - `amp_coder` when the saved agent enables the AMP coding-agent tool with a valid repository binding
 - `linear__*` dynamic tools when the saved agent enables `@linear`, the workspace has the `mcp`
   experiment on, and Linear MCP has workspace OAuth or bearer-token credentials configured
@@ -140,6 +143,9 @@ V1 tools:
 
 File-oriented tools must remain confined to `/home/user/workspace/work` or configured
 `/home/user/workspace/brain` paths, and their paths must be prefixed with `work/` or `brain/`.
+Enabled skills are also materialized as read-only files under `/home/user/workspace/skills/<id>/`;
+use `read_skill` with the skill id and an optional path inside that skill directory rather than
+generic file tools.
 Keep path validation in the runtime/sandbox layer rather than relying on model behavior.
 For connected GitHub code edits, clone the target repository into `work/<repo>` first unless the
 workflow is delegated to `amp_coder`.
@@ -166,6 +172,11 @@ Common event types:
 - `tool.completed`
 - `tool.failed`
 - `session.error`
+- `session.incomplete` — the turn still `completed`, but the model appears to have
+  stopped mid-task (announced a next action it never took). Distinct so unattended
+  runs don't look cleanly green; paired with an `opencompany.runner_turn_incomplete`
+  warning log. `payload.reason` is a stable code; currently
+  `announced_unexecuted_next_action`.
 
 Common transient-only event types:
 
@@ -219,6 +230,7 @@ Required environment variables:
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
+- `X_API_BEARER_TOKEN` (optional; required only for agents that enable the X hosted tool)
 - `AMP_API_KEY` (required only for agents that enable the AMP coding tool)
 - `OPENCOMPANY_AMP_E2B_TEMPLATE` (optional; AMP sessions default to E2B's `amp` template)
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required when agents use workspace MCP credentials)
@@ -243,7 +255,7 @@ retrying the stale id.
 
 `apps/runner/src/load-env.ts` loads the repo root `.env.local` for local runs. `bun run env:pull`
 also merges the runner env vars from Infisical `dev` + `/runner` into `.env.local`, including
-hosted-tool secrets like `EXA_API_KEY` when they are present.
+hosted-tool secrets like `EXA_API_KEY` and `X_API_BEARER_TOKEN` when they are present.
 
 Run the app, Inngest dev server, and runner together:
 

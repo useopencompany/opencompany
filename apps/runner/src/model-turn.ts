@@ -23,6 +23,9 @@ import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 export const MAX_MODEL_STEPS = 16;
+const INCOMPLETE_TURN_REASON = "announced_unexecuted_next_action" as const;
+const INCOMPLETE_TURN_REASON_DETAIL =
+  "Model stopped after announcing a next action it never took (trailing text ends mid-task).";
 
 export async function streamAssistantResponse(input: {
   ctx: RunContext;
@@ -91,6 +94,7 @@ export async function streamAssistantResponse(input: {
           tools: selectedTools,
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           abortSignal: input.ctx.controller.signal,
+          includeRawChunks: input.runtime.model.reasoningExposure === "raw",
           ...(input.runtime.model.providerOptions
             ? { providerOptions: input.runtime.model.providerOptions }
             : {}),
@@ -113,7 +117,7 @@ export async function streamAssistantResponse(input: {
           runLeaseOwner: input.ctx.leaseOwner,
           modelProvider: input.runtime.model.provider,
           modelName: input.runtime.model.name,
-          exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
+          reasoningExposure: input.runtime.model.reasoningExposure,
           signal: input.ctx.controller.signal,
           checkAbort: input.checkAbort,
           toolStartCoordinator: input.toolStartCoordinator,
@@ -130,7 +134,13 @@ export async function streamAssistantResponse(input: {
                 content: collected.assistantContent,
                 reasoning: collected.reasoningSummary,
               }
-            : { role: "assistant", content: collected.assistantContent },
+            : collected.reasoningContent
+              ? {
+                  role: "assistant",
+                  content: collected.assistantContent,
+                  reasoning: collected.reasoningContent,
+                }
+              : { role: "assistant", content: collected.assistantContent },
           metrics: modelStreamMetrics(collected.modelSteps, streamStartedAt, firstStreamPartAt),
           metadata: {
             // Braintrust derives estimated cost from `metadata.model` + token metrics.
@@ -162,6 +172,7 @@ export async function persistAssistantCompletion(input: {
   assistantContent: string;
   assistantReplayParts: Awaited<ReturnType<typeof collectAssistantStream>>["assistantReplayParts"];
   reasoningSummary: Awaited<ReturnType<typeof collectAssistantStream>>["reasoningSummary"];
+  reasoningContent: Awaited<ReturnType<typeof collectAssistantStream>>["reasoningContent"];
   internal: boolean;
 }) {
   const persistedAssistantModelMessage = toPersistedModelMessage(
@@ -181,11 +192,13 @@ export async function persistAssistantCompletion(input: {
     }),
   );
   const normalizedReasoningSummary = normalizeReasoningSummary(input.reasoningSummary);
+  const normalizedReasoningContent = normalizeReasoningSummary(input.reasoningContent);
   logBraintrustCurrentSpan({
     output: {
       content: input.assistantContent,
       replayParts: input.assistantReplayParts,
       ...(normalizedReasoningSummary ? { reasoningSummary: normalizedReasoningSummary } : {}),
+      ...(normalizedReasoningContent ? { reasoningContent: normalizedReasoningContent } : {}),
     },
     metadata: {
       assistant_message_id: input.assistantMessageId,
@@ -201,6 +214,22 @@ export async function persistAssistantCompletion(input: {
         leaseOwner: input.leaseOwner,
         type: "message.reasoning_summary",
         payload: { messageId: input.assistantMessageId, summary: normalizedReasoningSummary },
+      }),
+    );
+  }
+  if (normalizedReasoningContent) {
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.leaseId,
+        leaseOwner: input.leaseOwner,
+        type: "message.reasoning_content",
+        payload: {
+          messageId: input.assistantMessageId,
+          text: normalizedReasoningContent,
+          format: "raw",
+        },
       }),
     );
   }
@@ -232,6 +261,45 @@ export function assertTurnComplete(
   if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
     throw new ToolStepLimitExceededError();
   }
+}
+
+// A healthy completed turn ends with `finishReason === "stop"` after the model
+// has actually delivered its answer. A turn that *abandons* the task also ends
+// with `stop` — the model emits a step like "Now let me check the files…:" and
+// then produces no tool call, so the AI SDK ends the loop and the run is
+// recorded as a clean `completed`. `stop` alone therefore cannot tell the two
+// apart (see docs/agent-turn-vocabulary.md and
+// .context/issue-premature-turn-completion.md).
+//
+// This detects the abandoned case conservatively, favoring precision so a
+// genuine completion is never flagged. We only flag when ALL hold:
+//   1. the turn ended with a plain `stop` (not tool-calls / length / error),
+//   2. the turn actually drove at least one tool — i.e. it was doing work, the
+//      exact shape of the production failure — so a plain conversational reply
+//      is never flagged, and
+//   3. the trailing narration announces an unexecuted next action: after
+//      trimming, the final assistant text ends with a colon. A real final
+//      answer essentially never ends on a colon; an announced-but-skipped tool
+//      step almost always does ("Let me check the files changed:").
+export function detectIncompleteTurn(
+  streamResult: Pick<
+    Awaited<ReturnType<typeof collectAssistantStream>>,
+    "assistantContent" | "assistantReplayParts" | "lastFinishReason" | "lastStepEndedWithToolCalls"
+  >,
+): { reason: typeof INCOMPLETE_TURN_REASON; reasonDetail: string } | null {
+  if (streamResult.lastFinishReason !== "stop") return null;
+  if (streamResult.lastStepEndedWithToolCalls) return null;
+
+  const usedTools = streamResult.assistantReplayParts.some((part) => part.type === "tool-call");
+  if (!usedTools) return null;
+
+  const trailingText = streamResult.assistantContent.trimEnd();
+  if (!trailingText.endsWith(":")) return null;
+
+  return {
+    reason: INCOMPLETE_TURN_REASON,
+    reasonDetail: INCOMPLETE_TURN_REASON_DETAIL,
+  };
 }
 
 function modelStreamMetrics(

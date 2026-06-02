@@ -19,6 +19,7 @@ import {
 import type { ModelMessage } from "ai";
 import { asc, eq } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
+import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { syncBrainFromSandbox } from "./brain";
 import { createAgentDelegationHandler } from "./delegation";
 import type { RunnerEnv } from "./env";
@@ -39,6 +40,7 @@ import { createMcpToolSet } from "./mcp-tools";
 import { appendAssistantTextPart, buildModelMessages } from "./model-messages";
 import {
   assertTurnComplete,
+  detectIncompleteTurn,
   persistAssistantCompletion,
   streamAssistantResponse,
 } from "./model-turn";
@@ -407,6 +409,7 @@ async function runMessageWithContext(
       sandboxAcquirer,
       internal: false,
       brainStep: "sync_brain_after_message",
+      bundleStep: "sync_agent_bundle_after_message",
       appendCompletedEvent: () =>
         appendRuntimeEventForLease({
           sessionId: input.sessionId,
@@ -622,6 +625,7 @@ async function suspendRunForApproval(input: {
     assistantContent: error.assistantContent,
     assistantReplayParts: error.assistantReplayParts,
     reasoningSummary: error.reasoningSummary,
+    reasoningContent: error.reasoningContent,
     internal: false,
   });
 
@@ -660,6 +664,7 @@ async function executeStreamingTurn(input: {
   sandboxAcquirer: ReturnType<typeof createSandboxAcquirer>;
   internal: boolean;
   brainStep: string;
+  bundleStep: string;
   appendCompletedEvent: () => Promise<boolean>;
   emptyOutputFallback?: string;
   beforeRelease?: () => Promise<void>;
@@ -702,7 +707,7 @@ async function executeStreamingTurn(input: {
   }
 
   let { assistantContent } = streamResult;
-  const { assistantReplayParts, reasoningSummary } = streamResult;
+  const { assistantReplayParts, reasoningSummary, reasoningContent } = streamResult;
 
   if (sandboxAcquirer.current) {
     const activeSandbox = sandboxAcquirer.current;
@@ -715,10 +720,34 @@ async function executeStreamingTurn(input: {
         repository: row.repository,
       }),
     );
+    // Bundle sync is best-effort: a DB/GitHub failure here must not fail the
+    // turn or drop the assistant response (persistAssistantCompletion runs
+    // below). The next turn re-syncs from the sandbox.
+    try {
+      await observeRunStep(ctx, input.bundleStep, () =>
+        syncAgentBundleFromSandbox({
+          sandbox: activeSandbox,
+          sessionId: ctx.sessionId,
+          workspaceId: row.workspace.id,
+          agentId: row.agent.id,
+          workdir: row.session.workdir,
+          repository: row.repository,
+        }),
+      );
+    } catch (error) {
+      logger.error("Agent bundle sync failed", {
+        step: input.bundleStep,
+        session_id: ctx.sessionId,
+        workspace_id: row.workspace.id,
+        agent_id: row.agent.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   await input.checkAbort({ force: true });
 
+  let incompleteTurn: ReturnType<typeof detectIncompleteTurn> = null;
   if (input.emptyOutputFallback !== undefined) {
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = input.emptyOutputFallback;
@@ -726,6 +755,8 @@ async function executeStreamingTurn(input: {
     }
   } else {
     assertTurnComplete(streamResult);
+    // Only flag user-facing turns; internal after-session runs are exempt.
+    if (!input.internal) incompleteTurn = detectIncompleteTurn(streamResult);
   }
 
   await persistAssistantCompletion({
@@ -736,8 +767,38 @@ async function executeStreamingTurn(input: {
     assistantContent,
     assistantReplayParts,
     reasoningSummary,
+    reasoningContent,
     internal: input.internal,
   });
+
+  if (incompleteTurn) {
+    // Surface the abandoned turn distinctly so unattended/scheduled runs don't
+    // look cleanly green. We still complete the turn (failing would lose the
+    // partial work and re-run side effects) — the distinct event + warning log
+    // are the signal for observability and in-session review.
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: ctx.sessionId,
+        messageId: assistantMessageId,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "session.incomplete",
+        payload: { messageId: assistantMessageId, reason: incompleteTurn.reason },
+      }),
+    );
+    logger.warn("Runner turn stopped mid-task", {
+      event: "opencompany.runner_turn_incomplete",
+      workspace_id: row.workspace.id,
+      user_id: row.session.userId,
+      agent_id: row.agent.id,
+      session_id: ctx.sessionId,
+      assistant_message_id: assistantMessageId,
+      model_provider: input.runtime.model.provider,
+      model_name: input.runtime.model.name,
+      reason: incompleteTurn.reason,
+      reason_detail: incompleteTurn.reasonDetail,
+    });
+  }
 
   await requireLeaseWrite(input.appendCompletedEvent());
 
@@ -1020,7 +1081,7 @@ async function runAfterSessionWithContext(
         ...runtime,
         tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
       },
-      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Use mounted Brain files under ./brain to capture durable, long-lived context from the transcript when worthwhile, and skip the update if nothing is worth preserving.`,
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture durable learnings from the transcript in agent/memory.md when worthwhile, and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
       messages,
       tools,
       mcpContext: {
@@ -1043,6 +1104,7 @@ async function runAfterSessionWithContext(
       sandboxAcquirer,
       internal: true,
       brainStep: "sync_brain_after_session",
+      bundleStep: "sync_agent_bundle_after_session",
       emptyOutputFallback: "After-session run completed without changes.",
       appendCompletedEvent: () =>
         appendRuntimeEventForLease({
@@ -1537,6 +1599,7 @@ async function resumeApprovalWithContext(
       sandboxAcquirer,
       internal: false,
       brainStep: "sync_brain_after_resume",
+      bundleStep: "sync_agent_bundle_after_resume",
       appendCompletedEvent: () =>
         appendRuntimeEventForLease({
           sessionId: input.sessionId,

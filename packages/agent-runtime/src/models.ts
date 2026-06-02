@@ -1,6 +1,7 @@
 import type { AgentModelId } from "./types";
 
 export type ModelProviderOptions = Record<string, Record<string, boolean | number | string | null>>;
+export type ReasoningExposure = "hidden" | "summary" | "raw";
 
 export type AgentModelDefinition = {
   id: AgentModelId;
@@ -11,7 +12,7 @@ export type AgentModelDefinition = {
   supportsReasoning: boolean;
   reasoning?: {
     providerOptions: ModelProviderOptions;
-    exposeSummary: boolean;
+    exposure: ReasoningExposure;
   };
 };
 
@@ -30,7 +31,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           reasoningSummary: "concise",
         },
       },
-      exposeSummary: true,
+      exposure: "summary",
     },
   },
   {
@@ -47,7 +48,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           reasoningSummary: "concise",
         },
       },
-      exposeSummary: true,
+      exposure: "summary",
     },
   },
   {
@@ -64,7 +65,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           reasoningSummary: "concise",
         },
       },
-      exposeSummary: true,
+      exposure: "summary",
     },
   },
   {
@@ -81,7 +82,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           reasoningSummary: "concise",
         },
       },
-      exposeSummary: true,
+      exposure: "summary",
     },
   },
   {
@@ -105,7 +106,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           thinkingBudget: 0.001,
         },
       },
-      exposeSummary: false,
+      exposure: "hidden",
     },
   },
   {
@@ -121,7 +122,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           thinkingBudget: 0.001,
         },
       },
-      exposeSummary: false,
+      exposure: "hidden",
     },
   },
   {
@@ -137,7 +138,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
           thinkingBudget: 0.001,
         },
       },
-      exposeSummary: false,
+      exposure: "hidden",
     },
   },
   {
@@ -244,6 +245,10 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Latest Kimi model for long-horizon coding and agent workflows.",
     category: "Deep",
     supportsReasoning: true,
+    reasoning: {
+      providerOptions: {},
+      exposure: "raw",
+    },
   },
   {
     id: "moonshotai/kimi-k2.5",
@@ -252,6 +257,10 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Kimi multimodal model for agent tasks, coding, and visual understanding.",
     category: "Deep",
     supportsReasoning: true,
+    reasoning: {
+      providerOptions: {},
+      exposure: "raw",
+    },
   },
   {
     id: "moonshotai/kimi-k2-thinking",
@@ -260,6 +269,10 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Kimi reasoning model for long tool-call chains and explicit deliberation.",
     category: "Deep",
     supportsReasoning: true,
+    reasoning: {
+      providerOptions: {},
+      exposure: "raw",
+    },
   },
   {
     id: "moonshotai/kimi-k2-thinking-turbo",
@@ -268,6 +281,10 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Faster Kimi reasoning variant for interactive agent workflows.",
     category: "Fast",
     supportsReasoning: true,
+    reasoning: {
+      providerOptions: {},
+      exposure: "raw",
+    },
   },
   {
     id: "moonshotai/kimi-k2-turbo",
@@ -371,14 +388,15 @@ export function getAgentModelRuntimeOptions(id: string) {
     return {
       supportsReasoning: Boolean(model?.supportsReasoning),
       providerOptions: undefined,
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden" as const,
     };
   }
 
+  const providerOptions = copyProviderOptions(model.reasoning.providerOptions);
   return {
     supportsReasoning: true,
-    providerOptions: copyProviderOptions(model.reasoning.providerOptions),
-    exposeReasoningSummary: model.reasoning.exposeSummary,
+    ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
+    reasoningExposure: model.reasoning.exposure,
   };
 }
 

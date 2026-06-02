@@ -9,6 +9,7 @@ export * from "./models";
 export * from "./paths";
 export * from "./permissions";
 export * from "./schedules";
+export * from "./skills";
 export * from "./tokens";
 export * from "./tools";
 export * from "./types";

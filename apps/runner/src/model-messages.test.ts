@@ -210,6 +210,74 @@ describe("buildModelMessages", () => {
     ]);
   });
 
+  it("preserves assistant reasoning parts when replaying tool-call turns", () => {
+    const assistant = buildAssistantModelMessage({
+      content: "Done.",
+      parts: [
+        { type: "reasoning", text: "Need to inspect the file first." },
+        {
+          type: "tool-call",
+          toolCallId: "call_123",
+          toolName: "read_file",
+          input: { path: "README.md" },
+        },
+        { type: "text", text: "Done." },
+      ],
+    });
+    const tool = buildToolModelMessage({
+      toolCallId: "call_123",
+      toolName: "read_file",
+      output: { content: "Project docs" },
+    });
+
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_1",
+        role: "user",
+        content: "Read the docs.",
+        modelMessage: { role: "user", content: "Read the docs." },
+      },
+      {
+        id: "msg_assistant_1",
+        role: "assistant",
+        content: "Done.",
+        modelMessage: toPersistedModelMessage(assistant),
+      },
+      {
+        id: "msg_tool_1",
+        role: "tool",
+        content: JSON.stringify({ content: "Project docs" }),
+        modelMessage: toPersistedModelMessage(tool),
+      },
+      {
+        id: "msg_user_2",
+        role: "user",
+        content: "Continue.",
+        modelMessage: { role: "user", content: "Continue." },
+      },
+    ]);
+
+    expect(messages).toEqual([
+      { role: "user", content: "Read the docs." },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Need to inspect the file first." },
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "read_file",
+            input: { path: "README.md" },
+          },
+        ],
+      },
+      tool,
+      { role: "assistant", content: "Done." },
+      { role: "user", content: "Continue." },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
   it("falls back to basic text history for legacy rows without model messages", () => {
     expect(
       buildModelMessages([
@@ -293,6 +361,24 @@ describe("buildAssistantModelMessage", () => {
       content: [
         { type: "text", text: "AB" },
         { type: "tool-call", toolCallId: "call_abc", toolName: "list_files", input: {} },
+      ],
+    });
+  });
+
+  it("keeps AI SDK reasoning parts even without tools", () => {
+    expect(
+      buildAssistantModelMessage({
+        content: "Done",
+        parts: [
+          { type: "reasoning", text: "Checked the constraints." },
+          { type: "text", text: "Done" },
+        ],
+      }),
+    ).toEqual({
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "Checked the constraints." },
+        { type: "text", text: "Done" },
       ],
     });
   });

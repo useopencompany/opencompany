@@ -116,6 +116,7 @@ Set these in the Render `opencompany-runner` service.
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
 | `EXA_API_KEY` | No | Required only for agents that enable Exa. |
+| `X_API_BEARER_TOKEN` | No | Required only for agents that enable the X read-only hosted tool. |
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |

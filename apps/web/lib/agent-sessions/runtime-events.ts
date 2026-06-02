@@ -86,7 +86,11 @@ export type RuntimeToolCall = {
 
 export type AssistantTurnPart =
   | { type: "text"; text: string }
-  | { type: "reasoning"; text: string | undefined; durationSeconds?: number | undefined }
+  | {
+      type: "reasoning";
+      text: string | undefined;
+      durationSeconds?: number | undefined;
+    }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -435,10 +439,14 @@ export function buildAssistantTurnParts(
   const toolCallsById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   const modelParts = readAssistantModelParts(message.modelMessage);
   const reasoningSummary = readReasoningSummary(events, message.id);
+  const reasoningContent =
+    readReasoningContent(events, message.id) || readModelReasoning(modelParts);
+  const liveReasoning = readReasoningDeltas(events, message.id);
+  const reasoningText = reasoningSummary || reasoningContent || liveReasoning || undefined;
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
-    Boolean(reasoningSummary) ||
+    Boolean(reasoningText) ||
     thinkingDurationSeconds !== undefined ||
     hasReasoningPhaseEvent(events, message.id) ||
     hasReasoningDelta(events, message.id);
@@ -446,7 +454,7 @@ export function buildAssistantTurnParts(
     ? [
         {
           type: "reasoning",
-          text: reasoningSummary || undefined,
+          text: reasoningText,
           ...(thinkingDurationSeconds !== undefined
             ? { durationSeconds: thinkingDurationSeconds }
             : {}),
@@ -999,6 +1007,34 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .join("\n\n");
 }
 
+function readReasoningContent(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_content")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .filter((event) => readString(event.payload.format) === "raw")
+    .map((event) => readString(event.payload.text).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readModelReasoning(parts: Record<string, unknown>[] | null) {
+  if (!parts) return "";
+  return parts
+    .filter((part) => part.type === "reasoning")
+    .map((part) => readString(part.text).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readReasoningDeltas(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_delta")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .map((event) => readString(event.payload.delta))
+    .filter(Boolean)
+    .join("");
+}
+
 function hasReasoningDelta(events: RuntimeEvent[], messageId: string) {
   return events.some(
     (event) => event.type === "message.reasoning_delta" && eventBelongsToMessage(event, messageId),
@@ -1121,12 +1157,18 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "amp_coder":
       return "Coding with Amp";
+    case "read_skill": {
+      const skillId = field("skillId");
+      return skillId ? `Reading ${skillId} skill` : "Reading a skill";
+    }
     case "tool_help":
       return "Checking tool help";
     case "delegate_to_agent": {
       const agent = field("agent");
       return agent ? `Delegating to ${agent}` : "Delegating to an agent";
     }
+    case "update_agent_file":
+      return "Updating its agent configuration";
     default:
       return undefined;
   }

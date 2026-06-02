@@ -23,6 +23,7 @@ export class RunSuspendedError extends Error {
   readonly assistantContent: string;
   readonly assistantReplayParts: AssistantReplayPart[];
   readonly reasoningSummary: string;
+  readonly reasoningContent: string;
 
   constructor(input: {
     toolCallId: string;
@@ -31,6 +32,7 @@ export class RunSuspendedError extends Error {
     assistantContent: string;
     assistantReplayParts: AssistantReplayPart[];
     reasoningSummary: string;
+    reasoningContent: string;
   }) {
     super("Run suspended for tool approval.");
     this.name = "RunSuspendedError";
@@ -40,6 +42,7 @@ export class RunSuspendedError extends Error {
     this.assistantContent = input.assistantContent;
     this.assistantReplayParts = input.assistantReplayParts;
     this.reasoningSummary = input.reasoningSummary;
+    this.reasoningContent = input.reasoningContent;
   }
 }
 

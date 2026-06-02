@@ -9,6 +9,8 @@ import {
 } from "ai";
 
 export type PersistedModelMessage = Record<string, unknown>;
+type AssistantContentPart = Extract<AssistantModelMessage["content"], unknown[]>[number];
+type ReasoningReplayPart = Extract<AssistantContentPart, { type: "reasoning" }>;
 
 export type StoredSessionMessageForModelReplay = {
   id?: string;
@@ -17,7 +19,7 @@ export type StoredSessionMessageForModelReplay = {
   modelMessage?: PersistedModelMessage | null;
 };
 
-export type AssistantReplayPart = TextPart | ToolCallPart;
+export type AssistantReplayPart = ReasoningReplayPart | TextPart | ToolCallPart;
 type AssistantToolReplayMessage = Omit<AssistantModelMessage, "content"> & {
   role: "assistant";
   content: AssistantReplayPart[];
@@ -71,9 +73,10 @@ export function buildAssistantModelMessage(input: {
   parts: AssistantReplayPart[];
 }): AssistantModelMessage {
   const hasToolCall = input.parts.some((part) => part.type === "tool-call");
+  const hasReasoning = input.parts.some((part) => part.type === "reasoning");
   return validateModelMessage({
     role: "assistant",
-    content: hasToolCall ? input.parts : input.content,
+    content: hasToolCall || hasReasoning ? input.parts : input.content,
   }) as AssistantModelMessage;
 }
 
@@ -85,6 +88,16 @@ export function appendAssistantTextPart(parts: AssistantReplayPart[], text: stri
   }
 
   parts.push({ type: "text", text });
+}
+
+export function appendAssistantReasoningPart(parts: AssistantReplayPart[], text: string) {
+  const previous = parts.at(-1);
+  if (previous?.type === "reasoning") {
+    previous.text += text;
+    return;
+  }
+
+  parts.push({ type: "reasoning", text });
 }
 
 export function buildToolModelMessage(input: {
@@ -196,7 +209,7 @@ function splitAssistantToolReplay(
       flushAssistantAndTools();
     }
 
-    if (part.text) assistantParts.push(part);
+    if (isReasoningPart(part) || (isTextPart(part) && part.text)) assistantParts.push(part);
   }
 
   if (assistantParts.length > 0 || pendingToolCallIds.length > 0) {
@@ -208,6 +221,7 @@ function splitAssistantToolReplay(
 
 function buildAssistantReplayModelMessage(parts: AssistantReplayPart[]): AssistantModelMessage {
   const hasToolCall = parts.some(isToolCallPart);
+  const hasReasoning = parts.some(isReasoningPart);
   const text = parts
     .filter(isTextPart)
     .map((part) => part.text)
@@ -215,7 +229,7 @@ function buildAssistantReplayModelMessage(parts: AssistantReplayPart[]): Assista
 
   return validateModelMessage({
     role: "assistant",
-    content: hasToolCall ? parts : text,
+    content: hasToolCall || hasReasoning ? parts : text,
   }) as AssistantModelMessage;
 }
 
@@ -243,6 +257,10 @@ function readToolResultCallIds(message: ToolModelMessage) {
 
 function isTextPart(part: unknown): part is TextPart {
   return isRecord(part) && part.type === "text" && typeof part.text === "string";
+}
+
+function isReasoningPart(part: unknown): part is ReasoningReplayPart {
+  return isRecord(part) && part.type === "reasoning" && typeof part.text === "string";
 }
 
 function isToolCallPart(part: unknown): part is ToolCallPart {
