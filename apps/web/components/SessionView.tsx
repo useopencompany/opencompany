@@ -62,6 +62,11 @@ import {
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
+// How far from the bottom (in px) before we consider the user "pinned".
+const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+// Padding above the snapped user message (matches py-6 = 24px of the scroll container).
+const SCROLL_TO_TOP_PADDING_PX = 24;
+
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
@@ -174,7 +179,38 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+  // ID of the user message we should snap to the top of the viewport after render.
+  const [pendingScrollMessageId, setPendingScrollMessageId] = useState<string | null>(null);
+  // The user message currently snapped to the top — used to size the bottom spacer
+  // so it shrinks gradually as the response fills the area below it, instead of
+  // collapsing a full viewport in one frame when generation ends.
+  const [snappedMessageId, setSnappedMessageId] = useState<string | null>(null);
+  // Measured height (px) of the spacer below the response. Sized so the snapped
+  // message can sit at the top with room below; shrinks toward 0 as the real
+  // response grows taller than the viewport.
+  const [spacerHeight, setSpacerHeight] = useState(0);
+  // Whether the user is "pinned" at the bottom of the scroll container.
+  const isPinnedAtBottomRef = useRef(true);
+  // Set right after a snap-to-top so the bottom-auto-scroll effect does not
+  // immediately yank the message back down. Cleared once the user genuinely
+  // scrolls back to the bottom (onScroll) or generation ends.
+  const snapInProgressRef = useRef(false);
+  // The message id phase 2 has already scrolled to top, so it does not re-snap on
+  // every spacer/height change (only on a fresh send).
+  const justSnappedRef = useRef<string | null>(null);
+  // True only while the user is actively scrolling (wheel / touch). Lets a genuine
+  // user scroll be told apart from the programmatic snap/follow scrolls AND from
+  // layout-driven scroll events (the spacer shrinking, the viewport height changing).
+  // Without it those non-user scrolls hit the bottom threshold and wrongly clear the
+  // snap, so the streaming follow drags the just-snapped message back off the top.
+  const userScrollIntentRef = useRef(false);
+  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Timestamp until which the initial smooth snap is still animating. The maintain
+  // pass below holds off correcting drift until this passes, so it never cuts the
+  // smooth scroll short.
+  const snapSettleUntilRef = useRef(0);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -421,6 +457,167 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
   }, [relatedSessionCount]);
 
+  // Phase 1 of snap: when a send schedules a scroll, mark the message as snapped,
+  // seed a full-viewport spacer so there is always enough scroll range to bring it
+  // to the top, and suppress the bottom-auto-scroll until the user genuinely
+  // returns to the bottom. The actual scroll happens in the effect below, after
+  // the spacer has rendered. Runs on visibleMessages so we catch the render that
+  // adds the new message.
+  useEffect(() => {
+    if (!pendingScrollMessageId) return;
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const msgEl = container.querySelector<HTMLElement>(
+      `[data-message-id="${pendingScrollMessageId}"]`,
+    );
+    if (!msgEl) return;
+    setSpacerHeight(container.clientHeight);
+    setSnappedMessageId(pendingScrollMessageId);
+    setPendingScrollMessageId(null);
+    // Allow phase 2 to (re-)snap this message id.
+    justSnappedRef.current = null;
+    // The user is no longer at the bottom — do NOT re-arm the bottom-auto-scroll.
+    // Mark the snap so the streaming follow effect stays suppressed until the
+    // user genuinely reaches the bottom again (handled in onScroll).
+    isPinnedAtBottomRef.current = false;
+    snapInProgressRef.current = true;
+  }, [pendingScrollMessageId, visibleMessages]);
+
+  // Phase 2 of snap + maintain: bring the snapped message to the top, then HOLD it
+  // there through streaming layout shifts until the user scrolls. Uses rect math so
+  // it stays correct even if the wrapper becomes positioned (offsetTop would resolve
+  // against the wrong offsetParent then): current scroll + element-top-relative-to-
+  // container - padding.
+  //
+  // Why maintain (not a one-shot snap): after the snap the message sits near the
+  // bottom of the scroll range (the spacer fills ~one viewport below it). Any shrink
+  // of that range — the viewport growing, or the spacer collapsing as the response
+  // fills in — clamps scrollTop down and drags the message down with it. So we re-pin
+  // it to the top on each layout change, as long as the snap is still in progress
+  // (the user has not returned to the bottom) and the user is not actively scrolling.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin on every streaming/layout change
+  useEffect(() => {
+    if (!snappedMessageId) return;
+    if (!snapInProgressRef.current) return; // user reached the bottom → release the pin
+    if (userScrollIntentRef.current) return; // user is actively scrolling
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    const msgEl = container.querySelector<HTMLElement>(`[data-message-id="${snappedMessageId}"]`);
+    if (!msgEl) return;
+    const containerRect = container.getBoundingClientRect();
+    const msgRect = msgEl.getBoundingClientRect();
+    const drift = msgRect.top - containerRect.top - SCROLL_TO_TOP_PADDING_PX;
+
+    if (justSnappedRef.current !== snappedMessageId) {
+      // Initial snap — animate, and open a settle window so the maintain pass does
+      // not interrupt the in-flight smooth scroll.
+      container.scrollTo({ top: container.scrollTop + drift, behavior: "smooth" });
+      justSnappedRef.current = snappedMessageId;
+      snapSettleUntilRef.current = performance.now() + 450;
+      return;
+    }
+    // Maintain — only after the smooth snap has settled, and only when the message
+    // has actually drifted, so we do not churn out no-op scrolls every render.
+    if (performance.now() < snapSettleUntilRef.current) return;
+    if (Math.abs(drift) <= 2) return;
+    container.scrollTo({ top: container.scrollTop + drift, behavior: "auto" });
+  }, [
+    snappedMessageId,
+    spacerHeight,
+    visibleMessages,
+    hasRunningAssistantMessage,
+    showWaitingForAssistant,
+  ]);
+
+  // Auto-scroll to bottom during streaming — only if the user is pinned at the bottom.
+  // Skip while a snap-to-top scroll is still pending/in-progress so it never fights
+  // the snap. Uses behavior "auto" (instant) for streaming follow to avoid jitter
+  // from re-issuing smooth scrolls on every delta, and only scrolls when the user
+  // has actually drifted away from the bottom by more than the threshold.
+  useEffect(() => {
+    if (pendingScrollMessageId) return;
+    if (snapInProgressRef.current) return;
+    if (!hasRunningAssistantMessage && !showWaitingForAssistant) return;
+    if (!isPinnedAtBottomRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom <= 1) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+  }, [
+    pendingScrollMessageId,
+    visibleMessages,
+    hasRunningAssistantMessage,
+    showWaitingForAssistant,
+  ]);
+
+  // Size the bottom spacer so the snapped message can stay at the top with a full
+  // viewport of room below it, then shrink the spacer as the real response grows
+  // (the spacer only fills the gap the response itself does not yet cover, and
+  // reaches 0 once the response is at least a viewport tall).
+  //
+  // The spacer is sized whenever there IS a snapped message — NOT gated on the
+  // generation flags — so it stays put across the generation-end boundary. If it
+  // collapsed the instant generation ended, a user who had scrolled down would get a
+  // jarring jump as the scroll range shrank under them. It is reset on the next send
+  // (phase 1) and falls back to 0 once the snapped message leaves the DOM.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure on each render of the list
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    // Defer measurement + state update to a frame after paint so it is not a
+    // synchronous cascading setState in the effect body, and so the DOM (including
+    // freshly streamed content) reflects the latest render before we measure.
+    const raf = requestAnimationFrame(() => {
+      if (!snappedMessageId || !container) {
+        setSpacerHeight((prev) => (prev === 0 ? prev : 0));
+        return;
+      }
+      const snappedEl = container.querySelector<HTMLElement>(
+        `[data-message-id="${snappedMessageId}"]`,
+      );
+      if (!snappedEl) {
+        setSpacerHeight((prev) => (prev === 0 ? prev : 0));
+        return;
+      }
+      setSpacerHeight((prev) => {
+        // Height from the top of the snapped message to the bottom of the rendered
+        // content, excluding the spacer itself. Once this exceeds the viewport, no
+        // spacer is needed, so the spacer shrinks toward 0 as the response grows.
+        const contentBelow = container.scrollHeight - snappedEl.offsetTop - prev;
+        const next = Math.max(0, container.clientHeight - contentBelow - SCROLL_TO_TOP_PADDING_PX);
+        // Only update when it changes meaningfully to avoid render churn / jitter.
+        return Math.abs(next - prev) > 1 ? next : prev;
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [snappedMessageId, visibleMessages, hasRunningAssistantMessage, showWaitingForAssistant]);
+
+  // Note: snappedMessageId is intentionally NOT cleared when generation ends — the
+  // next send overwrites it (phase 1) and resets justSnappedRef so phase 2 re-snaps.
+  // Clearing it in an effect would trip the React Compiler's setState-in-effect lint.
+  // Trade-off: because the spacer is no longer gated on the generation flags (it
+  // stays put across generation-end to avoid a collapse jump), a sub-viewport reply
+  // keeps a reserved-whitespace spacer below it until the next send (ChatGPT-style),
+  // and the spacer/maintain effects keep re-measuring the stale id until then.
+
+  // Mark the next scroll events as user-driven. Debounced so a single wheel/touch
+  // gesture (incl. its momentum scroll burst) stays flagged, then clears shortly
+  // after the user stops — programmatic snap/follow scrolls never set this.
+  const markUserScrollIntent = () => {
+    userScrollIntentRef.current = true;
+    if (userScrollIntentTimerRef.current) clearTimeout(userScrollIntentTimerRef.current);
+    userScrollIntentTimerRef.current = setTimeout(() => {
+      userScrollIntentRef.current = false;
+    }, 250);
+  };
+  useEffect(
+    () => () => {
+      if (userScrollIntentTimerRef.current) clearTimeout(userScrollIntentTimerRef.current);
+    },
+    [],
+  );
+
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
@@ -444,6 +641,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
           );
           seedSessionQueries(queryClient, workspaceId, next);
         }
+        // Schedule a scroll so the just-sent message snaps to the top of the viewport.
+        setPendingScrollMessageId(result.messageId);
         return;
       }
       pendingTtftRef.current = null; // failed send — drop the timer
@@ -466,7 +665,33 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         </div>
 
         <div
+          ref={scrollContainerRef}
           className="relative flex-1 overflow-y-auto overscroll-contain px-8 lg:px-12 py-6"
+          onWheel={markUserScrollIntent}
+          onTouchMove={markUserScrollIntent}
+          onScroll={(event) => {
+            // Only a real user scroll may clear the snap / re-pin to the bottom.
+            // Ignore the programmatic snap & follow scrolls and layout-driven scroll
+            // events (spacer shrink, viewport-height changes) — otherwise they reach
+            // the bottom threshold and yank the just-snapped message back down.
+            //
+            // "User scroll" is detected via wheel/touch (covers mouse, trackpad and
+            // touch). Keyboard (PageUp/Down, Space) and scrollbar-thumb drag are not
+            // detected here — they cannot be told apart from a layout-driven scroll
+            // without making the container focusable, and on macOS overlay scrollbars
+            // make thumb-drag rare; treated as a known edge.
+            if (!userScrollIntentRef.current) return;
+            const el = event.currentTarget;
+            const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            const atBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+            isPinnedAtBottomRef.current = atBottom;
+            // ANY genuine user scroll hands control back to the user, so stop pinning
+            // the message to the top. The streaming bottom-follow then only resumes if
+            // the user is actually at the bottom (gated on isPinnedAtBottomRef). This
+            // is what makes "scroll up mid-generation is respected" hold: scrolling up
+            // releases the snap instead of getting re-pinned a frame later.
+            snapInProgressRef.current = false;
+          }}
           onDragEnter={(event) => {
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
@@ -559,6 +784,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               return (
                 <div
                   key={message.id}
+                  data-message-id={message.id}
                   className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
                 >
                   <div
@@ -581,7 +807,11 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                     )}
                     {canCopy && message.status !== "running" ? (
                       <div
-                        className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 opacity-70 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100`}
+                        className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
+                          message.role === "assistant"
+                            ? "opacity-100"
+                            : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+                        }`}
                       >
                         <CopyMessageButton text={copyText} />
                         {duration > 0 ? (
@@ -618,6 +848,20 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   ) : null,
                 )}
               </div>
+            ) : null}
+
+            {/* Whitespace reserved below the snapped user message so the streaming
+                response renders into a clean, visible area without the user needing
+                to scroll. The height is measured (see spacer effect) and stays put
+                across the generation-end boundary — it is NOT gated on the generation
+                flags, so it never collapses in one frame and jolts a user who has
+                scrolled down. It is reset on the next send. */}
+            {snappedMessageId && spacerHeight > 0 ? (
+              <div
+                aria-hidden="true"
+                className="shrink-0 transition-[height] duration-300 ease-out"
+                style={{ height: `${spacerHeight}px` }}
+              />
             ) : null}
           </div>
         </div>
