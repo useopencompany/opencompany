@@ -66,6 +66,10 @@ export function createMentionSuggestion({
             trigger: "manual",
             placement: "bottom-start",
             offset: [0, 4],
+            // Sit beneath the model dropdown (a Radix Select at z-50) instead of
+            // tippy's default z-index (9999), so the popup never paints on top
+            // of that menu — it stays underneath when both are open.
+            zIndex: 40,
           });
         },
         onUpdate: (props) => {
