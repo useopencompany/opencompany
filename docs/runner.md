@@ -172,6 +172,10 @@ Common event types:
 - `tool.completed`
 - `tool.failed`
 - `session.error`
+- `session.incomplete` — the turn still `completed`, but the model appears to have
+  stopped mid-task (announced a next action it never took). Distinct so unattended
+  runs don't look cleanly green; paired with an `opencompany.runner_turn_incomplete`
+  warning log.
 
 Common transient-only event types:
 

@@ -27,6 +27,7 @@ import {
   createHostedToolBudget,
   createKnownSecretRedactor,
   createToolStartCoordinator,
+  detectIncompleteTurn,
   executeRuntimeTool,
   MAX_MODEL_STEPS,
   normalizeReasoningSummary,
@@ -1884,6 +1885,74 @@ describe("stream error handling", () => {
         stepCount: 2,
       }),
     ).not.toThrow();
+  });
+
+  it("flags a tool-driven turn that stops after announcing an unexecuted action", () => {
+    const result = detectIncompleteTurn({
+      assistantContent:
+        "I scanned the open PRs.\n\nNow let me check the files changed in each PR to assess complexity:",
+      assistantReplayParts: [
+        { type: "text", text: "I scanned the open PRs." },
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "shell",
+          input: { cmd: "gh pr list" },
+        },
+        {
+          type: "text",
+          text: "Now let me check the files changed in each PR to assess complexity:",
+        },
+      ],
+      lastFinishReason: "stop",
+      lastStepEndedWithToolCalls: false,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.reason).toMatch(/never took/);
+  });
+
+  it("does not flag a genuine completion that used tools and ends with a real answer", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Done — 3 PRs reviewed and the Slack notification was sent.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "slack_post",
+            input: { text: "report" },
+          },
+          { type: "text", text: "Done — 3 PRs reviewed and the Slack notification was sent." },
+        ],
+        lastFinishReason: "stop",
+        lastStepEndedWithToolCalls: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not flag a colon-terminated reply when the turn never drove a tool", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Here are the three options I'd consider:",
+        assistantReplayParts: [{ type: "text", text: "Here are the three options I'd consider:" }],
+        lastFinishReason: "stop",
+        lastStepEndedWithToolCalls: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not flag while the model is still requesting tools", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Let me check the files changed:",
+        assistantReplayParts: [
+          { type: "text", text: "Let me check the files changed:" },
+          { type: "tool-call", toolCallId: "call_1", toolName: "shell", input: {} },
+        ],
+        lastFinishReason: "tool-calls",
+        lastStepEndedWithToolCalls: true,
+      }),
+    ).toBeNull();
   });
 
   it("throws model stream errors instead of allowing blank completions", () => {

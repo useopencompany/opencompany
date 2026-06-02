@@ -457,6 +457,8 @@ async function runMessageWithContext(
     await checkAbort({ force: true });
     assertTurnComplete(streamResult);
 
+    const incompleteTurn = detectIncompleteTurn(streamResult);
+
     await persistAssistantCompletion({
       sessionId: input.sessionId,
       assistantMessageId,
@@ -467,6 +469,35 @@ async function runMessageWithContext(
       reasoningSummary,
       internal: false,
     });
+
+    if (incompleteTurn) {
+      // Surface the abandoned turn distinctly so unattended/scheduled runs don't
+      // look cleanly green. We still complete the turn (failing would lose the
+      // partial work and re-run side effects) — the distinct event + warning log
+      // are the signal for observability and in-session review.
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: assistantMessageId,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.incomplete",
+          payload: { messageId: assistantMessageId, reason: incompleteTurn.reason },
+        }),
+      );
+      logger.warn("Runner turn stopped mid-task", {
+        event: "opencompany.runner_turn_incomplete",
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        session_id: input.sessionId,
+        message_id: input.messageId,
+        assistant_message_id: assistantMessageId,
+        model_provider: modelProvider,
+        model_name: modelName,
+        reason: incompleteTurn.reason,
+      });
+    }
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -648,6 +679,45 @@ export function assertTurnComplete(
   if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
     throw new ToolStepLimitExceededError();
   }
+}
+
+// A healthy completed turn ends with `finishReason === "stop"` after the model
+// has actually delivered its answer. A turn that *abandons* the task also ends
+// with `stop` — the model emits a step like "Now let me check the files…:" and
+// then produces no tool call, so the AI SDK ends the loop and the run is
+// recorded as a clean `completed`. `stop` alone therefore cannot tell the two
+// apart (see docs/agent-turn-vocabulary.md and
+// .context/issue-premature-turn-completion.md).
+//
+// This detects the abandoned case conservatively, favoring precision so a
+// genuine completion is never flagged. We only flag when ALL hold:
+//   1. the turn ended with a plain `stop` (not tool-calls / length / error),
+//   2. the turn actually drove at least one tool — i.e. it was doing work, the
+//      exact shape of the production failure — so a plain conversational reply
+//      is never flagged, and
+//   3. the trailing narration announces an unexecuted next action: after
+//      trimming, the final assistant text ends with a colon. A real final
+//      answer essentially never ends on a colon; an announced-but-skipped tool
+//      step almost always does ("Let me check the files changed:").
+export function detectIncompleteTurn(
+  streamResult: Pick<
+    Awaited<ReturnType<typeof collectAssistantStream>>,
+    "assistantContent" | "assistantReplayParts" | "lastFinishReason" | "lastStepEndedWithToolCalls"
+  >,
+): { reason: string } | null {
+  if (streamResult.lastFinishReason !== "stop") return null;
+  if (streamResult.lastStepEndedWithToolCalls) return null;
+
+  const usedTools = streamResult.assistantReplayParts.some((part) => part.type === "tool-call");
+  if (!usedTools) return null;
+
+  const trailingText = streamResult.assistantContent.trimEnd();
+  if (!trailingText.endsWith(":")) return null;
+
+  return {
+    reason:
+      "Model stopped after announcing a next action it never took (trailing text ends mid-task).",
+  };
 }
 
 export async function runAfterSession(input: {
