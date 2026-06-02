@@ -817,6 +817,63 @@ describe("buildAssistantTurnParts", () => {
     });
   });
 
+  it("preserves pending approval state when persisted model parts include the tool call", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "BeforeAfter",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Before" },
+            {
+              type: "tool-call",
+              toolCallId: "call_read",
+              toolName: "linear__list_issues",
+              input: { query: "test", limit: 5 },
+            },
+            { type: "text", text: "After" },
+            {
+              type: "tool-call",
+              toolCallId: "call_post",
+              toolName: "linear__save_comment",
+              input: { issueId: "OC-184", body: "Test comment" },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_read",
+          name: "linear__list_issues",
+          outputPreview: "{ issues: [] }",
+        }),
+        event(2, "tool.approval_required", {
+          messageId: "msg_assistant",
+          toolCallId: "call_post",
+          name: "linear__save_comment",
+          providerKey: "linear",
+          permissionGroup: "post",
+          inputPreview: '{\n  "issueId": "OC-184"\n}',
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+      ],
+    );
+
+    const postPart = parts.find(
+      (part) => part.type === "tool-call" && part.toolCall.id === "call_post",
+    );
+    expect(postPart?.type === "tool-call" ? postPart.toolCall.approval : undefined).toEqual({
+      status: "required",
+      providerKey: "linear",
+      permissionGroup: "post",
+      requestedAt: "2026-06-02T08:51:35.162Z",
+    });
+  });
+
   it("preserves approval decision source after a paused tool call is resolved", () => {
     const timeoutParts = buildAssistantTurnParts(
       { id: "msg_assistant", role: "assistant", content: "", status: "running" },

@@ -281,6 +281,87 @@ describe("AssistantMessageContent — tool approvals", () => {
     expect(screen.queryByText("failed")).not.toBeInTheDocument();
   });
 
+  it("keeps the persisted paused approval prompt visible after model parts are saved", () => {
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_approval", status: "awaiting_approval" }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Post a test comment",
+          status: "completed",
+          createdAt: "2026-06-02T08:51:30.000Z",
+        },
+        {
+          id: "msg_approval",
+          role: "assistant",
+          content: "I found an issue and I am posting a comment now.",
+          status: "completed",
+          responseToMessageId: "msg_user",
+          createdAt: "2026-06-02T08:51:31.000Z",
+          completedAt: "2026-06-02T08:51:35.000Z",
+          modelMessage: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "I found an issue." },
+              {
+                type: "tool-call",
+                toolCallId: "call_read",
+                toolName: "linear__list_issues",
+                input: { query: "test", limit: 5 },
+              },
+              { type: "text", text: "I am posting a comment now." },
+              {
+                type: "tool-call",
+                toolCallId: "call_approval",
+                toolName: "linear__save_comment",
+                input: { issueId: "OC-184", body: "Test comment" },
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "tool.completed",
+          messageId: "msg_approval",
+          createdAt: "2026-06-02T08:51:32.000Z",
+          payload: {
+            messageId: "msg_approval",
+            toolCallId: "call_read",
+            name: "linear__list_issues",
+            outputPreview: "{ issues: [] }",
+          },
+        },
+        {
+          id: 2,
+          type: "tool.approval_required",
+          messageId: "msg_approval",
+          createdAt: "2026-06-02T08:51:35.000Z",
+          payload: {
+            messageId: "msg_approval",
+            toolCallId: "call_approval",
+            name: "linear__save_comment",
+            providerKey: "linear",
+            permissionGroup: "post",
+            inputPreview: '{\n  "issueId": "OC-184"\n}',
+            requestedAt: "2026-06-02T08:51:35.000Z",
+          },
+        },
+      ],
+      runnerUrl: null,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(screen.getByText("Paused: waiting for your approval")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    expect(screen.queryByText("Stopped before finishing.")).not.toBeInTheDocument();
+  });
+
   it("keeps a disabled resolving state after the user denies", async () => {
     vi.useRealTimers();
     actionMocks.resolveToolApproval.mockResolvedValue({ ok: true });

@@ -489,6 +489,7 @@ export function buildAssistantTurnParts(
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
           ...(brainPath ? { brainPath } : {}),
+          ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
           startedEventId: matchingToolCall?.startedEventId ?? null,
           completedEventId: matchingToolCall?.completedEventId ?? null,
         },
