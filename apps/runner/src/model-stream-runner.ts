@@ -1,7 +1,11 @@
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
-import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
+import {
+  type AssistantReplayPart,
+  appendAssistantReasoningPart,
+  appendAssistantTextPart,
+} from "./model-messages";
 import type { RunControlCheck } from "./run-control";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
@@ -21,7 +25,7 @@ export async function collectAssistantStream(input: {
   runLeaseOwner: string;
   modelProvider: string;
   modelName: string;
-  exposeReasoningSummary: boolean;
+  reasoningExposure: "hidden" | "summary" | "raw";
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
@@ -30,6 +34,7 @@ export async function collectAssistantStream(input: {
   let assistantContent = "";
   const assistantReplayParts: AssistantReplayPart[] = [];
   let reasoningSummary = "";
+  let reasoningContent = "";
   let stepIndex = 0;
   let sawOutputPart = false;
   const modelSteps: Array<{
@@ -52,9 +57,9 @@ export async function collectAssistantStream(input: {
     });
   };
 
-  // Reasoning streams as its own transient `message.reasoning_delta` events so the UI can
-  // show a live "Thinking…" label only while the model is actually reasoning. The final
-  // reasoning summary still lands separately at message completion.
+  // Reasoning streams as its own transient `message.reasoning_delta` events when the model's
+  // reasoning is intentionally exposed. Raw Kimi reasoning is persisted separately from
+  // summary-style reasoning so the UI can label it honestly.
   const publishReasoningDelta = (delta: string) => {
     if (!delta) return;
     publishTransientRuntimeEvent({
@@ -124,8 +129,12 @@ export async function collectAssistantStream(input: {
 
       if (reasoningDelta) {
         await startReasoningPhase();
-        if (input.exposeReasoningSummary) {
+        if (input.reasoningExposure === "summary") {
           reasoningSummary += reasoningDelta;
+          publishReasoningDelta(reasoningDelta);
+        } else if (input.reasoningExposure === "raw") {
+          reasoningContent += reasoningDelta;
+          appendAssistantReasoningPart(assistantReplayParts, reasoningDelta);
           publishReasoningDelta(reasoningDelta);
         }
       }
@@ -210,6 +219,7 @@ export async function collectAssistantStream(input: {
     assistantContent,
     assistantReplayParts,
     reasoningSummary,
+    reasoningContent,
     modelSteps,
     stepCount: stepIndex,
     lastFinishReason,

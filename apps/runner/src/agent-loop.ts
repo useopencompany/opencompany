@@ -417,7 +417,8 @@ async function runMessageWithContext(
           ),
       ],
     });
-    const { assistantContent, assistantReplayParts, reasoningSummary } = streamResult;
+    const { assistantContent, assistantReplayParts, reasoningSummary, reasoningContent } =
+      streamResult;
 
     if (sandboxAcquirer.current) {
       const activeSandbox = sandboxAcquirer.current;
@@ -465,6 +466,7 @@ async function runMessageWithContext(
       assistantContent,
       assistantReplayParts,
       reasoningSummary,
+      reasoningContent,
       internal: false,
     });
 
@@ -912,7 +914,7 @@ async function runAfterSessionWithContext(
       toolBudget: createHostedToolBudget(),
     });
 
-    let { assistantContent, assistantReplayParts, reasoningSummary } =
+    let { assistantContent, assistantReplayParts, reasoningSummary, reasoningContent } =
       await streamAssistantResponse({
         ctx,
         runtime: {
@@ -983,6 +985,7 @@ async function runAfterSessionWithContext(
       assistantContent,
       assistantReplayParts,
       reasoningSummary,
+      reasoningContent,
       internal: true,
     });
 
@@ -2311,7 +2314,7 @@ async function streamAssistantResponse(input: {
           runLeaseOwner: input.ctx.leaseOwner,
           modelProvider: input.runtime.model.provider,
           modelName: input.runtime.model.name,
-          exposeReasoningSummary: input.runtime.model.exposeReasoningSummary,
+          reasoningExposure: input.runtime.model.reasoningExposure,
           signal: input.ctx.controller.signal,
           checkAbort: input.checkAbort,
           toolStartCoordinator: input.toolStartCoordinator,
@@ -2326,7 +2329,13 @@ async function streamAssistantResponse(input: {
                 content: collected.assistantContent,
                 reasoning: collected.reasoningSummary,
               }
-            : { role: "assistant", content: collected.assistantContent },
+            : collected.reasoningContent
+              ? {
+                  role: "assistant",
+                  content: collected.assistantContent,
+                  reasoning: collected.reasoningContent,
+                }
+              : { role: "assistant", content: collected.assistantContent },
           metrics: modelStreamMetrics(collected.modelSteps, streamStartedAt, firstStreamPartAt),
           metadata: {
             // Braintrust derives estimated cost from `metadata.model` + token metrics.
@@ -2358,6 +2367,7 @@ async function persistAssistantCompletion(input: {
   assistantContent: string;
   assistantReplayParts: Awaited<ReturnType<typeof collectAssistantStream>>["assistantReplayParts"];
   reasoningSummary: Awaited<ReturnType<typeof collectAssistantStream>>["reasoningSummary"];
+  reasoningContent: Awaited<ReturnType<typeof collectAssistantStream>>["reasoningContent"];
   internal: boolean;
 }) {
   const persistedAssistantModelMessage = toPersistedModelMessage(
@@ -2377,11 +2387,13 @@ async function persistAssistantCompletion(input: {
     }),
   );
   const normalizedReasoningSummary = normalizeReasoningSummary(input.reasoningSummary);
+  const normalizedReasoningContent = normalizeReasoningSummary(input.reasoningContent);
   logBraintrustCurrentSpan({
     output: {
       content: input.assistantContent,
       replayParts: input.assistantReplayParts,
       ...(normalizedReasoningSummary ? { reasoningSummary: normalizedReasoningSummary } : {}),
+      ...(normalizedReasoningContent ? { reasoningContent: normalizedReasoningContent } : {}),
     },
     metadata: {
       assistant_message_id: input.assistantMessageId,
@@ -2397,6 +2409,22 @@ async function persistAssistantCompletion(input: {
         leaseOwner: input.leaseOwner,
         type: "message.reasoning_summary",
         payload: { messageId: input.assistantMessageId, summary: normalizedReasoningSummary },
+      }),
+    );
+  }
+  if (normalizedReasoningContent) {
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        leaseId: input.leaseId,
+        leaseOwner: input.leaseOwner,
+        type: "message.reasoning_content",
+        payload: {
+          messageId: input.assistantMessageId,
+          text: normalizedReasoningContent,
+          format: "raw",
+        },
       }),
     );
   }

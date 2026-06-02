@@ -886,6 +886,63 @@ describe("buildAssistantTurnParts", () => {
     ]);
   });
 
+  it("prepends raw reasoning content without mixing it into visible text", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: "Final answer",
+        },
+      },
+      [
+        event(1, "message.reasoning_content", {
+          messageId: "msg_assistant",
+          text: "Raw Kimi reasoning.",
+          format: "raw",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Raw Kimi reasoning.",
+      },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("uses persisted model-message reasoning when no reasoning content event exists", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "Raw persisted reasoning." },
+            { type: "text", text: "Final answer" },
+          ],
+        },
+      },
+      [],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Raw persisted reasoning.",
+      },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
   it("does not render a reasoning part for reasoning tokens without real reasoning evidence", () => {
     const parts = buildAssistantTurnParts(
       {

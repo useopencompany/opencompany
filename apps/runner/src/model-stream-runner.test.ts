@@ -132,7 +132,7 @@ describe("collectAssistantStream", () => {
       streamPart({ type: "reasoning-delta", delta: "..." }),
     ]);
 
-    await collect(stream, { exposeReasoningSummary: true });
+    await collect(stream, { reasoningExposure: "summary" });
 
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
       sessionId: "ses_123",
@@ -209,13 +209,49 @@ describe("collectAssistantStream", () => {
     expect(heartbeatAndLoadState).not.toHaveBeenCalled();
   });
 
-  it("persists reasoning phase boundaries without exposing deltas when summaries are hidden", async () => {
+  it("publishes and stores raw reasoning when raw exposure is enabled", async () => {
+    const stream = createStream([
+      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", delta: "..." }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await expect(collect(stream, { reasoningExposure: "raw" })).resolves.toMatchObject({
+      assistantContent: "Visible answer",
+      assistantReplayParts: [
+        { type: "reasoning", text: "Thinking..." },
+        { type: "text", text: "Visible answer" },
+      ],
+      reasoningContent: "Thinking...",
+      reasoningSummary: "",
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Thinking" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "..." },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(3, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Visible answer" },
+    });
+  });
+
+  it("persists reasoning phase boundaries without exposing deltas when reasoning is hidden", async () => {
     const stream = createStream([
       streamPart({ type: "reasoning-delta", delta: "Hidden thinking" }),
       streamPart({ type: "text-delta", text: "Visible answer" }),
     ]);
 
-    await collect(stream, { exposeReasoningSummary: false });
+    await collect(stream, { reasoningExposure: "hidden" });
 
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledTimes(1);
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledWith({
@@ -255,7 +291,7 @@ function collect(
     runLeaseOwner: "runner-test",
     modelProvider: "vercel-ai-gateway",
     modelName: "openai/gpt-5.4-mini",
-    exposeReasoningSummary: false,
+    reasoningExposure: "hidden",
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator: createToolStartCoordinator(),

@@ -77,7 +77,11 @@ export type RuntimeToolCall = {
 
 export type AssistantTurnPart =
   | { type: "text"; text: string }
-  | { type: "reasoning"; text: string | undefined; durationSeconds?: number | undefined }
+  | {
+      type: "reasoning";
+      text: string | undefined;
+      durationSeconds?: number | undefined;
+    }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -426,10 +430,13 @@ export function buildAssistantTurnParts(
   const toolCallsById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   const modelParts = readAssistantModelParts(message.modelMessage);
   const reasoningSummary = readReasoningSummary(events, message.id);
+  const reasoningContent =
+    readReasoningContent(events, message.id) || readModelReasoning(modelParts);
+  const reasoningText = reasoningSummary || reasoningContent || undefined;
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
-    Boolean(reasoningSummary) ||
+    Boolean(reasoningText) ||
     thinkingDurationSeconds !== undefined ||
     hasReasoningPhaseEvent(events, message.id) ||
     hasReasoningDelta(events, message.id);
@@ -437,7 +444,7 @@ export function buildAssistantTurnParts(
     ? [
         {
           type: "reasoning",
-          text: reasoningSummary || undefined,
+          text: reasoningText,
           ...(thinkingDurationSeconds !== undefined
             ? { durationSeconds: thinkingDurationSeconds }
             : {}),
@@ -950,6 +957,25 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .filter((event) => event.type === "message.reasoning_summary")
     .filter((event) => eventBelongsToMessage(event, messageId))
     .map((event) => readString(event.payload.summary).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readReasoningContent(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_content")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .filter((event) => readString(event.payload.format) === "raw")
+    .map((event) => readString(event.payload.text).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readModelReasoning(parts: Record<string, unknown>[] | null) {
+  if (!parts) return "";
+  return parts
+    .filter((part) => part.type === "reasoning")
+    .map((part) => readString(part.text).trim())
     .filter(Boolean)
     .join("\n\n");
 }
