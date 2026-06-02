@@ -64,6 +64,14 @@ describe("encryptJson / decryptJson round-trip", () => {
     expect(decryptJson(encrypted, { key: key(1), aad })).toEqual({ token: "secret" });
   });
 
+  it("rejects non-object payloads before encryption", () => {
+    const aad = buildAad({ workspaceId: "wks_1", serverId: "srv_1", kind: "oauth", keyVersion: 1 });
+
+    expect(() =>
+      encryptJson(["secret"] as unknown as Record<string, unknown>, { key: key(1), aad }),
+    ).toThrow("Credential payload must be a JSON object.");
+  });
+
   it("fails with CredentialDecryptionError under a different key", () => {
     const aad = buildAad({ workspaceId: "wks_1", serverId: "srv_1", kind: "oauth", keyVersion: 1 });
     const encrypted = encryptJson({ token: "secret" }, { key: key(1), aad });
@@ -100,6 +108,20 @@ describe("encryptJson / decryptJson round-trip", () => {
     };
 
     expect(() => decryptJson(tampered, { key: key(1), aad })).toThrow(CredentialDecryptionError);
+  });
+
+  it("fails when the persisted algorithm is unsupported", () => {
+    const aad = buildAad({ workspaceId: "wks_1", serverId: "srv_1", kind: "oauth", keyVersion: 1 });
+    const encrypted = encryptJson({ token: "secret" }, { key: key(1), aad });
+    const tampered = {
+      ...encrypted,
+      algorithm: "future-aead",
+    } as unknown as EncryptedPayload;
+
+    expect(() => decryptJson(tampered, { key: key(1), aad })).toThrow(CredentialDecryptionError);
+    expect(() => decryptJson(tampered, { key: key(1), aad })).toThrow(
+      "Unsupported encryption algorithm future-aead.",
+    );
   });
 });
 

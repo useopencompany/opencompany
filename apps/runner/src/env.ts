@@ -8,7 +8,7 @@ export type RunnerEnv = {
   streamTokenSecret: string;
   e2bApiKey: string;
   vercelAiGatewayApiKey: string;
-  integrationCredentialEncryptionKey: string;
+  integrationCredentialEncryptionKey: Buffer;
   exaApiKey: string | undefined;
   xApiBearerToken: string | undefined;
   supadataApiKey: string | undefined;
@@ -53,13 +53,8 @@ function requiredEnv(name: string) {
   return value;
 }
 
-// Required at boot: the runner cannot decrypt MCP credentials without it. Calling
-// loadEncryptionKey validates presence + base64 + 32-byte length so a misconfigured
-// runner fails at startup instead of at the first MCP tool call.
 function requiredEncryptionKey() {
-  const value = requiredEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY");
-  loadEncryptionKey();
-  return value;
+  return loadEncryptionKey();
 }
 
 function optionalEnv(name: string) {

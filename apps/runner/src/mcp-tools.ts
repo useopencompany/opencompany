@@ -23,7 +23,6 @@ import {
   type EncryptedPayload,
   EncryptionKeyConfigError,
   encryptJson,
-  loadEncryptionKey,
 } from "@opencompany/crypto";
 import {
   workspaceExperiments,
@@ -125,6 +124,7 @@ type McpToolContext = {
   internalMessages?: boolean;
   workspaceId: string;
   agentConfig: AgentConfig;
+  integrationCredentialEncryptionKey: Buffer;
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
@@ -167,7 +167,7 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
     for (const provider of requestedProviders) {
       let connection: Awaited<ReturnType<typeof loadMcpConnection>>;
       try {
-        connection = await loadMcpConnection(input.workspaceId, provider);
+        connection = await loadMcpConnection(input, provider);
       } catch (error: unknown) {
         // The integration is enabled on the agent but not set up in the workspace
         // (no credential, beta off, etc.). Don't abort the whole turn — register a
@@ -192,6 +192,7 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
         transport: mcpTransportForConnection({
           workspaceId: input.workspaceId,
           provider,
+          integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
           connection,
         }),
       });
@@ -345,6 +346,7 @@ function isMcpProviderKey(value: string): value is McpProviderKey {
 function mcpTransportForConnection(input: {
   workspaceId: string;
   provider: McpProvider;
+  integrationCredentialEncryptionKey: Buffer;
   connection: Awaited<ReturnType<typeof loadMcpConnection>>;
 }) {
   if (input.connection.auth.type === "oauth") {
@@ -356,6 +358,7 @@ function mcpTransportForConnection(input: {
         serverId: input.connection.serverId,
         payload: input.connection.auth.payload,
         provider: input.provider,
+        encryptionKey: input.integrationCredentialEncryptionKey,
       }),
     };
   }
@@ -644,8 +647,9 @@ function isMcpFailedToolOutput(
   );
 }
 
-async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
+async function loadMcpConnection(input: McpToolContext, provider: McpProvider) {
   const db = getDb();
+  const { workspaceId } = input;
   const [[experiment], [server]] = await Promise.all([
     db
       .select({ enabled: workspaceExperiments.enabled })
@@ -709,6 +713,7 @@ async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
         serverId: oauthRow.serverId,
         kind: oauthRow.credentialKind,
         keyVersion: oauthRow.encryptionKeyVersion,
+        encryptionKey: input.integrationCredentialEncryptionKey,
       }),
     );
     if (!(provider.staticClientEnv || payload.clientInformation) || !payload.tokens) {
@@ -739,6 +744,7 @@ async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
     serverId: bearerRow.serverId,
     kind: bearerRow.credentialKind,
     keyVersion: bearerRow.encryptionKeyVersion,
+    encryptionKey: input.integrationCredentialEncryptionKey,
   });
   const bearerToken = typeof payload.bearerToken === "string" ? payload.bearerToken.trim() : "";
   if (!bearerToken)
@@ -762,6 +768,7 @@ function createRunnerMcpOAuthProvider(input: {
   serverId: string;
   payload: McpOAuthPayload;
   provider: McpProvider;
+  encryptionKey: Buffer;
 }): OAuthClientProvider {
   let payload = input.payload;
 
@@ -774,6 +781,7 @@ function createRunnerMcpOAuthProvider(input: {
         serverId: input.serverId,
         kind: input.provider.oauthCredentialKind,
         keyVersion: ENCRYPTION_KEY_VERSION,
+        encryptionKey: input.encryptionKey,
       },
     );
     const now = new Date();
@@ -873,7 +881,13 @@ function omitOAuthPayload<TKey extends keyof McpOAuthPayload>(
 
 function decryptPayload(
   encryptedPayload: EncryptedPayload,
-  context: { workspaceId: string; serverId: string; kind: string; keyVersion: number },
+  context: {
+    workspaceId: string;
+    serverId: string;
+    kind: string;
+    keyVersion: number;
+    encryptionKey: Buffer;
+  },
 ) {
   if (context.keyVersion !== ENCRYPTION_KEY_VERSION) {
     throw new Error(`Unsupported MCP credential encryption key version ${context.keyVersion}.`);
@@ -884,11 +898,11 @@ function decryptPayload(
     );
   }
 
-  // Loaded before the try so a missing/malformed key env (EncryptionKeyConfigError)
-  // surfaces as a configuration error rather than a generic decrypt failure.
-  const key = loadEncryptionKey();
   try {
-    return decryptJson(encryptedPayload, { key, aad: mcpCredentialAuthenticatedData(context) });
+    return decryptJson(encryptedPayload, {
+      key: context.encryptionKey,
+      aad: mcpCredentialAuthenticatedData(context),
+    });
   } catch {
     throw new McpCredentialDecryptionError({
       kind: context.kind,
@@ -900,10 +914,16 @@ function decryptPayload(
 
 function encryptPayload(
   payload: Record<string, unknown>,
-  context: { workspaceId: string; serverId: string; kind: string; keyVersion: number },
+  context: {
+    workspaceId: string;
+    serverId: string;
+    kind: string;
+    keyVersion: number;
+    encryptionKey: Buffer;
+  },
 ): EncryptedPayload {
   return encryptJson(payload, {
-    key: loadEncryptionKey(),
+    key: context.encryptionKey,
     aad: mcpCredentialAuthenticatedData(context),
   });
 }

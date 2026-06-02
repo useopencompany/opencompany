@@ -89,9 +89,13 @@ export function loadEncryptionKey(
 }
 
 export function encryptJson(
-  payload: unknown,
+  payload: Record<string, unknown>,
   opts: { key: Buffer; aad: Buffer },
 ): EncryptedPayload {
+  if (!isRecord(payload)) {
+    throw new TypeError("Credential payload must be a JSON object.");
+  }
+
   const iv = randomBytes(IV_BYTE_LENGTH);
   const cipher = createCipheriv(ENCRYPTION_ALGORITHM, opts.key, iv);
   cipher.setAAD(opts.aad);
@@ -112,6 +116,10 @@ export function decryptJson(
   encrypted: EncryptedPayload,
   opts: { key: Buffer; aad: Buffer },
 ): Record<string, unknown> {
+  if (encrypted.algorithm !== ENCRYPTION_ALGORITHM) {
+    throw new CredentialDecryptionError(`Unsupported encryption algorithm ${encrypted.algorithm}.`);
+  }
+
   try {
     const decipher = createDecipheriv(
       ENCRYPTION_ALGORITHM,
