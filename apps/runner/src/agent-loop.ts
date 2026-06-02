@@ -250,11 +250,16 @@ async function runMessageWithContext(
       metadata: { assistant_message_id: assistantMessageId },
     });
 
+    const suspendable = (input.delegationDepth ?? 0) === 0;
+    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
+      loadWorkspaceToolPolicy(row.workspace.id),
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserName(row.user),
+      toolPolicy: { policy: toolPolicy, suspendable },
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -383,14 +388,10 @@ async function runMessageWithContext(
       }),
     });
 
-    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
-      loadWorkspaceToolPolicy(row.workspace.id),
-    );
     // A top-level run (user or scheduled) has a resumable session a human can approve in,
     // so its "ask" tool calls suspend durably. Delegated children have a parent blocking
     // on them and cannot pause, so their "ask" collapses to "deny" (resolved in
     // collectAssistantStream / resolveToolDecision).
-    const suspendable = (input.delegationDepth ?? 0) === 0;
 
     const turn = await executeStreamingTurn({
       ctx,
@@ -940,11 +941,15 @@ async function runAfterSessionWithContext(
       return;
     }
 
+    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
+      loadWorkspaceToolPolicy(row.workspace.id),
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserName(row.user),
+      toolPolicy: { policy: toolPolicy, suspendable: false },
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -1100,9 +1105,7 @@ async function runAfterSessionWithContext(
       assistantMessageId,
       toolStartCoordinator,
       checkAbort,
-      policy: await observeRunStep(ctx, "load_tool_policy", () =>
-        loadWorkspaceToolPolicy(row.workspace.id),
-      ),
+      policy: toolPolicy,
       // After-session runs are background brain updates with no resumable user-facing
       // turn, so they cannot suspend; "ask" tools collapse to "deny".
       suspendable: false,
@@ -1337,11 +1340,15 @@ async function resumeApprovalWithContext(
       return;
     }
 
+    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
+      loadWorkspaceToolPolicy(row.workspace.id),
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserName(row.user),
+      toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -1453,6 +1460,8 @@ async function resumeApprovalWithContext(
             signal: ctx.controller.signal,
             checkAbort,
             toolStartCoordinator: createToolStartCoordinator(),
+            policy: toolPolicy,
+            suspendable: true,
             observabilityContext,
           });
           try {
@@ -1578,9 +1587,6 @@ async function resumeApprovalWithContext(
       observabilityContext,
       toolBudget: createHostedToolBudget(),
     });
-    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
-      loadWorkspaceToolPolicy(row.workspace.id),
-    );
 
     const turn = await executeStreamingTurn({
       ctx,

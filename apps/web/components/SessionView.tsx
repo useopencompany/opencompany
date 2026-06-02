@@ -944,6 +944,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   : message.content;
               const canCopy = copyText.trim().length > 0;
               const duration = message.role === "assistant" ? runDurationForMessage(message) : 0;
+              // The run paused at a tool gate: the message persists as `completed`, but it
+              // hasn't actually finished, so suppress the copy + duration footer that would
+              // make it read as a delivered turn.
+              const awaitingApproval =
+                message.role === "assistant" && partsAwaitApproval(assistantParts);
 
               return (
                 <div
@@ -970,7 +975,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     ) : (
                       message.content
                     )}
-                    {canCopy && message.status !== "running" ? (
+                    {canCopy && message.status !== "running" && !awaitingApproval ? (
                       <div
                         className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
                           message.role === "assistant"
@@ -1383,6 +1388,15 @@ function extractAssistantText(parts: AssistantTurnPart[]): string {
     .join("\n\n");
 }
 
+// A turn parked at a tool gate: a tool-call part still needs the user to decide. A run that
+// durably pauses for approval is persisted as a `completed` message, so this is what tells
+// the difference between such a pause and a genuinely finished turn.
+function partsAwaitApproval(parts: AssistantTurnPart[]): boolean {
+  return parts.some(
+    (part) => part.type === "tool-call" && part.toolCall.approval?.status === "required",
+  );
+}
+
 function CopyMessageButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1444,9 +1458,7 @@ export function AssistantMessageContent({
     message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
   const isCompleted = message.status === "completed";
   const runDurationSeconds = runDurationForMessage(message);
-  const hasPendingApproval = parts.some(
-    (part) => part.type === "tool-call" && part.toolCall.approval?.status === "required",
-  );
+  const hasPendingApproval = partsAwaitApproval(parts);
   // The run is parked at the tool gate waiting on a human decision — it isn't doing
   // work, so the tail should read as "paused" rather than a ticking spinner. This holds
   // while the message is still streaming (legacy in-flight gate) AND once the run has

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentGitHubRepositories, normalizeAgentConfig, resolveAgentRuntimeConfig } from "./config";
+import { policyMapKey } from "./permissions";
 import type { AgentConfig } from "./types";
 
 describe("resolveAgentRuntimeConfig", () => {
@@ -215,6 +216,49 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
     expect(resolved.mcpServers).toEqual([config.tools[0]]);
+  });
+
+  it("includes workspace tool policy guidance for enabled MCP providers", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Linear agent",
+      instructions: "Triage Linear.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "linear",
+          description: "Use workspace-configured Linear MCP tools.",
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      toolPolicy: {
+        policy: new Map([
+          [policyMapKey("linear", "read"), "ask"],
+          [policyMapKey("linear", "post"), "deny"],
+          [policyMapKey("linear", "modify"), "deny"],
+          [policyMapKey("linear", "admin"), "deny"],
+        ]),
+        suspendable: true,
+      },
+    });
+
+    expect(resolved.systemPrompt).toContain("Workspace tool permissions:");
+    expect(resolved.systemPrompt).toContain("Denied permissions must not be attempted");
+    expect(resolved.systemPrompt).toContain(
+      "Linear: Read=ask first, Post=deny, Modify=deny, Admin=deny.",
+    );
   });
 
   it("enables agent delegation when workspace agent references are configured", () => {

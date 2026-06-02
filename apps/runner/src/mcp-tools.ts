@@ -7,7 +7,15 @@ import {
   type OAuthClientProvider,
   type OAuthTokens,
 } from "@ai-sdk/mcp";
-import { type AgentConfig, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  type AgentConfig,
+  classifyMcpTool,
+  effectivePolicyDecisionForGroup,
+  formatPolicyDecision,
+  newAgentSessionMessageId,
+  PERMISSION_GROUP_LABELS,
+  type WorkspaceToolPolicyMap,
+} from "@opencompany/agent-runtime";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
@@ -115,6 +123,8 @@ type McpToolContext = {
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
   observabilityContext?: {
     workspaceId?: string;
     userId?: string;
@@ -181,7 +191,14 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
           execute?: (input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>;
         };
         tools[prefixedName] = tool({
-          description: `${provider.displayName} MCP: ${mcpTool.description ?? rawName}`,
+          description: mcpToolDescription({
+            providerName: provider.displayName,
+            rawName,
+            description: mcpTool.description,
+            prefixedName,
+            policy: input.policy,
+            suspendable: input.suspendable,
+          }),
           inputSchema:
             (mcpTool.inputSchema as never) ??
             jsonSchema({ type: "object", properties: {} } as never),
@@ -266,6 +283,27 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
 type McpToolBody =
   | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
   | undefined;
+
+function mcpToolDescription(input: {
+  providerName: string;
+  rawName: string;
+  description: string | undefined;
+  prefixedName: string;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
+}) {
+  const base = `${input.providerName} MCP: ${input.description ?? input.rawName}`;
+  const classification = classifyMcpTool(input.prefixedName);
+  if (!classification) return base;
+
+  const decision = effectivePolicyDecisionForGroup({
+    providerKey: classification.providerKey,
+    group: classification.group,
+    policy: input.policy,
+    suspendable: input.suspendable,
+  });
+  return `${base}\nPermission: ${PERMISSION_GROUP_LABELS[classification.group]} (${formatPolicyDecision(decision)}).`;
+}
 
 function requestedMcpProviders(agentConfig: AgentConfig) {
   const seen = new Set<McpProviderKey>();
