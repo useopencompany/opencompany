@@ -544,6 +544,16 @@ export default function Sidebar({
     initialData: sessionsLoading ? undefined : initialSessions,
     enabled: !sessionsLoading,
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
+    // Poll while any listed session is active so the green indicator stays in
+    // sync for sessions that are running in the background (i.e. not the one
+    // currently open in the main panel, which gets live updates via SSE).
+    refetchInterval: (query) => {
+      const data = query.state.data as SidebarSessionPayload[] | undefined;
+      const hasActiveSessions = data?.some(
+        (s) => s.status === "running" || s.status === "provisioning",
+      );
+      return hasActiveSessions ? 5_000 : false;
+    },
   });
   const sessions = queriedSessions ?? initialSessions;
   const showSessionsLoading = sessionsLoading || (isPending && sessions.length === 0);
