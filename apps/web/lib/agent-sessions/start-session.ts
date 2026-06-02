@@ -1,7 +1,4 @@
-import {
-  newAgentSessionId,
-  newAgentSessionMessageId,
-} from "@opencompany/agent-runtime";
+import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -30,7 +27,12 @@ async function loadAgent(idOrPath: string, workspaceId: string): Promise<Agent |
   const [agent] = await db
     .select()
     .from(agents)
-    .where(and(eq(agents.workspaceId, workspaceId), or(eq(agents.id, idOrPath), eq(agents.path, idOrPath))))
+    .where(
+      and(
+        eq(agents.workspaceId, workspaceId),
+        or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
+      ),
+    )
     .limit(1);
   return agent ?? null;
 }

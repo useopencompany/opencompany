@@ -29,9 +29,7 @@ describe("buildOnboardingKickoffPrompt", () => {
       helpAreas: ["decisions", "deep_research", "hiring"],
     });
 
-    expect(prompt).toContain(
-      "Thinking through decisions, Deep web research, and Hiring",
-    );
+    expect(prompt).toContain("Thinking through decisions, Deep web research, and Hiring");
   });
 
   it("omits the company line when no URL was provided", () => {

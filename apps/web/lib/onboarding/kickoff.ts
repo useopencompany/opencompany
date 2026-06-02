@@ -42,10 +42,7 @@ export function buildOnboardingKickoffPrompt(input: OnboardingKickoffInput): str
     lines.push("", "A bit about me:", ...details);
   }
 
-  lines.push(
-    "",
-    "Can you help me set up OpenCompany? Ask me whatever you need to get started.",
-  );
+  lines.push("", "Can you help me set up OpenCompany? Ask me whatever you need to get started.");
 
   return lines.join("\n");
 }
