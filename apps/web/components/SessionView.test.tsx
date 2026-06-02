@@ -809,6 +809,7 @@ describe("SessionViewContent — Phase C: no composer connection banner", () => 
     renderSessionViewContent(detail, "idle");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
   it("does NOT render a composer banner when stream is errored (error has its own UX)", () => {
@@ -816,6 +817,7 @@ describe("SessionViewContent — Phase C: no composer connection banner", () => 
     renderSessionViewContent(detail, "error");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 });
 
@@ -1032,6 +1034,53 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
     );
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+  });
+
+  it("refreshes stream credential when stream becomes stale during the recovery throttle window", () => {
+    const now = new Date("2000-01-01T00:03:45.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const staleUpdatedAt = new Date(now - 50_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: staleUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [],
+    });
+
+    streamMock.status = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+
+    invalidateSpy.mockClear();
+    streamMock.status = "stale";
+
+    act(() => {
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <SessionViewContent detail={detail} workspaceId="wks_test" />
+        </QueryClientProvider>,
+      );
+    });
+
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
     );

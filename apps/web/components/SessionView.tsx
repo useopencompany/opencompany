@@ -476,10 +476,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // detail so persisted completions appear without a manual page reload.
   const lastRecoveryRefetchAtRef = useRef(0);
   const refetchSessionProgress = useCallback(
-    ({ refreshStreamCredential = false }: { refreshStreamCredential?: boolean } = {}) => {
+    ({
+      refreshStreamCredential = false,
+      ignoreRecoveryThrottle = false,
+    }: {
+      refreshStreamCredential?: boolean;
+      ignoreRecoveryThrottle?: boolean;
+    } = {}) => {
       if (!awaitingAssistantWork) return;
       const currentTime = Date.now();
-      if (currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
+      if (
+        !ignoreRecoveryThrottle &&
+        currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS
+      ) {
+        return;
+      }
       lastRecoveryRefetchAtRef.current = currentTime;
       if (refreshStreamCredential) {
         void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
@@ -491,7 +502,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   useEffect(() => {
     if (!connectionLooksStale) return;
-    refetchSessionProgress({ refreshStreamCredential: stream.status === "stale" });
+    refetchSessionProgress({
+      refreshStreamCredential: stream.status === "stale",
+      ignoreRecoveryThrottle: stream.status === "stale",
+    });
   }, [refetchSessionProgress, connectionLooksStale, stream.status]);
 
   useEffect(() => {
