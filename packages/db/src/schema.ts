@@ -1,4 +1,5 @@
 import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
@@ -37,12 +38,9 @@ export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "di
 
 export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
 
-export type WorkspaceIntegrationCredentialEncryptedPayload = {
-  algorithm: "aes-256-gcm";
-  iv: string;
-  ciphertext: string;
-  authTag: string;
-};
+// Canonical encrypted-payload shape lives in @opencompany/crypto; aliased here so the
+// jsonb column annotations and existing importers keep their familiar name.
+export type WorkspaceIntegrationCredentialEncryptedPayload = EncryptedPayload;
 
 export const users = pgTable(
   "users",

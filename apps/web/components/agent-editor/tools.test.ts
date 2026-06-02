@@ -93,6 +93,25 @@ describe("agent editor mention tools", () => {
     );
   });
 
+  test("includes the TikTok and Instagram hosted tools in the mention suggestion menu", () => {
+    expect(buildAgentMentionItems()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "tiktok",
+          kind: "tool",
+          mentionId: "tool:tiktok",
+          displayLabel: "tiktok",
+        }),
+        expect.objectContaining({
+          id: "instagram",
+          kind: "tool",
+          mentionId: "tool:instagram",
+          displayLabel: "instagram",
+        }),
+      ]),
+    );
+  });
+
   test("exposes schedule creation as an action mention", () => {
     expect(buildAgentMentionItems()).toEqual(
       expect.arrayContaining([

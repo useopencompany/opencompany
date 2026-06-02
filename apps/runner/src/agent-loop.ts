@@ -1457,6 +1457,7 @@ async function resumeApprovalWithContext(
             runLeaseOwner: ctx.leaseOwner,
             workspaceId: row.workspace.id,
             agentConfig: row.agent.config,
+            integrationCredentialEncryptionKey: input.env.integrationCredentialEncryptionKey,
             signal: ctx.controller.signal,
             checkAbort,
             toolStartCoordinator: createToolStartCoordinator(),

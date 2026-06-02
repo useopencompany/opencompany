@@ -170,6 +170,89 @@ const AGENT_SELF_EDIT_SKILL_MD = buildSelfEditSkillMd();
 
 export const AGENT_SELF_EDIT_SKILL_ID = "agent-self-edit";
 
+export const OPENCOMPANY_SETUP_SKILL_ID = "opencompany-setup";
+
+function buildOpenCompanySetupSkillMd(): string {
+  return `---
+name: opencompany-setup
+description: Set up an OpenCompany workspace for the user — establish the Brain (shared company knowledge) and tune your own definition so the user has great scaffolding from day one.
+---
+
+# Setting up OpenCompany
+
+You are an OpenCompany agent. This skill teaches you how the workspace fits together and
+how to set it up well for a new user — especially right after they sign up. The surface you
+set up here is the **Brain**. You shape your own behavior with the separate
+\`agent-self-edit\` skill, which this skill hands off to.
+
+## How the pieces relate
+
+- **The Brain** is your workspace's shared, long-lived knowledge: plain Markdown/text files
+  under \`brain/\` (for example \`brain/company/overview.md\`). It is **shared by every agent
+  in the workspace** and persists across sessions. Use it for durable facts about the company,
+  its goals, customers, voice, and processes — not for one-off task context.
+- **Your \`.agent\` definition** is *you*: your instructions (the Markdown body), your model,
+  your tools, and which Brain paths you mount. It controls **behavior**, the Brain holds
+  **knowledge**. You change your definition with the \`agent-self-edit\` skill.
+- An agent **mounts** Brain context by \`@mention\`-ing it in its body: \`@brain/folder/\`
+  mounts a folder, \`@brain/folder/file.md\` mounts one file. Mounted files appear under
+  \`./brain\` in your session and are the ones you can read and edit.
+
+## How to edit the Brain
+
+You edit the Brain by writing files in the \`brain/\` directory of your session with the
+normal file tools (paths must be prefixed with \`brain/\`, e.g. \`brain/company/overview.md\`).
+Changes you make are saved back to the workspace automatically when the turn finishes, and
+become visible to the user in the **Brain** view.
+
+Two rules to keep in mind:
+
+- **A file persists only if it sits under a Brain path you have mounted.** During first-run
+  setup your definition mounts the whole Brain (\`@brain/\`), so any file you create under
+  \`brain/\` is saved. If you later narrow your mounts to specific folders, only files under
+  those folders are writable in future sessions.
+- **Keep files small and structured.** Each file must stay under 256 KB. Prefer a few
+  high-signal files in sensible folders (e.g. \`brain/company/\`, \`brain/customers/\`) over
+  many empty stubs.
+
+## First-run setup protocol
+
+When this is a fresh workspace, or the user asks you to "set up OpenCompany" / "get me set
+up", follow this loop. The user should feel guided and in control — not interrogated.
+
+1. **Read this skill** (you are doing that now) so you know the moves.
+2. **Ask 2–3 high-signal clarifying questions**, building on whatever signup details came in
+   the first message (their role, company URL, team size, and the areas they want help with).
+   Good questions: what the company actually does, who its customers are, and what they want
+   you to help with first. Ask them together, conversationally, and wait for the answer.
+3. **Write a small, tasteful starter Brain** capturing what you learned — for example
+   \`brain/company/overview.md\` (what the company does, who it serves) and
+   \`brain/company/goals.md\` (current priorities), plus one or two files tied to the user's
+   focus areas. Write only what you actually know; don't invent facts. If the user gave a
+   company URL and you have web research available, you may use it to enrich the overview —
+   otherwise keep it to what they told you.
+4. **Tune your own definition** so you are useful going forward: read
+   \`skills/agent-self-edit/SKILL.md\` with \`read_skill\`, then call \`update_agent_file\`
+   to give yourself clear instructions for this user and to mount the Brain folders you just
+   created (e.g. \`@brain/company/\`). Mounting the specific folders you created keeps future
+   sessions focused; you can keep \`@brain/\` if a broad mount is more useful.
+5. **Summarize what you set up** in plain language: list the Brain files you created, what you
+   changed about yourself, and remind the user that everything lives in the **Brain** view and
+   is fully editable. Note that changes to your definition take effect on your next session.
+
+## Guardrails
+
+- Prefer asking over assuming; a short, sharp set of questions beats a long form.
+- Don't over-scaffold. A handful of genuinely useful files is the goal.
+- The Brain is shared knowledge; your definition is behavior. Put durable facts in the Brain
+  and durable behavior in your definition — don't mix them up.
+- This skill covers Brain setup and points you at \`agent-self-edit\` for your own definition.
+  It does not grant any new powers beyond the file and self-edit tools you already have.
+`;
+}
+
+const OPENCOMPANY_SETUP_SKILL_MD = buildOpenCompanySetupSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -178,6 +261,14 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
       "Evolve your own .agent definition — adjust instructions, model, and tools — validated and synced safely via update_agent_file.",
     defaultEnabled: true,
     files: [{ path: "SKILL.md", content: AGENT_SELF_EDIT_SKILL_MD }],
+  },
+  {
+    id: OPENCOMPANY_SETUP_SKILL_ID,
+    name: "Set up OpenCompany",
+    description:
+      "Set up the workspace for a new user — establish the Brain (shared company knowledge) and tune your own definition for great day-one scaffolding.",
+    defaultEnabled: true,
+    files: [{ path: "SKILL.md", content: OPENCOMPANY_SETUP_SKILL_MD }],
   },
 ];
 
