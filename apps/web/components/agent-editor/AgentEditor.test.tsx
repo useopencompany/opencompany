@@ -403,8 +403,12 @@ describe("AgentEditor", () => {
     const editor = container.querySelector(".ProseMirror") as HTMLElement;
     editor.focus();
 
-    await user.keyboard("#after");
-    await user.click(await screen.findByRole("option", { name: /after-session/i }));
+    // A lone `#` at line start must open the hook menu immediately — the exact
+    // regression this PR fixes — not only after extra hook-name characters.
+    await user.keyboard("#");
+    const option = await screen.findByRole("option", { name: /after-session/i });
+    expect(option).toBeInTheDocument();
+    await user.click(option);
 
     // Must be inserted as a hook mention node, not left as raw "#after-session"
     // text — a plain text node would serialize to the same body string.
