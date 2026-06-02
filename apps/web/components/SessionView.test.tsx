@@ -14,7 +14,7 @@
  *
  * Phase C2 verifies data-freshness detection: the banner also appears when
  * stream.status is "open" but no new runtime event has arrived within
- * STALE_THRESHOLD_MS (15s), matching the real-world dead-session scenario where
+ * STALE_THRESHOLD_MS (45s), matching the real-world dead-session scenario where
  * SSE reconnects keep flipping stream.status away from "stale".
  */
 
@@ -63,6 +63,7 @@ vi.mock("@/components/ToastProvider", () => ({
 
 // Phase C: useSessionEventStream mock — controlled per-test via the exported setter.
 const mockStreamStatus = { value: "idle" as string };
+const STALE_BANNER_TEXT = "Connection idle — reconnecting and refreshing progress…";
 vi.mock("@/components/useSessionEventStream", () => ({
   useSessionEventStream: () => ({ status: mockStreamStatus.value, errorMessage: null }),
 }));
@@ -73,8 +74,8 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
 }));
 
 vi.mock("@/lib/agent-sessions/payload", () => ({
-  fetchAgentSession: vi.fn(),
-  fetchSessionStreamCredential: vi.fn(),
+  fetchAgentSession: vi.fn(async () => null),
+  fetchSessionStreamCredential: vi.fn(async () => null),
   addUserMessageToSessionDetail: vi.fn(),
   applyRuntimeEventToSessionDetail: vi.fn(),
   invalidateRelatedCachesForSessionEvent: vi.fn(),
@@ -368,6 +369,7 @@ describe("SessionViewContent — active turn timer", () => {
   });
 
   afterEach(() => {
+    setVisibility("visible");
     vi.useRealTimers();
   });
 
@@ -404,7 +406,7 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "stale");
 
-    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
@@ -418,7 +420,7 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     const banner = allStatusEls.find((el) => el.textContent?.includes("Connection idle"));
     expect(banner).toBeDefined();
     expect(banner).toHaveAttribute("aria-live", "polite");
-    expect(banner).toHaveTextContent("Connection idle — waiting for updates…");
+    expect(banner).toHaveTextContent(STALE_BANNER_TEXT);
   });
 
   it("does NOT show banner when stream is stale but no running assistant message", () => {
@@ -427,28 +429,28 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     });
     renderSessionViewContent(detail, "stale");
 
-    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
   it("does NOT show banner when stream is healthy (open) even with a running message", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "open");
 
-    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
   it("does NOT show banner when stream is idle even with a running message", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "idle");
 
-    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
   it("does NOT show banner when stream is errored (error has its own UX)", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "error");
 
-    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
   it("Retry button calls queryClient.invalidateQueries to trigger reconnect", async () => {
@@ -470,6 +472,9 @@ describe("SessionViewContent — Phase C: stale-stream banner", () => {
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
     );
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
   });
 });
 
@@ -489,12 +494,13 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
   });
 
   afterEach(() => {
+    setVisibility("visible");
     vi.useRealTimers();
   });
 
   it("does NOT show banner when stream is open and a recent event landed (< STALE_THRESHOLD_MS ago)", () => {
     // Set the fake clock so "now" is 2000-01-01T00:00:30Z.
-    // updatedAt is set to 25s before now — within the 15s threshold from the last event.
+    // updatedAt is set to 5s before now — within the 45s threshold from the last event.
     const now = new Date("2000-01-01T00:00:30.000Z").getTime();
     vi.setSystemTime(now);
 
@@ -519,8 +525,8 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       vi.advanceTimersByTime(1_000);
     });
 
-    // Still within threshold (5s + 1s = 6s < 15s), no banner.
-    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+    // Still within threshold (5s + 1s = 6s < 45s), no banner.
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
   it("shows banner when stream is open but no event for > STALE_THRESHOLD_MS", () => {
@@ -528,7 +534,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     const now = new Date("2000-01-01T00:01:00.000Z").getTime();
     vi.setSystemTime(now);
 
-    // updatedAt is 20s in the past — stale by the time the first tick fires.
+    // updatedAt is 50s in the past — stale by the time the first tick fires.
     const staleUpdatedAt = new Date(now - 50_000).toISOString();
     const detail = makeDetail({
       session: makeSession({ updatedAt: staleUpdatedAt }),
@@ -549,8 +555,40 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       vi.advanceTimersByTime(1_000);
     });
 
-    // 20s + 1s tick = 21s > 15s threshold → banner must appear.
-    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+    // 50s + 1s tick = 51s > 45s threshold, so the banner must appear.
+    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+  });
+
+  it("refetches session detail automatically when active work has stale data", () => {
+    const now = new Date("2000-01-01T00:01:30.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const staleUpdatedAt = new Date(now - 50_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: staleUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [],
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
   });
 
   it("hides banner once a new event arrives after being shown", () => {
@@ -576,7 +614,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
-    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
 
     // A new event arrives: rerender with a new event in the list.
     // The component sees lastEventId change → resets lastRuntimeActivityMs to now.
@@ -595,7 +633,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     });
 
     // Banner should be gone — event just landed.
-    expect(screen.queryByText("Connection idle — waiting for updates…")).not.toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
   it("still shows banner when stream.status is stale (regression of original Phase C behaviour)", () => {
@@ -621,9 +659,108 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
 
     // Banner must appear immediately (stream.status === "stale") without needing tick.
-    expect(screen.getByText("Connection idle — waiting for updates…")).toBeInTheDocument();
+    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+  });
+
+  it("refetches session detail and stream credential when stream status is stale", () => {
+    const now = new Date("2000-01-01T00:03:30.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const recentUpdatedAt = new Date(now - 1_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: recentUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(100)],
+    });
+
+    mockStreamStatus.value = "stale";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+  });
+
+  it("refetches session detail when an active session returns to the foreground", () => {
+    const now = new Date("2000-01-01T00:04:00.000Z").getTime();
+    vi.setSystemTime(now);
+    setVisibility("hidden");
+
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: new Date(now - 5_000).toISOString() }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(101)],
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      setVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+  });
+
+  it("refetches session detail when an active session comes back online", () => {
+    const now = new Date("2000-01-01T00:04:30.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: new Date(now - 5_000).toISOString() }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(102)],
+    });
+
+    mockStreamStatus.value = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
   });
 });
+
+function setVisibility(value: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value,
+  });
+}
 
 // ── PRO-124: snap-to-top on send ───────────────────────────────────────────
 //
