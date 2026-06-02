@@ -1,25 +1,39 @@
 import type { TextStreamPart, ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createLeaseDb, usage } from "./agent-loop-test-support";
+import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { collectAssistantStream } from "./model-stream-runner";
+import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
   type RunControlStore,
   type RunLeaseState,
 } from "./run-control";
+import { RunSuspendedError, ToolStepLimitExceededError } from "./runner-errors";
+import { throwIfStreamErrorPart } from "./stream-helpers";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
+const dbMocks = vi.hoisted(() => ({
+  getDb: vi.fn(),
+}));
 const usageRecorder = vi.hoisted(() => ({
   recordStepUsage: vi.fn(async () => {}),
 }));
 const eventMocks = vi.hoisted(() => ({
-  publishTransientRuntimeEvent: vi.fn(),
+  appendRuntimeEvent: vi.fn(async (_db: unknown, _event: unknown) => ({ id: 1 })),
+  publishTransientRuntimeEvent: vi.fn((event: unknown) => event),
 }));
 const leaseWrites = vi.hoisted(() => ({
-  appendRuntimeEventForLease: vi.fn(async () => true),
+  appendRuntimeEventForLease: vi.fn(async (event: unknown) => {
+    await eventMocks.appendRuntimeEvent(undefined, event);
+    return true;
+  }),
+  insertToolApprovalForLease: vi.fn(async () => "inserted"),
   requireLeaseWrite: vi.fn(async (value: unknown) => value),
 }));
 
+vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
 vi.mock("./usage-recorder", () => usageRecorder);
 vi.mock("./events", () => eventMocks);
 vi.mock("./lease-writes", () => leaseWrites);
@@ -40,6 +54,108 @@ describe("collectAssistantStream", () => {
       assistantReplayParts: [{ type: "text", text: "Hello world" }],
     });
     expect(stream.return).not.toHaveBeenCalled();
+  });
+
+  it("releases a denied tool call with a deny verdict and never starts the body unguarded", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_1",
+        toolName: "slack__chat_postMessage",
+        input: { text: "hi" },
+      }),
+    ]);
+
+    await collect(stream, {
+      toolStartCoordinator: coordinator,
+      policy: new Map([["slack:post", "deny"]]),
+    });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_1",
+      expect.objectContaining({ decision: "deny", providerKey: "slack", group: "post" }),
+    );
+  });
+
+  it("releases an allowed tool call with an allow verdict", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_read",
+        toolName: "slack__search",
+        input: { query: "launch" },
+      }),
+    ]);
+
+    await collect(stream, { toolStartCoordinator: coordinator });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_read",
+      expect.objectContaining({ decision: "allow", providerKey: "slack", group: "read" }),
+    );
+  });
+
+  it("collapses an ask decision to deny in a non-suspendable run", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_ask",
+        toolName: "slack__chat_postMessage",
+        input: { text: "hi" },
+      }),
+    ]);
+
+    await collect(stream, { toolStartCoordinator: coordinator, suspendable: false });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_ask",
+      expect.objectContaining({ decision: "deny", providerKey: "slack", group: "post" }),
+    );
+  });
+
+  it("suspends the run at an ask gate in a suspendable run", async () => {
+    const coordinator = createToolStartCoordinator();
+    const suspend = vi.spyOn(coordinator, "suspend");
+    const stream = createStream([
+      streamPart({ type: "text-delta", text: "I'll post that." }),
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_ask",
+        toolName: "slack__chat_postMessage",
+        input: { text: "hi" },
+      }),
+    ]);
+
+    const error = await collect(stream, {
+      toolStartCoordinator: coordinator,
+      suspendable: true,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(RunSuspendedError);
+    const suspended = error as RunSuspendedError;
+    expect(suspended.toolCallId).toBe("call_ask");
+    expect(suspended.providerKey).toBe("slack");
+    expect(suspended.group).toBe("post");
+    // The partial assistant turn ends in the pending tool-call so resume can pair it.
+    expect(suspended.assistantReplayParts.at(-1)).toEqual({
+      type: "tool-call",
+      toolCallId: "call_ask",
+      toolName: "slack__chat_postMessage",
+      input: { text: "hi" },
+    });
+    // The approval row + event are persisted, and parked siblings are released.
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tool.approval_required" }),
+    );
+    expect(suspend).toHaveBeenCalledTimes(1);
+    // The stream is torn down on the way out.
+    expect(stream.return).toHaveBeenCalledTimes(1);
   });
 
   it("closes the iterator when run control fails after a streamed part", async () => {
@@ -375,6 +491,8 @@ function collect(
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator: createToolStartCoordinator(),
+    policy: new Map(),
+    suspendable: true,
     ...overrides,
   });
 }
@@ -436,3 +554,220 @@ function createStream(
 function streamPart(part: Record<string, unknown>) {
   return part as TextStreamPart<ToolSet>;
 }
+
+describe("stream error handling", () => {
+  it("records terminal stream metadata from finish-step parts", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    async function* stream() {
+      yield { type: "text-delta", text: "Working" } as never;
+      yield {
+        type: "finish-step",
+        finishReason: "tool-calls",
+        rawFinishReason: "tool_calls",
+        response: {
+          id: "response_123",
+          timestamp: new Date("2026-05-22T12:00:00.000Z"),
+          modelId: "openai/gpt-5.4-mini",
+        },
+        usage: usage(100, 20),
+      } as never;
+    }
+
+    const result = await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      reasoningExposure: "hidden",
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      toolStartCoordinator: createToolStartCoordinator(),
+      policy: new Map(),
+      suspendable: true,
+    });
+
+    expect(result).toMatchObject({
+      assistantContent: "Working",
+      stepCount: 1,
+      lastFinishReason: "tool-calls",
+      lastRawFinishReason: "tool_calls",
+      lastStepEndedWithToolCalls: true,
+    });
+  });
+
+  it("persists pending text before tool starts even when tool input arrives first", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+    const toolStartCoordinator = createToolStartCoordinator();
+    toolStartCoordinator.record({
+      toolCallId: "call_search",
+      name: "exa_search",
+      input: { query: "YC agent discussion" },
+    });
+
+    async function* stream() {
+      yield { type: "text-delta", text: "I'll search, then distill the" } as never;
+      yield {
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "exa_search",
+        input: { query: "fallback input" },
+      } as never;
+      yield { type: "text-delta", text: " themes." } as never;
+    }
+
+    await collectAssistantStream({
+      stream: stream(),
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      reasoningExposure: "hidden",
+      signal: new AbortController().signal,
+      checkAbort: async () => {},
+      toolStartCoordinator,
+      policy: new Map(),
+      suspendable: true,
+    });
+
+    const transientEvents = vi
+      .mocked(publishTransientRuntimeEvent)
+      .mock.calls.map((call) => call[0]);
+    const durableEvents = vi.mocked(appendRuntimeEvent).mock.calls.map((call) => call[1]);
+    expect(transientEvents.map((event) => event.type)).toEqual(["message.delta", "message.delta"]);
+    expect(durableEvents.map((event) => event.type)).toEqual(["tool.started"]);
+    expect(transientEvents[0]).toMatchObject({
+      payload: { delta: "I'll search, then distill the" },
+    });
+    expect(durableEvents[0]).toMatchObject({
+      payload: {
+        toolCallId: "call_search",
+        name: "exa_search",
+        input: { query: "YC agent discussion" },
+      },
+    });
+  });
+
+  it("rejects turn completion when the model is still requesting tools at the step cap", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Partial progress.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "list_files",
+            input: {},
+          },
+        ],
+        lastStepEndedWithToolCalls: true,
+        stepCount: MAX_MODEL_STEPS,
+      }),
+    ).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("allows normal turns that end with final assistant text", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "Done.",
+        assistantReplayParts: [{ type: "text", text: "Done." }],
+        lastStepEndedWithToolCalls: false,
+        stepCount: 2,
+      }),
+    ).not.toThrow();
+  });
+
+  it("flags a tool-driven turn that stops after announcing an unexecuted action", () => {
+    const result = detectIncompleteTurn({
+      assistantContent:
+        "I scanned the open PRs.\n\nNow let me check the files changed in each PR to assess complexity:",
+      assistantReplayParts: [
+        { type: "text", text: "I scanned the open PRs." },
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "shell",
+          input: { cmd: "gh pr list" },
+        },
+        {
+          type: "text",
+          text: "Now let me check the files changed in each PR to assess complexity:",
+        },
+      ],
+      lastFinishReason: "stop",
+      lastStepEndedWithToolCalls: false,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.reason).toBe("announced_unexecuted_next_action");
+    expect(result?.reasonDetail).toMatch(/never took/);
+  });
+
+  it("does not flag a genuine completion that used tools and ends with a real answer", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Done — 3 PRs reviewed and the Slack notification was sent.",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "slack_post",
+            input: { text: "report" },
+          },
+          { type: "text", text: "Done — 3 PRs reviewed and the Slack notification was sent." },
+        ],
+        lastFinishReason: "stop",
+        lastStepEndedWithToolCalls: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not flag a colon-terminated reply when the turn never drove a tool", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Here are the three options I'd consider:",
+        assistantReplayParts: [{ type: "text", text: "Here are the three options I'd consider:" }],
+        lastFinishReason: "stop",
+        lastStepEndedWithToolCalls: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not flag while the model is still requesting tools", () => {
+    expect(
+      detectIncompleteTurn({
+        assistantContent: "Let me check the files changed:",
+        assistantReplayParts: [
+          { type: "text", text: "Let me check the files changed:" },
+          { type: "tool-call", toolCallId: "call_1", toolName: "shell", input: {} },
+        ],
+        lastFinishReason: "tool-calls",
+        lastStepEndedWithToolCalls: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("throws model stream errors instead of allowing blank completions", () => {
+    expect(() =>
+      throwIfStreamErrorPart({ type: "error", error: new Error("gateway failed") } as never),
+    ).toThrow("gateway failed");
+  });
+
+  it("throws tool stream errors with a fallback message", () => {
+    expect(() =>
+      throwIfStreamErrorPart({
+        type: "tool-error",
+        toolName: "list_files",
+        toolCallId: "tool_123",
+        input: {},
+        error: null,
+      } as never),
+    ).toThrow("Tool list_files failed.");
+  });
+});

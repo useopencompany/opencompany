@@ -230,10 +230,10 @@ Useful local-only vars:
 | `PLAYWRIGHT_PORT` | Optional Playwright web server port. |
 
 For local GitHub integration testing, `bun run dev` starts ngrok automatically when the local ngrok
-CLI is authenticated. It sets `NEXT_PUBLIC_APP_URL` and appends the tunnel origin to
-`RUNNER_ALLOWED_ORIGINS` in `.env.local` before starting the app. Local WorkOS redirects stay on
-`http://localhost:3000/auth/callback`; use a stable ngrok domain for the GitHub App callback so that
-setting does not need to change on every run.
+CLI is authenticated. It injects `NEXT_PUBLIC_APP_URL` and `RUNNER_ALLOWED_ORIGINS` into the dev
+process without changing `.env.local`. Local WorkOS redirects stay on
+`http://localhost:3000/auth/callback`; use `bun run github:tunnel` when you need to persist a tunnel
+origin to `.env.local`.
 
 ## Checks
 

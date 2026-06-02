@@ -8,12 +8,16 @@ import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
-import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
+import {
+  triggerAgentApprovalResume,
+  triggerAgentMessageRun,
+} from "@/lib/agent-sessions/message-runner";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { currentWorkspace } from "@/lib/auth";
 import {
   createAgentSession,
   createAgentSessionFromPrompt,
+  resolveToolApproval,
   setSessionStar,
   submitAgentSessionMessage,
 } from "./actions";
@@ -56,6 +60,7 @@ vi.mock("@/lib/agent-sessions/events", () => ({
 }));
 
 vi.mock("@/lib/agent-sessions/message-runner", () => ({
+  triggerAgentApprovalResume: vi.fn().mockResolvedValue(undefined),
   triggerAgentMessageRun: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -72,6 +77,7 @@ const newAgentSessionMessageIdMock = vi.mocked(newAgentSessionMessageId);
 const loadAgentSessionDetailForWorkspaceMock = vi.mocked(loadAgentSessionDetailForWorkspace);
 const dispatchAgentAfterSessionCheckMock = vi.mocked(dispatchAgentAfterSessionCheck);
 const dispatchAgentSessionStartedMock = vi.mocked(dispatchAgentSessionStarted);
+const triggerAgentApprovalResumeMock = vi.mocked(triggerAgentApprovalResume);
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
 const captureServerEventMock = vi.mocked(captureServerEvent);
 
@@ -470,5 +476,82 @@ describe("submitAgentSessionMessage", () => {
 
     expect(result).toEqual({ ok: false, error: "Session not found." });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveToolApproval", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  it("waits for the approval resume dispatch after deciding the row", async () => {
+    let finishResume!: () => void;
+    triggerAgentApprovalResumeMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishResume = resolve;
+      }),
+    );
+
+    const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
+    const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
+    const select = vi.fn(() => ({ from: sessionFrom }));
+    const returning = vi.fn().mockResolvedValue([{ id: 7 }]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set }));
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    let settled = false;
+    const resultPromise = resolveToolApproval({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      decision: "denied",
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(triggerAgentApprovalResumeMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      workspaceId: "wks_123",
+    });
+    expect(settled).toBe(false);
+
+    finishResume();
+
+    await expect(resultPromise).resolves.toEqual({ ok: true });
+    expect(settled).toBe(true);
+  });
+
+  it("does not dispatch resume when the approval row was already decided", async () => {
+    const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
+    const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
+    const select = vi.fn(() => ({ from: sessionFrom }));
+    const returning = vi.fn().mockResolvedValue([]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set }));
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    const result = await resolveToolApproval({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      decision: "denied",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This request is no longer awaiting approval.",
+    });
+    expect(triggerAgentApprovalResumeMock).not.toHaveBeenCalled();
   });
 });

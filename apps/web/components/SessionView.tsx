@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  PERMISSION_GROUP_LABELS,
+  PROVIDER_PERMISSION_REGISTRY,
+  permissionDescriptionFor,
+} from "@opencompany/agent-runtime";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,12 +20,22 @@ import {
   LoaderCircle,
   PanelRight,
   Plus,
+  ShieldAlert,
   TerminalSquare,
   Upload,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -30,7 +45,11 @@ import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
-import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
+import {
+  abortAgentSession,
+  resolveToolApproval,
+  submitAgentSessionMessage,
+} from "@/lib/agent-sessions/actions";
 import {
   type AgentSessionDetailPayload,
   addUserMessageToSessionDetail,
@@ -84,6 +103,10 @@ const MARKDOWN_COMPONENTS: Components = {
     </a>
   ),
 };
+
+// Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
+// without threading a prop through every intermediate render layer.
+const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   const { workspaceId } = useWorkspaceContext();
@@ -155,7 +178,15 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
 }
 
-export function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
+export function SessionViewContent(props: SessionViewContentProps) {
+  return (
+    <ToolApprovalContext.Provider value={{ sessionId: props.detail.session.id }}>
+      <SessionViewContentBody {...props} />
+    </ToolApprovalContext.Provider>
+  );
+}
+
+function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
@@ -257,6 +288,10 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
+  // The run has durably parked at a tool gate: the session status is `awaiting_approval`
+  // (not `running`) and the assistant message is already persisted as `completed`. The
+  // approval card + paused tail still need to render off this signal.
+  const sessionIsPaused = runtime.currentStatus === "awaiting_approval";
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -264,7 +299,9 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
   const showStoppedAfterUser =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
-  const canAbort = sessionCanGenerate;
+  // Abort stays available while paused so the user can cancel a parked run without
+  // having to approve or deny the pending tool call first.
+  const canAbort = sessionCanGenerate || sessionIsPaused;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
 
   const waitStartedAtRef = useRef<number | null>(null);
@@ -830,6 +867,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                         message={message}
                         parts={assistantParts}
                         sessionCanGenerate={sessionCanGenerate}
+                        sessionIsPaused={sessionIsPaused}
                         reasoningActive={isReasoningInProgress(message, runtime.events)}
                         activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
                       />
@@ -1211,12 +1249,14 @@ export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
+  sessionIsPaused = false,
   reasoningActive = false,
   activeStartedAt,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
+  sessionIsPaused?: boolean;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
 }) {
@@ -1226,10 +1266,25 @@ export function AssistantMessageContent({
     message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
   const isCompleted = message.status === "completed";
   const runDurationSeconds = runDurationForMessage(message);
+  const hasPendingApproval = parts.some(
+    (part) => part.type === "tool-call" && part.toolCall.approval?.status === "required",
+  );
+  // The run is parked at the tool gate waiting on a human decision — it isn't doing
+  // work, so the tail should read as "paused" rather than a ticking spinner. This holds
+  // while the message is still streaming (legacy in-flight gate) AND once the run has
+  // durably paused: the session status is `awaiting_approval` and the assistant message
+  // is persisted as `completed`, but a tool-call part still needs approval.
+  const awaitingApproval = (isRunning || sessionIsPaused) && hasPendingApproval;
 
   // A still-running tool call on a stopped session reads as failed — it never returned.
+  // A tool call awaiting an approval decision is the exception: the run paused on purpose
+  // (session is `awaiting_approval`, not generating), so it must keep rendering its
+  // approval prompt rather than flipping to "Stopped before finishing".
   const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
-    part.type === "tool-call" && part.toolCall.status === "running" && !sessionCanGenerate
+    part.type === "tool-call" &&
+    part.toolCall.status === "running" &&
+    !sessionCanGenerate &&
+    part.toolCall.approval?.status !== "required"
       ? {
           type: "tool-call",
           toolCall: {
@@ -1254,8 +1309,12 @@ export function AssistantMessageContent({
   const deliverableStart = isCompleted
     ? deliverableStartIndex(normalizedParts)
     : normalizedParts.length;
+  // While paused at a tool gate the trailing tool call still needs the user to act on it,
+  // so keep the steps expanded inline (the pending call carries the approval prompt) rather
+  // than folding the completed turn into a "N steps" summary that would hide it.
   const collapseWork =
     isCompleted &&
+    !awaitingApproval &&
     normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
 
   const groups: RenderGroup[] = [];
@@ -1323,7 +1382,11 @@ export function AssistantMessageContent({
           </div>
         );
       })}
-      {!hasParts ? (
+      {awaitingApproval ? (
+        // Parked at the tool gate: the run is waiting on the user, not working. Show a
+        // static "paused" tail so the spinner and elapsed timer stop implying progress.
+        <PausedForApprovalNotice />
+      ) : !hasParts ? (
         isRunning ? (
           <WorkingIndicator
             startedAt={activeStartedAt ?? message.createdAt}
@@ -1470,6 +1533,15 @@ function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | 
   );
 }
 
+function PausedForApprovalNotice() {
+  return (
+    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-warning">
+      <ShieldAlert size={13} strokeWidth={1.8} className="shrink-0" />
+      <span>Paused: waiting for your approval</span>
+    </div>
+  );
+}
+
 function ReasoningCard({
   text,
   durationSeconds,
@@ -1517,9 +1589,35 @@ function ReasoningCard({
 
 function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const [expanded, setExpanded] = useState(false);
+  const approvalContext = useContext(ToolApprovalContext);
+  const { showError } = useToast();
+  const [isResolving, startResolve] = useTransition();
+  // Optimistic overlay: reflect the click immediately, before the runner's durable
+  // tool.approval_resolved event arrives over SSE and converges the derived state.
+  const [optimisticDecision, setOptimisticDecision] = useState<"approved" | "denied" | null>(null);
+
   const isCompleted = toolCall.status === "completed";
   const activityLine = latestActivityLine(toolCall.activityPreview);
   const isFailed = toolCall.status === "failed";
+  const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
+  const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
+  const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
+
+  const submitDecision = (decision: "approved" | "denied") => {
+    if (!approvalContext) return;
+    setOptimisticDecision(decision);
+    startResolve(async () => {
+      const result = await resolveToolApproval({
+        sessionId: approvalContext.sessionId,
+        toolCallId: toolCall.id,
+        decision,
+      });
+      if (!result.ok) {
+        setOptimisticDecision(null);
+        showError(result.error);
+      }
+    });
+  };
 
   return (
     <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
@@ -1549,19 +1647,41 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
             Brain updated
           </span>
         ) : null}
-        {isFailed ? (
+        {approvalStatusLabel ? (
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+              approvalStatusLabel.tone === "danger"
+                ? "text-danger"
+                : approvalStatusLabel.tone === "success"
+                  ? "text-success"
+                  : "text-warning"
+            }`}
+          >
+            <ShieldAlert size={9} strokeWidth={1.9} />
+            {approvalStatusLabel.label}
+          </span>
+        ) : isFailed ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-danger">
             <AlertCircle size={9} strokeWidth={1.9} />
             failed
           </span>
-        ) : null}
-        {!isCompleted && !isFailed ? (
+        ) : !isCompleted ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
             <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
             running
           </span>
         ) : null}
       </button>
+      {awaitingApproval || resolvingApproval ? (
+        <ToolApprovalPrompt
+          approval={toolCall.approval}
+          inputPreview={toolCall.inputPreview}
+          disabled={isResolving || resolvingApproval || !approvalContext}
+          optimisticDecision={optimisticDecision}
+          onApprove={() => submitDecision("approved")}
+          onDeny={() => submitDecision("denied")}
+        />
+      ) : null}
       {activityLine && !expanded && !toolCall.outputPreview ? (
         <div
           title={activityLine}
@@ -1586,6 +1706,111 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function toolApprovalStatusLabel(
+  toolCall: RuntimeToolCall,
+  optimisticDecision: "approved" | "denied" | null,
+): { label: string; tone: "warning" | "success" | "danger" } | null {
+  if (toolCall.approval?.status === "required") {
+    if (optimisticDecision === "approved") {
+      return { label: "approved, finishing...", tone: "success" };
+    }
+    if (optimisticDecision === "denied") {
+      return { label: "denying...", tone: "warning" };
+    }
+    return { label: "needs approval", tone: "warning" };
+  }
+
+  if (toolCall.approval?.status === "denied") {
+    return {
+      label: toolCall.approval.decisionSource === "timeout" ? "timed out" : "denied",
+      tone: "danger",
+    };
+  }
+
+  if (toolCall.approval?.status === "approved" && toolCall.status !== "completed") {
+    return { label: "approved", tone: "success" };
+  }
+
+  return null;
+}
+
+function ToolApprovalPrompt({
+  approval,
+  inputPreview,
+  disabled,
+  optimisticDecision,
+  onApprove,
+  onDeny,
+}: {
+  approval: RuntimeToolCall["approval"];
+  inputPreview: string | undefined;
+  disabled: boolean;
+  optimisticDecision: "approved" | "denied" | null;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  const providerName = approval
+    ? (PROVIDER_PERMISSION_REGISTRY[approval.providerKey]?.displayName ?? approval.providerKey)
+    : "";
+  const groupLabel = approval
+    ? approval.permissionGroup
+      ? PERMISSION_GROUP_LABELS[approval.permissionGroup]
+      : "Unknown permission"
+    : "";
+  const permissionDescription = approval?.permissionGroup
+    ? permissionDescriptionFor(approval.providerKey, approval.permissionGroup)
+    : "";
+  const pendingMessage =
+    optimisticDecision === "approved"
+      ? "Approved, finishing..."
+      : optimisticDecision === "denied"
+        ? "Denying..."
+        : "Waiting for your approval.";
+
+  return (
+    <div className="ml-6 mt-1 rounded-md border border-warning-border bg-warning-bg/40 px-2.5 py-2">
+      <div className="text-[11px] leading-4 text-ink/75">
+        This agent wants to use{" "}
+        <span className="font-medium text-ink">
+          {providerName}
+          {groupLabel ? ` · ${groupLabel}` : ""}
+        </span>
+        . Approve this action?
+      </div>
+      {permissionDescription ? (
+        <div className="mt-0.5 text-[11px] leading-4 text-ink/60">{permissionDescription}.</div>
+      ) : null}
+      <div role="status" aria-live="polite" className="mt-1 text-[11px] text-warning">
+        {pendingMessage}
+      </div>
+      {inputPreview ? (
+        <pre className="mt-1 max-h-20 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/55">
+          {inputPreview}
+        </pre>
+      ) : null}
+      <div className="mt-2 flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onApprove}
+          className="inline-flex h-6 items-center gap-1 rounded-md bg-ink px-2.5 text-[11px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Check size={10} strokeWidth={2.2} />
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onDeny}
+          className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Deny
+        </button>
+      </div>
     </div>
   );
 }
@@ -1967,6 +2192,7 @@ function statusLabel(status: string) {
   if (status === "provisioning") return "Starting";
   if (status === "ready") return "Ready";
   if (status === "running") return "Running";
+  if (status === "awaiting_approval") return "Paused";
   if (status === "completed") return "Done";
   if (status === "aborting") return "Aborting";
   if (status === "archiving") return "Archiving";
