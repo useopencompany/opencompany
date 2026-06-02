@@ -6,10 +6,10 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { exit } from "node:process";
 import {
+  envForTunnel,
   ngrokConfigState,
   requestedNgrokUrl,
   startNgrok,
-  updateLocalEnvForTunnel,
   valueFor,
   waitForNgrokUrl,
 } from "./lib/ngrok-dev.mjs";
@@ -103,14 +103,14 @@ async function startDefaultTunnel(targetPort) {
   }
 
   try {
-    tunnelEnv = updateLocalEnvForTunnel(publicUrl, ".env.local", { localPort: targetPort });
+    tunnelEnv = envForTunnel(publicUrl, process.env, { localPort: targetPort });
     console.log(`\nngrok tunnel ready: ${publicUrl}`);
     console.log(`GitHub callback URL: ${publicUrl}/api/integrations/github/callback`);
     console.log(`WorkOS redirect URI: ${tunnelEnv.NEXT_PUBLIC_WORKOS_REDIRECT_URI}`);
-    console.log("Updated .env.local before starting dev.\n");
+    console.log("Injected tunnel env into the dev process without changing .env.local.\n");
   } catch (error) {
     child.kill("SIGTERM");
-    const message = `\nngrok started, but .env.local could not be updated: ${error.message}\n`;
+    const message = `\nngrok started, but tunnel env could not be prepared: ${error.message}\n`;
     if (required) {
       console.error(message);
       exit(1);

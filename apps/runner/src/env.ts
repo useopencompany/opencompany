@@ -9,6 +9,7 @@ export type RunnerEnv = {
   vercelAiGatewayApiKey: string;
   exaApiKey: string | undefined;
   xApiBearerToken: string | undefined;
+  supadataApiKey: string | undefined;
   ampApiKey: string | undefined;
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
@@ -27,6 +28,7 @@ export function loadEnv(): RunnerEnv {
     vercelAiGatewayApiKey: requiredEnv("VERCEL_AI_GATEWAY_API_KEY"),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
+    supadataApiKey: optionalEnv("SUPADATA_API_KEY"),
     ampApiKey: optionalEnv("AMP_API_KEY"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),

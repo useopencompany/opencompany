@@ -37,6 +37,7 @@
     "@workos-inc/authkit-nextjs": "^4.1.0",
     "@workos-inc/node": "^9.3.1",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.2",
     "fumadocs-core": "^16.9.0",
     "fumadocs-mdx": "^15.0.7",

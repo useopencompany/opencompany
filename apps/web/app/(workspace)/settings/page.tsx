@@ -5,6 +5,7 @@ import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
+import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 function initialsFor(name: string, email: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -30,7 +31,7 @@ function formatDate(date: Date) {
 export default async function SettingsPage() {
   const { authUser, workspace } = await currentWorkspace();
   const db = getDb();
-  const [[repository], billing, mcp] = await Promise.all([
+  const [[repository], billing, mcp, toolPolicies] = await Promise.all([
     db
       .select({
         updatedAt: workspaceRepositories.updatedAt,
@@ -40,6 +41,7 @@ export default async function SettingsPage() {
       .limit(1),
     loadBillingOverview(workspace.id),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
+    loadWorkspaceToolPolicyOverrides(workspace.id),
   ]);
   const displayName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
@@ -77,6 +79,7 @@ export default async function SettingsPage() {
         })),
       }}
       mcp={mcp}
+      toolPolicies={toolPolicies}
     />
   );
 }

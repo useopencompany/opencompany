@@ -7,7 +7,15 @@ import {
   type OAuthClientProvider,
   type OAuthTokens,
 } from "@ai-sdk/mcp";
-import { type AgentConfig, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  type AgentConfig,
+  classifyMcpTool,
+  effectivePolicyDecisionForGroup,
+  formatPolicyDecision,
+  newAgentSessionMessageId,
+  PERMISSION_GROUP_LABELS,
+  type WorkspaceToolPolicyMap,
+} from "@opencompany/agent-runtime";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
@@ -32,7 +40,11 @@ import {
   toPersistedModelMessage,
 } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
-import { formatRuntimePreview } from "./tool-dispatcher";
+import {
+  formatRuntimePreview,
+  persistDeniedToolResult,
+  SUSPENDED_TOOL_OUTPUT,
+} from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
@@ -111,6 +123,8 @@ type McpToolContext = {
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
   observabilityContext?: {
     workspaceId?: string;
     userId?: string;
@@ -123,6 +137,14 @@ type McpToolContext = {
 export type McpToolSet = {
   tools: ToolSet;
   close: () => Promise<void>;
+  // Execute an MCP tool body directly (bypassing the stream gate) for an approval resume.
+  // Returns null when no MCP tool with that prefixed name is connected. Persists the
+  // tool-result message + tool.completed/failed event just like the in-stream path.
+  runApprovedTool: (input: {
+    toolName: string;
+    toolCallId: string;
+    args: unknown;
+  }) => Promise<unknown> | null;
 };
 
 export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSet> {
@@ -132,6 +154,10 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   const clients: MCPClient[] = [];
   const tools: ToolSet = {};
   const usedNames = new Set<string>();
+  const bodiesByName = new Map<
+    string,
+    { server: McpProviderKey; rawName: string; execute: McpToolBody }
+  >();
   try {
     for (const provider of requestedProviders) {
       const connection = await loadMcpConnection(input.workspaceId, provider).catch(
@@ -165,7 +191,14 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
           execute?: (input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>;
         };
         tools[prefixedName] = tool({
-          description: `${provider.displayName} MCP: ${mcpTool.description ?? rawName}`,
+          description: mcpToolDescription({
+            providerName: provider.displayName,
+            rawName,
+            description: mcpTool.description,
+            prefixedName,
+            policy: input.policy,
+            suspendable: input.suspendable,
+          }),
           inputSchema:
             (mcpTool.inputSchema as never) ??
             jsonSchema({ type: "object", properties: {} } as never),
@@ -184,7 +217,27 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
             });
           },
           execute: async (toolInput: unknown, options: { toolCallId: string }) => {
-            await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+            const verdict = await input.toolStartCoordinator.waitForStarted(
+              options.toolCallId,
+              input.signal,
+            );
+            // Suspending at an "ask" gate — return a discarded no-op (the stream is torn
+            // down and this result is never persisted). The body runs in the resume run.
+            if (verdict.decision === "suspend") {
+              return SUSPENDED_TOOL_OUTPUT;
+            }
+            if (verdict.decision === "deny") {
+              return persistDeniedToolResult({
+                sessionId: input.sessionId,
+                assistantMessageId: input.assistantMessageId,
+                runLeaseId: input.runLeaseId,
+                runLeaseOwner: input.runLeaseOwner,
+                internalMessages: input.internalMessages,
+                toolCallId: options.toolCallId,
+                toolName: prefixedName,
+                verdict,
+              });
+            }
             return executeMcpTool({
               ...input,
               mcpServer: provider.key,
@@ -196,14 +249,60 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
             });
           },
         } as never) as ToolSet[string];
+        bodiesByName.set(prefixedName, {
+          server: provider.key,
+          rawName,
+          execute: mcpTool.execute,
+        });
       }
     }
 
-    return { tools, close: () => closeMcpClients(clients) };
+    return {
+      tools,
+      close: () => closeMcpClients(clients),
+      runApprovedTool: ({ toolName, toolCallId, args }) => {
+        const body = bodiesByName.get(toolName);
+        if (!body) return null;
+        return executeMcpTool({
+          ...input,
+          mcpServer: body.server,
+          toolCallId,
+          toolName,
+          rawToolName: body.rawName,
+          execute: body.execute,
+          args,
+        });
+      },
+    };
   } catch (error) {
     await closeMcpClients(clients);
     throw error;
   }
+}
+
+type McpToolBody =
+  | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
+  | undefined;
+
+function mcpToolDescription(input: {
+  providerName: string;
+  rawName: string;
+  description: string | undefined;
+  prefixedName: string;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
+}) {
+  const base = `${input.providerName} MCP: ${input.description ?? input.rawName}`;
+  const classification = classifyMcpTool(input.prefixedName);
+  if (!classification) return base;
+
+  const decision = effectivePolicyDecisionForGroup({
+    providerKey: classification.providerKey,
+    group: classification.group,
+    policy: input.policy,
+    suspendable: input.suspendable,
+  });
+  return `${base}\nPermission: ${PERMISSION_GROUP_LABELS[classification.group]} (${formatPolicyDecision(decision)}).`;
 }
 
 function requestedMcpProviders(agentConfig: AgentConfig) {
@@ -919,7 +1018,7 @@ function uniqueToolName(base: string, usedNames: Set<string>) {
 }
 
 function emptyMcpToolSet(): McpToolSet {
-  return { tools: {}, close: async () => {} };
+  return { tools: {}, close: async () => {}, runApprovedTool: () => null };
 }
 
 async function closeMcpClient(client: MCPClient) {

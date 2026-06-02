@@ -1073,6 +1073,202 @@ describe("getHostedToolFailureContext", () => {
       tool_error_code: "x_malformed_response",
     });
   });
+
+  it("classifies YouTube validation, HTTP, rate-limit, missing-key, and malformed-response failures", () => {
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_transcript",
+        args: { url: "https://youtube.com/watch?v=abc", videoId: "def" },
+        error: new Error("YouTube get_transcript accepts either url or videoId, not both."),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "get_transcript",
+      tool_error_stage: "request_validation",
+      tool_error_code: "youtube_invalid_request",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_video",
+        args: { id: "missing" },
+        error: new Error("YouTube get_video failed (404): Not Found"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "get_video",
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_not_found",
+      provider_status: 404,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_search",
+        args: { query: "test" },
+        error: new Error("YouTube search failed (429): Too Many Requests"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "search",
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_rate_limited",
+      provider_status: 429,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_channel",
+        args: { id: "channel" },
+        error: new Error("YouTube get_channel failed (503): Service Unavailable"),
+      }),
+    ).toMatchObject({
+      hosted_provider: "youtube",
+      hosted_operation: "get_channel",
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_http_error",
+      provider_status: 503,
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_get_transcript",
+        args: {},
+        error: new Error("SUPADATA_API_KEY is required for youtube get_transcript."),
+      }),
+    ).toMatchObject({
+      tool_error_stage: "configuration",
+      tool_error_code: "youtube_missing_api_key",
+    });
+    expect(
+      getHostedToolFailureContext({
+        name: "youtube_list_channel_videos",
+        args: { id: "channel" },
+        error: new Error("YouTube list_channel_videos returned an unexpected response shape."),
+      }),
+    ).toMatchObject({
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_malformed_response",
+    });
+  });
+});
+
+describe("executeHostedTool (YouTube)", () => {
+  it("searches YouTube with Supadata defaults and normalizes results", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            results: [
+              {
+                type: "video",
+                id: "dQw4w9WgXcQ",
+                title: "Never Gonna Give You Up",
+                description: "Official video",
+                thumbnail: "https://img.youtube.com/x.jpg",
+                duration: 213,
+                viewCount: 1600000000,
+                uploadDate: "2009-10-25T00:00:00Z",
+                channel: { id: "UC123", name: "Rick Astley" },
+              },
+            ],
+            nextPageToken: "next",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "youtube_search",
+      args: { query: "rick astley" },
+      env: env(),
+      enabledTools: ["tool_help", "youtube_search"],
+      signal: new AbortController().signal,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toContain("https://api.supadata.ai/v1/youtube/search?");
+    expect(url.searchParams.get("query")).toBe("rick astley");
+    expect(url.searchParams.get("type")).toBe("video");
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(init.headers).toMatchObject({ "x-api-key": "supadata_test" });
+    expect(result.output).toMatchObject({
+      query: "rick astley",
+      results: [
+        {
+          type: "video",
+          id: "dQw4w9WgXcQ",
+          title: "Never Gonna Give You Up",
+          channel: { id: "UC123", name: "Rick Astley" },
+        },
+      ],
+      nextPageToken: "next",
+    });
+    expect(result.usage).toMatchObject({ provider: "youtube", operation: "search" });
+  });
+
+  it("fetches a transcript by videoId as plain text", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            content: "We're no strangers to love",
+            lang: "en",
+            availableLangs: ["en", "es"],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "youtube_get_transcript",
+      args: { videoId: "dQw4w9WgXcQ" },
+      env: env(),
+      enabledTools: ["tool_help", "youtube_get_transcript"],
+      signal: new AbortController().signal,
+    });
+
+    const [url] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toContain("https://api.supadata.ai/v1/transcript?");
+    expect(url.searchParams.get("videoId")).toBe("dQw4w9WgXcQ");
+    expect(url.searchParams.get("text")).toBe("true");
+    expect(result.output).toEqual({
+      content: "We're no strangers to love",
+      lang: "en",
+      availableLangs: ["en", "es"],
+    });
+    expect(result.usage).toMatchObject({ provider: "youtube", operation: "get_transcript" });
+  });
+
+  it("rejects transcript requests without a url or videoId", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "youtube_get_transcript",
+        args: {},
+        env: env(),
+        enabledTools: ["tool_help", "youtube_get_transcript"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/requires either url or videoId/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects transcript requests that pass both url and videoId", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "youtube_get_transcript",
+        args: { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", videoId: "different" },
+        env: env(),
+        enabledTools: ["tool_help", "youtube_get_transcript"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/accepts either url or videoId, not both/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("validateHostedToolEnvironment", () => {
@@ -1117,6 +1313,27 @@ describe("validateHostedToolEnvironment", () => {
       }),
     ).toThrow(MissingEnvError);
   });
+
+  it("requires SUPADATA_API_KEY only when a YouTube provider tool is enabled", () => {
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help"],
+        env: env({ supadataApiKey: undefined }),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "youtube_search"],
+        env: env({ supadataApiKey: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "youtube_get_transcript"],
+        env: env({ supadataApiKey: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+  });
 });
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
@@ -1128,6 +1345,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     vercelAiGatewayApiKey: "vag",
     exaApiKey: "exa_test",
     xApiBearerToken: "x_test",
+    supadataApiKey: "supadata_test",
     ampApiKey: undefined,
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,

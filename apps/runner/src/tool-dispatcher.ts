@@ -1,6 +1,7 @@
 import {
   AGENT_SELF_EDIT_SKILL_ID,
   type AgentConfig,
+  buildDeniedToolOutput,
   newAgentSessionMessageId,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
@@ -50,7 +51,7 @@ import {
 } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
 import { hasReadSkill, markSkillRead } from "./self-edit-gate";
-import type { ToolStartCoordinator } from "./tool-start-coordinator";
+import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
@@ -62,10 +63,20 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   x_get_user_posts: 4,
   x_get_discussion: 3,
   x_get_trends: 4,
+  youtube_search: 6,
+  youtube_get_video: 8,
+  youtube_get_transcript: 6,
+  youtube_get_channel: 6,
+  youtube_list_channel_videos: 4,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
 const COMMAND_OUTPUT_FLUSH_CHARS = 1024;
+
+// Returned by a tool's execute() when the run is suspending at an "ask" gate. The stream
+// is torn down immediately after, so this value is discarded — it is never persisted as a
+// tool-result nor sent to the model. The real body runs in the resume run.
+export const SUSPENDED_TOOL_OUTPUT = { ok: false, suspended: true } as const;
 
 type ToolObservabilityContext = {
   workspaceId?: string;
@@ -140,7 +151,28 @@ export function createToolSet(input: {
         });
       },
       execute: async (toolInput, options) => {
-        await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+        const verdict = await input.toolStartCoordinator.waitForStarted(
+          options.toolCallId,
+          input.signal,
+        );
+        // The run is unwinding to wait for an approval decision. Return a discarded
+        // no-op: the stream is being torn down and this result is never persisted or
+        // sent to the model. The body runs later in the resume run.
+        if (verdict.decision === "suspend") {
+          return SUSPENDED_TOOL_OUTPUT;
+        }
+        if (verdict.decision === "deny") {
+          return persistDeniedToolResult({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            internalMessages: input.internalMessages,
+            toolCallId: options.toolCallId,
+            toolName: definition.name,
+            verdict,
+          });
+        }
         return executeRuntimeTool({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
@@ -743,6 +775,66 @@ function isFatalToolError(
   if (error instanceof MissingEnvError) return true;
   if (error instanceof RecoverableToolError) return false;
   return toolKind === "sandbox" && !sandboxIdForCapture;
+}
+
+// A denied tool call still needs a persisted tool result (the model requires one
+// result per tool call) and a tool.failed event for the UI, but it never runs the
+// real tool body. This mirrors the persistence tail of executeRuntimeTool.
+export async function persistDeniedToolResult(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean | undefined;
+  toolCallId: string;
+  toolName: string;
+  verdict: ToolStartVerdict;
+}) {
+  const output = buildDeniedToolOutput({
+    toolName: input.toolName,
+    providerKey: input.verdict.providerKey,
+    group: input.verdict.group,
+    source: input.verdict.source,
+  });
+
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          output,
+        }),
+      ),
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: input.toolName,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+      },
+    }),
+  );
+
+  return output;
 }
 
 function buildFailedToolOutput(error: unknown): FailedToolOutput {
