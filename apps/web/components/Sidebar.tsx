@@ -103,19 +103,43 @@ function statusPageMeta({
   error: boolean;
 }) {
   if (pending) {
-    return { label: "Checking status", dotClassName: "bg-ink-subtle/45" };
+    return {
+      label: "Checking",
+      description: "Checking status",
+      dotClassName: "bg-ink-subtle/45",
+    };
   }
   if (error || !aggregateState) {
-    return { label: "Status unavailable", dotClassName: "bg-ink-subtle/45" };
+    return {
+      label: "Unavailable",
+      description: "Status unavailable",
+      dotClassName: "bg-ink-subtle/45",
+    };
   }
   if (aggregateState === "operational") {
-    return { label: "All systems operational", dotClassName: "bg-success" };
+    return {
+      label: "Operational",
+      description: "All systems operational",
+      dotClassName: "bg-success",
+    };
   }
   if (aggregateState === "downtime") {
-    return { label: "Service disruption", dotClassName: "bg-danger" };
+    return {
+      label: "Disruption",
+      description: "Service disruption",
+      dotClassName: "bg-danger",
+    };
+  }
+  if (aggregateState === "maintenance") {
+    return {
+      label: "Maintenance",
+      description: "Maintenance",
+      dotClassName: "bg-warning",
+    };
   }
   return {
-    label: aggregateState === "maintenance" ? "Maintenance" : "Service degraded",
+    label: "Degraded",
+    description: "Service degraded",
     dotClassName: "bg-warning",
   };
 }
@@ -385,13 +409,14 @@ function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
       rel="noreferrer"
       onClick={onClose}
       className={ACCOUNT_MENU_ITEM_CLASS}
+      title={meta.description}
     >
       <span
         aria-hidden="true"
-        className={`h-2 w-2 shrink-0 rounded-full shadow-[0_0_0_2px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
+        className={`h-2 w-2 shrink-0 rounded-full shadow-[0_0_0_3px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
       />
-      <span className="min-w-0 flex-1 truncate">Status</span>
-      <span className="max-w-[118px] truncate text-ink-subtle">{meta.label}</span>
+      <span className="shrink-0">System status</span>
+      <span className="ml-auto shrink-0 text-[12.5px] text-ink-subtle">{meta.label}</span>
       <ExternalLink size={13} strokeWidth={1.85} className="shrink-0 text-ink/35" />
     </a>
   );

@@ -73,7 +73,7 @@ describe("Sidebar status menu item", () => {
     renderSidebar();
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
 
-    expect(await screen.findByText("All systems operational")).toBeInTheDocument();
+    expect(await screen.findByText("Operational")).toBeInTheDocument();
   });
 
   it("keeps the status link available when the status fetch fails", async () => {
@@ -83,7 +83,7 @@ describe("Sidebar status menu item", () => {
     renderSidebar();
     await user.click(screen.getByRole("button", { name: "Open account menu" }));
 
-    expect(await screen.findByText("Status unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument();
     const statusLink = screen.getByRole("link", { name: /status/i });
     expect(statusLink).toHaveAttribute("href", statusPageUrl);
   });
