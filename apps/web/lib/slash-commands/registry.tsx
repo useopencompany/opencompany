@@ -2,10 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Eraser, type LucideIcon } from "lucide-react";
 import type { useRouter } from "next/navigation";
 import type { useToast } from "@/components/ToastProvider";
-import {
-  createAgentSession,
-  createAgentSessionFromPrompt,
-} from "@/lib/agent-sessions/actions";
+import { createAgentSession, createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { type AgentSessionPayload, seedSessionQueries } from "@/lib/agent-sessions/payload";
 
 /**
@@ -59,7 +56,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
           router.push(result.redirectTo);
           return;
         }
-        showToast({ title: "Couldn't start a new session", description: result.error, tone: "error" });
+        showToast({
+          title: "Couldn't start a new session",
+          description: result.error,
+          tone: "error",
+        });
         return;
       }
       setInput("");

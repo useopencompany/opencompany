@@ -41,7 +41,9 @@ export function SlashCommandMenu({ commands, activeId, onSelect, onHover }: Slas
               >
                 <Icon size={13} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
                 <span className="font-mono text-[12px] text-ink">{command.trigger}</span>
-                <span className="truncate text-[11.5px] text-ink-subtle">{command.description}</span>
+                <span className="truncate text-[11.5px] text-ink-subtle">
+                  {command.description}
+                </span>
               </CommandItem>
             );
           })}
