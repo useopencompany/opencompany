@@ -442,7 +442,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
   const sessionFeedsLooksStale =
     awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
-  const showStaleBanner =
+  // Used only to gate silent background recovery and to surface status in the inspector's
+  // Runtime section — there is intentionally no user-facing banner for this in the chat UX.
+  const connectionLooksStale =
     awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
@@ -474,10 +476,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // detail so persisted completions appear without a manual page reload.
   const lastRecoveryRefetchAtRef = useRef(0);
   const refetchSessionProgress = useCallback(
-    ({ refreshStreamCredential = false }: { refreshStreamCredential?: boolean } = {}) => {
+    ({
+      refreshStreamCredential = false,
+      ignoreRecoveryThrottle = false,
+    }: {
+      refreshStreamCredential?: boolean;
+      ignoreRecoveryThrottle?: boolean;
+    } = {}) => {
       if (!awaitingAssistantWork) return;
       const currentTime = Date.now();
-      if (currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
+      if (
+        !ignoreRecoveryThrottle &&
+        currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS
+      ) {
+        return;
+      }
       lastRecoveryRefetchAtRef.current = currentTime;
       if (refreshStreamCredential) {
         void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
@@ -488,9 +501,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   );
 
   useEffect(() => {
-    if (!showStaleBanner) return;
-    refetchSessionProgress({ refreshStreamCredential: stream.status === "stale" });
-  }, [refetchSessionProgress, showStaleBanner, stream.status]);
+    if (!connectionLooksStale) return;
+    refetchSessionProgress({
+      refreshStreamCredential: stream.status === "stale",
+      ignoreRecoveryThrottle: stream.status === "stale",
+    });
+  }, [refetchSessionProgress, connectionLooksStale, stream.status]);
 
   useEffect(() => {
     if (!awaitingAssistantWork) return;
@@ -1038,25 +1054,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
         <div className="bg-canvas px-8 lg:px-12 py-4">
           <div className="group/composer mx-auto max-w-[960px]">
-            {showStaleBanner ? (
-              <div
-                role="status"
-                aria-live="polite"
-                className="mb-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[12.5px] text-warning"
-              >
-                <span>Connection idle — reconnecting and refreshing progress…</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-                    void queryClient.invalidateQueries({ queryKey: detailKey });
-                  }}
-                  className="shrink-0 rounded border border-warning-border bg-surface px-2.5 py-1 text-[11.5px] font-medium text-warning hover:bg-warning-bg"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : null}
             {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
             <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               {slashMenuOpen ? (
@@ -1282,6 +1279,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           lastError={runtime.lastError}
           streamStatus={stream.status}
           streamErrorMessage={stream.errorMessage}
+          connectionStale={connectionLooksStale}
           runnerConfigured={Boolean(runnerUrl && streamToken)}
           eventCount={inspectorEvents.length}
           usage={runtime.usage}
@@ -2039,6 +2037,7 @@ function SessionInspector({
   lastError,
   streamStatus,
   streamErrorMessage,
+  connectionStale,
   runnerConfigured,
   eventCount,
   usage,
@@ -2055,6 +2054,7 @@ function SessionInspector({
   lastError: string | null;
   streamStatus: string;
   streamErrorMessage: string | null;
+  connectionStale: boolean;
   runnerConfigured: boolean;
   eventCount: number;
   usage: SessionUsageSummary;
@@ -2135,9 +2135,9 @@ function SessionInspector({
           <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
             {lastError}
           </div>
-        ) : streamErrorMessage || streamStatus === "stale" ? (
+        ) : streamErrorMessage || streamStatus === "stale" || connectionStale ? (
           <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
-            {streamStatus === "stale"
+            {streamStatus === "stale" || connectionStale
               ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
               : streamErrorMessage}
           </div>
