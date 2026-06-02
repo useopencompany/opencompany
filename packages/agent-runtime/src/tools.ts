@@ -764,7 +764,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use x_get_discussion when the user provides a post URL/id or asks what people are saying around one post.",
-      'Start with maxResults=10 per collection and mode="recent". Use larger values, pagination, or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
+      'Start with maxResults=10 per collection and mode="recent". Use larger values or mode="all" only when the user explicitly asks for broader coverage and the token has needed access.',
       "The result includes the target post, replies from the same conversation, quote posts, and author profiles.",
       "This can be more expensive than a simple lookup because it may return many Posts.",
     ].join("\n"),

@@ -205,6 +205,8 @@ describe("runtime tool definitions", () => {
     expect(discussionMaxResults.default).toBe(10);
     expect(String(discussionMaxResults.description)).toContain("Defaults to 10");
     expect(discussion.help).toContain("Start with maxResults=10");
+    expect(discussion.parameters.properties).not.toHaveProperty("paginationToken");
+    expect(discussion.help).not.toContain("pagination");
 
     const trendsMaxResults = maxResultsFor(trends);
     expect(trendsMaxResults.default).toBe(10);
