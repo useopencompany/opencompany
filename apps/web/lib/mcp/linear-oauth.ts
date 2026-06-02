@@ -1,4 +1,3 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   auth,
   type OAuthClientInformation,
@@ -9,9 +8,12 @@ import {
 import { getAppUrl } from "@/lib/billing/stripe";
 import { loadMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
 import { LINEAR_MCP_ENDPOINT_URL, LINEAR_MCP_OAUTH_CREDENTIAL_KIND } from "@/lib/mcp/data";
-
-const DEFAULT_RETURN_TO = "/settings";
-const STATE_TTL_MS = 10 * 60 * 1000;
+import {
+  createMcpOAuthState,
+  type McpOAuthState,
+  sanitizeReturnTo,
+  verifyMcpOAuthState,
+} from "@/lib/mcp/oauth-state";
 
 export type LinearMcpSetupFailureReason =
   | "invalid_state"
@@ -21,13 +23,7 @@ export type LinearMcpSetupFailureReason =
   | "token_exchange_failed"
   | "start_failed";
 
-export type LinearMcpOAuthStatePayload = {
-  workspaceId: string;
-  userId: string;
-  returnTo: string;
-  expiresAt: number;
-  nonce: string;
-};
+export type LinearMcpOAuthStatePayload = McpOAuthState;
 
 export type LinearMcpOAuthPayload = {
   clientInformation?: OAuthClientInformation;
@@ -64,34 +60,11 @@ export function appendLinearMcpSetupStatus(
 export function createLinearMcpOAuthState(
   input: Omit<LinearMcpOAuthStatePayload, "expiresAt" | "nonce">,
 ) {
-  const payload: LinearMcpOAuthStatePayload = {
-    ...input,
-    returnTo: sanitizeReturnTo(input.returnTo),
-    expiresAt: Date.now() + STATE_TTL_MS,
-    nonce: randomUUID(),
-  };
-  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const signature = signStateBody(body);
-  return `${body}.${signature}`;
+  return createMcpOAuthState(input);
 }
 
 export function verifyLinearMcpOAuthState(state: string): LinearMcpOAuthStatePayload {
-  const [body, signature] = state.split(".");
-  if (!body || !signature) throw new Error("Invalid Linear MCP OAuth state.");
-
-  const expected = signStateBody(body);
-  if (!safeEqual(signature, expected)) throw new Error("Invalid Linear MCP OAuth state signature.");
-
-  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
-  if (!isLinearMcpOAuthStatePayload(payload)) {
-    throw new Error("Invalid Linear MCP OAuth state payload.");
-  }
-  if (payload.expiresAt < Date.now()) throw new Error("Linear MCP OAuth state expired.");
-
-  return {
-    ...payload,
-    returnTo: sanitizeReturnTo(payload.returnTo),
-  };
+  return verifyMcpOAuthState(state);
 }
 
 export async function loadLinearMcpOAuthPayload(context: LinearMcpOAuthContext) {
@@ -259,38 +232,6 @@ function isOAuthTokens(value: unknown): value is OAuthTokens {
     (value.scope === undefined || typeof value.scope === "string") &&
     (value.refresh_token === undefined || typeof value.refresh_token === "string")
   );
-}
-
-function isLinearMcpOAuthStatePayload(value: unknown): value is LinearMcpOAuthStatePayload {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.workspaceId === "string" &&
-    typeof value.userId === "string" &&
-    typeof value.returnTo === "string" &&
-    typeof value.expiresAt === "number" &&
-    typeof value.nonce === "string"
-  );
-}
-
-function sanitizeReturnTo(value: string) {
-  if (!value.startsWith("/") || value.startsWith("//")) return DEFAULT_RETURN_TO;
-  return value;
-}
-
-function signStateBody(body: string) {
-  return createHmac("sha256", stateSecret()).update(body).digest("base64url");
-}
-
-function safeEqual(left: string, right: string) {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-function stateSecret() {
-  const raw = process.env.INTEGRATION_CREDENTIAL_ENCRYPTION_KEY?.trim();
-  if (!raw) throw new Error("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP OAuth.");
-  return raw;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

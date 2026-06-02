@@ -7,6 +7,9 @@ services:
     dockerfilePath: ./Dockerfile.runner
     healthCheckPath: /healthz
     maxShutdownDelaySeconds: 120
+    # `sync: false` only tells Render not to generate these values. Secret values are populated by
+    # the Infisical → Render integration, which syncs the prod `/runner` folder into this service.
+    # Add new secrets to Infisical (`prod`, path `/runner`); no manual Render dashboard entry needed.
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -30,6 +33,8 @@ services:
       - key: VERCEL_AI_GATEWAY_API_KEY
         sync: false
       - key: EXA_API_KEY
+        sync: false
+      - key: SUPADATA_API_KEY
         sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false

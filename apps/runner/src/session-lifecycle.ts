@@ -9,6 +9,7 @@ import {
   agentSessionMessages,
   agentSessions,
   agents,
+  agentToolApprovals,
   users,
   workspaceRepositories,
   workspaces,
@@ -405,6 +406,22 @@ export async function abortSession(sessionId: string) {
   if (!updated) return;
 
   abortActiveRun(sessionId);
+  // If the session was paused at an "ask" gate there is no active run to abort, and a
+  // still-pending approval would later be swept (auto-denied) and resumed — reviving an
+  // aborted session. Deny any pending approvals now so no resume can fire. The dangling
+  // tool-call in the suspended assistant message is dropped by buildModelMessages, so the
+  // history stays valid for any future turn.
+  await db
+    .update(agentToolApprovals)
+    .set({
+      status: "denied",
+      decisionSource: "abort",
+      decidedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(eq(agentToolApprovals.sessionId, sessionId), eq(agentToolApprovals.status, "pending")),
+    );
   await appendRuntimeEvent(db, {
     sessionId,
     type: "session.status",

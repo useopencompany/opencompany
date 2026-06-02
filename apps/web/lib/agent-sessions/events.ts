@@ -4,6 +4,7 @@ export const AGENT_SESSION_STARTED_EVENT = "agent.session_started";
 export const AGENT_MESSAGE_SUBMITTED_EVENT = "agent.message_submitted";
 export const AGENT_AFTER_SESSION_CHECK_EVENT = "agent.after_session_check_requested";
 export const AGENT_SESSION_ABORT_REQUESTED_EVENT = "agent.session_abort_requested";
+export const AGENT_APPROVAL_RESUME_EVENT = "agent-session/approval.resume";
 
 export function dispatchAgentSessionStarted(input: { sessionId: string; workspaceId: string }) {
   return inngest.send({
@@ -40,6 +41,13 @@ export function dispatchAgentSessionAbortRequested(input: {
 }) {
   return inngest.send({
     name: AGENT_SESSION_ABORT_REQUESTED_EVENT,
+    data: input,
+  });
+}
+
+export function dispatchAgentApprovalResume(input: { sessionId: string; toolCallId: string }) {
+  return inngest.send({
+    name: AGENT_APPROVAL_RESUME_EVENT,
     data: input,
   });
 }

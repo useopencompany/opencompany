@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
+### Added
+- Guided first-run setup — after signing up you land in a live setup conversation that helps configure your workspace, instead of an empty editor (#241).
+- New `/btw` command to start a new session without leaving your current view (#243).
+- New `/clear` command in the chat composer (#231).
+- "Run now" button to trigger a scheduled agent immediately (#236).
+- Agents can now pull content from TikTok and Instagram (#239) and YouTube (#233).
+- Pin sessions to the top of the sidebar (#213).
+- Live product status indicator in the sidebar, linking to the public status page (#224).
+- Agents can now adjust their own schedules (#217).
+- Workspace tool permissions — allow, ask, or deny which tools and integrations an agent can use, with approval prompts that are remembered between runs (#229).
+- Live reasoning support for Kimi models (#226).
+- Provider logos for xAI and MiniMax in the model picker (#232).
+
+### Changed
+- Agent runs no longer break when an integration like Linear or Slack is turned on but not yet connected — the agent now asks you to connect it instead (#238).
+- When you send a message, it scrolls to the top of the chat, matching the ChatGPT/Claude experience (#219).
+- The copy button now stays visible on assistant replies and appears on hover for your own messages (#222).
+- The onboarding call step now has a clear "Skip for now" button (#220).
+- The "reconnecting" banner no longer appears in chat during normal streaming; connection status now lives in the inspector instead (#242).
+
+### Fixed
+- Linear no longer shows as disconnected after you reconnect with valid credentials (#234).
+- Agent turns that quietly stop mid-task are now flagged instead of being recorded as a silent success — important for scheduled and unattended runs (#225).
+- Sessions now recover when a response stream gets interrupted (#223).
+- Rapidly toggling a session's pin no longer causes glitches (#218).
+- Restored the after-session hook menu when typing at the start of a line (#227).
+- The hook suggestion popup now stays beneath the model dropdown (#230).
+
 ## [0.5.0] - 2026-06-01
 
 ### Added

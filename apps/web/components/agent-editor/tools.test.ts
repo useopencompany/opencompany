@@ -93,6 +93,25 @@ describe("agent editor mention tools", () => {
     );
   });
 
+  test("includes the TikTok and Instagram hosted tools in the mention suggestion menu", () => {
+    expect(buildAgentMentionItems()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "tiktok",
+          kind: "tool",
+          mentionId: "tool:tiktok",
+          displayLabel: "tiktok",
+        }),
+        expect.objectContaining({
+          id: "instagram",
+          kind: "tool",
+          mentionId: "tool:instagram",
+          displayLabel: "instagram",
+        }),
+      ]),
+    );
+  });
+
   test("exposes schedule creation as an action mention", () => {
     expect(buildAgentMentionItems()).toEqual(
       expect.arrayContaining([
@@ -127,6 +146,24 @@ describe("agent editor mention tools", () => {
         (item) => item.mentionId === "tool:slack",
       ),
     ).toBe(true);
+  });
+
+  test("shows not-connected MCP tools with a needs-setup badge when the beta is on", () => {
+    const items = buildAgentMentionItems([], [], {
+      mcpEnabled: true,
+      enabledMcpToolIds: ["linear"],
+    });
+    const linear = items.find((item) => item.mentionId === "tool:linear");
+    const slack = items.find((item) => item.mentionId === "tool:slack");
+
+    // Connected provider behaves normally.
+    expect(linear).toBeDefined();
+    expect(linear?.needsSetup).toBeFalsy();
+
+    // Not-connected provider stays selectable but is flagged + linkable.
+    expect(slack).toBeDefined();
+    expect(slack?.needsSetup).toBe(true);
+    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fsettings");
   });
 
   test("exposes workspace agents as stable agent slug mentions", () => {

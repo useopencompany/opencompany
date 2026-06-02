@@ -62,6 +62,14 @@ export type SessionRuntimeState = {
   lastError: string | null;
 };
 
+export type RuntimeToolApprovalState = {
+  status: "required" | "approved" | "denied";
+  providerKey: string;
+  permissionGroup?: "read" | "post" | "modify" | "admin" | undefined;
+  decisionSource?: "user" | "timeout" | "abort" | undefined;
+  requestedAt?: string | undefined;
+};
+
 export type RuntimeToolCall = {
   id: string;
   name: string;
@@ -71,6 +79,7 @@ export type RuntimeToolCall = {
   activityPreview: string;
   outputPreview: string;
   brainPath?: string | undefined;
+  approval?: RuntimeToolApprovalState | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
 };
@@ -488,6 +497,7 @@ export function buildAssistantTurnParts(
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
           ...(brainPath ? { brainPath } : {}),
+          ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
           startedEventId: matchingToolCall?.startedEventId ?? null,
           completedEventId: matchingToolCall?.completedEventId ?? null,
         },
@@ -717,6 +727,33 @@ export function buildRuntimeToolCallsForMessage(
       }
     }
 
+    if (event.type === "tool.approval_required") {
+      const call = getCall(toolCallId);
+      call.name = readString(event.payload.name) || call.name;
+      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
+      call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;
+      call.approval = {
+        status: "required",
+        providerKey: readString(event.payload.providerKey),
+        permissionGroup: readPermissionGroup(event.payload.permissionGroup),
+        requestedAt: readString(event.payload.requestedAt) || undefined,
+      };
+    }
+
+    if (event.type === "tool.approval_resolved") {
+      const call = getCall(toolCallId);
+      const decision = readString(event.payload.decision) === "approved" ? "approved" : "denied";
+      const decisionSource = readString(event.payload.decisionSource);
+      call.approval = {
+        status: decision,
+        providerKey: call.approval?.providerKey ?? "",
+        permissionGroup: call.approval?.permissionGroup,
+        requestedAt: call.approval?.requestedAt,
+        decisionSource:
+          decisionSource === "timeout" || decisionSource === "abort" ? decisionSource : "user",
+      };
+    }
+
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
@@ -805,6 +842,8 @@ function buildEventAssistantTurnParts(
 
     if (
       event.type === "tool.delta" ||
+      event.type === "tool.approval_required" ||
+      event.type === "tool.approval_resolved" ||
       event.type === "tool.started" ||
       event.type === "tool.completed" ||
       event.type === "tool.failed"
@@ -936,6 +975,12 @@ function formatToolResultOutput(output: unknown) {
 
 export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" | undefined {
+  return value === "read" || value === "post" || value === "modify" || value === "admin"
+    ? value
+    : undefined;
 }
 
 export function optionalString(value: unknown) {

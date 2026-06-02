@@ -232,6 +232,13 @@
       "when": 1780387166248,
       "tag": "0032_open_chimera",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780408092289,
+      "tag": "0033_blue_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }

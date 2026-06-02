@@ -30,7 +30,7 @@ describe("Slack MCP OAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     observed.clientInformation = null;
-    vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", "state-secret");
+    vi.stubEnv("MCP_OAUTH_STATE_SECRET", "state-secret");
     vi.stubEnv("SLACK_MCP_CLIENT_ID", "slack_client");
     vi.stubEnv("SLACK_MCP_CLIENT_SECRET", "slack_secret");
   });

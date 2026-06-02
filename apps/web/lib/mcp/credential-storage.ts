@@ -1,4 +1,11 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import {
+  buildAad,
+  decryptJson,
+  ENCRYPTION_ALGORITHM,
+  encryptJson,
+  loadEncryptionKey,
+} from "@opencompany/crypto";
 import { getDb } from "@opencompany/db/client";
 import {
   type WorkspaceIntegrationCredentialEncryptedPayload,
@@ -7,11 +14,7 @@ import {
 } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 
-const ENCRYPTION_KEY_ENV = "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY";
 const ENCRYPTION_KEY_VERSION = 1;
-const ENCRYPTION_ALGORITHM = "aes-256-gcm";
-const IV_BYTE_LENGTH = 12;
-const ENCRYPTION_KEY_BYTE_LENGTH = 32;
 
 type CredentialDb = Pick<ReturnType<typeof getDb>, "delete" | "insert" | "select">;
 
@@ -139,21 +142,10 @@ function encryptPayload(
   payload: Record<string, unknown>,
   context: McpCredentialContext,
 ): WorkspaceIntegrationCredentialEncryptedPayload {
-  const key = loadEncryptionKey();
-  const iv = randomBytes(IV_BYTE_LENGTH);
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
-  cipher.setAAD(authenticatedData(context, ENCRYPTION_KEY_VERSION));
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(payload), "utf8"),
-    cipher.final(),
-  ]);
-
-  return {
-    algorithm: ENCRYPTION_ALGORITHM,
-    iv: iv.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-    authTag: cipher.getAuthTag().toString("base64"),
-  };
+  return encryptJson(payload, {
+    key: loadEncryptionKey(ENCRYPTION_KEY_VERSION),
+    aad: authenticatedData(context, ENCRYPTION_KEY_VERSION),
+  });
 }
 
 function decryptPayload(
@@ -170,66 +162,27 @@ function decryptPayload(
     );
   }
 
+  // Loaded before the try so a missing/malformed key env (EncryptionKeyConfigError)
+  // surfaces as-is rather than being masked as a decrypt failure.
+  const key = loadEncryptionKey(keyVersion);
   try {
-    const decipher = createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      loadEncryptionKey(),
-      Buffer.from(encryptedPayload.iv, "base64"),
-    );
-    decipher.setAAD(authenticatedData(context, keyVersion));
-    decipher.setAuthTag(Buffer.from(encryptedPayload.authTag, "base64"));
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(encryptedPayload.ciphertext, "base64")),
-      decipher.final(),
-    ]).toString("utf8");
-    const payload = JSON.parse(plaintext) as unknown;
-    if (!isRecord(payload)) throw new Error("Decrypted MCP credential payload is invalid.");
-    return payload;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("Unsupported MCP credential")) {
-      throw error;
-    }
-    if (isEncryptionKeyConfigurationError(error)) {
-      throw error;
-    }
+    return decryptJson(encryptedPayload, { key, aad: authenticatedData(context, keyVersion) });
+  } catch {
     throw new Error("MCP credential could not be decrypted.");
   }
 }
 
+// Field order is significant — it must stay byte-identical to previously stored
+// credentials (see buildAad in @opencompany/crypto).
 function authenticatedData(context: McpCredentialContext, keyVersion: number) {
-  return Buffer.from(
-    JSON.stringify({
-      workspaceId: context.workspaceId,
-      serverId: context.serverId,
-      kind: context.kind,
-      keyVersion,
-    }),
-    "utf8",
-  );
-}
-
-function loadEncryptionKey() {
-  const raw = process.env[ENCRYPTION_KEY_ENV]?.trim();
-  if (!raw) throw new Error(`${ENCRYPTION_KEY_ENV} is required for MCP credential storage.`);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) {
-    throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
-  }
-
-  const key = Buffer.from(raw, "base64");
-  if (key.length !== ENCRYPTION_KEY_BYTE_LENGTH) {
-    throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
-  }
-  return key;
-}
-
-function isEncryptionKeyConfigurationError(error: unknown) {
-  return error instanceof Error && error.message.includes(ENCRYPTION_KEY_ENV);
+  return buildAad({
+    workspaceId: context.workspaceId,
+    serverId: context.serverId,
+    kind: context.kind,
+    keyVersion,
+  });
 }
 
 function newWorkspaceMcpCredentialId() {
   return `wmcpc_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
