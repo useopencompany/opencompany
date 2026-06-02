@@ -73,7 +73,10 @@ export function agentFileSyncJobUpsert(
 
 export function agentBundleConflictPath(path: string) {
   const dot = path.lastIndexOf(".");
-  const suffix = `.conflict-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  // Random (not timestamp) suffix so concurrent conflicts in the same
+  // millisecond don't collide and the retry loop in prepareAgentBundleFileMoves
+  // produces a distinct path each iteration.
+  const suffix = `.conflict-${crypto.randomUUID().slice(0, 8)}`;
   if (dot <= 0) return `${path}${suffix}`;
   return `${path.slice(0, dot)}${suffix}${path.slice(dot)}`;
 }
@@ -110,7 +113,14 @@ export function prepareAgentBundleFileMoves(input: AgentBundleFileMoveInput) {
   return movingFiles.map((file) => {
     const relativePath = file.path.slice(input.oldBundleDir.length + 1);
     let path = `${input.newBundleDir}/${relativePath}`;
-    if (!isPathInsideAgentBundle(path, input.newBundleDir)) {
+    // `isPathInsideAgentBundle` is a string prefix check, so reject any `..`
+    // segment explicitly — otherwise a malformed path like
+    // "agents/sales/../../etc/passwd" would slip past as it still starts with
+    // the destination prefix.
+    if (
+      relativePath.split("/").includes("..") ||
+      !isPathInsideAgentBundle(path, input.newBundleDir)
+    ) {
       throw new Error("Agent bundle move escaped the destination bundle.");
     }
 

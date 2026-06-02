@@ -99,6 +99,10 @@ export async function materializeAgentFileToGitHub(input: { workspaceId: string;
       );
       commitSha = result.commitSha;
     } else {
+      // Upsert jobs normally have a corresponding agentFiles row. If the file
+      // was deleted between job creation and execution (a race), there is
+      // nothing to write — drop the now-orphaned job. This is expected cleanup,
+      // not an error condition.
       if (!row.file) {
         await db.delete(agentFileSyncJobs).where(eq(agentFileSyncJobs.id, row.job.id));
         endTimingTrace(trace, { status: "missing-file" });
@@ -169,6 +173,9 @@ export async function materializeAgentFileToGitHub(input: { workspaceId: string;
       path: input.path,
     });
     await db.batch([
+      // If the file was deleted/replaced between sync start and this error, the
+      // update matches zero rows. That is acceptable: the replacement file
+      // carries its own sync job, so we don't treat a no-op here as a failure.
       db
         .update(agentFiles)
         .set({

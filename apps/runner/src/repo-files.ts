@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { BRAIN_SYNC_DELAY_MS } from "@opencompany/agent-runtime";
 import type { agentFileSyncJobs, brainSyncJobs, WorkspaceRepository } from "@opencompany/db/schema";
 import { getDb } from "./db";
@@ -13,7 +13,8 @@ export function hashContent(content: string) {
 
 export function conflictPath(path: string) {
   const dot = path.lastIndexOf(".");
-  const suffix = `.conflict-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  // Random (not timestamp) suffix so concurrent conflicts can't collide.
+  const suffix = `.conflict-${randomUUID().slice(0, 8)}`;
   if (dot <= 0) return `${path}${suffix}`;
   return `${path.slice(0, dot)}${suffix}${path.slice(dot)}`;
 }
@@ -27,19 +28,32 @@ export async function writeRepoFileToGitHub(
   const token = await getGitHubInstallationToken();
   if (!token) return { commitSha: null, blobSha: null };
   const repositoryPath = githubRepositoryPath(repository.fullName);
-  const current = await getGitHubFile(token, repository, path);
-  const result = await githubRequest<{ content?: { sha?: string }; commit?: { sha?: string } }>({
-    token,
-    repository,
-    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}`,
-    method: "PUT",
-    body: {
-      message: `Update ${path}`,
-      branch: repository.defaultBranch,
-      content: Buffer.from(content, "utf8").toString("base64"),
-      ...(current?.sha ? { sha: current.sha } : {}),
-    },
-  });
+  const encodedPath = `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}`;
+  const put = (sha: string | undefined) =>
+    githubRequest<{ content?: { sha?: string }; commit?: { sha?: string } }>({
+      token,
+      repository,
+      path: encodedPath,
+      method: "PUT",
+      body: {
+        message: `Update ${path}`,
+        branch: repository.defaultBranch,
+        content: Buffer.from(content, "utf8").toString("base64"),
+        ...(sha ? { sha } : {}),
+      },
+    });
+
+  let current = await getGitHubFile(token, repository, path);
+  let result: { content?: { sha?: string }; commit?: { sha?: string } };
+  try {
+    result = await put(current?.sha);
+  } catch (error) {
+    // Concurrent writers can leave us with a stale blob SHA (409/422). Refetch
+    // the latest SHA once and retry rather than failing the whole sync.
+    if (!isGitHubShaConflict(error)) throw error;
+    current = await getGitHubFile(token, repository, path);
+    result = await put(current?.sha);
+  }
   return { commitSha: result.commit?.sha ?? null, blobSha: result.content?.sha ?? null };
 }
 
@@ -52,19 +66,32 @@ export async function deleteRepoFileFromGitHub(
   const token = await getGitHubInstallationToken();
   if (!token) return;
   const repositoryPath = githubRepositoryPath(repository.fullName);
+  const encodedPath = `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}`;
+  const del = (sha: string) =>
+    githubRequest({
+      token,
+      repository,
+      path: encodedPath,
+      method: "DELETE",
+      body: {
+        message: `Delete ${path}`,
+        branch: repository.defaultBranch,
+        sha,
+      },
+    });
+
   const current = blobSha ? { sha: blobSha } : await getGitHubFile(token, repository, path);
   if (!current?.sha) return;
-  await githubRequest({
-    token,
-    repository,
-    path: `/repos/${repositoryPath}/contents/${encodeURIComponentPath(path)}`,
-    method: "DELETE",
-    body: {
-      message: `Delete ${path}`,
-      branch: repository.defaultBranch,
-      sha: current.sha,
-    },
-  });
+  try {
+    await del(current.sha);
+  } catch (error) {
+    // Same self-healing path as writeRepoFileToGitHub: a stale SHA means a
+    // concurrent update landed first, so refetch and retry the delete once.
+    if (!isGitHubShaConflict(error)) throw error;
+    const latest = await getGitHubFile(token, repository, path);
+    if (!latest?.sha) return;
+    await del(latest.sha);
+  }
 }
 
 export async function upsertRepoFileSyncJob(input: {
@@ -106,6 +133,25 @@ export async function upsertRepoFileSyncJob(input: {
     });
 }
 
+// Bound every GitHub call so a slow/hung response can't stall sandbox setup or
+// post-run sync indefinitely. Override via GITHUB_REQUEST_TIMEOUT_MS.
+const GITHUB_REQUEST_TIMEOUT_MS = Number(process.env.GITHUB_REQUEST_TIMEOUT_MS) || 30_000;
+
+class GitHubRequestError extends Error {
+  status: number;
+  constructor(status: number, body: string) {
+    super(`GitHub request failed with ${status}: ${body}`);
+    this.name = "GitHubRequestError";
+    this.status = status;
+  }
+}
+
+function isGitHubShaConflict(error: unknown): boolean {
+  // GitHub returns 409 (and occasionally 422) when the supplied blob SHA is
+  // stale relative to the branch head.
+  return error instanceof GitHubRequestError && (error.status === 409 || error.status === 422);
+}
+
 async function getGitHubFile(token: string, repository: WorkspaceRepository, path: string) {
   try {
     const repositoryPath = githubRepositoryPath(repository.fullName);
@@ -116,6 +162,7 @@ async function getGitHubFile(token: string, repository: WorkspaceRepository, pat
       method: "GET",
     });
   } catch (error) {
+    if (error instanceof GitHubRequestError && error.status === 404) return null;
     if (error instanceof Error && /404|not found/i.test(error.message)) return null;
     throw error;
   }
@@ -128,6 +175,8 @@ async function githubRequest<T = unknown>(input: {
   method: "GET" | "PUT" | "DELETE";
   body?: unknown;
 }): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
   const init: RequestInit = {
     method: input.method,
     headers: {
@@ -136,13 +185,26 @@ async function githubRequest<T = unknown>(input: {
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
+    signal: controller.signal,
   };
   if (input.body !== undefined) {
     init.body = JSON.stringify(input.body);
   }
-  const response = await fetch(`https://api.github.com${input.path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`https://api.github.com${input.path}`, init);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        `GitHub request timed out after ${GITHUB_REQUEST_TIMEOUT_MS}ms: ${input.method} ${input.path}`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
-    throw new Error(`GitHub request failed with ${response.status}: ${await response.text()}`);
+    throw new GitHubRequestError(response.status, await response.text());
   }
   return (await response.json()) as T;
 }

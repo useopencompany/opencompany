@@ -346,7 +346,12 @@ export async function updateAgent(
     renamePreviousPath: pathChanged ? previousPath : null,
     renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
   });
-  const previousBundleDir = previousPath ? agentBundleDir(previousPath) : null;
+  // Only plan bundle-file moves when previousPath is a validated bundle path.
+  // A legacy single-file path (e.g. "agents/leo.agent") resolves via
+  // agentBundleDir to the workspace root ("agents"), which would otherwise
+  // re-path unrelated bundle files into the new folder.
+  const previousBundleDir =
+    previousPath && agentSlugFromPath(previousPath) ? agentBundleDir(previousPath) : null;
   const nextBundleDir = agentBundleDir(path);
   const bundleFileMoves =
     previousBundleDir && previousBundleDir !== nextBundleDir
@@ -627,6 +632,33 @@ export async function deleteAgent(
             }),
           { path: agent.path },
         );
+
+        // Bundle-backed agents can have synced files (e.g. agent/memory.md)
+        // tracked in agentFiles. Delete the whole bundle so no private agent
+        // state lingers in the repo after the DB row is removed. Each delete is
+        // 404-safe, so a retry after a partial failure stays idempotent.
+        const bundleFiles = await timeAsync(trace, "db.selectAgentBundleFiles", () =>
+          db
+            .select({ path: agentFiles.path, githubBlobSha: agentFiles.githubBlobSha })
+            .from(agentFiles)
+            .where(and(eq(agentFiles.agentId, agent.id), eq(agentFiles.workspaceId, workspace.id))),
+        );
+        for (const file of bundleFiles) {
+          if (file.path === agent.path) continue;
+          await timeAsync(
+            trace,
+            "github.deleteWorkspaceFile",
+            () =>
+              deleteWorkspaceFile({
+                db,
+                repository,
+                path: file.path,
+                message: `Delete ${file.path}`,
+                blobSha: file.githubBlobSha,
+              }),
+            { path: file.path },
+          );
+        }
       } catch (err) {
         captureException(err, {
           event: "opencompany.agent_delete_github_failed",

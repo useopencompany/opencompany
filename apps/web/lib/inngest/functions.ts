@@ -84,6 +84,8 @@ export const syncAgentFileToGitHub = inngest.createFunction(
     triggers: { event: AGENT_FILE_SYNC_REQUESTED_EVENT },
   },
   async ({ event, step }) => {
+    // Intentionally reuses BRAIN_SYNC_DELAY_MS: agent files coalesce on the same
+    // window as brain files, so rapid successive edits collapse into one sync.
     await step.sleep("coalesce agent file edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
 
     return step.run("materialize latest agent folder file", async () => {
@@ -95,6 +97,13 @@ export const syncAgentFileToGitHub = inngest.createFunction(
   },
 );
 
+// Two distinct outbox sweepers run on the same cron but drain different tables:
+// - sweepAgentSyncOutbox drains agent_sync_jobs (the .agent definition record)
+//   and re-dispatches agent.sync_requested -> syncAgentToGitHub.
+// - sweepAgentFileSyncOutbox drains agent_file_sync_jobs (bundle files such as
+//   agent/memory.md) and re-dispatches agent_file.sync_requested ->
+//   syncAgentFileToGitHub.
+// Both exist so a missed/failed event still gets retried from its own outbox.
 export const sweepAgentSyncOutbox = inngest.createFunction(
   {
     id: "sweep-agent-sync-outbox",

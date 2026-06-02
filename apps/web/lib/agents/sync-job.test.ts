@@ -145,4 +145,22 @@ describe("prepareAgentBundleFileMoves", () => {
       }),
     );
   });
+
+  test("rejects moves that escape the destination bundle", () => {
+    expect(() =>
+      prepareAgentBundleFileMoves({
+        oldBundleDir: "agents/sales",
+        newBundleDir: "agents/revenue",
+        existingFileSyncJobs: [],
+        files: [
+          {
+            id: 1,
+            path: "agents/sales/../../../etc/passwd",
+            contentHash: "hash-evil",
+            githubBlobSha: "blob-evil",
+          },
+        ],
+      }),
+    ).toThrow("escaped the destination bundle");
+  });
 });

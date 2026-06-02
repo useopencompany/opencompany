@@ -430,16 +430,28 @@ async function runMessageWithContext(
           repository: row.repository,
         }),
       );
-      await observeRunStep(ctx, "sync_agent_bundle_after_message", () =>
-        syncAgentBundleFromSandbox({
-          sandbox: activeSandbox,
-          sessionId: input.sessionId,
-          workspaceId: row.workspace.id,
-          agentId: row.agent.id,
-          workdir: row.session.workdir,
-          repository: row.repository,
-        }),
-      );
+      // Bundle sync is best-effort: a DB/GitHub failure here must not fail the
+      // turn or drop the assistant response (persistAssistantCompletion runs
+      // below). The next turn re-syncs from the sandbox.
+      try {
+        await observeRunStep(ctx, "sync_agent_bundle_after_message", () =>
+          syncAgentBundleFromSandbox({
+            sandbox: activeSandbox,
+            sessionId: input.sessionId,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+            workdir: row.session.workdir,
+            repository: row.repository,
+          }),
+        );
+      } catch (error) {
+        logger.error("Agent bundle sync failed after message", {
+          session_id: input.sessionId,
+          workspace_id: row.workspace.id,
+          agent_id: row.agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     await checkAbort({ force: true });
@@ -934,16 +946,27 @@ async function runAfterSessionWithContext(
           repository: row.repository,
         }),
       );
-      await observeRunStep(ctx, "sync_agent_bundle_after_session", () =>
-        syncAgentBundleFromSandbox({
-          sandbox: activeSandbox,
-          sessionId: input.sessionId,
-          workspaceId: row.workspace.id,
-          agentId: row.agent.id,
-          workdir: row.session.workdir,
-          repository: row.repository,
-        }),
-      );
+      // Best-effort: an after-session run (which writes agent/memory.md) must
+      // not be marked failed because the bundle sync hit a DB/GitHub error.
+      try {
+        await observeRunStep(ctx, "sync_agent_bundle_after_session", () =>
+          syncAgentBundleFromSandbox({
+            sandbox: activeSandbox,
+            sessionId: input.sessionId,
+            workspaceId: row.workspace.id,
+            agentId: row.agent.id,
+            workdir: row.session.workdir,
+            repository: row.repository,
+          }),
+        );
+      } catch (error) {
+        logger.error("Agent bundle sync failed after session", {
+          session_id: input.sessionId,
+          workspace_id: row.workspace.id,
+          agent_id: row.agent.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     await checkAbort({ force: true });

@@ -21,6 +21,10 @@ export function serializeAgentBundleFiles(agentPath: string | null, files: Agent
   return files
     .flatMap((file) => {
       const relativePath = agentBundleRelativePath(file.path, bundleDir);
+      // Exclude the agent definition itself from the bundle file list. We check
+      // both the slug-derived name (e.g. "leo.agent") and the literal
+      // "agent.agent" fallback so the definition is never surfaced as a bundle
+      // file regardless of which naming form the bundle was created with.
       if (!relativePath || relativePath === "agent.agent" || relativePath === definitionFileName) {
         return [];
       }

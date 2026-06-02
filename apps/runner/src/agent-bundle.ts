@@ -50,6 +50,13 @@ export async function materializeAgentBundleForSession(input: {
   const limitedFiles = limitMountedAgentFiles(files);
   const layout = sandboxLayout(input.workdir);
 
+  // Defensive guard: agentRoot drives a destructive `rm -rf`. workdir comes
+  // from a system-controlled session record, but refuse to run if it ever
+  // resolves to a malformed path (empty workdir, missing /agent suffix).
+  if (!layout.agentRoot || !/.+\/agent$/.test(layout.agentRoot)) {
+    throw new Error(`Refusing destructive rm -rf on malformed agent root: ${layout.agentRoot}`);
+  }
+
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(layout.agentRoot)} && mkdir -p ${shellQuote(layout.agentRoot)}`,
   );
@@ -121,7 +128,20 @@ export async function syncAgentBundleFromSandbox(input: {
   for (const relativePath of sandboxPaths) {
     const repoPath = repoPathFor(bundle.dir, relativePath);
     assertInsideBundle(repoPath, bundle.dir);
-    const content = await input.sandbox.files.read(`${input.workdir}/agent/${relativePath}`);
+    // A file can be deleted/become unreadable between the listing above and
+    // this read. Skip it rather than aborting the whole sync.
+    let content: string;
+    try {
+      content = await input.sandbox.files.read(`${input.workdir}/agent/${relativePath}`);
+    } catch (error) {
+      logger.warn("Skipping unreadable file during agent bundle sync", {
+        session_id: input.sessionId,
+        workspace_id: input.workspaceId,
+        path: relativePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
     const sizeBytes = Buffer.byteLength(content, "utf8");
     if (sizeBytes > MAX_AGENT_BUNDLE_FILE_BYTES) continue;
     if (syncedFiles >= MAX_AGENT_BUNDLE_MOUNT_FILES) break;

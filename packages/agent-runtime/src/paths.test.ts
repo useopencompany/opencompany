@@ -16,7 +16,7 @@ describe("resolveWorkspacePath", () => {
 
   it("rejects bare paths outside configured workspace roots", () => {
     expect(() => resolveWorkspacePath("/home/user/workspace", "notes.md")).toThrow(
-      "Path must be inside work/, brain/, or agent/",
+      "Path must be inside work/, brain/, agent/, or skills/",
     );
   });
 

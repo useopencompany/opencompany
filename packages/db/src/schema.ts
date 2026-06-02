@@ -259,6 +259,11 @@ export const brainSyncJobs = pgTable(
   }),
 );
 
+// Mirrors brainSyncJobs: keyed on (workspaceId, path) with no per-agent FK.
+// Deleting an agent does not cascade-delete its pending file sync jobs; any
+// orphaned job self-cleans on its next run via the "missing-file" path in
+// materializeAgentFileToGitHub. This keeps the sync-job design uniform with
+// brainSyncJobs rather than coupling jobs to the agents table.
 export const agentFileSyncJobs = pgTable(
   "agent_file_sync_jobs",
   {
