@@ -123,6 +123,9 @@ export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 const MAX_AGENT_DELEGATION_DEPTH = 2;
 export const MAX_MODEL_STEPS = 16;
+const INCOMPLETE_TURN_REASON = "announced_unexecuted_next_action" as const;
+const INCOMPLETE_TURN_REASON_DETAIL =
+  "Model stopped after announcing a next action it never took (trailing text ends mid-task).";
 
 export async function runMessage(input: {
   sessionId: string;
@@ -496,6 +499,7 @@ async function runMessageWithContext(
         model_provider: modelProvider,
         model_name: modelName,
         reason: incompleteTurn.reason,
+        reason_detail: incompleteTurn.reasonDetail,
       });
     }
 
@@ -704,7 +708,7 @@ export function detectIncompleteTurn(
     Awaited<ReturnType<typeof collectAssistantStream>>,
     "assistantContent" | "assistantReplayParts" | "lastFinishReason" | "lastStepEndedWithToolCalls"
   >,
-): { reason: string } | null {
+): { reason: typeof INCOMPLETE_TURN_REASON; reasonDetail: string } | null {
   if (streamResult.lastFinishReason !== "stop") return null;
   if (streamResult.lastStepEndedWithToolCalls) return null;
 
@@ -715,8 +719,8 @@ export function detectIncompleteTurn(
   if (!trailingText.endsWith(":")) return null;
 
   return {
-    reason:
-      "Model stopped after announcing a next action it never took (trailing text ends mid-task).",
+    reason: INCOMPLETE_TURN_REASON,
+    reasonDetail: INCOMPLETE_TURN_REASON_DETAIL,
   };
 }
 

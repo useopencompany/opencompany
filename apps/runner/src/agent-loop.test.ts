@@ -1908,7 +1908,8 @@ describe("stream error handling", () => {
       lastStepEndedWithToolCalls: false,
     });
     expect(result).not.toBeNull();
-    expect(result?.reason).toMatch(/never took/);
+    expect(result?.reason).toBe("announced_unexecuted_next_action");
+    expect(result?.reasonDetail).toMatch(/never took/);
   });
 
   it("does not flag a genuine completion that used tools and ends with a real answer", () => {

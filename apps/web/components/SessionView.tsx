@@ -1992,6 +1992,13 @@ function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "message.reasoning_started") return "Thinking started";
   if (event.type === "message.reasoning_completed") return "Thinking completed";
   if (event.type === "message.reasoning_summary") return "Thinking summary";
+  if (event.type === "session.incomplete") {
+    const reason = readString(event.payload.reason);
+    if (reason === "announced_unexecuted_next_action") {
+      return "Model stopped after announcing a next action";
+    }
+    return reason ? `Incomplete: ${reason}` : "Incomplete turn";
+  }
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
   if (event.type === "session.tool_usage") {

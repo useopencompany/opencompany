@@ -9,6 +9,8 @@ export type AgentSessionStatus =
   | "completed"
   | "failed";
 
+export type AgentRuntimeIncompleteReason = "announced_unexecuted_next_action";
+
 export type AgentRuntimeEvent =
   | {
       type: "session.status";
@@ -134,7 +136,7 @@ export type AgentRuntimeEvent =
       // still completes, but this distinct event keeps unattended runs from
       // looking cleanly green when the work was actually abandoned.
       type: "session.incomplete";
-      payload: { messageId: string; reason: string };
+      payload: { messageId: string; reason: AgentRuntimeIncompleteReason };
     }
   | {
       type: "session.title_updated";
