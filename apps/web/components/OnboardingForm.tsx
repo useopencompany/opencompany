@@ -466,9 +466,12 @@ export default function OnboardingForm({
             {isLastStep ? (
               <div className="space-y-2">
                 <SubmitButton label="Finish onboarding" />
-                <p className="text-center text-[12px] leading-4 text-ink-muted">
-                  Booking is optional — you can finish now and schedule later.
-                </p>
+                <button
+                  type="submit"
+                  className="flex h-8 w-full items-center justify-center rounded-md border border-ink/20 px-3 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+                >
+                  Skip for now
+                </button>
               </div>
             ) : (
               <button
