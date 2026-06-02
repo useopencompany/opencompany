@@ -387,6 +387,60 @@ describe("AgentEditor", () => {
     });
   });
 
+  it("opens the #after-session hook menu when typing # at the start of a line", async () => {
+    const user = userEvent.setup();
+    const captured: Array<{ body: string; content: unknown }> = [];
+
+    const { container } = render(
+      <AgentEditor
+        initialBody=""
+        mentionItems={buildAgentMentionItems()}
+        onChange={(body, content) =>
+          captured.push({ body, content: JSON.parse(JSON.stringify(content)) })
+        }
+      />,
+    );
+    const editor = container.querySelector(".ProseMirror") as HTMLElement;
+    editor.focus();
+
+    // A lone `#` at line start must open the hook menu immediately — the exact
+    // regression this PR fixes — not only after extra hook-name characters.
+    await user.keyboard("#");
+    const option = await screen.findByRole("option", { name: /after-session/i });
+    expect(option).toBeInTheDocument();
+    await user.click(option);
+
+    // Must be inserted as a hook mention node, not left as raw "#after-session"
+    // text — a plain text node would serialize to the same body string.
+    expect(container.querySelector(".agent-mention[data-kind='hook']")).toBeInTheDocument();
+    expect(await screen.findByText("#after-session")).toBeInTheDocument();
+    expect(captured.at(-1)?.body).toBe("#after-session");
+    const mention = (
+      captured.at(-1)?.content as {
+        content?: Array<{ content?: Array<{ type?: string; attrs?: Record<string, unknown> }> }>;
+      }
+    )?.content?.[0]?.content?.find((node) => node.type === "mention");
+    expect(mention).toMatchObject({ type: "mention", attrs: { label: "after-session" } });
+  });
+
+  it("leaves the markdown heading shortcut intact when typing '# ' at the start of a line", async () => {
+    const user = userEvent.setup();
+
+    const { container } = render(
+      <AgentEditor initialBody="" mentionItems={buildAgentMentionItems()} onChange={vi.fn()} />,
+    );
+    const editor = container.querySelector(".ProseMirror") as HTMLElement;
+    editor.focus();
+
+    await user.keyboard("# Title");
+
+    // Await the heading first so any async suggestion popup has had a chance to
+    // mount; only then assert the hook menu never hijacked the heading shortcut.
+    const heading = await screen.findByRole("heading", { level: 1, name: "Title" });
+    expect(heading).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /after-session/i })).not.toBeInTheDocument();
+  });
+
   it("renders markdown headings and lists from initial body", async () => {
     const { container } = render(
       <AgentEditor
