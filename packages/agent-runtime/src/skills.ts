@@ -90,6 +90,39 @@ factual questions."). To **remove** one, leave its mention out of the new body. 
 tool whose prerequisites are not met is allowed and won't fail validation, but the tool
 stays inert until the prerequisite is satisfied.
 
+## Schedules (recurring triggers)
+
+You can give yourself recurring schedules — for example a daily standup or a weekly review.
+A schedule fires on its own and starts a **fresh session** whose first user message is the
+\`prompt\` you set, so write the prompt as a self-contained instruction to your future self.
+
+Pass a \`triggers\` array to \`update_agent_file\`. It is the **complete list** of your
+schedules and replaces all of them at once:
+
+- **Omit \`triggers\`** to leave your current schedules unchanged.
+- Pass an array to set them; pass \`[]\` to remove all schedules.
+- Each entry needs a \`cron\` and a \`prompt\`, plus optional \`timezone\` (IANA, default
+  \`UTC\`), \`enabled\` (default \`false\`), and \`id\` (auto-assigned if omitted).
+
+Only these cron shapes are supported — anything else is rejected:
+
+- \`*/N * * * *\` — every N minutes (N = 1–59)
+- \`0 */N * * *\` — every N hours (N ∈ {1, 2, 3, 4, 6, 8, 12})
+- \`M H * * *\` — daily at H:M
+- \`M H * * 1-5\` — weekdays at H:M
+- \`M H * * D\` — weekly on day D (0 = Sunday … 6 = Saturday) at H:M
+
+Example — a weekday 9am check-in in New York time:
+
+\`\`\`
+triggers: [
+  { cron: "0 9 * * 1-5", prompt: "Review yesterday's PRs and post a summary.", timezone: "America/New_York", enabled: true }
+]
+\`\`\`
+
+Set \`enabled: true\` only when you actually want it to run. A schedule with an unsupported
+cron or an empty prompt is rejected and nothing is saved — fix it and call again.
+
 ## How to make a change
 
 > The runner requires that you have read this skill (via \`read_skill\`) before it will accept
@@ -104,6 +137,8 @@ stays inert until the prerequisite is satisfied.
 3. Call \`update_agent_file\` with:
    - \`body\`: the full new Markdown body (required).
    - \`model\`: an optional model id to switch to. Omit it to keep your current model.
+   - \`triggers\`: an optional complete list of your recurring schedules (see "Schedules"
+     above). Omit it to keep your current schedules.
    - \`summary\`: a one-line description of what you changed and why.
 4. If the tool returns \`ok: false\`, read the \`errors\`, fix the body, and call it again.
    Common failures: empty body, an unknown model id, or malformed content.
@@ -113,9 +148,11 @@ stays inert until the prerequisite is satisfied.
 - **Keep it valid.** A broken edit is rejected, never silently applied.
 - **Don't change your title/name** here — that is out of scope for self-editing in this
   version; focus on instructions, model, tools, and brain mounts.
-- **Repositories, triggers, and delegated agents are preserved** automatically; you cannot
-  add unauthorized repositories through this tool. To use \`@amp\` or \`gh\`, a repository must
-  already be attached to you by a human.
+- **Repositories and delegated agents are preserved** automatically; you cannot add
+  unauthorized repositories through this tool. To use \`@amp\` or \`gh\`, a repository must
+  already be attached to you by a human. **GitHub pull-request triggers are also preserved**
+  and can only be changed by a human — but you *can* manage your own **schedule** triggers
+  here (see "Schedules" above).
 - **Changes take effect on your next session**, not the current one — the running session was
   configured when it started. Tell the user this so they know to start a fresh session (or
   send a new message, if your runtime reloads config per turn) to see the new behavior.
