@@ -575,6 +575,25 @@ describe("executeHostedTool", () => {
     });
   });
 
+  it("defaults X post searches to 10 results when maxResults is omitted", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await executeHostedTool({
+      name: "x_search_posts",
+      args: { query: "AI agents" },
+      env: env(),
+      enabledTools: ["tool_help", "x_search_posts"],
+      signal: new AbortController().signal,
+    });
+
+    const [url] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.searchParams.get("max_results")).toBe("10");
+  });
+
   it("gets an X profile by username", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -667,6 +686,31 @@ describe("executeHostedTool", () => {
     });
   });
 
+  it("defaults X user timelines to 10 results when maxResults is omitted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: "42", username: "builder", name: "Builder" } }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await executeHostedTool({
+      name: "x_get_user_posts",
+      args: { username: "builder" },
+      env: env(),
+      enabledTools: ["tool_help", "x_get_user_posts"],
+      signal: new AbortController().signal,
+    });
+
+    const [timelineUrl] = fetchMock.mock.calls[1] as [URL, RequestInit];
+    expect(timelineUrl.searchParams.get("max_results")).toBe("10");
+  });
+
   it("gets an X discussion with target post, replies, and quote posts", async () => {
     const fetchMock = vi
       .fn()
@@ -745,6 +789,45 @@ describe("executeHostedTool", () => {
     });
   });
 
+  it("defaults X discussion replies and quote posts to 10 results when maxResults is omitted", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: "111",
+              text: "Original",
+              author_id: "42",
+              conversation_id: "111",
+            },
+            includes: { users: [{ id: "42", username: "builder", name: "Builder" }] },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [], meta: { result_count: 0 } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await executeHostedTool({
+      name: "x_get_discussion",
+      args: { postIdOrUrl: "https://x.com/builder/status/111" },
+      env: env(),
+      enabledTools: ["tool_help", "x_get_discussion"],
+      signal: new AbortController().signal,
+    });
+
+    const repliesUrl = fetchMock.mock.calls[1]?.[0] as URL;
+    const quotesUrl = fetchMock.mock.calls[2]?.[0] as URL;
+    expect(repliesUrl.searchParams.get("max_results")).toBe("10");
+    expect(quotesUrl.searchParams.get("max_results")).toBe("10");
+  });
+
   it("gets X trends by WOEID", async () => {
     vi.stubGlobal(
       "fetch",
@@ -785,6 +868,44 @@ describe("executeHostedTool", () => {
       operation: "get_trends",
       costUsdMicros: 10_000,
       rawUsage: { trendsRead: 1, estimated: true },
+    });
+  });
+
+  it("defaults X trends to 10 results when maxResults is omitted", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: Array.from({ length: 12 }, (_, index) => ({
+                trend_name: `Trend ${index + 1}`,
+                tweet_count: index + 1,
+              })),
+            }),
+            { status: 200 },
+          ),
+      ),
+    );
+
+    const result = await executeHostedTool({
+      name: "x_get_trends",
+      args: {},
+      env: env(),
+      enabledTools: ["tool_help", "x_get_trends"],
+      signal: new AbortController().signal,
+    });
+
+    expect(result.output).toMatchObject({
+      woeid: 1,
+      trends: expect.arrayContaining([expect.objectContaining({ name: "Trend 10" })]),
+    });
+    expect((result.output as { trends: unknown[] }).trends).toHaveLength(10);
+    expect(result.usage).toMatchObject({
+      provider: "x",
+      operation: "get_trends",
+      costUsdMicros: 100_000,
+      rawUsage: { trendsRead: 10, estimated: true },
     });
   });
 
