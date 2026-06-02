@@ -441,6 +441,30 @@ describe("AgentEditor", () => {
     expect(screen.queryByRole("option", { name: /after-session/i })).not.toBeInTheDocument();
   });
 
+  it("renders the hook popup beneath the model dropdown (z-index under the Select's z-50)", async () => {
+    const user = userEvent.setup();
+
+    const { container } = render(
+      <AgentEditor initialBody="" mentionItems={buildAgentMentionItems()} onChange={vi.fn()} />,
+    );
+    const editor = container.querySelector(".ProseMirror") as HTMLElement;
+    editor.focus();
+
+    await user.keyboard("#");
+    expect(await screen.findByRole("option", { name: /after-session/i })).toBeInTheDocument();
+
+    // The popup must stack below the model dropdown (a Radix Select at z-50) so
+    // it sits underneath instead of painting over it.
+    const tippyRoot = document.querySelector("[data-tippy-root]") as HTMLElement | null;
+    expect(tippyRoot).not.toBeNull();
+    // Must be an explicit positive z-index below the model dropdown's z-50 — not
+    // an empty/unset value (which Number("") would silently coerce to 0).
+    expect(tippyRoot?.style.zIndex).toMatch(/^\d+$/);
+    const zIndex = Number(tippyRoot?.style.zIndex);
+    expect(zIndex).toBeGreaterThan(0);
+    expect(zIndex).toBeLessThan(50);
+  });
+
   it("renders markdown headings and lists from initial body", async () => {
     const { container } = render(
       <AgentEditor
