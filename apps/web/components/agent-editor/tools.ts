@@ -27,9 +27,11 @@ import {
   AnthropicIcon,
   DeepSeekIcon,
   GeminiIcon,
+  MinimaxIcon,
   MistralIcon,
   MoonshotIcon,
   OpenAIIcon,
+  XaiIcon,
   ZaiIcon,
 } from "@/components/icons/model-provider-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
@@ -123,6 +125,8 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   mistral: MistralIcon,
   moonshotai: MoonshotIcon,
   zai: ZaiIcon,
+  xai: XaiIcon,
+  minimax: MinimaxIcon,
 };
 
 function modelIconFor(id: AgentModelId): LucideIcon {
