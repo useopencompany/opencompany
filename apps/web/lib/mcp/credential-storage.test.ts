@@ -64,7 +64,7 @@ describe("MCP credential storage", () => {
     vi.unstubAllEnvs();
 
     await expect(loadMcpCredential({ ...credentialContext, db })).rejects.toThrow(
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required.",
     );
   });
 });
