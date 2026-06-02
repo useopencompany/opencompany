@@ -87,22 +87,20 @@ export function getSlashContext(
 }
 
 /**
- * Find a command token in a message being sent. A command counts only when it's a
- * clean token — the slash at the start or after a space, and the command word followed
- * by a space or end-of-string (so "/clearing" and "/clear-cache" are NOT commands).
- * Everything after the token is returned as `args` (the new prompt); anything before
- * it is discarded by the command itself. Returns the first such match, or null.
+ * Find a command token in a message being sent. A command counts only when it's the
+ * leading token of the trimmed input and the command word is followed by a space or
+ * end-of-string (so "/clearing" and "/clear-cache" are NOT commands). Everything
+ * after the token is returned as `args` (the new prompt). Returns null for incidental
+ * mid-sentence slash tokens.
  */
 export function parseSlashCommand(input: string): { command: SlashCommand; args: string } | null {
-  for (const match of input.matchAll(/(?:^|\s)\/(\w+)(?=\s|$)/g)) {
-    const word = match[1];
-    if (!word) continue;
-    const command = SLASH_COMMANDS.find((c) => c.id.toLowerCase() === word.toLowerCase());
-    if (!command) continue;
-    const args = input.slice((match.index ?? 0) + match[0].length).trim();
-    return { command, args };
-  }
-  return null;
+  const trimmed = input.trim();
+  const match = trimmed.match(/^\/(\w+)(?=\s|$)/);
+  const word = match?.[1];
+  if (!word) return null;
+  const command = SLASH_COMMANDS.find((c) => c.id.toLowerCase() === word.toLowerCase());
+  if (!command) return null;
+  return { command, args: trimmed.slice(match[0].length).trim() };
 }
 
 /**

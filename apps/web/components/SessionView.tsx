@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -192,6 +192,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   // Caret position, tracked so the slash menu can open on a `/token` mid-message.
   const [caret, setCaret] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashMenuId = useId();
+  const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
@@ -673,6 +675,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   );
   const slashMenuOpen = slashQuery !== null && !slashDismissed && slashCommands.length > 0;
   const slashActiveId = slashCommands[slashActiveIndex]?.id ?? null;
+  const slashActiveOptionId =
+    slashMenuOpen && slashActiveId ? `${slashMenuId}-option-${slashActiveId}` : undefined;
   // Reset highlight + un-dismiss whenever the query changes, so typing after
   // Escape reopens the menu and a changed list always starts at the top. Done as
   // a render-time adjustment (not an effect) per the "you might not need an
@@ -685,8 +689,15 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   }
 
   const runSlashCommand = (command: SlashCommand, args = "") => {
+    const commandKey = command.id;
+    if (slashCommandInFlightRef.current.has(commandKey)) return;
+    slashCommandInFlightRef.current.add(commandKey);
     startTransition(async () => {
-      await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+      try {
+        await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+      } finally {
+        slashCommandInFlightRef.current.delete(commandKey);
+      }
     });
   };
 
@@ -723,6 +734,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   // text after the token as its args); otherwise send a normal chat message. Commands
   // may run even while busy (they navigate away).
   const handleSend = () => {
+    if (isPending) return;
     const parsed = parseSlashCommand(input);
     if (parsed) {
       runSlashCommand(parsed.command, parsed.args);
@@ -1005,6 +1017,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
             <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
               {slashMenuOpen ? (
                 <SlashCommandMenu
+                  id={slashMenuId}
                   commands={slashCommands}
                   activeId={slashActiveId}
                   onSelect={(command) => insertSlashCommand(command)}
@@ -1119,6 +1132,11 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   });
                 }}
                 placeholder="Ask this agent to do something"
+                role="combobox"
+                aria-expanded={slashMenuOpen}
+                aria-controls={slashMenuOpen ? slashMenuId : undefined}
+                aria-activedescendant={slashActiveOptionId}
+                aria-haspopup="listbox"
                 rows={1}
                 className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
@@ -1137,7 +1155,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               ) : (
                 <button
                   type="button"
-                  disabled={parseSlashCommand(input) ? false : isBusy || !input.trim()}
+                  disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
                   onClick={handleSend}
                   aria-label="Send message"
                   className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
@@ -1163,7 +1181,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                     <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
                       ↵
                     </kbd>{" "}
-                    run
+                    insert
                   </span>
                   <span>
                     <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
