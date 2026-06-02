@@ -263,7 +263,9 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {session.status === "running" || session.status === "provisioning" ? (
+        {session.status === "running" ||
+        session.status === "provisioning" ||
+        session.status === "awaiting_approval" ? (
           <SessionStatusDot status={session.status} pulse />
         ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
