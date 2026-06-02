@@ -180,6 +180,20 @@ function SubmitButton({ label = "Start using opencompany" }: { label?: string })
   );
 }
 
+function SkipButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="flex h-8 w-full items-center justify-center rounded-md border border-ink/20 px-3 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {pending ? "Saving" : "Skip for now"}
+    </button>
+  );
+}
+
 function ChoiceButton({
   children,
   selected,
@@ -466,12 +480,7 @@ export default function OnboardingForm({
             {isLastStep ? (
               <div className="space-y-2">
                 <SubmitButton label="Finish onboarding" />
-                <button
-                  type="submit"
-                  className="flex h-8 w-full items-center justify-center rounded-md border border-ink/20 px-3 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
-                >
-                  Skip for now
-                </button>
+                <SkipButton />
               </div>
             ) : (
               <button
