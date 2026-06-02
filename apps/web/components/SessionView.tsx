@@ -415,17 +415,48 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
 
-  // Stale stream means the SSE connection is wedged, most often from a transient drop or an
-  // expired runner token. Refresh just the stream credential so reconnects do not reload the
-  // full session detail payload.
-  const lastStaleRefetchAtRef = useRef(0);
+  // Stale stream/data means the browser may have missed durable events while the tab was
+  // backgrounded or connected to a runner that did not own the active job. Refresh the canonical
+  // detail so persisted completions appear without a manual page reload.
+  const lastRecoveryRefetchAtRef = useRef(0);
+  const refetchSessionProgress = useCallback(
+    ({ refreshStreamCredential = false }: { refreshStreamCredential?: boolean } = {}) => {
+      if (!awaitingAssistantWork) return;
+      const currentTime = Date.now();
+      if (currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
+      lastRecoveryRefetchAtRef.current = currentTime;
+      if (refreshStreamCredential) {
+        void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+      }
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+    },
+    [awaitingAssistantWork, detailKey, queryClient, streamCredentialKey],
+  );
+
   useEffect(() => {
-    if (stream.status !== "stale") return;
-    const now = Date.now();
-    if (now - lastStaleRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
-    lastStaleRefetchAtRef.current = now;
-    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-  }, [stream.status, queryClient, streamCredentialKey]);
+    if (!showStaleBanner) return;
+    refetchSessionProgress({ refreshStreamCredential: stream.status === "stale" });
+  }, [refetchSessionProgress, showStaleBanner, stream.status]);
+
+  useEffect(() => {
+    if (!awaitingAssistantWork) return;
+
+    const refetchOnVisible = () => {
+      if (document.visibilityState !== "hidden") {
+        refetchSessionProgress();
+      }
+    };
+    const refetchOnOnline = () => {
+      refetchSessionProgress();
+    };
+
+    document.addEventListener("visibilitychange", refetchOnVisible);
+    window.addEventListener("online", refetchOnOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", refetchOnVisible);
+      window.removeEventListener("online", refetchOnOnline);
+    };
+  }, [awaitingAssistantWork, refetchSessionProgress]);
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -874,7 +905,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                 aria-live="polite"
                 className="mb-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[12.5px] text-warning"
               >
-                <span>Connection idle — waiting for updates…</span>
+                <span>Connection idle — reconnecting and refreshing progress…</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -1692,7 +1723,7 @@ function SessionInspector({
         ) : streamErrorMessage || streamStatus === "stale" ? (
           <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
             {streamStatus === "stale"
-              ? "The live session stream is not responding. Reloading will show persisted events."
+              ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
               : streamErrorMessage}
           </div>
         ) : null}

@@ -45,6 +45,103 @@ const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 // How long the red highlight shows on a session row before it is optimistically removed.
 const ARCHIVE_HIGHLIGHT_DELAY_MS = 220;
+const STATUS_PAGE_URL = "https://myopencompany.betteruptime.com";
+const STATUS_PAGE_JSON_URL = `${STATUS_PAGE_URL}/index.json`;
+const STATUS_PAGE_QUERY_STALE_TIME_MS = 60 * 1000;
+const ACCOUNT_MENU_ITEM_CLASS =
+  "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
+
+type StatusPageAggregateState = "operational" | "degraded" | "downtime" | "maintenance";
+
+async function fetchStatusPageAggregateState(): Promise<StatusPageAggregateState> {
+  const response = await fetch(STATUS_PAGE_JSON_URL, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`Status page request failed with ${response.status}.`);
+  }
+
+  const payload: unknown = await response.json();
+  const aggregateState = readAggregateState(payload);
+  if (!aggregateState) {
+    throw new Error("Status page response did not include a recognized aggregate state.");
+  }
+  return aggregateState;
+}
+
+function readAggregateState(payload: unknown): StatusPageAggregateState | null {
+  if (!isRecord(payload)) return null;
+  const data = payload.data;
+  if (!isRecord(data)) return null;
+  const attributes = data.attributes;
+  if (!isRecord(attributes)) return null;
+  const aggregateState = attributes.aggregate_state;
+  if (
+    aggregateState === "operational" ||
+    aggregateState === "degraded" ||
+    aggregateState === "downtime" ||
+    aggregateState === "maintenance"
+  ) {
+    return aggregateState;
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function statusPageMeta({
+  aggregateState,
+  pending,
+  error,
+}: {
+  aggregateState: StatusPageAggregateState | undefined;
+  pending: boolean;
+  error: boolean;
+}) {
+  if (pending) {
+    return {
+      label: "Checking status",
+      description: "Checking status",
+      dotClassName: "bg-ink-subtle/45",
+    };
+  }
+  if (error || !aggregateState) {
+    return {
+      label: "Status unavailable",
+      description: "Status unavailable",
+      dotClassName: "bg-ink-subtle/45",
+    };
+  }
+  if (aggregateState === "operational") {
+    return {
+      label: "All systems operational",
+      description: "All systems operational",
+      dotClassName: "bg-success",
+    };
+  }
+  if (aggregateState === "downtime") {
+    return {
+      label: "Service disruption",
+      description: "Service disruption",
+      dotClassName: "bg-danger",
+    };
+  }
+  if (aggregateState === "maintenance") {
+    return {
+      label: "Maintenance",
+      description: "Maintenance",
+      dotClassName: "bg-warning",
+    };
+  }
+  return {
+    label: "Service degraded",
+    description: "Service degraded",
+    dotClassName: "bg-warning",
+  };
+}
 
 export type SidebarSession = SidebarSessionPayload;
 
@@ -291,6 +388,37 @@ function SessionHistorySkeleton() {
   );
 }
 
+function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
+  const statusQuery = useQuery({
+    queryKey: ["status-page", STATUS_PAGE_JSON_URL],
+    queryFn: fetchStatusPageAggregateState,
+    staleTime: STATUS_PAGE_QUERY_STALE_TIME_MS,
+    retry: false,
+  });
+  const meta = statusPageMeta({
+    aggregateState: statusQuery.data,
+    pending: statusQuery.isPending,
+    error: statusQuery.isError,
+  });
+
+  return (
+    <a
+      href={STATUS_PAGE_URL}
+      target="_blank"
+      rel="noreferrer"
+      onClick={onClose}
+      className="mt-3 flex min-w-0 items-center gap-2 rounded-md py-1 text-[12.5px] leading-4 text-ink-subtle transition-colors duration-150 hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      title={meta.description}
+    >
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full shadow-[0_0_0_2px_rgba(15,15,15,0.04)] ${meta.dotClassName}`}
+      />
+      <span className="truncate">{meta.label}</span>
+    </a>
+  );
+}
+
 function AccountMenu({
   userName,
   userEmail,
@@ -318,12 +446,13 @@ function AccountMenu({
   ];
 
   return (
-    <div className="absolute bottom-[52px] left-3 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
+    <div className="absolute bottom-[60px] left-1 z-20 w-[220px] overflow-hidden rounded-lg border border-black/[0.08] bg-surface-raised shadow-[0_16px_36px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.08)]">
       <div className="px-3 pb-3 pt-3">
         <div className="text-[13.5px] font-medium leading-[1.2] tracking-[-0.01em] text-ink">
           {userName}
         </div>
         <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
+        <StatusPageMenuItem onClose={onClose} />
         {/* <button
           type="button"
           onClick={onClose}
@@ -346,12 +475,10 @@ function AccountMenu({
               )}
             </>
           );
-          const className =
-            "flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover";
 
           if (href) {
             return (
-              <Link key={label} href={href} onClick={onClose} className={className}>
+              <Link key={label} href={href} onClick={onClose} className={ACCOUNT_MENU_ITEM_CLASS}>
                 {inner}
               </Link>
             );
@@ -364,7 +491,7 @@ function AccountMenu({
                 action?.();
                 onClose();
               }}
-              className={className}
+              className={ACCOUNT_MENU_ITEM_CLASS}
             >
               {inner}
             </button>
@@ -373,11 +500,7 @@ function AccountMenu({
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
-        <a
-          href="/auth/sign-out"
-          onClick={onClose}
-          className="flex h-[29px] w-full items-center gap-2.5 px-3 text-left text-[13px] font-medium tracking-[-0.005em] text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
-        >
+        <a href="/auth/sign-out" onClick={onClose} className={ACCOUNT_MENU_ITEM_CLASS}>
           <LogOut size={15.5} strokeWidth={1.8} className="shrink-0 text-ink/60" />
           <span>Log Out</span>
         </a>

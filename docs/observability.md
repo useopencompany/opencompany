@@ -91,6 +91,29 @@ Production logs are forwarded by the hosting platforms, not by app-side source t
 Keep source tokens in Better Stack/Vercel/Render/Infisical configuration only. Do not commit source
 tokens, Logtail browser tokens, or OTLP exporter credentials.
 
+## Status Page
+
+The public product status page is hosted in Better Stack at `https://status.opencompany.cloud`.
+Keep it focused on customer-visible product availability:
+
+- `Application`: Better Stack keyword monitor for `https://my.opencompany.cloud/api/healthz`,
+  requiring `"service":"opencompany-web"`.
+- `Agent runtime`: Better Stack keyword monitor for the production `RUNNER_PUBLIC_URL` `/healthz`,
+  requiring `"service":"opencompany-runner"`.
+
+Both monitors should use `GET`, SSL verification, redirects, the `eu`, `us`, `as`, and `au`
+regions, a 180 second check frequency, a 30 second timeout, and 180 second confirmation and
+recovery periods. The status page should use the custom domain `status.opencompany.cloud`, expose
+90 days of history, allow subscriptions, and automatically create reports for monitor incidents.
+
+Do not expose the existing `opencompany.cloud` website monitor on the v1 product status page. Keep
+third-party dependencies such as Vercel, Render, Neon, WorkOS, Inngest, and model providers off the
+page unless they become manually tracked components with a clear incident communication policy.
+
+The DNS record for the custom domain is a CNAME from `status.opencompany.cloud` to
+`statuspage.betteruptime.com`. If the domain is managed through Cloudflare, keep this record in
+DNS-only mode.
+
 Server startup emits one reporter diagnostic per runtime:
 
 - `opencompany.observability_reporter_registered`: server-side Better Stack/Sentry reporter was
