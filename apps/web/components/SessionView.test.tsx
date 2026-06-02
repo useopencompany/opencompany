@@ -1,6 +1,6 @@
 /**
  * Phase B tests for AssistantMessageContent live-part rendering.
- * Phase C tests for the stale-stream banner in SessionViewContent.
+ * Phase C tests for stale-connection handling in SessionViewContent.
  * Phase C2 tests for the data-freshness stale detection (PRO-91 fix).
  *
  * Phase B verifies that tool-call and reasoning parts show up immediately in
@@ -8,14 +8,16 @@
  * and that WorkingIndicator stays visible as a footer for the entire duration
  * of a running message — regardless of whether parts are already present.
  *
- * Phase C verifies that the stale-connection banner appears only when the SSE
- * stream is stale AND there is a running assistant message, and that the Retry
- * button triggers a credential cache invalidation.
+ * Phase C verifies that a stale connection never surfaces a banner in the chat
+ * composer (that was found to be noisy during normal streaming), and instead is
+ * surfaced quietly in the inspector's Runtime section.
  *
- * Phase C2 verifies data-freshness detection: the banner also appears when
- * stream.status is "open" but no new runtime event has arrived within
- * STALE_THRESHOLD_MS (45s), matching the real-world dead-session scenario where
- * SSE reconnects keep flipping stream.status away from "stale".
+ * Phase C2 verifies data-freshness detection: a stale connection is also
+ * detected when stream.status is "open" but no new runtime event has arrived
+ * within STALE_THRESHOLD_MS (45s) — matching the real-world dead-session
+ * scenario where SSE reconnects keep flipping stream.status away from "stale".
+ * In all cases recovery still refetches silently and the inspector reflects the
+ * stale state, but no composer banner is rendered.
  */
 
 import { captureEvent } from "@opencompany/analytics/client";
@@ -72,7 +74,11 @@ const streamMock = vi.hoisted(() => ({
   status: "idle" as string,
   input: null as null | { onEvent: (event: RuntimeEvent) => void },
 }));
+// The composer banner was removed — this text must never appear in the chat UX.
 const STALE_BANNER_TEXT = "Connection idle — reconnecting and refreshing progress…";
+// Stale connection is now surfaced only here, in the inspector's Runtime section.
+const INSPECTOR_STALE_TEXT =
+  "The live session stream is not responding. Reconnecting and refreshing persisted progress.";
 vi.mock("@/components/useSessionEventStream", () => ({
   useSessionEventStream: (input: { onEvent: (event: RuntimeEvent) => void }) => {
     streamMock.input = input;
@@ -774,80 +780,42 @@ describe("SessionViewContent — felt TTFT", () => {
   });
 });
 
-describe("SessionViewContent — Phase C: stale-stream banner", () => {
-  it("shows banner when stream is stale AND there is a running assistant message", () => {
+describe("SessionViewContent — Phase C: no composer connection banner", () => {
+  it("does NOT render a composer banner when stream is stale with a running message", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "stale");
-
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-  });
-
-  it("banner has role=status and aria-live=polite", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "stale");
-
-    // There may be multiple role="status" elements (WorkingIndicator also uses it).
-    // Identify the banner by its unique text content.
-    const allStatusEls = screen.getAllByRole("status");
-    const banner = allStatusEls.find((el) => el.textContent?.includes("Connection idle"));
-    expect(banner).toBeDefined();
-    expect(banner).toHaveAttribute("aria-live", "polite");
-    expect(banner).toHaveTextContent(STALE_BANNER_TEXT);
-  });
-
-  it("does NOT show banner when stream is stale but no running assistant message", () => {
-    const detail = makeDetail({
-      messages: [{ id: "msg_done", role: "assistant", content: "Done.", status: "completed" }],
-    });
     renderSessionViewContent(detail, "stale");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
-  it("does NOT show banner when stream is healthy (open) even with a running message", () => {
+  it("surfaces a stale stream in the inspector Runtime section instead", () => {
+    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
+    renderSessionViewContent(detail, "stale");
+
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
+  });
+
+  it("does NOT render a composer banner when stream is healthy (open)", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "open");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("does NOT show banner when stream is idle even with a running message", () => {
+  it("does NOT render a composer banner when stream is idle", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "idle");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
   });
 
-  it("does NOT show banner when stream is errored (error has its own UX)", () => {
+  it("does NOT render a composer banner when stream is errored (error has its own UX)", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "error");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-  });
-
-  it("Retry button calls queryClient.invalidateQueries to trigger reconnect", async () => {
-    const user = userEvent.setup();
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-
-    streamMock.status = "stale";
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
   });
 });
 
@@ -898,11 +866,12 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       vi.advanceTimersByTime(1_000);
     });
 
-    // Still within threshold (5s + 1s = 6s < 45s), no banner.
+    // Still within threshold (5s + 1s = 6s < 45s) — nothing stale anywhere.
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("shows banner when stream is open but no event for > STALE_THRESHOLD_MS", () => {
+  it("flags the inspector (not a composer banner) when stream is open but no event for > STALE_THRESHOLD_MS", () => {
     // Set the fake clock so "now" is 2000-01-01T00:01:00Z.
     const now = new Date("2000-01-01T00:01:00.000Z").getTime();
     vi.setSystemTime(now);
@@ -928,8 +897,9 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       vi.advanceTimersByTime(1_000);
     });
 
-    // 50s + 1s tick = 51s > 45s threshold, so the banner must appear.
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+    // 50s + 1s tick = 51s > 45s threshold: inspector reflects it, composer stays clean.
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
   });
 
   it("refetches session detail automatically when active work has stale data", () => {
@@ -964,7 +934,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
   });
 
-  it("hides banner once a new event arrives after being shown", () => {
+  it("clears the inspector stale flag once a new event arrives after being shown", () => {
     const now = new Date("2000-01-01T00:02:00.000Z").getTime();
     vi.setSystemTime(now);
 
@@ -983,11 +953,12 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       </QueryClientProvider>,
     );
 
-    // Trigger tick → banner appears.
+    // Trigger tick → inspector flags stale (no composer banner).
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
 
     // A new event arrives: rerender with a new event in the list.
     // The component sees lastEventId change → resets lastRuntimeActivityMs to now.
@@ -1005,11 +976,12 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       );
     });
 
-    // Banner should be gone — event just landed.
+    // Inspector flag should clear — event just landed (and never a composer banner).
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("still shows banner when stream.status is stale (regression of original Phase C behaviour)", () => {
+  it("still flags the inspector when stream.status is stale (regression of original Phase C behaviour)", () => {
     // stream.status = "stale" path still works independently of data freshness.
     const now = new Date("2000-01-01T00:03:00.000Z").getTime();
     vi.setSystemTime(now);
@@ -1031,8 +1003,10 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       </QueryClientProvider>,
     );
 
-    // Banner must appear immediately (stream.status === "stale") without needing tick.
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+    // Inspector reflects it immediately (stream.status === "stale") without a tick,
+    // and the composer never shows a banner.
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
   });
 
   it("refetches session detail and stream credential when stream status is stale", () => {
