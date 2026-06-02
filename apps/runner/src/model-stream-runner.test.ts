@@ -128,8 +128,9 @@ describe("collectAssistantStream", () => {
 
   it("publishes reasoning deltas as transient runtime events as they arrive", async () => {
     const stream = createStream([
-      streamPart({ type: "reasoning-delta", delta: "Thinking" }),
+      streamPart({ type: "reasoning-delta", text: "Thinking" }),
       streamPart({ type: "reasoning-delta", delta: "..." }),
+      streamPart({ type: "reasoning", text: " done" }),
     ]);
 
     await collect(stream, { reasoningExposure: "summary" });
@@ -145,6 +146,12 @@ describe("collectAssistantStream", () => {
       messageId: "msg_assistant",
       type: "message.reasoning_delta",
       payload: { messageId: "msg_assistant", delta: "..." },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(3, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: " done" },
     });
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenNthCalledWith(1, {
       sessionId: "ses_123",
@@ -238,6 +245,79 @@ describe("collectAssistantStream", () => {
       payload: { messageId: "msg_assistant", delta: "..." },
     });
     expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(3, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.delta",
+      payload: { messageId: "msg_assistant", delta: "Visible answer" },
+    });
+  });
+
+  it("converts raw Moonshot reasoning_content chunks into raw reasoning deltas", async () => {
+    const stream = createStream([
+      streamPart({
+        type: "raw",
+        rawValue: {
+          choices: [{ delta: { reasoning_content: "Inspecting" } }],
+        },
+      }),
+      streamPart({
+        type: "raw",
+        rawValue: {
+          choices: [{ delta: { reasoning_content: " constraints." } }],
+        },
+      }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await expect(collect(stream, { reasoningExposure: "raw" })).resolves.toMatchObject({
+      assistantContent: "Visible answer",
+      assistantReplayParts: [
+        { type: "reasoning", text: "Inspecting constraints." },
+        { type: "text", text: "Visible answer" },
+      ],
+      reasoningContent: "Inspecting constraints.",
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Inspecting" },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: " constraints." },
+    });
+  });
+
+  it("deduplicates overlapping raw and normalized reasoning chunks", async () => {
+    const stream = createStream([
+      streamPart({
+        type: "raw",
+        rawValue: {
+          choices: [{ delta: { reasoning_content: "Inspecting constraints." } }],
+        },
+      }),
+      streamPart({ type: "reasoning-delta", text: "Inspecting constraints." }),
+      streamPart({ type: "text-delta", text: "Visible answer" }),
+    ]);
+
+    await expect(collect(stream, { reasoningExposure: "raw" })).resolves.toMatchObject({
+      assistantReplayParts: [
+        { type: "reasoning", text: "Inspecting constraints." },
+        { type: "text", text: "Visible answer" },
+      ],
+      reasoningContent: "Inspecting constraints.",
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenCalledTimes(2);
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(1, {
+      sessionId: "ses_123",
+      messageId: "msg_assistant",
+      type: "message.reasoning_delta",
+      payload: { messageId: "msg_assistant", delta: "Inspecting constraints." },
+    });
+    expect(eventMocks.publishTransientRuntimeEvent).toHaveBeenNthCalledWith(2, {
       sessionId: "ses_123",
       messageId: "msg_assistant",
       type: "message.delta",

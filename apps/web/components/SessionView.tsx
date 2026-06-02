@@ -883,9 +883,8 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
   return ref;
 }
 
-// Copy only the user-visible answer text — reasoning is hidden by default in
-// the UI and ChatGPT/Claude both exclude it from clipboard copies. Tool calls
-// are also intentionally excluded so what you paste matches what you read.
+// Copy only the user-visible answer text. Reasoning and tool calls are
+// intentionally excluded so what you paste matches the final assistant answer.
 function extractAssistantText(parts: AssistantTurnPart[]): string {
   return parts
     .map((part) => (part.type === "text" ? part.text : ""))
@@ -1021,7 +1020,7 @@ export function AssistantMessageContent({
           }
           if (part.type === "reasoning") {
             return (
-              <ReasoningSummaryCard
+              <ReasoningCard
                 key={group.key}
                 text={part.text}
                 durationSeconds={part.durationSeconds}
@@ -1196,7 +1195,7 @@ function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | 
   );
 }
 
-function ReasoningSummaryCard({
+function ReasoningCard({
   text,
   durationSeconds,
 }: {

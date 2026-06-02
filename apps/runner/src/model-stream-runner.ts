@@ -113,12 +113,12 @@ export async function collectAssistantStream(input: {
       throwIfAborted(input.signal);
       throwIfStreamErrorPart(part);
 
-      if (!sawOutputPart && isModelOutputPart(part)) {
+      const reasoningDelta = readReasoningTextDelta(part);
+
+      if (!sawOutputPart && isModelOutputPart(part, reasoningDelta)) {
         sawOutputPart = true;
         input.onFirstOutputPart?.();
       }
-
-      const reasoningDelta = readReasoningTextDelta(part);
 
       if (part.type === "text-delta") {
         await completeReasoningPhase();
@@ -133,9 +133,12 @@ export async function collectAssistantStream(input: {
           reasoningSummary += reasoningDelta;
           publishReasoningDelta(reasoningDelta);
         } else if (input.reasoningExposure === "raw") {
-          reasoningContent += reasoningDelta;
-          appendAssistantReasoningPart(assistantReplayParts, reasoningDelta);
-          publishReasoningDelta(reasoningDelta);
+          const uniqueDelta = uniqueReasoningDelta(reasoningContent, reasoningDelta);
+          if (uniqueDelta) {
+            reasoningContent += uniqueDelta;
+            appendAssistantReasoningPart(assistantReplayParts, uniqueDelta);
+            publishReasoningDelta(uniqueDelta);
+          }
         }
       }
 
@@ -228,8 +231,18 @@ export async function collectAssistantStream(input: {
   };
 }
 
-function isModelOutputPart(part: TextStreamPart<ToolSet>) {
-  return part.type === "text-delta" || part.type === "reasoning-delta" || part.type === "tool-call";
+function isModelOutputPart(part: TextStreamPart<ToolSet>, reasoningDelta: string) {
+  return part.type === "text-delta" || Boolean(reasoningDelta) || part.type === "tool-call";
+}
+
+function uniqueReasoningDelta(current: string, next: string) {
+  if (!current || !next) return next;
+  if (current.endsWith(next)) return "";
+  const maxOverlap = Math.min(current.length, next.length);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (current.endsWith(next.slice(0, size))) return next.slice(size);
+  }
+  return next;
 }
 
 function throwIfAborted(signal: AbortSignal) {

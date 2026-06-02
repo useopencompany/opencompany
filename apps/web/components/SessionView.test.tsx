@@ -179,7 +179,7 @@ describe("AssistantMessageContent — Phase B: running with parts renders all pa
     const parts = [makeReasoningPart()];
     render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
 
-    // ReasoningSummaryCard renders the formatted duration (formatThinkingDuration: "Thought for N seconds")
+    // ReasoningCard renders the formatted duration (formatThinkingDuration: "Thought for N seconds")
     expect(screen.getByText("Thought for 5 seconds")).toBeInTheDocument();
     // WorkingIndicator footer persists
     expect(screen.getByRole("status")).toBeInTheDocument();
@@ -406,6 +406,71 @@ describe("SessionViewContent — active turn timer", () => {
 
     expect(screen.getByText("5s")).toBeInTheDocument();
     expect(screen.queryByText("0s")).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionViewContent — live reasoning rendering", () => {
+  it("shows live reasoning delta text inside the expandable reasoning card", async () => {
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      messages: [makeRunningAssistantMessage({ content: "" })],
+      events: [
+        {
+          id: null,
+          type: "message.reasoning_delta",
+          messageId: "msg_running",
+          payload: { messageId: "msg_running", delta: "Considering constraints." },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail, "open");
+
+    await user.click(screen.getByRole("button", { name: /Thought/ }));
+
+    expect(screen.getByText("Considering constraints.")).toBeInTheDocument();
+  });
+
+  it("copies only assistant answer text when live reasoning is present", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => {});
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      const detail = makeDetail({
+        messages: [
+          {
+            id: "msg_done",
+            role: "assistant",
+            content: "Final answer",
+            status: "completed",
+          },
+        ],
+        events: [
+          {
+            id: null,
+            type: "message.reasoning_delta",
+            messageId: "msg_done",
+            payload: { messageId: "msg_done", delta: "Do not copy this reasoning." },
+          },
+        ],
+      });
+
+      renderSessionViewContent(detail, "open");
+
+      await user.click(screen.getByRole("button", { name: "Copy message" }));
+
+      expect(writeText).toHaveBeenCalledWith("Final answer");
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    }
   });
 });
 

@@ -2292,6 +2292,7 @@ async function streamAssistantResponse(input: {
           tools: selectedTools,
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           abortSignal: input.ctx.controller.signal,
+          includeRawChunks: input.runtime.model.reasoningExposure === "raw",
           ...(input.runtime.model.providerOptions
             ? { providerOptions: input.runtime.model.providerOptions }
             : {}),

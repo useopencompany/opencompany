@@ -432,7 +432,8 @@ export function buildAssistantTurnParts(
   const reasoningSummary = readReasoningSummary(events, message.id);
   const reasoningContent =
     readReasoningContent(events, message.id) || readModelReasoning(modelParts);
-  const reasoningText = reasoningSummary || reasoningContent || undefined;
+  const liveReasoning = readReasoningDeltas(events, message.id);
+  const reasoningText = reasoningSummary || reasoningContent || liveReasoning || undefined;
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
@@ -978,6 +979,15 @@ function readModelReasoning(parts: Record<string, unknown>[] | null) {
     .map((part) => readString(part.text).trim())
     .filter(Boolean)
     .join("\n\n");
+}
+
+function readReasoningDeltas(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_delta")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .map((event) => readString(event.payload.delta))
+    .filter(Boolean)
+    .join("");
 }
 
 function hasReasoningDelta(events: RuntimeEvent[], messageId: string) {

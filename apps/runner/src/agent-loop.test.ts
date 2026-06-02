@@ -2564,6 +2564,15 @@ describe("reasoning stream helpers", () => {
     expect(readReasoningTextDelta({ type: "reasoning-delta", delta: "Checked files." })).toBe(
       "Checked files.",
     );
+    expect(readReasoningTextDelta({ type: "reasoning-delta", text: "AI SDK v6 chunk." })).toBe(
+      "AI SDK v6 chunk.",
+    );
+    expect(
+      readReasoningTextDelta({
+        type: "raw",
+        rawValue: { choices: [{ delta: { reasoning_content: "Moonshot raw chunk." } }] },
+      }),
+    ).toBe("Moonshot raw chunk.");
     expect(readReasoningTextDelta({ type: "text-delta", text: "Visible answer." })).toBe("");
   });
 
