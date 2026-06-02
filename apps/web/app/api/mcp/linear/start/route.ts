@@ -25,6 +25,7 @@ export async function GET(request: Request) {
     });
 
     if (result.status === "connected") {
+      await upsertLinearMcpServer(workspace.id, "configured", null);
       return NextResponse.redirect(new URL(appendLinearMcpSetupStatus(returnTo, "connected"), url));
     }
 
