@@ -56,6 +56,10 @@ export type AgentRuntimeEvent =
       payload: { messageId: string; summary: string };
     }
   | {
+      type: "message.reasoning_content";
+      payload: { messageId: string; text: string; format: "raw" };
+    }
+  | {
       type: "tool.started";
       payload: { messageId: string; toolCallId: string; name: string; input?: unknown };
     }

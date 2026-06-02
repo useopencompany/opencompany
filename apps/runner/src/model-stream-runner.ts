@@ -1,7 +1,11 @@
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
-import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
+import {
+  type AssistantReplayPart,
+  appendAssistantReasoningPart,
+  appendAssistantTextPart,
+} from "./model-messages";
 import type { RunControlCheck } from "./run-control";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
@@ -21,7 +25,7 @@ export async function collectAssistantStream(input: {
   runLeaseOwner: string;
   modelProvider: string;
   modelName: string;
-  exposeReasoningSummary: boolean;
+  reasoningExposure: "hidden" | "summary" | "raw";
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
@@ -30,6 +34,7 @@ export async function collectAssistantStream(input: {
   let assistantContent = "";
   const assistantReplayParts: AssistantReplayPart[] = [];
   let reasoningSummary = "";
+  let reasoningContent = "";
   let stepIndex = 0;
   let sawOutputPart = false;
   const modelSteps: Array<{
@@ -52,9 +57,9 @@ export async function collectAssistantStream(input: {
     });
   };
 
-  // Reasoning streams as its own transient `message.reasoning_delta` events so the UI can
-  // show a live "Thinking…" label only while the model is actually reasoning. The final
-  // reasoning summary still lands separately at message completion.
+  // Reasoning streams as its own transient `message.reasoning_delta` events when the model's
+  // reasoning is intentionally exposed. Raw Kimi reasoning is persisted separately from
+  // summary-style reasoning so the UI can label it honestly.
   const publishReasoningDelta = (delta: string) => {
     if (!delta) return;
     publishTransientRuntimeEvent({
@@ -108,12 +113,12 @@ export async function collectAssistantStream(input: {
       throwIfAborted(input.signal);
       throwIfStreamErrorPart(part);
 
-      if (!sawOutputPart && isModelOutputPart(part)) {
+      const reasoningDelta = readReasoningTextDelta(part);
+
+      if (!sawOutputPart && isModelOutputPart(part, reasoningDelta)) {
         sawOutputPart = true;
         input.onFirstOutputPart?.();
       }
-
-      const reasoningDelta = readReasoningTextDelta(part);
 
       if (part.type === "text-delta") {
         await completeReasoningPhase();
@@ -124,9 +129,16 @@ export async function collectAssistantStream(input: {
 
       if (reasoningDelta) {
         await startReasoningPhase();
-        if (input.exposeReasoningSummary) {
+        if (input.reasoningExposure === "summary") {
           reasoningSummary += reasoningDelta;
           publishReasoningDelta(reasoningDelta);
+        } else if (input.reasoningExposure === "raw") {
+          const uniqueDelta = uniqueReasoningDelta(reasoningContent, reasoningDelta);
+          if (uniqueDelta) {
+            reasoningContent += uniqueDelta;
+            appendAssistantReasoningPart(assistantReplayParts, uniqueDelta);
+            publishReasoningDelta(uniqueDelta);
+          }
         }
       }
 
@@ -210,6 +222,7 @@ export async function collectAssistantStream(input: {
     assistantContent,
     assistantReplayParts,
     reasoningSummary,
+    reasoningContent,
     modelSteps,
     stepCount: stepIndex,
     lastFinishReason,
@@ -218,8 +231,18 @@ export async function collectAssistantStream(input: {
   };
 }
 
-function isModelOutputPart(part: TextStreamPart<ToolSet>) {
-  return part.type === "text-delta" || part.type === "reasoning-delta" || part.type === "tool-call";
+function isModelOutputPart(part: TextStreamPart<ToolSet>, reasoningDelta: string) {
+  return part.type === "text-delta" || Boolean(reasoningDelta) || part.type === "tool-call";
+}
+
+function uniqueReasoningDelta(current: string, next: string) {
+  if (!current || !next) return next;
+  if (current.endsWith(next)) return "";
+  const maxOverlap = Math.min(current.length, next.length);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (current.endsWith(next.slice(0, size))) return next.slice(size);
+  }
+  return next;
 }
 
 function throwIfAborted(signal: AbortSignal) {

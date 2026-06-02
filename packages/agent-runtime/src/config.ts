@@ -1,4 +1,8 @@
-import { getAgentModelRuntimeOptions, type ModelProviderOptions } from "./models";
+import {
+  getAgentModelRuntimeOptions,
+  type ModelProviderOptions,
+  type ReasoningExposure,
+} from "./models";
 import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkills } from "./skills";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
@@ -18,7 +22,7 @@ export type ResolvedAgentRuntimeConfig = {
     name: string;
     supportsReasoning: boolean;
     providerOptions?: ModelProviderOptions;
-    exposeReasoningSummary: boolean;
+    reasoningExposure: ReasoningExposure;
   };
   tools: RuntimeToolName[];
   mcpServers: AgentMcpToolConfig[];
@@ -83,7 +87,7 @@ export function resolveAgentRuntimeConfig(input: {
       name: input.agent.model.name,
       supportsReasoning: modelRuntime.supportsReasoning,
       ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),
-      exposeReasoningSummary: modelRuntime.exposeReasoningSummary,
+      reasoningExposure: modelRuntime.reasoningExposure,
     },
     tools: resolveRuntimeToolNamesForConfigTools({
       tools: input.agent.tools,

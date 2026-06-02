@@ -886,6 +886,121 @@ describe("buildAssistantTurnParts", () => {
     ]);
   });
 
+  it("prepends raw reasoning content without mixing it into visible text", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: "Final answer",
+        },
+      },
+      [
+        event(1, "message.reasoning_content", {
+          messageId: "msg_assistant",
+          text: "Raw Kimi reasoning.",
+          format: "raw",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Raw Kimi reasoning.",
+      },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("renders live reasoning deltas before completion", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "running",
+      },
+      [
+        event(null, "message.reasoning_delta", {
+          messageId: "msg_assistant",
+          delta: "Considering",
+        }),
+        event(null, "message.reasoning_delta", {
+          messageId: "msg_assistant",
+          delta: " constraints.",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Considering constraints.",
+      },
+    ]);
+  });
+
+  it("prefers final raw reasoning content over earlier live reasoning deltas", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+      },
+      [
+        event(null, "message.reasoning_delta", {
+          messageId: "msg_assistant",
+          delta: "Partial live thought.",
+        }),
+        event(1, "message.reasoning_content", {
+          messageId: "msg_assistant",
+          text: "Complete raw reasoning.",
+          format: "raw",
+        }),
+      ],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Complete raw reasoning.",
+      },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
+  it("uses persisted model-message reasoning when no reasoning content event exists", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Final answer",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "Raw persisted reasoning." },
+            { type: "text", text: "Final answer" },
+          ],
+        },
+      },
+      [],
+    );
+
+    expect(parts).toEqual([
+      {
+        type: "reasoning",
+        text: "Raw persisted reasoning.",
+      },
+      { type: "text", text: "Final answer" },
+    ]);
+  });
+
   it("does not render a reasoning part for reasoning tokens without real reasoning evidence", () => {
     const parts = buildAssistantTurnParts(
       {
@@ -986,7 +1101,7 @@ describe("buildAssistantTurnParts", () => {
     );
 
     expect(parts).toEqual([
-      { type: "reasoning", durationSeconds: 5, text: undefined },
+      { type: "reasoning", durationSeconds: 5, text: "Think 1Think 2" },
       { type: "text", text: "Final answer" },
     ]);
   });

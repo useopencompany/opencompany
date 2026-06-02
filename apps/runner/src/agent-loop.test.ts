@@ -1790,7 +1790,7 @@ describe("stream error handling", () => {
       runLeaseOwner: "runner-test",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
       signal: new AbortController().signal,
       checkAbort: async () => {},
       toolStartCoordinator: createToolStartCoordinator(),
@@ -1834,7 +1834,7 @@ describe("stream error handling", () => {
       runLeaseOwner: "runner-test",
       modelProvider: "vercel-ai-gateway",
       modelName: "openai/gpt-5.4-mini",
-      exposeReasoningSummary: false,
+      reasoningExposure: "hidden",
       signal: new AbortController().signal,
       checkAbort: async () => {},
       toolStartCoordinator,
@@ -2634,6 +2634,15 @@ describe("reasoning stream helpers", () => {
     expect(readReasoningTextDelta({ type: "reasoning-delta", delta: "Checked files." })).toBe(
       "Checked files.",
     );
+    expect(readReasoningTextDelta({ type: "reasoning-delta", text: "AI SDK v6 chunk." })).toBe(
+      "AI SDK v6 chunk.",
+    );
+    expect(
+      readReasoningTextDelta({
+        type: "raw",
+        rawValue: { choices: [{ delta: { reasoning_content: "Moonshot raw chunk." } }] },
+      }),
+    ).toBe("Moonshot raw chunk.");
     expect(readReasoningTextDelta({ type: "text-delta", text: "Visible answer." })).toBe("");
   });
 
