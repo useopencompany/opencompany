@@ -63,6 +63,7 @@ import {
 } from "@/components/ui/select";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
+import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { deleteAgent, updateAgent } from "@/lib/agents/actions";
@@ -212,6 +213,7 @@ function AgentDetailContent({
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
+  const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
@@ -402,6 +404,27 @@ function AgentDetailContent({
     setEditingSchedule(null);
   };
 
+  const runScheduleNow = (triggerId: string) => {
+    startTransition(async () => {
+      setRunningScheduleId(triggerId);
+      try {
+        const result = await runAgentScheduleNow(agent.id, triggerId);
+        if (!result.ok) {
+          if ("redirectTo" in result) {
+            router.push(result.redirectTo);
+            return;
+          }
+          showError(result.error, "Could not run schedule");
+          return;
+        }
+        seedSessionQueries(queryClient, workspaceId, result.detail);
+        router.push(`/session/${result.session.id}`);
+      } finally {
+        setRunningScheduleId(null);
+      }
+    });
+  };
+
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -586,6 +609,10 @@ function AgentDetailContent({
           schedules={configPreview.config.triggers.filter(
             (trigger): trigger is AgentScheduleTriggerConfig => trigger.type === "agent.schedule",
           )}
+          savedSchedules={agent.config.triggers.filter(
+            (trigger): trigger is AgentScheduleTriggerConfig => trigger.type === "agent.schedule",
+          )}
+          runningScheduleId={runningScheduleId}
           saveState={saveState}
           githubStatus={githubSyncStatus}
           githubError={githubSyncError}
@@ -602,6 +629,7 @@ function AgentDetailContent({
             setShowScheduleDialog(true);
           }}
           onRemoveSchedule={removeScheduleTrigger}
+          onRunSchedule={runScheduleNow}
           onDeleteClick={() => setShowDeleteDialog(true)}
         />
       </aside>
@@ -819,6 +847,8 @@ function AgentInspector({
   agents,
   afterSession,
   schedules,
+  savedSchedules,
+  runningScheduleId,
   saveState,
   githubStatus,
   githubError,
@@ -829,6 +859,7 @@ function AgentInspector({
   onAddSchedule,
   onEditSchedule,
   onRemoveSchedule,
+  onRunSchedule,
   onDeleteClick,
 }: {
   name: string;
@@ -840,6 +871,8 @@ function AgentInspector({
   agents: AgentReference[];
   afterSession: AgentConfig["afterSession"];
   schedules: AgentScheduleTriggerConfig[];
+  savedSchedules: AgentScheduleTriggerConfig[];
+  runningScheduleId: string | null;
   saveState: SaveState;
   githubStatus: string;
   githubError: string | null;
@@ -850,6 +883,7 @@ function AgentInspector({
   onAddSchedule: () => void;
   onEditSchedule: (trigger: AgentScheduleTriggerConfig) => void;
   onRemoveSchedule: (triggerId: string) => void;
+  onRunSchedule: (triggerId: string) => void;
   onDeleteClick: () => void;
 }) {
   return (
@@ -963,9 +997,12 @@ function AgentInspector({
 
       <ScheduleConfigPanel
         schedules={schedules}
+        savedSchedules={savedSchedules}
+        runningScheduleId={runningScheduleId}
         onAdd={onAddSchedule}
         onEdit={onEditSchedule}
         onRemove={onRemoveSchedule}
+        onRun={onRunSchedule}
       />
 
       <GitHubSyncPanel
@@ -1015,14 +1052,20 @@ function AfterSessionConfigItem({ prompt }: { prompt: string }) {
 
 function ScheduleConfigPanel({
   schedules,
+  savedSchedules,
+  runningScheduleId,
   onAdd,
   onEdit,
   onRemove,
+  onRun,
 }: {
   schedules: AgentScheduleTriggerConfig[];
+  savedSchedules: AgentScheduleTriggerConfig[];
+  runningScheduleId: string | null;
   onAdd: () => void;
   onEdit: (trigger: AgentScheduleTriggerConfig) => void;
   onRemove: (triggerId: string) => void;
+  onRun: (triggerId: string) => void;
 }) {
   return (
     <div>
@@ -1059,6 +1102,21 @@ function ScheduleConfigPanel({
                   {trigger.prompt}
                 </div>
                 <div className="mt-3 flex gap-2">
+                  {savedSchedules.some((saved) => scheduleTriggerEquals(saved, trigger)) ? (
+                    <button
+                      type="button"
+                      onClick={() => onRun(trigger.id)}
+                      disabled={runningScheduleId === trigger.id}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[11.5px] font-medium text-ink-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {runningScheduleId === trigger.id ? (
+                        <Loader2 size={11} strokeWidth={2} className="animate-spin" />
+                      ) : (
+                        <Play size={11} strokeWidth={2} />
+                      )}
+                      Run now
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onEdit(trigger)}
@@ -1093,6 +1151,19 @@ function ScheduleConfigPanel({
         </button>
       </div>
     </div>
+  );
+}
+
+function scheduleTriggerEquals(
+  left: AgentScheduleTriggerConfig,
+  right: AgentScheduleTriggerConfig,
+) {
+  return (
+    left.id === right.id &&
+    left.cron === right.cron &&
+    left.timezone === right.timezone &&
+    left.prompt === right.prompt &&
+    left.enabled === right.enabled
   );
 }
 

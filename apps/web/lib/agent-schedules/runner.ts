@@ -68,7 +68,7 @@ export async function sweepAgentSchedules(now = new Date()) {
   };
 }
 
-async function runScheduledAgent(input: {
+export async function runScheduledAgent(input: {
   agent: Agent;
   trigger: AgentScheduleTriggerConfig;
   scheduledFor: Date;
