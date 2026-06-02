@@ -13,6 +13,19 @@ import {
 const DEFAULT_USER_AGENT_TITLE = "leo";
 const DEFAULT_USER_AGENT_PATH = agentPathForSlug(DEFAULT_USER_AGENT_TITLE);
 
+// Starter instructions for a brand-new user's first agent. The `@brain/` mention mounts the
+// whole Brain, which (a) gives leo workspace context going forward and (b) is what lets the
+// first onboarding session create and persist Brain files — a session with no Brain mount
+// silently discards anything written under brain/. Keep this short; leo refines it via the
+// agent-self-edit skill during onboarding.
+export const DEFAULT_USER_AGENT_BODY = `You are leo, the user's OpenCompany agent. You help them get work done and you keep the company's shared knowledge in the Brain up to date.
+
+Your shared knowledge lives in @brain/ — read it for context and keep it current as you learn about the company and its goals.
+
+Research the live web with @exa before answering factual or time-sensitive questions, and cite what you find. Use @x to see what people are saying on X about a company, product, or topic when real-time or social signal is useful.
+
+When the workspace is fresh or the user asks you to get set up, follow the opencompany-setup skill: ask a couple of clarifying questions, scaffold a tidy starter Brain, and tune your own definition so you're genuinely useful for this user.`;
+
 export async function ensureUserOnboardingScaffold(input: { userId: string; workspaceId: string }) {
   const db = getDb();
   const [existingAgent] = await db
@@ -32,7 +45,7 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
   const pending = buildPendingAgent({
     workspaceId: input.workspaceId,
     title: DEFAULT_USER_AGENT_TITLE,
-    body: "",
+    body: DEFAULT_USER_AGENT_BODY,
     path: DEFAULT_USER_AGENT_PATH,
   });
   const syncJob = prepareAgentSyncJobUpsert(db, pending.syncJob);

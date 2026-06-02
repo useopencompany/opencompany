@@ -5,7 +5,9 @@ import { getDb } from "@opencompany/db/client";
 import { onboardingResponses, workspaces } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { startSeededAgentSession } from "@/lib/agent-sessions/start-session";
 import { currentWorkspace } from "@/lib/auth";
+import { buildOnboardingKickoffPrompt } from "@/lib/onboarding/kickoff";
 import { ensureUserOnboardingScaffold } from "@/lib/onboarding/scaffold";
 import {
   type FieldErrors,
@@ -83,7 +85,7 @@ export async function completeOnboarding(
       },
     });
 
-  await ensureUserOnboardingScaffold({
+  const scaffold = await ensureUserOnboardingScaffold({
     userId: user.id,
     workspaceId: workspace.id,
   });
@@ -97,6 +99,28 @@ export async function completeOnboarding(
     help_areas: normalized.helpAreas,
     help_area_count: normalized.helpAreas.length,
   });
+
+  // On a user's very first onboarding, kick off their agent's first run seeded with a visible
+  // message so they land directly in a live setup conversation. Skip when leo already exists
+  // (re-submits) so we never spawn duplicate onboarding sessions.
+  if (scaffold.created) {
+    const sessionId = await startSeededAgentSession({
+      agentId: scaffold.agentId,
+      userId: user.id,
+      workspaceId: workspace.id,
+      prompt: buildOnboardingKickoffPrompt({
+        role: values.role,
+        teamSize: values.teamSize,
+        companyUrl: normalized.companyUrl,
+        helpAreas: normalized.helpAreas,
+      }),
+      source: "onboarding",
+    });
+
+    if (sessionId) {
+      redirect(`/session/${sessionId}`);
+    }
+  }
 
   redirect("/");
 }
