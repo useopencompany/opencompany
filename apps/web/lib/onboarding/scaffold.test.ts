@@ -105,12 +105,12 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(result).toEqual({
       created: true,
       agentId: expect.stringMatching(/^agt_[a-f0-9]{16}$/),
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
     });
     expect(agentInsert).toMatchObject({
       id: result.agentId,
       workspaceId: "wks_123",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
       name: "leo",
       body: "",
       contentHash,
@@ -121,7 +121,7 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(syncJobInsert).toMatchObject({
       agentId: result.agentId,
       workspaceId: "wks_123",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
       desiredHash: contentHash,
       desiredVersion: 1,
       previousPath: null,
@@ -150,7 +150,7 @@ describe("ensureUserOnboardingScaffold", () => {
 
   it("skips creation when the leo agent already exists", async () => {
     const { db, insert, batch } = createDbMock([
-      [{ id: "agt_existing", path: "agents/leo.agent" }],
+      [{ id: "agt_existing", path: "agents/leo/leo.agent" }],
     ]);
     getDbMock.mockReturnValue(db as never);
 
@@ -162,7 +162,7 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(result).toEqual({
       created: false,
       agentId: "agt_existing",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
     });
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();

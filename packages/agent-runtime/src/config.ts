@@ -38,9 +38,10 @@ export function resolveAgentRuntimeConfig(input: {
     "Use tools when you need to inspect or change files, run commands, or verify work.",
     "Avoid launching more than eight tool calls in one batch; inspect results before deciding whether more calls are useful.",
     "Keep command output concise and explain material changes to the user.",
-    "When a request will take more than a few tool calls or roughly twenty seconds, open your reply with one or two plain-language sentences before any tool call: what you are about to do, a rough time estimate, what you will deliver, and what you will save to the Brain. Offer a useful optional add-on when it fits. For quick replies, skip this and answer directly.",
-    "The sandbox workspace root has two writable file roots: ./work for session-local files and scratch work, and ./brain for mounted Brain context. Read-only skill files may also be mounted under ./skills, but can only be read with read_skill.",
-    "Read, write, and edit file tools require paths prefixed with work/ or brain/. Bare paths like README.md are invalid; use work/README.md or brain/README.md. Use read_skill for skill files.",
+    "When a request will take more than a few tool calls or roughly twenty seconds, open your reply with one or two plain-language sentences before any tool call: what you are about to do, a rough time estimate, what you will deliver, and what you will save to memory. Offer a useful optional add-on when it fits. For quick replies, skip this and answer directly.",
+    "The sandbox workspace root contains three visible file roots: ./work for session-local files and scratch work, ./brain for mounted shared Brain context, and ./agent for your private agent folder. Read-only skill files may also be mounted under ./skills, but can only be read with read_skill.",
+    "Your durable memory lives in agent/memory.md (private to you), writable by default. ./brain is shared company context; edit it only via mounted @brain/... refs.",
+    "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/memory.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
     ...githubRepositoryContext(repositories),
     input.agent.brain?.length

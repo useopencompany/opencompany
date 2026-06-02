@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
+  agentBundleDir,
+  agentPathForSlug,
   buildAgentFile,
   parseAgentFile,
   serializeAgentFile,
@@ -9,6 +11,12 @@ import {
 import { extractConfigFromMentions } from "./mentions";
 
 describe(".agent files", () => {
+  test("builds bundle-backed agent paths from slugs", () => {
+    expect(agentPathForSlug("research")).toBe("agents/research/research.agent");
+    expect(agentPathForSlug("research-2")).toBe("agents/research-2/research-2.agent");
+    expect(agentBundleDir("agents/research-2/research-2.agent")).toBe("agents/research-2");
+  });
+
   test("round-trips deterministic frontmatter and markdown body", () => {
     const source = [
       "---",
@@ -165,7 +173,7 @@ describe(".agent files", () => {
     const agent = buildAgentFile({
       title: "Memory",
       body: [
-        "Help with onboarding. #after-session Update @brain/memory.md with durable customer preferences.",
+        "Help with onboarding. #after-session Update agent/memory.md with durable customer preferences.",
         "Keep this line in the same after-session paragraph.",
         "",
         "This paragraph is normal instructions.",
@@ -175,7 +183,7 @@ describe(".agent files", () => {
     expect(agent.config.afterSession).toEqual({
       enabled: true,
       prompt:
-        "Update @brain/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
+        "Update agent/memory.md with durable customer preferences.\nKeep this line in the same after-session paragraph.",
       idleDelaySeconds: 180,
     });
   });
@@ -223,12 +231,12 @@ describe(".agent files", () => {
   test("round-trips after-session tags through serialization", () => {
     const source = serializeAgentFile({
       title: "Memory",
-      body: "Help users. #after-session Save durable facts in @brain/memory.md.",
+      body: "Help users. #after-session Save durable facts in agent/memory.md.",
     });
 
     expect(parseAgentFile(source).config.afterSession).toEqual({
       enabled: true,
-      prompt: "Save durable facts in @brain/memory.md.",
+      prompt: "Save durable facts in agent/memory.md.",
       idleDelaySeconds: 180,
     });
   });
@@ -279,12 +287,35 @@ describe(".agent files", () => {
     const source = serializeAgentFile({
       title: "Coordinator",
       body: "Delegate research to @agent/research.",
-      agents: [{ path: "agents/research.agent", name: "Research" }],
+      agents: [{ path: "agents/research/research.agent", name: "Research" }],
     });
     const parsed = parseAgentFile(source);
 
-    expect(source).toContain("agents:\n  - path: agents/research.agent\n    name: Research");
-    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(source).toContain(
+      "agents:\n  - path: agents/research/research.agent\n    name: Research",
+    );
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
+  });
+
+  test("canonicalizes legacy delegated agent frontmatter paths", () => {
+    const parsed = parseAgentFile(
+      [
+        "---",
+        'title: "Coordinator"',
+        "agents:",
+        "  - path: agents/research/agent.agent",
+        "    name: Research",
+        "---",
+        "",
+        "Delegate research to @agent/research.",
+      ].join("\n"),
+    );
+
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
   });
 
   test("drops invalid delegated agent frontmatter entries", () => {
@@ -293,7 +324,7 @@ describe(".agent files", () => {
         "---",
         'title: "Coordinator"',
         "agents:",
-        "  - path: agents/research.agent",
+        "  - path: agents/research/research.agent",
         "    name: Research",
         "  - path: ../secret.agent",
         "    name: Missing",
@@ -303,7 +334,9 @@ describe(".agent files", () => {
       ].join("\n"),
     );
 
-    expect(parsed.config.agents).toEqual([{ path: "agents/research.agent", name: "Research" }]);
+    expect(parsed.config.agents).toEqual([
+      { path: "agents/research/research.agent", name: "Research" },
+    ]);
   });
 
   test("does not derive unknown delegated agent mentions without a catalog", () => {
