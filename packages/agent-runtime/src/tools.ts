@@ -33,6 +33,10 @@ export type RuntimeToolName =
   | "youtube_get_transcript"
   | "youtube_get_channel"
   | "youtube_list_channel_videos"
+  | "tiktok_get_metadata"
+  | "tiktok_get_transcript"
+  | "instagram_get_metadata"
+  | "instagram_get_transcript"
   | "web_fetch"
   | "tool_help";
 
@@ -110,6 +114,27 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
       "youtube_get_channel",
       "youtube_list_channel_videos",
     ],
+    defaultEnabled: true,
+    credentialSource: "platform",
+    requiredPlatformEnvVars: ["SUPADATA_API_KEY"],
+  },
+  {
+    id: "tiktok",
+    type: "hosted_tool",
+    label: "tiktok",
+    description: "Read public TikTok video metadata and transcripts via Supadata.",
+    runtimeTools: ["tiktok_get_metadata", "tiktok_get_transcript"],
+    defaultEnabled: true,
+    credentialSource: "platform",
+    requiredPlatformEnvVars: ["SUPADATA_API_KEY"],
+  },
+  {
+    id: "instagram",
+    type: "hosted_tool",
+    label: "instagram",
+    description:
+      "Read public Instagram post, reel, and video metadata and transcripts via Supadata.",
+    runtimeTools: ["instagram_get_metadata", "instagram_get_transcript"],
     defaultEnabled: true,
     credentialSource: "platform",
     requiredPlatformEnvVars: ["SUPADATA_API_KEY"],
@@ -1015,6 +1040,151 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use youtube_list_channel_videos to enumerate a channel's latest uploads, then pass each id to youtube_get_video or youtube_get_transcript.",
       "This returns ids only; call youtube_get_video for titles and metadata.",
+    ].join("\n"),
+  },
+  {
+    name: "tiktok_get_metadata",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description:
+      "Get unified metadata for a public TikTok video: title or caption, author, engagement stats, media details, tags, and publish time.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Public TikTok video URL, e.g. https://www.tiktok.com/@user/video/123.",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_get_metadata to inspect a public TikTok video's creator, caption, media details, and engagement before reading its transcript.",
+      "Only public URLs that can be viewed without signing in are supported.",
+    ].join("\n"),
+  },
+  {
+    name: "tiktok_get_transcript",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description:
+      "Get or poll for the transcript of a public TikTok video as text or timestamped chunks via Supadata.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Public TikTok video URL. Provide either url or jobId.",
+        },
+        jobId: {
+          type: "string",
+          description: "Supadata transcript job id returned by an earlier transcript request.",
+        },
+        lang: {
+          type: "string",
+          description:
+            "Preferred transcript language as an ISO 639-1 code (e.g. 'en'). Ignored when polling by jobId.",
+        },
+        text: {
+          type: "boolean",
+          description:
+            "When true (default), return one plain-text transcript. When false, return timestamped chunks.",
+          default: true,
+        },
+        mode: {
+          type: "string",
+          enum: ["native", "auto", "generate"],
+          description:
+            "Transcript mode. Defaults to auto; use native to avoid AI-generated transcript cost.",
+          default: "auto",
+        },
+        chunkSize: {
+          type: "number",
+          description:
+            "Maximum characters per transcript chunk when text=false. Defaults to Supadata's setting; valid range 50-10000.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_get_transcript to read what is said in a public TikTok video.",
+      "Provide either url or jobId. URL requests may return a jobId for longer generated transcripts; call this tool again with jobId to poll.",
+      "Keep text=true for summarization. Set text=false only when timestamps matter.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_get_metadata",
+    kind: "hosted",
+    configToolId: "instagram",
+    description:
+      "Get unified metadata for a public Instagram reel, video, post, or carousel: caption, author, engagement stats, media details, tags, and publish time.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description:
+            "Public Instagram post, reel, or video URL, e.g. https://www.instagram.com/reel/ABC123/.",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_get_metadata to inspect a public Instagram post, reel, or video before reading its transcript.",
+      "Only public URLs that can be viewed without signing in are supported.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_get_transcript",
+    kind: "hosted",
+    configToolId: "instagram",
+    description:
+      "Get or poll for the transcript of a public Instagram reel or video as text or timestamped chunks via Supadata.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Public Instagram reel or video URL. Provide either url or jobId.",
+        },
+        jobId: {
+          type: "string",
+          description: "Supadata transcript job id returned by an earlier transcript request.",
+        },
+        lang: {
+          type: "string",
+          description:
+            "Preferred transcript language as an ISO 639-1 code (e.g. 'en'). Ignored when polling by jobId.",
+        },
+        text: {
+          type: "boolean",
+          description:
+            "When true (default), return one plain-text transcript. When false, return timestamped chunks.",
+          default: true,
+        },
+        mode: {
+          type: "string",
+          enum: ["native", "auto", "generate"],
+          description:
+            "Transcript mode. Defaults to auto; use native to avoid AI-generated transcript cost.",
+          default: "auto",
+        },
+        chunkSize: {
+          type: "number",
+          description:
+            "Maximum characters per transcript chunk when text=false. Defaults to Supadata's setting; valid range 50-10000.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_get_transcript to read what is said in a public Instagram reel or video.",
+      "Provide either url or jobId. URL requests may return a jobId for longer generated transcripts; call this tool again with jobId to poll.",
+      "Keep text=true for summarization. Set text=false only when timestamps matter.",
     ].join("\n"),
   },
   {
