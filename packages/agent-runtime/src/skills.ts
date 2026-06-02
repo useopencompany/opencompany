@@ -65,9 +65,10 @@ invalid, the tool returns errors and nothing is saved — fix them and call it a
 - You notice a durable, repeatable instruction that belongs in your definition rather than
   in one conversation (a standing preference, a tone, a workflow, a default tool).
 
-Do **not** use this for one-off task context — that belongs in the conversation, in your
-agent folder (\`agent/\`) for private durable notes, or in the Brain (\`brain/\`) if it is
-shared long-lived knowledge. Use self-edit only when it changes how you behave going forward.
+Do **not** use this for one-off task context — that belongs in the conversation, not a file.
+Durable context lives elsewhere too: keep private durable notes in your agent folder
+(\`agent/\`) and shared long-lived knowledge in the Brain (\`brain/\`). Use self-edit only when
+the change is to how you behave going forward.
 
 ## How the .agent body works
 
