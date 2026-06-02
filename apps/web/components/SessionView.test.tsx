@@ -856,4 +856,33 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       expect(followedToBottom).toBe(true);
     });
   });
+
+  it("releases the snap when the user scrolls UP (not to the bottom) mid-generation — no re-pin", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // The user scrolls UP to read: a real wheel gesture landing FAR from the bottom
+    // (distanceFromBottom = 1000 - 0 - 800 = 200 > SCROLL_BOTTOM_THRESHOLD_PX). This
+    // must hand control to the user — releasing the snap so the maintain pass does NOT
+    // yank the message back to the top on the next streamed render.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get: () => 1000,
+    });
+    if (scroller) {
+      fireEvent.wheel(scroller);
+      fireEvent.scroll(scroller);
+    }
+    scrollToSpy.mockClear();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    // Neither the maintain pass (re-pin toward the top) nor the bottom-follow may
+    // scroll — the user's just-chosen position is left untouched.
+    await waitFor(() => {
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+  });
 });

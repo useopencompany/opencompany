@@ -588,11 +588,13 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     return () => cancelAnimationFrame(raf);
   }, [snappedMessageId, visibleMessages, hasRunningAssistantMessage, showWaitingForAssistant]);
 
-  // Note: snappedMessageId is intentionally NOT cleared when generation ends.
-  // The spacer is gated on the generation flags so it disappears anyway, and the
-  // stale id is harmless — the next send overwrites it (phase 1) and resets
-  // justSnappedRef so phase 2 re-snaps. This keeps us free of a cascading
-  // setState-in-effect that the React Compiler lint flags.
+  // Note: snappedMessageId is intentionally NOT cleared when generation ends — the
+  // next send overwrites it (phase 1) and resets justSnappedRef so phase 2 re-snaps.
+  // Clearing it in an effect would trip the React Compiler's setState-in-effect lint.
+  // Trade-off: because the spacer is no longer gated on the generation flags (it
+  // stays put across generation-end to avoid a collapse jump), a sub-viewport reply
+  // keeps a reserved-whitespace spacer below it until the next send (ChatGPT-style),
+  // and the spacer/maintain effects keep re-measuring the stale id until then.
 
   // Mark the next scroll events as user-driven. Debounced so a single wheel/touch
   // gesture (incl. its momentum scroll burst) stays flagged, then clears shortly
@@ -667,14 +669,23 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
             // Ignore the programmatic snap & follow scrolls and layout-driven scroll
             // events (spacer shrink, viewport-height changes) — otherwise they reach
             // the bottom threshold and yank the just-snapped message back down.
+            //
+            // "User scroll" is detected via wheel/touch (covers mouse, trackpad and
+            // touch). Keyboard (PageUp/Down, Space) and scrollbar-thumb drag are not
+            // detected here — they cannot be told apart from a layout-driven scroll
+            // without making the container focusable, and on macOS overlay scrollbars
+            // make thumb-drag rare; treated as a known edge.
             if (!userScrollIntentRef.current) return;
             const el = event.currentTarget;
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
             const atBottom = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
             isPinnedAtBottomRef.current = atBottom;
-            // Once the user actually reaches the bottom, the snap is done and the
-            // streaming follow may take over again.
-            if (atBottom) snapInProgressRef.current = false;
+            // ANY genuine user scroll hands control back to the user, so stop pinning
+            // the message to the top. The streaming bottom-follow then only resumes if
+            // the user is actually at the bottom (gated on isPinnedAtBottomRef). This
+            // is what makes "scroll up mid-generation is respected" hold: scrolling up
+            // releases the snap instead of getting re-pinned a frame later.
+            snapInProgressRef.current = false;
           }}
           onDragEnter={(event) => {
             if (!event.dataTransfer.types.includes("Files")) return;
