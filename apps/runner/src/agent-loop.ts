@@ -1185,7 +1185,37 @@ export async function resumeApproval(input: {
     env: input.env,
     ...(input.externalSignal ? { externalSignal: input.externalSignal } : {}),
   });
+  try {
+    return await traceBraintrust(
+      {
+        name: "runner.resume_approval",
+        type: "task",
+        tags: ["runner", "agent-session"],
+        metadata: {
+          run_type: "resume_approval",
+          session_id: input.sessionId,
+          tool_call_id: input.toolCallId,
+          run_lease_id: ctx.leaseId,
+          runner_instance_id: input.env.instanceId,
+        },
+      },
+      (span) => resumeApprovalWithContext(input, ctx, span),
+    );
+  } finally {
+    await flushBraintrust();
+  }
+}
 
+async function resumeApprovalWithContext(
+  input: {
+    sessionId: string;
+    toolCallId: string;
+    env: RunnerEnv;
+    externalSignal?: AbortSignal;
+  },
+  ctx: RunContext,
+  braintrustSpan: BraintrustSpan | undefined,
+) {
   let leaseAcquired = false;
   let outcome = "unknown";
   let modelProvider: string | undefined;
@@ -1220,6 +1250,15 @@ export async function resumeApproval(input: {
     const workspaceId = row.workspace.id;
     const userId = row.session.userId;
     const agentId = row.agent.id;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        agent_path: row.agent.path,
+        session_status: row.session.status,
+      },
+    });
 
     if (
       !(await observeRunStep(ctx, "check_workspace_credits", () =>
@@ -1239,6 +1278,13 @@ export async function resumeApproval(input: {
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        model_provider: modelProvider,
+        model_name: modelName,
+        enabled_tools: runtime.tools,
+      },
+    });
 
     const lease = await observeRunStep(ctx, "acquire_run_lease", () =>
       acquireRunLease({
@@ -1509,10 +1555,12 @@ export async function resumeApproval(input: {
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
       return;
     }
     if (ctx.controller.signal.aborted || error instanceof RunAbortError) {
       outcome = "aborted";
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
       if (leaseAcquired) {
         await failRunLease(
           input.sessionId,
@@ -1525,6 +1573,10 @@ export async function resumeApproval(input: {
       return;
     }
     const message = error instanceof Error ? error.message : "Unknown runner error";
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: { outcome: "failed", tool_call_id: input.toolCallId },
+    });
     if (leaseAcquired) {
       await appendRuntimeEventForLease({
         sessionId: input.sessionId,
