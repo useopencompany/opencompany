@@ -60,6 +60,8 @@ export async function streamAssistantResponse(input: {
       runLeaseOwner: input.ctx.leaseOwner,
       ...input.mcpContext,
       toolStartCoordinator: input.toolStartCoordinator,
+      policy: input.policy,
+      suspendable: input.suspendable,
     }),
   );
   const modelSystem = buildCacheableSystemPrompt(input.system, input.runtime.model.name);

@@ -1,7 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { createMCPClient } from "@ai-sdk/mcp";
-import type { AgentConfig } from "@opencompany/agent-runtime";
-import { resolveToolDecision } from "@opencompany/agent-runtime";
+import { type AgentConfig, policyMapKey, resolveToolDecision } from "@opencompany/agent-runtime";
 import { jsonSchema, type ToolSet } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpToolSet } from "./mcp-tools";
@@ -294,6 +293,43 @@ describe("createMcpToolSet", () => {
     expect(mcpClient.close).toHaveBeenCalled();
   });
 
+  it("annotates discovered Linear MCP tools with effective workspace policy", async () => {
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [{ name: "list_teams" }, { name: "create_issue" }],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      list_teams: {
+        description: "List Linear teams",
+        inputSchema: jsonSchema({ type: "object", properties: {} }),
+        execute: vi.fn(),
+      },
+      create_issue: {
+        description: "Create a Linear issue",
+        inputSchema: jsonSchema({ type: "object", properties: {} }),
+        execute: vi.fn(),
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(
+      baseInput(agentConfig, createToolStartCoordinator(), {
+        policy: new Map([
+          [policyMapKey("linear", "read"), "ask"],
+          [policyMapKey("linear", "post"), "deny"],
+          [policyMapKey("linear", "modify"), "deny"],
+          [policyMapKey("linear", "admin"), "deny"],
+        ]),
+        suspendable: true,
+      }),
+    );
+
+    const tools = mcpTools.tools as Record<string, { description?: string }>;
+    expect(tools.linear__list_teams?.description).toContain("Permission: Read (ask first).");
+    expect(tools.linear__create_issue?.description).toContain("Permission: Post (deny).");
+
+    await mcpTools.close();
+  });
+
   it("logs handled MCP tool failures to Braintrust", async () => {
     const execute = vi.fn(async () => {
       throw new Error("Linear unavailable");
@@ -459,6 +495,10 @@ describe("createMcpToolSet", () => {
 function baseInput(
   config: AgentConfig = agentConfig,
   toolStartCoordinator = createToolStartCoordinator(),
+  policyContext: {
+    policy: Map<string, "allow" | "ask" | "deny">;
+    suspendable: boolean;
+  } = { policy: new Map(), suspendable: true },
 ) {
   return {
     sessionId: "ses_123",
@@ -470,6 +510,8 @@ function baseInput(
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator,
+    policy: policyContext.policy,
+    suspendable: policyContext.suspendable,
   };
 }
 

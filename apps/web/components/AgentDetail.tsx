@@ -1604,8 +1604,7 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
 // flow. Mirrors the picker logic in agent-editor/tools.ts.
 function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"]): AgentTool {
   const connected =
-    (tool.id === "linear" && mcp.linearConfigured) ||
-    (tool.id === "slack" && mcp.slackConfigured);
+    (tool.id === "linear" && mcp.linearConfigured) || (tool.id === "slack" && mcp.slackConfigured);
   if ((tool.id !== "linear" && tool.id !== "slack") || connected) return tool;
   return {
     ...tool,
