@@ -354,10 +354,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         : message.content;
     const canCopy = copyText.trim().length > 0;
     const duration = message.role === "assistant" ? runDurationForMessage(message) : 0;
-    // The run paused at a tool gate: the message persists as `completed`, but it hasn't
-    // actually finished, so suppress the copy + duration footer that would make it read
-    // as a delivered turn.
-    const awaitingApproval = message.role === "assistant" && partsAwaitApproval(assistantParts);
+    // The run paused at a tool gate or on a pending user question: the message persists as
+    // `completed`, but it hasn't actually finished, so suppress the copy + duration footer
+    // that would make an unresolved turn read as a delivered answer.
+    const awaitingInput =
+      message.role === "assistant" &&
+      (partsAwaitApproval(assistantParts) || partsAwaitQuestion(assistantParts));
 
     return (
       <div
@@ -384,7 +386,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           ) : (
             message.content
           )}
-          {canCopy && message.status !== "running" && !awaitingApproval ? (
+          {canCopy && message.status !== "running" && !awaitingInput ? (
             <div
               className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
@@ -1354,6 +1356,12 @@ function extractAssistantText(parts: AssistantTurnPart[]): string {
 function partsAwaitApproval(parts: AssistantTurnPart[]): boolean {
   return parts.some(
     (part) => part.type === "tool-call" && part.toolCall.approval?.status === "required",
+  );
+}
+
+function partsAwaitQuestion(parts: AssistantTurnPart[]): boolean {
+  return parts.some(
+    (part) => part.type === "tool-call" && part.toolCall.question?.status === "pending",
   );
 }
 

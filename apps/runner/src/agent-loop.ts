@@ -1941,24 +1941,28 @@ async function resumeQuestionResponseWithContext(
           internal: false,
         }),
       );
-
-      await requireLeaseWrite(
-        appendRuntimeEventForLease({
-          sessionId: input.sessionId,
-          messageId: suspendedAssistantMessageId,
-          leaseId: ctx.leaseId,
-          leaseOwner: ctx.leaseOwner,
-          type: "question.answered",
-          payload: {
-            messageId: suspendedAssistantMessageId,
-            toolCallId: input.toolCallId,
-            answered: question.status === "answered",
-            answers: question.answers ?? [],
-            resolutionSource: question.resolutionSource ?? "user",
-          },
-        }),
-      );
     }
+
+    // Emit the resolution event unconditionally: the tool-result message and this event are
+    // separate writes, so a resume that crashed between them would otherwise skip the event on
+    // retry (tool result already persisted) and leave the question card stuck `pending` in the
+    // event-derived UI. The reducer keys off toolCallId, so a duplicate event is idempotent.
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: suspendedAssistantMessageId,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "question.answered",
+        payload: {
+          messageId: suspendedAssistantMessageId,
+          toolCallId: input.toolCallId,
+          answered: question.status === "answered",
+          answers: question.answers ?? [],
+          resolutionSource: question.resolutionSource ?? "user",
+        },
+      }),
+    );
 
     if (isQuietDecline) {
       // Park the session exactly as a completed turn would, but WITHOUT generating an assistant

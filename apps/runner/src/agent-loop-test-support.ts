@@ -173,7 +173,11 @@ export function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseW
     },
     async insertSessionQuestion(input, lease) {
       if (!leaseCurrent(lease)) return null;
-      const questions = getState().questions ?? [];
+      // Bind to the actual state reference (seeding it when absent) so the push persists and the
+      // duplicate check below can see prior inserts — `?? []` would mutate a throwaway array.
+      const state = getState();
+      state.questions ??= [];
+      const questions = state.questions;
       if (
         questions.some(
           (question) =>
