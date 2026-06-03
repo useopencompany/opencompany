@@ -246,6 +246,13 @@
       "when": 1780480877756,
       "tag": "0034_uneven_proteus",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1780494083057,
+      "tag": "0035_shocking_christian_walker",
+      "breakpoints": true
     }
   ]
 }
