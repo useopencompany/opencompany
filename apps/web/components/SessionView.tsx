@@ -2157,23 +2157,13 @@ function QuestionComposer({
               />
             ))}
             {current.allowOther ? (
-              <QuestionOptionRow
-                label="Other…"
+              <QuestionOtherOptionRow
                 selected={selection.otherSelected}
+                value={selection.otherText}
                 multiple={current.allowMultiple}
                 disabled={controlsDisabled}
-                onClick={() => chooseOther(safeStep)}
-              />
-            ) : null}
-            {current.allowOther && selection.otherSelected ? (
-              <input
-                type="text"
-                value={selection.otherText}
-                disabled={controlsDisabled}
-                autoFocus
-                placeholder="Type your answer"
-                onChange={(event) => updateSelection(safeStep, { otherText: event.target.value })}
-                className="mt-1 w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-50"
+                onSelect={() => chooseOther(safeStep)}
+                onChange={(otherText) => updateSelection(safeStep, { otherText })}
               />
             ) : null}
           </div>
@@ -2209,6 +2199,24 @@ function QuestionComposer({
   );
 }
 
+function QuestionSelectionMark({
+  selected,
+  multiple,
+}: {
+  selected: boolean;
+  multiple: boolean;
+}) {
+  return (
+    <span
+      className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border text-surface ${
+        multiple ? "rounded-[4px]" : "rounded-full"
+      } ${selected ? "border-ink bg-ink" : "border-border-strong bg-surface"}`}
+    >
+      {selected ? <Check size={9} strokeWidth={3} /> : null}
+    </span>
+  );
+}
+
 function QuestionOptionRow({
   label,
   description,
@@ -2237,13 +2245,7 @@ function QuestionOptionRow({
           : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
       }`}
     >
-      <span
-        className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border text-surface ${
-          multiple ? "rounded-[4px]" : "rounded-full"
-        } ${selected ? "border-ink bg-ink" : "border-border-strong bg-surface"}`}
-      >
-        {selected ? <Check size={9} strokeWidth={3} /> : null}
-      </span>
+      <QuestionSelectionMark selected={selected} multiple={multiple} />
       <span className="min-w-0">
         <span className="block text-[12.5px] font-medium leading-5 text-ink/90">{label}</span>
         {description ? (
@@ -2251,6 +2253,68 @@ function QuestionOptionRow({
         ) : null}
       </span>
     </button>
+  );
+}
+
+function QuestionOtherOptionRow({
+  selected,
+  value,
+  multiple,
+  disabled,
+  onSelect,
+  onChange,
+}: {
+  selected: boolean;
+  value: string;
+  multiple: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div
+      role={multiple ? "checkbox" : "radio"}
+      aria-checked={selected}
+      aria-label="Other answer"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      onClick={() => {
+        if (!disabled) onSelect();
+      }}
+      onKeyDown={(event) => {
+        if (disabled || event.target instanceof HTMLInputElement) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect();
+      }}
+      className={`flex w-full items-start gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-60"
+          : selected
+            ? "cursor-default"
+            : "cursor-pointer hover:border-border-strong hover:bg-surface-hover"
+      } ${selected ? "border-ink/40 bg-ink/[0.04]" : "border-border bg-surface"}`}
+    >
+      <QuestionSelectionMark selected={selected} multiple={multiple} />
+      {selected ? (
+        <input
+          type="text"
+          value={value}
+          disabled={disabled}
+          autoFocus
+          aria-label="Other answer text"
+          placeholder="Type your answer"
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-w-0 flex-1 bg-transparent text-[12.5px] font-medium leading-5 text-ink/90 outline-none placeholder:text-ink-muted disabled:opacity-50"
+        />
+      ) : (
+        <span className="min-w-0">
+          <span className="block text-[12.5px] font-medium leading-5 text-ink/90">Other…</span>
+        </span>
+      )}
+    </div>
   );
 }
 
