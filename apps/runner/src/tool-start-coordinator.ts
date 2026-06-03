@@ -1,4 +1,4 @@
-import type { PermissionGroup } from "@opencompany/agent-runtime";
+import type { DenialSource, PermissionGroup } from "@opencompany/agent-runtime";
 
 export type ToolStartMetadata = {
   toolCallId: string;
@@ -14,7 +14,7 @@ export type ToolStartVerdict = {
   decision: "allow" | "deny" | "suspend";
   providerKey: string;
   group: PermissionGroup;
-  source?: "policy" | "user" | "timeout";
+  source?: DenialSource;
 };
 
 const DEFAULT_VERDICT: ToolStartVerdict = {

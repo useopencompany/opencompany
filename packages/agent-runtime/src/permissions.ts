@@ -8,6 +8,11 @@ export type PermissionGroup = "read" | "post" | "modify" | "admin";
 // in-chat approval; "deny" blocks the tool body from ever running.
 export type PolicyDecision = "allow" | "ask" | "deny";
 
+// Why a tool call was denied. "policy" = explicit workspace deny. "collapsed_ask" = the
+// workspace stance is "ask" but the run is not suspendable (delegated child or background
+// run), so "ask" collapses to "deny". "user" / "timeout" = approval-flow outcomes.
+export type DenialSource = "policy" | "collapsed_ask" | "user" | "timeout";
+
 export const PERMISSION_GROUPS: readonly PermissionGroup[] = ["read", "post", "modify", "admin"];
 
 export const PERMISSION_GROUP_LABELS: Record<PermissionGroup, string> = {
@@ -383,13 +388,35 @@ export function effectivePolicyDecisionForGroup(input: {
   policy: WorkspaceToolPolicyMap;
   suspendable: boolean;
 }): PolicyDecision {
-  let decision =
+  const rawDecision =
     input.policy.get(policyMapKey(input.providerKey, input.group)) ??
     DEFAULT_GROUP_STANCE[input.group];
-  if (!input.suspendable && decision === "ask") {
-    decision = "deny";
+  if (!input.suspendable && rawDecision === "ask") {
+    return "deny";
   }
-  return decision;
+  return rawDecision;
+}
+
+// Like effectivePolicyDecisionForGroup but also returns the denial source so the
+// runner can emit a precise error message distinguishing "collapsed ask" from an
+// explicit "deny". Explicit "allow" policies are respected even in non-suspendable
+// (delegated / background) runs — only the default-ask stance collapses.
+export function resolveGroupDecisionWithSource(input: {
+  providerKey: string;
+  group: PermissionGroup;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
+}): { decision: PolicyDecision; denialSource?: DenialSource } {
+  const rawDecision =
+    input.policy.get(policyMapKey(input.providerKey, input.group)) ??
+    DEFAULT_GROUP_STANCE[input.group];
+  if (!input.suspendable && rawDecision === "ask") {
+    return { decision: "deny", denialSource: "collapsed_ask" };
+  }
+  if (rawDecision === "deny") {
+    return { decision: "deny", denialSource: "policy" };
+  }
+  return { decision: rawDecision };
 }
 
 export function formatWorkspaceToolPolicyContext(input: {
@@ -425,7 +452,7 @@ export function formatWorkspaceToolPolicyContext(input: {
     "Follow these permissions before choosing tools. Denied permissions must not be attempted. If the user's requested outcome requires a denied permission, explain that workspace settings block it. Do not call read or ask-first prerequisite tools only to prepare for an action that is already denied.",
     input.suspendable
       ? "Ask-first permissions may pause the visible session for user approval."
-      : "Ask-first permissions cannot pause this run and are treated as denied.",
+      : "This is an unattended (delegated or background) run that cannot pause for approval. Ask-first permissions are treated as denied for this run. Explicitly allowed permissions (shown as 'allow' below) will proceed normally.",
     ...providerLines.filter((line): line is string => Boolean(line)),
   ].join("\n");
 }
@@ -445,14 +472,20 @@ export type ToolDecision = {
   decision: PolicyDecision;
   providerKey: string;
   group: PermissionGroup;
+  // Set when decision === "deny": distinguishes an explicit workspace deny from an
+  // ask-collapses-to-deny in a non-suspendable (delegated / background) run. The runner
+  // uses this to emit a precise error message so the workspace operator knows an explicit
+  // "allow" policy is the right remediation, not a general settings change.
+  denialSource?: DenialSource;
 };
 
 // The single resolver the runner gate calls per tool call. Ungated tools (system,
 // exa, delegation, tool help) short-circuit to "allow". When `suspendable` is false
 // (delegated children with a parent blocking on them, or after-session/background runs
 // with no resumable user-facing turn), "ask" collapses to "deny" so the run never hangs
-// waiting for an approval that can't be resumed. Suspendable runs keep "ask" and pause
-// durably (see RunSuspendedError).
+// waiting for an approval that can't be resumed. Explicit "allow" policies are honoured
+// even in non-suspendable runs — only the default-ask stance collapses. Suspendable runs
+// keep "ask" and pause durably (see RunSuspendedError).
 export function resolveToolDecision(input: {
   toolName: string;
   policy: WorkspaceToolPolicyMap;
@@ -469,13 +502,15 @@ export function resolveToolDecision(input: {
     return { decision: "allow", providerKey, group };
   }
 
-  const decision = effectivePolicyDecisionForGroup({
+  const { decision, denialSource } = resolveGroupDecisionWithSource({
     providerKey,
     group,
     policy: input.policy,
     suspendable: input.suspendable,
   });
-  return { decision, providerKey, group };
+  return denialSource !== undefined
+    ? { decision, providerKey, group, denialSource }
+    : { decision, providerKey, group };
 }
 
 export type DeniedToolOutput = {
@@ -495,23 +530,36 @@ export function buildDeniedToolOutput(input: {
   toolName: string;
   providerKey: string;
   group: PermissionGroup;
-  source?: "policy" | "user" | "timeout" | undefined;
+  source?: DenialSource | undefined;
 }): DeniedToolOutput {
   const provider =
     PROVIDER_PERMISSION_REGISTRY[input.providerKey]?.displayName ?? input.providerKey;
-  const reason =
-    input.source === "timeout"
-      ? "The approval request timed out without a response"
-      : input.source === "user"
-        ? "The user denied permission"
-        : "The workspace has not granted permission";
+  let reason: string;
+  let remediation: string;
+  switch (input.source) {
+    case "timeout":
+      reason = "The approval request timed out without a response";
+      remediation = "ask the user to enable it in workspace settings, or take a different approach";
+      break;
+    case "user":
+      reason = "The user denied permission";
+      remediation = "take a different approach";
+      break;
+    case "collapsed_ask":
+      reason = `This is an unattended (delegated or background) run and the workspace policy for ${provider} · ${PERMISSION_GROUP_LABELS[input.group]} requires approval (ask-first), which cannot be granted in an unattended context`;
+      remediation = `ask the workspace operator to set an explicit "allow" policy for ${provider} · ${PERMISSION_GROUP_LABELS[input.group]} in workspace settings to enable this action in unattended runs`;
+      break;
+    default:
+      reason = "The workspace has not granted permission";
+      remediation = "ask the user to enable it in workspace settings, or take a different approach";
+  }
   return {
     ok: false,
     denied: true,
     error: {
       code: "permission_denied",
       recoverable: false,
-      message: `${reason} to run "${input.toolName}" (${provider} · ${PERMISSION_GROUP_LABELS[input.group]}). Do not retry this tool. Explain what you intended to do and ask the user to enable it in workspace settings, or take a different approach.`,
+      message: `${reason} to run "${input.toolName}" (${provider} · ${PERMISSION_GROUP_LABELS[input.group]}). Do not retry this tool. Explain what you intended to do and ${remediation}.`,
     },
   };
 }

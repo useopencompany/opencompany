@@ -99,7 +99,7 @@ describe("collectAssistantStream", () => {
     );
   });
 
-  it("collapses an ask decision to deny in a non-suspendable run", async () => {
+  it("collapses an ask decision to deny in a non-suspendable run (top-level behaviour for delegated/background)", async () => {
     const coordinator = createToolStartCoordinator();
     const markStarted = vi.spyOn(coordinator, "markStarted");
     const stream = createStream([
@@ -115,8 +115,99 @@ describe("collectAssistantStream", () => {
 
     expect(markStarted).toHaveBeenCalledWith(
       "call_ask",
-      expect.objectContaining({ decision: "deny", providerKey: "slack", group: "post" }),
+      expect.objectContaining({
+        decision: "deny",
+        providerKey: "slack",
+        group: "post",
+        // The runner must tag this as "collapsed_ask" (not generic "policy") so that
+        // persistDeniedToolResult can surface a useful error: "set explicit allow for
+        // unattended runs" rather than the vague "enable in workspace settings".
+        source: "collapsed_ask",
+      }),
     );
+  });
+
+  it("proceeds with an explicit allow policy in a non-suspendable (delegated/background) run", async () => {
+    // This is the core of the fix: if a workspace operator has explicitly set "allow"
+    // for a write-group action, delegated and background runs must be able to proceed.
+    // The "collapsed_ask" collapse must NOT override an explicit "allow".
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_post",
+        toolName: "slack__chat_postMessage",
+        input: { text: "daily summary" },
+      }),
+    ]);
+
+    await collect(stream, {
+      toolStartCoordinator: coordinator,
+      policy: new Map([["slack:post", "allow"]]),
+      suspendable: false,
+    });
+
+    expect(markStarted).toHaveBeenCalledWith(
+      "call_post",
+      expect.objectContaining({ decision: "allow", providerKey: "slack", group: "post" }),
+    );
+  });
+
+  it("proceeds for GitHub modify and Linear post/modify with explicit allow in non-suspendable run", async () => {
+    // Covers the three action categories called out in the issue: GitHub modify,
+    // Linear modify/post, Slack post. Ensures the collapse doesn't fire for any of them
+    // when the workspace has granted explicit "allow".
+    const cases: Array<{
+      toolName: string;
+      policyKey: string;
+      providerKey: string;
+      group: string;
+    }> = [
+      { toolName: "amp_coder", policyKey: "github:modify", providerKey: "github", group: "modify" },
+      {
+        toolName: "opencode_coder",
+        policyKey: "github:modify",
+        providerKey: "github",
+        group: "modify",
+      },
+      {
+        toolName: "linear__create_issue",
+        policyKey: "linear:post",
+        providerKey: "linear",
+        group: "post",
+      },
+      {
+        toolName: "linear__update_issue",
+        policyKey: "linear:modify",
+        providerKey: "linear",
+        group: "modify",
+      },
+    ];
+
+    for (const { toolName, policyKey, providerKey, group } of cases) {
+      const coordinator = createToolStartCoordinator();
+      const markStarted = vi.spyOn(coordinator, "markStarted");
+      const stream = createStream([
+        streamPart({
+          type: "tool-call",
+          toolCallId: `call_${toolName}`,
+          toolName,
+          input: {},
+        }),
+      ]);
+
+      await collect(stream, {
+        toolStartCoordinator: coordinator,
+        policy: new Map([[policyKey, "allow"]]),
+        suspendable: false,
+      });
+
+      expect(markStarted).toHaveBeenCalledWith(
+        `call_${toolName}`,
+        expect.objectContaining({ decision: "allow", providerKey, group }),
+      );
+    }
   });
 
   it("suspends the run at an ask gate in a suspendable run", async () => {

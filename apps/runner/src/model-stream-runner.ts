@@ -251,7 +251,7 @@ export async function collectAssistantStream(input: {
         // Evaluate the workspace permission policy for this tool call. This is the
         // hard gate: the tool's execute() is parked on waitForStarted() and only the
         // verdict we attach via markStarted() decides whether the real body runs.
-        const { decision, providerKey, group } = resolveToolDecision({
+        const { decision, providerKey, group, denialSource } = resolveToolDecision({
           toolName: toolStart.name,
           policy: input.policy,
           suspendable: input.suspendable,
@@ -335,11 +335,14 @@ export async function collectAssistantStream(input: {
             },
           }),
         );
+        // Pass the specific denial source so persistDeniedToolResult can emit a precise
+        // error message. For allowed tools denialSource is undefined — that's fine, the
+        // field is only used when decision === "deny".
         input.toolStartCoordinator.markStarted(part.toolCallId, {
           decision,
           providerKey,
           group,
-          source: "policy",
+          source: denialSource ?? "policy",
         });
 
         assistantReplayParts.push(toolCallReplayPart);
