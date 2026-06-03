@@ -45,7 +45,10 @@ export function buildOnboardingKickoffPrompt(input: OnboardingKickoffInput): str
   lines.push("", "Can you help me set up OpenCompany? Ask me whatever you need to get started.");
 
   if (input.companyUrl) {
-    lines.push("", "I've linked my company above — feel free to take a quick look first so you have context.");
+    lines.push(
+      "",
+      "I've linked my company above — feel free to take a quick look first so you have context.",
+    );
   }
 
   return lines.join("\n");
