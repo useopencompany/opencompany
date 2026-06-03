@@ -1,171 +1,9 @@
 {
-  "id": "98be7a14-cacd-4595-854d-c93de1568c76",
-  "prevId": "b0aebacf-c624-410e-a73b-9a1136236bcc",
+  "id": "b58fa313-1271-41b6-a346-6a2d952e5df3",
+  "prevId": "98be7a14-cacd-4595-854d-c93de1568c76",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.agent_file_sync_jobs": {
-      "name": "agent_file_sync_jobs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'upsert'"
-        },
-        "desired_hash": {
-          "name": "desired_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_path": {
-          "name": "previous_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_blob_sha": {
-          "name": "previous_blob_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_run_at": {
-          "name": "next_run_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "agent_file_sync_jobs_workspace_idx": {
-          "name": "agent_file_sync_jobs_workspace_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_file_sync_jobs_workspace_path_idx": {
-          "name": "agent_file_sync_jobs_workspace_path_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "path",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_file_sync_jobs_next_run_at_idx": {
-          "name": "agent_file_sync_jobs_next_run_at_idx",
-          "columns": [
-            {
-              "expression": "next_run_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agent_file_sync_jobs_workspace_id_workspaces_id_fk": {
-          "name": "agent_file_sync_jobs_workspace_id_workspaces_id_fk",
-          "tableFrom": "agent_file_sync_jobs",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.agent_files": {
       "name": "agent_files",
       "schema": "",
@@ -213,12 +51,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "github_blob_sha": {
-          "name": "github_blob_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "github_commit_sha": {
           "name": "github_commit_sha",
@@ -2903,159 +2735,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.agent_sync_jobs": {
-      "name": "agent_sync_jobs",
-      "schema": "",
-      "columns": {
-        "agent_id": {
-          "name": "agent_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "desired_hash": {
-          "name": "desired_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "desired_version": {
-          "name": "desired_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "previous_path": {
-          "name": "previous_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_blob_sha": {
-          "name": "previous_blob_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_run_at": {
-          "name": "next_run_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "agent_sync_jobs_workspace_idx": {
-          "name": "agent_sync_jobs_workspace_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_sync_jobs_next_run_at_idx": {
-          "name": "agent_sync_jobs_next_run_at_idx",
-          "columns": [
-            {
-              "expression": "next_run_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agent_sync_jobs_agent_id_agents_id_fk": {
-          "name": "agent_sync_jobs_agent_id_agents_id_fk",
-          "tableFrom": "agent_sync_jobs",
-          "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agent_sync_jobs_workspace_id_workspaces_id_fk": {
-          "name": "agent_sync_jobs_workspace_id_workspaces_id_fk",
-          "tableFrom": "agent_sync_jobs",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.agent_tool_approvals": {
       "name": "agent_tool_approvals",
       "schema": "",
@@ -3301,12 +2980,6 @@
           "notNull": true,
           "default": 1
         },
-        "github_blob_sha": {
-          "name": "github_blob_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "github_commit_sha": {
           "name": "github_commit_sha",
           "type": "text",
@@ -3468,12 +3141,6 @@
           "notNull": true,
           "default": 0
         },
-        "github_blob_sha": {
-          "name": "github_blob_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "github_commit_sha": {
           "name": "github_commit_sha",
           "type": "text",
@@ -3562,168 +3229,6 @@
         "brain_files_workspace_id_workspaces_id_fk": {
           "name": "brain_files_workspace_id_workspaces_id_fk",
           "tableFrom": "brain_files",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.brain_sync_jobs": {
-      "name": "brain_sync_jobs",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operation": {
-          "name": "operation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'upsert'"
-        },
-        "desired_hash": {
-          "name": "desired_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_path": {
-          "name": "previous_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "previous_blob_sha": {
-          "name": "previous_blob_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "attempts": {
-          "name": "attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_run_at": {
-          "name": "next_run_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "brain_sync_jobs_workspace_idx": {
-          "name": "brain_sync_jobs_workspace_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "brain_sync_jobs_workspace_path_idx": {
-          "name": "brain_sync_jobs_workspace_path_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "path",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "brain_sync_jobs_next_run_at_idx": {
-          "name": "brain_sync_jobs_next_run_at_idx",
-          "columns": [
-            {
-              "expression": "next_run_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "brain_sync_jobs_workspace_id_workspaces_id_fk": {
-          "name": "brain_sync_jobs_workspace_id_workspaces_id_fk",
-          "tableFrom": "brain_sync_jobs",
           "tableTo": "workspaces",
           "columnsFrom": [
             "workspace_id"
@@ -6003,6 +5508,95 @@
         "workspace_repositories_workspace_id_workspaces_id_fk": {
           "name": "workspace_repositories_workspace_id_workspaces_id_fk",
           "tableFrom": "workspace_repositories",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.workspace_sync_jobs": {
+      "name": "workspace_sync_jobs",
+      "schema": "",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_run_at": {
+          "name": "next_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "workspace_sync_jobs_next_run_at_idx": {
+          "name": "workspace_sync_jobs_next_run_at_idx",
+          "columns": [
+            {
+              "expression": "next_run_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "workspace_sync_jobs_workspace_id_workspaces_id_fk": {
+          "name": "workspace_sync_jobs_workspace_id_workspaces_id_fk",
+          "tableFrom": "workspace_sync_jobs",
           "tableTo": "workspaces",
           "columnsFrom": [
             "workspace_id"

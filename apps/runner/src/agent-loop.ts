@@ -64,6 +64,8 @@ import {
   finalizeRun,
   observeRunStep,
   type RunContext,
+  recordSandboxUsageBestEffort,
+  type SandboxBillingSnapshot,
 } from "./run-context";
 import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
 import { MessageTurnFailedError, RunSuspendedError } from "./runner-errors";
@@ -82,6 +84,7 @@ import {
   loadSession,
   loadUserMessage,
   optionalUserContext,
+  resolveSandboxBilling,
   setStatus,
 } from "./session-lifecycle";
 import {
@@ -617,6 +620,7 @@ async function suspendRunForInput(input: {
   ctx: RunContext;
   row: LoadedSession;
   sandbox: SandboxHandle | null;
+  sandboxBilling: SandboxBillingSnapshot | null;
   assistantMessageId: string;
   error: RunSuspendedError;
 }) {
@@ -658,6 +662,12 @@ async function suspendRunForInput(input: {
       payload: { status, message },
     }),
   );
+  // Bill the sandbox active window while the lease is still held (see executeStreamingTurn).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxBilling,
+  });
   await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, status));
 }
 
@@ -718,6 +728,7 @@ async function executeStreamingTurn(input: {
         ctx,
         row,
         sandbox: sandboxAcquirer.current,
+        sandboxBilling: sandboxAcquirer.billingSnapshot(),
         assistantMessageId,
         error,
       });
@@ -821,6 +832,14 @@ async function executeStreamingTurn(input: {
   await requireLeaseWrite(input.appendCompletedEvent());
 
   if (input.beforeRelease) await input.beforeRelease();
+
+  // Bill the sandbox active window before releasing the lease: recordSandboxUsage is
+  // lease-guarded, so it must run while we still own the lease (finalizeRun is too late).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxAcquirer.billingSnapshot(),
+  });
 
   await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
 
@@ -2114,6 +2133,9 @@ async function runDelegatedChildMessage(input: {
 type SandboxAcquirer = {
   get: () => Promise<SandboxHandle>;
   readonly current: SandboxHandle | null;
+  // The active-runtime window for billing: present only once the sandbox has been
+  // hydrated (resumed) during this run. Null for chat-only turns that never touch it.
+  billingSnapshot: () => SandboxBillingSnapshot | null;
 };
 
 function createSandboxAcquirer(input: {
@@ -2127,6 +2149,8 @@ function createSandboxAcquirer(input: {
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
   let sandboxPromise: Promise<SandboxHandle> | null = null;
+  let hydratedAt: Date | null = null;
+  const billing = resolveSandboxBilling(input.row, input.env);
 
   const get = async () => {
     if (sandbox) return sandbox;
@@ -2167,6 +2191,7 @@ function createSandboxAcquirer(input: {
         throw new StaleRunLeaseError();
       }
       sandbox = hydrated;
+      hydratedAt = new Date();
       input.onHydrated(hydrated);
       return hydrated;
     })().catch((error) => {
@@ -2181,6 +2206,16 @@ function createSandboxAcquirer(input: {
     get,
     get current() {
       return sandbox;
+    },
+    billingSnapshot() {
+      if (!sandbox || !hydratedAt) return null;
+      return {
+        sandboxId: sandbox.sandboxId,
+        hydratedAt,
+        template: billing.template,
+        vcpu: billing.vcpu,
+        ramMib: billing.ramMib,
+      };
     },
   };
 }

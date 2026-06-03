@@ -50,6 +50,7 @@ export type SessionCostSummary = {
   totalCostUsdMicros: number;
   modelCostUsdMicros: number;
   toolCostUsdMicros: number;
+  sandboxCostUsdMicros: number;
 };
 
 export type SessionRuntimeState = {
@@ -217,6 +218,13 @@ export function applyRuntimeEventToState(
     }
   }
 
+  if (event.type === "session.sandbox_usage") {
+    next = {
+      ...next,
+      cost: addCostSummary(next.cost, event.payload, "sandbox"),
+    };
+  }
+
   if (event.type === "session.delegated_usage") {
     const usage = isRecord(event.payload.usage) ? event.payload.usage : {};
     const cost = isRecord(event.payload.cost) ? event.payload.cost : {};
@@ -340,6 +348,7 @@ export function emptyCostSummary(): SessionCostSummary {
     totalCostUsdMicros: 0,
     modelCostUsdMicros: 0,
     toolCostUsdMicros: 0,
+    sandboxCostUsdMicros: 0,
   };
 }
 
@@ -362,7 +371,7 @@ function addUsageSummary(
 function addCostSummary(
   totals: SessionCostSummary,
   payload: Record<string, unknown>,
-  kind: "model" | "tool",
+  kind: "model" | "tool" | "sandbox",
 ): SessionCostSummary {
   const providerCostUsdMicros = readNumber(
     payload.providerCostUsdMicros ?? (kind === "tool" ? payload.costUsdMicros : 0),
@@ -378,6 +387,8 @@ function addCostSummary(
     totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
     modelCostUsdMicros: totals.modelCostUsdMicros + (kind === "model" ? totalCostUsdMicros : 0),
     toolCostUsdMicros: totals.toolCostUsdMicros + (kind === "tool" ? totalCostUsdMicros : 0),
+    sandboxCostUsdMicros:
+      totals.sandboxCostUsdMicros + (kind === "sandbox" ? totalCostUsdMicros : 0),
   };
 }
 
@@ -396,6 +407,7 @@ function addCostRollup(
     totalCostUsdMicros: totals.totalCostUsdMicros + totalCostUsdMicros,
     modelCostUsdMicros: totals.modelCostUsdMicros + readNumber(payload.modelCostUsdMicros),
     toolCostUsdMicros: totals.toolCostUsdMicros + readNumber(payload.toolCostUsdMicros),
+    sandboxCostUsdMicros: totals.sandboxCostUsdMicros + readNumber(payload.sandboxCostUsdMicros),
   };
 }
 

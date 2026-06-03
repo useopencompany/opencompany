@@ -602,6 +602,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       totalCostUsdMicros: 0,
       modelCostUsdMicros: 0,
       toolCostUsdMicros: 0,
+      sandboxCostUsdMicros: 0,
       providerCostUsdMicros: 0,
       platformFeeUsdMicros: 0,
     },
