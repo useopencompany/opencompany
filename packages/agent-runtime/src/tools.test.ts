@@ -44,6 +44,24 @@ describe("AGENT_TOOL_CATALOG", () => {
         requiresAttachedRepository: true,
       }),
     );
+
+    const opencode = AGENT_TOOL_DEFINITION_BY_ID.get("opencode");
+    expect(opencode?.credentialSource).toBe("mixed");
+    expect(opencode?.requiredPlatformEnvVars).toEqual(["VERCEL_AI_GATEWAY_API_KEY"]);
+    expect(opencode?.requiredWorkspaceResource).toBeUndefined();
+    const opencodeRuntimeTools = (opencode?.runtimeTools ?? []).map((name) =>
+      RUNTIME_TOOL_DEFINITION_BY_NAME.get(name),
+    );
+    expect(opencodeRuntimeTools).toContainEqual(
+      expect.objectContaining({
+        name: "opencode_coder",
+        configToolId: "opencode",
+      }),
+    );
+    expect(
+      opencodeRuntimeTools.find((tool) => tool?.name === "opencode_coder")
+        ?.requiresAttachedRepository,
+    ).toBeUndefined();
   });
 
   it("exposes Amp modes on amp_coder", () => {
@@ -256,6 +274,19 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     expect(
       resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
     ).not.toContain("amp_coder");
+  });
+
+  it("enables opencode_coder when opencode is selected, even without an attached repository", () => {
+    const opencodeTool = { id: "opencode" };
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [opencodeTool] })).toContain(
+      "opencode_coder",
+    );
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [opencodeTool], repositories: [repo] }),
+    ).toContain("opencode_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
+    ).not.toContain("opencode_coder");
   });
 
   it("adds delegate_to_agent only when delegatable agents are present", () => {

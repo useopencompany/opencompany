@@ -171,11 +171,11 @@ export function toConfigTool(
   tool: AgentToolDefinition,
   overrides: Partial<AgentCodingToolConfig> = {},
 ): AgentConfigTool {
-  if (tool.id === "amp") {
+  if (tool.id === "amp" || tool.id === "opencode") {
     return {
-      id: "amp",
+      id: tool.id,
       type: "coding_agent",
-      provider: "amp",
+      provider: tool.id,
       label: tool.label,
       description: tool.description,
       prCapable: overrides.prCapable ?? tool.prCapableDefault ?? true,

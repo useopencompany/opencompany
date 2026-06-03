@@ -236,9 +236,33 @@ Skill-enabled tools are enabled by agent skill configuration:
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
+- `opencode_coder` when `@opencode` is enabled and bound to a connected GitHub work repository
 
-AMP owns its coding checkout and may clone the selected connected repository directly into `work/`
-for that tool run.
+These coding-agent harnesses own their coding checkout and may clone the selected connected
+repository directly into `work/` for that tool run. They share the repo-clone, diff, draft-PR,
+artifact, and secret-redaction plumbing in `apps/runner/src/coding-agent-shared.ts`.
+
+opencode runs headless as `opencode run --format json` inside the same coding sandbox template.
+It is configured to reach the platform's Vercel AI Gateway through a generated `opencode.json`
+(custom `@ai-sdk/openai-compatible` provider, `OPENCODE_CONFIG` env), so it reuses the existing
+`VERCEL_AI_GATEWAY_API_KEY` rather than provisioning raw provider keys into the sandbox. The model
+is chosen per tool call via the optional `model` argument (validated against `AGENT_MODEL_CATALOG`),
+defaulting to a fixed platform model when omitted. Cost is recorded from opencode's reported token
+usage; dollar attribution is tracked through gateway spend (opencode has no per-run cost API).
+
+> Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
+> stdio). A future iteration can run harnesses through an in-runner ACP client to surface their
+> individual tool calls and permission requests through the existing approval gate, and to bring
+> additional harnesses (Claude Code, Codex, Gemini) the same way. Phase 1 intentionally uses the
+> simpler one-shot `opencode run` path that mirrors AMP.
+
+Both harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
+`opencode` CLI is made available defensively: `opencode-tool.ts` checks for the binary and installs
+it on demand if missing, so the tool works on the current template without a rebuild. The durable
+option is to bake opencode into `OPENCOMPANY_AMP_E2B_TEMPLATE` — either via the installer or by
+basing that image on e2b's prebuilt `opencode` template and layering `git`/`gh`/`amp` on top. We do
+not point the runner directly at e2b's stock `opencode` template because a session uses one template
+and still needs `gh`/`amp` for the other tools.
 
 Experimental MCP tools are enabled by workspace setup plus agent configuration:
 

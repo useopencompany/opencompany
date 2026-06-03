@@ -43,6 +43,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import { runOpencodeCoderTool } from "./opencode-tool";
 import {
   RunAbortError,
   type RunControlCheck,
@@ -395,6 +396,32 @@ async function executeRuntimeToolWithTracing(input: {
           usage = ampResult.usage;
         }
         return ampResult;
+      }
+      if (input.definition.name === "opencode_coder") {
+        if (!input.workspaceId || !input.agentConfig) {
+          throw new Error("opencode requires workspace and agent configuration context.");
+        }
+        const opencodeResult = await runOpencodeCoderTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          workspaceId: input.workspaceId,
+          toolCallId: input.toolCallId,
+          agentConfig: input.agentConfig,
+          env: input.env,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          onOutput: async (delta) => {
+            await input.checkAbort();
+            commandOutput.push("stdout", delta);
+          },
+        });
+        if (opencodeResult.usage) {
+          usage = opencodeResult.usage;
+        }
+        return opencodeResult;
       }
       const brainSnapshotBefore =
         input.definition.name === "shell"

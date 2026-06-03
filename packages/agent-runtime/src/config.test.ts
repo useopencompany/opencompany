@@ -148,6 +148,38 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).not.toContain("Attached GitHub repositories");
   });
 
+  it("explains opencode can target public GitHub repositories without an attached repository", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "opencode agent",
+      instructions: "@opencode",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [
+        {
+          id: "opencode",
+          type: "coding_agent",
+          provider: "opencode",
+          label: "opencode",
+          description: "Delegate coding work to opencode inside an E2B sandbox.",
+          prCapable: true,
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("opencode_coder");
+    expect(resolved.systemPrompt).toContain(
+      "opencode can work without an attached GitHub repository when the user provides a public GitHub owner/repo",
+    );
+    expect(resolved.systemPrompt).toContain(
+      "Public repositories are cloned without workspace GitHub credentials",
+    );
+  });
+
   it("enables hosted runtime tools from selected agent config tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",
