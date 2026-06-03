@@ -316,13 +316,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
   const showStoppedAfterUser =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
-  // The last turn is "active" only while a reply is being awaited or streamed (or the
-  // user just sent). The reserved min-height below the turn is applied only then, so a
-  // settled / freshly-opened conversation does not carry a half-viewport void under its
-  // last bubble — the reserve exists to give a just-sent message room to snap to the top,
-  // which is meaningless once the turn is complete.
-  const activeTurn =
-    showWaitingForAssistant || hasRunningAssistantMessage || lastVisibleMessage?.role === "user";
   // Abort stays available while paused so the user can cancel a parked run without
   // having to approve or deny the pending tool call first.
   const canAbort = sessionCanGenerate || sessionIsPaused;
@@ -832,15 +825,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain px-8 lg:px-12 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-8 lg:px-12 py-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {
-            // Only a genuine user scroll (flagged by the wheel/touch/pointer handlers
-            // above) updates the pinned-at-bottom state. Programmatic scrolls (snap +
-            // follow) and layout-driven scrolls (reflow, overflow-anchor) fire onScroll
-            // too, but without user intent — ignoring them is what keeps the snapped
-            // message at the top instead of being yanked away by the follow.
+            // Only a genuine user scroll (flagged by the wheel/touch handlers above)
+            // updates the pinned-at-bottom state. Programmatic scrolls (snap + follow),
+            // layout-driven scrolls (reflow, overflow-anchor) and non-scroll pointer
+            // interactions fire onScroll too, but without user intent — ignoring them is
+            // what keeps the snapped message at the top instead of being yanked by the
+            // follow. (Scrollbar-drag / keyboard scroll without wheel is an accepted edge.)
             if (!userScrollIntentRef.current) return;
             const el = event.currentTarget;
             const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -936,7 +930,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             <div
               className="space-y-5"
               style={
-                lastUserTurnStart >= 0 && activeTurn
+                lastUserTurnStart >= 0
                   ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
                   : undefined
               }

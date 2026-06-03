@@ -1279,12 +1279,10 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       </QueryClientProvider>,
     );
 
-    // The bottom-auto-scroll must NOT fire after the snap (snapInProgress + not
-    // pinned). No scroll-to-bottom (behavior "auto") should override the snap.
+    // The bottom-follow must NOT fire after the one-shot snap (the snap sets
+    // isPinnedAtBottom=false). No scroll-to-bottom should override the snap.
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
+      // A bottom-follow scrolls toward scrollHeight (≥ clientHeight 800).
       const followedToBottom = scrollToSpy.mock.calls.some(
         ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
       );
@@ -1394,8 +1392,8 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
 
     // The user scrolls UP to read: a real wheel gesture landing FAR from the bottom
     // (distanceFromBottom = 1000 - 0 - 800 = 200 > SCROLL_BOTTOM_THRESHOLD_PX). This
-    // must hand control to the user — releasing the snap so the maintain pass does NOT
-    // yank the message back to the top on the next streamed render.
+    // leaves isPinnedAtBottom false, so the streaming follow does NOT yank the message
+    // back to the bottom on the next streamed render.
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
       get: () => 1000,
@@ -1411,8 +1409,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       </QueryClientProvider>,
     );
 
-    // Neither the maintain pass (re-pin toward the top) nor the bottom-follow may
-    // scroll — the user's just-chosen position is left untouched.
+    // The bottom-follow must not scroll — the user's just-chosen position is untouched.
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     });
