@@ -33,6 +33,7 @@ import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/action
 import {
   archiveSidebarSessionOptimistically,
   fetchSidebarSessions,
+  GENERATABLE_SESSION_STATUSES,
   SESSIONS_QUERY_STALE_TIME_MS,
   type SidebarSessionPayload,
   sessionQueryKeys,
@@ -51,7 +52,10 @@ const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 // Query also pauses the interval automatically while the tab is hidden.
 const SIDEBAR_ACTIVE_POLL_MS = 2_000;
 const SIDEBAR_WATCH_POLL_MS = 6_000;
-const SIDEBAR_WATCHED_STATUSES = new Set(["created", "provisioning", "ready", "running"]);
+// Statuses whose row can still change, so the sidebar keeps polling them at the watch
+// cadence. The generatable set (shared with SessionView via payload.ts) plus
+// awaiting_approval, whose amber dot would otherwise go stale in the background.
+const SIDEBAR_WATCHED_STATUSES = new Set([...GENERATABLE_SESSION_STATUSES, "awaiting_approval"]);
 // Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 // How long the red highlight shows on a session row before it is optimistically removed.

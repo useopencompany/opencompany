@@ -60,6 +60,7 @@ import {
   applyRuntimeEventToSessionDetail,
   fetchAgentSession,
   fetchSessionStreamCredential,
+  GENERATABLE_SESSION_STATUSES,
   invalidateRelatedCachesForSessionEvent,
   mergeAgentSessionDetail,
   SESSIONS_QUERY_STALE_TIME_MS,
@@ -304,8 +305,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
   const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
   const sessionCanGenerate =
-    !runtime.lastError &&
-    ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
+    !runtime.lastError && GENERATABLE_SESSION_STATUSES.has(runtime.currentStatus);
   // The run has durably parked at a tool gate: the session status is `awaiting_approval`
   // (not `running`) and the assistant message is already persisted as `completed`. The
   // approval card + paused tail still need to render off this signal.

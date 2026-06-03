@@ -1005,6 +1005,14 @@ describe("sidebar session active indicator", () => {
     expect(isSidebarSessionActive("ready", true, true)).toBe(false);
   });
 
+  it("never lights the dot for an errored session, even with a running status", () => {
+    // hasError gates the whole result — a running/provisioning status with a lingering
+    // error must not show active, so the sidebar agrees with SessionView (which gates
+    // sessionCanGenerate on !lastError) instead of contradicting it.
+    expect(isSidebarSessionActive("running", false, true)).toBe(false);
+    expect(isSidebarSessionActive("provisioning", true, true)).toBe(false);
+  });
+
   it("projects active=true from a detail with a running assistant message and stale status", () => {
     const projected = sidebarSessionFromDetail(
       detail({

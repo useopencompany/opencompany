@@ -34,22 +34,31 @@ export type SidebarSessionPayload = {
 const ACTIVE_SESSION_STATUSES = new Set(["running", "provisioning"]);
 // Statuses from which a session can still be producing output. Mirrors
 // SessionView's `sessionCanGenerate`, so the sidebar dot agrees with the main
-// panel's "working" indicator.
-const GENERATABLE_SESSION_STATUSES = new Set(["created", "provisioning", "ready", "running"]);
+// panel's "working" indicator. Exported as the single source of truth so callers
+// (Sidebar polling, SessionView) share it instead of re-listing the literal.
+export const GENERATABLE_SESSION_STATUSES = new Set([
+  "created",
+  "provisioning",
+  "ready",
+  "running",
+]);
 
 // A session is "active" (green dot) when it is genuinely working: its status is
 // running/provisioning, or an assistant message is still streaming in a session
 // that could actually be generating. The message signal hardens the indicator
 // against a stale persisted status (the root cause of the dot going missing for
-// working sessions); the `canGenerate` guard keeps an orphaned "running" message
-// left behind by a failed/aborted/archived session from lighting the dot.
+// working sessions). An errored session is never active — `hasError` gates the whole
+// result, mirroring SessionView's `sessionCanGenerate` (`!lastError`) so the dot
+// agrees with the main panel and an orphaned "running" message left behind by a
+// failed/aborted/archived session never lights the dot.
 export function isSidebarSessionActive(
   status: string,
   hasRunningAssistantMessage: boolean,
   hasError: boolean,
 ): boolean {
+  if (hasError) return false;
   if (ACTIVE_SESSION_STATUSES.has(status)) return true;
-  return hasRunningAssistantMessage && !hasError && GENERATABLE_SESSION_STATUSES.has(status);
+  return hasRunningAssistantMessage && GENERATABLE_SESSION_STATUSES.has(status);
 }
 
 export type AgentSessionPayload = {
