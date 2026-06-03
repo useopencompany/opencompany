@@ -2,10 +2,11 @@
 
 ## Vercel AI Gateway
 
-**What it is:** Model gateway for routing calls to providers such as OpenAI and Anthropic.
+**What it is:** Model gateway for routing calls to model providers.
 
 **What it does for us:** Gives the runner one gateway credential and provider-neutral model IDs for
-agent runs. The model catalog currently exposes OpenAI GPT and Anthropic Claude fast/deep choices.
+agent runs. The exact catalog changes over time; `packages/agent-runtime/src/models.ts` is the
+source of truth for current fast/deep model choices.
 
 **Where it is used:**
 
@@ -44,7 +45,7 @@ normalization without each model provider needing bespoke runner code.
 **Reconsider if:** We need lower-level streaming/tool control than the SDK provides, or billing
 usage needs cannot be normalized reliably through it.
 
-## OpenAI and Anthropic
+## Gateway model providers
 
 **What they are:** AI model providers exposed through Vercel AI Gateway.
 
@@ -58,8 +59,8 @@ runner. The exact model IDs change more often than this register should; keep
 - `apps/web/lib/agents/config.ts`.
 - `apps/web/components/agent-editor/tools.ts`.
 
-**Why we use them:** We want at least two high-quality provider families so agents can choose fast
-or deep behavior without the product being locked to one model vendor.
+**Why we use them:** We want multiple high-quality provider families so agents can choose fast or
+deep behavior without the product being locked to one model vendor.
 
 **Owner:** AI Platform.
 
@@ -118,6 +119,64 @@ configuration level.
 **Reconsider if:** Search quality, latency, cost, coverage, compliance, or citation needs are better
 served by another search provider or by first-party browser/fetch infrastructure.
 
+## X API
+
+**What it is:** Official API for reading public X posts, profiles, timelines, discussions, and
+trends.
+
+**What it does for us:** Powers the optional `@x` hosted agent tool. Agents can search public posts,
+inspect profiles, read recent user timelines, explore a post's replies and quote posts, and fetch
+location-based trends without scraping or browser automation.
+
+**Where it is used:**
+
+- `packages/agent-runtime/src/tools.ts`.
+- `apps/runner/src/hosted-tools.ts`.
+- `apps/web/components/agent-editor/tools.ts`.
+- `X_API_BEARER_TOKEN` in `.env.example`.
+
+**Why we use it:** Agents need direct access to X's public conversation for research and social
+listening. Using the official API keeps the first version stable, auditable, and aligned with X's
+developer terms.
+
+**Status:** Optional. Agents can run without X unless they enable `@x`.
+
+**Owner:** AI Platform.
+
+**Reconsider if:** Official API cost, rate limits, coverage, compliance requirements, or customer
+credential needs make workspace-owned credentials or another licensed data provider a better fit.
+
+## Supadata (YouTube, TikTok, Instagram)
+
+**What it is:** A hosted API for YouTube search, YouTube video/channel metadata, universal social
+media metadata, and — most importantly — video transcripts, with AI-generated transcription as a
+fallback when a video has no captions.
+
+**What it does for us:** Powers the optional `@youtube`, `@tiktok`, and `@instagram` hosted agent
+tools. Agents can search YouTube, read a video's transcript as text (so the model can "watch" it),
+inspect YouTube video/channel metadata, enumerate a channel's recent uploads, and inspect/read
+public TikTok and Instagram media via Supadata's universal metadata and transcript endpoints.
+
+**Where it is used:**
+
+- `packages/agent-runtime/src/tools.ts`.
+- `apps/runner/src/hosted-tools.ts`.
+- `apps/web/components/agent-editor/tools.ts`.
+- `SUPADATA_API_KEY` in `.env.example`.
+
+**Why we use it:** The official YouTube Data API cannot return transcripts for arbitrary videos
+(captions download requires OAuth and only works for videos you own), and open-source transcript
+scrapers are blocked from datacenter IPs. Supadata gives reliable server-side transcripts plus
+search and metadata behind one `x-api-key` GET API, matching the existing hosted-tool pattern.
+
+**Status:** Optional. Agents can run without Supadata unless they enable `@youtube`, `@tiktok`, or
+`@instagram`. Comments are not covered — Supadata has no comments endpoint.
+
+**Owner:** AI Platform.
+
+**Reconsider if:** Transcript reliability, cost, coverage (e.g. comments), or compliance needs make
+another provider or first-party infrastructure a better fit.
+
 ## Runtime tools
 
 A runtime tool is a callable capability exposed to the model during a session. Integrations are the
@@ -128,20 +187,39 @@ Core tools are always available to runner sessions:
 
 - `shell`
 - `read_file`
+- `read_skill`
 - `edit_file`
 - `write_file`
 - `list_files`
 - `git_diff`
 - `tool_help`
 
-Sandbox sessions do not clone the managed workspace repository. `work/` is an empty git repository
-for session-local scratch changes, and configured Brain files are mounted separately under `brain/`.
+Sandbox sessions do not clone the managed workspace repository. `work/` is an empty scratch git
+repository for session-local changes, and configured Brain files are mounted separately under
+`brain/`. Connected GitHub repositories are lazy: `gh` metadata commands can run before clone, but
+code/file edits should clone the target repository into `work/<repo>` first. With one attached
+repository the runner sets `GH_REPO`; with multiple attached repositories, `gh` commands must pass
+`--repo owner/repo`.
 
 Hosted tools are enabled by agent configuration:
 
 - `exa_search`
 - `exa_contents`
 - `exa_answer`
+- `x_search_posts`
+- `x_get_profile`
+- `x_get_user_posts`
+- `x_get_discussion`
+- `x_get_trends`
+- `youtube_search`
+- `youtube_get_video`
+- `youtube_get_transcript`
+- `youtube_get_channel`
+- `youtube_list_channel_videos`
+- `tiktok_get_metadata`
+- `tiktok_get_transcript`
+- `instagram_get_metadata`
+- `instagram_get_transcript`
 - `web_fetch`
 
 Internal delegation tools are enabled by agent configuration:
@@ -149,9 +227,18 @@ Internal delegation tools are enabled by agent configuration:
 - `delegate_to_agent` when the agent references other workspace agents; it can start an inspectable
   child session hidden from sidebar history or continue one of its own prior child sessions by `sessionId`
 
+Skill-enabled tools are enabled by agent skill configuration:
+
+- `read_skill` reads mounted skill files from the read-only `skills/<id>/` tree
+- `update_agent_file` when the agent enables `agent-self-edit`; it validates and persists changes to
+  the agent's own `.agent` configuration and queues GitHub sync
+
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
+
+AMP owns its coding checkout and may clone the selected connected repository directly into `work/`
+for that tool run.
 
 Experimental MCP tools are enabled by workspace setup plus agent configuration:
 

@@ -1,7 +1,6 @@
 import {
   type AgentConfigDerivationRepository,
   deriveAgentConfigFromBody,
-  SUPPORTED_AGENT_MODELS,
   SUPPORTED_AGENT_TOOLS,
 } from "@opencompany/agent-runtime";
 import type {
@@ -16,9 +15,6 @@ import { asRecord, sanitizeTiptapDoc, type TiptapNode } from "./tiptap";
 
 const TOOL_ID_BY_LABEL = new Map(
   SUPPORTED_AGENT_TOOLS.map((tool) => [tool.label.toLowerCase(), tool.id]),
-);
-const MODEL_ID_BY_LABEL = new Map(
-  SUPPORTED_AGENT_MODELS.map((model) => [model.label.toLowerCase(), model.id]),
 );
 
 export { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@opencompany/agent-runtime";
@@ -131,9 +127,7 @@ function mentionDisplayText(attrs: Record<string, unknown> | null) {
 
   const label = typeof attrs?.label === "string" ? attrs.label.trim() : "";
   const normalizedLabel = label.toLowerCase();
-  return (
-    TOOL_ID_BY_LABEL.get(normalizedLabel) ?? MODEL_ID_BY_LABEL.get(normalizedLabel) ?? (label || id)
-  );
+  return TOOL_ID_BY_LABEL.get(normalizedLabel) ?? (label || id);
 }
 
 function gitHubRepositoryBindingFromValue(value: unknown): AgentGitHubRepositoryBinding | null {

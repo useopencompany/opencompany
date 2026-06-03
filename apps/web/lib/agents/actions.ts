@@ -2,6 +2,9 @@
 
 import {
   type AgentConfigPatch,
+  agentBundleDir,
+  agentPathForSlug,
+  agentSlugFromPath,
   collectBodyRepositoryMentions,
   deriveAgentConfigFromBody,
   normalizeAgentBody,
@@ -12,6 +15,8 @@ import type { AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentFileSyncJobs,
+  agentFiles,
   agentSessions,
   agentSyncJobs,
   agents,
@@ -25,6 +30,7 @@ import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   derivePreviewConfigFromTiptapDoc,
   extractPreferredGitHubRepositoriesFromTiptapDoc,
@@ -37,15 +43,21 @@ import {
   prepareAgentSyncJobUpsert,
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
+import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
+import { selectCanonicalAgentRepositoryFiles } from "@/lib/agents/paths";
 import {
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
   normalizeAgentConfig,
   serializeAgentDetail,
 } from "@/lib/agents/payload";
-import { resolveAgentSyncRename } from "@/lib/agents/sync-job";
+import {
+  agentFileSyncJobUpsert,
+  prepareAgentBundleFileMoves,
+  resolveAgentSyncRename,
+} from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
 import {
@@ -125,8 +137,12 @@ export async function updateAgent(
     config?: AgentConfigPatch;
   },
 ) {
+  // A rename with an empty/whitespace-only name should not override the stored
+  // name. Treat blank patch.name the same as a missing name (no rename intent).
+  const trimmedName = patch.name?.trim();
+  const effectiveName = trimmedName ? trimmedName : undefined;
   const trace = startTimingTrace("agents.update", {
-    hasName: typeof patch.name === "string",
+    hasName: effectiveName !== undefined,
     hasBody: typeof patch.body === "string",
     hasModel: typeof patch.model === "string",
     hasConfig: Boolean(patch.config),
@@ -135,7 +151,7 @@ export async function updateAgent(
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
   const changedFields: Array<"name" | "body" | "model" | "config"> = [];
-  if (typeof patch.name === "string") changedFields.push("name");
+  if (effectiveName !== undefined) changedFields.push("name");
   if (typeof patch.body === "string") changedFields.push("body");
   if (patch.content && !changedFields.includes("body")) changedFields.push("body");
   if (typeof patch.model === "string") changedFields.push("model");
@@ -169,9 +185,13 @@ export async function updateAgent(
   }
 
   const currentConfig = normalizeAgentConfig(agent.config);
-  const title = patch.name ?? agent.name;
+  const title = effectiveName ?? agent.name;
+  const currentSlug = agent.path ? agentSlugFromPath(agent.path) : null;
+  const canonicalCurrentPath = currentSlug ? agentPathForSlug(currentSlug) : null;
   const path =
-    typeof patch.name === "string" || !agent.path
+    effectiveName !== undefined ||
+    !agent.path ||
+    Boolean(canonicalCurrentPath && agent.path !== canonicalCurrentPath)
       ? await timeAsync(trace, "db.nextAvailableAgentPath", () =>
           nextAvailableAgentPath(db, workspace.id, title, agent.path),
         )
@@ -257,6 +277,7 @@ export async function updateAgent(
       ? extractPreferredGitHubRepositoriesFromTiptapDoc(sanitizedContent, derivationRepositories)
       : []),
   ];
+  const requestedTriggers = patch.config?.triggers ?? currentConfig.triggers;
   const derivedFromTiptap = sanitizedContent
     ? derivePreviewConfigFromTiptapDoc({
         title,
@@ -265,7 +286,7 @@ export async function updateAgent(
         repositories: derivationRepositories,
         agents: workspaceAgentReferences,
         preferredRepositories: savedPreferredRepositories,
-        triggers: currentConfig.triggers,
+        triggers: requestedTriggers,
       })
     : null;
   // The .agent body is the product contract and the source for runtime config.
@@ -280,7 +301,7 @@ export async function updateAgent(
           repositories: derivationRepositories,
           agents: workspaceAgentReferences,
           preferredRepositories,
-          triggers: currentConfig.triggers,
+          triggers: requestedTriggers,
         })
       : derivedFromTiptap;
   warnOnBodyTiptapMismatch({
@@ -325,6 +346,44 @@ export async function updateAgent(
     renamePreviousPath: pathChanged ? previousPath : null,
     renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
   });
+  // Only plan bundle-file moves when previousPath is a validated bundle path.
+  // A legacy single-file path (e.g. "agents/leo.agent") resolves via
+  // agentBundleDir to the workspace root ("agents"), which would otherwise
+  // re-path unrelated bundle files into the new folder.
+  const previousBundleDir =
+    previousPath && agentSlugFromPath(previousPath) ? agentBundleDir(previousPath) : null;
+  const nextBundleDir = agentBundleDir(path);
+  const bundleFileMoves =
+    previousBundleDir && previousBundleDir !== nextBundleDir
+      ? await timeAsync(trace, "db.prepareAgentBundleFileMoves", async () => {
+          const [files, existingFileSyncJobs] = await Promise.all([
+            db
+              .select({
+                id: agentFiles.id,
+                path: agentFiles.path,
+                contentHash: agentFiles.contentHash,
+                githubBlobSha: agentFiles.githubBlobSha,
+              })
+              .from(agentFiles)
+              .where(eq(agentFiles.workspaceId, workspace.id)),
+            db
+              .select({
+                path: agentFileSyncJobs.path,
+                previousPath: agentFileSyncJobs.previousPath,
+                previousBlobSha: agentFileSyncJobs.previousBlobSha,
+              })
+              .from(agentFileSyncJobs)
+              .where(eq(agentFileSyncJobs.workspaceId, workspace.id)),
+          ]);
+
+          return prepareAgentBundleFileMoves({
+            files,
+            existingFileSyncJobs,
+            oldBundleDir: previousBundleDir,
+            newBundleDir: nextBundleDir,
+          });
+        })
+      : [];
   const syncJob = prepareAgentSyncJobUpsert(db, {
     agentId: agent.id,
     workspaceId: workspace.id,
@@ -335,6 +394,7 @@ export async function updateAgent(
     previousBlobSha: rename.previousBlobSha,
   });
 
+  const now = new Date();
   await timeAsync(trace, "db.updateAgentAndSyncJob", () =>
     db.batch([
       db
@@ -349,14 +409,55 @@ export async function updateAgent(
           config: parsed.config,
           githubSyncStatus: "pending",
           githubSyncError: null,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+      ...bundleFileMoves.map((move) =>
+        db
+          .update(agentFiles)
+          .set({
+            path: move.path,
+            githubBlobSha: null,
+            githubCommitSha: null,
+            githubSyncedHash: null,
+            githubSyncedAt: null,
+            githubSyncStatus: "pending",
+            githubSyncError: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(agentFiles.id, move.fileId),
+              eq(agentFiles.workspaceId, workspace.id),
+              eq(agentFiles.path, move.previousPath),
+            ),
+          ),
+      ),
       syncJob.query,
+      ...bundleFileMoves.map((move) =>
+        agentFileSyncJobUpsert(db, {
+          workspaceId: workspace.id,
+          path: move.path,
+          operation: "upsert",
+          desiredHash: move.contentHash,
+          previousPath: move.rename.previousPath,
+          previousBlobSha: move.rename.previousBlobSha,
+        }),
+      ),
+      ...bundleFileMoves.map((move) =>
+        db
+          .delete(agentFileSyncJobs)
+          .where(
+            and(
+              eq(agentFileSyncJobs.workspaceId, workspace.id),
+              eq(agentFileSyncJobs.path, move.previousPath),
+            ),
+          ),
+      ),
     ]),
   );
   logAgentSyncJobQueued(syncJob.metadata);
-  const [[updatedAgent], brainPathRows, mcpSettings] = await Promise.all([
+  const [[updatedAgent], brainPathRows, bundleFileRows, mcpSettings] = await Promise.all([
     timeAsync(trace, "db.selectUpdatedAgent", () =>
       db
         .select()
@@ -371,9 +472,17 @@ export async function updateAgent(
         .where(eq(brainFiles.workspaceId, workspace.id))
         .orderBy(asc(brainFiles.path)),
     ),
+    timeAsync(trace, "db.selectAgentBundleFiles", () =>
+      db
+        .select()
+        .from(agentFiles)
+        .where(and(eq(agentFiles.workspaceId, workspace.id), eq(agentFiles.agentId, agent.id)))
+        .orderBy(asc(agentFiles.path)),
+    ),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
   ]);
   const brainPaths = brainPathRows.map((row) => row.path);
+  const bundleFiles = serializeAgentBundleFiles(path, bundleFileRows);
 
   if (changedFields.length > 0) {
     await captureServerEvent("agent_saved", user.id, {
@@ -401,6 +510,7 @@ export async function updateAgent(
             linearConfigured: mcpSettings.linear.configured,
             slackConfigured: mcpSettings.slack.configured,
           },
+          bundleFiles,
         )
       : null,
   };
@@ -414,6 +524,12 @@ export async function updateAgent(
     workspaceId: workspace.id,
     path,
   });
+  for (const move of bundleFileMoves) {
+    scheduleAgentFileSyncDispatch({
+      workspaceId: workspace.id,
+      path: move.path,
+    });
+  }
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
 }
@@ -516,6 +632,33 @@ export async function deleteAgent(
             }),
           { path: agent.path },
         );
+
+        // Bundle-backed agents can have synced files (e.g. agent/memory.md)
+        // tracked in agentFiles. Delete the whole bundle so no private agent
+        // state lingers in the repo after the DB row is removed. Each delete is
+        // 404-safe, so a retry after a partial failure stays idempotent.
+        const bundleFiles = await timeAsync(trace, "db.selectAgentBundleFiles", () =>
+          db
+            .select({ path: agentFiles.path, githubBlobSha: agentFiles.githubBlobSha })
+            .from(agentFiles)
+            .where(and(eq(agentFiles.agentId, agent.id), eq(agentFiles.workspaceId, workspace.id))),
+        );
+        for (const file of bundleFiles) {
+          if (file.path === agent.path) continue;
+          await timeAsync(
+            trace,
+            "github.deleteWorkspaceFile",
+            () =>
+              deleteWorkspaceFile({
+                db,
+                repository,
+                path: file.path,
+                message: `Delete ${file.path}`,
+                blobSha: file.githubBlobSha,
+              }),
+            { path: file.path },
+          );
+        }
       } catch (err) {
         captureException(err, {
           event: "opencompany.agent_delete_github_failed",
@@ -530,7 +673,11 @@ export async function deleteAgent(
           path: agent.path,
           error: err instanceof Error ? err.message : String(err),
         });
-        endTimingTrace(trace, { found: true, path: agent.path, githubDeleted: false });
+        endTimingTrace(trace, {
+          found: true,
+          path: agent.path,
+          githubDeleted: false,
+        });
         return {
           ok: false,
           error:
@@ -724,8 +871,9 @@ export async function syncAgentsFromWorkspaceRepository() {
   const files = await timeAsync(trace, "github.listWorkspaceAgentFiles", () =>
     listWorkspaceAgentFiles({ repository }),
   );
+  const canonicalFiles = selectCanonicalAgentRepositoryFiles(files);
 
-  for (const file of files) {
+  for (const file of canonicalFiles) {
     const { content, sha } = await timeAsync(
       trace,
       "github.readWorkspaceFile",
@@ -753,12 +901,22 @@ export async function syncAgentsFromWorkspaceRepository() {
       "db.selectAgentByPath",
       () =>
         db
-          .select({ id: agents.id })
+          .select({ id: agents.id, path: agents.path, version: agents.version })
           .from(agents)
-          .where(and(eq(agents.workspaceId, workspace.id), eq(agents.path, file.path)))
+          .where(
+            and(
+              eq(agents.workspaceId, workspace.id),
+              file.legacyPath
+                ? or(eq(agents.path, file.canonicalPath), eq(agents.path, file.legacyPath))
+                : eq(agents.path, file.canonicalPath),
+            ),
+          )
           .limit(1),
-      { path: file.path },
+      { path: file.canonicalPath },
     );
+    const shouldCanonicalize = Boolean(file.previousPath);
+    const pathChangedInDb = Boolean(existing && existing.path !== file.canonicalPath);
+    const nextVersion = (existing?.version ?? 0) + (shouldCanonicalize || pathChangedInDb ? 1 : 0);
 
     if (existing) {
       await timeAsync(
@@ -768,6 +926,7 @@ export async function syncAgentsFromWorkspaceRepository() {
           db
             .update(agents)
             .set({
+              path: file.canonicalPath,
               name: parsed.title,
               body: parsed.body,
               commitSha: sha ?? file.sha,
@@ -776,25 +935,47 @@ export async function syncAgentsFromWorkspaceRepository() {
               githubCommitSha: null,
               githubSyncedHash: contentHash,
               githubSyncedAt: new Date(),
-              githubSyncStatus: "synced",
+              githubSyncStatus: shouldCanonicalize ? "pending" : "synced",
               githubSyncError: null,
               config: parsed.config,
+              version: nextVersion,
               updatedAt: new Date(),
             })
             .where(and(eq(agents.id, existing.id), eq(agents.workspaceId, workspace.id))),
-        { path: file.path },
+        { path: file.canonicalPath },
       );
+      if (shouldCanonicalize) {
+        const syncJob = prepareAgentSyncJobUpsert(db, {
+          agentId: existing.id,
+          workspaceId: workspace.id,
+          path: file.canonicalPath,
+          desiredHash: contentHash,
+          desiredVersion: nextVersion,
+          previousPath: file.previousPath,
+          previousBlobSha: sha ?? file.sha,
+        });
+        await timeAsync(trace, "db.upsertCanonicalAgentSyncJob", () => syncJob.query, {
+          path: file.canonicalPath,
+        });
+        logAgentSyncJobQueued(syncJob.metadata);
+        scheduleAgentSyncDispatch({
+          id: existing.id,
+          workspaceId: workspace.id,
+          path: file.canonicalPath,
+        });
+      }
       continue;
     }
 
+    const id = newAgentId();
     await timeAsync(
       trace,
       "db.insertAgent",
       () =>
         db.insert(agents).values({
-          id: newAgentId(),
+          id,
           workspaceId: workspace.id,
-          path: file.path,
+          path: file.canonicalPath,
           name: parsed.title,
           body: parsed.body,
           commitSha: sha ?? file.sha,
@@ -802,15 +983,35 @@ export async function syncAgentsFromWorkspaceRepository() {
           githubBlobSha: sha ?? file.sha,
           githubSyncedHash: contentHash,
           githubSyncedAt: new Date(),
-          githubSyncStatus: "synced",
+          githubSyncStatus: shouldCanonicalize ? "pending" : "synced",
           config: parsed.config,
         }),
-      { path: file.path },
+      { path: file.canonicalPath },
     );
+    if (shouldCanonicalize) {
+      const syncJob = prepareAgentSyncJobUpsert(db, {
+        agentId: id,
+        workspaceId: workspace.id,
+        path: file.canonicalPath,
+        desiredHash: contentHash,
+        desiredVersion: 1,
+        previousPath: file.previousPath,
+        previousBlobSha: sha ?? file.sha,
+      });
+      await timeAsync(trace, "db.upsertCanonicalAgentSyncJob", () => syncJob.query, {
+        path: file.canonicalPath,
+      });
+      logAgentSyncJobQueued(syncJob.metadata);
+      scheduleAgentSyncDispatch({
+        id,
+        workspaceId: workspace.id,
+        path: file.canonicalPath,
+      });
+    }
   }
 
   revalidatePath("/agents");
-  endTimingTrace(trace, { count: files.length });
+  endTimingTrace(trace, { count: canonicalFiles.length });
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

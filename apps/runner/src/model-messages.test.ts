@@ -131,6 +131,153 @@ describe("buildModelMessages", () => {
     expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
   });
 
+  it("pairs an assistant tool call with a tool result persisted by a later resume run", () => {
+    // Suspend/resume splits one logical turn across two runner runs: the suspend run
+    // persists the assistant message ending in the pending tool-call, and the resume run
+    // (after approval) persists the tool-result. buildModelMessages reads ordered session
+    // rows and is agnostic to which run wrote each row, so the pairing must still hold.
+    const assistant = buildAssistantModelMessage({
+      content: "I'll open the issue.",
+      parts: [
+        { type: "text", text: "I'll open the issue." },
+        {
+          type: "tool-call",
+          toolCallId: "call_ask",
+          toolName: "linear__create_issue",
+          input: { title: "Bug" },
+        },
+      ],
+    });
+    const tool = buildToolModelMessage({
+      toolCallId: "call_ask",
+      toolName: "linear__create_issue",
+      output: { id: "ISS-1" },
+    });
+
+    const messages = buildModelMessages([
+      { id: "msg_user", role: "user", content: "Open an issue.", modelMessage: null },
+      {
+        id: "msg_assistant_suspended",
+        role: "assistant",
+        content: "I'll open the issue.",
+        modelMessage: toPersistedModelMessage(assistant),
+      },
+      // Persisted by the resume run, not the suspend run.
+      {
+        id: "msg_tool_resumed",
+        role: "tool",
+        content: JSON.stringify({ id: "ISS-1" }),
+        modelMessage: toPersistedModelMessage(tool),
+      },
+    ]);
+
+    expect(messages).toEqual([{ role: "user", content: "Open an issue." }, assistant, tool]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
+  it("drops a still-suspended assistant tool call when no result is persisted yet", () => {
+    // While suspended (or after an abort while paused) the assistant message ends in a
+    // dangling tool-call with no tool-result. buildModelMessages strips that tool-call,
+    // keeping the assistant text, so a later turn never sends the provider a tool_use with
+    // no matching tool_result. (The normal resume path persists the result first, so the
+    // tool-call is kept and paired.)
+    const assistant = buildAssistantModelMessage({
+      content: "I'll open the issue.",
+      parts: [
+        { type: "text", text: "I'll open the issue." },
+        {
+          type: "tool-call",
+          toolCallId: "call_ask",
+          toolName: "linear__create_issue",
+          input: { title: "Bug" },
+        },
+      ],
+    });
+
+    const messages = buildModelMessages([
+      { id: "msg_user", role: "user", content: "Open an issue.", modelMessage: null },
+      {
+        id: "msg_assistant_suspended",
+        role: "assistant",
+        content: "I'll open the issue.",
+        modelMessage: toPersistedModelMessage(assistant),
+      },
+    ]);
+
+    expect(messages).toEqual([
+      { role: "user", content: "Open an issue." },
+      { role: "assistant", content: "I'll open the issue." },
+    ]);
+  });
+
+  it("preserves assistant reasoning parts when replaying tool-call turns", () => {
+    const assistant = buildAssistantModelMessage({
+      content: "Done.",
+      parts: [
+        { type: "reasoning", text: "Need to inspect the file first." },
+        {
+          type: "tool-call",
+          toolCallId: "call_123",
+          toolName: "read_file",
+          input: { path: "README.md" },
+        },
+        { type: "text", text: "Done." },
+      ],
+    });
+    const tool = buildToolModelMessage({
+      toolCallId: "call_123",
+      toolName: "read_file",
+      output: { content: "Project docs" },
+    });
+
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_1",
+        role: "user",
+        content: "Read the docs.",
+        modelMessage: { role: "user", content: "Read the docs." },
+      },
+      {
+        id: "msg_assistant_1",
+        role: "assistant",
+        content: "Done.",
+        modelMessage: toPersistedModelMessage(assistant),
+      },
+      {
+        id: "msg_tool_1",
+        role: "tool",
+        content: JSON.stringify({ content: "Project docs" }),
+        modelMessage: toPersistedModelMessage(tool),
+      },
+      {
+        id: "msg_user_2",
+        role: "user",
+        content: "Continue.",
+        modelMessage: { role: "user", content: "Continue." },
+      },
+    ]);
+
+    expect(messages).toEqual([
+      { role: "user", content: "Read the docs." },
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Need to inspect the file first." },
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "read_file",
+            input: { path: "README.md" },
+          },
+        ],
+      },
+      tool,
+      { role: "assistant", content: "Done." },
+      { role: "user", content: "Continue." },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
   it("falls back to basic text history for legacy rows without model messages", () => {
     expect(
       buildModelMessages([
@@ -214,6 +361,24 @@ describe("buildAssistantModelMessage", () => {
       content: [
         { type: "text", text: "AB" },
         { type: "tool-call", toolCallId: "call_abc", toolName: "list_files", input: {} },
+      ],
+    });
+  });
+
+  it("keeps AI SDK reasoning parts even without tools", () => {
+    expect(
+      buildAssistantModelMessage({
+        content: "Done",
+        parts: [
+          { type: "reasoning", text: "Checked the constraints." },
+          { type: "text", text: "Done" },
+        ],
+      }),
+    ).toEqual({
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "Checked the constraints." },
+        { type: "text", text: "Done" },
       ],
     });
   });

@@ -16,9 +16,13 @@ export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
 }
 
 export function readReasoningTextDelta(part: TextStreamPart<ToolSet> | Record<string, unknown>) {
-  if (part.type !== "reasoning" && part.type !== "reasoning-delta") return "";
-  if (typeof part.text === "string") return part.text;
-  if ("delta" in part && typeof part.delta === "string") return part.delta;
+  if (part.type === "reasoning" || part.type === "reasoning-delta") {
+    if (typeof part.text === "string") return part.text;
+    if ("delta" in part && typeof part.delta === "string") return part.delta;
+    return "";
+  }
+
+  if (part.type === "raw") return readRawReasoningContent(part.rawValue);
   return "";
 }
 
@@ -58,4 +62,22 @@ function toStreamError(error: unknown, fallback: string) {
   }
 
   return new Error(fallback);
+}
+
+function readRawReasoningContent(value: unknown): string {
+  if (!isRecord(value)) return "";
+  const choices = value.choices;
+  if (!Array.isArray(choices)) return "";
+  return choices
+    .map((choice) => {
+      if (!isRecord(choice)) return "";
+      const delta = choice.delta;
+      if (!isRecord(delta)) return "";
+      return typeof delta.reasoning_content === "string" ? delta.reasoning_content : "";
+    })
+    .join("");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

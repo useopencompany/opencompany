@@ -1,4 +1,5 @@
 import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
@@ -37,12 +38,9 @@ export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "di
 
 export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
 
-export type WorkspaceIntegrationCredentialEncryptedPayload = {
-  algorithm: "aes-256-gcm";
-  iv: string;
-  ciphertext: string;
-  authTag: string;
-};
+// Canonical encrypted-payload shape lives in @opencompany/crypto; aliased here so the
+// jsonb column annotations and existing importers keep their familiar name.
+export type WorkspaceIntegrationCredentialEncryptedPayload = EncryptedPayload;
 
 export const users = pgTable(
   "users",
@@ -197,6 +195,39 @@ export const brainFiles = pgTable(
   }),
 );
 
+export const agentFiles = pgTable(
+  "agent_files",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    content: text("content").notNull().default(""),
+    contentHash: text("content_hash").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    githubBlobSha: text("github_blob_sha"),
+    githubCommitSha: text("github_commit_sha"),
+    githubSyncedHash: text("github_synced_hash"),
+    githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
+    githubSyncStatus: text("github_sync_status").notNull().default("pending"),
+    githubSyncError: text("github_sync_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agent_files_workspace_idx").on(table.workspaceId),
+    agentIdx: index("agent_files_agent_idx").on(table.agentId),
+    workspacePathIdx: uniqueIndex("agent_files_workspace_path_idx").on(
+      table.workspaceId,
+      table.path,
+    ),
+  }),
+);
+
 export const brainSyncJobs = pgTable(
   "brain_sync_jobs",
   {
@@ -223,6 +254,40 @@ export const brainSyncJobs = pgTable(
       table.path,
     ),
     nextRunAtIdx: index("brain_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+  }),
+);
+
+// Mirrors brainSyncJobs: keyed on (workspaceId, path) with no per-agent FK.
+// Deleting an agent does not cascade-delete its pending file sync jobs; any
+// orphaned job self-cleans on its next run via the "missing-file" path in
+// materializeAgentFileToGitHub. This keeps the sync-job design uniform with
+// brainSyncJobs rather than coupling jobs to the agents table.
+export const agentFileSyncJobs = pgTable(
+  "agent_file_sync_jobs",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    operation: text("operation").notNull().default("upsert"),
+    desiredHash: text("desired_hash"),
+    previousPath: text("previous_path"),
+    previousBlobSha: text("previous_blob_sha"),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agent_file_sync_jobs_workspace_idx").on(table.workspaceId),
+    workspacePathIdx: uniqueIndex("agent_file_sync_jobs_workspace_path_idx").on(
+      table.workspaceId,
+      table.path,
+    ),
+    nextRunAtIdx: index("agent_file_sync_jobs_next_run_at_idx").on(table.nextRunAt),
   }),
 );
 
@@ -292,6 +357,59 @@ export const agentSessions = pgTable(
   }),
 );
 
+export const sessionStars = pgTable(
+  "session_stars",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    starredAt: timestamp("starred_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userSessionIdx: uniqueIndex("session_stars_user_session_idx").on(table.userId, table.sessionId),
+    sessionIdx: index("session_stars_session_idx").on(table.sessionId),
+  }),
+);
+
+export const agentScheduleRuns = pgTable(
+  "agent_schedule_runs",
+  {
+    id: serial("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    triggerId: text("trigger_id").notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("pending"),
+    reservationToken: text("reservation_token"),
+    pendingExpiresAt: timestamp("pending_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("agent_schedule_runs_workspace_idx").on(table.workspaceId),
+    agentIdx: index("agent_schedule_runs_agent_idx").on(table.agentId),
+    scheduledForIdx: index("agent_schedule_runs_scheduled_for_idx").on(table.scheduledFor),
+    idempotencyIdx: uniqueIndex("agent_schedule_runs_idempotency_idx").on(
+      table.agentId,
+      table.triggerId,
+      table.scheduledFor,
+    ),
+    statusCheck: check(
+      "agent_schedule_runs_status_check",
+      sql`${table.status} IN ('pending', 'started', 'failed')`,
+    ),
+  }),
+);
+
 export const agentSessionBrainMounts = pgTable(
   "agent_session_brain_mounts",
   {
@@ -315,6 +433,35 @@ export const agentSessionBrainMounts = pgTable(
     sessionIdx: index("agent_session_brain_mounts_session_idx").on(table.sessionId),
     workspaceIdx: index("agent_session_brain_mounts_workspace_idx").on(table.workspaceId),
     sessionPathIdx: uniqueIndex("agent_session_brain_mounts_session_path_idx").on(
+      table.sessionId,
+      table.path,
+    ),
+  }),
+);
+
+export const agentSessionBundleMounts = pgTable(
+  "agent_session_bundle_mounts",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    requestedPath: text("requested_path").notNull(),
+    path: text("path").notNull(),
+    referenceType: text("reference_type").notNull().default("file"),
+    baseHash: text("base_hash"),
+    lastSyncedHash: text("last_synced_hash"),
+    status: text("status").notNull().default("mounted"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_bundle_mounts_session_idx").on(table.sessionId),
+    workspaceIdx: index("agent_session_bundle_mounts_workspace_idx").on(table.workspaceId),
+    sessionPathIdx: uniqueIndex("agent_session_bundle_mounts_session_path_idx").on(
       table.sessionId,
       table.path,
     ),
@@ -396,9 +543,11 @@ export const agentSessionRunJobs = pgTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => agentSessionMessages.id, {
-      onDelete: "cascade",
-    }),
+    // No FK to agent_session_messages: this column is overloaded by job kind. message/
+    // title/after_session jobs store a message id, `resume_approval` jobs store the
+    // tool_call_id (its idempotency key is resume_approval:{sessionId}:{toolCallId}), and
+    // `start` jobs leave it null. Cleanup still cascades via the session_id FK.
+    messageId: text("message_id"),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
@@ -422,7 +571,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'title', 'after_session')`,
+      sql`${table.kind} IN ('start', 'message', 'title', 'after_session', 'resume_approval')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",
@@ -937,6 +1086,91 @@ export const workspaceMcpCredentials = pgTable(
   }),
 );
 
+export const workspaceToolPolicies = pgTable(
+  "workspace_tool_policies",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    providerKey: text("provider_key").notNull(),
+    permissionGroup: text("permission_group")
+      .$type<"read" | "post" | "modify" | "admin">()
+      .notNull(),
+    decision: text("decision").$type<"allow" | "ask" | "deny">().notNull(),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderGroupIdx: uniqueIndex("workspace_tool_policies_ws_provider_group_idx").on(
+      table.workspaceId,
+      table.providerKey,
+      table.permissionGroup,
+    ),
+    workspaceIdx: index("workspace_tool_policies_workspace_idx").on(table.workspaceId),
+    groupCheck: check(
+      "workspace_tool_policies_group_check",
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+    ),
+    decisionCheck: check(
+      "workspace_tool_policies_decision_check",
+      sql`${table.decision} IN ('allow', 'ask', 'deny')`,
+    ),
+  }),
+);
+
+export const agentToolApprovals = pgTable(
+  "agent_tool_approvals",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id"),
+    toolCallId: text("tool_call_id").notNull(),
+    toolName: text("tool_name").notNull(),
+    providerKey: text("provider_key").notNull(),
+    permissionGroup: text("permission_group")
+      .$type<"read" | "post" | "modify" | "admin">()
+      .notNull(),
+    status: text("status").$type<"pending" | "approved" | "denied">().notNull().default("pending"),
+    inputPreview: text("input_preview"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decisionSource: text("decision_source").$type<"user" | "timeout" | "abort">(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionToolCallIdx: uniqueIndex("agent_tool_approvals_session_tool_call_idx").on(
+      table.sessionId,
+      table.toolCallId,
+    ),
+    sessionStatusIdx: index("agent_tool_approvals_session_status_idx").on(
+      table.sessionId,
+      table.status,
+    ),
+    groupCheck: check(
+      "agent_tool_approvals_group_check",
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+    ),
+    statusCheck: check(
+      "agent_tool_approvals_status_check",
+      sql`${table.status} IN ('pending', 'approved', 'denied')`,
+    ),
+    decisionSourceCheck: check(
+      "agent_tool_approvals_decision_source_check",
+      sql`${table.decisionSource} IS NULL OR ${table.decisionSource} IN ('user', 'timeout', 'abort')`,
+    ),
+  }),
+);
+
 export const agentSessionArtifacts = pgTable(
   "agent_session_artifacts",
   {
@@ -992,6 +1226,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
   agentSessions: many(agentSessions),
+  sessionStars: many(sessionStars),
   onboardingResponses: many(onboardingResponses),
   creditLedger: many(workspaceCreditLedger),
   stripeCheckoutSessions: many(stripeCheckoutSessions),
@@ -1008,6 +1243,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   agentSyncJobs: many(agentSyncJobs),
   brainFiles: many(brainFiles),
   brainSyncJobs: many(brainSyncJobs),
+  agentFiles: many(agentFiles),
+  agentFileSyncJobs: many(agentFileSyncJobs),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   creditBalance: one(workspaceCreditBalances, {
@@ -1038,6 +1275,7 @@ export const agentsRelations = relations(agents, ({ one, many }) => ({
     fields: [agents.id],
     references: [agentSyncJobs.agentId],
   }),
+  files: many(agentFiles),
   sessions: many(agentSessions),
 }));
 
@@ -1048,9 +1286,27 @@ export const brainFilesRelations = relations(brainFiles, ({ one }) => ({
   }),
 }));
 
+export const agentFilesRelations = relations(agentFiles, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [agentFiles.workspaceId],
+    references: [workspaces.id],
+  }),
+  agent: one(agents, {
+    fields: [agentFiles.agentId],
+    references: [agents.id],
+  }),
+}));
+
 export const brainSyncJobsRelations = relations(brainSyncJobs, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [brainSyncJobs.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const agentFileSyncJobsRelations = relations(agentFileSyncJobs, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [agentFileSyncJobs.workspaceId],
     references: [workspaces.id],
   }),
 }));
@@ -1079,8 +1335,21 @@ export const agentSessionsRelations = relations(agentSessions, ({ one, many }) =
   usage: many(agentSessionUsage),
   toolUsage: many(agentSessionToolUsage),
   brainMounts: many(agentSessionBrainMounts),
+  bundleMounts: many(agentSessionBundleMounts),
   artifacts: many(agentSessionArtifacts),
   runJobs: many(agentSessionRunJobs),
+  stars: many(sessionStars),
+}));
+
+export const sessionStarsRelations = relations(sessionStars, ({ one }) => ({
+  user: one(users, {
+    fields: [sessionStars.userId],
+    references: [users.id],
+  }),
+  session: one(agentSessions, {
+    fields: [sessionStars.sessionId],
+    references: [agentSessions.id],
+  }),
 }));
 
 export const agentSessionBrainMountsRelations = relations(agentSessionBrainMounts, ({ one }) => ({
@@ -1090,6 +1359,17 @@ export const agentSessionBrainMountsRelations = relations(agentSessionBrainMount
   }),
   workspace: one(workspaces, {
     fields: [agentSessionBrainMounts.workspaceId],
+    references: [workspaces.id],
+  }),
+}));
+
+export const agentSessionBundleMountsRelations = relations(agentSessionBundleMounts, ({ one }) => ({
+  session: one(agentSessions, {
+    fields: [agentSessionBundleMounts.sessionId],
+    references: [agentSessions.id],
+  }),
+  workspace: one(workspaces, {
+    fields: [agentSessionBundleMounts.workspaceId],
     references: [workspaces.id],
   }),
 }));
@@ -1351,10 +1631,15 @@ export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
 export type CreditCode = typeof creditCodes.$inferSelect;
 export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
 export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
+export type AgentScheduleRun = typeof agentScheduleRuns.$inferSelect;
 export type BrainFile = typeof brainFiles.$inferSelect;
 export type BrainSyncJob = typeof brainSyncJobs.$inferSelect;
+export type AgentFile = typeof agentFiles.$inferSelect;
+export type AgentFileSyncJob = typeof agentFileSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
+export type SessionStar = typeof sessionStars.$inferSelect;
 export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect;
+export type AgentSessionBundleMount = typeof agentSessionBundleMounts.$inferSelect;
 export type AgentSessionMessage = typeof agentSessionMessages.$inferSelect;
 export type AgentSessionEvent = typeof agentSessionEvents.$inferSelect;
 export type AgentSessionUsage = typeof agentSessionUsage.$inferSelect;
@@ -1364,3 +1649,5 @@ export type AgentSessionRunJob = typeof agentSessionRunJobs.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;
+export type WorkspaceToolPolicy = typeof workspaceToolPolicies.$inferSelect;
+export type AgentToolApproval = typeof agentToolApprovals.$inferSelect;

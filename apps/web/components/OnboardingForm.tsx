@@ -27,11 +27,18 @@ const initialState: OnboardingActionState = {
 
 const onboardingCallCalLink = "team/opencompany/intro-call";
 const onboardingCallUrl = `https://cal.com/${onboardingCallCalLink}?overlayCalendar=true`;
+// embed.js is served from app.cal.com; the booking pages it frames live on cal.com.
+const calEmbedOrigin = "https://cal.com";
 const calEmbedScriptSrc = "https://app.cal.com/embed/embed.js";
+
+// Guard so the booking embed is preloaded once per page load, even across
+// React StrictMode double-effects or onboarding remounts.
+let hasPreloadedCalEmbed = false;
 
 type CalCommand = [string, ...unknown[]];
 type CalApi = ((...args: CalCommand) => void) & {
   loaded?: boolean;
+  ns?: Record<string, CalApi>;
   q?: CalCommand[];
 };
 
@@ -91,30 +98,30 @@ function isValidCompanyUrl(value: string) {
   }
 }
 
-function ensureCalApi() {
+// Faithful port of cal.com's official embed bootstrap (Cal → Embed → Inline
+// snippet). The previous hand-rolled loader skipped `cal.ns` and set
+// `cal.loaded` before embed.js had actually loaded, so cal.com's embed.js threw
+// on load and never wired up the inline calendar — the booking widget rendered
+// as an empty, stuck spinner. The stub queues commands in `cal.q` and injects
+// embed.js on the first call; embed.js then drains the queue. Keep this aligned
+// with cal.com's snippet rather than reinventing it.
+function ensureCalApi(): CalApi {
   if (window.Cal) return window.Cal;
 
   const cal = ((...args: CalCommand) => {
-    cal.q = cal.q ?? [];
-    cal.q.push(args);
+    if (!cal.loaded) {
+      cal.ns = {};
+      cal.q = cal.q ?? [];
+      const script = document.createElement("script");
+      script.src = calEmbedScriptSrc;
+      script.async = true;
+      document.head.appendChild(script);
+      cal.loaded = true;
+    }
+    cal.q?.push(args);
   }) as CalApi;
 
-  cal.q = [];
   window.Cal = cal;
-  return cal;
-}
-
-function loadCalEmbed() {
-  const cal = ensureCalApi();
-
-  if (!cal.loaded && !document.querySelector(`script[src="${calEmbedScriptSrc}"]`)) {
-    const script = document.createElement("script");
-    script.src = calEmbedScriptSrc;
-    script.async = true;
-    document.head.appendChild(script);
-  }
-
-  cal.loaded = true;
   return cal;
 }
 
@@ -127,20 +134,27 @@ function OnboardingCallEmbed() {
 
     hasQueuedEmbedRef.current = true;
 
-    const cal = loadCalEmbed();
-    cal("init", { origin: "https://cal.com" });
+    const resolvedTheme =
+      document.documentElement.dataset.resolvedTheme === "dark" ? "dark" : "light";
+
+    const cal = ensureCalApi();
+    cal("init", { origin: calEmbedOrigin });
     cal("inline", {
       elementOrSelector: containerRef.current,
       calLink: onboardingCallCalLink,
       config: {
         layout: "month_view",
+        theme: resolvedTheme,
       },
     });
     cal("ui", {
       hideEventTypeDetails: false,
+      theme: resolvedTheme,
+      // Blend into the onboarding surface instead of a hard white panel that
+      // clashes with the dark theme; cal's own theme handles its inner colors.
       styles: {
         body: {
-          background: "#ffffff",
+          background: "transparent",
         },
       },
     });
@@ -176,6 +190,20 @@ function SubmitButton({ label = "Start using opencompany" }: { label?: string })
     >
       <span>{pending ? "Saving" : label}</span>
       <ArrowRight size={12} strokeWidth={2} />
+    </button>
+  );
+}
+
+function SkipButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="flex h-8 w-full items-center justify-center rounded-md border border-ink/20 px-3 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {pending ? "Saving" : "Skip for now"}
     </button>
   );
 }
@@ -229,6 +257,14 @@ export default function OnboardingForm({
       workspace_id: workspaceId,
     });
   }, [userId, workspaceId]);
+
+  // Warm up the cal.com booking embed as soon as onboarding opens, so the final
+  // step's calendar is already loading (or ready) by the time the user reaches it.
+  useEffect(() => {
+    if (hasPreloadedCalEmbed) return;
+    hasPreloadedCalEmbed = true;
+    ensureCalApi()("preload", { calLink: onboardingCallCalLink });
+  }, []);
 
   function updateValue<Key extends keyof typeof values>(key: Key, value: (typeof values)[Key]) {
     setValues((current) => ({ ...current, [key]: value }));
@@ -466,9 +502,7 @@ export default function OnboardingForm({
             {isLastStep ? (
               <div className="space-y-2">
                 <SubmitButton label="Finish onboarding" />
-                <p className="text-center text-[12px] leading-4 text-ink-muted">
-                  Booking is optional — you can finish now and schedule later.
-                </p>
+                <SkipButton />
               </div>
             ) : (
               <button

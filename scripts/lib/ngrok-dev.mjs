@@ -1,5 +1,5 @@
 // Called by: scripts/dev.mjs and scripts/github-tunnel.mjs.
-// Purpose: shared ngrok startup, URL detection, and .env.local tunnel updates.
+// Purpose: shared ngrok startup, URL detection, and tunnel environment handling.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -65,6 +65,19 @@ export async function waitForNgrokUrl(targetPort, timeoutMs = 20_000) {
   return null;
 }
 
+export function envForTunnel(
+  publicUrl,
+  currentEnv = {},
+  { localPort = DEFAULT_LOCAL_WEB_PORT } = {},
+) {
+  const allowedOrigins = appendCsvValue(currentEnv.RUNNER_ALLOWED_ORIGINS, publicUrl);
+  return {
+    NEXT_PUBLIC_APP_URL: publicUrl,
+    NEXT_PUBLIC_WORKOS_REDIRECT_URI: localWorkOSRedirectUri(localPort),
+    RUNNER_ALLOWED_ORIGINS: allowedOrigins,
+  };
+}
+
 export function updateLocalEnvForTunnel(
   publicUrl,
   path = ".env.local",
@@ -75,12 +88,7 @@ export function updateLocalEnvForTunnel(
   }
 
   const current = parseEnv(path);
-  const allowedOrigins = appendCsvValue(current.RUNNER_ALLOWED_ORIGINS, publicUrl);
-  const values = {
-    NEXT_PUBLIC_APP_URL: publicUrl,
-    NEXT_PUBLIC_WORKOS_REDIRECT_URI: localWorkOSRedirectUri(localPort),
-    RUNNER_ALLOWED_ORIGINS: allowedOrigins,
-  };
+  const values = envForTunnel(publicUrl, current, { localPort });
   writeEnvValues(path, values);
 
   return values;

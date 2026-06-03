@@ -62,6 +62,14 @@ export type SessionRuntimeState = {
   lastError: string | null;
 };
 
+export type RuntimeToolApprovalState = {
+  status: "required" | "approved" | "denied";
+  providerKey: string;
+  permissionGroup?: "read" | "post" | "modify" | "admin" | undefined;
+  decisionSource?: "user" | "timeout" | "abort" | undefined;
+  requestedAt?: string | undefined;
+};
+
 export type RuntimeToolCall = {
   id: string;
   name: string;
@@ -71,13 +79,18 @@ export type RuntimeToolCall = {
   activityPreview: string;
   outputPreview: string;
   brainPath?: string | undefined;
+  approval?: RuntimeToolApprovalState | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
 };
 
 export type AssistantTurnPart =
   | { type: "text"; text: string }
-  | { type: "reasoning"; text: string | undefined; durationSeconds?: number | undefined }
+  | {
+      type: "reasoning";
+      text: string | undefined;
+      durationSeconds?: number | undefined;
+    }
   | { type: "tool-call"; toolCall: RuntimeToolCall };
 
 export function applyRuntimeEventToState(
@@ -426,10 +439,14 @@ export function buildAssistantTurnParts(
   const toolCallsById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   const modelParts = readAssistantModelParts(message.modelMessage);
   const reasoningSummary = readReasoningSummary(events, message.id);
+  const reasoningContent =
+    readReasoningContent(events, message.id) || readModelReasoning(modelParts);
+  const liveReasoning = readReasoningDeltas(events, message.id);
+  const reasoningText = reasoningSummary || reasoningContent || liveReasoning || undefined;
   const thinkingDurationSeconds =
     message.thinkingDurationSeconds ?? computeThinkingDurationSeconds(message, events);
   const hasReasoningEvidence =
-    Boolean(reasoningSummary) ||
+    Boolean(reasoningText) ||
     thinkingDurationSeconds !== undefined ||
     hasReasoningPhaseEvent(events, message.id) ||
     hasReasoningDelta(events, message.id);
@@ -437,7 +454,7 @@ export function buildAssistantTurnParts(
     ? [
         {
           type: "reasoning",
-          text: reasoningSummary || undefined,
+          text: reasoningText,
           ...(thinkingDurationSeconds !== undefined
             ? { durationSeconds: thinkingDurationSeconds }
             : {}),
@@ -480,6 +497,7 @@ export function buildAssistantTurnParts(
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
           ...(brainPath ? { brainPath } : {}),
+          ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
           startedEventId: matchingToolCall?.startedEventId ?? null,
           completedEventId: matchingToolCall?.completedEventId ?? null,
         },
@@ -709,6 +727,33 @@ export function buildRuntimeToolCallsForMessage(
       }
     }
 
+    if (event.type === "tool.approval_required") {
+      const call = getCall(toolCallId);
+      call.name = readString(event.payload.name) || call.name;
+      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
+      call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;
+      call.approval = {
+        status: "required",
+        providerKey: readString(event.payload.providerKey),
+        permissionGroup: readPermissionGroup(event.payload.permissionGroup),
+        requestedAt: readString(event.payload.requestedAt) || undefined,
+      };
+    }
+
+    if (event.type === "tool.approval_resolved") {
+      const call = getCall(toolCallId);
+      const decision = readString(event.payload.decision) === "approved" ? "approved" : "denied";
+      const decisionSource = readString(event.payload.decisionSource);
+      call.approval = {
+        status: decision,
+        providerKey: call.approval?.providerKey ?? "",
+        permissionGroup: call.approval?.permissionGroup,
+        requestedAt: call.approval?.requestedAt,
+        decisionSource:
+          decisionSource === "timeout" || decisionSource === "abort" ? decisionSource : "user",
+      };
+    }
+
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
@@ -797,6 +842,8 @@ function buildEventAssistantTurnParts(
 
     if (
       event.type === "tool.delta" ||
+      event.type === "tool.approval_required" ||
+      event.type === "tool.approval_resolved" ||
       event.type === "tool.started" ||
       event.type === "tool.completed" ||
       event.type === "tool.failed"
@@ -930,6 +977,12 @@ export function readString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admin" | undefined {
+  return value === "read" || value === "post" || value === "modify" || value === "admin"
+    ? value
+    : undefined;
+}
+
 export function optionalString(value: unknown) {
   return typeof value === "string" ? value : null;
 }
@@ -952,6 +1005,34 @@ function readReasoningSummary(events: RuntimeEvent[], messageId: string) {
     .map((event) => readString(event.payload.summary).trim())
     .filter(Boolean)
     .join("\n\n");
+}
+
+function readReasoningContent(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_content")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .filter((event) => readString(event.payload.format) === "raw")
+    .map((event) => readString(event.payload.text).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readModelReasoning(parts: Record<string, unknown>[] | null) {
+  if (!parts) return "";
+  return parts
+    .filter((part) => part.type === "reasoning")
+    .map((part) => readString(part.text).trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function readReasoningDeltas(events: RuntimeEvent[], messageId: string) {
+  return events
+    .filter((event) => event.type === "message.reasoning_delta")
+    .filter((event) => eventBelongsToMessage(event, messageId))
+    .map((event) => readString(event.payload.delta))
+    .filter(Boolean)
+    .join("");
 }
 
 function hasReasoningDelta(events: RuntimeEvent[], messageId: string) {
@@ -1076,12 +1157,18 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "amp_coder":
       return "Coding with Amp";
+    case "read_skill": {
+      const skillId = field("skillId");
+      return skillId ? `Reading ${skillId} skill` : "Reading a skill";
+    }
     case "tool_help":
       return "Checking tool help";
     case "delegate_to_agent": {
       const agent = field("agent");
       return agent ? `Delegating to ${agent}` : "Delegating to an agent";
     }
+    case "update_agent_file":
+      return "Updating its agent configuration";
     default:
       return undefined;
   }

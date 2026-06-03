@@ -1,11 +1,20 @@
 import { createLogger } from "@opencompany/observability";
-import { dispatchAgentMessageSubmitted } from "@/lib/agent-sessions/events";
+import {
+  dispatchAgentApprovalResume,
+  dispatchAgentMessageSubmitted,
+} from "@/lib/agent-sessions/events";
 import { callRunner } from "@/lib/agent-sessions/runner";
 
 type TriggerAgentMessageRunInput = {
   sessionId: string;
   messageId: string;
   workspaceId: string;
+};
+
+type TriggerAgentApprovalResumeInput = {
+  sessionId: string;
+  toolCallId: string;
+  workspaceId?: string;
 };
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
@@ -53,6 +62,45 @@ export async function triggerAgentMessageRun(input: TriggerAgentMessageRunInput)
   } catch {
     // callRunner already captures the failure. Do not dispatch the shared message
     // event here, since that would schedule a duplicate message run.
+  }
+}
+
+export async function triggerAgentApprovalResume(input: TriggerAgentApprovalResumeInput) {
+  if (!canCallRunnerDirectly()) {
+    logger.info("Falling back to Inngest runner dispatch", {
+      event: "opencompany.runner_request_fallback",
+      reason: "runner_direct_call_unconfigured",
+      workspace_id: input.workspaceId,
+      session_id: input.sessionId,
+      tool_call_id: input.toolCallId,
+    });
+    await dispatchAgentApprovalResume({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCallId,
+    });
+    return;
+  }
+
+  try {
+    await callRunner(`/internal/sessions/${input.sessionId}/approvals/${input.toolCallId}/resume`, {
+      event: "opencompany.direct_resume_approval_failed",
+      session_id: input.sessionId,
+      ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+    });
+  } catch (error) {
+    logger.warn("Falling back to Inngest runner dispatch", {
+      event: "opencompany.runner_request_fallback",
+      reason: "direct_runner_request_failed",
+      workspace_id: input.workspaceId,
+      session_id: input.sessionId,
+      tool_call_id: input.toolCallId,
+      error,
+    });
+    await dispatchAgentApprovalResume({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCallId,
+    });
+    return;
   }
 }
 

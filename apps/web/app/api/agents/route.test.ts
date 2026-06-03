@@ -27,7 +27,7 @@ describe("agents API route", () => {
       {
         id: "agt_123",
         workspaceId: "wks_123",
-        path: "agents/leo.agent",
+        path: "agents/leo/leo.agent",
         name: "Leo",
         config: {
           schemaVersion: "agent.v1",
@@ -54,7 +54,7 @@ describe("agents API route", () => {
       agents: [
         expect.objectContaining({
           id: "agt_123",
-          path: "agents/leo.agent",
+          path: "agents/leo/leo.agent",
           githubSyncStatus: "pending",
         }),
       ],
@@ -67,7 +67,7 @@ describe("agents API route", () => {
       {
         id: "agt_123",
         workspaceId: "wks_123",
-        path: "agents/leo.agent",
+        path: "agents/leo/leo.agent",
         name: "Leo",
         config: {
           schemaVersion: "agent.v1",

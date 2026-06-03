@@ -6,7 +6,7 @@ import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
-import { ensureUserOnboardingScaffold } from "./scaffold";
+import { DEFAULT_USER_AGENT_BODY, ensureUserOnboardingScaffold } from "./scaffold";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn(),
@@ -74,9 +74,15 @@ describe("ensureUserOnboardingScaffold", () => {
       workspaceId: "wks_123",
     });
 
-    const source = serializeAgentFile({ title: "leo", body: "" });
+    const source = serializeAgentFile({ title: "leo", body: DEFAULT_USER_AGENT_BODY });
     const parsed = parseAgentFile(source);
     const contentHash = hashAgentSource(source);
+    // The starter body mounts the whole Brain so the first onboarding session can persist
+    // Brain files (a session with no mount silently discards anything written under brain/).
+    expect(parsed.config.brain).toEqual([{ path: "/", type: "folder" }]);
+    // It also enables zero-setup, platform-credentialed research tools so leo is useful
+    // immediately. (Tools needing an attached repo or workspace MCP config are left out.)
+    expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa", "x"]);
     const agentInsert = insertedValues.find((entry) => entry.table === agents)?.value as {
       id: string;
       workspaceId: string;
@@ -105,14 +111,14 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(result).toEqual({
       created: true,
       agentId: expect.stringMatching(/^agt_[a-f0-9]{16}$/),
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
     });
     expect(agentInsert).toMatchObject({
       id: result.agentId,
       workspaceId: "wks_123",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
       name: "leo",
-      body: "",
+      body: parsed.body,
       contentHash,
       version: 1,
       githubSyncStatus: "pending",
@@ -121,7 +127,7 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(syncJobInsert).toMatchObject({
       agentId: result.agentId,
       workspaceId: "wks_123",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
       desiredHash: contentHash,
       desiredVersion: 1,
       previousPath: null,
@@ -150,7 +156,7 @@ describe("ensureUserOnboardingScaffold", () => {
 
   it("skips creation when the leo agent already exists", async () => {
     const { db, insert, batch } = createDbMock([
-      [{ id: "agt_existing", path: "agents/leo.agent" }],
+      [{ id: "agt_existing", path: "agents/leo/leo.agent" }],
     ]);
     getDbMock.mockReturnValue(db as never);
 
@@ -162,7 +168,7 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(result).toEqual({
       created: false,
       agentId: "agt_existing",
-      path: "agents/leo.agent",
+      path: "agents/leo/leo.agent",
     });
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();

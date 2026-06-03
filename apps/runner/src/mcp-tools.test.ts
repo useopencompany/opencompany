@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { createMCPClient } from "@ai-sdk/mcp";
-import type { AgentConfig } from "@opencompany/agent-runtime";
+import { type AgentConfig, policyMapKey, resolveToolDecision } from "@opencompany/agent-runtime";
 import { jsonSchema, type ToolSet } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpToolSet } from "./mcp-tools";
@@ -125,35 +125,104 @@ afterEach(() => {
 });
 
 describe("createMcpToolSet", () => {
-  it("fails clearly when Linear MCP is enabled on the agent but not configured", async () => {
-    await expect(createMcpToolSet(baseInput())).rejects.toThrow(
-      "Linear MCP is enabled on this agent, but the workspace MCP beta is off.",
+  it("registers a not-connected stub tool instead of aborting the turn when an integration is not set up", async () => {
+    // MCP beta is off (no experiment row), so Linear can't connect.
+    const mcpTools = await createMcpToolSet(baseInput());
+    const stub = (mcpTools.tools as ToolSet).linear__get_connection_status;
+    expect(stub).toBeDefined();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message: "Linear MCP is enabled on this agent, but the workspace MCP beta is off.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
+    // Failure is still observed.
+    expect(observability.logger.error).toHaveBeenCalledWith(
+      "Linear MCP connection setup failed",
+      expect.objectContaining({ mcp_server: "linear" }),
     );
   });
 
-  it("surfaces missing encryption key configuration for Linear MCP credentials", async () => {
+  it("names the stub so it is auto-allowed (no approval suspend for a no-op)", async () => {
+    const mcpTools = await createMcpToolSet(baseInput());
+    const stubName = Object.keys(mcpTools.tools).find((name) => name.startsWith("linear__"))!;
+    // The stub must resolve to "allow"; an "ask" would suspend the run to approve a no-op.
+    expect(
+      resolveToolDecision({ toolName: stubName, policy: new Map(), suspendable: true }).decision,
+    ).toBe("allow");
+  });
+
+  it("keeps a healthy provider when another provider in the same agent is not set up", async () => {
+    const mixedConfig: AgentConfig = {
+      ...agentConfig,
+      tools: [...agentConfig.tools, ...slackAgentConfig.tools],
+    };
+    // Linear: beta on but no server row -> not configured (fails). Slack: fully connected.
+    db.queryResults = [
+      [{ enabled: true }],
+      [],
+      [{ enabled: true }],
+      [slackServerRow()],
+      [slackOAuthConnectionRow()],
+    ];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      search: {
+        description: "Search Slack",
+        inputSchema: jsonSchema({ type: "object", properties: {} }),
+        execute: vi.fn(async () => ({ messages: [] })),
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(mixedConfig));
+    const tools = mcpTools.tools as ToolSet;
+
+    // Linear degrades to a stub, Slack builds its real tool.
+    expect(tools.linear__get_connection_status).toBeDefined();
+    expect(tools.slack__search).toBeDefined();
+
+    const stubOutput = await tools.linear__get_connection_status?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(stubOutput).toMatchObject({
+      ok: false,
+      error: {
+        code: "mcp_not_connected",
+        message: "Linear MCP is enabled on this agent, but Linear is not configured.",
+      },
+    });
+  });
+
+  it("uses the validated encryption key when process env is later unset", async () => {
     db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
     vi.unstubAllEnvs();
 
-    await expect(createMcpToolSet(baseInput())).rejects.toThrow(
-      "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY is required for MCP credential storage.",
+    await createMcpToolSet(baseInput());
+
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          headers: {
+            Authorization: "Bearer lin_api_secret",
+          },
+        }),
+      }),
     );
-    expect(observability.logger.error).toHaveBeenCalledWith(
+    expect(observability.logger.error).not.toHaveBeenCalledWith(
       "Linear MCP connection setup failed",
       expect.objectContaining({
         event: "opencompany.runner_mcp_connection_failed",
-        mcp_failure_reason: "encryption_key_configuration",
-        mcp_server: "linear",
-        workspace_id: "wks_123",
       }),
     );
-    expect(observability.captureException).toHaveBeenCalledWith(
-      expect.any(Error),
-      expect.objectContaining({
-        event: "opencompany.runner_mcp_connection_failed",
-        mcp_failure_reason: "encryption_key_configuration",
-      }),
-    );
+    expect(observability.captureException).not.toHaveBeenCalled();
   });
 
   it("wraps discovered Linear MCP tools with runtime lifecycle writes", async () => {
@@ -210,6 +279,43 @@ describe("createMcpToolSet", () => {
 
     await mcpTools.close();
     expect(mcpClient.close).toHaveBeenCalled();
+  });
+
+  it("annotates discovered Linear MCP tools with effective workspace policy", async () => {
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [{ name: "list_teams" }, { name: "create_issue" }],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      list_teams: {
+        description: "List Linear teams",
+        inputSchema: jsonSchema({ type: "object", properties: {} }),
+        execute: vi.fn(),
+      },
+      create_issue: {
+        description: "Create a Linear issue",
+        inputSchema: jsonSchema({ type: "object", properties: {} }),
+        execute: vi.fn(),
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(
+      baseInput(agentConfig, createToolStartCoordinator(), {
+        policy: new Map([
+          [policyMapKey("linear", "read"), "ask"],
+          [policyMapKey("linear", "post"), "deny"],
+          [policyMapKey("linear", "modify"), "deny"],
+          [policyMapKey("linear", "admin"), "deny"],
+        ]),
+        suspendable: true,
+      }),
+    );
+
+    const tools = mcpTools.tools as Record<string, { description?: string }>;
+    expect(tools.linear__list_teams?.description).toContain("Permission: Read (ask first).");
+    expect(tools.linear__create_issue?.description).toContain("Permission: Post (deny).");
+
+    await mcpTools.close();
   });
 
   it("logs handled MCP tool failures to Braintrust", async () => {
@@ -377,6 +483,10 @@ describe("createMcpToolSet", () => {
 function baseInput(
   config: AgentConfig = agentConfig,
   toolStartCoordinator = createToolStartCoordinator(),
+  policyContext: {
+    policy: Map<string, "allow" | "ask" | "deny">;
+    suspendable: boolean;
+  } = { policy: new Map(), suspendable: true },
 ) {
   return {
     sessionId: "ses_123",
@@ -385,9 +495,12 @@ function baseInput(
     runLeaseOwner: "runner_123",
     workspaceId: "wks_123",
     agentConfig: config,
+    integrationCredentialEncryptionKey: Buffer.from(credentialKey(), "base64"),
     signal: new AbortController().signal,
     checkAbort: async () => {},
     toolStartCoordinator,
+    policy: policyContext.policy,
+    suspendable: policyContext.suspendable,
   };
 }
 

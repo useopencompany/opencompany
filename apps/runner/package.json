@@ -14,6 +14,7 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
+    "@opencompany/crypto": "workspace:*",
     "@opencompany/db": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@sentry/bun": "^10.53.1",

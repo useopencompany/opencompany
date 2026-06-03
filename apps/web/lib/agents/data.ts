@@ -1,11 +1,14 @@
+import { agentPathForSlug, agentSlugFromPath } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
+  agentFiles,
   agents,
   brainFiles,
   workspaceIntegrationResources,
   workspaceIntegrations,
 } from "@opencompany/db/schema";
 import { and, asc, desc, eq, or } from "drizzle-orm";
+import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   type AgentDetailPayload,
   type AgentListItemPayload,
@@ -116,6 +119,8 @@ export async function loadAgentForWorkspace(
   idOrPath: string,
 ): Promise<AgentDetailPayload | null> {
   const db = getDb();
+  const slug = agentSlugFromPath(idOrPath);
+  const canonicalPath = slug ? agentPathForSlug(slug) : null;
   const [[agent], brainPaths, githubIntegrationRepositories, agentReferences, mcpSettings] =
     await Promise.all([
       db
@@ -124,7 +129,13 @@ export async function loadAgentForWorkspace(
         .where(
           and(
             eq(agents.workspaceId, workspaceId),
-            or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
+            canonicalPath
+              ? or(
+                  eq(agents.id, idOrPath),
+                  eq(agents.path, idOrPath),
+                  eq(agents.path, canonicalPath),
+                )
+              : or(eq(agents.id, idOrPath), eq(agents.path, idOrPath)),
           ),
         )
         .limit(1),
@@ -135,6 +146,12 @@ export async function loadAgentForWorkspace(
     ]);
 
   if (!agent) return null;
+
+  const bundleFiles = await db
+    .select()
+    .from(agentFiles)
+    .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agent.id)))
+    .orderBy(asc(agentFiles.path));
 
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubIntegrationRepositories,
@@ -152,6 +169,7 @@ export async function loadAgentForWorkspace(
       linearConfigured: mcpSettings.linear.configured,
       slackConfigured: mcpSettings.slack.configured,
     },
+    serializeAgentBundleFiles(agent.path, bundleFiles),
   );
 }
 

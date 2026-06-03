@@ -204,6 +204,41 @@
       "when": 1779975815733,
       "tag": "0028_free_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1780314922212,
+      "tag": "0029_square_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1780319293489,
+      "tag": "0030_equal_justin_hammer",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1780329313845,
+      "tag": "0031_optimal_doctor_octopus",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1780387166248,
+      "tag": "0032_open_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1780408092289,
+      "tag": "0033_blue_madelyne_pryor",
+      "breakpoints": true
     }
   ]
 }
