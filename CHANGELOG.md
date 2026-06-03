@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-03
+
+### Added
+- Agents can now pause mid-run to ask structured questions with single-select, multi-select, and "Other" answers, then continue from the user's response (#255) — @louis.
+- Onboarding agents now use structured questions and receive signup names in their starting context, making first-run setup more personal and less brittle (#259, #260) — @louis.
+- Apify-backed Instagram and TikTok tools for public profiles, posts, reels, videos, comments, search, and async social scraping jobs (#253) — @louis.
+- Searchable, provider-grouped model picker with Capability, Speed, and Cost ratings so models are easier to compare at a glance (#254) — @louis.
+- Day-one Brain wiki and private agent `agent/soul.md` scaffolding, giving new workspaces a cleaner shared knowledge structure and better self-configuration defaults (#251) — @louis.
+
+### Changed
+- Onboarding call booking now uses one booking-aware button, the official Cal.com embed bootstrap, and clearer new-tab labeling (#249, #250, #258) — @jasper.
+- Public changelog entries now include author attributions (#256) — @louis.
+
+### Fixed
+- Chat scroll-to-top behavior after sending a message is now stable during streaming and viewport resizing, with less jitter and less fighting user scrolls (#248) — @jasper.
+- Paused sessions now refresh stream tokens correctly, and settings hydrate consistently after reloads (#252) — @louis.
+- Editing a markdown title or header no longer flickers while typing (#201) — @jasper.
+- Naming a new Brain file from its tab now updates the sidebar tree immediately (#198) — @jasper.
+
 ## [0.6.0] - 2026-06-02
 
 ### Added
