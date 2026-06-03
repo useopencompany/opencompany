@@ -207,7 +207,7 @@ function OnboardingCallEmbed({ onBooked }: { onBooked: (label: string | null) =>
           rel="noreferrer"
           className="flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-ink-subtle transition-colors hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
         >
-          <span>Open scheduler</span>
+          <span>Open scheduler in new tab</span>
           <ArrowUpRight size={11} strokeWidth={2} />
         </a>
       </div>
