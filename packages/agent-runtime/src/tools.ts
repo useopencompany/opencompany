@@ -222,6 +222,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "workspace",
   },
+  {
+    id: "posthog",
+    type: "mcp",
+    server: "posthog",
+    label: "posthog",
+    description: "Use workspace-configured PostHog MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
 ];
 
 export const AGENT_TOOL_DEFINITION_BY_ID = new Map(

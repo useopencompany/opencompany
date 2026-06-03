@@ -57,7 +57,8 @@ export type AgentToolId =
   | "amp"
   | "opencode"
   | "linear"
-  | "slack";
+  | "slack"
+  | "posthog";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -112,9 +113,9 @@ export type AgentCodingToolConfig = {
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear" | "slack";
+  id: "linear" | "slack" | "posthog";
   type: "mcp";
-  server: "linear" | "slack";
+  server: "linear" | "slack" | "posthog";
   label: string;
   description: string;
 };

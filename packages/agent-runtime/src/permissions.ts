@@ -123,6 +123,53 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       delete_issue: "admin",
     },
   },
+  posthog: {
+    providerKey: "posthog",
+    displayName: "PostHog",
+    groups: ["read", "post", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      post: "Create feature flags, insights, dashboards, or experiments",
+      modify: "Edit existing feature flags, insights, dashboards, or experiments",
+      admin: "Delete resources or change the active project/organization",
+    },
+    // PostHog MCP tool names are hyphenated (e.g. "feature-flag-get-all"). Keys here
+    // use the snake_case form so they match via classifyMcpTool's normalizeRawToolName
+    // fold regardless of whether the runtime delivers hyphenated, underscored, or
+    // camelCase names — important so admin actions like "*-set-active" can't slip to
+    // the verb heuristic (which would read "set" as modify). Anything not listed falls
+    // back to the heuristic. Refine against the live tool list.
+    toolGroups: {
+      get_sql_insight: "read",
+      query_run: "read",
+      insights_get_all: "read",
+      insight_get: "read",
+      dashboards_get_all: "read",
+      dashboard_get: "read",
+      feature_flag_get_all: "read",
+      feature_flag_get_definition: "read",
+      experiment_get_all: "read",
+      list_errors: "read",
+      error_details: "read",
+      docs_search: "read",
+      organizations_get: "read",
+      projects_get: "read",
+      create_feature_flag: "post",
+      insight_create_from_query: "post",
+      dashboard_create: "post",
+      add_insight_to_dashboard: "post",
+      experiment_create: "post",
+      update_feature_flag: "modify",
+      insight_update: "modify",
+      dashboard_update: "modify",
+      experiment_update: "modify",
+      delete_feature_flag: "admin",
+      insight_delete: "admin",
+      dashboard_delete: "admin",
+      project_set_active: "admin",
+      organization_set_active: "admin",
+    },
+  },
   github: {
     providerKey: "github",
     displayName: "GitHub",
