@@ -2401,6 +2401,12 @@ function summarizeEvent(event: RuntimeEvent) {
       Number(event.payload.costUsdMicros ?? 0),
     )}`;
   }
+  if (event.type === "session.sandbox_usage") {
+    const activeSeconds = Math.round(Number(event.payload.activeMs ?? 0) / 1000);
+    return `Sandbox compute ${formatUsdMicros(
+      Number(event.payload.chargedCostUsdMicros ?? 0),
+    )} (${activeSeconds}s active)`;
+  }
   if (event.type === "session.delegated_usage") {
     const cost =
       event.payload.cost && typeof event.payload.cost === "object"

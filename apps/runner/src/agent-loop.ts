@@ -57,6 +57,7 @@ import {
   finalizeRun,
   observeRunStep,
   type RunContext,
+  recordSandboxUsageBestEffort,
   type SandboxBillingSnapshot,
 } from "./run-context";
 import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
@@ -591,8 +592,6 @@ async function runMessageWithContext(
       modelProvider,
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
-      assistantMessageId,
-      sandboxBilling: sandboxAcquirer?.billingSnapshot() ?? null,
     });
   }
 
@@ -609,6 +608,7 @@ async function suspendRunForApproval(input: {
   ctx: RunContext;
   row: LoadedSession;
   sandbox: SandboxHandle | null;
+  sandboxBilling: SandboxBillingSnapshot | null;
   assistantMessageId: string;
   error: RunSuspendedError;
 }) {
@@ -649,6 +649,12 @@ async function suspendRunForApproval(input: {
       payload: { status: "awaiting_approval", message: "Waiting for approval" },
     }),
   );
+  // Bill the sandbox active window while the lease is still held (see executeStreamingTurn).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxBilling,
+  });
   await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner));
 }
 
@@ -708,6 +714,7 @@ async function executeStreamingTurn(input: {
         ctx,
         row,
         sandbox: sandboxAcquirer.current,
+        sandboxBilling: sandboxAcquirer.billingSnapshot(),
         assistantMessageId,
         error,
       });
@@ -813,6 +820,14 @@ async function executeStreamingTurn(input: {
   await requireLeaseWrite(input.appendCompletedEvent());
 
   if (input.beforeRelease) await input.beforeRelease();
+
+  // Bill the sandbox active window before releasing the lease: recordSandboxUsage is
+  // lease-guarded, so it must run while we still own the lease (finalizeRun is too late).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxAcquirer.billingSnapshot(),
+  });
 
   await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
 
@@ -1236,8 +1251,6 @@ async function runAfterSessionWithContext(
       modelProvider,
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
-      assistantMessageId,
-      sandboxBilling: sandboxAcquirer?.billingSnapshot() ?? null,
     });
   }
 }
@@ -1688,8 +1701,6 @@ async function resumeApprovalWithContext(
       modelProvider,
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
-      assistantMessageId: runAssistantMessageId,
-      sandboxBilling: sandboxAcquirer?.billingSnapshot() ?? null,
     });
   }
 }

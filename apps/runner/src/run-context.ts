@@ -98,51 +98,57 @@ export type SandboxBillingSnapshot = {
   ramMib: number;
 };
 
+// Bill the sandbox active-runtime window (hydration → now). MUST be called while the run
+// lease is still held — `recordSandboxUsage` is lease-guarded and silently no-ops once the
+// lease is released, so finalizeRun (which runs after the lease is gone) is too late. Callers
+// invoke this right before releasing/suspending the lease. Best-effort: a lost lease or
+// transient DB error must never break the turn, so we log and move on rather than throw.
+export async function recordSandboxUsageBestEffort(input: {
+  ctx: RunContext;
+  assistantMessageId: string;
+  sandboxBilling: SandboxBillingSnapshot | null | undefined;
+}) {
+  if (!input.sandboxBilling) return;
+  const billing = input.sandboxBilling;
+  const endedAt = new Date();
+  const activeMs = Math.max(0, endedAt.getTime() - billing.hydratedAt.getTime());
+  try {
+    await observeRunStep(
+      input.ctx,
+      "record_sandbox_usage",
+      () =>
+        recordSandboxUsage({
+          sessionId: input.ctx.sessionId,
+          assistantMessageId: input.assistantMessageId,
+          runLeaseId: input.ctx.leaseId,
+          runLeaseOwner: input.ctx.leaseOwner,
+          sandboxId: billing.sandboxId,
+          template: billing.template,
+          vcpu: billing.vcpu,
+          ramMib: billing.ramMib,
+          startedAt: billing.hydratedAt,
+          endedAt,
+          activeMs,
+        }),
+      { sandbox_id: billing.sandboxId, active_ms: activeMs },
+    );
+  } catch (error) {
+    logger.warn("Failed to record sandbox usage", {
+      session_id: input.ctx.sessionId,
+      sandbox_id: billing.sandboxId,
+      error,
+    });
+  }
+}
+
 export async function finalizeRun(input: {
   ctx: RunContext;
   outcome: string;
   modelProvider: string | undefined;
   modelName: string | undefined;
   sandbox: SandboxHandle | null;
-  assistantMessageId?: string | undefined;
-  sandboxBilling?: SandboxBillingSnapshot | null | undefined;
 }) {
   clearActiveRun(input.ctx.sessionId, input.ctx.controller);
-  // Bill the sandbox active-runtime window (hydration → now) before parking. Best-effort:
-  // a lost lease or transient DB error must never break run finalization, so we log and
-  // move on rather than throw out of the finally blocks that call this.
-  if (input.sandboxBilling && input.assistantMessageId) {
-    const billing = input.sandboxBilling;
-    const endedAt = new Date();
-    const activeMs = Math.max(0, endedAt.getTime() - billing.hydratedAt.getTime());
-    try {
-      await observeRunStep(
-        input.ctx,
-        "record_sandbox_usage",
-        () =>
-          recordSandboxUsage({
-            sessionId: input.ctx.sessionId,
-            assistantMessageId: input.assistantMessageId as string,
-            runLeaseId: input.ctx.leaseId,
-            runLeaseOwner: input.ctx.leaseOwner,
-            sandboxId: billing.sandboxId,
-            template: billing.template,
-            vcpu: billing.vcpu,
-            ramMib: billing.ramMib,
-            startedAt: billing.hydratedAt,
-            endedAt,
-            activeMs,
-          }),
-        { sandbox_id: billing.sandboxId, active_ms: activeMs },
-      );
-    } catch (error) {
-      logger.warn("Failed to record sandbox usage", {
-        session_id: input.ctx.sessionId,
-        sandbox_id: billing.sandboxId,
-        error,
-      });
-    }
-  }
   logBraintrustCurrentSpan({
     metadata: {
       outcome: input.outcome,
