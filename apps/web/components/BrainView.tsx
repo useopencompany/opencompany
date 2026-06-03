@@ -118,6 +118,12 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   const optimisticMutationCountRef = useRef(0);
   const deletedPathsRef = useRef(new Set<string>());
   const selectedPathRef = useRef(selectedPath);
+  const pendingCreatesRef = useRef(new Map<string, Promise<string | null>>());
+  // Serialises brain create() calls: a double-click on "new file"/"new folder"
+  // would otherwise fire two creates that read the same `files` snapshot, derive
+  // the same path, and collide on one pendingCreatesRef key — orphaning a pending
+  // promise so a follow-up rename bypasses the await (reintroducing the PRO-62 race).
+  const creatingRef = useRef(false);
 
   const selected = files.find((file) => file.path === selectedPath) ?? null;
   const tree = useMemo(() => buildBrainTree(files, query), [files, query]);
@@ -479,6 +485,8 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   });
 
   function createFile(contextPath = selectedContextPath) {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setError(null);
     const path = uniqueNewBrainFilePath(files, contextPath);
     const content = `# ${titleFromPath(path)}\n`;
@@ -494,6 +502,11 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setRenamingPath(path);
     setRenamingName(fileNameFromPath(path));
     setRenamingType("file");
+    const pendingCreate = createDeferred<string | null>();
+    // Track the key the pending-create is registered under so we can re-key it
+    // (and reliably delete it) if the server normalises the path.
+    let pendingKey = path;
+    pendingCreatesRef.current.set(pendingKey, pendingCreate.promise);
     startTransition(async () => {
       try {
         const result = await createBrainFile(path, content);
@@ -501,6 +514,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           restoreBrainViewSnapshot(snapshot);
           cancelRenameFile();
           setError(result.error);
+          pendingCreate.resolve(null);
           return;
         }
         if (result.path !== path) {
@@ -510,19 +524,30 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           expandAncestors(result.path);
           setRenamingPath((current) => (current === path ? result.path : current));
           setRenamingName(fileNameFromPath(result.path));
+          // Re-key the pending-create to the server path so a concurrent
+          // moveBrainFile (which now looks the node up by result.path) finds it.
+          pendingCreatesRef.current.delete(pendingKey);
+          pendingKey = result.path;
+          pendingCreatesRef.current.set(pendingKey, pendingCreate.promise);
         }
+        pendingCreate.resolve(result.path);
         router.refresh();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         cancelRenameFile();
         handleBrainActionError(error, "Create failed.");
+        pendingCreate.resolve(null);
       } finally {
+        pendingCreatesRef.current.delete(pendingKey);
         finishOptimisticMutation();
+        creatingRef.current = false;
       }
     });
   }
 
   function createFolder(contextPath = selectedContextPath) {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setError(null);
     const folderPath = uniqueNewBrainFolderPath(files, contextPath);
     const path = `${folderPath}/new-note.md`;
@@ -539,6 +564,12 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setRenamingPath(folderPath);
     setRenamingName(fileNameFromPath(folderPath));
     setRenamingType("folder");
+    // Resolves to the server-assigned folder path, or null if the create
+    // failed. A concurrent moveBrainFolder awaits this before renaming so the
+    // folder actually exists on the server first.
+    const pendingCreate = createDeferred<string | null>();
+    let pendingKey = folderPath;
+    pendingCreatesRef.current.set(pendingKey, pendingCreate.promise);
     startTransition(async () => {
       try {
         const result = await createBrainFile(path, content);
@@ -546,24 +577,36 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           restoreBrainViewSnapshot(snapshot);
           cancelRenameFile();
           setError(result.error);
+          pendingCreate.resolve(null);
           return;
         }
+        const resolvedFolder = parentFolderPath(result.path);
         if (result.path !== path) {
           setFiles((currentFiles) => optimisticRenameBrainFile(currentFiles, path, result.path));
           updateSelectedPath(result.path);
           setSelectedContextPath(parentFolderPath(result.path));
           expandAncestors(result.path);
-          const resolvedFolder = parentFolderPath(result.path);
           setRenamingPath((current) => (current === folderPath ? resolvedFolder : current));
           setRenamingName(fileNameFromPath(resolvedFolder));
+          // Re-key to the server folder path so a concurrent moveBrainFolder
+          // (which looks the folder up by resolvedFolder) finds the pending create.
+          if (resolvedFolder !== pendingKey) {
+            pendingCreatesRef.current.delete(pendingKey);
+            pendingKey = resolvedFolder;
+            pendingCreatesRef.current.set(pendingKey, pendingCreate.promise);
+          }
         }
+        pendingCreate.resolve(resolvedFolder);
         router.refresh();
       } catch (error) {
         restoreBrainViewSnapshot(snapshot);
         cancelRenameFile();
         handleBrainActionError(error, "Create failed.");
+        pendingCreate.resolve(null);
       } finally {
+        pendingCreatesRef.current.delete(pendingKey);
         finishOptimisticMutation();
+        creatingRef.current = false;
       }
     });
   }
@@ -630,7 +673,26 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           }
         }
 
-        const result = await renameBrainFile(file.path, nextPath);
+        // If the file was just created and the server create is still in-flight,
+        // wait for it to complete before renaming so the file actually exists.
+        // Use the server-assigned path as the rename source in case the server
+        // normalised the original path (e.g. due to a collision).
+        let sourcePath = file.path;
+        const pendingCreate = pendingCreatesRef.current.get(file.path);
+        if (pendingCreate !== undefined) {
+          const resolvedSourcePath = await pendingCreate;
+          // null means create failed. createFile's own error handler already
+          // restored the pre-create snapshot. Do NOT restore this move's
+          // post-create snapshot here — it still contains the ghost file and
+          // would resurrect it as a phantom row. Just bail; the create owns
+          // the rollback.
+          if (resolvedSourcePath === null) {
+            return;
+          }
+          sourcePath = resolvedSourcePath;
+        }
+
+        const result = await renameBrainFile(sourcePath, nextPath);
         if (!result.ok) {
           restoreBrainViewSnapshot(snapshot);
           setError(result.error);
@@ -724,7 +786,25 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           }
         }
 
-        const result = await renameBrainFolder(folderPath, nextPath);
+        // If the folder was just created and the server create is still
+        // in-flight, wait for it before renaming so the folder actually exists.
+        // Use the server-assigned folder path as the rename source in case the
+        // server normalised the original path (e.g. due to a collision).
+        let sourceFolderPath = folderPath;
+        const pendingCreate = pendingCreatesRef.current.get(folderPath);
+        if (pendingCreate !== undefined) {
+          const resolvedFolderPath = await pendingCreate;
+          // null means create failed. createFolder's own error handler already
+          // restored the pre-create snapshot. Do NOT restore this move's
+          // post-create snapshot — it still contains the ghost folder and would
+          // resurrect it. Just bail; the create owns the rollback.
+          if (resolvedFolderPath === null) {
+            return;
+          }
+          sourceFolderPath = resolvedFolderPath;
+        }
+
+        const result = await renameBrainFolder(sourceFolderPath, nextPath);
         if (!result.ok) {
           restoreBrainViewSnapshot(snapshot);
           setError(result.error);
@@ -1938,6 +2018,16 @@ function normalizeCreateFolderContext(files: BrainFile[], contextPath: string) {
   if (!normalized) return "";
   if (files.some((file) => file.path === normalized)) return parentFolderPath(normalized);
   return normalized;
+}
+
+type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 function createOptimisticBrainFile(path: string, content: string): BrainFile {

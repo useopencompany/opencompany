@@ -1,3 +1,4 @@
+import type { ModelRatings, ModelRatingTier } from "@opencompany/agent-runtime";
 import {
   AFTER_SESSION_TAG,
   agentMentionIdForPath,
@@ -51,6 +52,8 @@ type BaseAgentMentionItem = {
   icon: LucideIcon;
   category?: "Fast" | "Deep";
   supportsReasoning?: boolean;
+  // Capability / Speed / Cost tiers shown in the model picker (models only).
+  ratings?: ModelRatings;
   // Set on integrations that are enabled on the agent but not yet set up in the
   // workspace. The mention stays selectable; the UI shows a "Needs setup" badge
   // linking to `connectUrl` (Settings → Integrations connect flow).
@@ -67,6 +70,8 @@ export type AgentModel = BaseAgentMentionItem & {
   id: AgentModelId;
   kind: "model";
 };
+
+export type { ModelRatings, ModelRatingTier };
 
 export type AgentIntegration = Omit<
   BaseAgentMentionItem,
@@ -145,6 +150,29 @@ function modelIconFor(id: AgentModelId): LucideIcon {
   return PROVIDER_ICONS[provider] ?? FALLBACK_MODEL_ICON;
 }
 
+// Human-readable provider names keyed by the model id prefix, used to group the
+// model picker. Falls back to the raw prefix for unlisted providers.
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  minimax: "MiniMax",
+  moonshotai: "Moonshot",
+  zai: "Z.ai",
+  xai: "xAI",
+};
+
+export function modelProviderId(id: string): string {
+  return id.split("/")[0] ?? "";
+}
+
+export function modelProviderLabel(id: string): string {
+  const provider = modelProviderId(id);
+  return PROVIDER_LABELS[provider] ?? provider;
+}
+
 export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => ({
   id: model.id,
   mentionId: `model:${model.id}`,
@@ -154,6 +182,7 @@ export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => 
   description: model.description,
   category: model.category,
   supportsReasoning: model.supportsReasoning,
+  ratings: model.ratings,
   icon: modelIconFor(model.id),
 }));
 
