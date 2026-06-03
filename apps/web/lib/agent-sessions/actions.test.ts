@@ -199,6 +199,7 @@ describe("createAgentSession", () => {
         id: detail.session.id,
         title: detail.session.title,
         status: detail.session.status,
+        active: false,
         modelName: detail.session.modelName,
         lastError: detail.session.lastError,
         createdAt: detail.session.createdAt,

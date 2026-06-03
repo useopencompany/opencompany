@@ -44,6 +44,7 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
     list: (workspaceId: string) => ["sidebar-sessions", workspaceId],
   },
   setSidebarSessionStar: (entries: unknown) => entries,
+  GENERATABLE_SESSION_STATUSES: new Set(["created", "provisioning", "ready", "running"]),
 }));
 
 const statusPageUrl = "https://myopencompany.betteruptime.com";
