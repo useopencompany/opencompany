@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace } from "@/lib/auth";
-import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-sync/dispatch";
 import { deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
 
 vi.mock("@opencompany/db/client", () => ({
@@ -16,13 +16,13 @@ vi.mock("@/lib/auth", () => ({
   currentWorkspace: vi.fn(),
 }));
 
-vi.mock("@/lib/brain/sync-dispatch", () => ({
-  scheduleBrainSyncDispatch: vi.fn(),
+vi.mock("@/lib/workspace-sync/dispatch", () => ({
+  scheduleWorkspaceSyncDispatch: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
 const currentWorkspaceMock = vi.mocked(currentWorkspace);
-const scheduleBrainSyncDispatchMock = vi.mocked(scheduleBrainSyncDispatch);
+const scheduleWorkspaceSyncDispatchMock = vi.mocked(scheduleWorkspaceSyncDispatch);
 
 function createDbMock(input: { selectResults: unknown[][]; insertReturning?: unknown[][] }) {
   const pendingSelectResults = [...input.selectResults];
@@ -38,7 +38,7 @@ function createDbMock(input: { selectResults: unknown[][]; insertReturning?: unk
   const select = vi.fn(() => ({ from }));
   const returning = vi.fn(async () => pendingInsertReturning.shift() ?? []);
   const onConflictDoNothing = vi.fn(() => ({ returning }));
-  const onConflictDoUpdate = vi.fn(() => ({ query: "sync-job-upsert" }));
+  const onConflictDoUpdate = vi.fn(() => ({ query: "dirty-upsert" }));
   const insert = vi.fn(() => ({
     values: vi.fn((value: unknown) => {
       insertedValues.push(value);
@@ -73,15 +73,7 @@ describe("renameBrainFile", () => {
   it("rejects a rename when the destination already exists", async () => {
     const { db, insert, batch } = createDbMock({
       selectResults: [
-        [
-          {
-            path: "docs/old.md",
-            content: "old",
-            contentHash: "hash-old",
-            sizeBytes: 3,
-            githubBlobSha: "blob-old",
-          },
-        ],
+        [{ path: "docs/old.md", content: "old", contentHash: "hash-old", sizeBytes: 3 }],
         [{ path: "docs/new.md" }],
       ],
     });
@@ -93,22 +85,13 @@ describe("renameBrainFile", () => {
     });
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();
-    expect(scheduleBrainSyncDispatchMock).not.toHaveBeenCalled();
+    expect(scheduleWorkspaceSyncDispatchMock).not.toHaveBeenCalled();
   });
 
-  it("records the previous path and blob for GitHub sync", async () => {
+  it("inserts the renamed file and requests a single workspace reconcile", async () => {
     const { db, batch, insertedValues } = createDbMock({
       selectResults: [
-        [
-          {
-            path: "docs/old.md",
-            content: "old",
-            contentHash: "hash-old",
-            sizeBytes: 3,
-            githubBlobSha: "blob-old",
-          },
-        ],
-        [],
+        [{ path: "docs/old.md", content: "old", contentHash: "hash-old", sizeBytes: 3 }],
         [],
       ],
       insertReturning: [[{ path: "docs/new.md" }]],
@@ -129,49 +112,20 @@ describe("renameBrainFile", () => {
           contentHash: "hash-old",
           githubSyncStatus: "pending",
         }),
-        expect.objectContaining({
-          workspaceId: "wks_123",
-          path: "docs/new.md",
-          operation: "upsert",
-          desiredHash: "hash-old",
-          previousPath: "docs/old.md",
-          previousBlobSha: "blob-old",
-        }),
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledOnce();
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
-      workspaceId: "wks_123",
-      path: "docs/new.md",
-    });
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 
-  it("moves all files in a folder and records per-file sync renames", async () => {
+  it("moves all files in a folder and requests a single reconcile", async () => {
     const { db, batch, insertedValues } = createDbMock({
       selectResults: [
         [
-          {
-            path: "docs/a.md",
-            content: "a",
-            contentHash: "hash-a",
-            sizeBytes: 1,
-            githubBlobSha: "blob-a",
-          },
-          {
-            path: "docs/deep/b.md",
-            content: "b",
-            contentHash: "hash-b",
-            sizeBytes: 1,
-            githubBlobSha: "blob-b",
-          },
-          {
-            path: "notes/c.md",
-            content: "c",
-            contentHash: "hash-c",
-            sizeBytes: 1,
-            githubBlobSha: "blob-c",
-          },
+          { path: "docs/a.md", content: "a", contentHash: "hash-a", sizeBytes: 1 },
+          { path: "docs/deep/b.md", content: "b", contentHash: "hash-b", sizeBytes: 1 },
+          { path: "notes/c.md", content: "c", contentHash: "hash-c", sizeBytes: 1 },
         ],
         [],
       ],
@@ -189,49 +143,23 @@ describe("renameBrainFile", () => {
           expect.objectContaining({ path: "archive/docs/a.md", contentHash: "hash-a" }),
           expect.objectContaining({ path: "archive/docs/deep/b.md", contentHash: "hash-b" }),
         ]),
-        expect.objectContaining({
-          path: "archive/docs/a.md",
-          operation: "upsert",
-          previousPath: "docs/a.md",
-          previousBlobSha: "blob-a",
-        }),
-        expect.objectContaining({
-          path: "archive/docs/deep/b.md",
-          operation: "upsert",
-          previousPath: "docs/deep/b.md",
-          previousBlobSha: "blob-b",
-        }),
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledTimes(2);
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
-      workspaceId: "wks_123",
-      path: "archive/docs/a.md",
-    });
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
-      workspaceId: "wks_123",
-      path: "archive/docs/deep/b.md",
-    });
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 
   it("rejects moving a folder over an existing file path", async () => {
     const { db, batch } = createDbMock({
       selectResults: [
         [
-          {
-            path: "docs/a.md",
-            content: "a",
-            contentHash: "hash-a",
-            sizeBytes: 1,
-            githubBlobSha: "blob-a",
-          },
+          { path: "docs/a.md", content: "a", contentHash: "hash-a", sizeBytes: 1 },
           {
             path: "archive/docs/a.md",
             content: "existing",
             contentHash: "hash-existing",
             sizeBytes: 8,
-            githubBlobSha: "blob-existing",
           },
         ],
       ],
@@ -243,17 +171,12 @@ describe("renameBrainFile", () => {
       error: "A Brain file already exists at archive/docs/a.md.",
     });
     expect(batch).not.toHaveBeenCalled();
+    expect(scheduleWorkspaceSyncDispatchMock).not.toHaveBeenCalled();
   });
 
-  it("deletes all files in a folder and queues delete sync jobs", async () => {
-    const { db, batch, insertedValues } = createDbMock({
-      selectResults: [
-        [
-          { path: "docs/a.md", githubBlobSha: "blob-a" },
-          { path: "docs/deep/b.md", githubBlobSha: "blob-b" },
-          { path: "notes/c.md", githubBlobSha: "blob-c" },
-        ],
-      ],
+  it("deletes all files in a folder and requests a single reconcile", async () => {
+    const { db, batch } = createDbMock({
+      selectResults: [[{ path: "docs/a.md" }, { path: "docs/deep/b.md" }, { path: "notes/c.md" }]],
     });
     getDbMock.mockReturnValue(db as never);
 
@@ -262,31 +185,8 @@ describe("renameBrainFile", () => {
       path: "docs",
     });
 
-    expect(insertedValues).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          path: "docs/a.md",
-          operation: "delete",
-          desiredHash: null,
-          previousBlobSha: "blob-a",
-        }),
-        expect.objectContaining({
-          path: "docs/deep/b.md",
-          operation: "delete",
-          desiredHash: null,
-          previousBlobSha: "blob-b",
-        }),
-      ]),
-    );
     expect(batch).toHaveBeenCalledOnce();
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledTimes(2);
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
-      workspaceId: "wks_123",
-      path: "docs/a.md",
-    });
-    expect(scheduleBrainSyncDispatchMock).toHaveBeenCalledWith({
-      workspaceId: "wks_123",
-      path: "docs/deep/b.md",
-    });
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 });

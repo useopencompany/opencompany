@@ -4,15 +4,10 @@ import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agentFiles, agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
-import {
-  buildPendingAgent,
-  logAgentSyncJobQueued,
-  prepareAgentSyncJobUpsert,
-  scheduleAgentSyncDispatch,
-} from "@/lib/agents/create";
-import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
-import { agentFileSyncJobUpsert } from "@/lib/agents/sync-job";
+import { buildPendingAgent } from "@/lib/agents/create";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-sync/dispatch";
+import { markWorkspaceDirty } from "@/lib/workspace-sync/jobs";
 
 const DEFAULT_USER_AGENT_TITLE = "leo";
 const DEFAULT_USER_AGENT_PATH = agentPathForSlug(DEFAULT_USER_AGENT_TITLE);
@@ -82,7 +77,6 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     path: DEFAULT_USER_AGENT_PATH,
     model: DEFAULT_USER_AGENT_MODEL,
   });
-  const syncJob = prepareAgentSyncJobUpsert(db, pending.syncJob);
 
   // Seed leo's private operating doc (agent/soul.md). The runner mounts it into ./agent on
   // the first session; the insert commits here before the seeded session starts.
@@ -91,7 +85,6 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
 
   await db.batch([
     db.insert(agents).values(pending.agent),
-    syncJob.query,
     db.insert(agentFiles).values({
       workspaceId: input.workspaceId,
       agentId: pending.id,
@@ -101,14 +94,8 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
       sizeBytes: brainContentSize(DEFAULT_SOUL_MD),
       githubSyncStatus: "pending",
     }),
-    agentFileSyncJobUpsert(db, {
-      workspaceId: input.workspaceId,
-      path: soulPath,
-      operation: "upsert",
-      desiredHash: soulHash,
-    }),
+    markWorkspaceDirty(db, input.workspaceId),
   ]);
-  logAgentSyncJobQueued(syncJob.metadata);
 
   await captureServerEvent("agent_created", input.userId, {
     user_id: input.userId,
@@ -116,12 +103,7 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     agent_id: pending.id,
   });
 
-  scheduleAgentSyncDispatch({
-    id: pending.id,
-    workspaceId: input.workspaceId,
-    path: DEFAULT_USER_AGENT_PATH,
-  });
-  scheduleAgentFileSyncDispatch({ workspaceId: input.workspaceId, path: soulPath });
+  scheduleWorkspaceSyncDispatch({ workspaceId: input.workspaceId });
 
   return {
     created: true as const,

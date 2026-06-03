@@ -119,7 +119,6 @@ export const agents = pgTable(
     commitSha: text("commit_sha"),
     contentHash: text("content_hash"),
     version: integer("version").notNull().default(1),
-    githubBlobSha: text("github_blob_sha"),
     githubCommitSha: text("github_commit_sha"),
     githubSyncedHash: text("github_synced_hash"),
     githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
@@ -144,33 +143,6 @@ export const agents = pgTable(
   }),
 );
 
-export const agentSyncJobs = pgTable(
-  "agent_sync_jobs",
-  {
-    agentId: text("agent_id")
-      .primaryKey()
-      .references(() => agents.id, { onDelete: "cascade" }),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
-    desiredHash: text("desired_hash").notNull(),
-    desiredVersion: integer("desired_version").notNull(),
-    previousPath: text("previous_path"),
-    previousBlobSha: text("previous_blob_sha"),
-    status: text("status").notNull().default("pending"),
-    attempts: integer("attempts").notNull().default(0),
-    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
-    lastError: text("last_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    workspaceIdx: index("agent_sync_jobs_workspace_idx").on(table.workspaceId),
-    nextRunAtIdx: index("agent_sync_jobs_next_run_at_idx").on(table.nextRunAt),
-  }),
-);
-
 export const brainFiles = pgTable(
   "brain_files",
   {
@@ -182,7 +154,6 @@ export const brainFiles = pgTable(
     content: text("content").notNull().default(""),
     contentHash: text("content_hash").notNull(),
     sizeBytes: integer("size_bytes").notNull().default(0),
-    githubBlobSha: text("github_blob_sha"),
     githubCommitSha: text("github_commit_sha"),
     githubSyncedHash: text("github_synced_hash"),
     githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
@@ -214,7 +185,6 @@ export const agentFiles = pgTable(
     content: text("content").notNull().default(""),
     contentHash: text("content_hash").notNull(),
     sizeBytes: integer("size_bytes").notNull().default(0),
-    githubBlobSha: text("github_blob_sha"),
     githubCommitSha: text("github_commit_sha"),
     githubSyncedHash: text("github_synced_hash"),
     githubSyncedAt: timestamp("github_synced_at", { withTimezone: true }),
@@ -233,18 +203,17 @@ export const agentFiles = pgTable(
   }),
 );
 
-export const brainSyncJobs = pgTable(
-  "brain_sync_jobs",
+// One row per workspace: the "dirty" signal that the workspace's desired state
+// (brain files, agents, agent bundle files) needs reconciling to its managed
+// GitHub repo. Replaces the former per-file/per-agent sync-job tables — the
+// reconcile diffs the whole desired tree against GitHub and commits the delta
+// in a single commit, so no per-path operation/rename bookkeeping is needed.
+export const workspaceSyncJobs = pgTable(
+  "workspace_sync_jobs",
   {
-    id: serial("id").primaryKey(),
     workspaceId: text("workspace_id")
-      .notNull()
+      .primaryKey()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
-    operation: text("operation").notNull().default("upsert"),
-    desiredHash: text("desired_hash"),
-    previousPath: text("previous_path"),
-    previousBlobSha: text("previous_blob_sha"),
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
@@ -253,46 +222,7 @@ export const brainSyncJobs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceIdx: index("brain_sync_jobs_workspace_idx").on(table.workspaceId),
-    workspacePathIdx: uniqueIndex("brain_sync_jobs_workspace_path_idx").on(
-      table.workspaceId,
-      table.path,
-    ),
-    nextRunAtIdx: index("brain_sync_jobs_next_run_at_idx").on(table.nextRunAt),
-  }),
-);
-
-// Mirrors brainSyncJobs: keyed on (workspaceId, path) with no per-agent FK.
-// Deleting an agent does not cascade-delete its pending file sync jobs; any
-// orphaned job self-cleans on its next run via the "missing-file" path in
-// materializeAgentFileToGitHub. This keeps the sync-job design uniform with
-// brainSyncJobs rather than coupling jobs to the agents table.
-export const agentFileSyncJobs = pgTable(
-  "agent_file_sync_jobs",
-  {
-    id: serial("id").primaryKey(),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
-    operation: text("operation").notNull().default("upsert"),
-    desiredHash: text("desired_hash"),
-    previousPath: text("previous_path"),
-    previousBlobSha: text("previous_blob_sha"),
-    status: text("status").notNull().default("pending"),
-    attempts: integer("attempts").notNull().default(0),
-    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
-    lastError: text("last_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    workspaceIdx: index("agent_file_sync_jobs_workspace_idx").on(table.workspaceId),
-    workspacePathIdx: uniqueIndex("agent_file_sync_jobs_workspace_path_idx").on(
-      table.workspaceId,
-      table.path,
-    ),
-    nextRunAtIdx: index("agent_file_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+    nextRunAtIdx: index("workspace_sync_jobs_next_run_at_idx").on(table.nextRunAt),
   }),
 );
 
@@ -1296,11 +1226,12 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   }),
   memberships: many(workspaceMemberships),
   agents: many(agents),
-  agentSyncJobs: many(agentSyncJobs),
   brainFiles: many(brainFiles),
-  brainSyncJobs: many(brainSyncJobs),
   agentFiles: many(agentFiles),
-  agentFileSyncJobs: many(agentFileSyncJobs),
+  syncJob: one(workspaceSyncJobs, {
+    fields: [workspaces.id],
+    references: [workspaceSyncJobs.workspaceId],
+  }),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   creditBalance: one(workspaceCreditBalances, {
@@ -1327,10 +1258,6 @@ export const agentsRelations = relations(agents, ({ one, many }) => ({
     fields: [agents.workspaceId],
     references: [workspaces.id],
   }),
-  syncJob: one(agentSyncJobs, {
-    fields: [agents.id],
-    references: [agentSyncJobs.agentId],
-  }),
   files: many(agentFiles),
   sessions: many(agentSessions),
 }));
@@ -1353,16 +1280,9 @@ export const agentFilesRelations = relations(agentFiles, ({ one }) => ({
   }),
 }));
 
-export const brainSyncJobsRelations = relations(brainSyncJobs, ({ one }) => ({
+export const workspaceSyncJobsRelations = relations(workspaceSyncJobs, ({ one }) => ({
   workspace: one(workspaces, {
-    fields: [brainSyncJobs.workspaceId],
-    references: [workspaces.id],
-  }),
-}));
-
-export const agentFileSyncJobsRelations = relations(agentFileSyncJobs, ({ one }) => ({
-  workspace: one(workspaces, {
-    fields: [agentFileSyncJobs.workspaceId],
+    fields: [workspaceSyncJobs.workspaceId],
     references: [workspaces.id],
   }),
 }));
@@ -1557,17 +1477,6 @@ export const workspaceCreditLedgerRelations = relations(workspaceCreditLedger, (
   }),
 }));
 
-export const agentSyncJobsRelations = relations(agentSyncJobs, ({ one }) => ({
-  agent: one(agents, {
-    fields: [agentSyncJobs.agentId],
-    references: [agents.id],
-  }),
-  workspace: one(workspaces, {
-    fields: [agentSyncJobs.workspaceId],
-    references: [workspaces.id],
-  }),
-}));
-
 export const workspaceRepositoriesRelations = relations(workspaceRepositories, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [workspaceRepositories.workspaceId],
@@ -1686,12 +1595,10 @@ export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSele
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
 export type CreditCode = typeof creditCodes.$inferSelect;
 export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
-export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
 export type AgentScheduleRun = typeof agentScheduleRuns.$inferSelect;
 export type BrainFile = typeof brainFiles.$inferSelect;
-export type BrainSyncJob = typeof brainSyncJobs.$inferSelect;
 export type AgentFile = typeof agentFiles.$inferSelect;
-export type AgentFileSyncJob = typeof agentFileSyncJobs.$inferSelect;
+export type WorkspaceSyncJob = typeof workspaceSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type SessionStar = typeof sessionStars.$inferSelect;
 export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect;

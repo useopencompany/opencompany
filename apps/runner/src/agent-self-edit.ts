@@ -11,10 +11,11 @@ import {
   serializeAgentFile,
   validateAgentFileSource,
 } from "@opencompany/agent-runtime";
-import { agentSessions, agentSyncJobs, agents } from "@opencompany/db/schema";
+import { agentSessions, agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
+import { markWorkspaceDirty } from "./repo-files";
 
 export type AgentSelfUpdateResult =
   | { ok: true; version: number; changedFields: string[]; summary?: string; appliesTo: string }
@@ -125,41 +126,9 @@ export async function applyAgentSelfUpdate(input: {
     };
   }
 
-  // Queue the GitHub sync the same way the web editor does; the sync-outbox sweeper
-  // (runs every minute) commits the .agent file. Only possible once the agent has a path.
-  if (row.path) {
-    await db
-      .insert(agentSyncJobs)
-      .values({
-        agentId: row.agentId,
-        workspaceId: row.workspaceId,
-        path: row.path,
-        desiredHash: contentHash,
-        desiredVersion: nextVersion,
-        previousPath: null,
-        previousBlobSha: null,
-        status: "pending",
-        attempts: 0,
-        nextRunAt: now,
-        lastError: null,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: agentSyncJobs.agentId,
-        set: {
-          path: row.path,
-          desiredHash: contentHash,
-          desiredVersion: nextVersion,
-          previousPath: null,
-          previousBlobSha: null,
-          status: "pending",
-          attempts: 0,
-          nextRunAt: now,
-          lastError: null,
-          updatedAt: now,
-        },
-      });
-  }
+  // Flag the workspace dirty so the per-workspace reconcile (driven by the
+  // workspace-sync outbox sweeper, every minute) commits the updated .agent file.
+  await markWorkspaceDirty(row.workspaceId);
 
   const changedFields = diffChangedFields(current, nextConfig);
 

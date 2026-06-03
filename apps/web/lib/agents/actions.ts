@@ -15,15 +15,12 @@ import type { AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import {
-  agentFileSyncJobs,
   agentFiles,
   agentSessions,
-  agentSyncJobs,
   agents,
   brainFiles,
   workspaceIntegrationResources,
   workspaceIntegrations,
-  workspaceRepositories,
 } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
@@ -35,29 +32,15 @@ import {
   derivePreviewConfigFromTiptapDoc,
   extractPreferredGitHubRepositoriesFromTiptapDoc,
 } from "@/lib/agents/config";
-import {
-  buildPendingAgent,
-  logAgentSyncJobQueued,
-  newAgentId,
-  nextAvailableAgentPath,
-  prepareAgentSyncJobUpsert,
-  scheduleAgentSyncDispatch,
-} from "@/lib/agents/create";
-import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
+import { buildPendingAgent, nextAvailableAgentPath } from "@/lib/agents/create";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { randomAgentName } from "@/lib/agents/names";
-import { selectCanonicalAgentRepositoryFiles } from "@/lib/agents/paths";
 import {
   buildGitHubRepositoryCatalogs,
   type GitHubIntegrationRepositoryPayload,
   normalizeAgentConfig,
   serializeAgentDetail,
 } from "@/lib/agents/payload";
-import {
-  agentFileSyncJobUpsert,
-  prepareAgentBundleFileMoves,
-  resolveAgentSyncRename,
-} from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
 import {
@@ -66,13 +49,8 @@ import {
 } from "@/lib/integrations/service";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
-import {
-  deleteWorkspaceFile,
-  ensureWorkspaceRepository,
-  listWorkspaceAgentFiles,
-  readWorkspaceFile,
-  writeWorkspaceFile,
-} from "@/lib/workspace-state/github";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-sync/dispatch";
+import { markWorkspaceDirty } from "@/lib/workspace-sync/jobs";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
@@ -103,12 +81,10 @@ export async function createAgent() {
     body: "",
     path,
   });
-  const syncJob = prepareAgentSyncJobUpsert(db, pending.syncJob);
 
-  await timeAsync(trace, "db.createAgentAndSyncJob", () =>
-    db.batch([db.insert(agents).values(pending.agent), syncJob.query]),
+  await timeAsync(trace, "db.createAgentAndMarkDirty", () =>
+    db.batch([db.insert(agents).values(pending.agent), markWorkspaceDirty(db, workspace.id)]),
   );
-  logAgentSyncJobQueued(syncJob.metadata);
   const result = { id: pending.id, workspaceId: workspace.id, path };
 
   await captureServerEvent("agent_created", user.id, {
@@ -118,11 +94,7 @@ export async function createAgent() {
   });
 
   revalidatePath("/agents");
-  scheduleAgentSyncDispatch({
-    id: pending.id,
-    workspaceId: workspace.id,
-    path,
-  });
+  scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { path: result.path });
   redirect(`/agents/${result.path}`);
 }
@@ -167,7 +139,6 @@ export async function updateAgent(
         content: agents.content,
         config: agents.config,
         version: agents.version,
-        githubBlobSha: agents.githubBlobSha,
       })
       .from(agents)
       .where(
@@ -330,24 +301,8 @@ export async function updateAgent(
   const parsed = parseAgentFile(source);
   const contentHash = hashAgentSource(source);
   const version = agent.version + 1;
-  const [existingSyncJob] = await timeAsync(trace, "db.selectExistingSyncJob", () =>
-    db
-      .select({
-        previousPath: agentSyncJobs.previousPath,
-        previousBlobSha: agentSyncJobs.previousBlobSha,
-      })
-      .from(agentSyncJobs)
-      .where(eq(agentSyncJobs.agentId, agent.id))
-      .limit(1),
-  );
-  const rename = resolveAgentSyncRename({
-    existingPreviousPath: existingSyncJob?.previousPath,
-    existingPreviousBlobSha: existingSyncJob?.previousBlobSha,
-    renamePreviousPath: pathChanged ? previousPath : null,
-    renamePreviousBlobSha: pathChanged ? agent.githubBlobSha : null,
-  });
-  // Only plan bundle-file moves when previousPath is a validated bundle path.
-  // A legacy single-file path (e.g. "agents/leo.agent") resolves via
+  // Only move bundle files when previousPath is a validated bundle path. A
+  // legacy single-file path (e.g. "agents/leo.agent") resolves via
   // agentBundleDir to the workspace root ("agents"), which would otherwise
   // re-path unrelated bundle files into the new folder.
   const previousBundleDir =
@@ -356,46 +311,22 @@ export async function updateAgent(
   const bundleFileMoves =
     previousBundleDir && previousBundleDir !== nextBundleDir
       ? await timeAsync(trace, "db.prepareAgentBundleFileMoves", async () => {
-          const [files, existingFileSyncJobs] = await Promise.all([
-            db
-              .select({
-                id: agentFiles.id,
-                path: agentFiles.path,
-                contentHash: agentFiles.contentHash,
-                githubBlobSha: agentFiles.githubBlobSha,
-              })
-              .from(agentFiles)
-              .where(eq(agentFiles.workspaceId, workspace.id)),
-            db
-              .select({
-                path: agentFileSyncJobs.path,
-                previousPath: agentFileSyncJobs.previousPath,
-                previousBlobSha: agentFileSyncJobs.previousBlobSha,
-              })
-              .from(agentFileSyncJobs)
-              .where(eq(agentFileSyncJobs.workspaceId, workspace.id)),
-          ]);
-
-          return prepareAgentBundleFileMoves({
-            files,
-            existingFileSyncJobs,
-            oldBundleDir: previousBundleDir,
-            newBundleDir: nextBundleDir,
-          });
+          const files = await db
+            .select({ id: agentFiles.id, path: agentFiles.path })
+            .from(agentFiles)
+            .where(eq(agentFiles.workspaceId, workspace.id));
+          return files
+            .filter((file) => file.path.startsWith(`${previousBundleDir}/`))
+            .map((file) => ({
+              fileId: file.id,
+              previousPath: file.path,
+              path: `${nextBundleDir}/${file.path.slice(previousBundleDir.length + 1)}`,
+            }));
         })
       : [];
-  const syncJob = prepareAgentSyncJobUpsert(db, {
-    agentId: agent.id,
-    workspaceId: workspace.id,
-    path,
-    desiredHash: contentHash,
-    desiredVersion: version,
-    previousPath: rename.previousPath,
-    previousBlobSha: rename.previousBlobSha,
-  });
 
   const now = new Date();
-  await timeAsync(trace, "db.updateAgentAndSyncJob", () =>
+  await timeAsync(trace, "db.updateAgentAndMarkDirty", () =>
     db.batch([
       db
         .update(agents)
@@ -417,7 +348,6 @@ export async function updateAgent(
           .update(agentFiles)
           .set({
             path: move.path,
-            githubBlobSha: null,
             githubCommitSha: null,
             githubSyncedHash: null,
             githubSyncedAt: null,
@@ -433,30 +363,9 @@ export async function updateAgent(
             ),
           ),
       ),
-      syncJob.query,
-      ...bundleFileMoves.map((move) =>
-        agentFileSyncJobUpsert(db, {
-          workspaceId: workspace.id,
-          path: move.path,
-          operation: "upsert",
-          desiredHash: move.contentHash,
-          previousPath: move.rename.previousPath,
-          previousBlobSha: move.rename.previousBlobSha,
-        }),
-      ),
-      ...bundleFileMoves.map((move) =>
-        db
-          .delete(agentFileSyncJobs)
-          .where(
-            and(
-              eq(agentFileSyncJobs.workspaceId, workspace.id),
-              eq(agentFileSyncJobs.path, move.previousPath),
-            ),
-          ),
-      ),
+      markWorkspaceDirty(db, workspace.id),
     ]),
   );
-  logAgentSyncJobQueued(syncJob.metadata);
   const [[updatedAgent], brainPathRows, bundleFileRows, mcpSettings] = await Promise.all([
     timeAsync(trace, "db.selectUpdatedAgent", () =>
       db
@@ -519,17 +428,7 @@ export async function updateAgent(
   revalidatePath(`/agents/${result.path}`);
   if (previousPath) revalidatePath(`/agents/${previousPath}`);
   revalidatePath(`/agents/${result.id}`);
-  scheduleAgentSyncDispatch({
-    id: agent.id,
-    workspaceId: workspace.id,
-    path,
-  });
-  for (const move of bundleFileMoves) {
-    scheduleAgentFileSyncDispatch({
-      workspaceId: workspace.id,
-      path: move.path,
-    });
-  }
+  scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
   return result;
 }
@@ -572,7 +471,6 @@ export async function deleteAgent(
       .select({
         id: agents.id,
         path: agents.path,
-        githubBlobSha: agents.githubBlobSha,
       })
       .from(agents)
       .where(
@@ -587,104 +485,6 @@ export async function deleteAgent(
   if (!agent) {
     endTimingTrace(trace, { found: false });
     return { ok: false, error: "Agent not found." };
-  }
-
-  // GitHub delete first so a transient failure leaves the agent intact rather
-  // than orphaning the .agent file (which the next sync would re-import as a
-  // fresh agent). `deleteWorkspaceFile` swallows 404s, so a retry after a
-  // partial success is idempotent.
-  if (agent.path) {
-    const [repository] = await timeAsync(trace, "db.selectWorkspaceRepository", () =>
-      db
-        .select({
-          workspaceId: workspaceRepositories.workspaceId,
-          githubRepoId: workspaceRepositories.githubRepoId,
-          fullName: workspaceRepositories.fullName,
-          defaultBranch: workspaceRepositories.defaultBranch,
-          latestHeadSha: workspaceRepositories.latestHeadSha,
-          createdAt: workspaceRepositories.createdAt,
-          updatedAt: workspaceRepositories.updatedAt,
-        })
-        .from(workspaceRepositories)
-        .where(eq(workspaceRepositories.workspaceId, workspace.id))
-        .limit(1),
-    );
-
-    if (!repository) {
-      logger.warn("No workspace repository found; skipping GitHub file deletion", {
-        event: "opencompany.agent_delete_no_repository",
-        workspace_id: workspace.id,
-        agent_id: agent.id,
-        path: agent.path,
-      });
-    } else {
-      try {
-        await timeAsync(
-          trace,
-          "github.deleteWorkspaceFile",
-          () =>
-            deleteWorkspaceFile({
-              db,
-              repository,
-              path: agent.path!,
-              message: `Delete ${agent.path}`,
-              blobSha: agent.githubBlobSha,
-            }),
-          { path: agent.path },
-        );
-
-        // Bundle-backed agents can have synced files (e.g. agent/memory.md)
-        // tracked in agentFiles. Delete the whole bundle so no private agent
-        // state lingers in the repo after the DB row is removed. Each delete is
-        // 404-safe, so a retry after a partial failure stays idempotent.
-        const bundleFiles = await timeAsync(trace, "db.selectAgentBundleFiles", () =>
-          db
-            .select({ path: agentFiles.path, githubBlobSha: agentFiles.githubBlobSha })
-            .from(agentFiles)
-            .where(and(eq(agentFiles.agentId, agent.id), eq(agentFiles.workspaceId, workspace.id))),
-        );
-        for (const file of bundleFiles) {
-          if (file.path === agent.path) continue;
-          await timeAsync(
-            trace,
-            "github.deleteWorkspaceFile",
-            () =>
-              deleteWorkspaceFile({
-                db,
-                repository,
-                path: file.path,
-                message: `Delete ${file.path}`,
-                blobSha: file.githubBlobSha,
-              }),
-            { path: file.path },
-          );
-        }
-      } catch (err) {
-        captureException(err, {
-          event: "opencompany.agent_delete_github_failed",
-          workspace_id: workspace.id,
-          agent_id: agent.id,
-          path: agent.path,
-        });
-        logger.error("Failed to delete agent file from GitHub", {
-          event: "opencompany.agent_delete_github_failed",
-          workspace_id: workspace.id,
-          agent_id: agent.id,
-          path: agent.path,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        endTimingTrace(trace, {
-          found: true,
-          path: agent.path,
-          githubDeleted: false,
-        });
-        return {
-          ok: false,
-          error:
-            "Could not delete the agent from the connected GitHub repository. Please try again.",
-        } as const;
-      }
-    }
   }
 
   // Archive any live e2b sandboxes for this agent before the cascade removes
@@ -743,8 +543,14 @@ export async function deleteAgent(
     }
   }
 
-  await timeAsync(trace, "db.deleteAgent", () =>
-    db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+  // Delete the agent (cascades to its agentFiles) and mark the workspace dirty.
+  // The next reconcile removes the agent's files from GitHub as part of the
+  // whole-tree diff — no synchronous GitHub writes in the request path.
+  await timeAsync(trace, "db.deleteAgentAndMarkDirty", () =>
+    db.batch([
+      db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+      markWorkspaceDirty(db, workspace.id),
+    ]),
   );
 
   await captureServerEvent("agent_deleted", user.id, {
@@ -756,6 +562,7 @@ export async function deleteAgent(
   revalidatePath("/agents");
   if (agent.path) revalidatePath(`/agents/${agent.path}`);
   revalidatePath(`/agents/${agent.id}`);
+  scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { found: true, path: agent.path });
   return { ok: true };
 }
@@ -778,240 +585,6 @@ function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tipta
       tiptapRepositories: collectBodyRepositoryMentions(tiptapBody),
     }),
   );
-}
-
-export async function materializeLegacyAgentFiles() {
-  const trace = startTimingTrace("agents.materializeLegacy");
-  const { workspace } = await currentWorkspace();
-  const db = getDb();
-  const rows = await timeAsync(trace, "db.selectAgents", () =>
-    db
-      .select({
-        id: agents.id,
-        path: agents.path,
-        name: agents.name,
-        body: agents.body,
-        config: agents.config,
-      })
-      .from(agents)
-      .where(eq(agents.workspaceId, workspace.id)),
-  );
-  const repository = await timeAsync(trace, "github.ensureRepository", () =>
-    ensureWorkspaceRepository({ db, workspace }),
-  );
-
-  for (const agent of rows) {
-    if (agent.path) continue;
-
-    const config = normalizeAgentConfig(agent.config);
-    const body = agent.body || config.instructions;
-    const source = serializeAgentFile({
-      title: agent.name,
-      body,
-      model: config.model.name,
-      tools: config.tools,
-      brain: config.brain,
-      integrations: config.integrations,
-      triggers: config.triggers,
-    });
-    const parsed = parseAgentFile(source);
-    const contentHash = hashAgentSource(source);
-    const path = await nextAvailableAgentPath(db, workspace.id, agent.name);
-    const { commitSha, blobSha } = await timeAsync(
-      trace,
-      "github.writeWorkspaceFile",
-      () =>
-        writeWorkspaceFile({
-          db,
-          repository,
-          path,
-          content: source,
-          message: `Create ${path}`,
-        }),
-      { path },
-    );
-
-    await timeAsync(
-      trace,
-      "db.updateAgent",
-      () =>
-        db
-          .update(agents)
-          .set({
-            path,
-            name: parsed.title,
-            body: parsed.body,
-            commitSha,
-            contentHash,
-            githubBlobSha: blobSha,
-            githubCommitSha: commitSha,
-            githubSyncedHash: contentHash,
-            githubSyncedAt: new Date(),
-            githubSyncStatus: "synced",
-            githubSyncError: null,
-            config: parsed.config,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
-      { path },
-    );
-  }
-
-  revalidatePath("/agents");
-  endTimingTrace(trace, { count: rows.length });
-}
-
-export async function syncAgentsFromWorkspaceRepository() {
-  const trace = startTimingTrace("agents.syncFromWorkspaceRepository");
-  const { workspace } = await currentWorkspace();
-  const db = getDb();
-  const repository = await timeAsync(trace, "github.ensureRepository", () =>
-    ensureWorkspaceRepository({ db, workspace }),
-  );
-  const files = await timeAsync(trace, "github.listWorkspaceAgentFiles", () =>
-    listWorkspaceAgentFiles({ repository }),
-  );
-  const canonicalFiles = selectCanonicalAgentRepositoryFiles(files);
-
-  for (const file of canonicalFiles) {
-    const { content, sha } = await timeAsync(
-      trace,
-      "github.readWorkspaceFile",
-      () =>
-        readWorkspaceFile({
-          repository,
-          path: file.path,
-        }),
-      { path: file.path },
-    );
-    const parsed = parseAgentFile(content);
-    const contentHash = hashAgentSource(
-      serializeAgentFile({
-        title: parsed.title,
-        body: parsed.body,
-        model: parsed.config.model.name,
-        tools: parsed.config.tools,
-        brain: parsed.config.brain,
-        integrations: parsed.config.integrations,
-        triggers: parsed.config.triggers,
-      }),
-    );
-    const [existing] = await timeAsync(
-      trace,
-      "db.selectAgentByPath",
-      () =>
-        db
-          .select({ id: agents.id, path: agents.path, version: agents.version })
-          .from(agents)
-          .where(
-            and(
-              eq(agents.workspaceId, workspace.id),
-              file.legacyPath
-                ? or(eq(agents.path, file.canonicalPath), eq(agents.path, file.legacyPath))
-                : eq(agents.path, file.canonicalPath),
-            ),
-          )
-          .limit(1),
-      { path: file.canonicalPath },
-    );
-    const shouldCanonicalize = Boolean(file.previousPath);
-    const pathChangedInDb = Boolean(existing && existing.path !== file.canonicalPath);
-    const nextVersion = (existing?.version ?? 0) + (shouldCanonicalize || pathChangedInDb ? 1 : 0);
-
-    if (existing) {
-      await timeAsync(
-        trace,
-        "db.updateAgent",
-        () =>
-          db
-            .update(agents)
-            .set({
-              path: file.canonicalPath,
-              name: parsed.title,
-              body: parsed.body,
-              commitSha: sha ?? file.sha,
-              contentHash,
-              githubBlobSha: sha ?? file.sha,
-              githubCommitSha: null,
-              githubSyncedHash: contentHash,
-              githubSyncedAt: new Date(),
-              githubSyncStatus: shouldCanonicalize ? "pending" : "synced",
-              githubSyncError: null,
-              config: parsed.config,
-              version: nextVersion,
-              updatedAt: new Date(),
-            })
-            .where(and(eq(agents.id, existing.id), eq(agents.workspaceId, workspace.id))),
-        { path: file.canonicalPath },
-      );
-      if (shouldCanonicalize) {
-        const syncJob = prepareAgentSyncJobUpsert(db, {
-          agentId: existing.id,
-          workspaceId: workspace.id,
-          path: file.canonicalPath,
-          desiredHash: contentHash,
-          desiredVersion: nextVersion,
-          previousPath: file.previousPath,
-          previousBlobSha: sha ?? file.sha,
-        });
-        await timeAsync(trace, "db.upsertCanonicalAgentSyncJob", () => syncJob.query, {
-          path: file.canonicalPath,
-        });
-        logAgentSyncJobQueued(syncJob.metadata);
-        scheduleAgentSyncDispatch({
-          id: existing.id,
-          workspaceId: workspace.id,
-          path: file.canonicalPath,
-        });
-      }
-      continue;
-    }
-
-    const id = newAgentId();
-    await timeAsync(
-      trace,
-      "db.insertAgent",
-      () =>
-        db.insert(agents).values({
-          id,
-          workspaceId: workspace.id,
-          path: file.canonicalPath,
-          name: parsed.title,
-          body: parsed.body,
-          commitSha: sha ?? file.sha,
-          contentHash,
-          githubBlobSha: sha ?? file.sha,
-          githubSyncedHash: contentHash,
-          githubSyncedAt: new Date(),
-          githubSyncStatus: shouldCanonicalize ? "pending" : "synced",
-          config: parsed.config,
-        }),
-      { path: file.canonicalPath },
-    );
-    if (shouldCanonicalize) {
-      const syncJob = prepareAgentSyncJobUpsert(db, {
-        agentId: id,
-        workspaceId: workspace.id,
-        path: file.canonicalPath,
-        desiredHash: contentHash,
-        desiredVersion: 1,
-        previousPath: file.previousPath,
-        previousBlobSha: sha ?? file.sha,
-      });
-      await timeAsync(trace, "db.upsertCanonicalAgentSyncJob", () => syncJob.query, {
-        path: file.canonicalPath,
-      });
-      logAgentSyncJobQueued(syncJob.metadata);
-      scheduleAgentSyncDispatch({
-        id,
-        workspaceId: workspace.id,
-        path: file.canonicalPath,
-      });
-    }
-  }
-
-  revalidatePath("/agents");
-  endTimingTrace(trace, { count: canonicalFiles.length });
 }
 
 function readGitHubRepositoryDefaultBranch(metadata: Record<string, unknown>) {

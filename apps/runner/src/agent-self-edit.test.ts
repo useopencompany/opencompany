@@ -102,9 +102,9 @@ describe("applyAgentSelfUpdate", () => {
     // agents row updated with bumped version and pending sync status.
     expect(calls.update).toHaveLength(1);
     expect(calls.update[0]).toMatchObject({ version: 4, githubSyncStatus: "pending" });
-    // sync job queued for the GitHub sweeper.
+    // workspace marked dirty so the per-workspace reconcile commits the .agent file.
     expect(calls.insert).toHaveLength(1);
-    expect(calls.insert[0]).toMatchObject({ agentId: "agt_1", desiredVersion: 4 });
+    expect(calls.insert[0]).toMatchObject({ workspaceId: "wsp_1", status: "pending" });
     // self-update event emitted.
     expect(leaseMocks.appendRuntimeEventForLease).toHaveBeenCalledWith(
       expect.objectContaining({ type: "agent.self_updated" }),

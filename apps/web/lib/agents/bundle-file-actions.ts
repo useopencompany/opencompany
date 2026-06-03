@@ -11,11 +11,11 @@ import {
   normalizeAgentBundleRelativePath,
   serializeAgentBundleFiles,
 } from "@/lib/agents/bundle-files";
-import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
-import { agentFileSyncJobUpsert } from "@/lib/agents/sync-job";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-sync/dispatch";
+import { markWorkspaceDirty } from "@/lib/workspace-sync/jobs";
 
 type AgentBundleFileActionResult =
   | { ok: true; file: AgentBundleFilePayload }
@@ -91,15 +91,10 @@ export async function updateAgentBundleFile(
             eq(agentFiles.path, normalizedPath),
           ),
         ),
-      agentFileSyncJobUpsert(db, {
-        workspaceId: workspace.id,
-        path: normalizedPath,
-        operation: "upsert",
-        desiredHash: contentHash,
-      }),
+      markWorkspaceDirty(db, workspace.id),
     ]);
 
-    scheduleAgentFileSyncDispatch({ workspaceId: workspace.id, path: normalizedPath });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath(`/agents/${agent.path}`);
     revalidatePath(`/agents/${agent.id}`);
 

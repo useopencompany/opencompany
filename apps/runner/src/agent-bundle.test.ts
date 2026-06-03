@@ -210,16 +210,6 @@ describe("syncAgentBundleFromSandbox", () => {
       ],
     });
     dbMocks.getDb.mockReturnValue(db);
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce({ ok: false, status: 404, text: async () => "not found" })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ content: { sha: "blob_new" }, commit: { sha: "commit_new" } }),
-        }),
-    );
     const sandbox = createSandbox({
       commandStdout: "agent/memory.md\n",
       fileReads: {
@@ -233,16 +223,8 @@ describe("syncAgentBundleFromSandbox", () => {
       workspaceId: "wsp_123",
       agentId: "agt_sales",
       workdir: "/home/user/workspace",
-      repository: {
-        fullName: "opencompany/test",
-        defaultBranch: "main",
-      } as never,
     });
 
-    expect(fetch).toHaveBeenLastCalledWith(
-      "https://api.github.com/repos/opencompany/test/contents/agents/sales/memory.md",
-      expect.objectContaining({ method: "PUT" }),
-    );
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -250,8 +232,10 @@ describe("syncAgentBundleFromSandbox", () => {
           agentId: "agt_sales",
           path: "agents/sales/memory.md",
           content: "New memory",
-          githubSyncStatus: "synced",
+          githubSyncStatus: "pending",
         }),
+        // The per-workspace dirty signal — the reconcile materializes to GitHub.
+        expect.objectContaining({ workspaceId: "wsp_123", status: "pending" }),
       ]),
     );
     expect(eventMocks.appendRuntimeEvent).toHaveBeenCalledWith(
@@ -286,16 +270,6 @@ describe("syncAgentBundleFromSandbox", () => {
       ],
     });
     dbMocks.getDb.mockReturnValue(db);
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce({ ok: false, status: 404, text: async () => "not found" })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ content: { sha: "blob_nested" }, commit: { sha: "commit_nested" } }),
-        }),
-    );
     const sandbox = createSandbox({
       commandStdout: "agent/playbooks/deep/discovery.md\n",
       fileReads: {
@@ -309,16 +283,8 @@ describe("syncAgentBundleFromSandbox", () => {
       workspaceId: "wsp_123",
       agentId: "agt_sales",
       workdir: "/home/user/workspace",
-      repository: {
-        fullName: "opencompany/test",
-        defaultBranch: "main",
-      } as never,
     });
 
-    expect(fetch).toHaveBeenLastCalledWith(
-      "https://api.github.com/repos/opencompany/test/contents/agents/sales/playbooks/deep/discovery.md",
-      expect.objectContaining({ method: "PUT" }),
-    );
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -376,7 +342,6 @@ describe("syncAgentBundleFromSandbox", () => {
       workspaceId: "wsp_123",
       agentId: "agt_sales",
       workdir: "/home/user/workspace",
-      repository: null,
     });
 
     expect(db.insertedValues).toEqual(
@@ -431,7 +396,6 @@ describe("syncAgentBundleFromSandbox", () => {
       workspaceId: "wsp_123",
       agentId: "agt_sales",
       workdir: "/home/user/workspace",
-      repository: null,
     });
 
     expect(db.insertedValues).toEqual(
@@ -486,7 +450,6 @@ describe("syncAgentBundleFromSandbox", () => {
       workspaceId: "wsp_123",
       agentId: "agt_sales",
       workdir: "/home/user/workspace",
-      repository: null,
     });
 
     expect(sandbox.files.read).not.toHaveBeenCalled();

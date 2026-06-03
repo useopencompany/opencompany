@@ -196,7 +196,6 @@ function fakeAgent() {
     commitSha: null,
     contentHash: "hash_123",
     version: 1,
-    githubBlobSha: null,
     githubCommitSha: null,
     githubSyncedHash: null,
     githubSyncedAt: null,

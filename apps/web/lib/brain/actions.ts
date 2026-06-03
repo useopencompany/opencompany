@@ -1,14 +1,14 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { brainFiles, brainSyncJobs } from "@opencompany/db/schema";
+import { brainFiles } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
-import { brainSyncJobUpsert, resolveBrainSyncRename } from "@/lib/brain/jobs";
 import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
-import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-sync/dispatch";
+import { markWorkspaceDirty } from "@/lib/workspace-sync/jobs";
 
 type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
 
@@ -46,21 +46,6 @@ export async function renameBrainFile(
       .limit(1);
     if (destination) return { ok: false, error: "A Brain file already exists at that path." };
 
-    const [existingRenameJob] = await db
-      .select({
-        previousPath: brainSyncJobs.previousPath,
-        previousBlobSha: brainSyncJobs.previousBlobSha,
-      })
-      .from(brainSyncJobs)
-      .where(and(eq(brainSyncJobs.workspaceId, workspace.id), eq(brainSyncJobs.path, from)))
-      .limit(1);
-    const rename = resolveBrainSyncRename({
-      existingPreviousPath: existingRenameJob?.previousPath,
-      existingPreviousBlobSha: existingRenameJob?.previousBlobSha,
-      renamePreviousPath: from,
-      renamePreviousBlobSha: existing.githubBlobSha,
-    });
-
     const now = new Date();
     const [inserted] = await db
       .insert(brainFiles)
@@ -82,17 +67,10 @@ export async function renameBrainFile(
       db
         .delete(brainFiles)
         .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, from))),
-      brainSyncJobUpsert(db, {
-        workspaceId: workspace.id,
-        path: to,
-        operation: "upsert",
-        desiredHash: existing.contentHash,
-        previousPath: rename.previousPath,
-        previousBlobSha: rename.previousBlobSha,
-      }),
+      markWorkspaceDirty(db, workspace.id),
     ]);
 
-    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: to });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: to };
   } catch (error) {
@@ -141,15 +119,6 @@ export async function renameBrainFolder(
     );
     if (collision) return { ok: false, error: `A Brain file already exists at ${collision.path}.` };
 
-    const existingRenameJobs = await db
-      .select({
-        path: brainSyncJobs.path,
-        previousPath: brainSyncJobs.previousPath,
-        previousBlobSha: brainSyncJobs.previousBlobSha,
-      })
-      .from(brainSyncJobs)
-      .where(eq(brainSyncJobs.workspaceId, workspace.id));
-    const jobByPath = new Map(existingRenameJobs.map((job) => [job.path, job]));
     const now = new Date();
 
     await db.batch([
@@ -170,28 +139,10 @@ export async function renameBrainFolder(
           .delete(brainFiles)
           .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, file.path))),
       ),
-      ...movedFiles.map(({ file, path }) => {
-        const existingRenameJob = jobByPath.get(file.path);
-        const rename = resolveBrainSyncRename({
-          existingPreviousPath: existingRenameJob?.previousPath,
-          existingPreviousBlobSha: existingRenameJob?.previousBlobSha,
-          renamePreviousPath: file.path,
-          renamePreviousBlobSha: file.githubBlobSha,
-        });
-        return brainSyncJobUpsert(db, {
-          workspaceId: workspace.id,
-          path,
-          operation: "upsert",
-          desiredHash: file.contentHash,
-          previousPath: rename.previousPath,
-          previousBlobSha: rename.previousBlobSha,
-        });
-      }),
+      markWorkspaceDirty(db, workspace.id),
     ]);
 
-    for (const move of movedFiles) {
-      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: move.path });
-    }
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: to };
   } catch (error) {
@@ -205,26 +156,15 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
 
   try {
     const normalized = normalizeBrainPath(path);
-    const [existing] = await db
-      .select({ githubBlobSha: brainFiles.githubBlobSha })
-      .from(brainFiles)
-      .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, normalized)))
-      .limit(1);
 
     await db.batch([
       db
         .delete(brainFiles)
         .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, normalized))),
-      brainSyncJobUpsert(db, {
-        workspaceId: workspace.id,
-        path: normalized,
-        operation: "delete",
-        desiredHash: null,
-        previousBlobSha: existing?.githubBlobSha ?? null,
-      }),
+      markWorkspaceDirty(db, workspace.id),
     ]);
 
-    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: normalized });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: normalized };
   } catch (error) {
@@ -239,35 +179,22 @@ export async function deleteBrainFolder(path: string): Promise<BrainActionResult
   try {
     const folderPath = normalizeBrainFolderPath(path);
     const files = await db
-      .select({
-        path: brainFiles.path,
-        githubBlobSha: brainFiles.githubBlobSha,
-      })
+      .select({ path: brainFiles.path })
       .from(brainFiles)
       .where(eq(brainFiles.workspaceId, workspace.id));
     const deletedFiles = files.filter((file) => file.path.startsWith(`${folderPath}/`));
     if (deletedFiles.length === 0) return { ok: false, error: "Brain folder not found." };
 
-    const deleteQueries = deletedFiles.flatMap((file) => [
-      db
-        .delete(brainFiles)
-        .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, file.path))),
-      brainSyncJobUpsert(db, {
-        workspaceId: workspace.id,
-        path: file.path,
-        operation: "delete",
-        desiredHash: null,
-        previousBlobSha: file.githubBlobSha,
-      }),
+    await db.batch([
+      markWorkspaceDirty(db, workspace.id),
+      ...deletedFiles.map((file) =>
+        db
+          .delete(brainFiles)
+          .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, file.path))),
+      ),
     ]);
-    const firstDeleteQuery = deleteQueries[0];
-    if (!firstDeleteQuery) return { ok: false, error: "Brain folder not found." };
 
-    await db.batch([firstDeleteQuery, ...deleteQueries.slice(1)]);
-
-    for (const file of deletedFiles) {
-      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: file.path });
-    }
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: folderPath };
   } catch (error) {
@@ -319,15 +246,10 @@ async function upsertBrainFile(input: {
               updatedAt: now,
             },
           }),
-      brainSyncJobUpsert(db, {
-        workspaceId: workspace.id,
-        path,
-        operation: "upsert",
-        desiredHash: contentHash,
-      }),
+      markWorkspaceDirty(db, workspace.id),
     ]);
 
-    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path };
   } catch (error) {
