@@ -41,6 +41,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { ModelRatingMeters, modelRatingsTitle } from "@/components/agent-editor/ModelRatingMeters";
 import {
   AGENT_MODELS,
   type AgentMentionItem,
@@ -524,7 +525,12 @@ function AgentDetailContent({
                   <span className="truncate">{selectedModel.displayLabel}</span>
                 </span>
               </SelectTrigger>
-              <SelectContent className="min-w-[232px]">
+              <SelectContent className="min-w-[300px]">
+                <div className="flex items-center justify-between px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+                  <span>Model</span>
+                  <span>Capability · Speed · Cost</span>
+                </div>
+                <SelectSeparator />
                 {(["Thinking", "Non-thinking"] as const).map((group, index) => {
                   const models = AGENT_MODELS.filter((model) =>
                     group === "Thinking" ? model.supportsReasoning : !model.supportsReasoning,
@@ -537,14 +543,30 @@ function AgentDetailContent({
                       {models.map((model) => {
                         const ModelIcon = model.icon;
                         return (
-                          <SelectItem key={model.id} value={model.id}>
-                            <span className="flex min-w-0 items-center gap-1.5">
-                              <ModelIcon
-                                size={12.5}
-                                strokeWidth={1.85}
-                                className="shrink-0 text-ink-muted"
-                              />
-                              <span className="truncate">{model.displayLabel}</span>
+                          <SelectItem
+                            key={model.id}
+                            value={model.id}
+                            title={
+                              model.ratings
+                                ? modelRatingsTitle(model.label, model.description, model.ratings)
+                                : model.description
+                            }
+                          >
+                            <span className="flex min-w-0 items-center justify-between gap-3">
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <ModelIcon
+                                  size={12.5}
+                                  strokeWidth={1.85}
+                                  className="shrink-0 text-ink-muted"
+                                />
+                                <span className="truncate">{model.displayLabel}</span>
+                              </span>
+                              {model.ratings ? (
+                                <ModelRatingMeters
+                                  ratings={model.ratings}
+                                  className="text-ink-muted"
+                                />
+                              ) : null}
                             </span>
                           </SelectItem>
                         );
