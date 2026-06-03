@@ -1,7 +1,7 @@
 "use client";
 
 import { captureEvent } from "@opencompany/analytics/client";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Check } from "lucide-react";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { completeOnboarding, type OnboardingActionState } from "@/lib/onboarding/actions";
@@ -125,9 +125,39 @@ function ensureCalApi(): CalApi {
   return cal;
 }
 
-function OnboardingCallEmbed() {
+// cal.com's `bookingSuccessful` event payload isn't strongly typed by the embed
+// stub, so read the start time defensively and fall back to a label-less
+// confirmation if the shape ever changes.
+function readBookingLabel(event: unknown): string | null {
+  const data = (event as { detail?: { data?: Record<string, unknown> } } | null)?.detail?.data;
+  if (!data) return null;
+
+  const booking = data.booking as { startTime?: unknown } | undefined;
+  const rawStart =
+    (typeof data.date === "string" && data.date) ||
+    (typeof booking?.startTime === "string" && booking.startTime) ||
+    null;
+  if (!rawStart) return null;
+
+  const parsed = new Date(rawStart);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return parsed.toLocaleString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function OnboardingCallEmbed({ onBooked }: { onBooked: (label: string | null) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hasQueuedEmbedRef = useRef(false);
+  const onBookedRef = useRef(onBooked);
+  useEffect(() => {
+    onBookedRef.current = onBooked;
+  }, [onBooked]);
 
   useEffect(() => {
     if (hasQueuedEmbedRef.current || !containerRef.current) return;
@@ -158,53 +188,89 @@ function OnboardingCallEmbed() {
         },
       },
     });
+    // Once the call is actually confirmed (slot picked + booking submitted),
+    // there's no reason to keep offering "Skip" — collapse to a single Finish.
+    cal("on", {
+      action: "bookingSuccessful",
+      callback: (event: unknown) => {
+        onBookedRef.current(readBookingLabel(event));
+      },
+    });
   }, []);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <a
+          href={onboardingCallUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-ink-subtle transition-colors hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <span>Open scheduler</span>
+          <ArrowUpRight size={11} strokeWidth={2} />
+        </a>
+      </div>
       <div
         ref={containerRef}
         aria-label="Book an onboarding call"
         className="min-h-[620px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_1px_2px_rgba(17,17,17,0.04)]"
       />
-      <a
-        href={onboardingCallUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="mx-auto flex h-7 w-fit items-center rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        Open scheduler in a new tab
-      </a>
     </div>
   );
 }
 
-function SubmitButton({ label = "Start using opencompany" }: { label?: string }) {
+// Final-step actions. Before a call is booked, Skip + Finish share one
+// segmented control (Skip is the quiet escape hatch, Finish the primary). Once
+// a call is booked, Skip disappears and Finish takes the full width under a
+// confirmation. Both buttons submit the same form — booking lives in the cal
+// iframe, so "skip" and "finish" complete onboarding identically.
+function OnboardingCallActions({
+  booked,
+  bookedLabel,
+}: {
+  booked: boolean;
+  bookedLabel: string | null;
+}) {
   const { pending } = useFormStatus();
 
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
-    >
-      <span>{pending ? "Saving" : label}</span>
-      <ArrowRight size={12} strokeWidth={2} />
-    </button>
-  );
-}
+  if (booked) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 rounded-md border border-pill-green-text/20 bg-pill-green px-3 py-2 text-[12px] font-medium text-pill-green-text">
+          <Check size={14} strokeWidth={2.4} />
+          <span>Onboarding call booked{bookedLabel ? ` — ${bookedLabel}` : ""}</span>
+        </div>
+        <button
+          type="submit"
+          disabled={pending}
+          className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
+        >
+          <span>{pending ? "Saving" : "Finish onboarding"}</span>
+          <ArrowRight size={12} strokeWidth={2} />
+        </button>
+      </div>
+    );
+  }
 
-function SkipButton() {
-  const { pending } = useFormStatus();
-
   return (
-    <button
-      type="submit"
-      disabled={pending}
-      className="flex h-8 w-full items-center justify-center rounded-md border border-ink/20 px-3 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      {pending ? "Saving" : "Skip for now"}
-    </button>
+    <div className="flex h-9 w-full overflow-hidden rounded-md border border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.18)]">
+      <button
+        type="submit"
+        disabled={pending}
+        className="flex items-center justify-center border-r border-border-strong px-4 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {pending ? "Saving" : "Skip"}
+      </button>
+      <button
+        type="submit"
+        disabled={pending}
+        className="flex flex-1 items-center justify-center gap-1.5 bg-ink px-3 text-[12px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
+      >
+        <span>{pending ? "Saving" : "Finish onboarding"}</span>
+        <ArrowRight size={12} strokeWidth={2} />
+      </button>
+    </div>
   );
 }
 
@@ -245,6 +311,13 @@ export default function OnboardingForm({
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [values, setValues] = useState(initialState.values);
+  const [callBooked, setCallBooked] = useState(false);
+  const [callBookedLabel, setCallBookedLabel] = useState<string | null>(null);
+
+  function handleCallBooked(label: string | null) {
+    setCallBooked(true);
+    setCallBookedLabel(label);
+  }
 
   const currentStep = steps[step] ?? steps[0];
   const isLastStep = step === onboardingCallStepIndex;
@@ -489,7 +562,9 @@ export default function OnboardingForm({
               </div>
             ) : null}
 
-            {step === onboardingCallStepIndex ? <OnboardingCallEmbed /> : null}
+            {step === onboardingCallStepIndex ? (
+              <OnboardingCallEmbed onBooked={handleCallBooked} />
+            ) : null}
 
             {displayedError ? (
               <p className="mt-4 text-center text-[12px] leading-4 text-red-700">
@@ -500,10 +575,7 @@ export default function OnboardingForm({
 
           <div className="mt-5 space-y-3">
             {isLastStep ? (
-              <div className="space-y-2">
-                <SubmitButton label="Finish onboarding" />
-                <SkipButton />
-              </div>
+              <OnboardingCallActions booked={callBooked} bookedLabel={callBookedLabel} />
             ) : (
               <button
                 type="button"
@@ -515,7 +587,7 @@ export default function OnboardingForm({
               </button>
             )}
 
-            {step > 0 ? (
+            {step > 0 && !isLastStep ? (
               <button
                 type="button"
                 onClick={() => {
