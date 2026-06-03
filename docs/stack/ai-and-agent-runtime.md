@@ -146,16 +146,48 @@ developer terms.
 **Reconsider if:** Official API cost, rate limits, coverage, compliance requirements, or customer
 credential needs make workspace-owned credentials or another licensed data provider a better fit.
 
+## Apify (Instagram, TikTok social data)
+
+**What it is:** A hosted actor platform used for public Instagram and TikTok profile, feed,
+comment, and search scraping.
+
+**What it does for us:** Powers the profile-oriented `@instagram` and `@tiktok` hosted tools:
+profile lookup, recent profile posts/videos, direct post/video metadata, comments, and search.
+The runner normalizes actor-specific output into stable Profile, Post, and Comment shapes and keeps
+actor ids hidden from agents.
+
+**Where it is used:**
+
+- `packages/agent-runtime/src/tools.ts`.
+- `apps/runner/src/hosted-tools.ts`.
+- `APIFY_API_TOKEN` in `.env.example`.
+
+**Why we use it:** Supadata is a good fit for transcripts, but its public social endpoints are
+direct-media oriented. Apify actors cover handle/profile URLs, recent posts/reels/videos, comments,
+and search, which match real agent use cases like "research this creator" or "summarize recent
+posts from this account." The adapter is provider-agnostic so Bright Data or Data365 can be added
+later without changing the model-facing tool names.
+
+**Status:** Optional. Agents can run without Apify unless they enable `@tiktok` or `@instagram`
+and use profile/feed/comment/search tools. V1 is public data only: no login cookies, private
+profiles, follower/following list scraping, or contact-field extraction.
+
+**Owner:** AI Platform.
+
+**Reconsider if:** Actor reliability, pricing, scale requirements, or compliance requirements make
+Bright Data, Data365, official APIs, or first-party infrastructure a better fit.
+
 ## Supadata (YouTube, TikTok, Instagram)
 
 **What it is:** A hosted API for YouTube search, YouTube video/channel metadata, universal social
 media metadata, and — most importantly — video transcripts, with AI-generated transcription as a
 fallback when a video has no captions.
 
-**What it does for us:** Powers the optional `@youtube`, `@tiktok`, and `@instagram` hosted agent
-tools. Agents can search YouTube, read a video's transcript as text (so the model can "watch" it),
-inspect YouTube video/channel metadata, enumerate a channel's recent uploads, and inspect/read
-public TikTok and Instagram media via Supadata's universal metadata and transcript endpoints.
+**What it does for us:** Powers the optional `@youtube` hosted agent tools and the direct-media
+metadata/transcript tools inside `@tiktok` and `@instagram`. Agents can search YouTube, read a
+video's transcript as text (so the model can "watch" it), inspect YouTube video/channel metadata,
+enumerate a channel's recent uploads, and inspect/read public TikTok and Instagram media via
+Supadata's universal metadata and transcript endpoints.
 
 **Where it is used:**
 
@@ -170,7 +202,8 @@ scrapers are blocked from datacenter IPs. Supadata gives reliable server-side tr
 search and metadata behind one `x-api-key` GET API, matching the existing hosted-tool pattern.
 
 **Status:** Optional. Agents can run without Supadata unless they enable `@youtube`, `@tiktok`, or
-`@instagram`. Comments are not covered — Supadata has no comments endpoint.
+`@instagram`. TikTok and Instagram profile scraping, comments, and search are handled by Apify; the
+Supadata integration remains for direct public media URLs and transcripts.
 
 **Owner:** AI Platform.
 
@@ -192,6 +225,7 @@ Core tools are always available to runner sessions:
 - `write_file`
 - `list_files`
 - `git_diff`
+- `ask_user_question`
 - `tool_help`
 
 Sandbox sessions do not clone the managed workspace repository. `work/` is an empty scratch git
