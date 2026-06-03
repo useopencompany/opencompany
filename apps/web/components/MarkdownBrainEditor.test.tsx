@@ -1,21 +1,6 @@
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// BrainView pulls in server-action modules (which reach into the auth/DB
-// stack) through its import graph. Stub them so the component can mount in
-// jsdom; this test only exercises the client-side MarkdownBrainEditor.
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
-}));
-vi.mock("@/lib/brain/actions", () => ({
-  createBrainFile: vi.fn(),
-  deleteBrainFile: vi.fn(),
-  deleteBrainFolder: vi.fn(),
-  renameBrainFile: vi.fn(),
-  renameBrainFolder: vi.fn(),
-  updateBrainFile: vi.fn(),
-}));
-
 // Spy on the Tiptap entry point so we can inspect the exact `content` option
 // MarkdownBrainEditor hands to useEditor on each render. The real flicker
 // (PRO-83) is a browser-only input-composition artefact that jsdom cannot
@@ -34,7 +19,7 @@ vi.mock("@tiptap/react", async (importOriginal) => {
   };
 });
 
-const { MarkdownBrainEditor } = await import("./BrainView");
+const { MarkdownBrainEditor } = await import("./MarkdownBrainEditor");
 
 function contentOptionsSeen(): string[] {
   return useEditorSpy.mock.calls.map((call) => call[0] as string);
