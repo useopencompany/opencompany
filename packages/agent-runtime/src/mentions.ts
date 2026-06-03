@@ -1,5 +1,5 @@
 import { extractAfterSessionConfig } from "./after-session";
-import { AGENT_MODEL_CATALOG } from "./models";
+import { AGENT_MODEL_CATALOG, type ModelRatings } from "./models";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import type {
   AgentBrainReference,
@@ -23,6 +23,7 @@ type AgentModelDefinition = {
   description: string;
   category: "Fast" | "Deep";
   supportsReasoning: boolean;
+  ratings: ModelRatings;
 };
 
 export type AgentConfigDerivationRepository = {
@@ -45,6 +46,7 @@ export const SUPPORTED_AGENT_MODELS: AgentModelDefinition[] = AGENT_MODEL_CATALO
   description: model.description,
   category: model.category,
   supportsReasoning: model.supportsReasoning,
+  ratings: model.ratings,
 }));
 
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));

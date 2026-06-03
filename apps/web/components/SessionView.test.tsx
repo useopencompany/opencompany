@@ -1,6 +1,6 @@
 /**
  * Phase B tests for AssistantMessageContent live-part rendering.
- * Phase C tests for the stale-stream banner in SessionViewContent.
+ * Phase C tests for stale-connection handling in SessionViewContent.
  * Phase C2 tests for the data-freshness stale detection (PRO-91 fix).
  *
  * Phase B verifies that tool-call and reasoning parts show up immediately in
@@ -8,14 +8,16 @@
  * and that WorkingIndicator stays visible as a footer for the entire duration
  * of a running message — regardless of whether parts are already present.
  *
- * Phase C verifies that the stale-connection banner appears only when the SSE
- * stream is stale AND there is a running assistant message, and that the Retry
- * button triggers a credential cache invalidation.
+ * Phase C verifies that a stale connection never surfaces a banner in the chat
+ * composer (that was found to be noisy during normal streaming), and instead is
+ * surfaced quietly in the inspector's Runtime section.
  *
- * Phase C2 verifies data-freshness detection: the banner also appears when
- * stream.status is "open" but no new runtime event has arrived within
- * STALE_THRESHOLD_MS (45s), matching the real-world dead-session scenario where
- * SSE reconnects keep flipping stream.status away from "stale".
+ * Phase C2 verifies data-freshness detection: a stale connection is also
+ * detected when stream.status is "open" but no new runtime event has arrived
+ * within STALE_THRESHOLD_MS (45s) — matching the real-world dead-session
+ * scenario where SSE reconnects keep flipping stream.status away from "stale".
+ * In all cases recovery still refetches silently and the inspector reflects the
+ * stale state, but no composer banner is rendered.
  */
 
 import { captureEvent } from "@opencompany/analytics/client";
@@ -30,6 +32,7 @@ import { addUserMessageToSessionDetail } from "@/lib/agent-sessions/payload";
 import type {
   AssistantTurnPart,
   RuntimeEvent,
+  RuntimeToolCall,
   SessionMessage,
 } from "@/lib/agent-sessions/runtime-events";
 import { AssistantMessageContent, SessionViewContent } from "./SessionView";
@@ -71,7 +74,11 @@ const streamMock = vi.hoisted(() => ({
   status: "idle" as string,
   input: null as null | { onEvent: (event: RuntimeEvent) => void },
 }));
+// The composer banner was removed — this text must never appear in the chat UX.
 const STALE_BANNER_TEXT = "Connection idle — reconnecting and refreshing progress…";
+// Stale connection is now surfaced only here, in the inspector's Runtime section.
+const INSPECTOR_STALE_TEXT =
+  "The live session stream is not responding. Reconnecting and refreshing persisted progress.";
 vi.mock("@/components/useSessionEventStream", () => ({
   useSessionEventStream: (input: { onEvent: (event: RuntimeEvent) => void }) => {
     streamMock.input = input;
@@ -79,9 +86,16 @@ vi.mock("@/components/useSessionEventStream", () => ({
   },
 }));
 
-vi.mock("@/lib/agent-sessions/actions", () => ({
+const actionMocks = vi.hoisted(() => ({
   abortAgentSession: vi.fn(),
+  resolveToolApproval: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
+}));
+
+vi.mock("@/lib/agent-sessions/actions", () => ({
+  abortAgentSession: actionMocks.abortAgentSession,
+  resolveToolApproval: actionMocks.resolveToolApproval,
+  submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
 }));
 
 vi.mock("@/lib/agent-sessions/payload", () => ({
@@ -99,6 +113,10 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
   updateSessionStatusInDetail: vi.fn(),
   SESSIONS_QUERY_STALE_TIME_MS: 30_000,
 }));
+
+afterEach(() => {
+  actionMocks.resolveToolApproval.mockReset();
+});
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -124,6 +142,26 @@ function makeToolCallPart(status: "running" | "completed" = "running"): Assistan
       outputPreview: status === "completed" ? "3 files found" : "",
       startedEventId: 1,
       completedEventId: status === "completed" ? 2 : null,
+    },
+  };
+}
+
+function makeApprovalToolCallPart(
+  approval: NonNullable<RuntimeToolCall["approval"]>,
+): AssistantTurnPart {
+  return {
+    type: "tool-call",
+    toolCall: {
+      id: "call_approval",
+      name: "linear__save_comment",
+      label: "Saving Linear comment",
+      status: "running",
+      inputPreview: '{\n  "issueId": "OC-222"\n}',
+      activityPreview: "",
+      outputPreview: "",
+      approval,
+      startedEventId: null,
+      completedEventId: null,
     },
   };
 }
@@ -201,6 +239,205 @@ describe("AssistantMessageContent — Phase B: running with parts renders all pa
     expect(screen.getByText("Thought for 5 seconds")).toBeInTheDocument();
     // WorkingIndicator still visible as footer
     expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+});
+
+describe("AssistantMessageContent — tool approvals", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-02T08:51:35.162Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders a pending approval with clear copy", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "required",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // The pause is durable (7-day backstop), so there is no short auto-deny countdown.
+    expect(screen.getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(screen.getByText("Create issues and add comments.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+  });
+
+  it("keeps showing the approval prompt once the run has durably paused", () => {
+    // Regression: after suspend the assistant message is `completed` and the session is
+    // `awaiting_approval` (sessionCanGenerate=false). The pending tool call is still
+    // status "running" — it must NOT be flipped to "Stopped before finishing"; the
+    // approval prompt must stay rendered.
+    const message = makeMessage({ status: "completed" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "required",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+      }),
+    ];
+
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={parts}
+        sessionCanGenerate={false}
+        sessionIsPaused={true}
+      />,
+    );
+
+    expect(screen.getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped before finishing.")).not.toBeInTheDocument();
+    expect(screen.queryByText("failed")).not.toBeInTheDocument();
+  });
+
+  it("keeps the persisted paused approval prompt visible after model parts are saved", () => {
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_approval", status: "awaiting_approval" }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Post a test comment",
+          status: "completed",
+          createdAt: "2026-06-02T08:51:30.000Z",
+        },
+        {
+          id: "msg_approval",
+          role: "assistant",
+          content: "I found an issue and I am posting a comment now.",
+          status: "completed",
+          responseToMessageId: "msg_user",
+          createdAt: "2026-06-02T08:51:31.000Z",
+          completedAt: "2026-06-02T08:51:35.000Z",
+          modelMessage: {
+            role: "assistant",
+            content: [
+              { type: "text", text: "I found an issue." },
+              {
+                type: "tool-call",
+                toolCallId: "call_read",
+                toolName: "linear__list_issues",
+                input: { query: "test", limit: 5 },
+              },
+              { type: "text", text: "I am posting a comment now." },
+              {
+                type: "tool-call",
+                toolCallId: "call_approval",
+                toolName: "linear__save_comment",
+                input: { issueId: "OC-184", body: "Test comment" },
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "tool.completed",
+          messageId: "msg_approval",
+          createdAt: "2026-06-02T08:51:32.000Z",
+          payload: {
+            messageId: "msg_approval",
+            toolCallId: "call_read",
+            name: "linear__list_issues",
+            outputPreview: "{ issues: [] }",
+          },
+        },
+        {
+          id: 2,
+          type: "tool.approval_required",
+          messageId: "msg_approval",
+          createdAt: "2026-06-02T08:51:35.000Z",
+          payload: {
+            messageId: "msg_approval",
+            toolCallId: "call_approval",
+            name: "linear__save_comment",
+            providerKey: "linear",
+            permissionGroup: "post",
+            inputPreview: '{\n  "issueId": "OC-184"\n}',
+            requestedAt: "2026-06-02T08:51:35.000Z",
+          },
+        },
+      ],
+      runnerUrl: null,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.getByText("Waiting for your approval.")).toBeInTheDocument();
+    expect(screen.getByText("Paused: waiting for your approval")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
+    expect(screen.queryByText("Stopped before finishing.")).not.toBeInTheDocument();
+  });
+
+  it("keeps a disabled resolving state after the user denies", async () => {
+    vi.useRealTimers();
+    actionMocks.resolveToolApproval.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_approval" }),
+      messages: [makeRunningAssistantMessage({ id: "msg_approval", content: "" })],
+      events: [
+        {
+          id: 1,
+          type: "tool.approval_required",
+          messageId: "msg_approval",
+          createdAt: "2026-06-02T08:51:35.162Z",
+          payload: {
+            messageId: "msg_approval",
+            toolCallId: "call_approval",
+            name: "linear__save_comment",
+            providerKey: "linear",
+            permissionGroup: "post",
+            inputPreview: '{\n  "issueId": "OC-222"\n}',
+            requestedAt: "2026-06-02T08:51:35.162Z",
+          },
+        },
+      ],
+      runnerUrl: null,
+    });
+
+    renderSessionViewContent(detail);
+    await user.click(screen.getByRole("button", { name: "Deny" }));
+
+    expect(actionMocks.resolveToolApproval).toHaveBeenCalledWith({
+      sessionId: "sess_approval",
+      toolCallId: "call_approval",
+      decision: "denied",
+    });
+    expect(screen.getByText("Denying...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeDisabled();
+  });
+
+  it("renders a timeout-resolved approval as timed out instead of running", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "denied",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+        decisionSource: "timeout",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("timed out")).toBeInTheDocument();
+    expect(screen.queryByText("running")).not.toBeInTheDocument();
   });
 });
 
@@ -543,80 +780,44 @@ describe("SessionViewContent — felt TTFT", () => {
   });
 });
 
-describe("SessionViewContent — Phase C: stale-stream banner", () => {
-  it("shows banner when stream is stale AND there is a running assistant message", () => {
+describe("SessionViewContent — Phase C: no composer connection banner", () => {
+  it("does NOT render a composer banner when stream is stale with a running message", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "stale");
-
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
-  });
-
-  it("banner has role=status and aria-live=polite", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "stale");
-
-    // There may be multiple role="status" elements (WorkingIndicator also uses it).
-    // Identify the banner by its unique text content.
-    const allStatusEls = screen.getAllByRole("status");
-    const banner = allStatusEls.find((el) => el.textContent?.includes("Connection idle"));
-    expect(banner).toBeDefined();
-    expect(banner).toHaveAttribute("aria-live", "polite");
-    expect(banner).toHaveTextContent(STALE_BANNER_TEXT);
-  });
-
-  it("does NOT show banner when stream is stale but no running assistant message", () => {
-    const detail = makeDetail({
-      messages: [{ id: "msg_done", role: "assistant", content: "Done.", status: "completed" }],
-    });
     renderSessionViewContent(detail, "stale");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
-  it("does NOT show banner when stream is healthy (open) even with a running message", () => {
+  it("surfaces a stale stream in the inspector Runtime section instead", () => {
+    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
+    renderSessionViewContent(detail, "stale");
+
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
+  });
+
+  it("does NOT render a composer banner when stream is healthy (open)", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "open");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("does NOT show banner when stream is idle even with a running message", () => {
+  it("does NOT render a composer banner when stream is idle", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "idle");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("does NOT show banner when stream is errored (error has its own UX)", () => {
+  it("does NOT render a composer banner when stream is errored (error has its own UX)", () => {
     const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
     renderSessionViewContent(detail, "error");
 
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-  });
-
-  it("Retry button calls queryClient.invalidateQueries to trigger reconnect", async () => {
-    const user = userEvent.setup();
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-
-    streamMock.status = "stale";
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 });
 
@@ -667,11 +868,12 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       vi.advanceTimersByTime(1_000);
     });
 
-    // Still within threshold (5s + 1s = 6s < 45s), no banner.
+    // Still within threshold (5s + 1s = 6s < 45s) — nothing stale anywhere.
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("shows banner when stream is open but no event for > STALE_THRESHOLD_MS", () => {
+  it("flags the inspector (not a composer banner) when stream is open but no event for > STALE_THRESHOLD_MS", () => {
     // Set the fake clock so "now" is 2000-01-01T00:01:00Z.
     const now = new Date("2000-01-01T00:01:00.000Z").getTime();
     vi.setSystemTime(now);
@@ -697,8 +899,9 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       vi.advanceTimersByTime(1_000);
     });
 
-    // 50s + 1s tick = 51s > 45s threshold, so the banner must appear.
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+    // 50s + 1s tick = 51s > 45s threshold: inspector reflects it, composer stays clean.
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
   });
 
   it("refetches session detail automatically when active work has stale data", () => {
@@ -733,7 +936,7 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
   });
 
-  it("hides banner once a new event arrives after being shown", () => {
+  it("clears the inspector stale flag once a new event arrives after being shown", () => {
     const now = new Date("2000-01-01T00:02:00.000Z").getTime();
     vi.setSystemTime(now);
 
@@ -752,11 +955,12 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       </QueryClientProvider>,
     );
 
-    // Trigger tick → banner appears.
+    // Trigger tick → inspector flags stale (no composer banner).
     act(() => {
       vi.advanceTimersByTime(1_000);
     });
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
 
     // A new event arrives: rerender with a new event in the list.
     // The component sees lastEventId change → resets lastRuntimeActivityMs to now.
@@ -774,11 +978,12 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       );
     });
 
-    // Banner should be gone — event just landed.
+    // Inspector flag should clear — event just landed (and never a composer banner).
     expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
   });
 
-  it("still shows banner when stream.status is stale (regression of original Phase C behaviour)", () => {
+  it("still flags the inspector when stream.status is stale (regression of original Phase C behaviour)", () => {
     // stream.status = "stale" path still works independently of data freshness.
     const now = new Date("2000-01-01T00:03:00.000Z").getTime();
     vi.setSystemTime(now);
@@ -800,8 +1005,10 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
       </QueryClientProvider>,
     );
 
-    // Banner must appear immediately (stream.status === "stale") without needing tick.
-    expect(screen.getByText(STALE_BANNER_TEXT)).toBeInTheDocument();
+    // Inspector reflects it immediately (stream.status === "stale") without a tick,
+    // and the composer never shows a banner.
+    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
+    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
   });
 
   it("refetches session detail and stream credential when stream status is stale", () => {
@@ -829,6 +1036,144 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+  });
+
+  it("refreshes stream credential when stream becomes stale during the recovery throttle window", () => {
+    const now = new Date("2000-01-01T00:03:45.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const staleUpdatedAt = new Date(now - 50_000).toISOString();
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: staleUpdatedAt }),
+      messages: [makeRunningAssistantMessage()],
+      events: [],
+    });
+
+    streamMock.status = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
+    );
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+
+    invalidateSpy.mockClear();
+    streamMock.status = "stale";
+
+    act(() => {
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <SessionViewContent detail={detail} workspaceId="wks_test" />
+        </QueryClientProvider>,
+      );
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
+    );
+  });
+
+  it("refreshes the stream credential before an active session token expires", () => {
+    const now = new Date("2000-01-01T00:03:50.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: new Date(now - 1_000).toISOString() }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(101)],
+    });
+
+    streamMock.status = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const streamCredentialKey = ["stream-credential", "wks_test", detail.session.id];
+    queryClient.setQueryData(streamCredentialKey, {
+      runnerUrl: "https://runner.example.com",
+      streamToken: "token_123",
+      streamTokenExpiresAt: now + 5 * 60 * 1000 + 1_000,
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(999);
+    });
+
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: streamCredentialKey }),
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: streamCredentialKey }),
+    );
+  });
+
+  it("refreshes the stream credential before a paused (awaiting_approval) session token expires", () => {
+    // Regression: a durably paused run keeps its SSE stream open, so its token must keep
+    // refreshing even though the assistant is not actively working (awaitingAssistantWork
+    // is false while `awaiting_approval`). Without this the token silently expires and
+    // reconnects retry expired URLs.
+    const now = new Date("2000-01-01T00:03:50.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const detail = makeDetail({
+      session: makeSession({
+        status: "awaiting_approval",
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+      messages: [makeRunningAssistantMessage({ status: "completed" })],
+      events: [makeEventFixture(101)],
+    });
+
+    streamMock.status = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const streamCredentialKey = ["stream-credential", "wks_test", detail.session.id];
+    queryClient.setQueryData(streamCredentialKey, {
+      runnerUrl: "https://runner.example.com",
+      streamToken: "token_123",
+      streamTokenExpiresAt: now + 5 * 60 * 1000 + 1_000,
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(999);
+    });
+
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: streamCredentialKey }),
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: streamCredentialKey }),
     );
   });
 
@@ -995,13 +1340,14 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "Hello there");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    // The snap effect ran: a scrollTo was issued. It is a "top" snap (behavior
-    // "smooth"), NOT the streaming bottom-follow (which uses behavior "auto").
+    // The snap effect ran: a scrollTo was issued toward the TOP (drift brings the
+    // message up to the padding offset, so top is small/≤ 0), NOT a streaming
+    // bottom-follow (which targets scrollHeight ≥ clientHeight 800).
     await waitFor(() => {
       expect(scrollToSpy).toHaveBeenCalled();
     });
     const snapCall = scrollToSpy.mock.calls.at(-1)?.[0];
-    expect(snapCall).toMatchObject({ behavior: "smooth" });
+    expect(snapCall?.top ?? 0).toBeLessThan(800);
 
     scrollToSpy.mockClear();
 
@@ -1024,12 +1370,10 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       </QueryClientProvider>,
     );
 
-    // The bottom-auto-scroll must NOT fire after the snap (snapInProgress + not
-    // pinned). No scroll-to-bottom (behavior "auto") should override the snap.
+    // The bottom-follow must NOT fire after the one-shot snap (the snap sets
+    // isPinnedAtBottom=false). No scroll-to-bottom should override the snap.
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
+      // A bottom-follow scrolls toward scrollHeight (≥ clientHeight 800).
       const followedToBottom = scrollToSpy.mock.calls.some(
         ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
       );
@@ -1085,14 +1429,20 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     return { ...view, queryClient, scroller, streamingDetail };
   }
 
-  it("does not let a programmatic / layout-driven scroll near the bottom override the snap", async () => {
-    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+  it("does not re-scroll on later streaming renders — the snap is one-shot, not a per-frame re-pin (no jitter)", async () => {
+    const { rerender, queryClient, streamingDetail } = await sendAndSnap();
 
-    // A scroll event fires WITHOUT any user gesture — e.g. the reserved spacer
-    // shrinking or the viewport height changing right after the snap. It lands within
-    // the bottom threshold (distanceFromBottom = 60 ≤ 80) but must NOT be mistaken for
-    // "the user returned to the bottom" (the PRO-124 follow-up bug).
-    if (scroller) fireEvent.scroll(scroller);
+    // The one-shot snap already ran (sendAndSnap awaited and cleared the spy). The whole
+    // point of the new design: the message is held at the top by CSS (min-height on the
+    // last turn) + native scroll anchoring, NOT by a JS loop that re-pins every frame.
+    // So further streamed renders must issue NO additional programmatic scroll — that
+    // per-frame correction was the source of the visible jitter.
+    scrollToSpy.mockClear();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
     rerender(
       <QueryClientProvider client={queryClient}>
         <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
@@ -1100,21 +1450,15 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     );
 
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
-      const followedToBottom = scrollToSpy.mock.calls.some(
-        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
-      );
-      expect(followedToBottom).toBe(false);
+      expect(scrollToSpy).not.toHaveBeenCalled();
     });
   });
 
-  it("re-arms the streaming follow when the USER scrolls back to the bottom", async () => {
+  it("engages the streaming follow when the user is scrolled to the bottom", async () => {
     const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
 
-    // A genuine user gesture (wheel) precedes the scroll, so reaching the bottom IS
-    // user intent → the streaming follow may resume.
+    // A genuine user gesture (wheel) flags the scroll as user-driven, and it lands within
+    // the bottom threshold → the streaming follow keeps the latest content in view.
     if (scroller) {
       fireEvent.wheel(scroller);
       fireEvent.scroll(scroller);
@@ -1126,9 +1470,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     );
 
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
+      // A bottom-follow scrolls toward scrollHeight (≥ clientHeight 800).
       const followedToBottom = scrollToSpy.mock.calls.some(
         ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
       );
@@ -1141,8 +1483,8 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
 
     // The user scrolls UP to read: a real wheel gesture landing FAR from the bottom
     // (distanceFromBottom = 1000 - 0 - 800 = 200 > SCROLL_BOTTOM_THRESHOLD_PX). This
-    // must hand control to the user — releasing the snap so the maintain pass does NOT
-    // yank the message back to the top on the next streamed render.
+    // leaves isPinnedAtBottom false, so the streaming follow does NOT yank the message
+    // back to the bottom on the next streamed render.
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
       get: () => 1000,
@@ -1158,8 +1500,32 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       </QueryClientProvider>,
     );
 
-    // Neither the maintain pass (re-pin toward the top) nor the bottom-follow may
-    // scroll — the user's just-chosen position is left untouched.
+    // The bottom-follow must not scroll — the user's just-chosen position is untouched.
+    await waitFor(() => {
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // A layout-driven scroll (reflow / overflow-anchor adjustment) fires a bare `scroll`
+  // with NO wheel/touch gesture, and with the reserved min-height it can land within the
+  // bottom threshold. It must NOT be mistaken for the user reaching the bottom — otherwise
+  // the streaming follow engages and yanks the just-snapped message away. (A real scrollbar
+  // drag / keyboard scroll without wheel is the same, accepted, minor edge.)
+  it("ignores a non-user (layout-driven) scroll near the bottom — does not engage the follow", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // Bare scroll, no wheel/touch → not flagged as user intent. Default scrollHeight 860
+    // gives distanceFromBottom = 60 ≤ threshold, so it WOULD pin if wrongly treated as user.
+    if (scroller) {
+      fireEvent.scroll(scroller);
+    }
+    scrollToSpy.mockClear();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     });

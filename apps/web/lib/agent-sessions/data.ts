@@ -388,19 +388,24 @@ export async function loadAgentSessionStreamCredentialForWorkspace(
 
   const runnerUrl = getRunnerPublicUrl();
   const streamTokenSecret = getRunnerStreamTokenSecret();
+  const streamTokenExpiresAt = Date.now() + 60 * 60 * 1000;
   const streamToken =
     runnerUrl && streamTokenSecret
       ? createSessionStreamToken(
           {
             sessionId,
             userId,
-            expiresAt: Date.now() + 60 * 60 * 1000,
+            expiresAt: streamTokenExpiresAt,
           },
           streamTokenSecret,
         )
       : null;
 
-  return { runnerUrl, streamToken };
+  return {
+    runnerUrl,
+    streamToken,
+    streamTokenExpiresAt: streamToken ? streamTokenExpiresAt : null,
+  };
 }
 
 function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {

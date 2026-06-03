@@ -7,41 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
+### Added
+- Guided first-run setup — after signing up you land in a live setup conversation that helps configure your workspace, instead of an empty editor (#241) — @louis.
+- New `/btw` command to start a new session without leaving your current view (#243) — @louis.
+- New `/clear` command in the chat composer (#231) — @louis.
+- "Run now" button to trigger a scheduled agent immediately (#236) — @louis.
+- Agents can now pull content from TikTok and Instagram (#239) and YouTube (#233) — @louis.
+- Pin sessions to the top of the sidebar (#213) — @jasper.
+- Live product status indicator in the sidebar, linking to the public status page (#224) — @louis.
+- Agents can now adjust their own schedules (#217) — @louis.
+- Workspace tool permissions — allow, ask, or deny which tools and integrations an agent can use, with approval prompts that are remembered between runs (#229) — @louis.
+- Live reasoning support for Kimi models (#226) — @louis.
+- Provider logos for xAI and MiniMax in the model picker (#232) — @jasper.
+
+### Changed
+- Agent runs no longer break when an integration like Linear or Slack is turned on but not yet connected — the agent now asks you to connect it instead (#238) — @louis.
+- When you send a message, it scrolls to the top of the chat, matching the ChatGPT/Claude experience (#219) — @jasper.
+- The copy button now stays visible on assistant replies and appears on hover for your own messages (#222) — @jasper.
+- The onboarding call step now has a clear "Skip for now" button (#220) — @jasper.
+- The "reconnecting" banner no longer appears in chat during normal streaming; connection status now lives in the inspector instead (#242) — @louis.
+
+### Fixed
+- Linear no longer shows as disconnected after you reconnect with valid credentials (#234) — @louis.
+- Agent turns that quietly stop mid-task are now flagged instead of being recorded as a silent success — important for scheduled and unattended runs (#225) — @louis.
+- Sessions now recover when a response stream gets interrupted (#223) — @louis.
+- Rapidly toggling a session's pin no longer causes glitches (#218) — @jasper.
+- Restored the after-session hook menu when typing at the start of a line (#227) — @jasper.
+- The hook suggestion popup now stays beneath the model dropdown (#230) — @jasper.
+
 ## [0.5.0] - 2026-06-01
 
 ### Added
-- Cron-based agent schedules — agents can now be scheduled to run on a recurring basis (#208).
-- Read-only X (Twitter) hosted tool for agents (#212).
-- Agent self-update skill, allowing agents to evolve their own `.agent` definition (#210).
-- Dark mode support (#186).
-- Grok model support via the AI gateway (#206).
-- MiniMax and Kimi gateway models (#193).
-- Client-side felt time-to-first-token measurement (#192).
+- Cron-based agent schedules — agents can now be scheduled to run on a recurring basis (#208) — @louis.
+- Read-only X (Twitter) hosted tool for agents (#212) — @louis.
+- Agent self-update skill, allowing agents to evolve their own `.agent` definition (#210) — @louis.
+- Dark mode support (#186) — @louis.
+- Grok model support via the AI gateway (#206) — @louis.
+- MiniMax and Kimi gateway models (#193) — @louis.
+- Client-side felt time-to-first-token measurement (#192) — @louis.
 
 ### Changed
-- GitHub repositories are now decoupled from the amp tool, making repository bindings more flexible (#204).
-- Lazy GitHub sandbox initialization is more solid and reliable (#207).
-- Vercel Skew Protection is enabled via custom `deploymentId` for safer deploys (#205).
-- Onboarding call booking step is now skippable (#191).
-- Assistant turn duration is now shown next to the copy button (#187).
+- GitHub repositories are now decoupled from the amp tool, making repository bindings more flexible (#204) — @louis.
+- Lazy GitHub sandbox initialization is more solid and reliable (#207) — @louis.
+- Vercel Skew Protection is enabled via custom `deploymentId` for safer deploys (#205) — @louis.
+- Onboarding call booking step is now skippable (#191) — @jasper.
+- Assistant turn duration is now shown next to the copy button (#187) — @jasper.
 
 ### Fixed
-- Agents no longer disappear from the list after creating or editing a new agent (#203).
-- Renaming an agent no longer resets it to "Untitled agent" (#194).
-- Vercel deployment ID length is correctly handled (#211).
-- Session archiving is now optimistic and instant instead of waiting on the server (#200).
-- Feedback dialog auto-closes after a successful submit (#190).
-- Page no longer rubber-bands at the fold due to `overscroll-behavior` fix (#189).
+- Agents no longer disappear from the list after creating or editing a new agent (#203) — @jasper.
+- Renaming an agent no longer resets it to "Untitled agent" (#194) — @jasper.
+- Vercel deployment ID length is correctly handled (#211) — @louis.
+- Session archiving is now optimistic and instant instead of waiting on the server (#200) — @jasper.
+- Feedback dialog auto-closes after a successful submit (#190) — @jasper.
+- Page no longer rubber-bands at the fold due to `overscroll-behavior` fix (#189) — @jasper.
 
 ## [0.4.1] - 2026-05-30
 
 ### Changed
-- Runner job worker now wakes immediately on enqueue instead of waiting for the next poll interval, reducing time-to-first-token for agent sessions.
-- Web dispatch no longer blocks on analytics flush; PostHog capture and runner dispatch now run concurrently.
-- Workspace context loading collapses user, workspace, and role into a single joined query, and session submission runs the balance check and auth lookup concurrently, cutting pre-dispatch database round-trips.
+- Runner job worker now wakes immediately on enqueue instead of waiting for the next poll interval, reducing time-to-first-token for agent sessions — @louis.
+- Web dispatch no longer blocks on analytics flush; PostHog capture and runner dispatch now run concurrently — @louis.
+- Workspace context loading collapses user, workspace, and role into a single joined query, and session submission runs the balance check and auth lookup concurrently, cutting pre-dispatch database round-trips — @louis.
 
 ### Fixed
-- Runner event serialization no longer crashes when `created_at` arrives as a string from the raw lease-write path; the value is now coerced to a `Date` at the source.
+- Runner event serialization no longer crashes when `created_at` arrives as a string from the raw lease-write path; the value is now coerced to a `Date` at the source — @louis.
 
 ## [0.4.0] - 2026-05-28
 

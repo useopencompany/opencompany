@@ -5,6 +5,7 @@ import {
   AGENT_SELF_EDIT_SKILL_ID,
   isKnownAgentSkillId,
   normalizeAgentSkills,
+  OPENCOMPANY_SETUP_SKILL_ID,
   resolveEnabledSkills,
 } from "./skills";
 import type { AgentConfig } from "./types";
@@ -36,6 +37,26 @@ describe("skill catalog", () => {
     expect(resolveEnabledSkills(baseConfig()).map((skill) => skill.id)).toContain(
       AGENT_SELF_EDIT_SKILL_ID,
     );
+  });
+
+  test("the opencompany-setup skill is default-enabled and ships a SKILL.md", () => {
+    expect(isKnownAgentSkillId(OPENCOMPANY_SETUP_SKILL_ID)).toBe(true);
+    const setup = resolveEnabledSkills(baseConfig()).find(
+      (skill) => skill.id === OPENCOMPANY_SETUP_SKILL_ID,
+    );
+    expect(setup?.files.some((file) => file.path === "SKILL.md")).toBe(true);
+  });
+
+  test("the opencompany-setup SKILL.md teaches Brain setup and hands off to self-edit", () => {
+    const setup = resolveEnabledSkills(baseConfig()).find(
+      (skill) => skill.id === OPENCOMPANY_SETUP_SKILL_ID,
+    );
+    const skillMd = setup?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    // Brain is the surface it sets up.
+    expect(skillMd).toMatch(/brain\//i);
+    expect(skillMd).toMatch(/@brain\//);
+    // It points back at the self-edit skill for tuning the agent's own definition.
+    expect(skillMd).toContain(AGENT_SELF_EDIT_SKILL_ID);
   });
 
   test("the self-edit SKILL.md enumerates addable tool mentions with prerequisites", () => {

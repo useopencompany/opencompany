@@ -274,7 +274,12 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {session.active ? <SessionStatusDot status="running" pulse /> : null}
+        {session.status === "awaiting_approval" ? (
+          // Amber "needs your approval" dot (distinct from the green active dot).
+          <SessionStatusDot status="awaiting_approval" pulse />
+        ) : session.active ? (
+          <SessionStatusDot status="running" pulse />
+        ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
       {onToggleStar && (
@@ -688,11 +693,11 @@ export default function Sidebar({
     <>
       <aside
         className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border after:transition-opacity after:duration-200 ${
-          collapsed ? "w-0 after:opacity-0" : "w-[232px] after:opacity-100"
+          collapsed ? "w-0 after:opacity-0" : "w-[256px] after:opacity-100"
         }`}
         aria-hidden={collapsed}
       >
-        <div className="flex h-full w-[232px] flex-col">
+        <div className="flex h-full w-[256px] flex-col">
           {/* Top icons */}
           <div className="flex items-center gap-1 px-2 pb-2 pt-3">
             <button

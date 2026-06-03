@@ -29,6 +29,7 @@ describe("session stream token API route", () => {
     loadAgentSessionStreamCredentialForWorkspaceMock.mockResolvedValue({
       runnerUrl: "https://runner.example.com",
       streamToken: "token_123",
+      streamTokenExpiresAt: 1_780_000_000_000,
     });
 
     const response = await POST(
@@ -45,6 +46,7 @@ describe("session stream token API route", () => {
     await expect(response.json()).resolves.toEqual({
       runnerUrl: "https://runner.example.com",
       streamToken: "token_123",
+      streamTokenExpiresAt: 1_780_000_000_000,
     });
     expect(loadAgentSessionStreamCredentialForWorkspaceMock).toHaveBeenCalledWith(
       "ses_123",

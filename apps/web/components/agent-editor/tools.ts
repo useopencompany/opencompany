@@ -1,3 +1,4 @@
+import type { ModelRatings, ModelRatingTier } from "@opencompany/agent-runtime";
 import {
   AFTER_SESSION_TAG,
   agentMentionIdForPath,
@@ -20,18 +21,23 @@ import {
   type LucideIcon,
   MessageSquare,
   MessagesSquare,
+  Music2,
   Search,
   Sparkles,
+  SquarePlay,
 } from "lucide-react";
 import {
   AnthropicIcon,
   DeepSeekIcon,
   GeminiIcon,
+  MinimaxIcon,
   MistralIcon,
   MoonshotIcon,
   OpenAIIcon,
+  XaiIcon,
   ZaiIcon,
 } from "@/components/icons/model-provider-icons";
+import { InstagramIcon } from "@/components/icons/social-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
 type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent" | "schedule";
@@ -46,6 +52,13 @@ type BaseAgentMentionItem = {
   icon: LucideIcon;
   category?: "Fast" | "Deep";
   supportsReasoning?: boolean;
+  // Capability / Speed / Cost tiers shown in the model picker (models only).
+  ratings?: ModelRatings;
+  // Set on integrations that are enabled on the agent but not yet set up in the
+  // workspace. The mention stays selectable; the UI shows a "Needs setup" badge
+  // linking to `connectUrl` (Settings → Integrations connect flow).
+  needsSetup?: boolean;
+  connectUrl?: string;
 };
 
 export type AgentTool = BaseAgentMentionItem & {
@@ -57,6 +70,8 @@ export type AgentModel = BaseAgentMentionItem & {
   id: AgentModelId;
   kind: "model";
 };
+
+export type { ModelRatings, ModelRatingTier };
 
 export type AgentIntegration = Omit<
   BaseAgentMentionItem,
@@ -104,6 +119,9 @@ export type AgentMentionItem =
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
   x: AtSign,
+  youtube: SquarePlay,
+  tiktok: Music2,
+  instagram: InstagramIcon,
   amp: Code2,
   linear: ListTodo,
   slack: MessageSquare,
@@ -123,11 +141,36 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   mistral: MistralIcon,
   moonshotai: MoonshotIcon,
   zai: ZaiIcon,
+  xai: XaiIcon,
+  minimax: MinimaxIcon,
 };
 
 function modelIconFor(id: AgentModelId): LucideIcon {
   const provider = id.split("/")[0] ?? "";
   return PROVIDER_ICONS[provider] ?? FALLBACK_MODEL_ICON;
+}
+
+// Human-readable provider names keyed by the model id prefix, used to group the
+// model picker. Falls back to the raw prefix for unlisted providers.
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  minimax: "MiniMax",
+  moonshotai: "Moonshot",
+  zai: "Z.ai",
+  xai: "xAI",
+};
+
+export function modelProviderId(id: string): string {
+  return id.split("/")[0] ?? "";
+}
+
+export function modelProviderLabel(id: string): string {
+  const provider = modelProviderId(id);
+  return PROVIDER_LABELS[provider] ?? provider;
 }
 
 export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => ({
@@ -139,6 +182,7 @@ export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => 
   description: model.description,
   category: model.category,
   supportsReasoning: model.supportsReasoning,
+  ratings: model.ratings,
   icon: modelIconFor(model.id),
 }));
 
@@ -190,6 +234,7 @@ export function buildAgentMentionItems(
   options: {
     enabledMcpToolIds?: AgentToolId[];
     includeMcpTools?: boolean;
+    mcpEnabled?: boolean;
     agents?: AgentReference[];
   } = {},
 ): AgentMentionItem[] {
@@ -222,18 +267,46 @@ export function buildAgentMentionItems(
 
   return [
     ...AGENT_SCHEDULE_MENTION_ITEMS,
-    ...AGENT_TOOLS.filter(
-      (tool) =>
-        tool.kind !== "tool" ||
-        !isMcpToolId(tool.id) ||
-        options.includeMcpTools ||
-        Boolean(options.enabledMcpToolIds?.includes(tool.id)),
-    ),
+    ...buildToolMentionItems(options),
     ...buildWorkspaceAgentMentionItems(options.agents ?? []),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+// Non-MCP tools are always available. MCP-backed tools (Linear, Slack) are shown
+// whenever the workspace MCP beta is on: connected ones behave normally, while
+// not-yet-connected ones stay selectable but carry `needsSetup`/`connectUrl` so
+// the UI can flag them and link to the connect flow. With the beta off they are
+// hidden entirely (matching the runtime's "beta is off" guard).
+function buildToolMentionItems(options: {
+  enabledMcpToolIds?: AgentToolId[];
+  includeMcpTools?: boolean;
+  mcpEnabled?: boolean;
+}): AgentTool[] {
+  return AGENT_TOOLS.flatMap((tool) => {
+    if (tool.kind !== "tool" || !isMcpToolId(tool.id)) return [tool];
+    const connected = Boolean(options.enabledMcpToolIds?.includes(tool.id));
+    const visible = options.includeMcpTools || options.mcpEnabled || connected;
+    if (!visible) return [];
+    if (connected) return [tool];
+    return [
+      {
+        ...tool,
+        description: "Not connected — set up in Settings → Integrations.",
+        needsSetup: true,
+        connectUrl: mcpConnectUrl(tool.id),
+      },
+    ];
+  });
+}
+
+// Single source of truth for the MCP connect (OAuth start) URL, reused by the agent
+// inspector. The route issues an external OAuth redirect, so callers link to it with a
+// plain anchor (full-page navigation), not a client-side router.
+export function mcpConnectUrl(toolId: AgentToolId, returnTo = "/settings") {
+  return `/api/mcp/${toolId}/start?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): AgentWorkspaceMention[] {

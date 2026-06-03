@@ -678,10 +678,12 @@ describe("session payload cache helpers", () => {
       parseSessionStreamCredentialResponse({
         runnerUrl: "https://runner.example.com",
         streamToken: "token",
+        streamTokenExpiresAt: 1_780_000_000_000,
       }),
     ).toEqual({
       runnerUrl: "https://runner.example.com",
       streamToken: "token",
+      streamTokenExpiresAt: 1_780_000_000_000,
     });
   });
 

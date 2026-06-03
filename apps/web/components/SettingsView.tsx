@@ -22,6 +22,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
+import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { Toggle } from "@/components/ui/toggle";
 import { createCreditCheckoutSession, redeemCreditCode } from "@/lib/billing/actions";
 import {
@@ -36,6 +37,7 @@ import {
   saveLinearMcpToken,
   setWorkspaceMcpExperimentEnabled,
 } from "@/lib/mcp/actions";
+import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { updateWorkspaceName } from "@/lib/workspaces/actions";
 
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
@@ -43,6 +45,8 @@ const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
 const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
 const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
 const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
+const SETTINGS_FORMAT_LOCALE = "en-US";
+const SETTINGS_FORMAT_TIME_ZONE = "UTC";
 
 type Props = {
   profile: {
@@ -101,6 +105,7 @@ type Props = {
       updatedAt: string | null;
     };
   };
+  toolPolicies: WorkspaceToolPolicyOverrides;
 };
 
 function Section({
@@ -192,7 +197,7 @@ function AppearanceSection() {
 }
 
 function formatUsd(cents: number) {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(SETTINGS_FORMAT_LOCALE, {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
@@ -201,18 +206,19 @@ function formatUsd(cents: number) {
 function formatUsdMicros(micros: number) {
   const roundedCents = Math.round(micros / 10_000);
   const cents = roundedCents === 0 ? 0 : roundedCents;
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(SETTINGS_FORMAT_LOCALE, {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
 }
 
 function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(SETTINGS_FORMAT_LOCALE, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: SETTINGS_FORMAT_TIME_ZONE,
   }).format(new Date(value));
 }
 
@@ -593,7 +599,13 @@ function WorkspaceState({ repository }: { repository: Props["workspace"]["reposi
   );
 }
 
-function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
+function ExperimentsSection({
+  mcp,
+  toolPolicies,
+}: {
+  mcp: Props["mcp"];
+  toolPolicies: WorkspaceToolPolicyOverrides;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [enabled, setEnabled] = useState(mcp.mcpEnabled);
@@ -663,11 +675,13 @@ function ExperimentsSection({ mcp }: { mcp: Props["mcp"] }) {
             linear={mcp.linear}
             setupStatus={normalizedLinearSetupStatus}
             setupReason={linearSetupReason}
+            policyOverrides={toolPolicies.linear}
           />
           <SlackMcpCard
             slack={mcp.slack}
             setupStatus={normalizedSlackSetupStatus}
             setupReason={slackSetupReason}
+            policyOverrides={toolPolicies.slack}
           />
         </>
       ) : null}
@@ -679,10 +693,12 @@ function LinearMcpCard({
   linear,
   setupStatus,
   setupReason,
+  policyOverrides,
 }: {
   linear: Props["mcp"]["linear"];
   setupStatus: "connected" | "error" | null;
   setupReason: string | null;
+  policyOverrides: WorkspaceToolPolicyOverrides[string] | undefined;
 }) {
   const router = useRouter();
   const [token, setToken] = useState("");
@@ -838,6 +854,7 @@ function LinearMcpCard({
           {visibleMessage.text}
         </div>
       )}
+      {configured ? <ToolPolicyEditor providerKey="linear" overrides={policyOverrides} /> : null}
     </form>
   );
 }
@@ -846,10 +863,12 @@ function SlackMcpCard({
   slack,
   setupStatus,
   setupReason,
+  policyOverrides,
 }: {
   slack: Props["mcp"]["slack"];
   setupStatus: "connected" | "error" | null;
   setupReason: string | null;
+  policyOverrides: WorkspaceToolPolicyOverrides[string] | undefined;
 }) {
   const router = useRouter();
   const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
@@ -949,6 +968,7 @@ function SlackMcpCard({
           {visibleMessage.text}
         </div>
       )}
+      {configured ? <ToolPolicyEditor providerKey="slack" overrides={policyOverrides} /> : null}
     </div>
   );
 }
@@ -1071,7 +1091,7 @@ function WorkspaceNameForm({ initial }: { initial: string }) {
   );
 }
 
-export default function SettingsView({ profile, workspace, billing, mcp }: Props) {
+export default function SettingsView({ profile, workspace, billing, mcp, toolPolicies }: Props) {
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-8 pb-24 pt-10">
@@ -1146,7 +1166,7 @@ export default function SettingsView({ profile, workspace, billing, mcp }: Props
           </Section>
 
           <Section title="Experiments" description="Beta capabilities for this workspace.">
-            <ExperimentsSection mcp={mcp} />
+            <ExperimentsSection mcp={mcp} toolPolicies={toolPolicies} />
           </Section>
         </div>
       </div>

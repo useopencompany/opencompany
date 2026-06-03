@@ -1,4 +1,5 @@
 import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
@@ -37,12 +38,9 @@ export type WorkspaceMcpServerStatus = "configured" | "missing_credential" | "di
 
 export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
 
-export type WorkspaceIntegrationCredentialEncryptedPayload = {
-  algorithm: "aes-256-gcm";
-  iv: string;
-  ciphertext: string;
-  authTag: string;
-};
+// Canonical encrypted-payload shape lives in @opencompany/crypto; aliased here so the
+// jsonb column annotations and existing importers keep their familiar name.
+export type WorkspaceIntegrationCredentialEncryptedPayload = EncryptedPayload;
 
 export const users = pgTable(
   "users",
@@ -545,9 +543,11 @@ export const agentSessionRunJobs = pgTable(
     sessionId: text("session_id")
       .notNull()
       .references(() => agentSessions.id, { onDelete: "cascade" }),
-    messageId: text("message_id").references(() => agentSessionMessages.id, {
-      onDelete: "cascade",
-    }),
+    // No FK to agent_session_messages: this column is overloaded by job kind. message/
+    // title/after_session jobs store a message id, `resume_approval` jobs store the
+    // tool_call_id (its idempotency key is resume_approval:{sessionId}:{toolCallId}), and
+    // `start` jobs leave it null. Cleanup still cascades via the session_id FK.
+    messageId: text("message_id"),
     kind: text("kind").notNull(),
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
@@ -571,7 +571,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'title', 'after_session')`,
+      sql`${table.kind} IN ('start', 'message', 'title', 'after_session', 'resume_approval')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",
@@ -1086,6 +1086,91 @@ export const workspaceMcpCredentials = pgTable(
   }),
 );
 
+export const workspaceToolPolicies = pgTable(
+  "workspace_tool_policies",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    providerKey: text("provider_key").notNull(),
+    permissionGroup: text("permission_group")
+      .$type<"read" | "post" | "modify" | "admin">()
+      .notNull(),
+    decision: text("decision").$type<"allow" | "ask" | "deny">().notNull(),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceProviderGroupIdx: uniqueIndex("workspace_tool_policies_ws_provider_group_idx").on(
+      table.workspaceId,
+      table.providerKey,
+      table.permissionGroup,
+    ),
+    workspaceIdx: index("workspace_tool_policies_workspace_idx").on(table.workspaceId),
+    groupCheck: check(
+      "workspace_tool_policies_group_check",
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+    ),
+    decisionCheck: check(
+      "workspace_tool_policies_decision_check",
+      sql`${table.decision} IN ('allow', 'ask', 'deny')`,
+    ),
+  }),
+);
+
+export const agentToolApprovals = pgTable(
+  "agent_tool_approvals",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id"),
+    toolCallId: text("tool_call_id").notNull(),
+    toolName: text("tool_name").notNull(),
+    providerKey: text("provider_key").notNull(),
+    permissionGroup: text("permission_group")
+      .$type<"read" | "post" | "modify" | "admin">()
+      .notNull(),
+    status: text("status").$type<"pending" | "approved" | "denied">().notNull().default("pending"),
+    inputPreview: text("input_preview"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    decisionSource: text("decision_source").$type<"user" | "timeout" | "abort">(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionToolCallIdx: uniqueIndex("agent_tool_approvals_session_tool_call_idx").on(
+      table.sessionId,
+      table.toolCallId,
+    ),
+    sessionStatusIdx: index("agent_tool_approvals_session_status_idx").on(
+      table.sessionId,
+      table.status,
+    ),
+    groupCheck: check(
+      "agent_tool_approvals_group_check",
+      sql`${table.permissionGroup} IN ('read', 'post', 'modify', 'admin')`,
+    ),
+    statusCheck: check(
+      "agent_tool_approvals_status_check",
+      sql`${table.status} IN ('pending', 'approved', 'denied')`,
+    ),
+    decisionSourceCheck: check(
+      "agent_tool_approvals_decision_source_check",
+      sql`${table.decisionSource} IS NULL OR ${table.decisionSource} IN ('user', 'timeout', 'abort')`,
+    ),
+  }),
+);
+
 export const agentSessionArtifacts = pgTable(
   "agent_session_artifacts",
   {
@@ -1564,3 +1649,5 @@ export type AgentSessionRunJob = typeof agentSessionRunJobs.$inferSelect;
 export type WorkspaceMembership = typeof workspaceMemberships.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;
+export type WorkspaceToolPolicy = typeof workspaceToolPolicies.$inferSelect;
+export type AgentToolApproval = typeof agentToolApprovals.$inferSelect;

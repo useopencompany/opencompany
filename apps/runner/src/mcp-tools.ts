@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   createMCPClient,
   type MCPClient,
@@ -7,7 +7,23 @@ import {
   type OAuthClientProvider,
   type OAuthTokens,
 } from "@ai-sdk/mcp";
-import { type AgentConfig, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  type AgentConfig,
+  classifyMcpTool,
+  effectivePolicyDecisionForGroup,
+  formatPolicyDecision,
+  newAgentSessionMessageId,
+  PERMISSION_GROUP_LABELS,
+  type WorkspaceToolPolicyMap,
+} from "@opencompany/agent-runtime";
+import {
+  buildAad,
+  decryptJson,
+  ENCRYPTION_ALGORITHM,
+  type EncryptedPayload,
+  EncryptionKeyConfigError,
+  encryptJson,
+} from "@opencompany/crypto";
 import {
   workspaceExperiments,
   workspaceMcpCredentials,
@@ -32,7 +48,11 @@ import {
   toPersistedModelMessage,
 } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
-import { formatRuntimePreview } from "./tool-dispatcher";
+import {
+  formatRuntimePreview,
+  persistDeniedToolResult,
+  SUSPENDED_TOOL_OUTPUT,
+} from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
@@ -59,11 +79,7 @@ const SLACK_READ_SCOPES = [
   "groups:read",
   "mpim:read",
 ];
-const ENCRYPTION_KEY_ENV = "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY";
-const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 const ENCRYPTION_KEY_VERSION = 1;
-const ENCRYPTION_KEY_BYTE_LENGTH = 32;
-const IV_BYTE_LENGTH = 12;
 const logger = createLogger({ service: "opencompany-runner" });
 
 type McpProviderKey = typeof LINEAR_MCP_SERVER_KEY | typeof SLACK_MCP_SERVER_KEY;
@@ -108,9 +124,12 @@ type McpToolContext = {
   internalMessages?: boolean;
   workspaceId: string;
   agentConfig: AgentConfig;
+  integrationCredentialEncryptionKey: Buffer;
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
   observabilityContext?: {
     workspaceId?: string;
     userId?: string;
@@ -123,6 +142,14 @@ type McpToolContext = {
 export type McpToolSet = {
   tools: ToolSet;
   close: () => Promise<void>;
+  // Execute an MCP tool body directly (bypassing the stream gate) for an approval resume.
+  // Returns null when no MCP tool with that prefixed name is connected. Persists the
+  // tool-result message + tool.completed/failed event just like the in-stream path.
+  runApprovedTool: (input: {
+    toolName: string;
+    toolCallId: string;
+    args: unknown;
+  }) => Promise<unknown> | null;
 };
 
 export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSet> {
@@ -132,20 +159,40 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   const clients: MCPClient[] = [];
   const tools: ToolSet = {};
   const usedNames = new Set<string>();
+  const bodiesByName = new Map<
+    string,
+    { server: McpProviderKey; rawName: string; execute: McpToolBody }
+  >();
   try {
     for (const provider of requestedProviders) {
-      const connection = await loadMcpConnection(input.workspaceId, provider).catch(
-        (error: unknown) => {
-          logMcpConnectionSetupFailure({ error, input, provider });
-          throw error;
-        },
-      );
+      let connection: Awaited<ReturnType<typeof loadMcpConnection>>;
+      try {
+        connection = await loadMcpConnection(input, provider);
+      } catch (error: unknown) {
+        // The integration is enabled on the agent but not set up in the workspace
+        // (no credential, beta off, etc.). Don't abort the whole turn — register a
+        // stub tool that returns the reason to the model so it can ask the user to
+        // connect it. The real tool names can't be listed without a live connection,
+        // so a single stub per failed provider is the right granularity.
+        logMcpConnectionSetupFailure({ error, input, provider });
+        const stubName = uniqueToolName(
+          `${provider.key}__${NOT_CONNECTED_STUB_RAW_NAME}`,
+          usedNames,
+        );
+        tools[stubName] = buildNotConnectedStubTool({
+          provider,
+          error,
+          checkAbort: input.checkAbort,
+        });
+        continue;
+      }
       const client = await createMCPClient({
         clientName: "opencompany-runner",
         version: "0.2.0",
         transport: mcpTransportForConnection({
           workspaceId: input.workspaceId,
           provider,
+          integrationCredentialEncryptionKey: input.integrationCredentialEncryptionKey,
           connection,
         }),
       });
@@ -165,7 +212,14 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
           execute?: (input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>;
         };
         tools[prefixedName] = tool({
-          description: `${provider.displayName} MCP: ${mcpTool.description ?? rawName}`,
+          description: mcpToolDescription({
+            providerName: provider.displayName,
+            rawName,
+            description: mcpTool.description,
+            prefixedName,
+            policy: input.policy,
+            suspendable: input.suspendable,
+          }),
           inputSchema:
             (mcpTool.inputSchema as never) ??
             jsonSchema({ type: "object", properties: {} } as never),
@@ -184,7 +238,27 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
             });
           },
           execute: async (toolInput: unknown, options: { toolCallId: string }) => {
-            await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+            const verdict = await input.toolStartCoordinator.waitForStarted(
+              options.toolCallId,
+              input.signal,
+            );
+            // Suspending at an "ask" gate — return a discarded no-op (the stream is torn
+            // down and this result is never persisted). The body runs in the resume run.
+            if (verdict.decision === "suspend") {
+              return SUSPENDED_TOOL_OUTPUT;
+            }
+            if (verdict.decision === "deny") {
+              return persistDeniedToolResult({
+                sessionId: input.sessionId,
+                assistantMessageId: input.assistantMessageId,
+                runLeaseId: input.runLeaseId,
+                runLeaseOwner: input.runLeaseOwner,
+                internalMessages: input.internalMessages,
+                toolCallId: options.toolCallId,
+                toolName: prefixedName,
+                verdict,
+              });
+            }
             return executeMcpTool({
               ...input,
               mcpServer: provider.key,
@@ -196,14 +270,60 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
             });
           },
         } as never) as ToolSet[string];
+        bodiesByName.set(prefixedName, {
+          server: provider.key,
+          rawName,
+          execute: mcpTool.execute,
+        });
       }
     }
 
-    return { tools, close: () => closeMcpClients(clients) };
+    return {
+      tools,
+      close: () => closeMcpClients(clients),
+      runApprovedTool: ({ toolName, toolCallId, args }) => {
+        const body = bodiesByName.get(toolName);
+        if (!body) return null;
+        return executeMcpTool({
+          ...input,
+          mcpServer: body.server,
+          toolCallId,
+          toolName,
+          rawToolName: body.rawName,
+          execute: body.execute,
+          args,
+        });
+      },
+    };
   } catch (error) {
     await closeMcpClients(clients);
     throw error;
   }
+}
+
+type McpToolBody =
+  | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
+  | undefined;
+
+function mcpToolDescription(input: {
+  providerName: string;
+  rawName: string;
+  description: string | undefined;
+  prefixedName: string;
+  policy: WorkspaceToolPolicyMap;
+  suspendable: boolean;
+}) {
+  const base = `${input.providerName} MCP: ${input.description ?? input.rawName}`;
+  const classification = classifyMcpTool(input.prefixedName);
+  if (!classification) return base;
+
+  const decision = effectivePolicyDecisionForGroup({
+    providerKey: classification.providerKey,
+    group: classification.group,
+    policy: input.policy,
+    suspendable: input.suspendable,
+  });
+  return `${base}\nPermission: ${PERMISSION_GROUP_LABELS[classification.group]} (${formatPolicyDecision(decision)}).`;
 }
 
 function requestedMcpProviders(agentConfig: AgentConfig) {
@@ -226,6 +346,7 @@ function isMcpProviderKey(value: string): value is McpProviderKey {
 function mcpTransportForConnection(input: {
   workspaceId: string;
   provider: McpProvider;
+  integrationCredentialEncryptionKey: Buffer;
   connection: Awaited<ReturnType<typeof loadMcpConnection>>;
 }) {
   if (input.connection.auth.type === "oauth") {
@@ -237,6 +358,7 @@ function mcpTransportForConnection(input: {
         serverId: input.connection.serverId,
         payload: input.connection.auth.payload,
         provider: input.provider,
+        encryptionKey: input.integrationCredentialEncryptionKey,
       }),
     };
   }
@@ -461,6 +583,47 @@ function buildMcpFailedToolOutput(error: unknown) {
   };
 }
 
+// Raw (un-prefixed) name for the not-connected stub tool. The prefixed name
+// (`${provider}__${this}`) is classified by the permission system via a read-verb
+// heuristic — "get" resolves the stub to the `read` group, which defaults to "allow".
+// This is deliberate: the stub has no side effects, so it must never trigger an
+// approval gate (an "ask" would suspend the run, or on non-suspendable scheduled
+// runs collapse to "deny" — defeating the graceful message). Keep a read verb here.
+const NOT_CONNECTED_STUB_RAW_NAME = "get_connection_status";
+
+// A placeholder tool for an integration that is enabled on the agent but not set up
+// in the workspace. Calling it performs no action and returns the connection reason
+// so the model can ask the user to connect the integration in Settings. It has no
+// side effects, so it skips the permission/approval gate entirely.
+function buildNotConnectedStubTool(input: {
+  provider: McpProvider;
+  error: unknown;
+  checkAbort: RunControlCheck;
+}): ToolSet[string] {
+  const reason =
+    input.error instanceof Error
+      ? input.error.message
+      : `${input.provider.displayName} is not connected.`;
+  return tool({
+    description:
+      `${input.provider.displayName} is enabled for this agent but not connected. ` +
+      `Calling this performs no action — instead tell the user to connect ` +
+      `${input.provider.displayName} in Settings → Integrations.`,
+    inputSchema: jsonSchema({ type: "object", properties: {} } as never),
+    onInputAvailable: async () => {
+      await input.checkAbort();
+    },
+    execute: async () => ({
+      ok: false,
+      error: {
+        message: reason,
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    }),
+  } as never) as ToolSet[string];
+}
+
 function braintrustError(error: unknown) {
   if (error instanceof Error) {
     return {
@@ -484,8 +647,9 @@ function isMcpFailedToolOutput(
   );
 }
 
-async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
+async function loadMcpConnection(input: McpToolContext, provider: McpProvider) {
   const db = getDb();
+  const { workspaceId } = input;
   const [[experiment], [server]] = await Promise.all([
     db
       .select({ enabled: workspaceExperiments.enabled })
@@ -549,6 +713,7 @@ async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
         serverId: oauthRow.serverId,
         kind: oauthRow.credentialKind,
         keyVersion: oauthRow.encryptionKeyVersion,
+        encryptionKey: input.integrationCredentialEncryptionKey,
       }),
     );
     if (!(provider.staticClientEnv || payload.clientInformation) || !payload.tokens) {
@@ -579,6 +744,7 @@ async function loadMcpConnection(workspaceId: string, provider: McpProvider) {
     serverId: bearerRow.serverId,
     kind: bearerRow.credentialKind,
     keyVersion: bearerRow.encryptionKeyVersion,
+    encryptionKey: input.integrationCredentialEncryptionKey,
   });
   const bearerToken = typeof payload.bearerToken === "string" ? payload.bearerToken.trim() : "";
   if (!bearerToken)
@@ -602,6 +768,7 @@ function createRunnerMcpOAuthProvider(input: {
   serverId: string;
   payload: McpOAuthPayload;
   provider: McpProvider;
+  encryptionKey: Buffer;
 }): OAuthClientProvider {
   let payload = input.payload;
 
@@ -614,6 +781,7 @@ function createRunnerMcpOAuthProvider(input: {
         serverId: input.serverId,
         kind: input.provider.oauthCredentialKind,
         keyVersion: ENCRYPTION_KEY_VERSION,
+        encryptionKey: input.encryptionKey,
       },
     );
     const now = new Date();
@@ -712,13 +880,14 @@ function omitOAuthPayload<TKey extends keyof McpOAuthPayload>(
 }
 
 function decryptPayload(
-  encryptedPayload: {
-    algorithm: string;
-    iv: string;
-    ciphertext: string;
-    authTag: string;
+  encryptedPayload: EncryptedPayload,
+  context: {
+    workspaceId: string;
+    serverId: string;
+    kind: string;
+    keyVersion: number;
+    encryptionKey: Buffer;
   },
-  context: { workspaceId: string; serverId: string; kind: string; keyVersion: number },
 ) {
   if (context.keyVersion !== ENCRYPTION_KEY_VERSION) {
     throw new Error(`Unsupported MCP credential encryption key version ${context.keyVersion}.`);
@@ -730,37 +899,11 @@ function decryptPayload(
   }
 
   try {
-    const decipher = createDecipheriv(
-      ENCRYPTION_ALGORITHM,
-      loadEncryptionKey(),
-      Buffer.from(encryptedPayload.iv, "base64"),
-    );
-    decipher.setAAD(
-      Buffer.from(
-        JSON.stringify({
-          workspaceId: context.workspaceId,
-          serverId: context.serverId,
-          kind: context.kind,
-          keyVersion: context.keyVersion,
-        }),
-        "utf8",
-      ),
-    );
-    decipher.setAuthTag(Buffer.from(encryptedPayload.authTag, "base64"));
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(encryptedPayload.ciphertext, "base64")),
-      decipher.final(),
-    ]).toString("utf8");
-    const payload = JSON.parse(plaintext) as unknown;
-    if (!isRecord(payload)) throw new Error("Decrypted MCP credential payload is invalid.");
-    return payload;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("Unsupported MCP credential")) {
-      throw error;
-    }
-    if (isEncryptionKeyConfigurationError(error)) {
-      throw error;
-    }
+    return decryptJson(encryptedPayload, {
+      key: context.encryptionKey,
+      aad: mcpCredentialAuthenticatedData(context),
+    });
+  } catch {
     throw new McpCredentialDecryptionError({
       kind: context.kind,
       keyVersion: context.keyVersion,
@@ -771,52 +914,34 @@ function decryptPayload(
 
 function encryptPayload(
   payload: Record<string, unknown>,
-  context: { workspaceId: string; serverId: string; kind: string; keyVersion: number },
-) {
-  const iv = randomBytes(IV_BYTE_LENGTH);
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, loadEncryptionKey(), iv);
-  cipher.setAAD(mcpCredentialAuthenticatedData(context));
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(payload), "utf8"),
-    cipher.final(),
-  ]);
-
-  return {
-    algorithm: ENCRYPTION_ALGORITHM as "aes-256-gcm",
-    iv: iv.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
-    authTag: cipher.getAuthTag().toString("base64"),
-  };
+  context: {
+    workspaceId: string;
+    serverId: string;
+    kind: string;
+    keyVersion: number;
+    encryptionKey: Buffer;
+  },
+): EncryptedPayload {
+  return encryptJson(payload, {
+    key: context.encryptionKey,
+    aad: mcpCredentialAuthenticatedData(context),
+  });
 }
 
+// Field order is significant — it must stay byte-identical to previously stored
+// credentials (see buildAad in @opencompany/crypto).
 function mcpCredentialAuthenticatedData(context: {
   workspaceId: string;
   serverId: string;
   kind: string;
   keyVersion: number;
 }) {
-  return Buffer.from(
-    JSON.stringify({
-      workspaceId: context.workspaceId,
-      serverId: context.serverId,
-      kind: context.kind,
-      keyVersion: context.keyVersion,
-    }),
-    "utf8",
-  );
-}
-
-function loadEncryptionKey() {
-  const raw = process.env[ENCRYPTION_KEY_ENV]?.trim();
-  if (!raw) throw new Error(`${ENCRYPTION_KEY_ENV} is required for MCP credential storage.`);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) {
-    throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
-  }
-  const key = Buffer.from(raw, "base64");
-  if (key.length !== ENCRYPTION_KEY_BYTE_LENGTH) {
-    throw new Error(`${ENCRYPTION_KEY_ENV} must be a base64-encoded 32-byte key.`);
-  }
-  return key;
+  return buildAad({
+    workspaceId: context.workspaceId,
+    serverId: context.serverId,
+    kind: context.kind,
+    keyVersion: context.keyVersion,
+  });
 }
 
 type McpConnectionErrorDiagnostic = {
@@ -855,7 +980,7 @@ class McpCredentialDecryptionError extends Error {
 }
 
 function isEncryptionKeyConfigurationError(error: unknown) {
-  return error instanceof Error && error.message.includes(ENCRYPTION_KEY_ENV);
+  return error instanceof EncryptionKeyConfigError;
 }
 
 function newWorkspaceMcpCredentialId() {
@@ -919,7 +1044,7 @@ function uniqueToolName(base: string, usedNames: Set<string>) {
 }
 
 function emptyMcpToolSet(): McpToolSet {
-  return { tools: {}, close: async () => {} };
+  return { tools: {}, close: async () => {}, runApprovedTool: () => null };
 }
 
 async function closeMcpClient(client: MCPClient) {

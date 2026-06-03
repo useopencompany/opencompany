@@ -1,13 +1,19 @@
+import { TOOL_APPROVAL_BACKSTOP_MS } from "@opencompany/agent-runtime";
+import { getDb } from "@opencompany/db/client";
+import { agentToolApprovals } from "@opencompany/db/schema";
+import { and, eq, lt } from "drizzle-orm";
 import {
   AGENT_SCHEDULE_SWEEP_CRON,
   sweepAgentSchedules as runAgentScheduleSweep,
 } from "@/lib/agent-schedules/runner";
 import {
   AGENT_AFTER_SESSION_CHECK_EVENT,
+  AGENT_APPROVAL_RESUME_EVENT,
   AGENT_MESSAGE_SUBMITTED_EVENT,
   AGENT_SESSION_ABORT_REQUESTED_EVENT,
   AGENT_SESSION_STARTED_EVENT,
 } from "@/lib/agent-sessions/events";
+import { triggerAgentApprovalResume } from "@/lib/agent-sessions/message-runner";
 import { callRunner } from "@/lib/agent-sessions/runner";
 import { materializeAgentFileToGitHub, materializeAgentToGitHub } from "@/lib/agents/materialize";
 import {
@@ -285,6 +291,97 @@ export const abortAgentSession = inngest.createFunction(
   },
 );
 
+export const runAgentApprovalResume = inngest.createFunction(
+  {
+    id: "run-agent-approval-resume",
+    name: "Run agent approval resume",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: AGENT_APPROVAL_RESUME_EVENT },
+  },
+  async ({ event, step }) => {
+    return step.run("resume runner approval", async () => {
+      await callRunner(
+        `/internal/sessions/${event.data.sessionId}/approvals/${event.data.toolCallId}/resume`,
+        {
+          event: "opencompany.inngest_resume_approval_failed",
+          session_id: event.data.sessionId,
+        },
+      );
+      return { ok: true };
+    });
+  },
+);
+
+// Backstop sweep: pending approvals older than the backstop window are auto-denied with
+// decisionSource='timeout' so a run never hangs forever waiting on a user. The atomic,
+// status-guarded UPDATE means a concurrent user decision always wins; only rows this
+// sweep actually flips trigger a resume.
+const TOOL_APPROVAL_SWEEP_CRON = "0 * * * *";
+
+export const sweepExpiredToolApprovals = inngest.createFunction(
+  {
+    id: "sweep-expired-tool-approvals",
+    name: "Sweep expired tool approvals",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: TOOL_APPROVAL_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    const db = getDb();
+    const cutoff = new Date(Date.now() - TOOL_APPROVAL_BACKSTOP_MS);
+
+    const expired = await step.run("select expired pending approvals", async () => {
+      return db
+        .select({
+          id: agentToolApprovals.id,
+          sessionId: agentToolApprovals.sessionId,
+          toolCallId: agentToolApprovals.toolCallId,
+        })
+        .from(agentToolApprovals)
+        .where(
+          and(eq(agentToolApprovals.status, "pending"), lt(agentToolApprovals.requestedAt, cutoff)),
+        )
+        .limit(100);
+    });
+
+    let denied = 0;
+    for (const approval of expired) {
+      const flippedRow = await step.run(`deny approval ${approval.id}`, async () => {
+        const updated = await db
+          .update(agentToolApprovals)
+          .set({
+            status: "denied",
+            decisionSource: "timeout",
+            decidedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(agentToolApprovals.id, approval.id), eq(agentToolApprovals.status, "pending")),
+          )
+          .returning({ id: agentToolApprovals.id });
+        return updated.length > 0;
+      });
+
+      if (!flippedRow) continue;
+      denied += 1;
+
+      await step.run(`resume approval ${approval.id}`, async () => {
+        await triggerAgentApprovalResume({
+          sessionId: approval.sessionId,
+          toolCallId: approval.toolCallId,
+        });
+        return { ok: true };
+      });
+    }
+
+    return { scanned: expired.length, denied };
+  },
+);
+
 export const sendSignupWelcome = inngest.createFunction(
   {
     id: "send-signup-welcome-email",
@@ -315,5 +412,7 @@ export const inngestFunctions = [
   runAgentAfterSession,
   sweepAgentSchedules,
   abortAgentSession,
+  runAgentApprovalResume,
+  sweepExpiredToolApprovals,
   sendSignupWelcome,
 ];

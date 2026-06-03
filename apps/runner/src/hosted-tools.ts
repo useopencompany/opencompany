@@ -82,6 +82,24 @@ type NormalizedXUser = {
   url: string;
 };
 
+type SupadataSocialPlatform = "tiktok" | "instagram";
+
+// Estimated Supadata (YouTube) costs for internal usage tracking; persisted raw usage marks them
+// estimated. Supadata bills in credits, not per-call USD, so these are rough per-operation values.
+const YOUTUBE_OPERATION_COST_USD_MICROS: Record<string, number> = {
+  search: 2_000,
+  get_video: 1_000,
+  get_transcript: 4_000,
+  get_channel: 1_000,
+  list_channel_videos: 2_000,
+};
+
+const SUPADATA_UNIVERSAL_OPERATION_COST_USD_MICROS: Record<string, number> = {
+  get_metadata: 1_000,
+  get_transcript: 4_000,
+  poll_transcript: 0,
+};
+
 // Estimated X API read costs for internal usage tracking; persisted raw usage marks them estimated.
 const X_POST_READ_COST_USD_MICROS = 5_000;
 const X_USER_READ_COST_USD_MICROS = 10_000;
@@ -197,6 +215,60 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
     failureContext: ({ args, error }) => getXFailureContext("get_trends", args, error),
     validateEnvironment: (env) => validateXEnvironment(env, "x_get_trends"),
   },
+  youtube_search: {
+    execute: ({ args, env, signal }) => executeYoutubeSearch(args, env, signal),
+    failureContext: ({ args, error }) => getYoutubeFailureContext("search", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "youtube_search"),
+  },
+  youtube_get_video: {
+    execute: ({ args, env, signal }) => executeYoutubeGetVideo(args, env, signal),
+    failureContext: ({ args, error }) => getYoutubeFailureContext("get_video", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "youtube_get_video"),
+  },
+  youtube_get_transcript: {
+    execute: ({ args, env, signal }) => executeYoutubeGetTranscript(args, env, signal),
+    failureContext: ({ args, error }) => getYoutubeFailureContext("get_transcript", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "youtube_get_transcript"),
+  },
+  youtube_get_channel: {
+    execute: ({ args, env, signal }) => executeYoutubeGetChannel(args, env, signal),
+    failureContext: ({ args, error }) => getYoutubeFailureContext("get_channel", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "youtube_get_channel"),
+  },
+  youtube_list_channel_videos: {
+    execute: ({ args, env, signal }) => executeYoutubeListChannelVideos(args, env, signal),
+    failureContext: ({ args, error }) =>
+      getYoutubeFailureContext("list_channel_videos", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "youtube_list_channel_videos"),
+  },
+  tiktok_get_metadata: {
+    execute: ({ args, env, signal }) =>
+      executeSupadataSocialGetMetadata("tiktok", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSupadataSocialFailureContext("tiktok", "get_metadata", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "tiktok_get_metadata"),
+  },
+  tiktok_get_transcript: {
+    execute: ({ args, env, signal }) =>
+      executeSupadataSocialGetTranscript("tiktok", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSupadataSocialFailureContext("tiktok", "get_transcript", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "tiktok_get_transcript"),
+  },
+  instagram_get_metadata: {
+    execute: ({ args, env, signal }) =>
+      executeSupadataSocialGetMetadata("instagram", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSupadataSocialFailureContext("instagram", "get_metadata", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "instagram_get_metadata"),
+  },
+  instagram_get_transcript: {
+    execute: ({ args, env, signal }) =>
+      executeSupadataSocialGetTranscript("instagram", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSupadataSocialFailureContext("instagram", "get_transcript", args, error),
+    validateEnvironment: (env) => validateYoutubeEnvironment(env, "instagram_get_transcript"),
+  },
   web_fetch: {
     execute: ({ args, signal }) => executeWebFetch(args, signal),
     failureContext: () => ({
@@ -222,6 +294,15 @@ function validateXEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
     throw new MissingEnvError(
       "X_API_BEARER_TOKEN",
       `The ${toolName} tool is enabled, but X_API_BEARER_TOKEN is not configured.`,
+    );
+  }
+}
+
+function validateYoutubeEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
+  if (!env.supadataApiKey) {
+    throw new MissingEnvError(
+      "SUPADATA_API_KEY",
+      `The ${toolName} tool is enabled, but SUPADATA_API_KEY is not configured.`,
     );
   }
 }
@@ -1101,6 +1182,593 @@ function xApiUrl(path: string, params: Record<string, string | undefined> = {}) 
     if (value) url.searchParams.set(key, value);
   }
   return url;
+}
+
+function supadataUrl(path: string, params: Record<string, string | undefined> = {}) {
+  const url = new URL(`https://api.supadata.ai/v1${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") url.searchParams.set(key, value);
+  }
+  return url;
+}
+
+function requireSupadataApiKey(env: RunnerEnv, operation: string, provider = "youtube") {
+  if (!env.supadataApiKey) {
+    throw new MissingEnvError(
+      "SUPADATA_API_KEY",
+      `SUPADATA_API_KEY is required for ${provider} ${operation}.`,
+    );
+  }
+  return env.supadataApiKey;
+}
+
+async function supadataGet(
+  url: URL,
+  env: RunnerEnv,
+  signal: AbortSignal,
+  operation: string,
+  options: { provider?: string; providerLabel?: string } = {},
+) {
+  const provider = options.provider ?? "youtube";
+  const providerLabel = options.providerLabel ?? "YouTube";
+  const apiKey = requireSupadataApiKey(env, operation, provider);
+  const response = await fetch(url, {
+    headers: {
+      "x-api-key": apiKey,
+      Accept: "application/json",
+    },
+    signal,
+  });
+  const body = await readProviderJsonResponse(response, providerLabel, operation);
+  if (!response.ok) {
+    const message = providerErrorMessage(body) ?? response.statusText;
+    throw new Error(`${providerLabel} ${operation} failed (${response.status}): ${message}`);
+  }
+  return body;
+}
+
+function youtubeUsage(operation: string): HostedToolUsage {
+  return {
+    provider: "youtube",
+    operation,
+    costUsdMicros: YOUTUBE_OPERATION_COST_USD_MICROS[operation] ?? 1_000,
+    rawUsage: { estimated: true, operation },
+  };
+}
+
+async function executeYoutubeSearch(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const query = readString(record, "query").trim();
+  if (!query) throw new Error("YouTube search query must not be empty.");
+  const type =
+    readOptionalEnum(record, "type", ["all", "video", "channel", "playlist", "movie"] as const) ??
+    "video";
+  const uploadDate = readOptionalEnum(record, "uploadDate", [
+    "all",
+    "hour",
+    "today",
+    "week",
+    "month",
+    "year",
+  ] as const);
+  const duration = readOptionalEnum(record, "duration", ["short", "medium", "long"] as const);
+  const sortBy =
+    readOptionalEnum(record, "sortBy", ["relevance", "rating", "date", "views"] as const) ??
+    "relevance";
+  const limit = readBoundedOptionalInteger(record, "limit", 1, 50) ?? 10;
+
+  const url = supadataUrl("/youtube/search", {
+    query,
+    type,
+    uploadDate,
+    duration,
+    sortBy,
+    limit: String(limit),
+  });
+  const body = await supadataGet(url, env, signal, "search");
+  if (!isRecord(body) || !Array.isArray(body.results)) {
+    throw new Error("YouTube search returned an unexpected response shape.");
+  }
+
+  return {
+    output: omitUndefined({
+      query,
+      results: body.results.slice(0, limit).map(normalizeYoutubeSearchResult),
+      nextPageToken: readOptionalString(body, "nextPageToken"),
+    }),
+    usage: youtubeUsage("search"),
+  };
+}
+
+async function executeYoutubeGetVideo(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const id = readString(record, "id").trim();
+  if (!id) throw new Error("YouTube video id must not be empty.");
+  const url = supadataUrl("/youtube/video", { id });
+  const body = await supadataGet(url, env, signal, "get_video");
+  if (!isRecord(body)) {
+    throw new Error("YouTube get_video returned an unexpected response shape.");
+  }
+
+  return {
+    output: { video: normalizeYoutubeVideo(body) },
+    usage: youtubeUsage("get_video"),
+  };
+}
+
+async function executeYoutubeGetTranscript(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const videoUrl = readOptionalString(record, "url");
+  const videoId = readOptionalString(record, "videoId");
+  if (!videoUrl && !videoId) {
+    throw new Error("YouTube get_transcript requires either url or videoId.");
+  }
+  if (videoUrl && videoId) {
+    throw new Error("YouTube get_transcript accepts either url or videoId, not both.");
+  }
+  const lang = readOptionalString(record, "lang");
+  const text = readOptionalBoolean(record, "text") ?? true;
+
+  const url = supadataUrl("/transcript", {
+    url: videoUrl,
+    videoId,
+    lang,
+    text: text ? "true" : "false",
+  });
+  const body = await supadataGet(url, env, signal, "get_transcript");
+  if (!isRecord(body)) {
+    throw new Error("YouTube get_transcript returned an unexpected response shape.");
+  }
+
+  const availableLangs = readOptionalStringArray(body, "availableLangs");
+  return {
+    output: omitUndefined({
+      content: body.content,
+      lang: readOptionalString(body, "lang"),
+      availableLangs: availableLangs.length > 0 ? availableLangs : undefined,
+    }),
+    usage: youtubeUsage("get_transcript"),
+  };
+}
+
+async function executeYoutubeGetChannel(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const id = readString(record, "id").trim();
+  if (!id) throw new Error("YouTube channel id must not be empty.");
+  const url = supadataUrl("/youtube/channel", { id });
+  const body = await supadataGet(url, env, signal, "get_channel");
+  if (!isRecord(body)) {
+    throw new Error("YouTube get_channel returned an unexpected response shape.");
+  }
+
+  return {
+    output: { channel: normalizeYoutubeChannel(body) },
+    usage: youtubeUsage("get_channel"),
+  };
+}
+
+async function executeYoutubeListChannelVideos(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const id = readString(record, "id").trim();
+  if (!id) throw new Error("YouTube channel id must not be empty.");
+  const limit = readBoundedOptionalInteger(record, "limit", 1, 50) ?? 20;
+  const url = supadataUrl("/youtube/channel/videos", { id, limit: String(limit) });
+  const body = await supadataGet(url, env, signal, "list_channel_videos");
+  if (!isRecord(body)) {
+    throw new Error("YouTube list_channel_videos returned an unexpected response shape.");
+  }
+
+  return {
+    output: {
+      videoIds: readOptionalStringArray(body, "videoIds").slice(0, limit),
+      shortIds: readOptionalStringArray(body, "shortIds").slice(0, limit),
+      liveIds: readOptionalStringArray(body, "liveIds").slice(0, limit),
+    },
+    usage: youtubeUsage("list_channel_videos"),
+  };
+}
+
+async function executeSupadataSocialGetMetadata(
+  platform: SupadataSocialPlatform,
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const mediaUrl = readString(record, "url").trim();
+  assertSupadataPlatformUrl(platform, mediaUrl);
+
+  const body = await supadataGet(
+    supadataUrl("/metadata", { url: mediaUrl }),
+    env,
+    signal,
+    "get_metadata",
+    {
+      provider: platform,
+      providerLabel: supadataPlatformLabel(platform),
+    },
+  );
+  if (!isRecord(body)) {
+    throw new Error(
+      `${supadataPlatformLabel(platform)} get_metadata returned an unexpected response shape.`,
+    );
+  }
+
+  return {
+    output: { metadata: normalizeSupadataMetadata(body) },
+    usage: supadataUniversalUsage(platform, "get_metadata"),
+  };
+}
+
+async function executeSupadataSocialGetTranscript(
+  platform: SupadataSocialPlatform,
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const record = asRecord(args);
+  const mediaUrl = readOptionalString(record, "url")?.trim();
+  const jobId = readOptionalString(record, "jobId")?.trim();
+  if (!mediaUrl && !jobId) {
+    throw new Error(
+      `${supadataPlatformLabel(platform)} get_transcript requires either url or jobId.`,
+    );
+  }
+  if (mediaUrl && jobId) {
+    throw new Error(
+      `${supadataPlatformLabel(platform)} get_transcript accepts either url or jobId, not both.`,
+    );
+  }
+
+  const label = supadataPlatformLabel(platform);
+  if (mediaUrl) assertSupadataPlatformUrl(platform, mediaUrl);
+  const body = jobId
+    ? await supadataGet(
+        supadataUrl(`/transcript/${encodeURIComponent(jobId)}`),
+        env,
+        signal,
+        "get_transcript",
+        {
+          provider: platform,
+          providerLabel: label,
+        },
+      )
+    : await supadataGet(
+        supadataUrl("/transcript", {
+          url: mediaUrl,
+          lang: readOptionalString(record, "lang"),
+          text: String(readOptionalBoolean(record, "text") ?? true),
+          mode: readOptionalEnum(record, "mode", ["native", "auto", "generate"] as const) ?? "auto",
+          chunkSize: readOptionalChunkSize(record),
+        }),
+        env,
+        signal,
+        "get_transcript",
+        { provider: platform, providerLabel: label },
+      );
+
+  if (!isRecord(body)) {
+    throw new Error(`${label} get_transcript returned an unexpected response shape.`);
+  }
+
+  return {
+    output: normalizeSupadataTranscript(body),
+    usage: supadataUniversalUsage(platform, jobId ? "poll_transcript" : "get_transcript"),
+  };
+}
+
+function readOptionalChunkSize(record: Record<string, unknown>) {
+  const value = readOptionalNumber(record, "chunkSize");
+  if (value === undefined) return undefined;
+  return String(Math.min(Math.max(Math.floor(value), 50), 10_000));
+}
+
+function supadataUniversalUsage(
+  platform: SupadataSocialPlatform,
+  operation: string,
+): HostedToolUsage {
+  return {
+    provider: platform,
+    operation,
+    costUsdMicros: SUPADATA_UNIVERSAL_OPERATION_COST_USD_MICROS[operation] ?? 1_000,
+    rawUsage: { estimated: true, provider: "supadata", operation },
+  };
+}
+
+function normalizeYoutubeSearchResult(value: unknown) {
+  const record = asRecord(value);
+  const channel = isRecord(record.channel)
+    ? omitUndefined({
+        id: readOptionalString(record.channel, "id"),
+        name: readOptionalString(record.channel, "name"),
+      })
+    : undefined;
+  return omitUndefined({
+    type: readOptionalString(record, "type"),
+    id: readOptionalString(record, "id"),
+    title: readOptionalString(record, "title"),
+    description: readOptionalString(record, "description"),
+    thumbnail: readOptionalString(record, "thumbnail"),
+    duration: readOptionalNumber(record, "duration"),
+    viewCount: readOptionalNumber(record, "viewCount"),
+    uploadDate: readOptionalString(record, "uploadDate"),
+    subscriberCount: readOptionalNumber(record, "subscriberCount"),
+    videoCount: readOptionalNumber(record, "videoCount"),
+    channel,
+  });
+}
+
+function normalizeYoutubeVideo(value: unknown) {
+  const record = asRecord(value);
+  const channel = isRecord(record.channel)
+    ? omitUndefined({
+        id: readOptionalString(record.channel, "id"),
+        name: readOptionalString(record.channel, "name"),
+      })
+    : undefined;
+  return omitUndefined({
+    id: readOptionalString(record, "id"),
+    title: readOptionalString(record, "title"),
+    description: readOptionalString(record, "description"),
+    duration: readOptionalNumber(record, "duration"),
+    thumbnail: readOptionalString(record, "thumbnail"),
+    uploadDate: readOptionalString(record, "uploadDate"),
+    viewCount: readOptionalNumber(record, "viewCount"),
+    likeCount: readOptionalNumber(record, "likeCount"),
+    tags: nonEmptyArray(readOptionalStringArray(record, "tags")),
+    transcriptLanguages: nonEmptyArray(readOptionalStringArray(record, "transcriptLanguages")),
+    channel,
+  });
+}
+
+function normalizeYoutubeChannel(value: unknown) {
+  const record = asRecord(value);
+  return omitUndefined({
+    id: readOptionalString(record, "id"),
+    name: readOptionalString(record, "name"),
+    description: readOptionalString(record, "description"),
+    subscriberCount: readOptionalNumber(record, "subscriberCount"),
+    videoCount: readOptionalNumber(record, "videoCount"),
+    viewCount: readOptionalNumber(record, "viewCount"),
+    thumbnail: readOptionalString(record, "thumbnail"),
+    banner: readOptionalString(record, "banner"),
+  });
+}
+
+function normalizeSupadataMetadata(value: unknown) {
+  const record = asRecord(value);
+  return omitUndefined({
+    platform: readOptionalString(record, "platform"),
+    type: readOptionalString(record, "type"),
+    id: readOptionalString(record, "id"),
+    url: readOptionalString(record, "url"),
+    title: readOptionalString(record, "title"),
+    description: readOptionalString(record, "description"),
+    author: normalizeSupadataAuthor(record.author),
+    stats: normalizeSupadataStats(record.stats),
+    media: readOptionalObject(record, "media"),
+    tags: nonEmptyArray(readOptionalStringArray(record, "tags")),
+    createdAt: readOptionalString(record, "createdAt"),
+    additionalData: readOptionalObject(record, "additionalData"),
+  });
+}
+
+function normalizeSupadataAuthor(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  return omitUndefined({
+    displayName: readOptionalString(value, "displayName"),
+    username: readOptionalString(value, "username"),
+    avatarUrl: readOptionalString(value, "avatarUrl"),
+    verified: readOptionalBoolean(value, "verified"),
+  });
+}
+
+function normalizeSupadataStats(value: unknown) {
+  if (!isRecord(value)) return undefined;
+  return omitUndefined({
+    views: readOptionalNumber(value, "views"),
+    likes: readOptionalNumber(value, "likes"),
+    comments: readOptionalNumber(value, "comments"),
+    shares: readOptionalNumber(value, "shares"),
+  });
+}
+
+function normalizeSupadataTranscript(record: Record<string, unknown>) {
+  const jobId = readOptionalString(record, "jobId");
+  if (jobId) {
+    return { status: "processing", jobId };
+  }
+
+  const status = readOptionalString(record, "status");
+  const availableLangs = readOptionalStringArray(record, "availableLangs");
+  return omitUndefined({
+    status,
+    content: record.content,
+    lang: readOptionalString(record, "lang"),
+    availableLangs: availableLangs.length > 0 ? availableLangs : undefined,
+    error: readOptionalObject(record, "error"),
+  });
+}
+
+function getYoutubeFailureContext(operation: string, args: unknown, error: unknown) {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const context: Record<string, unknown> = {
+    hosted_provider: "youtube",
+    hosted_operation: operation,
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+  };
+
+  if (message.includes("SUPADATA_API_KEY")) {
+    return {
+      ...context,
+      tool_error_stage: "configuration",
+      tool_error_code: "youtube_missing_api_key",
+    };
+  }
+
+  if (
+    message.startsWith("YouTube") &&
+    (message.includes("requires") ||
+      message.includes("accepts either") ||
+      message.includes("must not be empty"))
+  ) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: "youtube_invalid_request",
+    };
+  }
+
+  if (message.startsWith("YouTube") && message.includes("failed (")) {
+    const status = readHttpStatusFromMessage(message);
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code:
+        status.provider_status === 404
+          ? "youtube_not_found"
+          : status.provider_status === 429
+            ? "youtube_rate_limited"
+            : "youtube_http_error",
+      ...status,
+    };
+  }
+
+  if (message.includes("unexpected response shape") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: "youtube_malformed_response",
+    };
+  }
+
+  return context;
+}
+
+function getSupadataSocialFailureContext(
+  platform: SupadataSocialPlatform,
+  operation: string,
+  args: unknown,
+  error: unknown,
+) {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const label = supadataPlatformLabel(platform);
+  const context: Record<string, unknown> = {
+    hosted_provider: platform,
+    hosted_operation: operation,
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+  };
+
+  if (message.includes("SUPADATA_API_KEY")) {
+    return {
+      ...context,
+      tool_error_stage: "configuration",
+      tool_error_code: `${platform}_missing_api_key`,
+    };
+  }
+
+  if (
+    message.startsWith(label) &&
+    (message.includes("requires") ||
+      message.includes("accepts either") ||
+      message.includes("must") ||
+      message.includes("URL"))
+  ) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: `${platform}_invalid_request`,
+    };
+  }
+
+  if (operation === "get_metadata" && !readOptionalString(asRecord(args), "url")?.trim()) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: `${platform}_invalid_request`,
+    };
+  }
+
+  if (message.startsWith(label) && message.includes("failed (")) {
+    const status = readHttpStatusFromMessage(message);
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code:
+        status.provider_status === 404
+          ? `${platform}_not_found`
+          : status.provider_status === 429
+            ? `${platform}_rate_limited`
+            : `${platform}_http_error`,
+      ...status,
+    };
+  }
+
+  if (message.includes("unexpected response shape") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: `${platform}_malformed_response`,
+    };
+  }
+
+  return context;
+}
+
+function assertSupadataPlatformUrl(platform: SupadataSocialPlatform, rawUrl: string) {
+  if (!rawUrl) {
+    throw new Error(`${supadataPlatformLabel(platform)} URL must not be empty.`);
+  }
+
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`${supadataPlatformLabel(platform)} URL must be an absolute URL.`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${supadataPlatformLabel(platform)} URL must use http or https.`);
+  }
+
+  const host = url.hostname.toLowerCase();
+  const valid =
+    platform === "tiktok"
+      ? host === "tiktok.com" || host.endsWith(".tiktok.com")
+      : host === "instagram.com" ||
+        host.endsWith(".instagram.com") ||
+        host === "instagr.am" ||
+        host.endsWith(".instagr.am");
+  if (!valid) {
+    throw new Error(
+      `${supadataPlatformLabel(platform)} URL must be a public ${supadataPlatformLabel(platform)} URL.`,
+    );
+  }
+}
+
+function supadataPlatformLabel(platform: SupadataSocialPlatform) {
+  return platform === "tiktok" ? "TikTok" : "Instagram";
 }
 
 async function fetchXUserByUsername(username: string, token: string, signal: AbortSignal) {

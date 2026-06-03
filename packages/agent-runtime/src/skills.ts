@@ -65,8 +65,10 @@ invalid, the tool returns errors and nothing is saved — fix them and call it a
 - You notice a durable, repeatable instruction that belongs in your definition rather than
   in one conversation (a standing preference, a tone, a workflow, a default tool).
 
-Do **not** use this for one-off task context — that belongs in the conversation, or in the
-Brain (\`brain/\`) if it is long-lived knowledge rather than behavior.
+Do **not** use this for one-off task context — that belongs in the conversation, not a file.
+Durable context lives elsewhere too: keep your operating doc in \`agent/soul.md\` and other
+private notes in your agent folder (\`agent/\`), and shared long-lived knowledge in the Brain
+(\`brain/\`). Use self-edit only when the change is to how you behave going forward.
 
 ## How the .agent body works
 
@@ -168,6 +170,111 @@ const AGENT_SELF_EDIT_SKILL_MD = buildSelfEditSkillMd();
 
 export const AGENT_SELF_EDIT_SKILL_ID = "agent-self-edit";
 
+export const OPENCOMPANY_SETUP_SKILL_ID = "opencompany-setup";
+
+function buildOpenCompanySetupSkillMd(): string {
+  return `---
+name: opencompany-setup
+description: Set up an OpenCompany workspace for the user — establish the Brain (a company wiki) and tune your own definition so the user has great scaffolding from day one.
+---
+
+# Setting up OpenCompany
+
+You are an OpenCompany agent. This skill teaches you how the workspace fits together and how
+to set it up well for a new user — especially right after they sign up. You set up two
+surfaces: the **Brain** (shared knowledge) and **yourself** (your definition and your private
+\`agent/soul.md\`). Aim for a focused, high-signal starting point that the user can grow — not
+a pile of empty files.
+
+## How the pieces relate
+
+- **The Brain** is your workspace's shared, long-lived knowledge — plain Markdown files that
+  every agent in the workspace can read and that persist across sessions. Treat it as a
+  **company wiki** under \`brain/wiki/\`. Use it for durable facts about the company, product,
+  customers, and processes — not one-off task context.
+- **Your \`.agent\` definition** is your behavior: instructions, model, tools, and which Brain
+  paths you mount. You change it with the \`agent-self-edit\` skill.
+- **\`agent/soul.md\`** is your private operating doc — who you serve and how you work. Read it
+  before any work and keep it current.
+
+You **mount** Brain context by \`@mention\`-ing it in your definition: \`@brain/wiki/\` mounts the
+wiki. Files you write under a mounted path persist and show up in the user's **Brain** view.
+
+## The Brain is a wiki
+
+Organize the Brain as a wiki under \`brain/wiki/\`. Here is the canonical shape — a strong
+default, **not a fixed template**:
+
+\`\`\`
+brain/wiki/
+  company/       # what we do, mission, structure, key facts
+  product/       # what we build, how it works, roadmap
+  team/          # who's who, roles, ways of working
+  growth/        # marketing, sales, acquisition
+  strategy/      # bets, positioning, priorities
+  competitors/   # who we're up against, how we differ
+  operations/    # processes, tools, vendors
+  projects/      # active initiatives
+  meetings/      # notes and decisions
+\`\`\`
+
+**Adapt it to the business.** An agency adds \`clients/\`; a software company adds
+\`engineering/\`; a creator adds \`content/\`. Drop folders that don't apply. Give each folder a
+one-line \`README.md\` naming what belongs there so it can evolve.
+
+**Keep it low-noise:**
+
+- Prefer a few high-signal files over many empty stubs.
+- Write only what you actually know — don't invent facts.
+- READMEs are a sentence, not a wall of boilerplate.
+- Let the structure grow over time; don't front-load everything.
+- Each file stays under 256 KB.
+
+## First-run setup protocol
+
+When the workspace is fresh, or the user asks to "set up OpenCompany" / "get me set up",
+follow this loop. The user should feel guided and in control — not interrogated.
+
+1. **Read this skill** (you are doing that now).
+2. **Ground yourself.** If a company URL came in the signup, do a **quick @exa research pass**
+   — one or two targeted searches to learn what the company does. Don't over-research.
+3. **Ask 1–2 sharp questions**, building on the signup details and what you found: what the
+   company really does, who it serves, and what they want help with first. Ask conversationally
+   and wait.
+4. **Scaffold a tailored \`brain/wiki/\`**: the folders that fit this business, each with a
+   one-line README, plus two or three genuinely useful seeded files (e.g.
+   \`brain/wiki/company/overview.md\`, \`brain/wiki/strategy/priorities.md\`). Capture what you
+   learned; leave the rest to grow.
+5. **Personalize \`agent/soul.md\`** to this user — fill in who you serve (their role and what
+   they care about) and what good looks like for their focus areas. Keep it short.
+6. **Tune your definition.** Read \`skills/agent-self-edit/SKILL.md\` with \`read_skill\`, then
+   call \`update_agent_file\` to give yourself crisp instructions for this user and mount the
+   wiki with \`@brain/wiki/\`.
+7. **Solve "what now?"** (see below) so the user has a clear next step.
+
+## Closing — solve "what now?"
+
+Don't just stop after setup. In plain language:
+
+- Tell the user what you set up, and point them to the **Brain** tab (to see and expand the
+  wiki) and the **Agent** tab (to see and customize you and your \`soul.md\`). Invite them to
+  tweak anything — it's all theirs to edit.
+- Note that changes to your definition take effect on your next session.
+- If a concrete first task is obvious from what you learned, **offer to start on it right now**
+  rather than leaving them on a blank page.
+
+## Guardrails
+
+- Prefer asking over assuming; a short, sharp set of questions beats a long form.
+- Don't over-scaffold. A handful of genuinely useful files is the goal.
+- The Brain is shared knowledge; your definition and \`soul.md\` are behavior. Keep durable
+  facts in the Brain and durable behavior in your definition — don't mix them up.
+- This skill grants no new powers beyond the file and self-edit tools you already have.
+`;
+}
+
+const OPENCOMPANY_SETUP_SKILL_MD = buildOpenCompanySetupSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -176,6 +283,14 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
       "Evolve your own .agent definition — adjust instructions, model, and tools — validated and synced safely via update_agent_file.",
     defaultEnabled: true,
     files: [{ path: "SKILL.md", content: AGENT_SELF_EDIT_SKILL_MD }],
+  },
+  {
+    id: OPENCOMPANY_SETUP_SKILL_ID,
+    name: "Set up OpenCompany",
+    description:
+      "Set up the workspace for a new user — establish the Brain (shared company knowledge) and tune your own definition for great day-one scaffolding.",
+    defaultEnabled: true,
+    files: [{ path: "SKILL.md", content: OPENCOMPANY_SETUP_SKILL_MD }],
   },
 ];
 
