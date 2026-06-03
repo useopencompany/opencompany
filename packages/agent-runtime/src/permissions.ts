@@ -224,6 +224,7 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // GitHub-effecting tools. gh is an unbounded CLI → admin; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "modify" },
+  opencode_coder: { providerKey: "github", group: "modify" },
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,
