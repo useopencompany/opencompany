@@ -17,9 +17,7 @@ describe("normalizeQuestionsInput", () => {
       normalizeQuestionsInput({ questions: [{ question: "Pick one", options: [{}] }] }),
     ).toBeNull();
     // A question with no text is dropped.
-    expect(
-      normalizeQuestionsInput({ questions: [{ options: [{ label: "A" }] }] }),
-    ).toBeNull();
+    expect(normalizeQuestionsInput({ questions: [{ options: [{ label: "A" }] }] })).toBeNull();
   });
 
   it("normalizes flags, trims text, and defaults the header to the question", () => {

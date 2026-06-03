@@ -61,18 +61,16 @@ export function normalizeQuestionsInput(rawInput: unknown): AgentSessionQuestion
     if (!question) continue;
 
     const rawOptions = Array.isArray(q.options) ? q.options : [];
-    const options = rawOptions
-      .slice(0, MAX_OPTIONS_PER_QUESTION)
-      .flatMap((rawOption) => {
-        const o = rawOption as Record<string, unknown> | null | undefined;
-        const label = typeof o?.label === "string" ? o.label.trim() : "";
-        if (!label) return [];
-        const description =
-          typeof o?.description === "string" && o.description.trim()
-            ? o.description.trim()
-            : undefined;
-        return [description ? { label, description } : { label }];
-      });
+    const options = rawOptions.slice(0, MAX_OPTIONS_PER_QUESTION).flatMap((rawOption) => {
+      const o = rawOption as Record<string, unknown> | null | undefined;
+      const label = typeof o?.label === "string" ? o.label.trim() : "";
+      if (!label) return [];
+      const description =
+        typeof o?.description === "string" && o.description.trim()
+          ? o.description.trim()
+          : undefined;
+      return [description ? { label, description } : { label }];
+    });
     if (options.length === 0) continue;
 
     normalized.push({

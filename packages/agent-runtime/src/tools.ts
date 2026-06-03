@@ -509,8 +509,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
               },
               allowMultiple: {
                 type: "boolean",
-                description:
-                  "Whether the user may select more than one option. Defaults to false.",
+                description: "Whether the user may select more than one option. Defaults to false.",
                 default: false,
               },
               allowOther: {
