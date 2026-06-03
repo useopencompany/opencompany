@@ -1,10 +1,29 @@
 import { agentSessions } from "@opencompany/db/schema";
+import { createLogger } from "@opencompany/observability";
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "./db";
+import { appendRuntimeEvent } from "./events";
 
 export const RUN_LEASE_TTL_MS = 15 * 60 * 1000;
 export const RUN_HEARTBEAT_INTERVAL_MS = 5_000;
 export const STALE_RUN_HEARTBEAT_MS = 5 * 60 * 1000;
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
+
+// Status events are a best-effort notification layered on top of the lease write: a
+// failure to append one must never abort an otherwise-successful claim/finish. Swallow
+// and log instead of letting it propagate into the run lifecycle.
+async function emitSessionStatusEvent(event: Parameters<typeof appendRuntimeEvent>[1]) {
+  try {
+    await appendRuntimeEvent(getDb(), event);
+  } catch (error) {
+    logger.warn("Failed to emit a session.status event", {
+      event: "opencompany.runner_session_status_event_failed",
+      session_id: event.sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 export class RunAbortError extends Error {
   constructor(message = "Run aborted.") {
@@ -193,7 +212,23 @@ export async function claimRunLease(
   store: RunControlStore = createDbRunControlStore(),
 ) {
   const now = new Date();
-  return store.claimLease(input, now, leaseExpiresAt(now));
+  const claimed = await store.claimLease(input, now, leaseExpiresAt(now));
+  if (claimed) {
+    // The lease wrote `status: "running"` to the DB but emits no event on its own,
+    // unlike the provisioning/ready/aborting transitions in session-lifecycle.ts. Emit
+    // it here so live clients (and the sidebar's green active dot) see the running
+    // transition. Guard the append with the lease identity — a lease lost between the
+    // claim and this write yields null and is silently skipped.
+    await emitSessionStatusEvent({
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      leaseId: input.leaseId,
+      leaseOwner: input.leaseOwner,
+      type: "session.status",
+      payload: { status: "running" },
+    });
+  }
+  return claimed;
 }
 
 /**
@@ -263,7 +298,19 @@ export async function finishRunLease(
   input: FinishRunLeaseInput,
   store: RunControlStore = createDbRunControlStore(),
 ) {
-  return store.finishLease(input, new Date());
+  const finished = await store.finishLease(input, new Date());
+  if (finished) {
+    // finishLease cleared the lease, so the lease-guarded append would always reject;
+    // append unconditionally instead. Emits the terminal status (completed/failed, or a
+    // duplicate idempotent `aborting` already sent at abort-request time — clients dedupe
+    // by event id and treat status as a state-set) so the dot clears in realtime.
+    await emitSessionStatusEvent({
+      sessionId: input.sessionId,
+      type: "session.status",
+      payload: { status: input.status },
+    });
+  }
+  return finished;
 }
 
 export async function releaseRunLease(

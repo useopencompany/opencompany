@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { appendRuntimeEvent } from "./events";
 import {
+  claimRunLease,
   createRunControlGate,
+  finishRunLease,
   heartbeatAndCheckRunControl,
   isStaleActiveRun,
   RunAbortError,
@@ -9,6 +12,14 @@ import {
   type RunLeaseState,
   withRunControlChecks,
 } from "./run-control";
+
+// claimRunLease / finishRunLease emit their status events through
+// events.appendRuntimeEvent (mocked so it never touches a database) after building
+// the db arg via ./db's getDb (also mocked). The rest of the suite injects a store
+// stub and never reaches these, so the module mocks are inert there.
+const dbMocks = vi.hoisted(() => ({ getDb: vi.fn(() => ({})) }));
+vi.mock("./db", () => ({ getDb: dbMocks.getDb }));
+vi.mock("./events", () => ({ appendRuntimeEvent: vi.fn(async () => ({ id: 1 })) }));
 
 const lease = {
   sessionId: "ses_123",
@@ -201,5 +212,112 @@ describe("createRunControlGate", () => {
     await expect(gate()).rejects.toThrow(RunAbortError);
     // No throttle wait, no extra DB round-trip — local abort is instant.
     expect(heartbeatAndLoadState).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("run lease status events", () => {
+  beforeEach(() => {
+    vi.mocked(appendRuntimeEvent).mockClear();
+  });
+
+  const claimInput = {
+    sessionId: "ses_123",
+    leaseId: "run_123",
+    leaseOwner: "runner-a",
+    messageId: "msg_1",
+    modelProvider: "anthropic",
+    modelName: "claude",
+  };
+
+  it("emits a session.status running event after a successful claim", async () => {
+    const claimed = await claimRunLease(
+      claimInput,
+      store({ claimLease: vi.fn().mockResolvedValue(true) }),
+    );
+
+    expect(claimed).toBe(true);
+    expect(appendRuntimeEvent).toHaveBeenCalledTimes(1);
+    // Lease-guarded append (mirrors session-lifecycle.ts): carries the lease identity
+    // so a lost lease yields null and the running event is silently skipped.
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_123",
+        leaseId: "run_123",
+        leaseOwner: "runner-a",
+        type: "session.status",
+        payload: { status: "running" },
+      }),
+    );
+  });
+
+  it("does not emit a status event when the claim is rejected", async () => {
+    const claimed = await claimRunLease(
+      claimInput,
+      store({ claimLease: vi.fn().mockResolvedValue(false) }),
+    );
+
+    expect(claimed).toBe(false);
+    expect(appendRuntimeEvent).not.toHaveBeenCalled();
+  });
+
+  it("emits a terminal session.status event after a successful finish", async () => {
+    const finished = await finishRunLease(
+      { sessionId: "ses_123", leaseId: "run_123", leaseOwner: "runner-a", status: "completed" },
+      store({ finishLease: vi.fn().mockResolvedValue(true) }),
+    );
+
+    expect(finished).toBe(true);
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sessionId: "ses_123",
+        type: "session.status",
+        payload: { status: "completed" },
+      }),
+    );
+  });
+
+  it("carries the failure status through to the status event", async () => {
+    await finishRunLease(
+      { sessionId: "ses_123", leaseId: "run_123", leaseOwner: "runner-a", status: "failed" },
+      store({ finishLease: vi.fn().mockResolvedValue(true) }),
+    );
+
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ type: "session.status", payload: { status: "failed" } }),
+    );
+  });
+
+  it("does not emit a status event when the finish is rejected (lease lost)", async () => {
+    const finished = await finishRunLease(
+      { sessionId: "ses_123", leaseId: "run_123", leaseOwner: "runner-a", status: "completed" },
+      store({ finishLease: vi.fn().mockResolvedValue(false) }),
+    );
+
+    expect(finished).toBe(false);
+    expect(appendRuntimeEvent).not.toHaveBeenCalled();
+  });
+
+  it("still resolves the claim when emitting the status event throws", async () => {
+    // The status event is best-effort: a failed append must not abort an otherwise
+    // successful lease claim.
+    vi.mocked(appendRuntimeEvent).mockRejectedValueOnce(new Error("event store down"));
+
+    await expect(
+      claimRunLease(claimInput, store({ claimLease: vi.fn().mockResolvedValue(true) })),
+    ).resolves.toBe(true);
+  });
+
+  it("still resolves the finish when emitting the status event throws", async () => {
+    vi.mocked(appendRuntimeEvent).mockRejectedValueOnce(new Error("event store down"));
+
+    await expect(
+      finishRunLease(
+        { sessionId: "ses_123", leaseId: "run_123", leaseOwner: "runner-a", status: "completed" },
+        store({ finishLease: vi.fn().mockResolvedValue(true) }),
+      ),
+    ).resolves.toBe(true);
   });
 });
