@@ -917,8 +917,37 @@ export function formatRuntimePreview(value: unknown) {
 
   const trimmed = text.trim();
   const maxLength = 900;
-  if (trimmed.length <= maxLength) return trimmed;
-  return `${trimmed.slice(0, maxLength - 1)}...`;
+  const preview = trimmed.length <= maxLength ? trimmed : `${trimmed.slice(0, maxLength - 1)}...`;
+  return redactPreviewSecrets(preview);
+}
+
+/**
+ * Redacts secret-like patterns from a tool output/input preview string before it is
+ * persisted to `agent_session_events.payload.outputPreview` (or `inputPreview`).
+ *
+ * This is a best-effort, defence-in-depth layer — it catches patterns that the
+ * known-secret redactor (used for sandbox/shell tools) does not cover, such as raw
+ * API keys returned inside MCP tool responses (e.g. PostHog `phc_…` project API keys).
+ *
+ * Patterns covered:
+ *  - HTTP Authorization header values  (Bearer / Basic tokens)
+ *  - Generic key=value credential pairs (api_key, token, secret, password, access_key)
+ *  - OpenAI-style secret keys          (sk-… ≥12 chars)
+ *  - PostHog personal/project API keys (phc_… ≥12 chars)
+ *  - GitHub personal access tokens     (ghp_ / ghs_ / github_pat_ prefixes)
+ */
+export function redactPreviewSecrets(value: string): string {
+  return value
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(
+      /\b(api[_-]?key|access[_-]?key|secret[_-]?key|secret|token|password)\s*[:=]\s*\S+/gi,
+      "$1=[redacted]",
+    )
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, "[redacted]")
+    .replace(/\b(phc_[A-Za-z0-9_-]{12,})\b/g, "[redacted]")
+    .replace(/\b(ghp_[A-Za-z0-9]{36,})\b/g, "[redacted]")
+    .replace(/\b(ghs_[A-Za-z0-9]{36,})\b/g, "[redacted]")
+    .replace(/\b(github_pat_[A-Za-z0-9_]{36,})\b/g, "[redacted]");
 }
 
 function braintrustError(error: unknown) {
