@@ -59,6 +59,33 @@ describe("resolveOpencodeTarget", () => {
     ).toEqual({ kind: "attached", repository: attachedRepo });
   });
 
+  it("uses the only attached repository when the requested owner is stale but repo name matches", () => {
+    const repository = {
+      id: "useopencompany-opencompany-experimental",
+      fullName: "useopencompany/opencompany-experimental",
+      defaultBranch: "main",
+    };
+
+    expect(
+      resolveOpencodeTarget({
+        repositories: [repository],
+        requestedRepository: "opencompany/opencompany-experimental",
+      }),
+    ).toEqual({ kind: "attached", repository });
+  });
+
+  it("still accepts a distinct public GitHub repository when an attached repo exists", () => {
+    expect(
+      resolveOpencodeTarget({
+        repositories: [attachedRepo],
+        requestedRepository: "vercel/next.js",
+      }),
+    ).toEqual({
+      kind: "public",
+      repositoryFullName: "vercel/next.js",
+    });
+  });
+
   it("accepts public GitHub owner/repo and https URLs", () => {
     expect(
       resolveOpencodeTarget({ repositories: [], requestedRepository: "vercel/next.js" }),
