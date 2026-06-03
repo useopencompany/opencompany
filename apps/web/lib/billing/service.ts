@@ -32,6 +32,7 @@ export type BillingSessionChargeSummary = {
   totalUsdMicros: number;
   modelCostUsdMicros: number;
   toolCostUsdMicros: number;
+  sandboxCostUsdMicros: number;
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
   createdAt: Date;
@@ -127,6 +128,7 @@ export async function loadBillingOverview(workspaceId: string) {
         COALESCE(SUM(-ledger_with_root.amount_usd_micros), 0) AS "totalUsdMicros",
         COALESCE(SUM(-ledger_with_root.amount_usd_micros) FILTER (WHERE ledger_with_root.source = 'model_usage'), 0) AS "modelCostUsdMicros",
         COALESCE(SUM(-ledger_with_root.amount_usd_micros) FILTER (WHERE ledger_with_root.source = 'tool_usage'), 0) AS "toolCostUsdMicros",
+        COALESCE(SUM(-ledger_with_root.amount_usd_micros) FILTER (WHERE ledger_with_root.source = 'sandbox_usage'), 0) AS "sandboxCostUsdMicros",
         COALESCE(SUM(ledger_with_root.provider_cost_usd_micros), 0) AS "providerCostUsdMicros",
         COALESCE(SUM(ledger_with_root.platform_fee_usd_micros), 0) AS "platformFeeUsdMicros",
         MAX(ledger_with_root.created_at) AS "createdAt"
@@ -159,6 +161,7 @@ export async function loadBillingOverview(workspaceId: string) {
         totalUsdMicros: readMicros(row.totalUsdMicros),
         modelCostUsdMicros: readMicros(row.modelCostUsdMicros),
         toolCostUsdMicros: readMicros(row.toolCostUsdMicros),
+        sandboxCostUsdMicros: readMicros(row.sandboxCostUsdMicros),
         providerCostUsdMicros: readMicros(row.providerCostUsdMicros),
         platformFeeUsdMicros: readMicros(row.platformFeeUsdMicros),
         createdAt: readTimestamp(row.createdAt),

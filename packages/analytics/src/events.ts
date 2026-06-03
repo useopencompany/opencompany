@@ -80,6 +80,7 @@ export type AnalyticsEventPropertiesByName = {
     total_cost_usd_micros: number;
     model_cost_usd_micros: number;
     tool_cost_usd_micros: number;
+    sandbox_cost_usd_micros: number;
   };
   sign_out: {
     user_id: string;
@@ -203,6 +204,7 @@ export const analyticsEvents = {
       "total_cost_usd_micros",
       "model_cost_usd_micros",
       "tool_cost_usd_micros",
+      "sandbox_cost_usd_micros",
     ],
   },
   sign_out: {

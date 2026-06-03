@@ -7,7 +7,7 @@ import {
 } from "./agent-loop-test-support";
 import { appendRuntimeEvent } from "./events";
 import { setLeaseWriteStoreForTests } from "./lease-writes";
-import { recordStepUsage, recordToolUsage } from "./usage-recorder";
+import { recordSandboxUsage, recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const dbMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
@@ -135,5 +135,69 @@ describe("usage recording", () => {
         }),
       }),
     );
+  });
+
+  it("records sandbox compute usage, debits the ledger, and emits a usage event", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await recordSandboxUsage({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      sandboxId: "sbx_abc",
+      template: "amp",
+      vcpu: 2,
+      ramMib: 512,
+      startedAt: new Date("2026-05-22T12:00:00.000Z"),
+      endedAt: new Date("2026-05-22T12:01:00.000Z"),
+      activeMs: 60_000,
+    });
+
+    expect(db.state.sandboxUsage).toEqual([
+      expect.objectContaining({
+        sandboxId: "sbx_abc",
+        template: "amp",
+        vcpu: 2,
+        ramMib: 512,
+        activeMs: 60_000,
+        costUsdMicros: 1_815,
+      }),
+    ]);
+    expect(db.state.ledgerDebits).toBe(1);
+    expect(appendRuntimeEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "session.sandbox_usage",
+        payload: expect.objectContaining({
+          sandboxId: "sbx_abc",
+          activeMs: 60_000,
+          chargedCostUsdMicros: 1_997,
+        }),
+      }),
+    );
+  });
+
+  it("does not debit for a zero-duration sandbox window", async () => {
+    const db = createLeaseDb({ runLeaseId: "run_123" });
+    dbMocks.getDb.mockReturnValue(db);
+
+    await recordSandboxUsage({
+      sessionId: "ses_123",
+      assistantMessageId: "msg_assistant",
+      runLeaseId: "run_123",
+      runLeaseOwner: "runner-test",
+      sandboxId: "sbx_abc",
+      template: "amp",
+      vcpu: 2,
+      ramMib: 512,
+      startedAt: new Date("2026-05-22T12:00:00.000Z"),
+      endedAt: new Date("2026-05-22T12:00:00.000Z"),
+      activeMs: 0,
+    });
+
+    expect(db.state.sandboxUsage).toHaveLength(1);
+    expect(db.state.ledgerDebits).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
 import {
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
+  calculateSandboxUsageCost,
   recordWorkspaceUsageDebit,
 } from "@opencompany/billing";
 import type { FinishReason, LanguageModelResponseMetadata, LanguageModelUsage } from "ai";
@@ -219,6 +220,103 @@ export async function recordToolUsage(
       leaseId: input.runLeaseId,
       leaseOwner: input.runLeaseOwner,
       type: "session.tool_usage",
+      payload: usagePayload,
+    }),
+  );
+}
+
+export async function recordSandboxUsage(
+  input: {
+    sessionId: string;
+    assistantMessageId: string;
+    runLeaseId: string;
+    runLeaseOwner: string;
+    sandboxId: string;
+    template: string | null;
+    vcpu: number | null;
+    ramMib: number | null;
+    startedAt: Date;
+    endedAt: Date;
+    activeMs: number;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
+  const db = getDb();
+  const lease = {
+    sessionId: input.sessionId,
+    leaseId: input.runLeaseId,
+    leaseOwner: input.runLeaseOwner,
+  };
+  const cost = calculateSandboxUsageCost({
+    template: input.template,
+    vcpu: input.vcpu ?? 0,
+    ramMiB: input.ramMib ?? 0,
+    activeMs: input.activeMs,
+  });
+
+  const usagePayload = {
+    messageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    sandboxId: input.sandboxId,
+    template: input.template,
+    vcpu: input.vcpu,
+    ramMib: input.ramMib,
+    activeMs: input.activeMs,
+    providerCostUsdMicros: cost.providerCostUsdMicros,
+    platformFeeUsdMicros: cost.platformFeeUsdMicros,
+    chargedCostUsdMicros: cost.totalCostUsdMicros,
+  };
+
+  // Lease-guarded atomic insert, mirroring recordToolUsage: no row means the lease was
+  // lost, so we never bill a reclaimed session.
+  const sandboxUsageRow = await store.insertSandboxUsage(
+    {
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      runLeaseId: input.runLeaseId,
+      sandboxId: input.sandboxId,
+      template: input.template,
+      vcpu: input.vcpu,
+      ramMib: input.ramMib,
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
+      activeMs: input.activeMs,
+      costUsdMicros: cost.providerCostUsdMicros,
+      rawMetrics: {},
+    },
+    lease,
+  );
+  if (!sandboxUsageRow) {
+    throw new StaleRunLeaseError();
+  }
+
+  if (cost.billable) {
+    await recordWorkspaceUsageDebit({
+      db,
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      sandboxUsageId: sandboxUsageRow.id,
+      source: "sandbox_usage",
+      providerCostUsdMicros: cost.providerCostUsdMicros,
+      platformFeeUsdMicros: cost.platformFeeUsdMicros,
+      totalCostUsdMicros: cost.totalCostUsdMicros,
+      costBasis: cost.costBasis,
+      metadata: {
+        runLeaseId: input.runLeaseId,
+        sandboxId: input.sandboxId,
+        template: input.template,
+        activeMs: input.activeMs,
+      },
+    });
+  }
+
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "session.sandbox_usage",
       payload: usagePayload,
     }),
   );

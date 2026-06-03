@@ -238,6 +238,21 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      type: "session.sandbox_usage";
+      payload: {
+        messageId: string;
+        runLeaseId: string;
+        sandboxId: string;
+        template: string | null;
+        vcpu: number | null;
+        ramMib: number | null;
+        activeMs: number;
+        providerCostUsdMicros?: number;
+        platformFeeUsdMicros?: number;
+        chargedCostUsdMicros?: number;
+      };
+    }
+  | {
       type: "session.delegated_usage";
       payload: {
         childSessionId: string;
@@ -267,6 +282,7 @@ export type AgentRuntimeEvent =
           totalCostUsdMicros: number;
           modelCostUsdMicros: number;
           toolCostUsdMicros: number;
+          sandboxCostUsdMicros: number;
         };
       };
     }
