@@ -837,6 +837,13 @@ export function buildRuntimeToolCallsForMessage(
       call.name = readString(event.payload.name) || call.name;
       call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
       call.inputPreview = formatRuntimePreview(event.payload.input) || call.inputPreview;
+      if (call.approval?.status === "required") {
+        call.approval = {
+          ...call.approval,
+          status: "approved",
+          decisionSource: "user",
+        };
+      }
       const brainPath = brainPathForToolPayload(call.name, event.payload.input);
       if (brainPath) {
         call.brainPath = brainPath;
