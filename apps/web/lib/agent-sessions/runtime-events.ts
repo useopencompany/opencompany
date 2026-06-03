@@ -70,6 +70,35 @@ export type RuntimeToolApprovalState = {
   requestedAt?: string | undefined;
 };
 
+export type RuntimeQuestionOption = {
+  label: string;
+  description?: string | undefined;
+};
+
+export type RuntimeQuestionItem = {
+  header: string;
+  question: string;
+  options: RuntimeQuestionOption[];
+  allowMultiple: boolean;
+  allowOther: boolean;
+};
+
+export type RuntimeQuestionAnswer = {
+  selectedLabels: string[];
+  otherText?: string | undefined;
+};
+
+// State for an ask_user_question tool call. "pending" → render the interactive card; otherwise a
+// read-only summary. `resolutionSource` mirrors the runner: user-answered, dismissed (user),
+// superseded by a message, timed out, or aborted.
+export type RuntimeQuestionState = {
+  status: "pending" | "answered" | "cancelled";
+  questions: RuntimeQuestionItem[];
+  answers?: RuntimeQuestionAnswer[] | undefined;
+  resolutionSource?: "user" | "abort" | "timeout" | "superseded" | undefined;
+  requestedAt?: string | undefined;
+};
+
 export type RuntimeToolCall = {
   id: string;
   name: string;
@@ -80,6 +109,7 @@ export type RuntimeToolCall = {
   outputPreview: string;
   brainPath?: string | undefined;
   approval?: RuntimeToolApprovalState | undefined;
+  question?: RuntimeQuestionState | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
 };
@@ -498,6 +528,7 @@ export function buildAssistantTurnParts(
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
           ...(brainPath ? { brainPath } : {}),
           ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
+          ...(matchingToolCall?.question ? { question: matchingToolCall.question } : {}),
           startedEventId: matchingToolCall?.startedEventId ?? null,
           completedEventId: matchingToolCall?.completedEventId ?? null,
         },
@@ -754,6 +785,35 @@ export function buildRuntimeToolCallsForMessage(
       };
     }
 
+    if (event.type === "question.requested") {
+      const call = getCall(toolCallId);
+      call.name = "ask_user_question";
+      call.question = {
+        status: "pending",
+        questions: readQuestionPrompts(event.payload.questions),
+        requestedAt: readString(event.payload.requestedAt) || undefined,
+      };
+    }
+
+    if (event.type === "question.answered") {
+      const call = getCall(toolCallId);
+      call.name = "ask_user_question";
+      const resolutionSource = readString(event.payload.resolutionSource);
+      const answered = resolutionSource === "user" || resolutionSource === "";
+      call.question = {
+        status: answered ? "answered" : "cancelled",
+        questions: call.question?.questions ?? [],
+        answers: readQuestionAnswers(event.payload.answers),
+        resolutionSource:
+          resolutionSource === "abort" ||
+          resolutionSource === "timeout" ||
+          resolutionSource === "superseded"
+            ? resolutionSource
+            : "user",
+        requestedAt: call.question?.requestedAt,
+      };
+    }
+
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
       call.name = readString(event.payload.name) || call.name;
@@ -844,6 +904,8 @@ function buildEventAssistantTurnParts(
       event.type === "tool.delta" ||
       event.type === "tool.approval_required" ||
       event.type === "tool.approval_resolved" ||
+      event.type === "question.requested" ||
+      event.type === "question.answered" ||
       event.type === "tool.started" ||
       event.type === "tool.completed" ||
       event.type === "tool.failed"
@@ -981,6 +1043,47 @@ function readPermissionGroup(value: unknown): "read" | "post" | "modify" | "admi
   return value === "read" || value === "post" || value === "modify" || value === "admin"
     ? value
     : undefined;
+}
+
+function readQuestionPrompts(value: unknown): RuntimeQuestionItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object") return [];
+    const record = raw as Record<string, unknown>;
+    const question = readString(record.question);
+    if (!question) return [];
+    const options = Array.isArray(record.options)
+      ? record.options.flatMap((rawOption) => {
+          if (!rawOption || typeof rawOption !== "object") return [];
+          const optionRecord = rawOption as Record<string, unknown>;
+          const label = readString(optionRecord.label);
+          if (!label) return [];
+          const description = readString(optionRecord.description);
+          return [description ? { label, description } : { label }];
+        })
+      : [];
+    return [
+      {
+        header: readString(record.header) || question,
+        question,
+        options,
+        allowMultiple: record.allowMultiple === true,
+        allowOther: record.allowOther === true,
+      },
+    ];
+  });
+}
+
+function readQuestionAnswers(value: unknown): RuntimeQuestionAnswer[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((raw) => {
+    const record = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const selectedLabels = Array.isArray(record.selectedLabels)
+      ? record.selectedLabels.filter((label): label is string => typeof label === "string")
+      : [];
+    const otherText = readString(record.otherText);
+    return otherText ? { selectedLabels, otherText } : { selectedLabels };
+  });
 }
 
 export function optionalString(value: unknown) {

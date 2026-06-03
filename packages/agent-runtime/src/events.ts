@@ -1,9 +1,16 @@
+import type {
+  AgentSessionQuestionAnswer,
+  AgentSessionQuestionPrompt,
+  AgentSessionQuestionResolutionSource,
+} from "./types";
+
 export type AgentSessionStatus =
   | "created"
   | "provisioning"
   | "ready"
   | "running"
   | "awaiting_approval"
+  | "awaiting_input"
   | "aborting"
   | "archiving"
   | "archived"
@@ -105,6 +112,24 @@ export type AgentRuntimeEvent =
         name: string;
         decision: "approved" | "denied";
         decisionSource: "user" | "timeout" | "abort";
+      };
+    }
+  | {
+      type: "question.requested";
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        questions: AgentSessionQuestionPrompt[];
+        requestedAt: string;
+      };
+    }
+  | {
+      type: "question.answered";
+      payload: {
+        messageId: string;
+        toolCallId: string;
+        answers: AgentSessionQuestionAnswer[];
+        resolutionSource: AgentSessionQuestionResolutionSource;
       };
     }
   | {

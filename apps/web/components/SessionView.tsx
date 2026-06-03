@@ -18,12 +18,14 @@ import {
   Copy,
   ExternalLink,
   LoaderCircle,
+  MessageCircleQuestion,
   PanelRight,
   Plus,
   ShieldAlert,
   TerminalSquare,
   Upload,
   Wrench,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -51,8 +53,10 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import {
   abortAgentSession,
+  cancelAgentSessionQuestion,
   resolveToolApproval,
   submitAgentSessionMessage,
+  submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
 import {
   type AgentSessionDetailPayload,
@@ -74,6 +78,7 @@ import {
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   type RuntimeEvent,
+  type RuntimeQuestionItem,
   type RuntimeToolCall,
   readString,
   type SessionCostSummary,
@@ -305,10 +310,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
-  // The run has durably parked at a tool gate: the session status is `awaiting_approval`
-  // (not `running`) and the assistant message is already persisted as `completed`. The
-  // approval card + paused tail still need to render off this signal.
-  const sessionIsPaused = runtime.currentStatus === "awaiting_approval";
+  // The run has durably parked at a tool gate or a user question: the session status is
+  // `awaiting_approval` / `awaiting_input` (not `running`) and the assistant message is already
+  // persisted as `completed`. The approval/question card + paused tail render off this signal.
+  const sessionIsPaused =
+    runtime.currentStatus === "awaiting_approval" || runtime.currentStatus === "awaiting_input";
+  // Paused specifically for an ask_user_question: the composer is hidden and the question card is
+  // the only input surface (the card's X cancels back to the composer).
+  const sessionIsAwaitingInput = runtime.currentStatus === "awaiting_input";
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -967,7 +976,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           </div>
         </div>
 
-        <div className="bg-canvas px-8 lg:px-12 py-4">
+        {/* The composer is hidden while the agent is awaiting a structured answer: the question
+            card in the conversation is the only input surface (its X cancels back to here). */}
+        {sessionIsAwaitingInput ? null : (
+          <div className="bg-canvas px-8 lg:px-12 py-4">
           <div className="group/composer mx-auto max-w-[960px]">
             {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
             <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
@@ -1165,6 +1177,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {!inspectorCollapsed && (
@@ -1378,6 +1391,12 @@ export function AssistantMessageContent({
   // durably paused: the session status is `awaiting_approval` and the assistant message
   // is persisted as `completed`, but a tool-call part still needs approval.
   const awaitingApproval = (isRunning || sessionIsPaused) && hasPendingApproval;
+  // An ask_user_question lives in the turn as a tool-call carrying `question` state. Whether
+  // pending or already answered, it is a meaningful interaction we always keep visible (never
+  // folded into the collapsed "N steps" summary).
+  const hasQuestionPart = parts.some(
+    (part) => part.type === "tool-call" && part.toolCall.question !== undefined,
+  );
 
   // A still-running tool call on a stopped session reads as failed — it never returned.
   // A tool call awaiting an approval decision is the exception: the run paused on purpose
@@ -1387,7 +1406,8 @@ export function AssistantMessageContent({
     part.type === "tool-call" &&
     part.toolCall.status === "running" &&
     !sessionCanGenerate &&
-    part.toolCall.approval?.status !== "required"
+    part.toolCall.approval?.status !== "required" &&
+    part.toolCall.question === undefined
       ? {
           type: "tool-call",
           toolCall: {
@@ -1418,6 +1438,7 @@ export function AssistantMessageContent({
   const collapseWork =
     isCompleted &&
     !awaitingApproval &&
+    !hasQuestionPart &&
     normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
 
   const groups: RenderGroup[] = [];
@@ -1691,6 +1712,15 @@ function ReasoningCard({
 }
 
 function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
+  // ask_user_question renders a dedicated question card (interactive while pending, a read-only
+  // summary once answered/cancelled) instead of the generic tool-call chrome.
+  if (toolCall.question) {
+    return <QuestionCard toolCall={toolCall} />;
+  }
+  return <ToolCallCardDefault toolCall={toolCall} />;
+}
+
+function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
   const [expanded, setExpanded] = useState(false);
   const approvalContext = useContext(ToolApprovalContext);
   const { showError } = useToast();
@@ -1809,6 +1839,322 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+type QuestionSelection = {
+  labels: string[];
+  otherSelected: boolean;
+  otherText: string;
+};
+
+function questionSelectionComplete(question: RuntimeQuestionItem, selection: QuestionSelection) {
+  if (selection.otherSelected) {
+    return question.allowOther && selection.otherText.trim().length > 0;
+  }
+  return selection.labels.length > 0;
+}
+
+// Renders an ask_user_question tool call: an interactive single-/multi-select form while pending,
+// or a compact read-only summary once the user answers, dismisses, or the run resolves it. The X
+// dismisses the question (cancel) and returns the user to the composer.
+function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
+  const question = toolCall.question;
+  const approvalContext = useContext(ToolApprovalContext);
+  const { showError } = useToast();
+  const [isResolving, startResolve] = useTransition();
+  // Optimistic overlay until the runner's durable question.answered event arrives over SSE.
+  const [optimistic, setOptimistic] = useState<"submitting" | "cancelling" | null>(null);
+  const questions = question?.questions ?? [];
+  const [selections, setSelections] = useState<QuestionSelection[]>(() =>
+    questions.map(() => ({ labels: [], otherSelected: false, otherText: "" })),
+  );
+
+  if (!question) return null;
+
+  const isPending = question.status === "pending" && optimistic === null;
+  const isSubmitting = optimistic === "submitting";
+  const isCancelling = optimistic === "cancelling";
+
+  const updateSelection = (index: number, next: Partial<QuestionSelection>) => {
+    setSelections((current) =>
+      current.map((selection, i) => (i === index ? { ...selection, ...next } : selection)),
+    );
+  };
+
+  const chooseOption = (index: number, label: string) => {
+    const item = questions[index];
+    if (!item) return;
+    if (item.allowMultiple) {
+      const current = selections[index]?.labels ?? [];
+      const labels = current.includes(label)
+        ? current.filter((value) => value !== label)
+        : [...current, label];
+      updateSelection(index, { labels });
+    } else {
+      updateSelection(index, { labels: [label], otherSelected: false });
+    }
+  };
+
+  const chooseOther = (index: number) => {
+    const item = questions[index];
+    if (!item) return;
+    if (item.allowMultiple) {
+      updateSelection(index, { otherSelected: !(selections[index]?.otherSelected ?? false) });
+    } else {
+      updateSelection(index, { labels: [], otherSelected: true });
+    }
+  };
+
+  const allAnswered = questions.every((item, index) =>
+    questionSelectionComplete(item, selections[index] ?? { labels: [], otherSelected: false, otherText: "" }),
+  );
+
+  const submit = () => {
+    if (!approvalContext || !allAnswered) return;
+    const answers = questions.map((_, index) => {
+      const selection = selections[index] ?? { labels: [], otherSelected: false, otherText: "" };
+      const otherText = selection.otherSelected ? selection.otherText.trim() : "";
+      return otherText
+        ? { selectedLabels: selection.labels, otherText }
+        : { selectedLabels: selection.labels };
+    });
+    setOptimistic("submitting");
+    startResolve(async () => {
+      const result = await submitAgentSessionQuestionResponse({
+        sessionId: approvalContext.sessionId,
+        toolCallId: toolCall.id,
+        answers,
+      });
+      if (!result.ok) {
+        setOptimistic(null);
+        showError(result.error);
+      }
+    });
+  };
+
+  const cancel = () => {
+    if (!approvalContext) return;
+    setOptimistic("cancelling");
+    startResolve(async () => {
+      const result = await cancelAgentSessionQuestion({
+        sessionId: approvalContext.sessionId,
+        toolCallId: toolCall.id,
+      });
+      if (!result.ok) {
+        setOptimistic(null);
+        showError(result.error);
+      }
+    });
+  };
+
+  if (!isPending && !isSubmitting && !isCancelling) {
+    return <QuestionSummary question={question} />;
+  }
+
+  const remaining = questions.reduce(
+    (total, item, index) =>
+      questionSelectionComplete(
+        item,
+        selections[index] ?? { labels: [], otherSelected: false, otherText: "" },
+      )
+        ? total
+        : total + 1,
+    0,
+  );
+  const statusLine = isSubmitting
+    ? "Sending answer…"
+    : isCancelling
+      ? "Cancelling…"
+      : remaining > 0
+        ? `Answer ${remaining} ${remaining === 1 ? "question" : "questions"} to continue.`
+        : "Ready to submit.";
+  const controlsDisabled = isResolving || isSubmitting || isCancelling || !approvalContext;
+
+  return (
+    <div className="ml-6 mt-1 rounded-lg border border-border bg-surface-raised/70 px-3 py-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 text-[11px] font-medium text-ink/70">
+          <MessageCircleQuestion size={12} strokeWidth={1.9} />
+          {questions.length > 1 ? `${questions.length} questions` : "A quick question"}
+        </div>
+        <button
+          type="button"
+          aria-label="Dismiss question"
+          disabled={controlsDisabled}
+          onClick={cancel}
+          className="flex h-5 w-5 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {questions.map((item, index) => {
+          const selection = selections[index] ?? {
+            labels: [],
+            otherSelected: false,
+            otherText: "",
+          };
+          return (
+            <div key={`${item.header}:${index}`}>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+                {item.header}
+              </div>
+              <div className="mb-1.5 text-[12.5px] leading-5 text-ink/90">
+                {item.question}
+                {item.allowMultiple ? (
+                  <span className="ml-1 text-[11px] text-ink-subtle">(select all that apply)</span>
+                ) : null}
+              </div>
+              <div className="space-y-1" role={item.allowMultiple ? "group" : "radiogroup"}>
+                {item.options.map((option) => (
+                  <QuestionOptionRow
+                    key={option.label}
+                    label={option.label}
+                    description={option.description}
+                    selected={selection.labels.includes(option.label)}
+                    multiple={item.allowMultiple}
+                    disabled={controlsDisabled}
+                    onClick={() => chooseOption(index, option.label)}
+                  />
+                ))}
+                {item.allowOther ? (
+                  <QuestionOptionRow
+                    label="Other…"
+                    selected={selection.otherSelected}
+                    multiple={item.allowMultiple}
+                    disabled={controlsDisabled}
+                    onClick={() => chooseOther(index)}
+                  />
+                ) : null}
+                {item.allowOther && selection.otherSelected ? (
+                  <input
+                    type="text"
+                    value={selection.otherText}
+                    disabled={controlsDisabled}
+                    autoFocus
+                    placeholder="Type your answer"
+                    onChange={(event) => updateSelection(index, { otherText: event.target.value })}
+                    onKeyDown={(event) => {
+                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") submit();
+                    }}
+                    className="mt-1 w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12.5px] text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-50"
+                  />
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2.5 flex items-center justify-between gap-2">
+        <span role="status" aria-live="polite" className="text-[11px] text-ink-muted">
+          {statusLine}
+        </span>
+        <button
+          type="button"
+          disabled={controlsDisabled || !allAnswered}
+          onClick={submit}
+          className="inline-flex h-7 items-center gap-1 rounded-md bg-ink px-3 text-[12px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSubmitting ? (
+            <LoaderCircle size={11} strokeWidth={2} className="animate-spin" />
+          ) : (
+            <Check size={11} strokeWidth={2.2} />
+          )}
+          Submit
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function QuestionOptionRow({
+  label,
+  description,
+  selected,
+  multiple,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  description?: string | undefined;
+  selected: boolean;
+  multiple: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role={multiple ? "checkbox" : "radio"}
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex w-full items-start gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+        selected
+          ? "border-ink/40 bg-ink/[0.04]"
+          : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
+      }`}
+    >
+      <span
+        className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border text-surface ${
+          multiple ? "rounded-[4px]" : "rounded-full"
+        } ${selected ? "border-ink bg-ink" : "border-border-strong bg-surface"}`}
+      >
+        {selected ? <Check size={9} strokeWidth={3} /> : null}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[12.5px] font-medium leading-5 text-ink/90">{label}</span>
+        {description ? (
+          <span className="block text-[11px] leading-4 text-ink-muted">{description}</span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+function QuestionSummary({ question }: { question: NonNullable<RuntimeToolCall["question"]> }) {
+  const answered = question.status === "answered";
+  const heading = answered
+    ? "Your answer"
+    : question.resolutionSource === "timeout"
+      ? "No answer provided"
+      : question.resolutionSource === "abort"
+        ? "Cancelled"
+        : "Question skipped";
+
+  return (
+    <div className="ml-6 mt-1 rounded-lg border border-border bg-surface-muted/40 px-3 py-2">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+        <MessageCircleQuestion size={11} strokeWidth={1.9} />
+        {heading}
+      </div>
+      {answered ? (
+        <div className="space-y-1.5">
+          {question.questions.map((item, index) => {
+            const answer = question.answers?.[index];
+            const chips = [
+              ...(answer?.selectedLabels ?? []),
+              ...(answer?.otherText ? [answer.otherText] : []),
+            ];
+            return (
+              <div key={`${item.header}:${index}`} className="text-[12px] leading-5">
+                <span className="text-ink-muted">{item.question} </span>
+                <span className="font-medium text-ink/90">
+                  {chips.length > 0 ? chips.join(", ") : "—"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-[12px] leading-5 text-ink-muted">
+          The agent continued without an answer.
+        </div>
+      )}
     </div>
   );
 }
@@ -2297,7 +2643,7 @@ function statusLabel(status: string) {
   if (status === "provisioning") return "Starting";
   if (status === "ready") return "Ready";
   if (status === "running") return "Running";
-  if (status === "awaiting_approval") return "Paused";
+  if (status === "awaiting_approval" || status === "awaiting_input") return "Paused";
   if (status === "completed") return "Done";
   if (status === "aborting") return "Aborting";
   if (status === "archiving") return "Archiving";

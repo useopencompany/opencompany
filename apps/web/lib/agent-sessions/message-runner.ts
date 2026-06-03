@@ -2,6 +2,7 @@ import { createLogger } from "@opencompany/observability";
 import {
   dispatchAgentApprovalResume,
   dispatchAgentMessageSubmitted,
+  dispatchAgentQuestionResume,
 } from "@/lib/agent-sessions/events";
 import { callRunner } from "@/lib/agent-sessions/runner";
 
@@ -97,6 +98,45 @@ export async function triggerAgentApprovalResume(input: TriggerAgentApprovalResu
       error,
     });
     await dispatchAgentApprovalResume({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCallId,
+    });
+    return;
+  }
+}
+
+export async function triggerAgentQuestionResume(input: TriggerAgentApprovalResumeInput) {
+  if (!canCallRunnerDirectly()) {
+    logger.info("Falling back to Inngest runner dispatch", {
+      event: "opencompany.runner_request_fallback",
+      reason: "runner_direct_call_unconfigured",
+      workspace_id: input.workspaceId,
+      session_id: input.sessionId,
+      tool_call_id: input.toolCallId,
+    });
+    await dispatchAgentQuestionResume({
+      sessionId: input.sessionId,
+      toolCallId: input.toolCallId,
+    });
+    return;
+  }
+
+  try {
+    await callRunner(`/internal/sessions/${input.sessionId}/questions/${input.toolCallId}/resume`, {
+      event: "opencompany.direct_resume_question_failed",
+      session_id: input.sessionId,
+      ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+    });
+  } catch (error) {
+    logger.warn("Falling back to Inngest runner dispatch", {
+      event: "opencompany.runner_request_fallback",
+      reason: "direct_runner_request_failed",
+      workspace_id: input.workspaceId,
+      session_id: input.sessionId,
+      tool_call_id: input.toolCallId,
+      error,
+    });
+    await dispatchAgentQuestionResume({
       sessionId: input.sessionId,
       toolCallId: input.toolCallId,
     });

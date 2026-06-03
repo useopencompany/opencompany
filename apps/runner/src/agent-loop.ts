@@ -35,6 +35,7 @@ import {
   appendRuntimeEventForLease,
   createAssistantMessageForLease,
   failRunLease,
+  insertToolMessageForLease,
   releaseRunLease,
   requireLeaseWrite,
   StaleRunLeaseError,
@@ -42,7 +43,13 @@ import {
   updateSandboxForLease,
 } from "./lease-writes";
 import { createMcpToolSet } from "./mcp-tools";
-import { appendAssistantTextPart, buildModelMessages } from "./model-messages";
+import {
+  appendAssistantTextPart,
+  buildModelMessages,
+  buildToolModelMessage,
+  serializeToolOutputForStorage,
+  toPersistedModelMessage,
+} from "./model-messages";
 import {
   assertTurnComplete,
   detectIncompleteTurn,
@@ -77,6 +84,11 @@ import {
   optionalUserName,
   setStatus,
 } from "./session-lifecycle";
+import {
+  buildQuestionAnswerToolOutput,
+  buildUnansweredQuestionToolOutput,
+  loadSessionQuestion,
+} from "./session-questions";
 import { loadToolApproval } from "./tool-approvals";
 import {
   createHostedToolBudget,
@@ -601,7 +613,7 @@ async function runMessageWithContext(
 // run can pair it with the tool-result. Brain is synced first so any allowed sibling
 // tool call that mutated the sandbox before the gate is not lost when the sandbox is torn
 // down (the resume run re-hydrates from brain).
-async function suspendRunForApproval(input: {
+async function suspendRunForInput(input: {
   ctx: RunContext;
   row: LoadedSession;
   sandbox: SandboxHandle | null;
@@ -635,6 +647,8 @@ async function suspendRunForApproval(input: {
     internal: false,
   });
 
+  const status = error.reason === "question" ? "awaiting_input" : "awaiting_approval";
+  const message = error.reason === "question" ? "Waiting for your answer" : "Waiting for approval";
   await requireLeaseWrite(
     appendRuntimeEventForLease({
       sessionId: ctx.sessionId,
@@ -642,10 +656,10 @@ async function suspendRunForApproval(input: {
       leaseId: ctx.leaseId,
       leaseOwner: ctx.leaseOwner,
       type: "session.status",
-      payload: { status: "awaiting_approval", message: "Waiting for approval" },
+      payload: { status, message },
     }),
   );
-  await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner));
+  await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, status));
 }
 
 // Shared "model turn" middle used by the message, after-session, and resume runs: stream the
@@ -696,11 +710,12 @@ async function executeStreamingTurn(input: {
     });
   } catch (error) {
     if (error instanceof RunSuspendedError) {
-      // An "ask" gate fired. Persist the partial assistant turn (ending in the pending
-      // tool-call), park the session as `awaiting_approval`, and release the lease. The run
-      // resumes in a fresh resume_approval job once the approval is decided. Only reachable
-      // when `suspendable` is true.
-      await suspendRunForApproval({
+      // A suspension point fired: an "ask" approval gate (→ awaiting_approval) or an
+      // ask_user_question call (→ awaiting_input). Persist the partial assistant turn (ending in
+      // the pending tool-call), park the session, and release the lease. The run resumes in a
+      // fresh resume_approval / resume_question job once decided. Only reachable when
+      // `suspendable` is true.
+      await suspendRunForInput({
         ctx,
         row,
         sandbox: sandboxAcquirer.current,
@@ -1544,89 +1559,18 @@ async function resumeApprovalWithContext(
     }
 
     // Continue the turn with a fresh assistant message over the reconciled history.
-    const continuationAssistantMessageId = newAgentSessionMessageId();
-    const created = await observeRunStep(ctx, "create_assistant_message", () =>
-      createAssistantMessageForLease({
-        id: continuationAssistantMessageId,
-        sessionId: input.sessionId,
-        leaseId: ctx.leaseId,
-        leaseOwner: ctx.leaseOwner,
-      }),
-    );
-    if (!created) {
-      outcome = "skipped_assistant_exists";
-      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
-      return;
-    }
-
-    const continuationMessages = buildModelMessages(
-      (
-        await ctx.db
-          .select()
-          .from(agentSessionMessages)
-          .where(eq(agentSessionMessages.sessionId, input.sessionId))
-          .orderBy(asc(agentSessionMessages.createdAt))
-      ).filter((message) => message.id !== continuationAssistantMessageId && !message.internal),
-    );
-
-    const toolStartCoordinator = createToolStartCoordinator();
-    const tools = createToolSet({
-      sessionId: input.sessionId,
-      assistantMessageId: continuationAssistantMessageId,
-      runLeaseId: ctx.leaseId,
-      runLeaseOwner: ctx.leaseOwner,
-      workspaceId: row.workspace.id,
-      agentConfig,
-      getSandbox: sandboxAcquirer.get,
-      workdir: row.session.workdir,
-      env: input.env,
-      enabledTools: runtime.tools,
-      repository: row.repository,
-      signal: ctx.controller.signal,
-      checkAbort,
-      toolStartCoordinator,
-      observabilityContext,
-      toolBudget: createHostedToolBudget(),
-    });
-
-    const turn = await executeStreamingTurn({
+    outcome = await continueTurnAfterToolResult({
       ctx,
       row,
+      agentConfig,
       runtime,
-      system: runtime.systemPrompt,
-      messages: continuationMessages,
-      tools,
-      mcpContext: {
-        workspaceId: row.workspace.id,
-        agentConfig: row.agent.config,
-        signal: ctx.controller.signal,
-        checkAbort,
-        observabilityContext,
-      },
-      assistantMessageId: continuationAssistantMessageId,
-      toolStartCoordinator,
-      checkAbort,
-      policy: toolPolicy,
-      suspendable: true,
+      toolPolicy,
       sandboxAcquirer,
-      internal: false,
-      brainStep: "sync_brain_after_resume",
-      bundleStep: "sync_agent_bundle_after_resume",
-      appendCompletedEvent: () =>
-        appendRuntimeEventForLease({
-          sessionId: input.sessionId,
-          messageId: null,
-          leaseId: ctx.leaseId,
-          leaseOwner: ctx.leaseOwner,
-          type: "session.status",
-          payload: { status: "completed", message: "Agent completed" },
-        }),
+      observabilityContext,
+      checkAbort,
+      env: input.env,
+      sessionId: input.sessionId,
     });
-    if (turn.outcome === "suspended") {
-      outcome = "suspended";
-      return;
-    }
-    outcome = "completed";
   } catch (error) {
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
@@ -1665,6 +1609,396 @@ async function resumeApprovalWithContext(
     }
     captureException(error, {
       event: "opencompany.runner_resume_approval_failed",
+      session_id: input.sessionId,
+      tool_call_id: input.toolCallId,
+    });
+    outcome = "failed";
+    throw error;
+  } finally {
+    await finalizeRun({
+      ctx,
+      outcome,
+      modelProvider,
+      modelName,
+      sandbox: sandboxAcquirer?.current ?? null,
+    });
+  }
+}
+
+// The shared tail of both resume paths: once the now-decided tool-result is persisted, continue
+// the suspended turn with a fresh assistant message over the reconciled history (assistant +
+// tool-result), streaming the next model step. Returns the run outcome string. Extracted so the
+// approval and question resumes share identical continuation behaviour.
+async function continueTurnAfterToolResult(input: {
+  ctx: RunContext;
+  row: LoadedSession;
+  agentConfig: ReturnType<typeof normalizeAgentConfig>;
+  runtime: ReturnType<typeof resolveAgentRuntimeConfig>;
+  toolPolicy: Awaited<ReturnType<typeof loadWorkspaceToolPolicy>>;
+  sandboxAcquirer: ReturnType<typeof createSandboxAcquirer>;
+  observabilityContext: NonNullable<Parameters<typeof createToolSet>[0]["observabilityContext"]>;
+  checkAbort: RunControlCheck;
+  env: RunnerEnv;
+  sessionId: string;
+}): Promise<"completed" | "suspended" | "skipped_assistant_exists"> {
+  const { ctx, row, sandboxAcquirer, checkAbort } = input;
+  const continuationAssistantMessageId = newAgentSessionMessageId();
+  const created = await observeRunStep(ctx, "create_assistant_message", () =>
+    createAssistantMessageForLease({
+      id: continuationAssistantMessageId,
+      sessionId: input.sessionId,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+    }),
+  );
+  if (!created) {
+    await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+    return "skipped_assistant_exists";
+  }
+
+  const continuationMessages = buildModelMessages(
+    (
+      await ctx.db
+        .select()
+        .from(agentSessionMessages)
+        .where(eq(agentSessionMessages.sessionId, input.sessionId))
+        .orderBy(asc(agentSessionMessages.createdAt))
+    ).filter((message) => message.id !== continuationAssistantMessageId && !message.internal),
+  );
+
+  const toolStartCoordinator = createToolStartCoordinator();
+  const tools = createToolSet({
+    sessionId: input.sessionId,
+    assistantMessageId: continuationAssistantMessageId,
+    runLeaseId: ctx.leaseId,
+    runLeaseOwner: ctx.leaseOwner,
+    workspaceId: row.workspace.id,
+    agentConfig: input.agentConfig,
+    getSandbox: sandboxAcquirer.get,
+    workdir: row.session.workdir,
+    env: input.env,
+    enabledTools: input.runtime.tools,
+    repository: row.repository,
+    signal: ctx.controller.signal,
+    checkAbort,
+    toolStartCoordinator,
+    observabilityContext: input.observabilityContext,
+    toolBudget: createHostedToolBudget(),
+  });
+
+  const turn = await executeStreamingTurn({
+    ctx,
+    row,
+    runtime: input.runtime,
+    system: input.runtime.systemPrompt,
+    messages: continuationMessages,
+    tools,
+    mcpContext: {
+      workspaceId: row.workspace.id,
+      agentConfig: row.agent.config,
+      signal: ctx.controller.signal,
+      checkAbort,
+      observabilityContext: input.observabilityContext,
+    },
+    assistantMessageId: continuationAssistantMessageId,
+    toolStartCoordinator,
+    checkAbort,
+    policy: input.toolPolicy,
+    suspendable: true,
+    sandboxAcquirer,
+    internal: false,
+    brainStep: "sync_brain_after_resume",
+    bundleStep: "sync_agent_bundle_after_resume",
+    appendCompletedEvent: () =>
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "session.status",
+        payload: { status: "completed", message: "Agent completed" },
+      }),
+  });
+  return turn.outcome === "suspended" ? "suspended" : "completed";
+}
+
+// Resume a turn that suspended on an ask_user_question call, once the question row is decided (the
+// user answered, cancelled via the X, was superseded by a new message, or the 7-day backstop
+// fired). Synthesizes the tool-result from the persisted answers (or an "unanswered" result when
+// cancelled) outside the model stream, then continues the turn over the full history. The question
+// row is the source of truth, so this is crash-safe and idempotent: a tool-result already persisted
+// short-circuits to the continuation. Mirrors resumeApproval.
+export async function resumeQuestionResponse(input: {
+  sessionId: string;
+  toolCallId: string;
+  env: RunnerEnv;
+  externalSignal?: AbortSignal;
+}) {
+  const ctx = createRunContext("runner.resume_question", {
+    sessionId: input.sessionId,
+    messageId: input.toolCallId,
+    env: input.env,
+    ...(input.externalSignal ? { externalSignal: input.externalSignal } : {}),
+  });
+  try {
+    return await traceBraintrust(
+      {
+        name: "runner.resume_question",
+        type: "task",
+        tags: ["runner", "agent-session"],
+        metadata: {
+          run_type: "resume_question",
+          session_id: input.sessionId,
+          tool_call_id: input.toolCallId,
+          run_lease_id: ctx.leaseId,
+          runner_instance_id: input.env.instanceId,
+        },
+      },
+      (span) => resumeQuestionResponseWithContext(input, ctx, span),
+    );
+  } finally {
+    await flushBraintrust();
+  }
+}
+
+async function resumeQuestionResponseWithContext(
+  input: {
+    sessionId: string;
+    toolCallId: string;
+    env: RunnerEnv;
+    externalSignal?: AbortSignal;
+  },
+  ctx: RunContext,
+  braintrustSpan: BraintrustSpan | undefined,
+) {
+  let leaseAcquired = false;
+  let outcome = "unknown";
+  let modelProvider: string | undefined;
+  let modelName: string | undefined;
+  let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
+
+  try {
+    const question = await loadSessionQuestion(input.sessionId, input.toolCallId);
+    if (!question) {
+      outcome = "skipped_missing_question";
+      return;
+    }
+    // Decision hasn't landed yet (resume fired before the row was updated). Drop it; the web
+    // action / backstop re-triggers a resume once the row is decided.
+    if (question.status === "pending") {
+      outcome = "skipped_pending_question";
+      return;
+    }
+
+    const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
+    if (row.session.archivedAt) {
+      outcome = "skipped_archived";
+      return;
+    }
+    // A session torn down (aborted/archiving) while paused must not be revived by a late resume.
+    if (row.session.status === "aborting" || row.session.status === "archiving") {
+      outcome = "skipped_aborted";
+      return;
+    }
+    const agentConfig = normalizeAgentConfig(row.agent.config);
+    const workspaceId = row.workspace.id;
+    const userId = row.session.userId;
+    const agentId = row.agent.id;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        agent_path: row.agent.path,
+        session_status: row.session.status,
+      },
+    });
+
+    if (
+      !(await observeRunStep(ctx, "check_workspace_credits", () =>
+        hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
+      ))
+    ) {
+      outcome = "skipped_no_credits";
+      await setStatus(input.sessionId, "ready");
+      return;
+    }
+
+    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
+      loadWorkspaceToolPolicy(row.workspace.id),
+    );
+    const runtime = resolveAgentRuntimeConfig({
+      agent: agentConfig,
+      workspaceName: row.workspace.name,
+      sessionTitle: row.session.title,
+      ...optionalUserName(row.user),
+      toolPolicy: { policy: toolPolicy, suspendable: true },
+    });
+    modelProvider = runtime.model.provider;
+    modelName = runtime.model.name;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: {
+        model_provider: modelProvider,
+        model_name: modelName,
+        enabled_tools: runtime.tools,
+      },
+    });
+
+    const lease = await observeRunStep(ctx, "acquire_run_lease", () =>
+      acquireRunLease({
+        sessionId: input.sessionId,
+        messageId: input.toolCallId,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        modelProvider: runtime.model.provider,
+        modelName: runtime.model.name,
+      }),
+    );
+    if (!lease) {
+      outcome = "skipped_lease_busy";
+      return;
+    }
+    leaseAcquired = true;
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
+
+    const checkAbort = createLeaseAbortCheck(ctx);
+    await checkAbort({ force: true });
+    validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
+
+    await requireLeaseWrite(
+      appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "session.status",
+        payload: { status: "running", message: "Agent is running" },
+      }),
+    );
+
+    // The suspended assistant message (carries the pending tool-call) is the parent for the
+    // question.answered event so its card renders under the original turn.
+    const suspendedAssistantMessageId = question.messageId ?? "";
+    const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
+      ctx.db
+        .select()
+        .from(agentSessionMessages)
+        .where(eq(agentSessionMessages.sessionId, input.sessionId))
+        .orderBy(asc(agentSessionMessages.createdAt)),
+    );
+
+    sandboxAcquirer = createSandboxAcquirer({
+      row,
+      env: input.env,
+      trace: ctx.trace,
+      leaseId: ctx.leaseId,
+      leaseOwner: ctx.leaseOwner,
+      checkAbort,
+      onHydrated: () => {},
+    });
+
+    const observabilityContext = { workspaceId, userId, agentId, modelProvider, modelName };
+
+    // Idempotency: a prior resume that crashed after persisting the tool-result skips straight to
+    // the continuation.
+    const toolResultAlreadyPersisted = storedMessages.some(
+      (message) => message.role === "tool" && message.toolCallId === input.toolCallId,
+    );
+
+    if (!toolResultAlreadyPersisted) {
+      // There is no tool body to execute — the answer (or an "unanswered" notice) IS the result.
+      const output =
+        question.status === "answered"
+          ? buildQuestionAnswerToolOutput(question.questions, question.answers)
+          : buildUnansweredQuestionToolOutput(question.resolutionSource);
+      await requireLeaseWrite(
+        insertToolMessageForLease({
+          id: newAgentSessionMessageId(),
+          sessionId: input.sessionId,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          content: serializeToolOutputForStorage(output),
+          modelMessage: toPersistedModelMessage(
+            buildToolModelMessage({
+              toolCallId: input.toolCallId,
+              toolName: "ask_user_question",
+              output,
+            }),
+          ),
+          toolName: "ask_user_question",
+          toolCallId: input.toolCallId,
+          internal: false,
+        }),
+      );
+
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: suspendedAssistantMessageId,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "question.answered",
+          payload: {
+            messageId: suspendedAssistantMessageId,
+            toolCallId: input.toolCallId,
+            answers: question.answers ?? [],
+            resolutionSource: question.resolutionSource ?? "user",
+          },
+        }),
+      );
+    }
+
+    // Continue the turn with a fresh assistant message over the reconciled history.
+    outcome = await continueTurnAfterToolResult({
+      ctx,
+      row,
+      agentConfig,
+      runtime,
+      toolPolicy,
+      sandboxAcquirer,
+      observabilityContext,
+      checkAbort,
+      env: input.env,
+      sessionId: input.sessionId,
+    });
+  } catch (error) {
+    if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
+      outcome = "stale_lease";
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      return;
+    }
+    if (ctx.controller.signal.aborted || error instanceof RunAbortError) {
+      outcome = "aborted";
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      if (leaseAcquired) {
+        await failRunLease(
+          input.sessionId,
+          ctx.leaseId,
+          ctx.leaseOwner,
+          "aborting",
+          "Run aborted.",
+        );
+      }
+      return;
+    }
+    const message = error instanceof Error ? error.message : "Unknown runner error";
+    logBraintrustCurrentSpan({
+      error: braintrustError(error),
+      metadata: { outcome: "failed", tool_call_id: input.toolCallId },
+    });
+    if (leaseAcquired) {
+      await appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "session.error",
+        payload: { message },
+      });
+      await failRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "failed", message);
+    }
+    captureException(error, {
+      event: "opencompany.runner_resume_question_failed",
       session_id: input.sessionId,
       tool_call_id: input.toolCallId,
     });

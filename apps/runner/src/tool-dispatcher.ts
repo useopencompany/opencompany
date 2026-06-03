@@ -339,6 +339,17 @@ async function executeRuntimeToolWithTracing(input: {
             args: input.args,
           });
         }
+        if (input.definition.name === "ask_user_question") {
+          // The body only runs when the question could not suspend: a non-suspendable run
+          // (delegated child / after-session / background), or malformed questions. The
+          // suspend path in model-stream-runner never reaches execute(). Tell the model so it
+          // proceeds on its own rather than waiting on input that will never come.
+          return {
+            status: "unanswered" as const,
+            reason:
+              "You cannot ask the user a question in this context (no interactive session, or the questions were malformed). Proceed using your best judgment.",
+          };
+        }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
         }

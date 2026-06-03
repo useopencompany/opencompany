@@ -7,6 +7,7 @@ import {
   agentSessionAfterSessionRuns,
   agentSessionEvents,
   agentSessionMessages,
+  agentSessionQuestions,
   agentSessions,
   agents,
   agentToolApprovals,
@@ -421,6 +422,22 @@ export async function abortSession(sessionId: string) {
     })
     .where(
       and(eq(agentToolApprovals.sessionId, sessionId), eq(agentToolApprovals.status, "pending")),
+    );
+  // Same hazard for a session paused on an ask_user_question: cancel any pending question so the
+  // backstop can't revive the aborted session via a question resume.
+  await db
+    .update(agentSessionQuestions)
+    .set({
+      status: "cancelled",
+      resolutionSource: "abort",
+      answeredAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, sessionId),
+        eq(agentSessionQuestions.status, "pending"),
+      ),
     );
   await appendRuntimeEvent(db, {
     sessionId,
