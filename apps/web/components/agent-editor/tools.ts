@@ -150,6 +150,29 @@ function modelIconFor(id: AgentModelId): LucideIcon {
   return PROVIDER_ICONS[provider] ?? FALLBACK_MODEL_ICON;
 }
 
+// Human-readable provider names keyed by the model id prefix, used to group the
+// model picker. Falls back to the raw prefix for unlisted providers.
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  minimax: "MiniMax",
+  moonshotai: "Moonshot",
+  zai: "Z.ai",
+  xai: "xAI",
+};
+
+export function modelProviderId(id: string): string {
+  return id.split("/")[0] ?? "";
+}
+
+export function modelProviderLabel(id: string): string {
+  const provider = modelProviderId(id);
+  return PROVIDER_LABELS[provider] ?? provider;
+}
+
 export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => ({
   id: model.id,
   mentionId: `model:${model.id}`,

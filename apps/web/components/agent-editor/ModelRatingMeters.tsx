@@ -36,13 +36,17 @@ const TIERS: ModelRatingTier[] = [1, 2, 3];
 
 function DotMeter({ value, label }: { value: ModelRatingTier; label: string }) {
   return (
-    <span className="flex items-center gap-[2px]" role="img" aria-label={label}>
+    <span
+      className="inline-flex w-7 items-center justify-center gap-[3px]"
+      role="img"
+      aria-label={label}
+    >
       {TIERS.map((tier) => (
         <span
           key={tier}
           className={cn(
-            "h-[3.5px] w-[3.5px] rounded-full",
-            tier <= value ? "bg-ink-muted" : "bg-ink-subtle/30",
+            "h-[4px] w-[4px] rounded-full",
+            tier <= value ? "bg-ink-muted" : "bg-ink-subtle/25",
           )}
         />
       ))}
@@ -52,9 +56,13 @@ function DotMeter({ value, label }: { value: ModelRatingTier; label: string }) {
 
 function CostMeter({ value, label }: { value: ModelRatingTier; label: string }) {
   return (
-    <span className="flex items-center font-medium tabular-nums" role="img" aria-label={label}>
+    <span
+      className="inline-flex w-7 items-center justify-center font-medium tabular-nums"
+      role="img"
+      aria-label={label}
+    >
       {TIERS.map((tier) => (
-        <span key={tier} className={tier <= value ? "text-ink-muted" : "text-ink-subtle/30"}>
+        <span key={tier} className={tier <= value ? "text-ink-muted" : "text-ink-subtle/25"}>
           $
         </span>
       ))}
@@ -76,7 +84,7 @@ export function ModelRatingMeters({
   className?: string;
 }) {
   return (
-    <span className={cn("flex shrink-0 items-center gap-2 text-[10px] leading-none", className)}>
+    <span className={cn("flex shrink-0 items-center gap-1.5 text-[10px] leading-none", className)}>
       <DotMeter
         value={ratings.capability}
         label={`Capability: ${CAPABILITY_LABELS[ratings.capability]}`}
