@@ -225,6 +225,7 @@ Core tools are always available to runner sessions:
 - `write_file`
 - `list_files`
 - `git_diff`
+- `ask_user_question`
 - `tool_help`
 
 Sandbox sessions do not clone the managed workspace repository. `work/` is an empty scratch git
