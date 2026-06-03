@@ -34,6 +34,8 @@ services:
         sync: false
       - key: EXA_API_KEY
         sync: false
+      - key: APIFY_API_TOKEN
+        sync: false
       - key: SUPADATA_API_KEY
         sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE

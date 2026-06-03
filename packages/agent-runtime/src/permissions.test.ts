@@ -27,8 +27,20 @@ describe("classifyRuntimeTool", () => {
       providerKey: "tiktok",
       group: "read",
     });
+    expect(classifyRuntimeTool("tiktok_list_profile_posts")).toEqual({
+      providerKey: "tiktok",
+      group: "read",
+    });
     expect(classifyRuntimeTool("instagram_get_transcript")).toEqual({
       providerKey: "instagram",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("instagram_search_profiles")).toEqual({
+      providerKey: "instagram",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("social_get_job")).toEqual({
+      providerKey: "system",
       group: "read",
     });
   });
