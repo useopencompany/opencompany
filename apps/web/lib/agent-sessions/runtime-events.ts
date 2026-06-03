@@ -799,7 +799,13 @@ export function buildRuntimeToolCallsForMessage(
       const call = getCall(toolCallId);
       call.name = "ask_user_question";
       const resolutionSource = readString(event.payload.resolutionSource);
-      const answered = resolutionSource === "user" || resolutionSource === "";
+      // Prefer the explicit `answered` flag the runner now emits. Fall back to inferring from the
+      // resolution source for events written before that field existed — note that a user X-dismiss
+      // is (cancelled, user), which the old inference wrongly rendered as an answer.
+      const answered =
+        event.payload.answered === undefined
+          ? resolutionSource === "user" || resolutionSource === ""
+          : readBoolean(event.payload.answered);
       call.question = {
         status: answered ? "answered" : "cancelled",
         questions: call.question?.questions ?? [],

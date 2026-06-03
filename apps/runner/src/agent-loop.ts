@@ -1790,6 +1790,13 @@ async function resumeQuestionResponseWithContext(
       return;
     }
 
+    // The user dismissed the question (the X) instead of answering. We still persist the
+    // "unanswered" tool-result below so the model sees the question went unanswered, but we must
+    // NOT continue the turn — the run resolves quietly and the agent only speaks again on the
+    // user's next message. Re-derived from the row (not a job flag) so it survives a runner restart;
+    // timeout (cancelled+timeout) and answered (answered+user) still continue the turn below.
+    const isQuietDecline = question.status === "cancelled" && question.resolutionSource === "user";
+
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
@@ -1865,16 +1872,20 @@ async function resumeQuestionResponseWithContext(
     await checkAbort({ force: true });
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
 
-    await requireLeaseWrite(
-      appendRuntimeEventForLease({
-        sessionId: input.sessionId,
-        messageId: null,
-        leaseId: ctx.leaseId,
-        leaseOwner: ctx.leaseOwner,
-        type: "session.status",
-        payload: { status: "running", message: "Agent is running" },
-      }),
-    );
+    // A quiet decline resolves straight to "completed"; emitting "running" first would flash a
+    // working indicator for no reason. Every other path runs the model, so announce it.
+    if (!isQuietDecline) {
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.status",
+          payload: { status: "running", message: "Agent is running" },
+        }),
+      );
+    }
 
     // The suspended assistant message (carries the pending tool-call) is the parent for the
     // question.answered event so its card renders under the original turn.
@@ -1941,11 +1952,32 @@ async function resumeQuestionResponseWithContext(
           payload: {
             messageId: suspendedAssistantMessageId,
             toolCallId: input.toolCallId,
+            answered: question.status === "answered",
             answers: question.answers ?? [],
             resolutionSource: question.resolutionSource ?? "user",
           },
         }),
       );
+    }
+
+    if (isQuietDecline) {
+      // Park the session exactly as a completed turn would, but WITHOUT generating an assistant
+      // message: the composer returns and the agent stays silent until the user's next message,
+      // which then replays over assistant(ask) → tool(unanswered) → user(...). Placed after the
+      // idempotency block so a crash-then-retry still releases the lease.
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: null,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "session.status",
+          payload: { status: "completed", message: "Agent completed" },
+        }),
+      );
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      outcome = "resolved_quiet_decline";
+      return;
     }
 
     // Continue the turn with a fresh assistant message over the reconciled history.

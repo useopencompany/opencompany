@@ -443,13 +443,13 @@ export async function submitAgentSessionQuestionResponse(input: {
   return { ok: true } as const;
 }
 
-// Dismiss a paused ask_user_question (the X on the card). Cancels the row and resumes the run with
-// an "unanswered" tool-result so the model adapts and the composer returns. Same status-guard and
-// only-winner-resumes semantics as the answer path.
-export async function cancelAgentSessionQuestion(input: {
-  sessionId: string;
-  toolCallId: string;
-}) {
+// Dismiss a paused ask_user_question (the X / Skip). Cancels the row and triggers a resume that
+// resolves QUIETLY: the runner persists an "unanswered" tool-result and parks the session as
+// completed WITHOUT generating an assistant message (see the isQuietDecline branch in
+// resumeQuestionResponseWithContext). The composer returns and the agent only speaks again on the
+// user's next message — which then replays over assistant(ask) → tool(unanswered) → user(...). Same
+// status-guard and only-winner-resumes semantics as the answer path.
+export async function cancelAgentSessionQuestion(input: { sessionId: string; toolCallId: string }) {
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
   const [session] = await db

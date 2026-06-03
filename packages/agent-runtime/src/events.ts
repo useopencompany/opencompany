@@ -128,6 +128,9 @@ export type AgentRuntimeEvent =
       payload: {
         messageId: string;
         toolCallId: string;
+        // Whether the user actually answered (vs. skipped / timed out / aborted). The web client
+        // renders the "Question skipped" summary off this rather than inferring from resolutionSource.
+        answered: boolean;
         answers: AgentSessionQuestionAnswer[];
         resolutionSource: AgentSessionQuestionResolutionSource;
       };

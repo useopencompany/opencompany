@@ -13,6 +13,7 @@ import {
   Bot,
   Brain,
   Check,
+  ChevronLeft,
   ChevronRight,
   CircleStop,
   Copy,
@@ -300,6 +301,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     }
     return partsByMessageId;
   }, [runtime.events, runtime.messages]);
+  // The single ask_user_question awaiting an answer (the run suspends, so at most one exists). It
+  // drives the stepped QuestionComposer that takes over the composer slot. Derived from the same
+  // parts that render the transcript, so it stays reactive to SSE.
+  const pendingQuestion = useMemo(() => {
+    const findPending = (parts: AssistantTurnPart[]) =>
+      parts.find(
+        (part) => part.type === "tool-call" && part.toolCall.question?.status === "pending",
+      );
+    for (const parts of assistantPartsByMessageId.values()) {
+      const match = findPending(parts);
+      if (match?.type === "tool-call") return match.toolCall;
+    }
+    const background = findPending(backgroundParts);
+    return background?.type === "tool-call" ? background.toolCall : null;
+  }, [assistantPartsByMessageId, backgroundParts]);
   const lastVisibleMessage = visibleMessages.at(-1);
   // Index of the last user message. Everything from here down (that message, its reply,
   // the working indicator, background tool cards) is the "active turn" and gets wrapped
@@ -976,207 +992,225 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           </div>
         </div>
 
-        {/* The composer is hidden while the agent is awaiting a structured answer: the question
-            card in the conversation is the only input surface (its X cancels back to here). */}
-        {sessionIsAwaitingInput ? null : (
+        {/* While the agent awaits a structured answer, the stepped QuestionComposer takes over the
+            composer slot (its Skip/X quietly returns here). It replaces the text composer entirely so
+            there's a single input surface. Falls back to the text composer if the pending question
+            can't be located (status race), so the user is never stuck. */}
+        {sessionIsAwaitingInput && pendingQuestion ? (
           <div className="bg-canvas px-8 lg:px-12 py-4">
-          <div className="group/composer mx-auto max-w-[960px]">
-            {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
-            <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
-              {slashMenuOpen ? (
-                <SlashCommandMenu
-                  id={slashMenuId}
-                  commands={slashCommands}
-                  activeId={slashActiveId}
-                  onSelect={(command) => insertSlashCommand(command)}
-                  onHover={(id) => {
-                    const idx = slashCommands.findIndex((command) => command.id === id);
-                    if (idx >= 0) setSlashActiveIndex(idx);
-                  }}
-                />
-              ) : null}
-              <div ref={attachMenuRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setAttachMenuOpen((prev) => !prev)}
-                  aria-label="Attach file"
-                  aria-expanded={attachMenuOpen}
-                  aria-haspopup="menu"
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
-                >
-                  <Plus size={15} strokeWidth={1.75} />
-                </button>
-                {attachMenuOpen ? (
-                  <div
-                    role="menu"
-                    className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        showToast({
-                          title: "Coming soon",
-                          description: "File attachments will be available soon.",
-                          tone: "default",
-                        });
-                        setAttachMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
-                    >
-                      <Upload size={13} strokeWidth={1.75} />
-                      Upload file
-                    </button>
-                  </div>
+            <div className="mx-auto max-w-[960px]">
+              <QuestionComposer
+                key={pendingQuestion.id}
+                sessionId={session.id}
+                toolCall={pendingQuestion}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="bg-canvas px-8 lg:px-12 py-4">
+            <div className="group/composer mx-auto max-w-[960px]">
+              {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
+              <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+                {slashMenuOpen ? (
+                  <SlashCommandMenu
+                    id={slashMenuId}
+                    commands={slashCommands}
+                    activeId={slashActiveId}
+                    onSelect={(command) => insertSlashCommand(command)}
+                    onHover={(id) => {
+                      const idx = slashCommands.findIndex((command) => command.id === id);
+                      if (idx >= 0) setSlashActiveIndex(idx);
+                    }}
+                  />
                 ) : null}
-              </div>
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(event) => {
-                  setInput(event.target.value);
-                  setCaret(event.target.selectionStart ?? event.target.value.length);
-                }}
-                onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
-                onKeyDown={(event) => {
-                  // While the slash menu is open it owns navigation keys; focus
-                  // stays in the textarea so typing keeps filtering the list.
-                  if (slashMenuOpen && !event.nativeEvent.isComposing) {
-                    if (event.key === "ArrowDown") {
-                      event.preventDefault();
-                      setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
-                      return;
-                    }
-                    if (event.key === "ArrowUp") {
-                      event.preventDefault();
-                      setSlashActiveIndex(
-                        (i) => (i - 1 + slashCommands.length) % slashCommands.length,
-                      );
-                      return;
-                    }
-                    // Enter and Tab both insert the highlighted command into the input
-                    // (they do not run it) — the user runs it by then pressing Enter to send.
-                    if (event.key === "Enter" || event.key === "Tab") {
-                      if (event.key === "Enter" && event.shiftKey) {
-                        // shift+Enter falls through to a normal newline.
-                      } else {
+                <div ref={attachMenuRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setAttachMenuOpen((prev) => !prev)}
+                    aria-label="Attach file"
+                    aria-expanded={attachMenuOpen}
+                    aria-haspopup="menu"
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+                  >
+                    <Plus size={15} strokeWidth={1.75} />
+                  </button>
+                  {attachMenuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          showToast({
+                            title: "Coming soon",
+                            description: "File attachments will be available soon.",
+                            tone: "default",
+                          });
+                          setAttachMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                      >
+                        <Upload size={13} strokeWidth={1.75} />
+                        Upload file
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(event) => {
+                    setInput(event.target.value);
+                    setCaret(event.target.selectionStart ?? event.target.value.length);
+                  }}
+                  onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+                  onKeyDown={(event) => {
+                    // While the slash menu is open it owns navigation keys; focus
+                    // stays in the textarea so typing keeps filtering the list.
+                    if (slashMenuOpen && !event.nativeEvent.isComposing) {
+                      if (event.key === "ArrowDown") {
                         event.preventDefault();
-                        const command = slashCommands[slashActiveIndex];
-                        if (command) insertSlashCommand(command);
+                        setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
+                        return;
+                      }
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setSlashActiveIndex(
+                          (i) => (i - 1 + slashCommands.length) % slashCommands.length,
+                        );
+                        return;
+                      }
+                      // Enter and Tab both insert the highlighted command into the input
+                      // (they do not run it) — the user runs it by then pressing Enter to send.
+                      if (event.key === "Enter" || event.key === "Tab") {
+                        if (event.key === "Enter" && event.shiftKey) {
+                          // shift+Enter falls through to a normal newline.
+                        } else {
+                          event.preventDefault();
+                          const command = slashCommands[slashActiveIndex];
+                          if (command) insertSlashCommand(command);
+                          return;
+                        }
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setSlashDismissed(true);
                         return;
                       }
                     }
-                    if (event.key === "Escape") {
+                    if (
+                      event.key === "Enter" &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
                       event.preventDefault();
-                      setSlashDismissed(true);
-                      return;
+                      handleSend();
                     }
-                  }
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    handleSend();
-                  }
-                }}
-                onPaste={(event) => {
-                  const items = event.clipboardData?.items;
-                  if (!items) return;
-                  const itemArray = Array.from(items);
-                  const hasImage = itemArray.some(
-                    (item) => item.kind === "file" && item.type.startsWith("image/"),
-                  );
-                  if (!hasImage) return;
-                  const hasText = itemArray.some((item) => item.kind === "string");
-                  // Pure-image paste: stop the browser default so nothing visible
-                  // changes in the textarea and the toast is the only signal.
-                  // Mixed text+image: let the browser paste the text portion
-                  // alongside the toast so the user keeps what they expected.
-                  if (!hasText) event.preventDefault();
-                  showToast({
-                    title: "Image upload coming soon",
-                    description: hasText
-                      ? "The text was pasted; the image was ignored."
-                      : "Image attachments aren't supported yet.",
-                    tone: "default",
-                  });
-                }}
-                placeholder="Ask this agent to do something"
-                role="combobox"
-                aria-expanded={slashMenuOpen}
-                aria-controls={slashMenuOpen ? slashMenuId : undefined}
-                aria-activedescendant={slashActiveOptionId}
-                aria-haspopup="listbox"
-                rows={1}
-                className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-              />
-              {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                <button
-                  type="button"
-                  disabled={isPending}
-                  onClick={requestAbort}
-                  aria-label="Stop generating"
-                  title="Stop generating"
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  <CircleStop size={16} strokeWidth={1.9} />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
-                  onClick={handleSend}
-                  aria-label="Send message"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
-                >
-                  <ArrowUp size={13} strokeWidth={2} />
-                </button>
-              )}
-            </div>
-            <div
-              className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
-                slashMenuOpen ? "opacity-100" : "opacity-0 group-focus-within/composer:opacity-100"
-              }`}
-            >
-              {slashMenuOpen ? (
-                <>
-                  <span>
-                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                      ↑↓
-                    </kbd>{" "}
-                    navigate
-                  </span>
-                  <span>
-                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                      ↵
-                    </kbd>{" "}
-                    insert
-                  </span>
-                  <span>
-                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                      esc
-                    </kbd>{" "}
-                    dismiss
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span>
-                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                      ↵
-                    </kbd>{" "}
-                    send
-                  </span>
-                  <span>
-                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                      ⇧↵
-                    </kbd>{" "}
-                    new line
-                  </span>
-                </>
-              )}
+                  }}
+                  onPaste={(event) => {
+                    const items = event.clipboardData?.items;
+                    if (!items) return;
+                    const itemArray = Array.from(items);
+                    const hasImage = itemArray.some(
+                      (item) => item.kind === "file" && item.type.startsWith("image/"),
+                    );
+                    if (!hasImage) return;
+                    const hasText = itemArray.some((item) => item.kind === "string");
+                    // Pure-image paste: stop the browser default so nothing visible
+                    // changes in the textarea and the toast is the only signal.
+                    // Mixed text+image: let the browser paste the text portion
+                    // alongside the toast so the user keeps what they expected.
+                    if (!hasText) event.preventDefault();
+                    showToast({
+                      title: "Image upload coming soon",
+                      description: hasText
+                        ? "The text was pasted; the image was ignored."
+                        : "Image attachments aren't supported yet.",
+                      tone: "default",
+                    });
+                  }}
+                  placeholder="Ask this agent to do something"
+                  role="combobox"
+                  aria-expanded={slashMenuOpen}
+                  aria-controls={slashMenuOpen ? slashMenuId : undefined}
+                  aria-activedescendant={slashActiveOptionId}
+                  aria-haspopup="listbox"
+                  rows={1}
+                  className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                />
+                {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={requestAbort}
+                    aria-label="Stop generating"
+                    title="Stop generating"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    <CircleStop size={16} strokeWidth={1.9} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
+                    onClick={handleSend}
+                    aria-label="Send message"
+                    className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
+                  >
+                    <ArrowUp size={13} strokeWidth={2} />
+                  </button>
+                )}
+              </div>
+              <div
+                className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
+                  slashMenuOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-focus-within/composer:opacity-100"
+                }`}
+              >
+                {slashMenuOpen ? (
+                  <>
+                    <span>
+                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                        ↑↓
+                      </kbd>{" "}
+                      navigate
+                    </span>
+                    <span>
+                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                        ↵
+                      </kbd>{" "}
+                      insert
+                    </span>
+                    <span>
+                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                        esc
+                      </kbd>{" "}
+                      dismiss
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                        ↵
+                      </kbd>{" "}
+                      send
+                    </span>
+                    <span>
+                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                        ⇧↵
+                      </kbd>{" "}
+                      new line
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
         )}
       </div>
 
@@ -1856,30 +1890,74 @@ function questionSelectionComplete(question: RuntimeQuestionItem, selection: Que
   return selection.labels.length > 0;
 }
 
-// Renders an ask_user_question tool call: an interactive single-/multi-select form while pending,
-// or a compact read-only summary once the user answers, dismisses, or the run resolves it. The X
-// dismisses the question (cancel) and returns the user to the composer.
+// Renders an ask_user_question tool call IN THE TRANSCRIPT. The interactive form now lives in the
+// composer slot (QuestionComposer), so here we only show a compact read-only reference while the
+// question is pending, and the answer/skip summary once it resolves.
 function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const question = toolCall.question;
-  const approvalContext = useContext(ToolApprovalContext);
+  if (!question) return null;
+  if (question.status === "pending") {
+    return <QuestionPendingHint question={question} />;
+  }
+  return <QuestionSummary question={question} />;
+}
+
+// Transcript placeholder while the agent waits on an answer: lists what was asked and points the
+// user at the composer, where the stepped QuestionComposer is the actual input surface.
+function QuestionPendingHint({ question }: { question: NonNullable<RuntimeToolCall["question"]> }) {
+  const questions = question.questions;
+  return (
+    <div className="ml-6 mt-1 rounded-lg border border-border bg-surface-raised/70 px-3 py-2">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+        <MessageCircleQuestion size={11} strokeWidth={1.9} />
+        {questions.length > 1 ? `${questions.length} questions` : "A quick question"}
+      </div>
+      <div className="space-y-1">
+        {questions.map((item, index) => (
+          <div key={`${item.header}:${index}`} className="text-[12px] leading-5 text-ink/80">
+            {item.question}
+          </div>
+        ))}
+      </div>
+      <div className="mt-1.5 text-[11px] text-ink-muted">Answer below to continue.</div>
+    </div>
+  );
+}
+
+// The stepped input surface for a pending ask_user_question. It takes over the composer slot and
+// walks the user through one question per step (select → Continue → … → Submit), so answering feels
+// like the message composer. Skip/X resolves quietly (see cancelAgentSessionQuestion): no assistant
+// turn fires; the composer simply returns to its text form.
+function QuestionComposer({
+  sessionId,
+  toolCall,
+}: {
+  sessionId: string;
+  toolCall: RuntimeToolCall;
+}) {
   const { showError } = useToast();
   const [isResolving, startResolve] = useTransition();
-  // Optimistic overlay until the runner's durable question.answered event arrives over SSE.
+  // Optimistic overlay so the surface stays put until the runner's durable question.answered event
+  // arrives over SSE and the composer swaps back to its text form.
   const [optimistic, setOptimistic] = useState<"submitting" | "cancelling" | null>(null);
-  const questions = question?.questions ?? [];
+  const [step, setStep] = useState(0);
+  const stepRef = useRef<HTMLDivElement | null>(null);
+  const questions = toolCall.question?.questions ?? [];
   const [selections, setSelections] = useState<QuestionSelection[]>(() =>
     questions.map(() => ({ labels: [], otherSelected: false, otherText: "" })),
   );
 
-  if (!question) return null;
-
-  const isPending = question.status === "pending" && optimistic === null;
-  const isSubmitting = optimistic === "submitting";
-  const isCancelling = optimistic === "cancelling";
+  const total = questions.length;
+  const safeStep = Math.min(step, Math.max(total - 1, 0));
+  const current = questions[safeStep];
+  const selection = selections[safeStep] ?? { labels: [], otherSelected: false, otherText: "" };
+  const isLast = safeStep >= total - 1;
+  const controlsDisabled = isResolving || optimistic !== null;
+  const canAdvance = current ? questionSelectionComplete(current, selection) : false;
 
   const updateSelection = (index: number, next: Partial<QuestionSelection>) => {
-    setSelections((current) =>
-      current.map((selection, i) => (i === index ? { ...selection, ...next } : selection)),
+    setSelections((value) =>
+      value.map((entry, i) => (i === index ? { ...entry, ...next } : entry)),
     );
   };
 
@@ -1887,10 +1965,9 @@ function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
     const item = questions[index];
     if (!item) return;
     if (item.allowMultiple) {
-      const current = selections[index]?.labels ?? [];
-      const labels = current.includes(label)
-        ? current.filter((value) => value !== label)
-        : [...current, label];
+      const labels = selection.labels.includes(label)
+        ? selection.labels.filter((value) => value !== label)
+        : [...selection.labels, label];
       updateSelection(index, { labels });
     } else {
       updateSelection(index, { labels: [label], otherSelected: false });
@@ -1901,29 +1978,24 @@ function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
     const item = questions[index];
     if (!item) return;
     if (item.allowMultiple) {
-      updateSelection(index, { otherSelected: !(selections[index]?.otherSelected ?? false) });
+      updateSelection(index, { otherSelected: !selection.otherSelected });
     } else {
       updateSelection(index, { labels: [], otherSelected: true });
     }
   };
 
-  const allAnswered = questions.every((item, index) =>
-    questionSelectionComplete(item, selections[index] ?? { labels: [], otherSelected: false, otherText: "" }),
-  );
-
   const submit = () => {
-    if (!approvalContext || !allAnswered) return;
     const answers = questions.map((_, index) => {
-      const selection = selections[index] ?? { labels: [], otherSelected: false, otherText: "" };
-      const otherText = selection.otherSelected ? selection.otherText.trim() : "";
+      const entry = selections[index] ?? { labels: [], otherSelected: false, otherText: "" };
+      const otherText = entry.otherSelected ? entry.otherText.trim() : "";
       return otherText
-        ? { selectedLabels: selection.labels, otherText }
-        : { selectedLabels: selection.labels };
+        ? { selectedLabels: entry.labels, otherText }
+        : { selectedLabels: entry.labels };
     });
     setOptimistic("submitting");
     startResolve(async () => {
       const result = await submitAgentSessionQuestionResponse({
-        sessionId: approvalContext.sessionId,
+        sessionId,
         toolCallId: toolCall.id,
         answers,
       });
@@ -1935,13 +2007,9 @@ function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   };
 
   const cancel = () => {
-    if (!approvalContext) return;
     setOptimistic("cancelling");
     startResolve(async () => {
-      const result = await cancelAgentSessionQuestion({
-        sessionId: approvalContext.sessionId,
-        toolCallId: toolCall.id,
-      });
+      const result = await cancelAgentSessionQuestion({ sessionId, toolCallId: toolCall.id });
       if (!result.ok) {
         setOptimistic(null);
         showError(result.error);
@@ -1949,123 +2017,161 @@ function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
     });
   };
 
-  if (!isPending && !isSubmitting && !isCancelling) {
-    return <QuestionSummary question={question} />;
-  }
+  const advance = () => {
+    if (controlsDisabled || !canAdvance) return;
+    if (isLast) submit();
+    else setStep(safeStep + 1);
+  };
 
-  const remaining = questions.reduce(
-    (total, item, index) =>
-      questionSelectionComplete(
-        item,
-        selections[index] ?? { labels: [], otherSelected: false, otherText: "" },
-      )
-        ? total
-        : total + 1,
-    0,
-  );
-  const statusLine = isSubmitting
-    ? "Sending answer…"
-    : isCancelling
-      ? "Cancelling…"
-      : remaining > 0
-        ? `Answer ${remaining} ${remaining === 1 ? "question" : "questions"} to continue.`
-        : "Ready to submit.";
-  const controlsDisabled = isResolving || isSubmitting || isCancelling || !approvalContext;
+  // Move focus to the step's first option whenever the step changes, so keyboard users land on the
+  // active question rather than the surface chrome.
+  useEffect(() => {
+    if (controlsDisabled) return;
+    const target = stepRef.current?.querySelector<HTMLElement>("[role='radio'],[role='checkbox']");
+    target?.focus();
+  }, [safeStep, controlsDisabled]);
+
+  if (!current) return null;
+
+  const statusLine =
+    optimistic === "submitting"
+      ? "Sending answer…"
+      : optimistic === "cancelling"
+        ? "Skipping…"
+        : total > 1
+          ? `Question ${safeStep + 1} of ${total}`
+          : "A quick question";
 
   return (
-    <div className="ml-6 mt-1 rounded-lg border border-border bg-surface-raised/70 px-3 py-2.5 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-ink/70">
-          <MessageCircleQuestion size={12} strokeWidth={1.9} />
-          {questions.length > 1 ? `${questions.length} questions` : "A quick question"}
-        </div>
-        <button
-          type="button"
-          aria-label="Dismiss question"
-          disabled={controlsDisabled}
-          onClick={cancel}
-          className="flex h-5 w-5 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <X size={12} strokeWidth={2} />
-        </button>
-      </div>
-
-      <div className="space-y-3">
-        {questions.map((item, index) => {
-          const selection = selections[index] ?? {
-            labels: [],
-            otherSelected: false,
-            otherText: "",
-          };
-          return (
-            <div key={`${item.header}:${index}`}>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
-                {item.header}
-              </div>
-              <div className="mb-1.5 text-[12.5px] leading-5 text-ink/90">
-                {item.question}
-                {item.allowMultiple ? (
-                  <span className="ml-1 text-[11px] text-ink-subtle">(select all that apply)</span>
-                ) : null}
-              </div>
-              <div className="space-y-1" role={item.allowMultiple ? "group" : "radiogroup"}>
-                {item.options.map((option) => (
-                  <QuestionOptionRow
-                    key={option.label}
-                    label={option.label}
-                    description={option.description}
-                    selected={selection.labels.includes(option.label)}
-                    multiple={item.allowMultiple}
-                    disabled={controlsDisabled}
-                    onClick={() => chooseOption(index, option.label)}
+    <div className="group/composer">
+      <div
+        // Escape skips the whole question (quiet decline). Enter advances/submits unless the focused
+        // element is itself a button (option toggle or the primary action) that handles its own key.
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancel();
+            return;
+          }
+          if (event.key === "Enter" && !event.shiftKey) {
+            if ((event.target as HTMLElement)?.tagName === "BUTTON") return;
+            event.preventDefault();
+            advance();
+          }
+        }}
+        className="rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]"
+      >
+        <div className="mb-2.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-ink/70">
+            <MessageCircleQuestion size={13} strokeWidth={1.9} />
+            <span role="status" aria-live="polite">
+              {statusLine}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {total > 1 ? (
+              <div className="flex items-center gap-1" aria-hidden>
+                {questions.map((item, index) => (
+                  <span
+                    key={`${item.header}:${index}`}
+                    className={`h-1.5 rounded-full transition-all ${
+                      index === safeStep
+                        ? "w-4 bg-ink"
+                        : index < safeStep
+                          ? "w-1.5 bg-ink/50"
+                          : "w-1.5 bg-border-strong"
+                    }`}
                   />
                 ))}
-                {item.allowOther ? (
-                  <QuestionOptionRow
-                    label="Other…"
-                    selected={selection.otherSelected}
-                    multiple={item.allowMultiple}
-                    disabled={controlsDisabled}
-                    onClick={() => chooseOther(index)}
-                  />
-                ) : null}
-                {item.allowOther && selection.otherSelected ? (
-                  <input
-                    type="text"
-                    value={selection.otherText}
-                    disabled={controlsDisabled}
-                    autoFocus
-                    placeholder="Type your answer"
-                    onChange={(event) => updateSelection(index, { otherText: event.target.value })}
-                    onKeyDown={(event) => {
-                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") submit();
-                    }}
-                    className="mt-1 w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12.5px] text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-50"
-                  />
-                ) : null}
               </div>
-            </div>
-          );
-        })}
-      </div>
+            ) : null}
+            <button
+              type="button"
+              aria-label="Skip question"
+              disabled={controlsDisabled}
+              onClick={cancel}
+              className="flex h-6 w-6 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {optimistic === "cancelling" ? (
+                <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
+              ) : (
+                <X size={13} strokeWidth={2} />
+              )}
+            </button>
+          </div>
+        </div>
 
-      <div className="mt-2.5 flex items-center justify-between gap-2">
-        <span role="status" aria-live="polite" className="text-[11px] text-ink-muted">
-          {statusLine}
-        </span>
-        <button
-          type="button"
-          disabled={controlsDisabled || !allAnswered}
-          onClick={submit}
-          className="inline-flex h-7 items-center gap-1 rounded-md bg-ink px-3 text-[12px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isSubmitting ? (
-            <LoaderCircle size={11} strokeWidth={2} className="animate-spin" />
-          ) : (
-            <Check size={11} strokeWidth={2.2} />
-          )}
-          Submit
-        </button>
+        <div ref={stepRef} aria-current="step">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
+            {current.header}
+          </div>
+          <div className="mb-2 text-[13.5px] leading-5 text-ink/90">
+            {current.question}
+            {current.allowMultiple ? (
+              <span className="ml-1 text-[11px] text-ink-subtle">(select all that apply)</span>
+            ) : null}
+          </div>
+          <div className="space-y-1" role={current.allowMultiple ? "group" : "radiogroup"}>
+            {current.options.map((option) => (
+              <QuestionOptionRow
+                key={option.label}
+                label={option.label}
+                description={option.description}
+                selected={selection.labels.includes(option.label)}
+                multiple={current.allowMultiple}
+                disabled={controlsDisabled}
+                onClick={() => chooseOption(safeStep, option.label)}
+              />
+            ))}
+            {current.allowOther ? (
+              <QuestionOptionRow
+                label="Other…"
+                selected={selection.otherSelected}
+                multiple={current.allowMultiple}
+                disabled={controlsDisabled}
+                onClick={() => chooseOther(safeStep)}
+              />
+            ) : null}
+            {current.allowOther && selection.otherSelected ? (
+              <input
+                type="text"
+                value={selection.otherText}
+                disabled={controlsDisabled}
+                autoFocus
+                placeholder="Type your answer"
+                onChange={(event) => updateSelection(safeStep, { otherText: event.target.value })}
+                className="mt-1 w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-colors focus:border-border-strong disabled:opacity-50"
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            disabled={controlsDisabled || safeStep === 0}
+            onClick={() => setStep(Math.max(safeStep - 1, 0))}
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-0"
+          >
+            <ChevronLeft size={13} strokeWidth={2} />
+            Back
+          </button>
+          <button
+            type="button"
+            disabled={controlsDisabled || !canAdvance}
+            onClick={advance}
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-ink px-3 text-[12px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {optimistic === "submitting" ? (
+              <LoaderCircle size={12} strokeWidth={2} className="animate-spin" />
+            ) : isLast ? (
+              <Check size={12} strokeWidth={2.2} />
+            ) : null}
+            {isLast ? "Submit" : "Continue"}
+            {!isLast ? <ChevronRight size={13} strokeWidth={2} /> : null}
+          </button>
+        </div>
       </div>
     </div>
   );
