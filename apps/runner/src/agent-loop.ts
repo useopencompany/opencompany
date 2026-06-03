@@ -1464,6 +1464,26 @@ async function resumeApprovalWithContext(
       const toolName = toolCall?.toolName ?? approval.toolName;
       const toolArgs = toolCall?.input;
 
+      // Approval resolution is the user's decision, not the tool's completion. Emit it before
+      // executing the resumed tool so long-running or failing tools do not leave the approval card
+      // stuck in a pending/resolving state.
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: suspendedAssistantMessageId,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "tool.approval_resolved",
+          payload: {
+            messageId: suspendedAssistantMessageId,
+            toolCallId: input.toolCallId,
+            name: toolName,
+            decision: approval.status === "approved" ? "approved" : "denied",
+            decisionSource: approval.decisionSource ?? "user",
+          },
+        }),
+      );
+
       if (approval.status === "approved") {
         await requireLeaseWrite(
           appendRuntimeEventForLease({
@@ -1558,23 +1578,6 @@ async function resumeApprovalWithContext(
           },
         });
       }
-
-      await requireLeaseWrite(
-        appendRuntimeEventForLease({
-          sessionId: input.sessionId,
-          messageId: suspendedAssistantMessageId,
-          leaseId: ctx.leaseId,
-          leaseOwner: ctx.leaseOwner,
-          type: "tool.approval_resolved",
-          payload: {
-            messageId: suspendedAssistantMessageId,
-            toolCallId: input.toolCallId,
-            name: toolName,
-            decision: approval.status === "approved" ? "approved" : "denied",
-            decisionSource: approval.decisionSource ?? "user",
-          },
-        }),
-      );
     }
 
     // Continue the turn with a fresh assistant message over the reconciled history.
