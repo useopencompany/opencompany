@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { getRuntimeToolHelp, type RuntimeToolName } from "@opencompany/agent-runtime";
 import type { RunnerEnv } from "./env";
 
@@ -1529,15 +1530,18 @@ async function executeSocialTool(
     return {
       output: {
         status: "processing",
-        jobId: encodeSocialJobId({
-          provider: "apify",
-          platform,
-          operation,
-          runId,
-          limit: request.limit,
-          sourceUrl: request.sourceUrl,
-          query: request.query,
-        }),
+        jobId: encodeSocialJobId(
+          {
+            provider: "apify",
+            platform,
+            operation,
+            runId,
+            limit: request.limit,
+            sourceUrl: request.sourceUrl,
+            query: request.query,
+          },
+          env,
+        ),
       },
       usage: apifyUsage(platform, operation, request, { asyncStarted: true }),
     };
@@ -1556,7 +1560,7 @@ async function executeSocialGetJob(
   signal: AbortSignal,
 ): Promise<HostedToolResult> {
   const jobId = readString(asRecord(args), "jobId").trim();
-  const job = decodeSocialJobId(jobId);
+  const job = decodeSocialJobId(jobId, env);
   const body = await apifyGet(
     `/actor-runs/${encodeURIComponent(job.runId)}`,
     env,
@@ -1634,7 +1638,7 @@ function buildInstagramProviderRequest(
   runMode: SocialRunMode,
 ): SocialProviderRequest {
   if (operation === "get_profile") {
-    const username = readSocialHandle(record, "username", "Instagram");
+    const username = readSocialHandle(record, "username", "Instagram", "instagram");
     return {
       platform: "instagram",
       operation,
@@ -1647,7 +1651,7 @@ function buildInstagramProviderRequest(
   }
 
   if (operation === "list_profile_posts") {
-    const username = readSocialHandle(record, "username", "Instagram");
+    const username = readSocialHandle(record, "username", "Instagram", "instagram");
     const sourceUrl = instagramProfileUrl(username);
     return {
       platform: "instagram",
@@ -1727,7 +1731,7 @@ function buildTikTokProviderRequest(
   runMode: SocialRunMode,
 ): SocialProviderRequest {
   if (operation === "get_profile") {
-    const username = readSocialHandle(record, "username", "TikTok");
+    const username = readSocialHandle(record, "username", "TikTok", "tiktok");
     return {
       platform: "tiktok",
       operation,
@@ -1740,7 +1744,7 @@ function buildTikTokProviderRequest(
   }
 
   if (operation === "list_profile_posts") {
-    const username = readSocialHandle(record, "username", "TikTok");
+    const username = readSocialHandle(record, "username", "TikTok", "tiktok");
     const sourceUrl = tiktokProfileUrl(username);
     return {
       platform: "tiktok",
@@ -2090,7 +2094,7 @@ function normalizeSocialProfile(
   const username =
     readFirstString(value, ["username", "userName", "uniqueId", "handle"]) ??
     readFirstString(asRecord(value.authorMeta), ["name"]) ??
-    readUsernameFromUrl(readFirstString(value, ["url", "profile_url", "profileUrl"]));
+    readUsernameFromUrl(readFirstString(value, ["url", "profile_url", "profileUrl"]), platform);
   if (!username) return undefined;
 
   const profileUrl =
@@ -2302,10 +2306,15 @@ function readSocialLimit(record: Record<string, unknown>, operation: SocialOpera
   return operation === "get_profile" || operation === "get_post" ? 1 : limit;
 }
 
-function readSocialHandle(record: Record<string, unknown>, key: string, label: string) {
+function readSocialHandle(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+  platform: SocialPlatform,
+) {
   const raw = readString(record, key).trim();
   if (!raw) throw new Error(`${label} username must not be empty.`);
-  const username = readUsernameFromUrl(raw) ?? raw.replace(/^@+/, "").replace(/\/+$/, "");
+  const username = readUsernameFromUrl(raw, platform) ?? raw.replace(/^@+/, "").replace(/\/+$/, "");
   if (!/^[A-Za-z0-9._]{1,100}$/.test(username)) {
     throw new Error(`${label} username must be a username, @handle, or profile URL.`);
   }
@@ -2358,10 +2367,11 @@ function tiktokProfileUrl(username: string) {
   return `https://www.tiktok.com/@${username.replace(/^@+/, "")}`;
 }
 
-function readUsernameFromUrl(value: string | undefined) {
+function readUsernameFromUrl(value: string | undefined, platform: SocialPlatform) {
   if (!value) return undefined;
   try {
     const url = new URL(value);
+    if (!isSocialProfileHost(url, platform)) return undefined;
     const segment = url.pathname.split("/").filter(Boolean)[0];
     return segment?.replace(/^@+/, "") || undefined;
   } catch {
@@ -2369,14 +2379,27 @@ function readUsernameFromUrl(value: string | undefined) {
   }
 }
 
-function encodeSocialJobId(job: SocialJobPayload) {
-  return Buffer.from(JSON.stringify(job), "utf8").toString("base64url");
+function isSocialProfileHost(url: URL, platform: SocialPlatform) {
+  const host = url.hostname.toLowerCase();
+  if (platform === "instagram") {
+    return host === "instagram.com" || host.endsWith(".instagram.com");
+  }
+  return host === "tiktok.com" || host.endsWith(".tiktok.com");
 }
 
-function decodeSocialJobId(jobId: string): SocialJobPayload {
+function encodeSocialJobId(job: SocialJobPayload, env: RunnerEnv) {
+  const body = Buffer.from(JSON.stringify(job), "utf8").toString("base64url");
+  return `${body}.${signSocialJobId(body, env)}`;
+}
+
+function decodeSocialJobId(jobId: string, env: RunnerEnv): SocialJobPayload {
   if (!jobId) throw new Error("social_get_job jobId must not be empty.");
   try {
-    const decoded = JSON.parse(Buffer.from(jobId, "base64url").toString("utf8")) as unknown;
+    const [body, signature] = jobId.split(".");
+    if (!body || !signature || !safeEqual(signature, signSocialJobId(body, env))) {
+      throw new Error("invalid social job signature");
+    }
+    const decoded = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
     if (!isRecord(decoded)) throw new Error("not a record");
     const provider = readOptionalString(decoded, "provider");
     const platform = readOptionalEnum(decoded, "platform", ["instagram", "tiktok"] as const);
@@ -2405,6 +2428,28 @@ function decodeSocialJobId(jobId: string): SocialJobPayload {
   } catch {
     throw new Error("social_get_job jobId is invalid.");
   }
+}
+
+function readSocialJobPlatformForContext(jobId: string): SocialPlatform | undefined {
+  const [body] = jobId.split(".");
+  if (!body) return undefined;
+  try {
+    const decoded = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as unknown;
+    if (!isRecord(decoded)) return undefined;
+    return readOptionalEnum(decoded, "platform", ["instagram", "tiktok"] as const);
+  } catch {
+    return undefined;
+  }
+}
+
+function signSocialJobId(body: string, env: RunnerEnv) {
+  return createHmac("sha256", env.streamTokenSecret).update(body).digest("base64url");
+}
+
+function safeEqual(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function apifyUsage(
@@ -2733,12 +2778,9 @@ function getSocialFailureContext(
 
 function getSocialJobFailureContext(args: unknown, error: unknown) {
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  let platform: SocialPlatform = "instagram";
-  try {
-    platform = decodeSocialJobId(readOptionalString(asRecord(args), "jobId") ?? "").platform;
-  } catch {
-    // Invalid job ids are reported as request validation below.
-  }
+  const platform =
+    readSocialJobPlatformForContext(readOptionalString(asRecord(args), "jobId") ?? "") ??
+    "instagram";
   if (message.includes("jobId")) {
     return {
       hosted_provider: platform,

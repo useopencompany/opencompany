@@ -1623,6 +1623,31 @@ describe("executeHostedTool (TikTok and Instagram)", () => {
     expect(result.usage).toMatchObject({ provider: "instagram", operation: "get_profile" });
   });
 
+  it("rejects profile URLs from the wrong social platform", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "instagram_get_profile",
+        args: { username: "https://www.tiktok.com/@openai" },
+        env: env(),
+        enabledTools: ["tool_help", "instagram_get_profile"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/Instagram username must be a username, @handle, or profile URL/);
+    await expect(
+      executeHostedTool({
+        name: "tiktok_get_profile",
+        args: { username: "https://example.com/openai" },
+        env: env(),
+        enabledTools: ["tool_help", "tiktok_get_profile"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/TikTok username must be a username, @handle, or profile URL/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("constructs a TikTok profile-post request and normalizes nested videos", async () => {
     const fetchMock = vi.fn(
       async () =>
@@ -1725,6 +1750,7 @@ describe("executeHostedTool (TikTok and Instagram)", () => {
       signal: new AbortController().signal,
     });
     const jobId = (started.output as { jobId: string }).jobId;
+    expect(jobId).toMatch(/^[^.]+\.[^.]+$/);
     const completed = await executeHostedTool({
       name: "social_get_job",
       args: { jobId },
@@ -1759,6 +1785,49 @@ describe("executeHostedTool (TikTok and Instagram)", () => {
         },
       ],
     });
+  });
+
+  it("rejects tampered async Apify job ids before polling", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: { id: "run_123" } }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const started = await executeHostedTool({
+      name: "instagram_get_comments",
+      args: { url: "https://www.instagram.com/reel/ABC123/", limit: 25, runMode: "async" },
+      env: env(),
+      enabledTools: ["tool_help", "instagram_get_comments", "social_get_job"],
+      signal: new AbortController().signal,
+    });
+    const jobId = (started.output as { jobId: string }).jobId;
+    const [, signature] = jobId.split(".");
+    const forgedBody = Buffer.from(
+      JSON.stringify({
+        provider: "apify",
+        platform: "instagram",
+        operation: "get_comments",
+        runId: "run_forged",
+        limit: 25,
+        sourceUrl: "https://www.instagram.com/reel/ABC123/",
+      }),
+      "utf8",
+    ).toString("base64url");
+
+    await expect(
+      executeHostedTool({
+        name: "social_get_job",
+        args: { jobId: `${forgedBody}.${signature}` },
+        env: env(),
+        enabledTools: ["tool_help", "social_get_job"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/social_get_job jobId is invalid/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
