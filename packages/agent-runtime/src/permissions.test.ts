@@ -77,6 +77,23 @@ describe("classifyMcpTool", () => {
       providerKey: "linear",
       group: "modify",
     });
+    // PostHog tool names are hyphenated and match the static map directly.
+    expect(classifyTool("posthog__get-sql-insight")).toEqual({
+      providerKey: "posthog",
+      group: "read",
+    });
+    expect(classifyTool("posthog__create-feature-flag")).toEqual({
+      providerKey: "posthog",
+      group: "post",
+    });
+    expect(classifyTool("posthog__update-feature-flag")).toEqual({
+      providerKey: "posthog",
+      group: "modify",
+    });
+    expect(classifyTool("posthog__delete-feature-flag")).toEqual({
+      providerKey: "posthog",
+      group: "admin",
+    });
   });
 
   it("falls back to the verb heuristic for unmapped MCP tools", () => {
