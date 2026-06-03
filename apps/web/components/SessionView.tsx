@@ -1939,7 +1939,7 @@ function QuestionCard({ toolCall }: { toolCall: RuntimeToolCall }) {
 function QuestionPendingHint({ question }: { question: NonNullable<RuntimeToolCall["question"]> }) {
   const questions = question.questions;
   return (
-    <div className="ml-6 mt-1 rounded-lg border border-border bg-surface-raised/70 px-3 py-2">
+    <div className="mt-1 rounded-lg border border-border bg-surface-raised/70 px-3 py-2">
       <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
         <MessageCircleQuestion size={11} strokeWidth={1.9} />
         {questions.length > 1 ? `${questions.length} questions` : "A quick question"}
@@ -2199,13 +2199,7 @@ function QuestionComposer({
   );
 }
 
-function QuestionSelectionMark({
-  selected,
-  multiple,
-}: {
-  selected: boolean;
-  multiple: boolean;
-}) {
+function QuestionSelectionMark({ selected, multiple }: { selected: boolean; multiple: boolean }) {
   return (
     <span
       className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center border text-surface ${
@@ -2329,7 +2323,7 @@ function QuestionSummary({ question }: { question: NonNullable<RuntimeToolCall["
         : "Question skipped";
 
   return (
-    <div className="ml-6 mt-1 rounded-lg border border-border bg-surface-muted/40 px-3 py-2">
+    <div className="mt-1 rounded-lg border border-border bg-surface-muted/40 px-3 py-2">
       <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-ink-subtle">
         <MessageCircleQuestion size={11} strokeWidth={1.9} />
         {heading}
