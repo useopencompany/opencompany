@@ -83,6 +83,36 @@ type NormalizedXUser = {
 };
 
 type SupadataSocialPlatform = "tiktok" | "instagram";
+type SocialPlatform = SupadataSocialPlatform;
+type SocialOperation =
+  | "get_profile"
+  | "list_profile_posts"
+  | "get_post"
+  | "get_comments"
+  | "search_profiles"
+  | "search";
+type SocialRunMode = "sync" | "async";
+
+type SocialProviderRequest = {
+  platform: SocialPlatform;
+  operation: SocialOperation;
+  actorId: string;
+  input: Record<string, unknown>;
+  limit: number;
+  sourceUrl?: string | undefined;
+  query?: string | undefined;
+  runMode: SocialRunMode;
+};
+
+type SocialJobPayload = {
+  provider: "apify";
+  platform: SocialPlatform;
+  operation: SocialOperation;
+  runId: string;
+  limit: number;
+  sourceUrl?: string | undefined;
+  query?: string | undefined;
+};
 
 // Estimated Supadata (YouTube) costs for internal usage tracking; persisted raw usage marks them
 // estimated. Supadata bills in credits, not per-call USD, so these are rough per-operation values.
@@ -98,6 +128,24 @@ const SUPADATA_UNIVERSAL_OPERATION_COST_USD_MICROS: Record<string, number> = {
   get_metadata: 1_000,
   get_transcript: 4_000,
   poll_transcript: 0,
+};
+
+const APIFY_ACTORS = {
+  instagramProfile: "instagram-scraper/instagram-profile-scraper",
+  instagramApi: "apify/instagram-api-scraper",
+  tiktokProfile: "clockworks/tiktok-profile-scraper",
+  tiktokScraper: "clockworks/tiktok-scraper",
+  tiktokComments: "clockworks/tiktok-comments-scraper",
+} as const;
+
+const APIFY_OPERATION_COST_USD_MICROS: Record<SocialOperation | "poll_job", number> = {
+  get_profile: 2_000,
+  list_profile_posts: 8_000,
+  get_post: 3_000,
+  get_comments: 8_000,
+  search_profiles: 6_000,
+  search: 6_000,
+  poll_job: 0,
 };
 
 // Estimated X API read costs for internal usage tracking; persisted raw usage marks them estimated.
@@ -241,6 +289,37 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
       getYoutubeFailureContext("list_channel_videos", args, error),
     validateEnvironment: (env) => validateYoutubeEnvironment(env, "youtube_list_channel_videos"),
   },
+  tiktok_get_profile: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("tiktok", "get_profile", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("tiktok", "get_profile", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "tiktok_get_profile"),
+  },
+  tiktok_list_profile_posts: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("tiktok", "list_profile_posts", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("tiktok", "list_profile_posts", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "tiktok_list_profile_posts"),
+  },
+  tiktok_get_video: {
+    execute: ({ args, env, signal }) => executeSocialTool("tiktok", "get_post", args, env, signal),
+    failureContext: ({ args, error }) => getSocialFailureContext("tiktok", "get_post", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "tiktok_get_video"),
+  },
+  tiktok_get_comments: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("tiktok", "get_comments", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("tiktok", "get_comments", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "tiktok_get_comments"),
+  },
+  tiktok_search: {
+    execute: ({ args, env, signal }) => executeSocialTool("tiktok", "search", args, env, signal),
+    failureContext: ({ args, error }) => getSocialFailureContext("tiktok", "search", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "tiktok_search"),
+  },
   tiktok_get_metadata: {
     execute: ({ args, env, signal }) =>
       executeSupadataSocialGetMetadata("tiktok", args, env, signal),
@@ -269,6 +348,46 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
       getSupadataSocialFailureContext("instagram", "get_transcript", args, error),
     validateEnvironment: (env) => validateYoutubeEnvironment(env, "instagram_get_transcript"),
   },
+  instagram_get_profile: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("instagram", "get_profile", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("instagram", "get_profile", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "instagram_get_profile"),
+  },
+  instagram_list_profile_posts: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("instagram", "list_profile_posts", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("instagram", "list_profile_posts", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "instagram_list_profile_posts"),
+  },
+  instagram_get_post: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("instagram", "get_post", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("instagram", "get_post", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "instagram_get_post"),
+  },
+  instagram_get_comments: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("instagram", "get_comments", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("instagram", "get_comments", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "instagram_get_comments"),
+  },
+  instagram_search_profiles: {
+    execute: ({ args, env, signal }) =>
+      executeSocialTool("instagram", "search_profiles", args, env, signal),
+    failureContext: ({ args, error }) =>
+      getSocialFailureContext("instagram", "search_profiles", args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "instagram_search_profiles"),
+  },
+  social_get_job: {
+    execute: ({ args, env, signal }) => executeSocialGetJob(args, env, signal),
+    failureContext: ({ args, error }) => getSocialJobFailureContext(args, error),
+    validateEnvironment: (env) => validateApifyEnvironment(env, "social_get_job"),
+  },
   web_fetch: {
     execute: ({ args, signal }) => executeWebFetch(args, signal),
     failureContext: () => ({
@@ -294,6 +413,15 @@ function validateXEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
     throw new MissingEnvError(
       "X_API_BEARER_TOKEN",
       `The ${toolName} tool is enabled, but X_API_BEARER_TOKEN is not configured.`,
+    );
+  }
+}
+
+function validateApifyEnvironment(env: RunnerEnv, toolName: RuntimeToolName) {
+  if (!env.apifyApiToken) {
+    throw new MissingEnvError(
+      "APIFY_API_TOKEN",
+      `The ${toolName} tool is enabled, but APIFY_API_TOKEN is not configured.`,
     );
   }
 }
@@ -1388,6 +1516,285 @@ async function executeYoutubeListChannelVideos(
   };
 }
 
+async function executeSocialTool(
+  platform: SocialPlatform,
+  operation: SocialOperation,
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const request = buildSocialProviderRequest(platform, operation, args);
+  if (request.runMode === "async") {
+    const runId = await startApifyRun(request, env, signal);
+    return {
+      output: {
+        status: "processing",
+        jobId: encodeSocialJobId({
+          provider: "apify",
+          platform,
+          operation,
+          runId,
+          limit: request.limit,
+          sourceUrl: request.sourceUrl,
+          query: request.query,
+        }),
+      },
+      usage: apifyUsage(platform, operation, request, { asyncStarted: true }),
+    };
+  }
+
+  const items = await runApifyActorSync(request, env, signal);
+  return {
+    output: normalizeSocialOutput(request, items),
+    usage: apifyUsage(platform, operation, request, { itemsReturned: items.length }),
+  };
+}
+
+async function executeSocialGetJob(
+  args: unknown,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<HostedToolResult> {
+  const jobId = readString(asRecord(args), "jobId").trim();
+  const job = decodeSocialJobId(jobId);
+  const body = await apifyGet(
+    `/actor-runs/${encodeURIComponent(job.runId)}`,
+    env,
+    signal,
+    "poll_job",
+  );
+  if (!isRecord(body) || !isRecord(body.data)) {
+    throw new Error("Apify poll_job returned an unexpected response shape.");
+  }
+
+  const status = readOptionalString(body.data, "status") ?? "UNKNOWN";
+  if (!["SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"].includes(status)) {
+    return {
+      output: { status: "processing", providerStatus: status, jobId },
+      usage: apifyUsage(job.platform, "poll_job", undefined, { providerStatus: status }),
+    };
+  }
+  if (status !== "SUCCEEDED") {
+    const message =
+      readOptionalString(body.data, "statusMessage") ??
+      readOptionalString(body.data, "errorMessage") ??
+      status;
+    throw new Error(`Apify poll_job failed (${status}): ${message}`);
+  }
+
+  const items = await apifyGet(
+    `/actor-runs/${encodeURIComponent(job.runId)}/dataset/items`,
+    env,
+    signal,
+    "poll_job",
+    { clean: "true", format: "json", limit: String(job.limit) },
+  );
+  if (!Array.isArray(items)) {
+    throw new Error("Apify poll_job returned an unexpected dataset shape.");
+  }
+
+  const request: SocialProviderRequest = {
+    platform: job.platform,
+    operation: job.operation,
+    actorId: "apify/job-result",
+    input: {},
+    limit: job.limit,
+    sourceUrl: job.sourceUrl,
+    query: job.query,
+    runMode: "async",
+  };
+  return {
+    output: { status: "completed", ...normalizeSocialOutput(request, items) },
+    usage: apifyUsage(job.platform, "poll_job", request, {
+      providerStatus: status,
+      itemsReturned: items.length,
+    }),
+  };
+}
+
+function buildSocialProviderRequest(
+  platform: SocialPlatform,
+  operation: SocialOperation,
+  args: unknown,
+): SocialProviderRequest {
+  const record = asRecord(args);
+  const limit = readSocialLimit(record, operation);
+  const runMode = readOptionalEnum(record, "runMode", ["sync", "async"] as const) ?? "sync";
+
+  if (platform === "instagram") {
+    return buildInstagramProviderRequest(operation, record, limit, runMode);
+  }
+  return buildTikTokProviderRequest(operation, record, limit, runMode);
+}
+
+function buildInstagramProviderRequest(
+  operation: SocialOperation,
+  record: Record<string, unknown>,
+  limit: number,
+  runMode: SocialRunMode,
+): SocialProviderRequest {
+  if (operation === "get_profile") {
+    const username = readSocialHandle(record, "username", "Instagram");
+    return {
+      platform: "instagram",
+      operation,
+      actorId: APIFY_ACTORS.instagramProfile,
+      input: { instagramUsernames: [username] },
+      limit: 1,
+      sourceUrl: instagramProfileUrl(username),
+      runMode,
+    };
+  }
+
+  if (operation === "list_profile_posts") {
+    const username = readSocialHandle(record, "username", "Instagram");
+    const sourceUrl = instagramProfileUrl(username);
+    return {
+      platform: "instagram",
+      operation,
+      actorId: APIFY_ACTORS.instagramApi,
+      input: {
+        directUrls: [sourceUrl],
+        resultsType: "posts",
+        resultsLimit: limit,
+        maxResults: limit,
+      },
+      limit,
+      sourceUrl,
+      runMode,
+    };
+  }
+
+  if (operation === "get_post") {
+    const sourceUrl = readSocialUrl(record, "url", "Instagram", isInstagramMediaUrl);
+    return {
+      platform: "instagram",
+      operation,
+      actorId: APIFY_ACTORS.instagramApi,
+      input: { directUrls: [sourceUrl], resultsType: "details", resultsLimit: 1, maxResults: 1 },
+      limit: 1,
+      sourceUrl,
+      runMode,
+    };
+  }
+
+  if (operation === "get_comments") {
+    const sourceUrl = readSocialUrl(record, "url", "Instagram", isInstagramMediaUrl);
+    return {
+      platform: "instagram",
+      operation,
+      actorId: APIFY_ACTORS.instagramApi,
+      input: {
+        directUrls: [sourceUrl],
+        resultsType: "comments",
+        resultsLimit: limit,
+        maxResults: limit,
+        maxComments: limit,
+        maxReplies: 3,
+      },
+      limit,
+      sourceUrl,
+      runMode,
+    };
+  }
+
+  if (operation === "search_profiles") {
+    const query = readSocialQuery(record);
+    return {
+      platform: "instagram",
+      operation,
+      actorId: APIFY_ACTORS.instagramApi,
+      input: {
+        search: query,
+        searchType: "user",
+        resultsType: "search",
+        resultsLimit: limit,
+        maxResults: limit,
+      },
+      limit,
+      query,
+      runMode,
+    };
+  }
+
+  throw new Error(`Instagram ${operation} is not supported.`);
+}
+
+function buildTikTokProviderRequest(
+  operation: SocialOperation,
+  record: Record<string, unknown>,
+  limit: number,
+  runMode: SocialRunMode,
+): SocialProviderRequest {
+  if (operation === "get_profile") {
+    const username = readSocialHandle(record, "username", "TikTok");
+    return {
+      platform: "tiktok",
+      operation,
+      actorId: APIFY_ACTORS.tiktokProfile,
+      input: { profiles: [username], resultsPerPage: 1, shouldDownloadVideos: false },
+      limit: 1,
+      sourceUrl: tiktokProfileUrl(username),
+      runMode,
+    };
+  }
+
+  if (operation === "list_profile_posts") {
+    const username = readSocialHandle(record, "username", "TikTok");
+    const sourceUrl = tiktokProfileUrl(username);
+    return {
+      platform: "tiktok",
+      operation,
+      actorId: APIFY_ACTORS.tiktokProfile,
+      input: { profiles: [username], resultsPerPage: limit },
+      limit,
+      sourceUrl,
+      runMode,
+    };
+  }
+
+  if (operation === "get_post") {
+    const sourceUrl = readSocialUrl(record, "url", "TikTok", isTikTokVideoUrl);
+    return {
+      platform: "tiktok",
+      operation,
+      actorId: APIFY_ACTORS.tiktokScraper,
+      input: { postURLs: [sourceUrl], resultsPerPage: 1 },
+      limit: 1,
+      sourceUrl,
+      runMode,
+    };
+  }
+
+  if (operation === "get_comments") {
+    const sourceUrl = readSocialUrl(record, "url", "TikTok", isTikTokVideoUrl);
+    return {
+      platform: "tiktok",
+      operation,
+      actorId: APIFY_ACTORS.tiktokComments,
+      input: { postURLs: [sourceUrl], commentsPerPost: limit, maxComments: limit },
+      limit,
+      sourceUrl,
+      runMode,
+    };
+  }
+
+  if (operation === "search") {
+    const query = readSocialQuery(record);
+    return {
+      platform: "tiktok",
+      operation,
+      actorId: APIFY_ACTORS.tiktokScraper,
+      input: { searchQueries: [query], resultsPerPage: limit },
+      limit,
+      query,
+      runMode,
+    };
+  }
+
+  throw new Error(`TikTok ${operation} is not supported.`);
+}
+
 async function executeSupadataSocialGetMetadata(
   platform: SupadataSocialPlatform,
   args: unknown,
@@ -1492,6 +1899,531 @@ function supadataUniversalUsage(
     operation,
     costUsdMicros: SUPADATA_UNIVERSAL_OPERATION_COST_USD_MICROS[operation] ?? 1_000,
     rawUsage: { estimated: true, provider: "supadata", operation },
+  };
+}
+
+async function runApifyActorSync(
+  request: SocialProviderRequest,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<unknown[]> {
+  const body = await apifyPost(
+    `/acts/${apifyActorPath(request.actorId)}/run-sync-get-dataset-items`,
+    request.input,
+    env,
+    signal,
+    request.operation,
+    { clean: "true", format: "json", limit: String(request.limit) },
+  );
+  if (!Array.isArray(body)) {
+    throw new Error(`Apify ${request.operation} returned an unexpected dataset shape.`);
+  }
+  return body.slice(0, request.limit);
+}
+
+async function startApifyRun(
+  request: SocialProviderRequest,
+  env: RunnerEnv,
+  signal: AbortSignal,
+): Promise<string> {
+  const body = await apifyPost(
+    `/acts/${apifyActorPath(request.actorId)}/runs`,
+    request.input,
+    env,
+    signal,
+    request.operation,
+  );
+  if (!isRecord(body) || !isRecord(body.data)) {
+    throw new Error(`Apify ${request.operation} returned an unexpected response shape.`);
+  }
+  const runId = readOptionalString(body.data, "id");
+  if (!runId) {
+    throw new Error(`Apify ${request.operation} did not return a run id.`);
+  }
+  return runId;
+}
+
+async function apifyPost(
+  path: string,
+  input: Record<string, unknown>,
+  env: RunnerEnv,
+  signal: AbortSignal,
+  operation: string,
+  params: Record<string, string | undefined> = {},
+) {
+  const response = await fetch(apifyUrl(path, env, params), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(input),
+    signal,
+  });
+  const body = await readProviderJsonResponse(response, "Apify", operation);
+  if (!response.ok) {
+    const message = providerErrorMessage(body) ?? response.statusText;
+    throw new Error(`Apify ${operation} failed (${response.status}): ${message}`);
+  }
+  return body;
+}
+
+async function apifyGet(
+  path: string,
+  env: RunnerEnv,
+  signal: AbortSignal,
+  operation: string,
+  params: Record<string, string | undefined> = {},
+) {
+  const response = await fetch(apifyUrl(path, env, params), {
+    headers: { Accept: "application/json" },
+    signal,
+  });
+  const body = await readProviderJsonResponse(response, "Apify", operation);
+  if (!response.ok) {
+    const message = providerErrorMessage(body) ?? response.statusText;
+    throw new Error(`Apify ${operation} failed (${response.status}): ${message}`);
+  }
+  return body;
+}
+
+function apifyUrl(path: string, env: RunnerEnv, params: Record<string, string | undefined> = {}) {
+  const token = requireApifyApiToken(env);
+  const url = new URL(`https://api.apify.com/v2${path}`);
+  url.searchParams.set("token", token);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") url.searchParams.set(key, value);
+  }
+  return url;
+}
+
+function apifyActorPath(actorId: string) {
+  return encodeURIComponent(actorId.replace("/", "~"));
+}
+
+function requireApifyApiToken(env: RunnerEnv) {
+  if (!env.apifyApiToken) {
+    throw new MissingEnvError(
+      "APIFY_API_TOKEN",
+      "APIFY_API_TOKEN is required for social scraping.",
+    );
+  }
+  return env.apifyApiToken;
+}
+
+function normalizeSocialOutput(request: SocialProviderRequest, items: unknown[]) {
+  const fetchedAt = new Date().toISOString();
+  const base = {
+    sourceProvider: "apify",
+    sourceUrl: request.sourceUrl,
+    fetchedAt,
+  };
+
+  if (request.operation === "get_profile") {
+    return {
+      ...base,
+      profile: normalizeSocialProfile(request.platform, items[0], base),
+    };
+  }
+
+  if (request.operation === "list_profile_posts") {
+    const nestedPosts = items.flatMap((item) => readNestedSocialPosts(item));
+    const sourceItems = nestedPosts.length > 0 ? nestedPosts : items;
+    return {
+      ...base,
+      posts: sourceItems
+        .flatMap((item) => {
+          const post = normalizeSocialPost(request.platform, item, base);
+          return post ? [post] : [];
+        })
+        .slice(0, request.limit),
+    };
+  }
+
+  if (request.operation === "get_post") {
+    return {
+      ...base,
+      post: normalizeSocialPost(request.platform, items[0], base),
+    };
+  }
+
+  if (request.operation === "get_comments") {
+    return {
+      ...base,
+      comments: items
+        .flatMap((item) => {
+          const comment = normalizeSocialComment(request.platform, item, base);
+          return comment ? [comment] : [];
+        })
+        .slice(0, request.limit),
+    };
+  }
+
+  if (request.operation === "search_profiles") {
+    return {
+      ...base,
+      query: request.query,
+      profiles: items
+        .flatMap((item) => {
+          const profile = normalizeSocialProfile(request.platform, item, base);
+          return profile ? [profile] : [];
+        })
+        .slice(0, request.limit),
+    };
+  }
+
+  return {
+    ...base,
+    query: request.query,
+    posts: items
+      .flatMap((item) => {
+        const post = normalizeSocialPost(request.platform, item, base);
+        return post ? [post] : [];
+      })
+      .slice(0, request.limit),
+  };
+}
+
+function normalizeSocialProfile(
+  platform: SocialPlatform,
+  value: unknown,
+  source: { sourceProvider: string; sourceUrl?: string | undefined; fetchedAt: string },
+) {
+  if (!isRecord(value)) return undefined;
+  const username =
+    readFirstString(value, ["username", "userName", "uniqueId", "handle"]) ??
+    readFirstString(asRecord(value.authorMeta), ["name"]) ??
+    readUsernameFromUrl(readFirstString(value, ["url", "profile_url", "profileUrl"]));
+  if (!username) return undefined;
+
+  const profileUrl =
+    readFirstString(value, ["url", "profile_url", "profileUrl"]) ??
+    (platform === "instagram" ? instagramProfileUrl(username) : tiktokProfileUrl(username));
+  const bioLinks = readUrlArray(value.bio_links) ?? readUrlArray(value.bioLinks);
+  const externalUrl = readFirstString(value, ["external_url", "externalUrl", "website", "bioLink"]);
+
+  return omitUndefined({
+    platform,
+    id: stringifyId(readFirstValue(value, ["id", "fbid", "eimu_id", "secUid", "sec_uid"])),
+    username,
+    displayName: readFirstString(value, [
+      "full_name",
+      "fullName",
+      "displayName",
+      "nickname",
+      "name",
+    ]),
+    url: profileUrl,
+    bio:
+      truncate(
+        readFirstString(value, ["biography", "bio", "signature", "description"]) ?? "",
+        2000,
+      ) || undefined,
+    verified: readFirstBoolean(value, ["is_verified", "isVerified", "verified"]),
+    avatarUrl: readFirstString(value, [
+      "profile_pic_url_hd",
+      "profile_pic_url",
+      "profilePicUrlHD",
+      "profilePicUrl",
+      "avatarMedium",
+      "avatarThumb",
+      "avatarUrl",
+    ]),
+    externalUrls: nonEmptyArray([...(externalUrl ? [externalUrl] : []), ...(bioLinks ?? [])]),
+    stats: omitUndefined({
+      followers: readFirstNumber(value, ["followers", "followersCount", "followerCount", "fans"]),
+      following: readFirstNumber(value, ["following", "followingCount", "followingsCount"]),
+      posts: readFirstNumber(value, ["post_count", "postCount", "postsCount", "videoCount"]),
+      likes: readFirstNumber(value, ["heart", "heartCount", "likesCount", "totalLikes"]),
+    }),
+    sourceProvider: source.sourceProvider,
+    sourceUrl: source.sourceUrl ?? profileUrl,
+    fetchedAt: source.fetchedAt,
+  });
+}
+
+function normalizeSocialPost(
+  platform: SocialPlatform,
+  value: unknown,
+  source: { sourceProvider: string; sourceUrl?: string | undefined; fetchedAt: string },
+) {
+  if (!isRecord(value)) return undefined;
+  const url =
+    readFirstString(value, ["url", "webVideoUrl", "videoUrl", "postUrl"]) ??
+    (platform === "instagram" && readFirstString(value, ["shortCode", "shortcode"])
+      ? `https://www.instagram.com/p/${readFirstString(value, ["shortCode", "shortcode"])}/`
+      : undefined);
+  const id = stringifyId(readFirstValue(value, ["id", "shortCode", "shortcode", "awemeId"]));
+  if (!id && !url) return undefined;
+
+  const caption =
+    readFirstString(value, ["caption", "description", "text", "title"]) ??
+    readFirstString(asRecord(value.authorMeta), ["signature"]);
+  const hashtags = mergeUniqueStrings(
+    readStringList(value.hashtags),
+    caption ? Array.from(caption.matchAll(/#([\p{L}\p{N}_]+)/gu), (match) => match[1] ?? "") : [],
+  );
+  const mentions = mergeUniqueStrings(
+    readStringList(value.mentions),
+    caption ? Array.from(caption.matchAll(/@([\p{L}\p{N}_.]+)/gu), (match) => match[1] ?? "") : [],
+  );
+
+  return omitUndefined({
+    platform,
+    id,
+    url,
+    type: normalizeSocialPostType(readFirstString(value, ["type", "productType", "mediaType"])),
+    caption: caption ? truncate(caption, 4000) : undefined,
+    author: normalizeSocialAuthor(platform, value),
+    createdAt: normalizeSocialTimestamp(
+      readFirstValue(value, [
+        "createdAt",
+        "timestamp",
+        "taken_at_timestamp",
+        "takenAtTimestamp",
+        "createTime",
+        "createTimeISO",
+      ]),
+    ),
+    stats: omitUndefined({
+      views: readFirstNumber(value, ["playCount", "viewCount", "videoViewCount"]),
+      likes: readFirstNumber(value, ["likesCount", "likeCount", "diggCount"]),
+      comments: readFirstNumber(value, ["commentsCount", "commentCount"]),
+      shares: readFirstNumber(value, ["sharesCount", "shareCount"]),
+      saves: readFirstNumber(value, ["saveCount", "collectCount"]),
+    }),
+    media: omitUndefined({
+      thumbnailUrl: readFirstString(value, [
+        "displayUrl",
+        "thumbnailUrl",
+        "coverUrl",
+        "videoMeta.coverUrl",
+      ]),
+      videoUrl: readFirstString(value, ["videoUrl", "webVideoUrl"]),
+      durationSeconds: readFirstNumber(value, ["duration", "videoMeta.duration"]),
+    }),
+    hashtags: nonEmptyArray(hashtags),
+    mentions: nonEmptyArray(mentions),
+    sourceProvider: source.sourceProvider,
+    sourceUrl: source.sourceUrl ?? url,
+    fetchedAt: source.fetchedAt,
+  });
+}
+
+function normalizeSocialComment(
+  platform: SocialPlatform,
+  value: unknown,
+  source: { sourceProvider: string; sourceUrl?: string | undefined; fetchedAt: string },
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = stringifyId(readFirstValue(value, ["id", "cid", "commentId"]));
+  const text = readFirstString(value, ["text", "comment", "content"]);
+  if (!id && !text) return undefined;
+  const replies = Array.isArray(value.replies)
+    ? value.replies.flatMap((reply) => {
+        const normalized = normalizeSocialComment(platform, reply, source);
+        return normalized ? [normalized] : [];
+      })
+    : undefined;
+
+  return omitUndefined({
+    id,
+    text: text ? truncate(text, 2000) : undefined,
+    createdAt: normalizeSocialTimestamp(
+      readFirstValue(value, ["created_at", "createdAt", "createTime"]),
+    ),
+    author: normalizeSocialAuthor(platform, value),
+    stats: omitUndefined({
+      likes: readFirstNumber(value, ["likesCount", "likeCount", "diggCount"]),
+      replies: readFirstNumber(value, ["repliesCount", "replyCount"]),
+    }),
+    replies: nonEmptyArray(replies ?? []),
+    sourceProvider: source.sourceProvider,
+    sourceUrl: source.sourceUrl,
+    fetchedAt: source.fetchedAt,
+  });
+}
+
+function normalizeSocialAuthor(platform: SocialPlatform, value: Record<string, unknown>) {
+  const owner = asRecord(value.owner);
+  const author = asRecord(value.author);
+  const authorMeta = asRecord(value.authorMeta);
+  const source =
+    Object.keys(owner).length > 0
+      ? owner
+      : Object.keys(author).length > 0
+        ? author
+        : Object.keys(authorMeta).length > 0
+          ? authorMeta
+          : value;
+  const username =
+    readFirstString(source, ["username", "userName", "name", "uniqueId"]) ??
+    readFirstString(value, ["ownerUsername", "authorUsername"]);
+  return omitUndefined({
+    id: stringifyId(readFirstValue(source, ["id", "secUid", "sec_uid"])),
+    username,
+    displayName: readFirstString(source, ["full_name", "fullName", "displayName", "nickname"]),
+    url: username
+      ? platform === "instagram"
+        ? instagramProfileUrl(username)
+        : tiktokProfileUrl(username)
+      : undefined,
+    verified: readFirstBoolean(source, ["is_verified", "isVerified", "verified"]),
+    avatarUrl: readFirstString(source, [
+      "profile_pic_url",
+      "profilePicUrl",
+      "avatarUrl",
+      "avatarMedium",
+      "avatarThumb",
+    ]),
+  });
+}
+
+function readNestedSocialPosts(value: unknown) {
+  if (!isRecord(value)) return [];
+  const candidates = [
+    value.latest_posts,
+    value.latestPosts,
+    value.posts,
+    value.videos,
+    value.items,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+  return [];
+}
+
+function readSocialLimit(record: Record<string, unknown>, operation: SocialOperation) {
+  const fallback =
+    operation === "get_comments"
+      ? 25
+      : operation === "search_profiles" || operation === "search"
+        ? 10
+        : 12;
+  const limit = readBoundedOptionalInteger(record, "limit", 1, 50) ?? fallback;
+  return operation === "get_profile" || operation === "get_post" ? 1 : limit;
+}
+
+function readSocialHandle(record: Record<string, unknown>, key: string, label: string) {
+  const raw = readString(record, key).trim();
+  if (!raw) throw new Error(`${label} username must not be empty.`);
+  const username = readUsernameFromUrl(raw) ?? raw.replace(/^@+/, "").replace(/\/+$/, "");
+  if (!/^[A-Za-z0-9._]{1,100}$/.test(username)) {
+    throw new Error(`${label} username must be a username, @handle, or profile URL.`);
+  }
+  return username;
+}
+
+function readSocialQuery(record: Record<string, unknown>) {
+  const query = readString(record, "query").trim();
+  if (!query) throw new Error("Social search query must not be empty.");
+  return query;
+}
+
+function readSocialUrl(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+  predicate: (url: URL) => boolean,
+) {
+  const raw = readString(record, key).trim();
+  if (!raw) throw new Error(`${label} URL must not be empty.`);
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${label} URL must be an absolute URL.`);
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !predicate(url)) {
+    throw new Error(`${label} URL must be a public direct media URL.`);
+  }
+  return url.toString();
+}
+
+function isInstagramMediaUrl(url: URL) {
+  const host = url.hostname.toLowerCase();
+  if (!(host === "instagram.com" || host.endsWith(".instagram.com"))) return false;
+  return /^\/(p|reel|tv)\//i.test(url.pathname);
+}
+
+function isTikTokVideoUrl(url: URL) {
+  const host = url.hostname.toLowerCase();
+  if (!(host === "tiktok.com" || host.endsWith(".tiktok.com"))) return false;
+  return /\/video\/\d+/i.test(url.pathname);
+}
+
+function instagramProfileUrl(username: string) {
+  return `https://www.instagram.com/${username.replace(/^@+/, "")}/`;
+}
+
+function tiktokProfileUrl(username: string) {
+  return `https://www.tiktok.com/@${username.replace(/^@+/, "")}`;
+}
+
+function readUsernameFromUrl(value: string | undefined) {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const segment = url.pathname.split("/").filter(Boolean)[0];
+    return segment?.replace(/^@+/, "") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function encodeSocialJobId(job: SocialJobPayload) {
+  return Buffer.from(JSON.stringify(job), "utf8").toString("base64url");
+}
+
+function decodeSocialJobId(jobId: string): SocialJobPayload {
+  if (!jobId) throw new Error("social_get_job jobId must not be empty.");
+  try {
+    const decoded = JSON.parse(Buffer.from(jobId, "base64url").toString("utf8")) as unknown;
+    if (!isRecord(decoded)) throw new Error("not a record");
+    const provider = readOptionalString(decoded, "provider");
+    const platform = readOptionalEnum(decoded, "platform", ["instagram", "tiktok"] as const);
+    const operation = readOptionalEnum(decoded, "operation", [
+      "get_profile",
+      "list_profile_posts",
+      "get_post",
+      "get_comments",
+      "search_profiles",
+      "search",
+    ] as const);
+    const runId = readOptionalString(decoded, "runId");
+    const limit = readBoundedOptionalInteger(decoded, "limit", 1, 50);
+    if (provider !== "apify" || !platform || !operation || !runId || !limit) {
+      throw new Error("invalid social job payload");
+    }
+    return {
+      provider,
+      platform,
+      operation,
+      runId,
+      limit,
+      sourceUrl: readOptionalString(decoded, "sourceUrl"),
+      query: readOptionalString(decoded, "query"),
+    };
+  } catch {
+    throw new Error("social_get_job jobId is invalid.");
+  }
+}
+
+function apifyUsage(
+  platform: SocialPlatform,
+  operation: SocialOperation | "poll_job",
+  request?: SocialProviderRequest,
+  extra: Record<string, unknown> = {},
+): HostedToolUsage {
+  return {
+    provider: platform,
+    operation,
+    costUsdMicros: APIFY_OPERATION_COST_USD_MICROS[operation] ?? 1_000,
+    rawUsage: omitUndefined({
+      estimated: true,
+      provider: "apify",
+      actorId: request?.actorId,
+      operation,
+      ...extra,
+    }),
   };
 }
 
@@ -1737,6 +2669,88 @@ function getSupadataSocialFailureContext(
   return context;
 }
 
+function getSocialFailureContext(
+  platform: SocialPlatform,
+  operation: SocialOperation | "poll_job",
+  _args: unknown,
+  error: unknown,
+) {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const context: Record<string, unknown> = {
+    hosted_provider: platform,
+    hosted_operation: operation,
+    social_provider: "apify",
+    tool_error_stage: "unknown",
+    tool_error_code: "hosted_tool_failed",
+  };
+
+  if (message.includes("APIFY_API_TOKEN")) {
+    return {
+      ...context,
+      tool_error_stage: "configuration",
+      tool_error_code: `${platform}_missing_apify_api_token`,
+    };
+  }
+
+  if (
+    message.includes("username") ||
+    message.includes("URL") ||
+    message.includes("query") ||
+    message.includes("not supported")
+  ) {
+    return {
+      ...context,
+      tool_error_stage: "request_validation",
+      tool_error_code: `${platform}_invalid_request`,
+    };
+  }
+
+  if (message.startsWith("Apify") && message.includes("failed (")) {
+    const status = readHttpStatusFromMessage(message);
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code:
+        status.provider_status === 404
+          ? `${platform}_not_found`
+          : status.provider_status === 429
+            ? `${platform}_rate_limited`
+            : `${platform}_http_error`,
+      ...status,
+    };
+  }
+
+  if (message.includes("unexpected") || message.includes("non-JSON response")) {
+    return {
+      ...context,
+      tool_error_stage: "provider_response",
+      tool_error_code: `${platform}_malformed_response`,
+    };
+  }
+
+  return context;
+}
+
+function getSocialJobFailureContext(args: unknown, error: unknown) {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  let platform: SocialPlatform = "instagram";
+  try {
+    platform = decodeSocialJobId(readOptionalString(asRecord(args), "jobId") ?? "").platform;
+  } catch {
+    // Invalid job ids are reported as request validation below.
+  }
+  if (message.includes("jobId")) {
+    return {
+      hosted_provider: platform,
+      hosted_operation: "poll_job",
+      social_provider: "apify",
+      tool_error_stage: "request_validation",
+      tool_error_code: "social_invalid_job_id",
+    };
+  }
+  return getSocialFailureContext(platform, "poll_job", args, error);
+}
+
 function assertSupadataPlatformUrl(platform: SupadataSocialPlatform, rawUrl: string) {
   if (!rawUrl) {
     throw new Error(`${supadataPlatformLabel(platform)} URL must not be empty.`);
@@ -1765,10 +2779,39 @@ function assertSupadataPlatformUrl(platform: SupadataSocialPlatform, rawUrl: str
       `${supadataPlatformLabel(platform)} URL must be a public ${supadataPlatformLabel(platform)} URL.`,
     );
   }
+  assertSupadataMediaUrl(platform, url);
 }
 
 function supadataPlatformLabel(platform: SupadataSocialPlatform) {
   return platform === "tiktok" ? "TikTok" : "Instagram";
+}
+
+function assertSupadataMediaUrl(platform: SupadataSocialPlatform, url: URL) {
+  const segments = url.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (platform === "tiktok") {
+    const firstSegment = segments[0];
+    const isProfileUrl =
+      firstSegment?.startsWith("@") && (segments.length === 1 || segments[1] !== "video");
+    if (isProfileUrl) {
+      throw new Error(
+        "TikTok URL must be a direct video URL. TikTok profile handles and profile URLs are not supported by the Supadata integration.",
+      );
+    }
+    return;
+  }
+
+  const isInstagramProfileUrl =
+    segments.length === 1 ||
+    (segments.length >= 2 && ["reels", "tagged"].includes(segments[1]?.toLowerCase() ?? ""));
+  if (isInstagramProfileUrl) {
+    throw new Error(
+      "Instagram URL must be a direct post, reel, or video URL. Instagram profile handles and profile URLs are not supported by the Supadata integration.",
+    );
+  }
 }
 
 async function fetchXUserByUsername(username: string, token: string, signal: AbortSignal) {
@@ -2333,6 +3376,110 @@ function readOptionalEnum<T extends string>(
 ) {
   const value = record[key];
   return typeof value === "string" && allowed.includes(value as T) ? (value as T) : undefined;
+}
+
+function readFirstValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = readPathValue(record, key);
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return undefined;
+}
+
+function readFirstString(record: Record<string, unknown>, keys: string[]) {
+  const value = readFirstValue(record, keys);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readFirstNumber(record: Record<string, unknown>, keys: string[]) {
+  const value = readFirstValue(record, keys);
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readFirstBoolean(record: Record<string, unknown>, keys: string[]) {
+  const value = readFirstValue(record, keys);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function readPathValue(record: Record<string, unknown>, path: string): unknown {
+  const parts = path.split(".");
+  let current: unknown = record;
+  for (const part of parts) {
+    if (!isRecord(current)) return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+function stringifyId(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function readStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item === "string" && item.trim()) return [item.trim().replace(/^#/, "")];
+    if (isRecord(item)) {
+      const label = readFirstString(item, ["name", "tag", "title"]);
+      return label ? [label.replace(/^#/, "")] : [];
+    }
+    return [];
+  });
+}
+
+function readUrlArray(value: unknown) {
+  if (!Array.isArray(value)) return undefined;
+  return nonEmptyArray(
+    value.flatMap((item) => {
+      if (typeof item === "string" && item.trim()) return [item.trim()];
+      if (isRecord(item)) {
+        const url = readFirstString(item, ["url", "link", "lynx_url"]);
+        return url ? [url] : [];
+      }
+      return [];
+    }),
+  );
+}
+
+function mergeUniqueStrings(...groups: string[][]) {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const group of groups) {
+    for (const value of group) {
+      const normalized = value.trim().replace(/^[@#]/, "");
+      const key = normalized.toLowerCase();
+      if (!normalized || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(normalized);
+    }
+  }
+  return merged;
+}
+
+function normalizeSocialPostType(value: string | undefined) {
+  const normalized = value?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.includes("video") || normalized.includes("reel")) return "video";
+  if (normalized.includes("carousel") || normalized.includes("sidecar")) return "carousel";
+  if (normalized.includes("image") || normalized.includes("photo")) return "image";
+  return normalized;
+}
+
+function normalizeSocialTimestamp(value: unknown) {
+  if (typeof value === "string" && value.trim()) {
+    if (/^\d+$/.test(value)) return normalizeSocialTimestamp(Number(value));
+    return value;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const millis = value > 10_000_000_000 ? value : value * 1000;
+  return new Date(millis).toISOString();
 }
 
 function omitUndefined<T extends Record<string, unknown>>(value: T) {

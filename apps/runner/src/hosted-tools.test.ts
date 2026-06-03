@@ -1531,6 +1531,235 @@ describe("executeHostedTool (TikTok and Instagram)", () => {
     ).rejects.toThrow(/accepts either url or jobId, not both/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("rejects social profile URLs before calling Supadata", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeHostedTool({
+        name: "instagram_get_metadata",
+        args: { url: "https://www.instagram.com/openai/" },
+        env: env(),
+        enabledTools: ["tool_help", "instagram_get_metadata"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/Instagram profile handles and profile URLs are not supported/);
+    await expect(
+      executeHostedTool({
+        name: "instagram_get_metadata",
+        args: { url: "https://www.instagram.com/openai/reels/" },
+        env: env(),
+        enabledTools: ["tool_help", "instagram_get_metadata"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/Instagram profile handles and profile URLs are not supported/);
+    await expect(
+      executeHostedTool({
+        name: "tiktok_get_metadata",
+        args: { url: "https://www.tiktok.com/@openai" },
+        env: env(),
+        enabledTools: ["tool_help", "tiktok_get_metadata"],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/TikTok profile handles and profile URLs are not supported/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches and normalizes an Instagram profile through Apify", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              id: "ig_123",
+              username: "openai",
+              full_name: "OpenAI",
+              biography: "Research and deployment",
+              is_verified: true,
+              profile_pic_url_hd: "https://example.com/openai.jpg",
+              external_url: "https://openai.com",
+              followers: 1000,
+              following: 12,
+              post_count: 42,
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "instagram_get_profile",
+      args: { username: "@openai" },
+      env: env(),
+      enabledTools: ["tool_help", "instagram_get_profile"],
+      signal: new AbortController().signal,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toContain(
+      "https://api.apify.com/v2/acts/instagram-scraper~instagram-profile-scraper/run-sync-get-dataset-items",
+    );
+    expect(url.searchParams.get("token")).toBe("apify_test");
+    expect(JSON.parse(String(init.body))).toEqual({ instagramUsernames: ["openai"] });
+    expect(result.output).toMatchObject({
+      sourceProvider: "apify",
+      sourceUrl: "https://www.instagram.com/openai/",
+      profile: {
+        platform: "instagram",
+        id: "ig_123",
+        username: "openai",
+        displayName: "OpenAI",
+        bio: "Research and deployment",
+        verified: true,
+        avatarUrl: "https://example.com/openai.jpg",
+        externalUrls: ["https://openai.com"],
+        stats: { followers: 1000, following: 12, posts: 42 },
+        sourceProvider: "apify",
+      },
+    });
+    expect(result.output).toMatchObject({ fetchedAt: expect.any(String) });
+    expect(result.usage).toMatchObject({ provider: "instagram", operation: "get_profile" });
+  });
+
+  it("constructs a TikTok profile-post request and normalizes nested videos", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify([
+            {
+              username: "openai",
+              nickname: "OpenAI",
+              videos: [
+                {
+                  id: "video_1",
+                  text: "Launch day #ai @team",
+                  webVideoUrl: "https://www.tiktok.com/@openai/video/123",
+                  createTime: 1767225600,
+                  playCount: 100,
+                  diggCount: 20,
+                  commentCount: 3,
+                  shareCount: 4,
+                  authorMeta: { name: "openai", nickName: "OpenAI", verified: true },
+                },
+              ],
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeHostedTool({
+      name: "tiktok_list_profile_posts",
+      args: { username: "https://www.tiktok.com/@openai", limit: 12 },
+      env: env(),
+      enabledTools: ["tool_help", "tiktok_list_profile_posts"],
+      signal: new AbortController().signal,
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toContain(
+      "https://api.apify.com/v2/acts/clockworks~tiktok-profile-scraper/run-sync-get-dataset-items",
+    );
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      profiles: ["openai"],
+      resultsPerPage: 12,
+    });
+    expect(result.output).toMatchObject({
+      sourceProvider: "apify",
+      sourceUrl: "https://www.tiktok.com/@openai",
+      posts: [
+        {
+          platform: "tiktok",
+          id: "video_1",
+          url: "https://www.tiktok.com/@openai/video/123",
+          caption: "Launch day #ai @team",
+          author: { username: "openai", verified: true },
+          stats: { views: 100, likes: 20, comments: 3, shares: 4 },
+          hashtags: ["ai"],
+          mentions: ["team"],
+          sourceProvider: "apify",
+        },
+      ],
+    });
+  });
+
+  it("starts and polls async Apify jobs with normalized completed output", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: "run_123" } }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { status: "SUCCEEDED" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              id: "comment_1",
+              text: "great reel",
+              created_at: 1767225600,
+              owner: { username: "reader", is_verified: false },
+              likesCount: 2,
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const started = await executeHostedTool({
+      name: "instagram_get_comments",
+      args: { url: "https://www.instagram.com/reel/ABC123/", limit: 25, runMode: "async" },
+      env: env(),
+      enabledTools: ["tool_help", "instagram_get_comments", "social_get_job"],
+      signal: new AbortController().signal,
+    });
+    const jobId = (started.output as { jobId: string }).jobId;
+    const completed = await executeHostedTool({
+      name: "social_get_job",
+      args: { jobId },
+      env: env(),
+      enabledTools: ["tool_help", "social_get_job"],
+      signal: new AbortController().signal,
+    });
+
+    const [startUrl, startInit] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(startUrl.pathname).toBe("/v2/acts/apify~instagram-api-scraper/runs");
+    expect(JSON.parse(String(startInit.body))).toMatchObject({
+      directUrls: ["https://www.instagram.com/reel/ABC123/"],
+      resultsType: "comments",
+      maxComments: 25,
+    });
+    const [pollUrl] = fetchMock.mock.calls[1] as unknown as [URL, RequestInit];
+    const [datasetUrl] = fetchMock.mock.calls[2] as unknown as [URL, RequestInit];
+    expect(pollUrl.pathname).toBe("/v2/actor-runs/run_123");
+    expect(datasetUrl.pathname).toBe("/v2/actor-runs/run_123/dataset/items");
+    expect(started.output).toMatchObject({ status: "processing", jobId: expect.any(String) });
+    expect(completed.output).toMatchObject({
+      status: "completed",
+      sourceProvider: "apify",
+      sourceUrl: "https://www.instagram.com/reel/ABC123/",
+      comments: [
+        {
+          id: "comment_1",
+          text: "great reel",
+          author: { username: "reader", verified: false },
+          stats: { likes: 2 },
+          sourceProvider: "apify",
+        },
+      ],
+    });
+  });
 });
 
 describe("validateHostedToolEnvironment", () => {
@@ -1608,6 +1837,27 @@ describe("validateHostedToolEnvironment", () => {
       }),
     ).toThrow(MissingEnvError);
   });
+
+  it("requires APIFY_API_TOKEN only when an Apify-backed social tool is enabled", () => {
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help"],
+        env: env({ apifyApiToken: undefined }),
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "instagram_get_profile"],
+        env: env({ apifyApiToken: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+    expect(() =>
+      validateHostedToolEnvironment({
+        enabledTools: ["tool_help", "tiktok_get_comments"],
+        env: env({ apifyApiToken: undefined }),
+      }),
+    ).toThrow(MissingEnvError);
+  });
 });
 
 function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
@@ -1620,6 +1870,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     integrationCredentialEncryptionKey: Buffer.alloc(32, 0),
     exaApiKey: "exa_test",
     xApiBearerToken: "x_test",
+    apifyApiToken: "apify_test",
     supadataApiKey: "supadata_test",
     ampApiKey: undefined,
     e2bTemplate: undefined,
