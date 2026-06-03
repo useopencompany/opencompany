@@ -236,7 +236,13 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
   it("always exposes the core file/shell tools and tool_help", () => {
     const names = resolveRuntimeToolNamesForConfigTools({ tools: [] });
     expect(names).toEqual(
-      expect.arrayContaining(["shell", "read_file", "read_skill", "tool_help"]),
+      expect.arrayContaining([
+        "shell",
+        "read_file",
+        "read_skill",
+        "ask_user_question",
+        "tool_help",
+      ]),
     );
   });
 
