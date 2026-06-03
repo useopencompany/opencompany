@@ -8,9 +8,10 @@ import {
   agents,
   sessionStars,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
+  isSidebarSessionActive,
   type SessionStreamCredentialPayload,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
@@ -74,9 +75,37 @@ export async function loadSidebarSessionsForWorkspace(
   for (const row of recent) byId.set(row.id, row);
   for (const row of starred) byId.set(row.id, row);
 
+  // The persisted session status is unreliable for the "is it working now?"
+  // question (it can lag or get stuck), so the green dot is driven by whether a
+  // session still has a streaming assistant message. Look that up for the
+  // visible set and union it with the running/provisioning statuses.
+  const sessionIds = Array.from(byId.keys());
+  const runningAssistantRows = sessionIds.length
+    ? await db
+        .select({ sessionId: agentSessionMessages.sessionId })
+        .from(agentSessionMessages)
+        .where(
+          and(
+            inArray(agentSessionMessages.sessionId, sessionIds),
+            eq(agentSessionMessages.role, "assistant"),
+            eq(agentSessionMessages.status, "running"),
+          ),
+        )
+    : [];
+  const activeSessionIds = new Set(runningAssistantRows.map((row) => row.sessionId));
+
   return Array.from(byId.values())
     .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
-    .map(serializeSidebarSession);
+    .map((row) =>
+      serializeSidebarSession({
+        ...row,
+        active: isSidebarSessionActive(
+          row.status,
+          activeSessionIds.has(row.id),
+          row.lastError !== null,
+        ),
+      }),
+    );
 }
 
 export async function loadAgentSessionDetailForWorkspace(

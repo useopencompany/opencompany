@@ -41,6 +41,17 @@ import {
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+// Sidebar session-list polling cadence. There is no workspace-wide realtime
+// channel — only the open session streams live (via seedSessionQueries) — so
+// background sessions are tracked by polling. Poll fast while something is
+// actively working, keep a slower baseline while any session could still become
+// active (so a session started/running in the background is discovered even
+// when it isn't the open one), and pause once every session is terminal. React
+// Query also pauses the interval automatically while the tab is hidden.
+const SIDEBAR_ACTIVE_POLL_MS = 2_000;
+const SIDEBAR_WATCH_POLL_MS = 6_000;
+const SIDEBAR_WATCHED_STATUSES = new Set(["created", "provisioning", "ready", "running"]);
 // Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 // How long the red highlight shows on a session row before it is optimistically removed.
@@ -263,9 +274,7 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {session.status === "running" || session.status === "provisioning" ? (
-          <SessionStatusDot status={session.status} pulse />
-        ) : null}
+        {session.active ? <SessionStatusDot status="running" pulse /> : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
       {onToggleStar && (
@@ -544,15 +553,19 @@ export default function Sidebar({
     initialData: sessionsLoading ? undefined : initialSessions,
     enabled: !sessionsLoading,
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
-    // Poll while any listed session is active so the green indicator stays in
-    // sync for sessions that are running in the background (i.e. not the one
-    // currently open in the main panel, which gets live updates via SSE).
+    // Background sessions have no realtime channel, so the green dot is kept in
+    // sync by polling (see SIDEBAR_*_POLL_MS): fast while anything is actively
+    // working, a slower baseline while a session could still activate so a
+    // background session is discovered without the cold-start dead-stop, and
+    // paused once everything is terminal. The open session still updates live via
+    // the SSE → sidebar-cache path (seedSessionQueries).
     refetchInterval: (query) => {
       const data = query.state.data as SidebarSessionPayload[] | undefined;
-      const hasActiveSessions = data?.some(
-        (s) => s.status === "running" || s.status === "provisioning",
-      );
-      return hasActiveSessions ? 5_000 : false;
+      if (data?.some((session) => session.active)) return SIDEBAR_ACTIVE_POLL_MS;
+      if (data?.some((session) => SIDEBAR_WATCHED_STATUSES.has(session.status))) {
+        return SIDEBAR_WATCH_POLL_MS;
+      }
+      return false;
     },
   });
   const sessions = queriedSessions ?? initialSessions;

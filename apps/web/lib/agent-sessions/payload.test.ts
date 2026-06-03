@@ -6,6 +6,7 @@ import {
   applyRuntimeEventToSessionDetail,
   archiveSidebarSessionOptimistically,
   invalidateRelatedCachesForSessionEvent,
+  isSidebarSessionActive,
   mergeAgentSessionDetail,
   parseAgentSessionDetailResponse,
   parseSessionStreamCredentialResponse,
@@ -17,6 +18,7 @@ import {
   serializeAgentSessionDetail,
   sessionQueryKeys,
   setSidebarSessionStar,
+  sidebarSessionFromDetail,
   upsertSidebarSession,
 } from "@/lib/agent-sessions/payload";
 import { agentQueryKeys } from "@/lib/agents/payload";
@@ -917,6 +919,7 @@ function sidebarSession(id: string, title: string) {
     id,
     title,
     status: "completed",
+    active: false,
     modelName: "model",
     lastError: null,
     createdAt: "2026-05-24T10:00:00.000Z",
@@ -974,3 +977,65 @@ function detail(
     runnerUrl: null,
   };
 }
+
+describe("sidebar session active indicator", () => {
+  it("treats running/provisioning statuses as active regardless of messages", () => {
+    expect(isSidebarSessionActive("running", false, false)).toBe(true);
+    expect(isSidebarSessionActive("provisioning", false, false)).toBe(true);
+    expect(isSidebarSessionActive("ready", false, false)).toBe(false);
+    expect(isSidebarSessionActive("completed", false, false)).toBe(false);
+  });
+
+  it("is active when an assistant message streams in a session that can still generate", () => {
+    // The persisted "running" session status often lags; a streaming assistant
+    // message in a generatable state still lights the dot.
+    expect(isSidebarSessionActive("created", true, false)).toBe(true);
+    expect(isSidebarSessionActive("ready", true, false)).toBe(true);
+  });
+
+  it("ignores orphaned running messages on failed/aborted/errored sessions", () => {
+    // A failed or aborted session can leave a "running" assistant message behind
+    // (a zombie). That must not light the dot — mirrors SessionView's
+    // `sessionCanGenerate` guard so the sidebar agrees with the main panel.
+    expect(isSidebarSessionActive("failed", true, false)).toBe(false);
+    expect(isSidebarSessionActive("aborting", true, false)).toBe(false);
+    expect(isSidebarSessionActive("archived", true, false)).toBe(false);
+    expect(isSidebarSessionActive("ready", true, true)).toBe(false);
+  });
+
+  it("projects active=true from a detail with a running assistant message and stale status", () => {
+    const projected = sidebarSessionFromDetail(
+      detail({
+        messages: [
+          {
+            id: "msg_1",
+            role: "assistant",
+            content: "still writing…",
+            status: "running",
+            createdAt: "2026-05-24T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    expect(projected.active).toBe(true);
+  });
+
+  it("projects active=false when no assistant message is running and status is idle", () => {
+    const projected = sidebarSessionFromDetail(
+      detail({
+        messages: [
+          {
+            id: "msg_1",
+            role: "assistant",
+            content: "done",
+            status: "completed",
+            createdAt: "2026-05-24T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    expect(projected.active).toBe(false);
+  });
+});

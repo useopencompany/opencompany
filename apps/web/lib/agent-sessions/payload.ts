@@ -18,6 +18,11 @@ export type SidebarSessionPayload = {
   id: string;
   title: string;
   status: string;
+  // True while the session is actively working — drives the green sidebar dot.
+  // Derived from a real activity signal (a running assistant message, or a
+  // running/provisioning status) so it stays correct even when the persisted
+  // session status lags behind reality (e.g. stuck on "aborting" / "created").
+  active: boolean;
   modelName: string;
   lastError: string | null;
   createdAt: string;
@@ -25,6 +30,27 @@ export type SidebarSessionPayload = {
   // ISO timestamp the current user starred this session, or null if unstarred.
   starredAt: string | null;
 };
+
+const ACTIVE_SESSION_STATUSES = new Set(["running", "provisioning"]);
+// Statuses from which a session can still be producing output. Mirrors
+// SessionView's `sessionCanGenerate`, so the sidebar dot agrees with the main
+// panel's "working" indicator.
+const GENERATABLE_SESSION_STATUSES = new Set(["created", "provisioning", "ready", "running"]);
+
+// A session is "active" (green dot) when it is genuinely working: its status is
+// running/provisioning, or an assistant message is still streaming in a session
+// that could actually be generating. The message signal hardens the indicator
+// against a stale persisted status (the root cause of the dot going missing for
+// working sessions); the `canGenerate` guard keeps an orphaned "running" message
+// left behind by a failed/aborted/archived session from lighting the dot.
+export function isSidebarSessionActive(
+  status: string,
+  hasRunningAssistantMessage: boolean,
+  hasError: boolean,
+): boolean {
+  if (ACTIVE_SESSION_STATUSES.has(status)) return true;
+  return hasRunningAssistantMessage && !hasError && GENERATABLE_SESSION_STATUSES.has(status);
+}
 
 export type AgentSessionPayload = {
   id: string;
@@ -199,6 +225,13 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     id: detail.session.id,
     title: detail.session.title,
     status: detail.session.status,
+    active: isSidebarSessionActive(
+      detail.session.status,
+      detail.messages.some(
+        (message) => message.role === "assistant" && message.status === "running",
+      ),
+      detail.session.lastError !== null,
+    ),
     modelName: detail.session.modelName,
     lastError: detail.session.lastError,
     createdAt: detail.session.createdAt,
@@ -501,6 +534,7 @@ function sidebarSessionEquals(left: SidebarSessionPayload, right: SidebarSession
   return (
     left.title === right.title &&
     left.status === right.status &&
+    left.active === right.active &&
     left.modelName === right.modelName &&
     left.lastError === right.lastError &&
     left.updatedAt === right.updatedAt &&
@@ -662,6 +696,7 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
     id: readStringField(record, "id"),
     title: readNonEmptyStringField(record, "title"),
     status: readNonEmptyStringField(record, "status"),
+    active: readOptionalBooleanField(record, "active") ?? false,
     modelName: readNonEmptyStringField(record, "modelName"),
     lastError: readNullableStringField(record, "lastError"),
     createdAt: readStringField(record, "createdAt"),
