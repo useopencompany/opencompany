@@ -677,6 +677,41 @@ export const agentSessionToolUsage = pgTable(
   }),
 );
 
+export const agentSessionSandboxUsage = pgTable(
+  "agent_session_sandbox_usage",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    runLeaseId: text("run_lease_id"),
+    sandboxId: text("sandbox_id").notNull(),
+    template: text("template"),
+    vcpu: integer("vcpu"),
+    ramMib: integer("ram_mib"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    activeMs: integer("active_ms").notNull().default(0),
+    costUsdMicros: bigint("cost_usd_micros", { mode: "number" }).notNull().default(0),
+    rawMetrics: jsonb("raw_metrics")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionIdx: index("agent_session_sandbox_usage_session_idx").on(table.sessionId),
+    messageIdx: index("agent_session_sandbox_usage_message_idx").on(table.messageId),
+    sessionCreatedAtIdx: index("agent_session_sandbox_usage_session_created_at_idx").on(
+      table.sessionId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const workspaceCreditBalances = pgTable("workspace_credit_balances", {
   workspaceId: text("workspace_id")
     .primaryKey()
@@ -785,6 +820,9 @@ export const workspaceCreditLedger = pgTable(
     toolUsageId: integer("tool_usage_id").references(() => agentSessionToolUsage.id, {
       onDelete: "set null",
     }),
+    sandboxUsageId: integer("sandbox_usage_id").references(() => agentSessionSandboxUsage.id, {
+      onDelete: "set null",
+    }),
     providerCostUsdMicros: bigint("provider_cost_usd_micros", { mode: "number" })
       .notNull()
       .default(0),
@@ -819,6 +857,9 @@ export const workspaceCreditLedger = pgTable(
     toolUsageIdx: uniqueIndex("workspace_credit_ledger_tool_usage_idx")
       .on(table.toolUsageId)
       .where(sql`${table.toolUsageId} IS NOT NULL`),
+    sandboxUsageIdx: uniqueIndex("workspace_credit_ledger_sandbox_usage_idx")
+      .on(table.sandboxUsageId)
+      .where(sql`${table.sandboxUsageId} IS NOT NULL`),
     signupBonusIdx: uniqueIndex("workspace_credit_ledger_signup_bonus_idx")
       .on(table.workspaceId)
       .where(sql`${table.source} = 'signup_bonus'`),

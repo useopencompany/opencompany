@@ -57,6 +57,7 @@ import {
   finalizeRun,
   observeRunStep,
   type RunContext,
+  type SandboxBillingSnapshot,
 } from "./run-context";
 import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
 import { RunSuspendedError } from "./runner-errors";
@@ -75,6 +76,7 @@ import {
   loadSession,
   loadUserMessage,
   optionalUserName,
+  resolveSandboxBilling,
   setStatus,
 } from "./session-lifecycle";
 import { loadToolApproval } from "./tool-approvals";
@@ -589,6 +591,8 @@ async function runMessageWithContext(
       modelProvider,
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
+      assistantMessageId,
+      sandboxBilling: sandboxAcquirer?.billingSnapshot() ?? null,
     });
   }
 
@@ -1232,6 +1236,8 @@ async function runAfterSessionWithContext(
       modelProvider,
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
+      assistantMessageId,
+      sandboxBilling: sandboxAcquirer?.billingSnapshot() ?? null,
     });
   }
 }
@@ -1291,6 +1297,9 @@ async function resumeApprovalWithContext(
   let modelProvider: string | undefined;
   let modelName: string | undefined;
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
+  // Function-scoped so the finally block can attribute sandbox usage to the message that
+  // drove this resumed run; the per-step ids below are scoped to the try.
+  let runAssistantMessageId: string | undefined;
 
   try {
     const approval = await loadToolApproval(input.sessionId, input.toolCallId);
@@ -1395,6 +1404,7 @@ async function resumeApprovalWithContext(
     // The suspended assistant message (carries the pending tool-call) is the parent for
     // the tool's started/completed events so its card renders under the original turn.
     const suspendedAssistantMessageId = approval.messageId ?? "";
+    runAssistantMessageId = suspendedAssistantMessageId || undefined;
     const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
         .select()
@@ -1545,6 +1555,7 @@ async function resumeApprovalWithContext(
 
     // Continue the turn with a fresh assistant message over the reconciled history.
     const continuationAssistantMessageId = newAgentSessionMessageId();
+    runAssistantMessageId = continuationAssistantMessageId;
     const created = await observeRunStep(ctx, "create_assistant_message", () =>
       createAssistantMessageForLease({
         id: continuationAssistantMessageId,
@@ -1677,6 +1688,8 @@ async function resumeApprovalWithContext(
       modelProvider,
       modelName,
       sandbox: sandboxAcquirer?.current ?? null,
+      assistantMessageId: runAssistantMessageId,
+      sandboxBilling: sandboxAcquirer?.billingSnapshot() ?? null,
     });
   }
 }
@@ -1747,6 +1760,9 @@ async function runDelegatedChildMessage(input: {
 type SandboxAcquirer = {
   get: () => Promise<SandboxHandle>;
   readonly current: SandboxHandle | null;
+  // The active-runtime window for billing: present only once the sandbox has been
+  // hydrated (resumed) during this run. Null for chat-only turns that never touch it.
+  billingSnapshot: () => SandboxBillingSnapshot | null;
 };
 
 function createSandboxAcquirer(input: {
@@ -1760,6 +1776,8 @@ function createSandboxAcquirer(input: {
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
   let sandboxPromise: Promise<SandboxHandle> | null = null;
+  let hydratedAt: Date | null = null;
+  const billing = resolveSandboxBilling(input.row, input.env);
 
   const get = async () => {
     if (sandbox) return sandbox;
@@ -1800,6 +1818,7 @@ function createSandboxAcquirer(input: {
         throw new StaleRunLeaseError();
       }
       sandbox = hydrated;
+      hydratedAt = new Date();
       input.onHydrated(hydrated);
       return hydrated;
     })().catch((error) => {
@@ -1814,6 +1833,16 @@ function createSandboxAcquirer(input: {
     get,
     get current() {
       return sandbox;
+    },
+    billingSnapshot() {
+      if (!sandbox || !hydratedAt) return null;
+      return {
+        sandboxId: sandbox.sandboxId,
+        hydratedAt,
+        template: billing.template,
+        vcpu: billing.vcpu,
+        ramMib: billing.ramMib,
+      };
     },
   };
 }

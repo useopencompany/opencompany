@@ -843,6 +843,8 @@ function parseCostSummary(value: unknown): SessionCostSummary {
     totalCostUsdMicros: readNumberField(record, "totalCostUsdMicros"),
     modelCostUsdMicros: readNumberField(record, "modelCostUsdMicros"),
     toolCostUsdMicros: readNumberField(record, "toolCostUsdMicros"),
+    // Tolerant: payloads cached before sandbox billing shipped won't carry this field.
+    sandboxCostUsdMicros: readOptionalNumberField(record, "sandboxCostUsdMicros") ?? 0,
   };
 }
 

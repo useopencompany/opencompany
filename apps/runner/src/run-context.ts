@@ -2,6 +2,7 @@ import { newRunLeaseId } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { workspaceCreditLedger } from "@opencompany/db/schema";
 import {
+  createLogger,
   endTimingTrace,
   type LogFields,
   startTimingTrace,
@@ -19,6 +20,9 @@ import type { RunnerEnv } from "./env";
 import { createRunControlGate, type RunControlCheck } from "./run-control";
 import type { SandboxHandle } from "./sandbox";
 import { parkSandboxWhenIdle } from "./session-lifecycle";
+import { recordSandboxUsage } from "./usage-recorder";
+
+const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 export type RunContext = {
   sessionId: string;
@@ -86,14 +90,59 @@ export function linkExternalAbortSignal(
   signal.addEventListener("abort", () => controller.abort(), { once: true });
 }
 
+export type SandboxBillingSnapshot = {
+  sandboxId: string;
+  hydratedAt: Date;
+  template: string | null;
+  vcpu: number;
+  ramMib: number;
+};
+
 export async function finalizeRun(input: {
   ctx: RunContext;
   outcome: string;
   modelProvider: string | undefined;
   modelName: string | undefined;
   sandbox: SandboxHandle | null;
+  assistantMessageId?: string | undefined;
+  sandboxBilling?: SandboxBillingSnapshot | null | undefined;
 }) {
   clearActiveRun(input.ctx.sessionId, input.ctx.controller);
+  // Bill the sandbox active-runtime window (hydration → now) before parking. Best-effort:
+  // a lost lease or transient DB error must never break run finalization, so we log and
+  // move on rather than throw out of the finally blocks that call this.
+  if (input.sandboxBilling && input.assistantMessageId) {
+    const billing = input.sandboxBilling;
+    const endedAt = new Date();
+    const activeMs = Math.max(0, endedAt.getTime() - billing.hydratedAt.getTime());
+    try {
+      await observeRunStep(
+        input.ctx,
+        "record_sandbox_usage",
+        () =>
+          recordSandboxUsage({
+            sessionId: input.ctx.sessionId,
+            assistantMessageId: input.assistantMessageId as string,
+            runLeaseId: input.ctx.leaseId,
+            runLeaseOwner: input.ctx.leaseOwner,
+            sandboxId: billing.sandboxId,
+            template: billing.template,
+            vcpu: billing.vcpu,
+            ramMib: billing.ramMib,
+            startedAt: billing.hydratedAt,
+            endedAt,
+            activeMs,
+          }),
+        { sandbox_id: billing.sandboxId, active_ms: activeMs },
+      );
+    } catch (error) {
+      logger.warn("Failed to record sandbox usage", {
+        session_id: input.ctx.sessionId,
+        sandbox_id: billing.sandboxId,
+        error,
+      });
+    }
+  }
   logBraintrustCurrentSpan({
     metadata: {
       outcome: input.outcome,
@@ -148,6 +197,7 @@ export async function captureTurnCompletedAnalytics(input: {
       totalCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}), 0)`,
       modelCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'model_usage'), 0)`,
       toolCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'tool_usage'), 0)`,
+      sandboxCostUsdMicros: sql<number>`COALESCE(SUM(-${workspaceCreditLedger.amountUsdMicros}) FILTER (WHERE ${workspaceCreditLedger.source} = 'sandbox_usage'), 0)`,
     })
     .from(workspaceCreditLedger)
     .where(
@@ -172,6 +222,7 @@ export async function captureTurnCompletedAnalytics(input: {
     total_cost_usd_micros: cost?.totalCostUsdMicros ?? 0,
     model_cost_usd_micros: cost?.modelCostUsdMicros ?? 0,
     tool_cost_usd_micros: cost?.toolCostUsdMicros ?? 0,
+    sandbox_cost_usd_micros: cost?.sandboxCostUsdMicros ?? 0,
   });
 }
 

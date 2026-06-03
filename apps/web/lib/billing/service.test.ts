@@ -58,9 +58,10 @@ describe("loadBillingOverview", () => {
             sessionId: "ses_123",
             title: "Billing test",
             agentName: "Research agent",
-            totalUsdMicros: "12500",
+            totalUsdMicros: "13500",
             modelCostUsdMicros: "10000",
             toolCostUsdMicros: "2500",
+            sandboxCostUsdMicros: "1000",
             providerCostUsdMicros: "10000",
             platformFeeUsdMicros: "2500",
             createdAt: "2026-05-22T13:00:00.000Z",
@@ -95,6 +96,7 @@ describe("loadBillingOverview", () => {
     expect(result.recentSessionCharges[0]?.agentName).toBe("Research agent");
     expect(result.recentSessionCharges[0]?.modelCostUsdMicros).toBe(10_000);
     expect(result.recentSessionCharges[0]?.toolCostUsdMicros).toBe(2_500);
+    expect(result.recentSessionCharges[0]?.sandboxCostUsdMicros).toBe(1_000);
     expect(result.ledger[0]?.createdAt).toBeInstanceOf(Date);
     expect(result.ledger[0]?.createdAt.toISOString()).toBe("2026-05-22T13:00:00.000Z");
   });

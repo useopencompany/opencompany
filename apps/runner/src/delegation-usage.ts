@@ -64,6 +64,7 @@ export type SessionTreeUsageRollup = {
     totalCostUsdMicros: number;
     modelCostUsdMicros: number;
     toolCostUsdMicros: number;
+    sandboxCostUsdMicros: number;
   };
 };
 
@@ -111,6 +112,7 @@ function parseDelegatedUsagePayload(value: unknown): SessionTreeUsageRollup {
       totalCostUsdMicros: readNumber(cost.totalCostUsdMicros),
       modelCostUsdMicros: readNumber(cost.modelCostUsdMicros),
       toolCostUsdMicros: readNumber(cost.toolCostUsdMicros),
+      sandboxCostUsdMicros: readNumber(cost.sandboxCostUsdMicros),
     },
   };
 }
@@ -137,6 +139,7 @@ function emptySessionTreeUsageRollup(): SessionTreeUsageRollup {
       totalCostUsdMicros: 0,
       modelCostUsdMicros: 0,
       toolCostUsdMicros: 0,
+      sandboxCostUsdMicros: 0,
     },
   };
 }
@@ -169,6 +172,7 @@ function addSessionTreeUsageRollup(
       totalCostUsdMicros: left.cost.totalCostUsdMicros + right.cost.totalCostUsdMicros,
       modelCostUsdMicros: left.cost.modelCostUsdMicros + right.cost.modelCostUsdMicros,
       toolCostUsdMicros: left.cost.toolCostUsdMicros + right.cost.toolCostUsdMicros,
+      sandboxCostUsdMicros: left.cost.sandboxCostUsdMicros + right.cost.sandboxCostUsdMicros,
     },
   };
 }
@@ -233,6 +237,10 @@ function subtractSessionTreeUsageRollup(
       toolCostUsdMicros: subtractMetric(
         total.cost.toolCostUsdMicros,
         emitted.cost.toolCostUsdMicros,
+      ),
+      sandboxCostUsdMicros: subtractMetric(
+        total.cost.sandboxCostUsdMicros,
+        emitted.cost.sandboxCostUsdMicros,
       ),
     },
   };
@@ -317,7 +325,8 @@ async function loadSessionTreeUsageRollup(sessionId: string): Promise<SessionTre
         COALESCE(SUM(platform_fee_usd_micros), 0) AS platform_fee_usd_micros,
         COALESCE(SUM(-amount_usd_micros), 0) AS total_cost_usd_micros,
         COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'model_usage'), 0) AS model_cost_usd_micros,
-        COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'tool_usage'), 0) AS tool_cost_usd_micros
+        COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'tool_usage'), 0) AS tool_cost_usd_micros,
+        COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'sandbox_usage'), 0) AS sandbox_cost_usd_micros
       FROM workspace_credit_ledger
       WHERE session_id IN (SELECT id FROM session_tree)
         AND amount_usd_micros < 0
@@ -363,6 +372,7 @@ async function loadSessionTreeUsageRollup(sessionId: string): Promise<SessionTre
       cost_totals.total_cost_usd_micros AS "totalCostUsdMicros",
       cost_totals.model_cost_usd_micros AS "modelCostUsdMicros",
       cost_totals.tool_cost_usd_micros AS "toolCostUsdMicros",
+      cost_totals.sandbox_cost_usd_micros AS "sandboxCostUsdMicros",
       tool_totals.tool_usage_cost_usd_micros AS "toolUsageTotalCostUsdMicros",
       tool_totals.tool_usage_by_provider_operation AS "toolUsageByProviderOperation"
     FROM usage_totals
@@ -396,6 +406,7 @@ function parseSessionTreeUsageRollup(row: Record<string, unknown>): SessionTreeU
       totalCostUsdMicros: readNumber(row.totalCostUsdMicros),
       modelCostUsdMicros: readNumber(row.modelCostUsdMicros),
       toolCostUsdMicros: readNumber(row.toolCostUsdMicros),
+      sandboxCostUsdMicros: readNumber(row.sandboxCostUsdMicros),
     },
   };
 }

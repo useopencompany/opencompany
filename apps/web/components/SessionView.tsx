@@ -2119,6 +2119,10 @@ function SessionInspector({
           <InspectorField label="Model charges" value={formatUsdMicros(cost.modelCostUsdMicros)} />
           <InspectorField label="Tool charges" value={formatUsdMicros(cost.toolCostUsdMicros)} />
           <InspectorField
+            label="Sandbox compute"
+            value={formatUsdMicros(cost.sandboxCostUsdMicros)}
+          />
+          <InspectorField
             label="Provider cost"
             value={formatUsdMicros(cost.providerCostUsdMicros)}
           />

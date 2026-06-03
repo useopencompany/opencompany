@@ -3,6 +3,7 @@ import {
   calculateHostedToolUsageCost,
   calculateModelUsageCost,
   calculatePlatformFeeUsdMicros,
+  calculateSandboxUsageCost,
   recordWorkspaceUsageDebit,
 } from ".";
 
@@ -175,6 +176,45 @@ describe("fees and hosted tools", () => {
   });
 });
 
+describe("calculateSandboxUsageCost", () => {
+  it("prices vCPU-seconds + RAM-GiB-seconds plus the platform fee", () => {
+    // 60s on the base allocation (2 vCPU, 512 MiB = 0.5 GiB):
+    //   vCPU: 60 * 2 * 14   = 1680
+    //   RAM:  60 * 0.5 * 4.5 = 135
+    const cost = calculateSandboxUsageCost({
+      template: "amp",
+      vcpu: 2,
+      ramMiB: 512,
+      activeMs: 60_000,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(1_815);
+    expect(cost.platformFeeUsdMicros).toBe(182);
+    expect(cost.totalCostUsdMicros).toBe(1_997);
+    expect(cost.billable).toBe(true);
+    expect(cost.costBasis).toMatchObject({
+      kind: "sandbox_usage",
+      template: "amp",
+      vcpu: 2,
+      ramMiB: 512,
+      activeMs: 60_000,
+    });
+  });
+
+  it("is not billable for a zero-duration window", () => {
+    const cost = calculateSandboxUsageCost({
+      template: null,
+      vcpu: 2,
+      ramMiB: 512,
+      activeMs: 0,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(0);
+    expect(cost.totalCostUsdMicros).toBe(0);
+    expect(cost.billable).toBe(false);
+  });
+});
+
 describe("recordWorkspaceUsageDebit", () => {
   it("reports duplicate usage debits without applying a second charge", async () => {
     const executeRows = [[{ ledgerId: 1, balanceUsdMicros: 92_300 }], []];
@@ -202,5 +242,30 @@ describe("recordWorkspaceUsageDebit", () => {
       ok: false,
       reason: "duplicate_or_missing_session",
     });
+  });
+
+  it("records a sandbox_usage debit against the ledger", async () => {
+    let captured: unknown;
+    const db = {
+      execute: async (query: unknown) => {
+        captured = query;
+        return { rows: [{ ledgerId: 9, balanceUsdMicros: 88_003 }] };
+      },
+    };
+
+    await expect(
+      recordWorkspaceUsageDebit({
+        db,
+        sessionId: "ses_123",
+        messageId: "msg_123",
+        sandboxUsageId: 4,
+        source: "sandbox_usage",
+        providerCostUsdMicros: 1_815,
+        platformFeeUsdMicros: 182,
+        totalCostUsdMicros: 1_997,
+        costBasis: { kind: "sandbox_usage" },
+      }),
+    ).resolves.toEqual({ ok: true, ledgerId: 9, balanceUsdMicros: 88_003 });
+    expect(captured).toBeDefined();
   });
 });

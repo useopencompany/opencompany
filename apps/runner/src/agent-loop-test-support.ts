@@ -37,6 +37,16 @@ export type ToolUsageState = {
   costUsdMicros: number;
 };
 
+export type SandboxUsageState = {
+  id: number;
+  sandboxId: string;
+  template: string | null;
+  vcpu: number | null;
+  ramMib: number | null;
+  activeMs: number;
+  costUsdMicros: number;
+};
+
 export type ToolApprovalState = {
   id: number;
   sessionId: string;
@@ -73,6 +83,7 @@ export type LeaseDbState = {
   messages: MessageState[];
   usage: UsageState[];
   toolUsage: ToolUsageState[];
+  sandboxUsage: SandboxUsageState[];
   approvals: ToolApprovalState[];
 };
 
@@ -170,6 +181,13 @@ export function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseW
       toolUsage.push(row);
       return { id: row.id };
     },
+    async insertSandboxUsage(input, lease) {
+      if (!leaseCurrent(lease)) return null;
+      const { sandboxUsage } = getState();
+      const row = { id: sandboxUsage.length + 1, ...input } as SandboxUsageState;
+      sandboxUsage.push(row);
+      return { id: row.id };
+    },
   };
 }
 
@@ -191,6 +209,7 @@ export function createLeaseDb(input: {
     messages: [...(input.messages ?? [])],
     usage: [] as UsageState[],
     toolUsage: [] as ToolUsageState[],
+    sandboxUsage: [] as SandboxUsageState[],
     approvals: [] as ToolApprovalState[],
     ledgerDebits: 0,
   };

@@ -68,6 +68,7 @@ function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: str
   const messages: StoredMessage[] = [];
   const usage: Array<{ id: number }> = [];
   const toolUsage: Array<{ id: number }> = [];
+  const sandboxUsage: Array<{ id: number }> = [];
 
   const isCurrent = (guard: { leaseId: string; leaseOwner: string }) =>
     !lease.archived && lease.leaseId === guard.leaseId && lease.leaseOwner === guard.leaseOwner;
@@ -138,6 +139,12 @@ function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: str
       toolUsage.push(row);
       return row;
     },
+    async insertSandboxUsage(_input, guard) {
+      if (!isCurrent(guard)) return null;
+      const row = { id: sandboxUsage.length + 1 };
+      sandboxUsage.push(row);
+      return row;
+    },
   };
 
   return {
@@ -145,6 +152,7 @@ function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: str
     messages,
     usage,
     toolUsage,
+    sandboxUsage,
     reclaim(next: { leaseId?: string; leaseOwner: string }) {
       lease.leaseId = next.leaseId ?? lease.leaseId;
       lease.leaseOwner = next.leaseOwner;
