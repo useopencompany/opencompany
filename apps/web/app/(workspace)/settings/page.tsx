@@ -21,10 +21,11 @@ function initialsFor(name: string, email: string) {
 }
 
 function formatDate(date: Date) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
+    timeZone: "UTC",
   }).format(date);
 }
 

@@ -1086,6 +1086,48 @@ describe("SessionViewContent — Phase C2: data-freshness stale detection", () =
     );
   });
 
+  it("refreshes the stream credential before an active session token expires", () => {
+    const now = new Date("2000-01-01T00:03:50.000Z").getTime();
+    vi.setSystemTime(now);
+
+    const detail = makeDetail({
+      session: makeSession({ updatedAt: new Date(now - 1_000).toISOString() }),
+      messages: [makeRunningAssistantMessage()],
+      events: [makeEventFixture(101)],
+    });
+
+    streamMock.status = "open";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const streamCredentialKey = ["stream-credential", "wks_test", detail.session.id];
+    queryClient.setQueryData(streamCredentialKey, {
+      runnerUrl: "https://runner.example.com",
+      streamToken: "token_123",
+      streamTokenExpiresAt: now + 5 * 60 * 1000 + 1_000,
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={detail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(999);
+    });
+
+    expect(invalidateSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: streamCredentialKey }),
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: streamCredentialKey }),
+    );
+  });
+
   it("refetches session detail when an active session returns to the foreground", () => {
     const now = new Date("2000-01-01T00:04:00.000Z").getTime();
     vi.setSystemTime(now);
