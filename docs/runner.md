@@ -238,7 +238,8 @@ Required environment variables:
 - `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` (required; validated at boot — the runner refuses to start if it is missing or not a base64-encoded 32-byte key)
 - `RUNNER_E2B_IDLE_TIMEOUT_MS` (optional, defaults to `30000`)
 - `RUNNER_INSTANCE_ID` (optional stable identity for hosted multi-instance deployments)
-- optional GitHub App env vars used for Brain sync back to the managed workspace repo:
+- optional GitHub App env vars used for managed workspace repository metadata and web-side
+  materialization:
   `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, and `GITHUB_APP_PRIVATE_KEY`
 - optional GitHub integration app env vars for cloning configured work repositories into E2B and
   creating AMP pull requests: `GITHUB_INTEGRATION_APP_ID` and

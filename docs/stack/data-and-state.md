@@ -54,8 +54,10 @@ Drizzle handles cleanly; or the team needs a more batteries-included ORM workflo
 **What it is:** GitHub integration authenticated as an app installation.
 
 **What it does for us:** Creates and writes to managed private workspace repositories. GitHub stores
-versioned `.agent` and Brain file copies for durability, ownership, and manual reconciliation;
-Postgres stores the canonical interactive app state and sync job state.
+asynchronously materialized, versioned `.agent` and Brain file copies for durability, ownership,
+and portability; Postgres stores the canonical desired app state and sync job state. External edits
+under managed `agents/` or `brain/` prefixes are drift and may be overwritten or deleted by
+reconciliation.
 
 **Where it is used:**
 

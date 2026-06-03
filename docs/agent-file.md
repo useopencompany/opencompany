@@ -303,20 +303,21 @@ If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix 
 
 ### Renames
 
-- **Editor-originated** (changing the title): the new slug is computed at save time, the file is written at the new path, and the old GitHub file is deleted as part of the same sync job (tracked via `previousPath` / `previousBlobSha` on `agent_sync_jobs`).
-- **GitHub-originated** (renaming the file directly in the repo): handled only through manual
-  import/reconciliation. Because the app keys workspace sync by file path, a GitHub rename is
-  treated as a new agent on the next import and can stay out of sync until the editor re-saves the
-  canonical Postgres state.
+- **Editor-originated** (changing the title): the new slug is computed at save time and stored in
+  Postgres. The next workspace reconcile writes the file at the new path and removes the old
+  managed-path blob from GitHub in the same commit.
+- **GitHub-originated** (renaming the file directly in the repo): treated as drift. Postgres is the
+  canonical desired state for MVP, so the next reconcile may restore the Postgres path and delete
+  repo-only managed-prefix files.
 
 ## Save behavior
 
 When the editor saves an agent:
 
 1. Postgres receives the title, body, body-derived config, sanitized editor content, content hash, and version — synchronously. This is the "saved" state from the user's perspective.
-2. `agent_sync_jobs` is upserted with a `nextRunAt` ~10 seconds out, debouncing rapid edits. If the title change produced a new path, the previous path and blob SHA are recorded on the job so the worker can delete the old GitHub file.
-3. `agent.sync_requested` is dispatched to Inngest.
-4. Inngest writes the file to GitHub asynchronously.
+2. `workspace_sync_jobs` is upserted with a `nextRunAt` ~10 seconds out, debouncing rapid edits.
+3. `workspace.sync_requested` is dispatched to Inngest.
+4. Inngest reconciles all desired workspace files to GitHub asynchronously in one commit.
 
 The editor only waits on step 1. GitHub sync status is surfaced separately and never blocks editing — a failing sync shows on the agent row, not on the save button.
 
@@ -434,17 +435,18 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
 - Tiptap preview adapter — `apps/web/lib/agents/config.ts`
 - Compiled config type — `packages/agent-runtime/src/types.ts` (`AgentConfig`)
 - Editor — `apps/web/components/agent-editor/AgentEditor.tsx`
-- Save action and GitHub sync — `apps/web/lib/agents/actions.ts`, `apps/web/lib/inngest/functions.ts`
+- Save action and workspace sync — `apps/web/lib/agents/actions.ts`, `apps/web/lib/inngest/functions.ts`
 
 ## FAQ
 
 **Can I commit `.agent` files by hand?**
-Yes. Push them to the workspace repo and trigger a manual import/reconciliation. The web app reads
-the format directly and writes the imported result into Postgres; normal editor saves remain the
-canonical app state after the database transaction succeeds.
+Not as an MVP authority path. Hand edits under `agents/` are drift relative to canonical Postgres
+state and may be overwritten or deleted by the next workspace reconcile.
 
 **What happens if two saves race?**
-Every save carries a content hash and version. Inngest debounces by ~10 seconds and limits one in-flight sync per agent. If GitHub returns a conflicting blob SHA, the sync refetches and retries.
+Every save carries a content hash and version. Inngest debounces by ~10 seconds and limits one
+in-flight sync per workspace. The workspace reconciler retries if the GitHub branch ref moves before
+its commit is applied.
 
 **How do I add a new model or tool?**
 Add models to `packages/agent-runtime/src/models.ts`. Add product-level tools

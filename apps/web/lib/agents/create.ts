@@ -63,14 +63,5 @@ export function buildPendingAgent(input: {
       config: parsed.config,
       githubSyncStatus: "pending",
     },
-    syncJob: {
-      agentId: id,
-      workspaceId: input.workspaceId,
-      path: input.path,
-      desiredHash: contentHash,
-      desiredVersion: version,
-      previousPath: null,
-      previousBlobSha: null,
-    },
   };
 }

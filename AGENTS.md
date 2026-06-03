@@ -38,7 +38,7 @@ OpenCompany is a platform for running company-owned AI agents.
 
 Agents are plain-text `.agent` files backed by GitHub, Postgres, and the runtime. The `.agent` file is the product contract. Anything that edits, syncs, parses, stores, or runs an agent must preserve that contract. Read `docs/agent-file.md` before changing agent format behavior.
 
-GitHub is the source of truth for managed workspace repos, while the app stores the latest editable state in Postgres and syncs GitHub asynchronously. Preserve that product model unless the task is explicitly about changing it.
+Postgres is the canonical desired state for managed workspace files. GitHub is an asynchronously materialized, versioned mirror for files under `agents/` and `brain/`; external edits under those prefixes are drift and may be overwritten or deleted by reconciliation.
 
 ## Work Loop
 

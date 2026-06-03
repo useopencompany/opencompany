@@ -34,7 +34,9 @@ describe("scheduleWorkspaceSyncDispatch", () => {
   });
 
   it("dispatches the workspace sync event and logs Inngest event ids", async () => {
-    dispatchWorkspaceSyncRequestedMock.mockResolvedValue({ ids: ["evt_123"] } as never);
+    dispatchWorkspaceSyncRequestedMock.mockResolvedValue({
+      ids: ["evt_123"],
+    } as Awaited<ReturnType<typeof dispatchWorkspaceSyncRequested>>);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: "wks_123" });
 

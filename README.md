@@ -7,9 +7,9 @@ Agents are **plain-text files** — Markdown with a small YAML header — versio
 ## The model
 
 - **Workspace** — a tenant. One company, one managed private GitHub repo, one set of members.
-- **Agent** — a `.agent` file at `agents/<slug>.agent` in the workspace repo. Title, instructions, model, tools — one file, no separate config.
+- **Agent** — a `.agent` file at `agents/<slug>/<slug>.agent` in the workspace repo. Title, instructions, model, tools — one file, no separate config.
 - **Mentions** — write `@exa` or `@deep` in the body. The editor parses mentions and rewrites the frontmatter, so the instructions stay the source of truth.
-- **Sync** — every save commits to Postgres immediately and queues an asynchronous GitHub write. The editor never blocks on GitHub, and failed GitHub sync does not make the app save unsaved.
+- **Sync** — every save commits desired state to Postgres immediately and queues asynchronous GitHub materialization. The editor never blocks on GitHub, and failed GitHub sync does not make the app save unsaved.
 - **Runtime** — agents run through Vercel AI Gateway, which abstracts OpenAI, Anthropic, and other providers behind a single API.
 
 The `.agent` file is the contract. Anything that touches an agent — the UI, the sync worker, the runtime — reads or writes that format. See [docs/agent-file.md](./docs/agent-file.md) for the full spec.

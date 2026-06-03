@@ -122,6 +122,7 @@ export async function reconcileWorkspaceToGitHub(input: {
     // Build the commit, retrying on a non-fast-forward ref update.
     let commitSha: string | null = null;
     let changedFiles: DesiredFile[] = [];
+    let syncedFiles: DesiredFile[] = [];
     let removed = 0;
     let noop = false;
 
@@ -159,6 +160,7 @@ export async function reconcileWorkspaceToGitHub(input: {
 
       if (treeEntries.length === 0) {
         commitSha = head.commitSha;
+        syncedFiles = desired;
         noop = true;
         break;
       }
@@ -193,6 +195,7 @@ export async function reconcileWorkspaceToGitHub(input: {
 
       commitSha = newCommitSha;
       changedFiles = changed;
+      syncedFiles = desired;
       removed = removals;
       break;
     }
@@ -201,13 +204,14 @@ export async function reconcileWorkspaceToGitHub(input: {
       throw new Error("Workspace sync exhausted ref-update retries without committing.");
     }
 
-    // Persist GitHub head + per-file synced status (only for files we materialized,
-    // guarded on contentHash so a mid-reconcile edit isn't marked synced).
+    // Persist GitHub head + per-file synced status for every desired file the
+    // final GitHub tree now contains, guarded on contentHash so a mid-reconcile
+    // edit isn't marked synced.
     await timeAsync(trace, "db.markSynced", () =>
       persistSynced(db, {
         workspaceId: input.workspaceId,
         commitSha: commitSha as string,
-        changed: changedFiles,
+        synced: syncedFiles,
       }),
     );
 
@@ -398,7 +402,7 @@ function markFilesSyncing(db: ReturnType<typeof getDb>, workspaceId: string) {
 
 async function persistSynced(
   db: ReturnType<typeof getDb>,
-  input: { workspaceId: string; commitSha: string; changed: DesiredFile[] },
+  input: { workspaceId: string; commitSha: string; synced: DesiredFile[] },
 ) {
   const now = new Date();
 
@@ -407,9 +411,9 @@ async function persistSynced(
     .set({ latestHeadSha: input.commitSha, updatedAt: now })
     .where(eq(workspaceRepositories.workspaceId, input.workspaceId));
 
-  if (input.changed.length === 0) return;
+  if (input.synced.length === 0) return;
 
-  const statements = input.changed.map((file) => {
+  const statements = input.synced.map((file) => {
     const synced = {
       githubSyncStatus: "synced",
       githubSyncedHash: file.contentHash,

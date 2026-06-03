@@ -202,16 +202,15 @@ Prefer these correlation fields in all handled captures:
 - `opencompany.runner_sse_connected`: browser connected to runner SSE; check `replayed_events`.
 - `opencompany.runner_sse_closed`: browser disconnected from runner SSE.
 - `opencompany.runner_sse_rejected`: runner rejected an SSE connection.
-- `opencompany.agent_sync_job_queued`: the app wrote or updated an `agent_sync_jobs` row after an
-  agent edit. Check `agent_id`, `workspace_id`, `path`, `desired_version`, and `next_run_at`.
-- `opencompany.agent_sync_dispatch_succeeded`: the app sent `agent.sync_requested` to Inngest.
-  Check `inngest_event_ids`.
-- `opencompany.agent_sync_dispatch_failed`: the app could not send the Inngest event after the DB
-  write. Check `error_name`, `error_message`, and `dispatch_status_marked_failed`.
-- `opencompany.agent_github_sync_started`: the Inngest worker started materializing an agent file.
-- `opencompany.agent_github_sync_succeeded`: GitHub materialization completed. Check `status`,
-  `commit_sha`, `blob_sha`, and `duration_ms`.
-- `opencompany.agent_github_sync_failed`: managed GitHub repo/file sync failed.
+- `opencompany.workspace_sync_dispatch_succeeded`: the app sent `workspace.sync_requested` to Inngest.
+  Check `workspace_id` and `inngest_event_ids`.
+- `opencompany.workspace_sync_dispatch_failed`: the app could not send the Inngest event after the
+  DB write. Check `workspace_id`, `error_name`, and `error_message`.
+- `opencompany.workspace_github_sync_started`: the Inngest worker started reconciling desired
+  Postgres workspace state to GitHub.
+- `opencompany.workspace_github_sync_succeeded`: GitHub materialization completed. Check
+  `workspace_id`, `commit_sha`, `changed`, and `removed`.
+- `opencompany.workspace_github_sync_failed`: managed workspace GitHub sync failed.
 - `opencompany.auth_callback_failed`: WorkOS callback provisioning failed.
 - `opencompany.next_request_error`: Next.js caught a server render, route handler, or server
   action failure. Check `next_route_path`, `next_route_type`, `next_render_source`, and

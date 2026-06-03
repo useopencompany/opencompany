@@ -24,8 +24,8 @@ When an agent is created or edited:
 
 1. `createAgent()` or `updateAgent()` in `apps/web/lib/agents/actions.ts` serializes the agent into the `.agent` file format.
 2. The app stores the latest title, body, parsed config, content hash, and version in Postgres.
-3. The same transaction upserts `agent_sync_jobs` with the desired hash/version and a `nextRunAt` about 10 seconds out.
-4. After the response, the action dispatches `agent.sync_requested` to Inngest.
+3. The same transaction marks the workspace dirty in `workspace_sync_jobs` with a `nextRunAt` about 10 seconds out.
+4. After the response, the action dispatches `workspace.sync_requested` to Inngest.
 5. The UI treats the DB write as saved immediately and separately shows GitHub sync status.
 
 The editor debounces saves by about 600ms in `AgentDetail.tsx`. Failed GitHub syncs should not make the editor look unsaved; they set `githubSyncStatus = failed` and keep the error on the agent row.
@@ -51,53 +51,40 @@ GitHub logic lives in `apps/web/lib/workspace-state/github.ts`.
 - Each workspace gets one managed private repo named from the workspace and id suffix.
 - The repo record is cached in `workspace_repositories`.
 - GitHub App credentials provide installation tokens; the token is cached in memory until close to expiry.
-- Writes use the Contents API. The app reuses the last `githubBlobSha` when available, then refetches on content conflicts.
-- `listWorkspaceAgentFiles()` and `readWorkspaceFile()` support manual GitHub-to-DB reconciliation
-  through `syncAgentsFromWorkspaceRepository()`.
+- Reconciliation uses the Git Data API to compare the current GitHub tree with desired Postgres
+  state, create one commit for all `agents/` and `brain/` changes, and fast-forward the branch ref.
+- Files outside `agents/` and `brain/` are left untouched.
 
-Current limitation: there is no GitHub webhook ingestion path. External GitHub edits are not part
-of the normal authority path; they are only reflected after an explicit sync-from-repository action.
+Postgres is the authority for managed workspace files. External GitHub edits under `agents/` or
+`brain/` are drift and may be overwritten or deleted by the next reconcile. Manual GitHub-to-DB
+import is not part of the MVP.
 
 ## Synced Workspace Resources
 
 A synced workspace resource is workspace-scoped state whose latest editable version is stored in
 Postgres and whose versioned file copy is materialized to the managed GitHub repo. A write updates
-Postgres and a sync job together, then an Inngest event materializes the desired GitHub file
-asynchronously. Content hashes make repeated jobs idempotent, and the sync job row stores the
-desired state plus retry metadata.
+Postgres and the workspace dirty row together, then an Inngest event reconciles the whole desired
+workspace tree asynchronously. Content hashes make repeated reconciles idempotent, and per-row sync
+metadata powers UI status badges.
 
 Current instances:
 
-- Agents use `agents` and `agent_sync_jobs`. Writes live in `apps/web/lib/agents/actions.ts`,
-  materialization lives in `apps/web/lib/agents/materialize.ts`, and dispatch uses
-  `agent.sync_requested`.
-- Brain files use `brain_files` and `brain_sync_jobs`. Writes live in
-  `apps/web/lib/brain/actions.ts`, materialization lives in `apps/web/lib/brain/materialize.ts`,
-  and dispatch uses `brain.sync_requested`.
+- Agents use `agents` for desired `.agent` files.
+- Brain files use `brain_files` for desired `brain/` files.
+- Agent bundle files use `agent_files` for desired files under each agent folder.
 
 Every implementation of this pattern should include:
 
 - A workspace-scoped unique index on `(workspaceId, path)` when path identifies the resource.
 - A resource `contentHash` column.
-- A `*_sync_jobs` table with desired hash, `nextRunAt`, status, attempts, last error, and previous
-  path/blob metadata for renames or deletes. Include desired version only when the resource is
-  versioned.
-- A single `db.batch([...])` that writes the resource row and upserts the sync job.
+- A single `db.batch([...])` that writes the resource row and marks `workspace_sync_jobs` dirty.
 - Fire-and-forget Inngest dispatch after the response has been sent.
-- Idempotent materialization that no-ops when the GitHub synced hash already matches current
-  content and no rename or delete remains.
+- Idempotent reconciliation that compares desired DB content to the current GitHub tree, writes only
+  changed blobs, deletes repo-only managed-prefix drift, and marks rows synced with content-hash
+  guards.
 
-Keep the two current implementations separate. When a third synced workspace resource is added,
-first decide whether to extract shared helpers under `lib/workspace-state/synced-resource/`, and
-whether sync jobs should stay per-resource or move into a generic table. That tradeoff should be
-settled before copying the pattern a third time.
-
-Known differences to preserve or reconcile during extraction:
-
-- Agents are versioned and their sync jobs are keyed by `agentId`.
-- Brain sync jobs are keyed by `(workspaceId, path)` and carry `operation: "upsert" | "delete"`.
-- Brain supports folder rename/delete fan-out, while agents focus on one `.agent` path and
-  title-driven renames.
+When a synced workspace resource is added, teach `reconcileWorkspaceToGitHub()` to include its
+desired files rather than creating another per-resource materializer.
 
 ## GitHub Work Integrations
 
@@ -158,17 +145,22 @@ Inngest setup is in:
 - `apps/web/app/api/inngest/route.ts`
 - `scripts/inngest-dev.mjs`
 
-`sync-agent-to-github` listens for `agent.sync_requested`, sleeps 10 seconds to coalesce rapid edits, then calls `materializeAgentToGitHub()`. Cron sweepers also scan due `agent_sync_jobs` and `brain_sync_jobs` rows once per minute and re-dispatch the same sync events, so a missed post-response dispatch can recover without another edit.
+`sync-workspace-to-github` listens for `workspace.sync_requested`, sleeps 10 seconds to coalesce
+rapid edits, then calls `reconcileWorkspaceToGitHub()`. The cron sweeper scans due
+`workspace_sync_jobs` rows once per minute and re-dispatches the same event, so a missed
+post-response dispatch can recover without another edit.
 
-`materializeAgentToGitHub()`:
+`reconcileWorkspaceToGitHub()`:
 
-- loads the latest agent, workspace, and sync job from Postgres;
-- defers if the job's `nextRunAt` is still in the future;
-- no-ops and deletes the job if `githubSyncedHash` already matches the current hash;
-- marks the agent `syncing`, writes the `.agent` file to GitHub, then marks it `synced`;
-- records failure on both the agent and sync job, then rethrows so Inngest retries.
+- loads the workspace dirty row and desired `agents`, `brain_files`, and `agent_files` rows;
+- defers if `nextRunAt` is still in the future;
+- marks dirty rows `syncing`, diffs desired blob SHAs against the GitHub tree, and writes one commit;
+- marks desired rows `synced` with content-hash guards, including no-op reconciles where GitHub
+  already matches desired state;
+- records failure on syncing rows and the workspace sync job, then rethrows so Inngest retries.
 
-Inngest concurrency is limited to one active sync per `agentId` for agents and one active sync per workspace/path for Brain files. The outbox sweepers fan out recovery events, while the existing sync functions remain the only materialization path.
+Inngest concurrency is limited to one active workspace sync per workspace. The outbox sweeper fans
+out recovery events, while the workspace reconciler remains the only materialization path.
 
 ## Database Model
 
@@ -176,7 +168,7 @@ The high-level table groups are:
 
 - Identity and tenancy: `users`, `workspaces`, `workspace_memberships`, with WorkOS Organizations mapped through `workspaces.workos_organization_id`.
 - Agent editing: `agents` stores the latest DB version and parsed config.
-- GitHub sync: `agent_sync_jobs` stores desired materialization state; `workspace_repositories` maps workspaces to managed GitHub backing repos.
+- GitHub sync: `workspace_sync_jobs` stores the workspace dirty signal and retry state; `workspace_repositories` maps workspaces to managed GitHub backing repos.
 - Agent work integrations: `workspace_integrations` stores connected provider accounts, and
   `workspace_integration_resources` stores provider resources such as GitHub repositories.
 - Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store
