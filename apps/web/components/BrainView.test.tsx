@@ -66,4 +66,21 @@ describe("MarkdownBrainEditor", () => {
     expect(seen.length).toBeGreaterThanOrEqual(3);
     expect(seen.every((value) => value === "# Title")).toBe(true);
   });
+
+  it("re-seeds content when the key changes — i.e. on file switch (PRO-83)", () => {
+    // The freeze above is per-instance. Showing a different file relies on the
+    // parent remounting the editor via `key={selected.path}` (BrainView.tsx),
+    // which gives a fresh useState and re-captures `initialContent` from the
+    // new file's content. This is the other half of the fix's contract: a key
+    // change MUST surface the new content, not stay frozen on the old file.
+    const { container, rerender } = render(
+      <MarkdownBrainEditor key={"a.md"} content={"# File A"} onChange={vi.fn()} />,
+    );
+    expect(contentOptionsSeen().at(-1)).toBe("# File A");
+    expect(container.querySelector(".tiptap-brain")?.textContent ?? "").toContain("File A");
+
+    rerender(<MarkdownBrainEditor key={"b.md"} content={"# File B"} onChange={vi.fn()} />);
+    expect(contentOptionsSeen().at(-1)).toBe("# File B");
+    expect(container.querySelector(".tiptap-brain")?.textContent ?? "").toContain("File B");
+  });
 });

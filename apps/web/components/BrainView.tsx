@@ -346,10 +346,16 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     return () => clearTimeout(timeout);
   }, [dirty, draftContent, saveDraft, selected]);
 
-  function updateDraftContent(content: string) {
-    if (autoSaveState === "error") setAutoSaveState("idle");
+  // Stable across renders (functional updater reads no closed-over state) so
+  // the editor never holds a stale onChange. Tiptap v3's useEditor forwards
+  // callbacks through options.current and so stays fresh regardless, but
+  // MarkdownBrainEditor passes deps=[] to useEditor — keeping this stable
+  // means the contract doesn't silently break if Tiptap is ever downgraded
+  // to v2 (which captures callbacks at creation time).
+  const updateDraftContent = useCallback((content: string) => {
+    setAutoSaveState((prev) => (prev === "error" ? "idle" : prev));
     setDraftContent(content);
-  }
+  }, []);
 
   function updateSelectedPath(path: string) {
     selectedPathRef.current = path;
