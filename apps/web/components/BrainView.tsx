@@ -119,6 +119,11 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   const deletedPathsRef = useRef(new Set<string>());
   const selectedPathRef = useRef(selectedPath);
   const pendingCreatesRef = useRef(new Map<string, Promise<string | null>>());
+  // Serialises brain create() calls: a double-click on "new file"/"new folder"
+  // would otherwise fire two creates that read the same `files` snapshot, derive
+  // the same path, and collide on one pendingCreatesRef key — orphaning a pending
+  // promise so a follow-up rename bypasses the await (reintroducing the PRO-62 race).
+  const creatingRef = useRef(false);
 
   const selected = files.find((file) => file.path === selectedPath) ?? null;
   const tree = useMemo(() => buildBrainTree(files, query), [files, query]);
@@ -480,6 +485,8 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   });
 
   function createFile(contextPath = selectedContextPath) {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setError(null);
     const path = uniqueNewBrainFilePath(files, contextPath);
     const content = `# ${titleFromPath(path)}\n`;
@@ -533,11 +540,14 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
       } finally {
         pendingCreatesRef.current.delete(pendingKey);
         finishOptimisticMutation();
+        creatingRef.current = false;
       }
     });
   }
 
   function createFolder(contextPath = selectedContextPath) {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setError(null);
     const folderPath = uniqueNewBrainFolderPath(files, contextPath);
     const path = `${folderPath}/new-note.md`;
@@ -596,6 +606,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
       } finally {
         pendingCreatesRef.current.delete(pendingKey);
         finishOptimisticMutation();
+        creatingRef.current = false;
       }
     });
   }
