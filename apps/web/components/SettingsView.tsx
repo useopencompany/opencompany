@@ -1041,9 +1041,13 @@ function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; init
 // so we never ship a multi-MB original to the server or store one in Postgres.
 async function resizeImageToSquareWebp(
   file: File,
-): Promise<{ dataBase64: string; mime: string; previewUrl: string }> {
+): Promise<{ dataBase64: string; previewUrl: string }> {
   const SIZE = 256;
   const bitmap = await createImageBitmap(file);
+  if (!bitmap.width || !bitmap.height) {
+    bitmap.close?.();
+    throw new Error("Invalid image dimensions.");
+  }
   const canvas = document.createElement("canvas");
   canvas.width = SIZE;
   canvas.height = SIZE;
@@ -1054,11 +1058,11 @@ async function resizeImageToSquareWebp(
   const drawH = bitmap.height * scale;
   ctx.drawImage(bitmap, (SIZE - drawW) / 2, (SIZE - drawH) / 2, drawW, drawH);
   bitmap.close?.();
-  // Browsers without webp encode fall back to png; read the real mime from the data URL.
+  // The server derives the real mime from magic bytes, so we just hand over the bytes.
+  // (Browsers without webp encode fall back to png, which the server also accepts.)
   const dataUrl = canvas.toDataURL("image/webp", 0.9);
-  const mime = dataUrl.slice(5, dataUrl.indexOf(";"));
   const dataBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-  return { dataBase64, mime, previewUrl: dataUrl };
+  return { dataBase64, previewUrl: dataUrl };
 }
 
 function AvatarForm({
@@ -1075,13 +1079,14 @@ function AvatarForm({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
 
   const hasPhoto = (hasCustomAvatar && !removed) || Boolean(preview);
   const shownUrl = removed ? null : (preview ?? avatarUrl);
 
   const onPick = async (file: File) => {
     setError(null);
-    let resized: { dataBase64: string; mime: string; previewUrl: string };
+    let resized: { dataBase64: string; previewUrl: string };
     try {
       resized = await resizeImageToSquareWebp(file);
     } catch {
@@ -1091,8 +1096,10 @@ function AvatarForm({
     setPreview(resized.previewUrl);
     setRemoved(false);
     startTransition(async () => {
-      const res = await updateAvatar({ dataBase64: resized.dataBase64, mime: resized.mime });
-      if (!res.ok) {
+      const res = await updateAvatar({ dataBase64: resized.dataBase64 });
+      if (res.ok) {
+        router.refresh();
+      } else {
         setError(res.error);
         setPreview(null);
       }
@@ -1106,6 +1113,7 @@ function AvatarForm({
       if (res.ok) {
         setPreview(null);
         setRemoved(true);
+        router.refresh();
       } else {
         setError(res.error);
       }
@@ -1228,7 +1236,7 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
         <div className="mt-8">
           <Section
             title="Profile"
-            description="Your photo is visible across the app. Email is managed by your identity provider."
+            description="Shown on your profile. Email is managed by your identity provider."
           >
             <AvatarForm
               avatarUrl={profile.avatarUrl}

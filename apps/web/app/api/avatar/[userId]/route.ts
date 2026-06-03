@@ -3,9 +3,11 @@ import { userAvatars } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import { currentWorkspace } from "@/lib/auth";
 
-// Serves a user's custom avatar bytes from Postgres (PRO-47). Requires an authenticated
-// session so the blobs aren't anonymously scrapeable. The `?v=<updatedAt>` query param
-// the caller appends busts the browser cache after an upload.
+// Serves a user's custom avatar bytes from Postgres (PRO-47). Scoped to the signed-in
+// user's own avatar — the image is only shown in their own settings, so there's no
+// reason to expose other users' bytes by id (avoids cross-user/cross-workspace IDOR).
+// The `?v=<updatedAt>` query param the caller appends busts the browser cache after an
+// upload.
 export async function GET(_request: Request, { params }: { params: Promise<{ userId: string }> }) {
   const context = await currentWorkspace({ optional: true });
   if (!context) {
@@ -13,6 +15,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ use
   }
 
   const { userId } = await params;
+  if (userId !== context.user.id) {
+    return new Response(null, { status: 403 });
+  }
+
   const db = getDb();
   const [row] = await db
     .select({ blob: userAvatars.blob, mime: userAvatars.mime })
@@ -31,6 +37,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ use
       "Content-Type": row.mime,
       "Content-Length": String(body.byteLength),
       "Cache-Control": "private, max-age=0, must-revalidate",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 }
