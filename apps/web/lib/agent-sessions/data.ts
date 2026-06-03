@@ -233,7 +233,8 @@ export async function loadAgentSessionDetailForWorkspace(
           COALESCE(SUM(platform_fee_usd_micros), 0) AS platform_fee_usd_micros,
           COALESCE(SUM(-amount_usd_micros), 0) AS total_cost_usd_micros,
           COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'model_usage'), 0) AS model_cost_usd_micros,
-          COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'tool_usage'), 0) AS tool_cost_usd_micros
+          COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'tool_usage'), 0) AS tool_cost_usd_micros,
+          COALESCE(SUM(-amount_usd_micros) FILTER (WHERE source = 'sandbox_usage'), 0) AS sandbox_cost_usd_micros
         FROM workspace_credit_ledger
         WHERE session_id IN (SELECT id FROM session_tree)
           AND amount_usd_micros < 0
@@ -279,6 +280,7 @@ export async function loadAgentSessionDetailForWorkspace(
         cost_totals.total_cost_usd_micros AS "totalCostUsdMicros",
         cost_totals.model_cost_usd_micros AS "modelCostUsdMicros",
         cost_totals.tool_cost_usd_micros AS "toolCostUsdMicros",
+        cost_totals.sandbox_cost_usd_micros AS "sandboxCostUsdMicros",
         tool_totals.tool_usage_cost_usd_micros AS "toolUsageTotalCostUsdMicros",
         tool_totals.tool_usage_by_provider_operation AS "toolUsageByProviderOperation"
       FROM usage_totals
@@ -401,6 +403,7 @@ function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {
       totalCostUsdMicros: readNumber(row?.totalCostUsdMicros),
       modelCostUsdMicros: readNumber(row?.modelCostUsdMicros),
       toolCostUsdMicros: readNumber(row?.toolCostUsdMicros),
+      sandboxCostUsdMicros: readNumber(row?.sandboxCostUsdMicros),
     },
   };
 }

@@ -2637,6 +2637,10 @@ function SessionInspector({
           <InspectorField label="Model charges" value={formatUsdMicros(cost.modelCostUsdMicros)} />
           <InspectorField label="Tool charges" value={formatUsdMicros(cost.toolCostUsdMicros)} />
           <InspectorField
+            label="Sandbox compute"
+            value={formatUsdMicros(cost.sandboxCostUsdMicros)}
+          />
+          <InspectorField
             label="Provider cost"
             value={formatUsdMicros(cost.providerCostUsdMicros)}
           />
@@ -2914,6 +2918,12 @@ function summarizeEvent(event: RuntimeEvent) {
     return `${readString(event.payload.provider)} ${formatUsdMicros(
       Number(event.payload.costUsdMicros ?? 0),
     )}`;
+  }
+  if (event.type === "session.sandbox_usage") {
+    const activeSeconds = Math.round(Number(event.payload.activeMs ?? 0) / 1000);
+    return `Sandbox compute ${formatUsdMicros(
+      Number(event.payload.chargedCostUsdMicros ?? 0),
+    )} (${activeSeconds}s active)`;
   }
   if (event.type === "session.delegated_usage") {
     const cost =

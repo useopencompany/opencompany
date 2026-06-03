@@ -113,6 +113,21 @@ export type ToolUsageInsert = {
   rawUsage: Record<string, unknown>;
 };
 
+export type SandboxUsageInsert = {
+  sessionId: string;
+  messageId: string;
+  runLeaseId: string;
+  sandboxId: string;
+  template: string | null;
+  vcpu: number | null;
+  ramMib: number | null;
+  startedAt: Date | null;
+  endedAt: Date | null;
+  activeMs: number;
+  costUsdMicros: number;
+  rawMetrics: Record<string, unknown>;
+};
+
 /**
  * The atomic, lease-guarded durable writes. Each method writes only while the lease
  * is still current and reports "no write" so the caller can map it to lease loss.
@@ -141,6 +156,10 @@ export type LeaseWriteStore = {
   ): Promise<AssistantInsertOutcome | null>;
   insertModelUsage(input: ModelUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
   insertToolUsage(input: ToolUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
+  insertSandboxUsage(
+    input: SandboxUsageInsert,
+    lease: LeaseIdentity,
+  ): Promise<{ id: number } | null>;
 };
 
 // `EXISTS (lease current)` predicate shared by every guarded statement. The lease row
@@ -337,6 +356,22 @@ export function createDbLeaseWriteStore(): LeaseWriteStore {
           ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.toolCallId}, ${input.toolName},
           ${input.provider}, ${input.operation}, ${input.providerRequestId}, ${input.costUsdMicros},
           ${JSON.stringify(input.rawUsage)}::jsonb
+        WHERE ${leaseIsCurrent(lease)}
+        RETURNING id
+      `);
+      return rowsFromExecute<{ id: number }>(result)[0] ?? null;
+    },
+
+    async insertSandboxUsage(input, lease) {
+      const result = await getDb().execute(sql`
+        INSERT INTO agent_session_sandbox_usage (
+          session_id, message_id, run_lease_id, sandbox_id, template,
+          vcpu, ram_mib, started_at, ended_at, active_ms, cost_usd_micros, raw_metrics
+        )
+        SELECT
+          ${input.sessionId}, ${input.messageId}, ${input.runLeaseId}, ${input.sandboxId}, ${input.template},
+          ${input.vcpu}, ${input.ramMib}, ${input.startedAt}, ${input.endedAt}, ${input.activeMs},
+          ${input.costUsdMicros}, ${JSON.stringify(input.rawMetrics)}::jsonb
         WHERE ${leaseIsCurrent(lease)}
         RETURNING id
       `);

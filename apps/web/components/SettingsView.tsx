@@ -77,6 +77,7 @@ type Props = {
       totalUsdMicros: number;
       modelCostUsdMicros: number;
       toolCostUsdMicros: number;
+      sandboxCostUsdMicros: number;
       providerCostUsdMicros: number;
       platformFeeUsdMicros: number;
       createdAt: string;
@@ -243,6 +244,7 @@ function ledgerLabel(source: string) {
   if (source === "credit_code") return "Redeemed code";
   if (source === "model_usage") return "Model usage";
   if (source === "tool_usage") return "Tool usage";
+  if (source === "sandbox_usage") return "Sandbox compute";
   if (source === "usage") return "Usage";
   return "Credit event";
 }
@@ -258,7 +260,10 @@ function CostLine({ label, value }: { label: string; value: number }) {
 
 function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCharges"][number] }) {
   const otherCostUsdMicros = Math.max(
-    entry.totalUsdMicros - entry.modelCostUsdMicros - entry.toolCostUsdMicros,
+    entry.totalUsdMicros -
+      entry.modelCostUsdMicros -
+      entry.toolCostUsdMicros -
+      entry.sandboxCostUsdMicros,
     0,
   );
 
@@ -292,6 +297,7 @@ function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCha
             <div className="space-y-1 text-[12px]">
               <CostLine label="Model usage" value={entry.modelCostUsdMicros} />
               <CostLine label="Tool usage" value={entry.toolCostUsdMicros} />
+              <CostLine label="Sandbox compute" value={entry.sandboxCostUsdMicros} />
               {otherCostUsdMicros > 0 && (
                 <CostLine label="Other usage" value={otherCostUsdMicros} />
               )}
