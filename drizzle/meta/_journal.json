@@ -239,6 +239,13 @@
       "when": 1780408092289,
       "tag": "0033_blue_madelyne_pryor",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1780482267912,
+      "tag": "0034_closed_katie_power",
+      "breakpoints": true
     }
   ]
 }

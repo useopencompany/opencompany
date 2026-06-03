@@ -5,6 +5,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -42,6 +43,25 @@ export type WorkspaceMcpCredentialKind = "bearer_token" | (string & {});
 // jsonb column annotations and existing importers keep their familiar name.
 export type WorkspaceIntegrationCredentialEncryptedPayload = EncryptedPayload;
 
+// Postgres `bytea` for small binary blobs (user-uploaded avatars, PRO-47).
+// Drizzle has no built-in bytea helper; values round-trip as Node Buffers.
+// The neon-http driver returns bytea as a hex string ("\\x...") rather than a
+// Buffer, so normalize defensively on read.
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+  fromDriver(value: unknown): Buffer {
+    if (Buffer.isBuffer(value)) return value;
+    if (value instanceof Uint8Array) return Buffer.from(value);
+    if (typeof value === "string") {
+      const hex = value.startsWith("\\x") ? value.slice(2) : value;
+      return Buffer.from(hex, "hex");
+    }
+    return Buffer.from([]);
+  },
+});
+
 export const users = pgTable(
   "users",
   {
@@ -58,6 +78,18 @@ export const users = pgTable(
     workosUserIdIdx: uniqueIndex("users_workos_user_id_idx").on(table.workosUserId),
   }),
 );
+
+// User-uploaded avatar (PRO-47). Kept in its own table so the auth hot path
+// (`loadCurrentWorkspaceContextReadOnly` selects all `users` columns on every request)
+// never drags the image bytes. When a row exists it overrides the WorkOS avatarUrl.
+export const userAvatars = pgTable("user_avatars", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  blob: bytea("blob").notNull(),
+  mime: text("mime").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const workspaces = pgTable(
   "workspaces",
