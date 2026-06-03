@@ -1249,13 +1249,14 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "Hello there");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    // The snap effect ran: a scrollTo was issued. It is a "top" snap (behavior
-    // "smooth"), NOT the streaming bottom-follow (which uses behavior "auto").
+    // The snap effect ran: a scrollTo was issued toward the TOP (drift brings the
+    // message up to the padding offset, so top is small/≤ 0), NOT a streaming
+    // bottom-follow (which targets scrollHeight ≥ clientHeight 800).
     await waitFor(() => {
       expect(scrollToSpy).toHaveBeenCalled();
     });
     const snapCall = scrollToSpy.mock.calls.at(-1)?.[0];
-    expect(snapCall).toMatchObject({ behavior: "smooth" });
+    expect(snapCall?.top ?? 0).toBeLessThan(800);
 
     scrollToSpy.mockClear();
 
@@ -1278,12 +1279,10 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       </QueryClientProvider>,
     );
 
-    // The bottom-auto-scroll must NOT fire after the snap (snapInProgress + not
-    // pinned). No scroll-to-bottom (behavior "auto") should override the snap.
+    // The bottom-follow must NOT fire after the one-shot snap (the snap sets
+    // isPinnedAtBottom=false). No scroll-to-bottom should override the snap.
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
+      // A bottom-follow scrolls toward scrollHeight (≥ clientHeight 800).
       const followedToBottom = scrollToSpy.mock.calls.some(
         ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
       );
@@ -1339,14 +1338,20 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     return { ...view, queryClient, scroller, streamingDetail };
   }
 
-  it("does not let a programmatic / layout-driven scroll near the bottom override the snap", async () => {
-    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+  it("does not re-scroll on later streaming renders — the snap is one-shot, not a per-frame re-pin (no jitter)", async () => {
+    const { rerender, queryClient, streamingDetail } = await sendAndSnap();
 
-    // A scroll event fires WITHOUT any user gesture — e.g. the reserved spacer
-    // shrinking or the viewport height changing right after the snap. It lands within
-    // the bottom threshold (distanceFromBottom = 60 ≤ 80) but must NOT be mistaken for
-    // "the user returned to the bottom" (the PRO-124 follow-up bug).
-    if (scroller) fireEvent.scroll(scroller);
+    // The one-shot snap already ran (sendAndSnap awaited and cleared the spy). The whole
+    // point of the new design: the message is held at the top by CSS (min-height on the
+    // last turn) + native scroll anchoring, NOT by a JS loop that re-pins every frame.
+    // So further streamed renders must issue NO additional programmatic scroll — that
+    // per-frame correction was the source of the visible jitter.
+    scrollToSpy.mockClear();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
     rerender(
       <QueryClientProvider client={queryClient}>
         <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
@@ -1354,21 +1359,15 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     );
 
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
-      const followedToBottom = scrollToSpy.mock.calls.some(
-        ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
-      );
-      expect(followedToBottom).toBe(false);
+      expect(scrollToSpy).not.toHaveBeenCalled();
     });
   });
 
-  it("re-arms the streaming follow when the USER scrolls back to the bottom", async () => {
+  it("engages the streaming follow when the user is scrolled to the bottom", async () => {
     const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
 
-    // A genuine user gesture (wheel) precedes the scroll, so reaching the bottom IS
-    // user intent → the streaming follow may resume.
+    // A genuine user gesture (wheel) flags the scroll as user-driven, and it lands within
+    // the bottom threshold → the streaming follow keeps the latest content in view.
     if (scroller) {
       fireEvent.wheel(scroller);
       fireEvent.scroll(scroller);
@@ -1380,9 +1379,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     );
 
     await waitFor(() => {
-      // A real bottom-follow scrolls toward scrollHeight (≥ clientHeight 800); the
-      // maintain pass issues upward "auto" scrolls toward the top, which are NOT a
-      // follow-to-bottom.
+      // A bottom-follow scrolls toward scrollHeight (≥ clientHeight 800).
       const followedToBottom = scrollToSpy.mock.calls.some(
         ([arg]) => arg?.behavior === "auto" && (arg?.top ?? 0) >= 800,
       );
@@ -1395,8 +1392,8 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
 
     // The user scrolls UP to read: a real wheel gesture landing FAR from the bottom
     // (distanceFromBottom = 1000 - 0 - 800 = 200 > SCROLL_BOTTOM_THRESHOLD_PX). This
-    // must hand control to the user — releasing the snap so the maintain pass does NOT
-    // yank the message back to the top on the next streamed render.
+    // leaves isPinnedAtBottom false, so the streaming follow does NOT yank the message
+    // back to the bottom on the next streamed render.
     Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
       configurable: true,
       get: () => 1000,
@@ -1412,8 +1409,32 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       </QueryClientProvider>,
     );
 
-    // Neither the maintain pass (re-pin toward the top) nor the bottom-follow may
-    // scroll — the user's just-chosen position is left untouched.
+    // The bottom-follow must not scroll — the user's just-chosen position is untouched.
+    await waitFor(() => {
+      expect(scrollToSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  // A layout-driven scroll (reflow / overflow-anchor adjustment) fires a bare `scroll`
+  // with NO wheel/touch gesture, and with the reserved min-height it can land within the
+  // bottom threshold. It must NOT be mistaken for the user reaching the bottom — otherwise
+  // the streaming follow engages and yanks the just-snapped message away. (A real scrollbar
+  // drag / keyboard scroll without wheel is the same, accepted, minor edge.)
+  it("ignores a non-user (layout-driven) scroll near the bottom — does not engage the follow", async () => {
+    const { rerender, queryClient, scroller, streamingDetail } = await sendAndSnap();
+
+    // Bare scroll, no wheel/touch → not flagged as user intent. Default scrollHeight 860
+    // gives distanceFromBottom = 60 ≤ threshold, so it WOULD pin if wrongly treated as user.
+    if (scroller) {
+      fireEvent.scroll(scroller);
+    }
+    scrollToSpy.mockClear();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent detail={streamingDetail} workspaceId="wks_test" />
+      </QueryClientProvider>,
+    );
+
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     });
