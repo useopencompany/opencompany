@@ -89,6 +89,12 @@ describe(".agent files", () => {
     expect(config.tools).toEqual(["amp"]);
   });
 
+  test("syncs opencode tool config from a mention", () => {
+    const config = extractConfigFromMentions("Use @opencode for code changes.");
+
+    expect(config.tools).toEqual(["opencode"]);
+  });
+
   test("round-trips Linear MCP tool config without secrets", () => {
     const source = serializeAgentFile({
       title: "Linear triage",

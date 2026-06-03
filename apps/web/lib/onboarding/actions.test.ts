@@ -78,14 +78,16 @@ function createDbMock() {
   const where = vi.fn();
   const set = vi.fn(() => ({ where }));
   const update = vi.fn(() => ({ set }));
-  const onConflictDoUpdate = vi.fn();
-  const values = vi.fn(() => ({ onConflictDoUpdate }));
+  const returning = vi.fn(async () => [{ userId: "usr_123" }]);
+  const onConflictDoNothing = vi.fn(() => ({ returning }));
+  const values = vi.fn(() => ({ onConflictDoNothing }));
   const insert = vi.fn(() => ({ values }));
 
   return {
     db: { update, insert },
     update,
     insert,
+    returning,
   };
 }
 
@@ -152,6 +154,32 @@ describe("completeOnboarding", () => {
     await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
 
     expect(startSeededAgentSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("skips setup when onboarding was already completed by a concurrent submit", async () => {
+    const { db, update, returning } = createDbMock();
+    returning.mockResolvedValue([]);
+    getDbMock.mockReturnValue(db as never);
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+
+    await expect(completeOnboarding(previousState, validFormData())).rejects.toThrow("redirect:/");
+
+    expect(update).not.toHaveBeenCalled();
+    expect(ensureUserOnboardingScaffoldMock).not.toHaveBeenCalled();
+    expect(startSeededAgentSessionMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).not.toHaveBeenCalledWith(
+      "onboarding_completed",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(loggerMock.info).toHaveBeenCalledWith("Skipping duplicate onboarding completion", {
+      event: "opencompany.onboarding_completion_duplicate",
+      workspace_id: "wks_123",
+      user_id: "usr_123",
+    });
   });
 
   it("redirects home when first-run session startup fails", async () => {

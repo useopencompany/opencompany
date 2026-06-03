@@ -66,7 +66,7 @@ import {
   type RunContext,
 } from "./run-context";
 import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
-import { RunSuspendedError } from "./runner-errors";
+import { MessageTurnFailedError, RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
   appendAfterSessionSkipped,
@@ -593,7 +593,7 @@ async function runMessageWithContext(
       model_name: modelName,
       error,
     });
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -1236,7 +1236,7 @@ async function runAfterSessionWithContext(
       model_name: modelName,
       error,
     });
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -1610,7 +1610,7 @@ async function resumeApprovalWithContext(
       tool_call_id: input.toolCallId,
     });
     outcome = "failed";
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -2036,7 +2036,7 @@ async function resumeQuestionResponseWithContext(
       tool_call_id: input.toolCallId,
     });
     outcome = "failed";
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,

@@ -12,6 +12,24 @@ export class ToolStepLimitExceededError extends Error {
   }
 }
 
+// Wraps any failure that surfaces *after* a run acquired its execution lease and began the
+// model/tool loop — for message, after_session, and resume_approval/resume_question jobs.
+// Once a run is past the lease it may already have executed tool calls with external side
+// effects (brain writes, GitHub sync, outbound messages). Retrying the job would replay the
+// whole turn from persisted history and double-run those side effects, so this is treated as
+// non-retryable at the job layer (see isNonRetryableRunnerError). Failures *before* the lease
+// (load/credit/lease-busy) stay raw and remain retryable. The original error is preserved on
+// `cause` and its message is surfaced so the job's lastError stays meaningful.
+export class MessageTurnFailedError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Message turn failed.");
+    this.name = "MessageTurnFailedError";
+    this.cause = cause;
+  }
+}
+
 // Thrown out of the model stream when a turn must suspend for a human. Two reasons:
 //   - "approval": a tool call hit an "ask" gate (resumes in a `resume_approval` job).
 //   - "question": the model called ask_user_question (resumes in a `resume_question` job).
@@ -61,5 +79,9 @@ export class RunSuspendedError extends Error {
 }
 
 export function isNonRetryableRunnerError(error: unknown) {
-  return error instanceof ToolStepLimitExceededError || error instanceof RunSuspendedError;
+  return (
+    error instanceof ToolStepLimitExceededError ||
+    error instanceof RunSuspendedError ||
+    error instanceof MessageTurnFailedError
+  );
 }
