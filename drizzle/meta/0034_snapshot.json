@@ -1,5 +1,5 @@
 {
-  "id": "6727bb09-9e74-40b2-8383-a21fc5eb6a81",
+  "id": "b0aebacf-c624-410e-a73b-9a1136236bcc",
   "prevId": "06bdbad6-f016-47cc-9151-a0688c8afffe",
   "version": "7",
   "dialect": "postgresql",
@@ -1526,6 +1526,180 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.agent_session_questions": {
+      "name": "agent_session_questions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tool_call_id": {
+          "name": "tool_call_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "questions": {
+          "name": "questions",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answers": {
+          "name": "answers",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "answered_at": {
+          "name": "answered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "answered_by_user_id": {
+          "name": "answered_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution_source": {
+          "name": "resolution_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_session_questions_session_tool_call_idx": {
+          "name": "agent_session_questions_session_tool_call_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tool_call_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_session_questions_session_status_idx": {
+          "name": "agent_session_questions_session_status_idx",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_session_questions_session_id_agent_sessions_id_fk": {
+          "name": "agent_session_questions_session_id_agent_sessions_id_fk",
+          "tableFrom": "agent_session_questions",
+          "tableTo": "agent_sessions",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "agent_session_questions_answered_by_user_id_users_id_fk": {
+          "name": "agent_session_questions_answered_by_user_id_users_id_fk",
+          "tableFrom": "agent_session_questions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "answered_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "agent_session_questions_status_check": {
+          "name": "agent_session_questions_status_check",
+          "value": "\"agent_session_questions\".\"status\" IN ('pending', 'answered', 'cancelled')"
+        },
+        "agent_session_questions_resolution_source_check": {
+          "name": "agent_session_questions_resolution_source_check",
+          "value": "\"agent_session_questions\".\"resolution_source\" IS NULL OR \"agent_session_questions\".\"resolution_source\" IN ('user', 'abort', 'timeout', 'superseded')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.agent_session_run_jobs": {
       "name": "agent_session_run_jobs",
       "schema": "",
@@ -1708,7 +1882,7 @@
       "checkConstraints": {
         "agent_session_run_jobs_kind_check": {
           "name": "agent_session_run_jobs_kind_check",
-          "value": "\"agent_session_run_jobs\".\"kind\" IN ('start', 'message', 'title', 'after_session', 'resume_approval')"
+          "value": "\"agent_session_run_jobs\".\"kind\" IN ('start', 'message', 'title', 'after_session', 'resume_approval', 'resume_question')"
         },
         "agent_session_run_jobs_status_check": {
           "name": "agent_session_run_jobs_status_check",
@@ -3942,58 +4116,6 @@
             "id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.user_avatars": {
-      "name": "user_avatars",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "blob": {
-          "name": "blob",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mime": {
-          "name": "mime",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "user_avatars_user_id_users_id_fk": {
-          "name": "user_avatars_user_id_users_id_fk",
-          "tableFrom": "user_avatars",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

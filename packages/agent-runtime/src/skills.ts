@@ -238,9 +238,10 @@ follow this loop. The user should feel guided and in control — not interrogate
 1. **Read this skill** (you are doing that now).
 2. **Ground yourself.** If a company URL came in the signup, do a **quick @exa research pass**
    — one or two targeted searches to learn what the company does. Don't over-research.
-3. **Ask 1–2 sharp questions**, building on the signup details and what you found: what the
-   company really does, who it serves, and what they want help with first. Ask conversationally
-   and wait.
+3. **Ask 1–2 sharp questions with \`ask_user_question\`**, building on the signup details and
+   what you found: what the company really does, who it serves, and what they want help with
+   first. Use one structured tool call with short options and \`allowOther: true\` when the
+   user's answer may not fit your options. Do not ask these as plain chat questions.
 4. **Scaffold a tailored \`brain/wiki/\`**: the folders that fit this business, each with a
    one-line README, plus two or three genuinely useful seeded files (e.g.
    \`brain/wiki/company/overview.md\`, \`brain/wiki/strategy/priorities.md\`). Capture what you
@@ -266,6 +267,9 @@ Don't just stop after setup. In plain language:
 ## Guardrails
 
 - Prefer asking over assuming; a short, sharp set of questions beats a long form.
+- During interactive setup, prefer \`ask_user_question\` for required decisions so the run pauses
+  cleanly and resumes with structured answers. If the tool says questions are unavailable, proceed
+  with best judgment and explain your assumption.
 - Don't over-scaffold. A handful of genuinely useful files is the goal.
 - The Brain is shared knowledge; your definition and \`soul.md\` are behavior. Keep durable
   facts in the Brain and durable behavior in your definition — don't mix them up.

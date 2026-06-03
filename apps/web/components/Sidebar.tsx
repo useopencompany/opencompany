@@ -265,7 +265,8 @@ function SessionHistoryItem({
       >
         {session.status === "running" ||
         session.status === "provisioning" ||
-        session.status === "awaiting_approval" ? (
+        session.status === "awaiting_approval" ||
+        session.status === "awaiting_input" ? (
           <SessionStatusDot status={session.status} pulse />
         ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>

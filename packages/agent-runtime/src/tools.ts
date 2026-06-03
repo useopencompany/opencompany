@@ -19,6 +19,7 @@ export type RuntimeToolName =
   | "git_diff"
   | "delegate_to_agent"
   | "update_agent_file"
+  | "ask_user_question"
   | "amp_coder"
   | "exa_search"
   | "exa_contents"
@@ -463,6 +464,74 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
       "Pass the COMPLETE new Markdown body, not a diff.",
       "Changes apply on your next session, not the current one — offer to start one.",
+    ].join("\n"),
+  },
+  {
+    name: "ask_user_question",
+    kind: "internal",
+    description:
+      "Pause and ask the user one or more structured questions when you genuinely cannot proceed without their input — a real decision, a missing requirement, or an ambiguity that changes the outcome. The run suspends until the user answers, so do not use this for things you can reasonably decide yourself, and never use it to narrate progress or ask for permission to use a tool. Prefer a single round of questions over many sequential pauses: batch everything you need now. Each question presents selectable options; set allowMultiple when several options can be chosen together, and set allowOther when a sensible answer might fall outside the options (this lets the user type their own). Keep headers to two or three words and questions to one clear sentence.",
+    parameters: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "array",
+          description: "Between 1 and 4 questions to ask in a single pause.",
+          items: {
+            type: "object",
+            properties: {
+              header: {
+                type: "string",
+                description: "Two or three word label for this question, shown as its title.",
+              },
+              question: {
+                type: "string",
+                description: "The full question, phrased as one clear sentence.",
+              },
+              options: {
+                type: "array",
+                description: "Between 2 and 6 selectable options.",
+                items: {
+                  type: "object",
+                  properties: {
+                    label: {
+                      type: "string",
+                      description: "Short option label shown to the user.",
+                    },
+                    description: {
+                      type: "string",
+                      description: "Optional one-line clarification of this option.",
+                    },
+                  },
+                  required: ["label"],
+                  additionalProperties: false,
+                },
+              },
+              allowMultiple: {
+                type: "boolean",
+                description: "Whether the user may select more than one option. Defaults to false.",
+                default: false,
+              },
+              allowOther: {
+                type: "boolean",
+                description:
+                  "Whether the user may provide a free-text answer outside the options. Defaults to false.",
+                default: false,
+              },
+            },
+            required: ["header", "question", "options"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["questions"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use ask_user_question only when user input is genuinely required to proceed correctly.",
+      "Batch every question you need into one call; the run pauses until the user answers.",
+      "Set allowMultiple for multi-select questions; set allowOther to let the user type their own answer.",
+      "Do not use it to narrate progress or to ask permission to run a tool.",
     ].join("\n"),
   },
   {

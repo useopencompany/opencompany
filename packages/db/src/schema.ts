@@ -1,4 +1,9 @@
-import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import type {
+  AgentConfig,
+  AgentSessionQuestionAnswer,
+  AgentSessionQuestionPrompt,
+  TiptapDoc,
+} from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, sql } from "drizzle-orm";
 import {
@@ -603,7 +608,7 @@ export const agentSessionRunJobs = pgTable(
     ),
     kindCheck: check(
       "agent_session_run_jobs_kind_check",
-      sql`${table.kind} IN ('start', 'message', 'title', 'after_session', 'resume_approval')`,
+      sql`${table.kind} IN ('start', 'message', 'title', 'after_session', 'resume_approval', 'resume_question')`,
     ),
     statusCheck: check(
       "agent_session_run_jobs_status_check",
@@ -1203,6 +1208,57 @@ export const agentToolApprovals = pgTable(
   }),
 );
 
+// The durable handoff for the ask_user_question tool. Mirrors agentToolApprovals: the model's
+// tool-call suspends the run and writes a pending row here; a web action / backstop flips it to
+// answered/cancelled and triggers a resume run that synthesizes the tool-result from `answers`.
+export const agentSessionQuestions = pgTable(
+  "agent_session_questions",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    messageId: text("message_id"),
+    toolCallId: text("tool_call_id").notNull(),
+    // The questions the model asked (array of {header, question, options[], allowMultiple, allowOther}).
+    questions: jsonb("questions").$type<AgentSessionQuestionPrompt[]>().notNull(),
+    // The user's answers, one entry per question in order. Null until answered.
+    answers: jsonb("answers").$type<AgentSessionQuestionAnswer[]>(),
+    status: text("status")
+      .$type<"pending" | "answered" | "cancelled">()
+      .notNull()
+      .default("pending"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    answeredByUserId: text("answered_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    resolutionSource: text("resolution_source").$type<
+      "user" | "abort" | "timeout" | "superseded"
+    >(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionToolCallIdx: uniqueIndex("agent_session_questions_session_tool_call_idx").on(
+      table.sessionId,
+      table.toolCallId,
+    ),
+    sessionStatusIdx: index("agent_session_questions_session_status_idx").on(
+      table.sessionId,
+      table.status,
+    ),
+    statusCheck: check(
+      "agent_session_questions_status_check",
+      sql`${table.status} IN ('pending', 'answered', 'cancelled')`,
+    ),
+    resolutionSourceCheck: check(
+      "agent_session_questions_resolution_source_check",
+      sql`${table.resolutionSource} IS NULL OR ${table.resolutionSource} IN ('user', 'abort', 'timeout', 'superseded')`,
+    ),
+  }),
+);
+
 export const agentSessionArtifacts = pgTable(
   "agent_session_artifacts",
   {
@@ -1683,3 +1739,4 @@ export type Agent = typeof agents.$inferSelect;
 export type OnboardingResponse = typeof onboardingResponses.$inferSelect;
 export type WorkspaceToolPolicy = typeof workspaceToolPolicies.$inferSelect;
 export type AgentToolApproval = typeof agentToolApprovals.$inferSelect;
+export type AgentSessionQuestion = typeof agentSessionQuestions.$inferSelect;
