@@ -79,7 +79,8 @@ describe("classifyMcpTool", () => {
       providerKey: "linear",
       group: "modify",
     });
-    // PostHog tool names are hyphenated and match the static map directly.
+    // PostHog tool names resolve via the snake_case static map (normalizeRawToolName
+    // folds the hyphenated runtime names before lookup).
     expect(classifyTool("posthog__get-sql-insight")).toEqual({
       providerKey: "posthog",
       group: "read",
@@ -96,6 +97,16 @@ describe("classifyMcpTool", () => {
       providerKey: "posthog",
       group: "admin",
     });
+    // Admin gating for "*-set-active" must survive both hyphenated and sanitized
+    // (underscored) name forms — otherwise the verb heuristic reads "set" as modify.
+    for (const name of [
+      "posthog__project-set-active",
+      "posthog__project_set_active",
+      "posthog__organization-set-active",
+      "posthog__organization_set_active",
+    ]) {
+      expect(classifyTool(name)).toEqual({ providerKey: "posthog", group: "admin" });
+    }
     // Linear's `save_*` upsert family classifies as modify (static map).
     expect(classifyTool("linear__save_comment")).toEqual({
       providerKey: "linear",
