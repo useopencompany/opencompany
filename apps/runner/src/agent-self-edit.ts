@@ -4,6 +4,8 @@ import {
   type AgentConfig,
   type AgentModelId,
   type AgentScheduleTriggerConfig,
+  buildAgentTiptapDoc,
+  buildConfigMentionResolver,
   getAgentModelDefinition,
   isSupportedScheduleCron,
   normalizeAgentConfig,
@@ -95,6 +97,15 @@ export async function applyAgentSelfUpdate(input: {
   if (!validation.ok) return { ok: false, errors: validation.errors };
   const nextConfig = validation.parsed.config;
 
+  // Rebuild the Tiptap "pill" doc the agent detail page renders, mirroring what
+  // the web editor persists. Built from the normalized parsed body (the value
+  // we store below) so it round-trips and the detail page renders these pills
+  // instead of falling back to a lossy text-only rebuild that drops mentions.
+  const content = buildAgentTiptapDoc(
+    validation.parsed.body,
+    buildConfigMentionResolver(nextConfig),
+  );
+
   const contentHash = hashAgentSource(source);
   const nextVersion = row.version + 1;
   const now = new Date();
@@ -106,6 +117,7 @@ export async function applyAgentSelfUpdate(input: {
     .set({
       name: validation.parsed.title,
       body: validation.parsed.body,
+      content,
       config: nextConfig,
       contentHash,
       version: nextVersion,

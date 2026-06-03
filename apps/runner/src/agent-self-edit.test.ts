@@ -91,7 +91,7 @@ describe("applyAgentSelfUpdate", () => {
     dbMocks.getDb.mockReturnValue(db);
 
     const result = await applyAgentSelfUpdate(
-      input({ body: "New sharper instructions.", summary: "tightened tone" }),
+      input({ body: "New sharper instructions. Research with @exa.", summary: "tightened tone" }),
     );
 
     expect(result.ok).toBe(true);
@@ -102,6 +102,19 @@ describe("applyAgentSelfUpdate", () => {
     // agents row updated with bumped version and pending sync status.
     expect(calls.update).toHaveLength(1);
     expect(calls.update[0]).toMatchObject({ version: 4, githubSyncStatus: "pending" });
+    // The Tiptap "pill" doc is regenerated so the detail page renders resolved
+    // mentions instead of a lossy text-only rebuild.
+    const updated = calls.update[0] as { content?: { type: string; content?: unknown[] } };
+    expect(updated.content?.type).toBe("doc");
+    const mentions: Array<{ attrs?: Record<string, unknown> }> = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== "object") return;
+      const n = node as { type?: string; attrs?: Record<string, unknown>; content?: unknown[] };
+      if (n.type === "mention") mentions.push(n);
+      (n.content ?? []).forEach(walk);
+    };
+    (updated.content?.content ?? []).forEach(walk);
+    expect(mentions.map((m) => m.attrs?.id)).toContain("tool:exa");
     // sync job queued for the GitHub sweeper.
     expect(calls.insert).toHaveLength(1);
     expect(calls.insert[0]).toMatchObject({ agentId: "agt_1", desiredVersion: 4 });

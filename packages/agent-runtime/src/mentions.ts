@@ -1,5 +1,6 @@
-import { extractAfterSessionConfig } from "./after-session";
+import { AFTER_SESSION_TAG, extractAfterSessionConfig } from "./after-session";
 import { AGENT_MODEL_CATALOG, type ModelRatings } from "./models";
+import type { MentionResolver } from "./tiptap-builder";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import type {
   AgentBrainReference,
@@ -469,4 +470,101 @@ function isMentionChar(char: string) {
     char === "/" ||
     char === "-"
   );
+}
+
+// Mirrors the web editor's `repositoryMentionId` so a config-derived repository
+// pill carries the same id the editor would have stored.
+function repositoryMentionIdForConfig(repository: AgentGitHubRepositoryConfig) {
+  const repositoryId = repositoryIdForFullName(repository.fullName);
+  if (!repository.binding) return `integration:github:${repositoryId}`;
+  return [
+    "integration",
+    "github",
+    repositoryId,
+    repository.binding.connection.externalId,
+    repository.binding.externalId,
+  ].join(":");
+}
+
+// Mirrors the web editor's `mentionIdDisplayText`: the text a mention pill
+// renders for a given id (empty when the id has no recognized prefix, in which
+// case the label is used instead).
+function mentionIdDisplayText(id: string) {
+  const trimmed = id.trim();
+  if (trimmed.startsWith("tool:")) return trimmed.slice("tool:".length);
+  if (trimmed.startsWith("model:")) return trimmed.slice("model:".length);
+  if (trimmed.startsWith("brain/")) return trimmed;
+  if (trimmed.startsWith("agent/")) return trimmed;
+  if (trimmed === "integration:github") return "github";
+  if (trimmed === "after-session") return "after-session";
+  return "";
+}
+
+function mentionDisplayText(id: string, label: string) {
+  const idDisplay = mentionIdDisplayText(id);
+  return idDisplay.length > 0 ? idDisplay : label.trim();
+}
+
+/**
+ * Build a {@link MentionResolver} from an agent's persisted config. Used by the
+ * runner's self-edit path to construct an authoritative Tiptap `content` doc
+ * whose mention pills carry the same `{id,label}` the web catalog would produce.
+ *
+ * It only emits a pill when the rendered display equals the original body token
+ * (a per-mention round-trip guard); otherwise the token stays plain text. This
+ * keeps `tiptapDocToBody(content) === body` so the detail page renders the
+ * stored doc instead of falling back to a lossy rebuild.
+ */
+export function buildConfigMentionResolver(config: AgentConfig): MentionResolver {
+  const repositoryByFullName = new Map<string, AgentGitHubRepositoryConfig>();
+  for (const repository of config.integrations?.github?.repositories ?? []) {
+    repositoryByFullName.set(repository.fullName.toLowerCase(), repository);
+  }
+
+  const agentMentionIdByKey = new Map<string, string>();
+  for (const agent of config.agents ?? []) {
+    const mentionId = agentMentionIdForPath(agent.path);
+    if (!mentionId) continue;
+    agentMentionIdByKey.set(normalizeAgentMentionId(mentionId), mentionId);
+    const name = agent.name.trim().toLowerCase();
+    if (name) agentMentionIdByKey.set(name, mentionId);
+  }
+
+  const resolveCandidate = (
+    token: string,
+    char: "@" | "#",
+  ): { id: string; label: string } | null => {
+    if (!token) return null;
+
+    if (char === "#") {
+      const hook = AFTER_SESSION_TAG.slice(1);
+      return token === hook ? { id: hook, label: hook } : null;
+    }
+
+    const toolId = toolIdFromMention(token);
+    if (toolId) return { id: `tool:${toolId}`, label: toolId };
+
+    if (brainReferenceFromMention(token)) return { id: token, label: token };
+
+    if (token === "github") return { id: "integration:github", label: "github" };
+
+    const agentMentionId =
+      agentMentionIdByKey.get(normalizeAgentMentionId(token)) ??
+      agentMentionIdByKey.get(token.trim().toLowerCase());
+    if (agentMentionId) return { id: agentMentionId, label: agentMentionId };
+
+    const repository = repositoryByFullName.get(token.toLowerCase());
+    if (repository) {
+      return { id: repositoryMentionIdForConfig(repository), label: repository.fullName };
+    }
+
+    return null;
+  };
+
+  return (token, char) => {
+    const candidate = resolveCandidate(token, char);
+    if (!candidate) return null;
+    if (mentionDisplayText(candidate.id, candidate.label) !== token) return null;
+    return candidate;
+  };
 }
