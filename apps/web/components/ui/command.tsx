@@ -1,6 +1,7 @@
 "use client";
 
 import { Command as CommandPrimitive } from "cmdk";
+import { Search } from "lucide-react";
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +16,24 @@ const Command = React.forwardRef<
   />
 ));
 Command.displayName = CommandPrimitive.displayName;
+
+const CommandInput = React.forwardRef<
+  React.ComponentRef<typeof CommandPrimitive.Input>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
+>(({ className, ...props }, ref) => (
+  <div className="flex items-center gap-2 border-b border-border px-2.5" cmdk-input-wrapper="">
+    <Search size={14} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
+    <CommandPrimitive.Input
+      ref={ref}
+      className={cn(
+        "flex h-9 w-full bg-transparent py-2 text-[13px] text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    />
+  </div>
+));
+CommandInput.displayName = CommandPrimitive.Input.displayName;
 
 const CommandList = React.forwardRef<
   React.ComponentRef<typeof CommandPrimitive.List>,
@@ -82,4 +101,12 @@ const CommandItem = React.forwardRef<
 ));
 CommandItem.displayName = CommandPrimitive.Item.displayName;
 
-export { Command, CommandEmpty, CommandGroup, CommandItem, CommandList, CommandSeparator };
+export {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+};

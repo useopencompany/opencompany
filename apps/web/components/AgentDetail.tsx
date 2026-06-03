@@ -21,7 +21,9 @@ import type {
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
+  Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   CircleAlert,
   Clock3,
@@ -41,6 +43,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { ModelRatingMeters, modelRatingsTitle } from "@/components/agent-editor/ModelRatingMeters";
 import {
   AGENT_MODELS,
   type AgentMentionItem,
@@ -50,18 +53,20 @@ import {
   findModel,
   findTool,
   mcpConnectUrl,
+  modelProviderId,
+  modelProviderLabel,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useToast } from "@/components/ToastProvider";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
@@ -79,6 +84,7 @@ import {
   fetchAgent,
   fetchAgents,
 } from "@/lib/agents/payload";
+import { cn } from "@/lib/utils";
 
 type Props = {
   idOrPath: string;
@@ -207,6 +213,7 @@ function AgentDetailContent({
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
   );
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [isDeleting, startDeleteTransition] = useTransition();
@@ -255,6 +262,26 @@ function AgentDetailContent({
   );
   const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
   const SelectedModelIcon = selectedModel.icon;
+  // Group models by provider (in catalog order) for the searchable picker.
+  const modelsByProvider = useMemo(() => {
+    const order: string[] = [];
+    const byProvider = new Map<string, AgentModel[]>();
+    for (const model of AGENT_MODELS) {
+      const provider = modelProviderId(model.id);
+      const bucket = byProvider.get(provider);
+      if (bucket) {
+        bucket.push(model);
+      } else {
+        byProvider.set(provider, [model]);
+        order.push(provider);
+      }
+    }
+    return order.map((provider) => ({
+      provider,
+      label: modelProviderLabel(provider),
+      models: byProvider.get(provider) ?? [],
+    }));
+  }, []);
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
     agent.githubSyncStatus === optimisticGitHubSync.baseStatus &&
@@ -508,53 +535,77 @@ function AgentDetailContent({
           />
 
           <div className="mt-2 flex items-center">
-            <Select
-              value={selectedModelId}
-              onValueChange={(value) => {
-                const next = findModel(value)?.id;
-                if (!next) return;
-                setSelectedModelId(next);
-                pendingRef.current.model = next;
-                schedule();
-              }}
-            >
-              <SelectTrigger className="h-6 w-auto border-0 bg-transparent px-1.5 text-[11.5px] font-medium text-ink-muted shadow-none hover:bg-surface-subtle/70 focus:ring-0 focus-visible:ring-0 [&>svg]:ml-0.5 [&>svg]:h-3 [&>svg]:w-3">
-                <span className="flex min-w-0 items-center gap-1.5">
+            <Popover open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="flex h-6 w-auto items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted outline-none transition-colors hover:bg-surface-subtle/70 focus-visible:bg-surface-subtle/70 data-[state=open]:bg-surface-subtle/70"
+                >
                   <SelectedModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
-                  <span className="truncate">{selectedModel.displayLabel}</span>
-                </span>
-              </SelectTrigger>
-              <SelectContent className="min-w-[232px]">
-                {(["Thinking", "Non-thinking"] as const).map((group, index) => {
-                  const models = AGENT_MODELS.filter((model) =>
-                    group === "Thinking" ? model.supportsReasoning : !model.supportsReasoning,
-                  );
-                  if (models.length === 0) return null;
-
-                  return (
-                    <SelectGroup key={group}>
-                      <SelectLabel>{group}</SelectLabel>
-                      {models.map((model) => {
-                        const ModelIcon = model.icon;
-                        return (
-                          <SelectItem key={model.id} value={model.id}>
-                            <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate">{selectedModel.label}</span>
+                  <ChevronDown size={12} strokeWidth={1.9} className="ml-0.5 shrink-0" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[360px] p-0">
+                <Command>
+                  <CommandInput placeholder="Search models or providers…" />
+                  <div className="flex items-center justify-end px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+                    Capability · Speed · Cost
+                  </div>
+                  <CommandList>
+                    <CommandEmpty>No models found.</CommandEmpty>
+                    {modelsByProvider.map((group) => (
+                      <CommandGroup key={group.provider} heading={group.label}>
+                        {group.models.map((model) => {
+                          const ModelIcon = model.icon;
+                          const isSelected = model.id === selectedModelId;
+                          return (
+                            <CommandItem
+                              key={model.id}
+                              value={model.id}
+                              keywords={[model.label, group.label]}
+                              onSelect={() => {
+                                setSelectedModelId(model.id);
+                                pendingRef.current.model = model.id;
+                                schedule();
+                                setModelMenuOpen(false);
+                              }}
+                              title={
+                                model.ratings
+                                  ? modelRatingsTitle(model.label, model.description, model.ratings)
+                                  : model.description
+                              }
+                              className="gap-2 py-1.5"
+                            >
+                              <Check
+                                size={13}
+                                strokeWidth={2}
+                                className={cn(
+                                  "shrink-0 text-ink",
+                                  isSelected ? "opacity-100" : "opacity-0",
+                                )}
+                              />
                               <ModelIcon
-                                size={12.5}
+                                size={13}
                                 strokeWidth={1.85}
                                 className="shrink-0 text-ink-muted"
                               />
-                              <span className="truncate">{model.displayLabel}</span>
-                            </span>
-                          </SelectItem>
-                        );
-                      })}
-                      {index === 0 ? <SelectSeparator /> : null}
-                    </SelectGroup>
-                  );
-                })}
-              </SelectContent>
-            </Select>
+                              <span className="min-w-0 flex-1 truncate">{model.label}</span>
+                              {model.ratings ? (
+                                <ModelRatingMeters
+                                  ratings={model.ratings}
+                                  className="shrink-0 text-ink-muted"
+                                />
+                              ) : null}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    ))}
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="mt-6">

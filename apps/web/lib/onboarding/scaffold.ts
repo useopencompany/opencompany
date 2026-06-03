@@ -1,7 +1,8 @@
-import { agentPathForSlug } from "@opencompany/agent-runtime";
+import { agentBundleDir, agentPathForSlug } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agents } from "@opencompany/db/schema";
+import { agentFiles, agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   buildPendingAgent,
@@ -9,22 +10,54 @@ import {
   prepareAgentSyncJobUpsert,
   scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
+import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
+import { agentFileSyncJobUpsert } from "@/lib/agents/sync-job";
+import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 
 const DEFAULT_USER_AGENT_TITLE = "leo";
 const DEFAULT_USER_AGENT_PATH = agentPathForSlug(DEFAULT_USER_AGENT_TITLE);
 
-// Starter instructions for a brand-new user's first agent. The `@brain/` mention mounts the
-// whole Brain, which (a) gives leo workspace context going forward and (b) is what lets the
-// first onboarding session create and persist Brain files — a session with no Brain mount
-// silently discards anything written under brain/. Keep this short; leo refines it via the
-// agent-self-edit skill during onboarding.
-export const DEFAULT_USER_AGENT_BODY = `You are leo, the user's OpenCompany agent. You help them get work done and you keep the company's shared knowledge in the Brain up to date.
+// Throughput-optimized MiniMax M2.7 is a capable, low-latency default for leo. Other agents
+// keep the global default.
+const DEFAULT_USER_AGENT_MODEL: AgentModelId = "minimax/minimax-m2.7-highspeed";
 
-Your shared knowledge lives in @brain/ — read it for context and keep it current as you learn about the company and its goals.
+// Starter instructions for a brand-new user's first agent. Deliberately minimal — leo's
+// richer operating guidance lives in agent/soul.md (read first, see DEFAULT_SOUL_MD), and it
+// sharpens this body via the agent-self-edit skill during onboarding. The `@brain/` mention
+// mounts the whole Brain, which (a) gives leo workspace context going forward and (b) is what
+// lets the first onboarding session create and persist Brain files — a session with no Brain
+// mount silently discards anything written under brain/.
+export const DEFAULT_USER_AGENT_BODY = `You are leo, the user's OpenCompany agent.
 
-Research the live web with @exa before answering factual or time-sensitive questions, and cite what you find. Use @x to see what people are saying on X about a company, product, or topic when real-time or social signal is useful.
+Before doing any work, read agent/soul.md — it's how you operate and who you serve. Keep it current as you learn.
 
-When the workspace is fresh or the user asks you to get set up, follow the opencompany-setup skill: ask a couple of clarifying questions, scaffold a tidy starter Brain, and tune your own definition so you're genuinely useful for this user.`;
+Shared company knowledge lives in @brain/. Read it for context and keep it current.
+
+Research with @exa (live web, cited) and @x (social signal) before answering factual or time-sensitive questions.
+
+If the workspace is fresh or the user asks to get set up, follow the opencompany-setup skill.`;
+
+// Default operating doc seeded into leo's private agent folder (agent/soul.md). The angle-bracket
+// placeholders are personalized to the user's role and focus during onboarding (the
+// opencompany-setup skill drives this). Keep it short; it's leo's to evolve.
+export const DEFAULT_SOUL_MD = `# leo's soul
+
+This is how I operate. I read it before any work and keep it current as I learn.
+
+## Who I serve
+
+<personalized to the user's role and what they care about during setup>
+
+## How I work
+
+- I keep shared knowledge current in the Brain (brain/wiki/).
+- I research before I assert — live web via exa, social signal via x — and cite what I find.
+- I'm concise and bias to action; I confirm before anything destructive or outward-facing.
+
+## What good looks like
+
+<tuned to the user's focus areas during setup>
+`;
 
 export async function ensureUserOnboardingScaffold(input: { userId: string; workspaceId: string }) {
   const db = getDb();
@@ -47,10 +80,34 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     title: DEFAULT_USER_AGENT_TITLE,
     body: DEFAULT_USER_AGENT_BODY,
     path: DEFAULT_USER_AGENT_PATH,
+    model: DEFAULT_USER_AGENT_MODEL,
   });
   const syncJob = prepareAgentSyncJobUpsert(db, pending.syncJob);
 
-  await db.batch([db.insert(agents).values(pending.agent), syncJob.query]);
+  // Seed leo's private operating doc (agent/soul.md). The runner mounts it into ./agent on
+  // the first session; the insert commits here before the seeded session starts.
+  const soulPath = `${agentBundleDir(DEFAULT_USER_AGENT_PATH)}/soul.md`;
+  const soulHash = hashBrainContent(DEFAULT_SOUL_MD);
+
+  await db.batch([
+    db.insert(agents).values(pending.agent),
+    syncJob.query,
+    db.insert(agentFiles).values({
+      workspaceId: input.workspaceId,
+      agentId: pending.id,
+      path: soulPath,
+      content: DEFAULT_SOUL_MD,
+      contentHash: soulHash,
+      sizeBytes: brainContentSize(DEFAULT_SOUL_MD),
+      githubSyncStatus: "pending",
+    }),
+    agentFileSyncJobUpsert(db, {
+      workspaceId: input.workspaceId,
+      path: soulPath,
+      operation: "upsert",
+      desiredHash: soulHash,
+    }),
+  ]);
   logAgentSyncJobQueued(syncJob.metadata);
 
   await captureServerEvent("agent_created", input.userId, {
@@ -64,6 +121,7 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     workspaceId: input.workspaceId,
     path: DEFAULT_USER_AGENT_PATH,
   });
+  scheduleAgentFileSyncDispatch({ workspaceId: input.workspaceId, path: soulPath });
 
   return {
     created: true as const,

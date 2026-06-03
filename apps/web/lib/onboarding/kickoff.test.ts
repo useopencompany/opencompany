@@ -19,6 +19,8 @@ describe("buildOnboardingKickoffPrompt", () => {
     expect(prompt).toContain("Building the product");
     expect(prompt).toContain("Operations");
     expect(prompt).not.toContain("product_building");
+    // With a company URL present, nudge leo to ground itself with a quick research pass.
+    expect(prompt).toContain("take a quick look first");
   });
 
   it("joins multiple help areas with 'and'", () => {
@@ -42,5 +44,7 @@ describe("buildOnboardingKickoffPrompt", () => {
 
     expect(prompt).not.toContain("Company:");
     expect(prompt).toContain("My role: Engineer");
+    // No company URL means no research nudge.
+    expect(prompt).not.toContain("take a quick look first");
   });
 });
