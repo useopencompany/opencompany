@@ -1238,7 +1238,10 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
             title="Profile"
             description="Shown on your profile. Email is managed by your identity provider."
           >
+            {/* key resets the optimistic preview/removed state once the server
+                refresh delivers a new avatarUrl (e.g. the IdP avatar after a remove). */}
             <AvatarForm
+              key={profile.avatarUrl ?? "none"}
               avatarUrl={profile.avatarUrl}
               initials={profile.initials}
               hasCustomAvatar={profile.hasCustomAvatar}

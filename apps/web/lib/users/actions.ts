@@ -51,13 +51,17 @@ export async function updateAvatar(input: { dataBase64: string }) {
 
   const db = getDb();
   const now = new Date();
-  await db
-    .insert(userAvatars)
-    .values({ userId: context.user.id, blob: buffer, mime, updatedAt: now })
-    .onConflictDoUpdate({
-      target: userAvatars.userId,
-      set: { blob: buffer, mime, updatedAt: now },
-    });
+  try {
+    await db
+      .insert(userAvatars)
+      .values({ userId: context.user.id, blob: buffer, mime, updatedAt: now })
+      .onConflictDoUpdate({
+        target: userAvatars.userId,
+        set: { blob: buffer, mime, updatedAt: now },
+      });
+  } catch {
+    return { ok: false as const, error: "Could not save the image. Please try again." };
+  }
 
   revalidatePath("/", "layout");
   revalidatePath("/settings");
@@ -71,7 +75,11 @@ export async function removeAvatar() {
   }
 
   const db = getDb();
-  await db.delete(userAvatars).where(eq(userAvatars.userId, context.user.id));
+  try {
+    await db.delete(userAvatars).where(eq(userAvatars.userId, context.user.id));
+  } catch {
+    return { ok: false as const, error: "Could not remove the image. Please try again." };
+  }
 
   revalidatePath("/", "layout");
   revalidatePath("/settings");

@@ -58,7 +58,7 @@ const bytea = customType<{ data: Buffer }>({
       const hex = value.startsWith("\\x") ? value.slice(2) : value;
       return Buffer.from(hex, "hex");
     }
-    return Buffer.from([]);
+    throw new Error(`Unexpected bytea value from driver (${typeof value}).`);
   },
 });
 

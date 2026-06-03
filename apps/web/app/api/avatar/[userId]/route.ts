@@ -36,7 +36,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ use
     headers: {
       "Content-Type": row.mime,
       "Content-Length": String(body.byteLength),
-      "Cache-Control": "private, max-age=0, must-revalidate",
+      // The reader appends ?v=<updatedAt>, so each version is an immutable URL.
+      "Cache-Control": "private, max-age=31536000, immutable",
       "X-Content-Type-Options": "nosniff",
     },
   });
