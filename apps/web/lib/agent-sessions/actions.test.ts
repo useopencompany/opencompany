@@ -8,12 +8,17 @@ import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionStarted,
 } from "@/lib/agent-sessions/events";
-import { triggerAgentMessageRun } from "@/lib/agent-sessions/message-runner";
+import {
+  triggerAgentApprovalResume,
+  triggerAgentMessageRun,
+} from "@/lib/agent-sessions/message-runner";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { currentWorkspace } from "@/lib/auth";
 import {
   createAgentSession,
   createAgentSessionFromPrompt,
+  resolveToolApproval,
+  setSessionStar,
   submitAgentSessionMessage,
 } from "./actions";
 
@@ -55,6 +60,7 @@ vi.mock("@/lib/agent-sessions/events", () => ({
 }));
 
 vi.mock("@/lib/agent-sessions/message-runner", () => ({
+  triggerAgentApprovalResume: vi.fn().mockResolvedValue(undefined),
   triggerAgentMessageRun: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -71,6 +77,7 @@ const newAgentSessionMessageIdMock = vi.mocked(newAgentSessionMessageId);
 const loadAgentSessionDetailForWorkspaceMock = vi.mocked(loadAgentSessionDetailForWorkspace);
 const dispatchAgentAfterSessionCheckMock = vi.mocked(dispatchAgentAfterSessionCheck);
 const dispatchAgentSessionStartedMock = vi.mocked(dispatchAgentSessionStarted);
+const triggerAgentApprovalResumeMock = vi.mocked(triggerAgentApprovalResume);
 const triggerAgentMessageRunMock = vi.mocked(triggerAgentMessageRun);
 const captureServerEventMock = vi.mocked(captureServerEvent);
 
@@ -78,7 +85,7 @@ function fakeAgent() {
   return {
     id: "agt_123",
     name: "Leo",
-    path: "agents/leo.agent",
+    path: "agents/leo/leo.agent",
     workspaceId: "wks_123",
     config: { model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" } },
   };
@@ -90,7 +97,7 @@ function fakeDetail(): AgentSessionDetailPayload {
       id: "ses_123",
       agentId: "agt_123",
       agentName: "Leo",
-      agentPath: "agents/leo.agent",
+      agentPath: "agents/leo/leo.agent",
       title: "Untitled",
       status: "created",
       source: "user",
@@ -196,6 +203,7 @@ describe("createAgentSession", () => {
         lastError: detail.session.lastError,
         createdAt: detail.session.createdAt,
         updatedAt: detail.session.updatedAt,
+        starredAt: null,
       },
     });
     expect(loadAgentSessionDetailForWorkspaceMock).toHaveBeenCalledWith(
@@ -321,6 +329,70 @@ describe("createAgentSessionFromPrompt", () => {
   });
 });
 
+describe("setSessionStar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  function dbForStar(session: { id: string } | null) {
+    const limit = vi.fn().mockResolvedValue(session ? [session] : []);
+    const selectWhere = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where: selectWhere }));
+    const select = vi.fn(() => ({ from }));
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insert = vi.fn(() => ({ values }));
+    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const del = vi.fn(() => ({ where: deleteWhere }));
+    return {
+      db: { select, insert, delete: del } as never,
+      values,
+      onConflictDoUpdate,
+      del,
+      deleteWhere,
+    };
+  }
+
+  it("rejects starring a session the user cannot see", async () => {
+    getDbMock.mockReturnValue(dbForStar(null).db);
+
+    const result = await setSessionStar("ses_missing", true);
+
+    expect(result).toEqual({ ok: false, error: "Session not found." });
+  });
+
+  it("upserts a star row and returns the new starredAt", async () => {
+    const { db, values, onConflictDoUpdate, del } = dbForStar({ id: "ses_123" });
+    getDbMock.mockReturnValue(db);
+
+    const result = await setSessionStar("ses_123", true);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && typeof result.starredAt === "string").toBe(true);
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "usr_123", sessionId: "ses_123" }),
+    );
+    expect(onConflictDoUpdate).toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("deletes the star row when unstarring", async () => {
+    const { db, del, deleteWhere, values } = dbForStar({ id: "ses_123" });
+    getDbMock.mockReturnValue(db);
+
+    const result = await setSessionStar("ses_123", false);
+
+    expect(result).toEqual({ ok: true, starredAt: null });
+    expect(del).toHaveBeenCalled();
+    expect(deleteWhere).toHaveBeenCalled();
+    expect(values).not.toHaveBeenCalled();
+  });
+});
+
 describe("submitAgentSessionMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -404,5 +476,82 @@ describe("submitAgentSessionMessage", () => {
 
     expect(result).toEqual({ ok: false, error: "Session not found." });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveToolApproval", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+  });
+
+  it("waits for the approval resume dispatch after deciding the row", async () => {
+    let finishResume!: () => void;
+    triggerAgentApprovalResumeMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishResume = resolve;
+      }),
+    );
+
+    const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
+    const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
+    const select = vi.fn(() => ({ from: sessionFrom }));
+    const returning = vi.fn().mockResolvedValue([{ id: 7 }]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set }));
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    let settled = false;
+    const resultPromise = resolveToolApproval({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      decision: "denied",
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(triggerAgentApprovalResumeMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      workspaceId: "wks_123",
+    });
+    expect(settled).toBe(false);
+
+    finishResume();
+
+    await expect(resultPromise).resolves.toEqual({ ok: true });
+    expect(settled).toBe(true);
+  });
+
+  it("does not dispatch resume when the approval row was already decided", async () => {
+    const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
+    const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
+    const select = vi.fn(() => ({ from: sessionFrom }));
+    const returning = vi.fn().mockResolvedValue([]);
+    const updateWhere = vi.fn(() => ({ returning }));
+    const set = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set }));
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    const result = await resolveToolApproval({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      decision: "denied",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "This request is no longer awaiting approval.",
+    });
+    expect(triggerAgentApprovalResumeMock).not.toHaveBeenCalled();
   });
 });

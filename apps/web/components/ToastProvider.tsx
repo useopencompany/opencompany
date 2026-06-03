@@ -5,17 +5,24 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 type ToastTone = "default" | "error";
 
+type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 type Toast = {
   id: number;
   title: string;
   description?: string;
   tone: ToastTone;
+  action?: ToastAction;
 };
 
 type ToastInput = {
   title: string;
   description?: string;
   tone?: ToastTone;
+  action?: ToastAction;
 };
 
 type ToastContextValue = {
@@ -42,6 +49,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         title: input.title,
         tone: input.tone ?? "default",
         ...(input.description ? { description: input.description } : {}),
+        ...(input.action ? { action: input.action } : {}),
       },
     ]);
   }, []);
@@ -102,6 +110,18 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
             <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">{toast.description}</p>
           ) : null}
         </div>
+        {toast.action ? (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action?.onClick();
+              onDismiss(toast.id);
+            }}
+            className="shrink-0 rounded px-1.5 py-0.5 text-[12.5px] font-medium leading-4 text-ink hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            {toast.action.label}
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label="Dismiss notification"

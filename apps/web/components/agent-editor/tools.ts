@@ -1,4 +1,8 @@
-import { AFTER_SESSION_TAG, repositoryIdForFullName } from "@opencompany/agent-runtime";
+import {
+  AFTER_SESSION_TAG,
+  agentMentionIdForPath,
+  repositoryIdForFullName,
+} from "@opencompany/agent-runtime";
 import type {
   AgentGitHubRepositoryBinding,
   AgentModelId,
@@ -6,6 +10,7 @@ import type {
   AgentToolId,
 } from "@opencompany/agent-runtime/types";
 import {
+  AtSign,
   Clock3,
   Code2,
   FileText,
@@ -15,21 +20,26 @@ import {
   type LucideIcon,
   MessageSquare,
   MessagesSquare,
+  Music2,
   Search,
   Sparkles,
+  SquarePlay,
 } from "lucide-react";
 import {
   AnthropicIcon,
   DeepSeekIcon,
   GeminiIcon,
+  MinimaxIcon,
   MistralIcon,
   MoonshotIcon,
   OpenAIIcon,
+  XaiIcon,
   ZaiIcon,
 } from "@/components/icons/model-provider-icons";
+import { InstagramIcon } from "@/components/icons/social-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
-type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent";
+type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent" | "schedule";
 
 type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -41,6 +51,11 @@ type BaseAgentMentionItem = {
   icon: LucideIcon;
   category?: "Fast" | "Deep";
   supportsReasoning?: boolean;
+  // Set on integrations that are enabled on the agent but not yet set up in the
+  // workspace. The mention stays selectable; the UI shows a "Needs setup" badge
+  // linking to `connectUrl` (Settings → Integrations connect flow).
+  needsSetup?: boolean;
+  connectUrl?: string;
 };
 
 export type AgentTool = BaseAgentMentionItem & {
@@ -82,16 +97,26 @@ export type AgentWorkspaceMention = BaseAgentMentionItem & {
   path: string;
 };
 
+export type AgentScheduleMention = BaseAgentMentionItem & {
+  id: "run-every";
+  kind: "schedule";
+};
+
 export type AgentMentionItem =
   | AgentModel
   | AgentTool
   | AgentIntegration
   | AgentBrainMention
   | AgentHookMention
-  | AgentWorkspaceMention;
+  | AgentWorkspaceMention
+  | AgentScheduleMention;
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
+  x: AtSign,
+  youtube: SquarePlay,
+  tiktok: Music2,
+  instagram: InstagramIcon,
   amp: Code2,
   linear: ListTodo,
   slack: MessageSquare,
@@ -111,6 +136,8 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   mistral: MistralIcon,
   moonshotai: MoonshotIcon,
   zai: ZaiIcon,
+  xai: XaiIcon,
+  minimax: MinimaxIcon,
 };
 
 function modelIconFor(id: AgentModelId): LucideIcon {
@@ -154,6 +181,18 @@ export const AGENT_AFTER_SESSION_MENTION_ITEMS: AgentHookMention[] = [
   },
 ];
 
+export const AGENT_SCHEDULE_MENTION_ITEMS: AgentScheduleMention[] = [
+  {
+    id: "run-every",
+    mentionId: "schedule:run-every",
+    kind: "schedule",
+    label: "run-every",
+    displayLabel: "Run every...",
+    description: "Create a recurring scheduled run",
+    icon: Clock3,
+  },
+];
+
 export function buildAgentMentionItems(
   repositories: Array<{
     fullName: string;
@@ -166,6 +205,7 @@ export function buildAgentMentionItems(
   options: {
     enabledMcpToolIds?: AgentToolId[];
     includeMcpTools?: boolean;
+    mcpEnabled?: boolean;
     agents?: AgentReference[];
   } = {},
 ): AgentMentionItem[] {
@@ -197,18 +237,47 @@ export function buildAgentMentionItems(
   });
 
   return [
-    ...AGENT_TOOLS.filter(
-      (tool) =>
-        tool.kind !== "tool" ||
-        !isMcpToolId(tool.id) ||
-        options.includeMcpTools ||
-        Boolean(options.enabledMcpToolIds?.includes(tool.id)),
-    ),
+    ...AGENT_SCHEDULE_MENTION_ITEMS,
+    ...buildToolMentionItems(options),
     ...buildWorkspaceAgentMentionItems(options.agents ?? []),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+// Non-MCP tools are always available. MCP-backed tools (Linear, Slack) are shown
+// whenever the workspace MCP beta is on: connected ones behave normally, while
+// not-yet-connected ones stay selectable but carry `needsSetup`/`connectUrl` so
+// the UI can flag them and link to the connect flow. With the beta off they are
+// hidden entirely (matching the runtime's "beta is off" guard).
+function buildToolMentionItems(options: {
+  enabledMcpToolIds?: AgentToolId[];
+  includeMcpTools?: boolean;
+  mcpEnabled?: boolean;
+}): AgentTool[] {
+  return AGENT_TOOLS.flatMap((tool) => {
+    if (tool.kind !== "tool" || !isMcpToolId(tool.id)) return [tool];
+    const connected = Boolean(options.enabledMcpToolIds?.includes(tool.id));
+    const visible = options.includeMcpTools || options.mcpEnabled || connected;
+    if (!visible) return [];
+    if (connected) return [tool];
+    return [
+      {
+        ...tool,
+        description: "Not connected — set up in Settings → Integrations.",
+        needsSetup: true,
+        connectUrl: mcpConnectUrl(tool.id),
+      },
+    ];
+  });
+}
+
+// Single source of truth for the MCP connect (OAuth start) URL, reused by the agent
+// inspector. The route issues an external OAuth redirect, so callers link to it with a
+// plain anchor (full-page navigation), not a client-side router.
+export function mcpConnectUrl(toolId: AgentToolId, returnTo = "/settings") {
+  return `/api/mcp/${toolId}/start?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): AgentWorkspaceMention[] {
@@ -231,11 +300,7 @@ export function buildWorkspaceAgentMentionItems(agents: AgentReference[]): Agent
 }
 
 function agentMentionId(path: string) {
-  const normalized = path.trim();
-  if (!normalized.startsWith("agents/") || !normalized.endsWith(".agent")) return null;
-  const slug = normalized.slice("agents/".length, -".agent".length);
-  if (!slug || slug.includes("/")) return null;
-  return `agent/${slug}`;
+  return agentMentionIdForPath(path);
 }
 
 function isMcpToolId(id: AgentToolId) {

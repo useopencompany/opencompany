@@ -1,12 +1,25 @@
+import { TOOL_APPROVAL_BACKSTOP_MS } from "@opencompany/agent-runtime";
+import { getDb } from "@opencompany/db/client";
+import { agentToolApprovals } from "@opencompany/db/schema";
+import { and, eq, lt } from "drizzle-orm";
+import {
+  AGENT_SCHEDULE_SWEEP_CRON,
+  sweepAgentSchedules as runAgentScheduleSweep,
+} from "@/lib/agent-schedules/runner";
 import {
   AGENT_AFTER_SESSION_CHECK_EVENT,
+  AGENT_APPROVAL_RESUME_EVENT,
   AGENT_MESSAGE_SUBMITTED_EVENT,
   AGENT_SESSION_ABORT_REQUESTED_EVENT,
   AGENT_SESSION_STARTED_EVENT,
 } from "@/lib/agent-sessions/events";
+import { triggerAgentApprovalResume } from "@/lib/agent-sessions/message-runner";
 import { callRunner } from "@/lib/agent-sessions/runner";
-import { materializeAgentToGitHub } from "@/lib/agents/materialize";
-import { AGENT_SYNC_REQUESTED_EVENT } from "@/lib/agents/sync-events";
+import { materializeAgentFileToGitHub, materializeAgentToGitHub } from "@/lib/agents/materialize";
+import {
+  AGENT_FILE_SYNC_REQUESTED_EVENT,
+  AGENT_SYNC_REQUESTED_EVENT,
+} from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { materializeBrainFileToGitHub } from "@/lib/brain/materialize";
 import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
@@ -14,6 +27,7 @@ import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import {
+  sweepAgentFileSyncOutbox as runAgentFileSyncOutboxSweep,
   sweepAgentSyncOutbox as runAgentSyncOutboxSweep,
   sweepBrainSyncOutbox as runBrainSyncOutboxSweep,
   SYNC_OUTBOX_SWEEP_CRON,
@@ -34,7 +48,9 @@ export const syncAgentToGitHub = inngest.createFunction(
     await step.sleep("coalesce agent edits", "10s");
 
     return step.run("materialize latest agent file", async () => {
-      return materializeAgentToGitHub(event.data.agentId, { mode: "scheduled" });
+      return materializeAgentToGitHub(event.data.agentId, {
+        mode: "scheduled",
+      });
     });
   },
 );
@@ -62,6 +78,38 @@ export const syncBrainToGitHub = inngest.createFunction(
   },
 );
 
+export const syncAgentFileToGitHub = inngest.createFunction(
+  {
+    id: "sync-agent-file-to-github",
+    name: "Sync agent file to GitHub",
+    retries: 5,
+    concurrency: {
+      limit: 1,
+      key: "event.data.workspaceId + ':' + event.data.path",
+    },
+    triggers: { event: AGENT_FILE_SYNC_REQUESTED_EVENT },
+  },
+  async ({ event, step }) => {
+    // Intentionally reuses BRAIN_SYNC_DELAY_MS: agent files coalesce on the same
+    // window as brain files, so rapid successive edits collapse into one sync.
+    await step.sleep("coalesce agent file edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
+
+    return step.run("materialize latest agent folder file", async () => {
+      return materializeAgentFileToGitHub({
+        workspaceId: event.data.workspaceId,
+        path: event.data.path,
+      });
+    });
+  },
+);
+
+// Two distinct outbox sweepers run on the same cron but drain different tables:
+// - sweepAgentSyncOutbox drains agent_sync_jobs (the .agent definition record)
+//   and re-dispatches agent.sync_requested -> syncAgentToGitHub.
+// - sweepAgentFileSyncOutbox drains agent_file_sync_jobs (bundle files such as
+//   agent/memory.md) and re-dispatches agent_file.sync_requested ->
+//   syncAgentFileToGitHub.
+// Both exist so a missed/failed event still gets retried from its own outbox.
 export const sweepAgentSyncOutbox = inngest.createFunction(
   {
     id: "sweep-agent-sync-outbox",
@@ -72,6 +120,19 @@ export const sweepAgentSyncOutbox = inngest.createFunction(
   },
   async ({ step }) => {
     return runAgentSyncOutboxSweep(step);
+  },
+);
+
+export const sweepAgentFileSyncOutbox = inngest.createFunction(
+  {
+    id: "sweep-agent-file-sync-outbox",
+    name: "Sweep agent file sync outbox",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return runAgentFileSyncOutboxSweep(step);
   },
 );
 
@@ -196,6 +257,21 @@ export const runAgentAfterSession = inngest.createFunction(
   },
 );
 
+export const sweepAgentSchedules = inngest.createFunction(
+  {
+    id: "sweep-agent-schedules",
+    name: "Sweep agent schedules",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: AGENT_SCHEDULE_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    return step.run("run due agent schedules", async () => {
+      return runAgentScheduleSweep();
+    });
+  },
+);
+
 export const abortAgentSession = inngest.createFunction(
   {
     id: "abort-agent-session",
@@ -212,6 +288,97 @@ export const abortAgentSession = inngest.createFunction(
       });
       return { ok: true };
     });
+  },
+);
+
+export const runAgentApprovalResume = inngest.createFunction(
+  {
+    id: "run-agent-approval-resume",
+    name: "Run agent approval resume",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: AGENT_APPROVAL_RESUME_EVENT },
+  },
+  async ({ event, step }) => {
+    return step.run("resume runner approval", async () => {
+      await callRunner(
+        `/internal/sessions/${event.data.sessionId}/approvals/${event.data.toolCallId}/resume`,
+        {
+          event: "opencompany.inngest_resume_approval_failed",
+          session_id: event.data.sessionId,
+        },
+      );
+      return { ok: true };
+    });
+  },
+);
+
+// Backstop sweep: pending approvals older than the backstop window are auto-denied with
+// decisionSource='timeout' so a run never hangs forever waiting on a user. The atomic,
+// status-guarded UPDATE means a concurrent user decision always wins; only rows this
+// sweep actually flips trigger a resume.
+const TOOL_APPROVAL_SWEEP_CRON = "0 * * * *";
+
+export const sweepExpiredToolApprovals = inngest.createFunction(
+  {
+    id: "sweep-expired-tool-approvals",
+    name: "Sweep expired tool approvals",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: TOOL_APPROVAL_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    const db = getDb();
+    const cutoff = new Date(Date.now() - TOOL_APPROVAL_BACKSTOP_MS);
+
+    const expired = await step.run("select expired pending approvals", async () => {
+      return db
+        .select({
+          id: agentToolApprovals.id,
+          sessionId: agentToolApprovals.sessionId,
+          toolCallId: agentToolApprovals.toolCallId,
+        })
+        .from(agentToolApprovals)
+        .where(
+          and(eq(agentToolApprovals.status, "pending"), lt(agentToolApprovals.requestedAt, cutoff)),
+        )
+        .limit(100);
+    });
+
+    let denied = 0;
+    for (const approval of expired) {
+      const flippedRow = await step.run(`deny approval ${approval.id}`, async () => {
+        const updated = await db
+          .update(agentToolApprovals)
+          .set({
+            status: "denied",
+            decisionSource: "timeout",
+            decidedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(agentToolApprovals.id, approval.id), eq(agentToolApprovals.status, "pending")),
+          )
+          .returning({ id: agentToolApprovals.id });
+        return updated.length > 0;
+      });
+
+      if (!flippedRow) continue;
+      denied += 1;
+
+      await step.run(`resume approval ${approval.id}`, async () => {
+        await triggerAgentApprovalResume({
+          sessionId: approval.sessionId,
+          toolCallId: approval.toolCallId,
+        });
+        return { ok: true };
+      });
+    }
+
+    return { scanned: expired.length, denied };
   },
 );
 
@@ -237,11 +404,15 @@ export const inngestFunctions = [
   syncAgentToGitHub,
   syncBrainToGitHub,
   sweepAgentSyncOutbox,
+  sweepAgentFileSyncOutbox,
   sweepBrainSyncOutbox,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,
   runAgentAfterSession,
+  sweepAgentSchedules,
   abortAgentSession,
+  runAgentApprovalResume,
+  sweepExpiredToolApprovals,
   sendSignupWelcome,
 ];

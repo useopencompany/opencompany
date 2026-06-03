@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  PERMISSION_GROUP_LABELS,
+  PROVIDER_PERMISSION_REGISTRY,
+  permissionDescriptionFor,
+} from "@opencompany/agent-runtime";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,22 +20,40 @@ import {
   LoaderCircle,
   PanelRight,
   Plus,
+  ShieldAlert,
   TerminalSquare,
   Upload,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
-import { abortAgentSession, submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
+import {
+  abortAgentSession,
+  resolveToolApproval,
+  submitAgentSessionMessage,
+} from "@/lib/agent-sessions/actions";
 import {
   type AgentSessionDetailPayload,
   addUserMessageToSessionDetail,
@@ -58,9 +81,26 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import {
+  getSlashContext,
+  matchSlashCommands,
+  parseSlashCommand,
+  type SlashCommand,
+} from "@/lib/slash-commands/registry";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
+const STREAM_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+
+// How far from the bottom (in px) before we consider the user "pinned".
+const SCROLL_BOTTOM_THRESHOLD_PX = 80;
+// Padding above the snapped user message (matches py-6 = 24px of the scroll container).
+const SCROLL_TO_TOP_PADDING_PX = 24;
+// Space reserved below the active turn, as a fraction of the viewport, so a just-sent
+// message can sit near the top with room for the reply to grow into. 1 = a full viewport
+// (message pins to the very top, but a short reply leaves a big void below); lower values
+// trade top-alignment for less trailing whitespace. 0.5 ≈ the common ChatGPT-style 50dvh.
+const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
@@ -79,6 +119,10 @@ const MARKDOWN_COMPONENTS: Components = {
     </a>
   ),
 };
+
+// Lets the deeply-nested ToolCallCard reach the session id (for tool-approval actions)
+// without threading a prop through every intermediate render layer.
+const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   const { workspaceId } = useWorkspaceContext();
@@ -150,8 +194,17 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
   return <SessionViewContent key={detail.session.id} detail={detail} workspaceId={workspaceId} />;
 }
 
-export function SessionViewContent({ detail, workspaceId }: SessionViewContentProps) {
+export function SessionViewContent(props: SessionViewContentProps) {
+  return (
+    <ToolApprovalContext.Provider value={{ sessionId: props.detail.session.id }}>
+      <SessionViewContentBody {...props} />
+    </ToolApprovalContext.Provider>
+  );
+}
+
+function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps) {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
   const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
@@ -172,9 +225,35 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const [isPending, startTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+  // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  // Caret position, tracked so the slash menu can open on a `/token` mid-message.
+  const [caret, setCaret] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const slashMenuId = useId();
+  const slashCommandInFlightRef = useRef<Set<string>>(new Set());
   const attachMenuRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
+  // ID of the user message to scroll to the top of the viewport ONCE, right after a
+  // send. The reserved space below it is held by CSS (min-height on the last turn),
+  // not a JS maintain loop — so there is no per-frame re-pin (no jitter) and the
+  // position survives viewport resize. Cleared as soon as the one-shot scroll runs.
+  const [pendingScrollMessageId, setPendingScrollMessageId] = useState<string | null>(null);
+  // Whether the user is "pinned" at the bottom of the scroll container. Drives the
+  // streaming bottom-follow.
+  const isPinnedAtBottomRef = useRef(true);
+  // True only briefly after a genuine USER scroll input (wheel / trackpad / touch).
+  // onScroll only updates isPinnedAtBottom while this is set, so it ignores BOTH our own
+  // programmatic scrolls (snap + follow) AND layout-driven scroll events (reflow,
+  // overflow-anchor) AND non-scroll pointer interactions (clicks/selection). Crucial
+  // because with the reserved min-height the snapped position reads as "near the bottom" —
+  // a stray non-user scroll there would otherwise flip isPinnedAtBottom on and the follow
+  // would yank the message up and out of
+  // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
+  const userScrollIntentRef = useRef(false);
+  const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runtime = useMemo(
     () => ({
       events: detail.events,
@@ -218,9 +297,19 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     return partsByMessageId;
   }, [runtime.events, runtime.messages]);
   const lastVisibleMessage = visibleMessages.at(-1);
+  // Index of the last user message. Everything from here down (that message, its reply,
+  // the working indicator, background tool cards) is the "active turn" and gets wrapped
+  // in a min-height:var(--chat-vh) box so the just-sent message can sit at the top with
+  // a viewport of room below it — reserved by CSS, so it survives resize and never
+  // needs a JS re-pin. -1 (no user message yet) means no turn to reserve.
+  const lastUserTurnStart = visibleMessages.findLastIndex((message) => message.role === "user");
   const sessionCanGenerate =
     !runtime.lastError &&
     ["created", "provisioning", "ready", "running"].includes(runtime.currentStatus);
+  // The run has durably parked at a tool gate: the session status is `awaiting_approval`
+  // (not `running`) and the assistant message is already persisted as `completed`. The
+  // approval card + paused tail still need to render off this signal.
+  const sessionIsPaused = runtime.currentStatus === "awaiting_approval";
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -228,8 +317,69 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && sessionCanGenerate;
   const showStoppedAfterUser =
     !hasRunningAssistantMessage && lastVisibleMessage?.role === "user" && !sessionCanGenerate;
-  const canAbort = sessionCanGenerate;
+  // Abort stays available while paused so the user can cancel a parked run without
+  // having to approve or deny the pending tool call first.
+  const canAbort = sessionCanGenerate || sessionIsPaused;
   const isBusy = isPending || hasRunningAssistantMessage || showWaitingForAssistant;
+
+  const renderMessage = (message: SessionMessage) => {
+    const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
+    const copyText =
+      message.role === "assistant"
+        ? extractAssistantText(assistantParts) || message.content
+        : message.content;
+    const canCopy = copyText.trim().length > 0;
+    const duration = message.role === "assistant" ? runDurationForMessage(message) : 0;
+    // The run paused at a tool gate: the message persists as `completed`, but it hasn't
+    // actually finished, so suppress the copy + duration footer that would make it read
+    // as a delivered turn.
+    const awaitingApproval = message.role === "assistant" && partsAwaitApproval(assistantParts);
+
+    return (
+      <div
+        key={message.id}
+        data-message-id={message.id}
+        className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
+      >
+        <div
+          className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
+            message.role === "user"
+              ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
+              : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
+          }`}
+        >
+          {message.role === "assistant" ? (
+            <AssistantMessageContent
+              message={message}
+              parts={assistantParts}
+              sessionCanGenerate={sessionCanGenerate}
+              sessionIsPaused={sessionIsPaused}
+              reasoningActive={isReasoningInProgress(message, runtime.events)}
+              activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
+            />
+          ) : (
+            message.content
+          )}
+          {canCopy && message.status !== "running" && !awaitingApproval ? (
+            <div
+              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
+                message.role === "assistant"
+                  ? "opacity-100"
+                  : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+              }`}
+            >
+              <CopyMessageButton text={copyText} />
+              {duration > 0 ? (
+                <span className="text-[10px] tabular-nums text-ink-subtle/60 select-none">
+                  {formatElapsed(Math.round(duration))}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
   const waitStartedAtRef = useRef<number | null>(null);
   // Felt time-to-first-token: stamped at the Send click, resolved when the first
@@ -270,9 +420,14 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
 
   const applyRuntimeEvent = useCallback(
     (event: RuntimeEvent) => {
-      // Felt TTFT: the first delta (text or visible reasoning) ends the timer.
+      // Felt TTFT: the first visible assistant activity (text or reasoning) ends the timer.
       const pending = pendingTtftRef.current;
-      if (pending && (event.type === "message.delta" || event.type === "message.reasoning_delta")) {
+      if (
+        pending &&
+        (event.type === "message.delta" ||
+          event.type === "message.reasoning_delta" ||
+          event.type === "message.reasoning_started")
+      ) {
         if (pending.messageId) {
           captureEvent("session_first_token", {
             workspace_id: workspaceId,
@@ -282,7 +437,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
             model_provider: session.modelProvider,
             model_name: session.modelName,
             ttft_ms: Math.round(performance.now() - pending.startedAt),
-            first_token_kind: event.type === "message.reasoning_delta" ? "reasoning" : "text",
+            first_token_kind: event.type === "message.delta" ? "text" : "reasoning",
           });
         }
         pendingTtftRef.current = null;
@@ -347,7 +502,9 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
   const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
   const sessionFeedsLooksStale =
     awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
-  const showStaleBanner =
+  // Used only to gate silent background recovery and to surface status in the inspector's
+  // Runtime section — there is intentionally no user-facing banner for this in the chat UX.
+  const connectionLooksStale =
     awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
@@ -374,17 +531,85 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
 
-  // Stale stream means the SSE connection is wedged, most often from a transient drop or an
-  // expired runner token. Refresh just the stream credential so reconnects do not reload the
-  // full session detail payload.
-  const lastStaleRefetchAtRef = useRef(0);
+  // Stale stream/data means the browser may have missed durable events while the tab was
+  // backgrounded or connected to a runner that did not own the active job. Refresh the canonical
+  // detail so persisted completions appear without a manual page reload.
+  const lastRecoveryRefetchAtRef = useRef(0);
+  const refetchSessionProgress = useCallback(
+    ({
+      refreshStreamCredential = false,
+      ignoreRecoveryThrottle = false,
+    }: {
+      refreshStreamCredential?: boolean;
+      ignoreRecoveryThrottle?: boolean;
+    } = {}) => {
+      if (!awaitingAssistantWork) return;
+      const currentTime = Date.now();
+      if (
+        !ignoreRecoveryThrottle &&
+        currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS
+      ) {
+        return;
+      }
+      lastRecoveryRefetchAtRef.current = currentTime;
+      if (refreshStreamCredential) {
+        void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+      }
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+    },
+    [awaitingAssistantWork, detailKey, queryClient, streamCredentialKey],
+  );
+
   useEffect(() => {
-    if (stream.status !== "stale") return;
-    const now = Date.now();
-    if (now - lastStaleRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS) return;
-    lastStaleRefetchAtRef.current = now;
-    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-  }, [stream.status, queryClient, streamCredentialKey]);
+    if (!connectionLooksStale) return;
+    refetchSessionProgress({
+      refreshStreamCredential: stream.status === "stale",
+      ignoreRecoveryThrottle: stream.status === "stale",
+    });
+  }, [refetchSessionProgress, connectionLooksStale, stream.status]);
+
+  useEffect(() => {
+    // Keep credentials fresh whenever the SSE stream stays live: both while the assistant
+    // is actively working AND while the run is durably paused at a tool gate
+    // (`awaiting_approval`). A paused session keeps its stream open, so without this its
+    // token would silently expire and reconnects would retry expired URLs.
+    if ((!awaitingAssistantWork && !sessionIsPaused) || !streamCredential?.streamTokenExpiresAt)
+      return;
+    const refreshInMs = Math.max(
+      streamCredential.streamTokenExpiresAt - Date.now() - STREAM_TOKEN_REFRESH_BUFFER_MS,
+      0,
+    );
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+    }, refreshInMs);
+    return () => window.clearTimeout(timer);
+  }, [
+    awaitingAssistantWork,
+    sessionIsPaused,
+    queryClient,
+    streamCredential?.streamTokenExpiresAt,
+    streamCredentialKey,
+  ]);
+
+  useEffect(() => {
+    if (!awaitingAssistantWork) return;
+
+    const refetchOnVisible = () => {
+      if (document.visibilityState !== "hidden") {
+        refetchSessionProgress();
+      }
+    };
+    const refetchOnOnline = () => {
+      refetchSessionProgress();
+    };
+
+    document.addEventListener("visibilitychange", refetchOnVisible);
+    window.addEventListener("online", refetchOnOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", refetchOnVisible);
+      window.removeEventListener("online", refetchOnOnline);
+    };
+  }, [awaitingAssistantWork, refetchSessionProgress]);
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -416,6 +641,166 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
     if (previousCount === 0 && relatedSessionCount > 0) setInspectorCollapsed(false);
   }, [relatedSessionCount]);
 
+  // One-shot snap: place the just-sent user message at the TOP of the viewport, exactly
+  // once. Done in useLayoutEffect (before the browser paints) and INSTANTLY, so the very
+  // first frame the user sees already has the message at the top — it never flashes at
+  // the bottom and then animates up (that visible travel was the "springt hoch"). The
+  // space below it is reserved in CSS (min-height on the last turn, sized from --chat-vh),
+  // so the browser's native scroll anchoring holds it in place while the reply streams in
+  // below — no per-frame re-pin, no jitter, resize-safe.
+  useLayoutEffect(() => {
+    if (!pendingScrollMessageId) return;
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    const msgEl = container.querySelector<HTMLElement>(
+      `[data-message-id="${pendingScrollMessageId}"]`,
+    );
+    if (!msgEl) return;
+    const drift =
+      msgEl.getBoundingClientRect().top -
+      container.getBoundingClientRect().top -
+      SCROLL_TO_TOP_PADDING_PX;
+    container.scrollTo({ top: container.scrollTop + drift, behavior: "auto" });
+    // The user is now reading from the top, not pinned at the bottom — the streaming
+    // follow stays off until they scroll back down themselves.
+    isPinnedAtBottomRef.current = false;
+    setPendingScrollMessageId(null);
+  }, [pendingScrollMessageId, visibleMessages]);
+
+  // Streaming bottom-follow: while the assistant is producing output AND the user is
+  // pinned at the bottom, keep the latest content in view. Instant ("auto") to avoid
+  // smooth-scroll churn on every delta. Skipped while a one-shot snap is pending so the
+  // two never fight.
+  useEffect(() => {
+    if (pendingScrollMessageId) return;
+    if (!hasRunningAssistantMessage && !showWaitingForAssistant) return;
+    if (!isPinnedAtBottomRef.current) return;
+    const container = scrollContainerRef.current;
+    if (!container || typeof container.scrollTo !== "function") return;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom <= 1) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+  }, [
+    pendingScrollMessageId,
+    visibleMessages,
+    hasRunningAssistantMessage,
+    showWaitingForAssistant,
+  ]);
+
+  // Keep the reserved-space height (--chat-vh) in sync with the scroll container's own
+  // height. A single ResizeObserver means the CSS min-height on the last turn recomputes
+  // on every viewport/container resize (window resize, sidebar toggle, devtools), so the
+  // snapped message keeps its top position instead of drifting — in BOTH the grow and
+  // shrink directions. No scroll is issued here; CSS does the layout.
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const apply = () => {
+      container.style.setProperty("--chat-vh", `${container.clientHeight}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  // Flag the next scroll events as user-driven for a short, self-renewing window. A real
+  // wheel/touch/scrollbar gesture keeps it set through its momentum burst; programmatic
+  // and layout scrolls never set it, so onScroll ignores them.
+  const markUserScrollIntent = () => {
+    userScrollIntentRef.current = true;
+    if (userScrollIntentTimerRef.current) clearTimeout(userScrollIntentTimerRef.current);
+    userScrollIntentTimerRef.current = setTimeout(() => {
+      userScrollIntentRef.current = false;
+    }, 250);
+  };
+  useEffect(
+    () => () => {
+      if (userScrollIntentTimerRef.current) clearTimeout(userScrollIntentTimerRef.current);
+    },
+    [],
+  );
+
+  // Command mode is active while the caret sits on a `/token` (at the start of the
+  // input or after whitespace). The token after the slash is the live filter query.
+  const slashContext = useMemo(() => getSlashContext(input, caret), [input, caret]);
+  const slashQuery = slashContext?.query ?? null;
+  const slashCommands = useMemo(
+    () => (slashQuery !== null ? matchSlashCommands(slashQuery) : []),
+    [slashQuery],
+  );
+  const slashMenuOpen = slashQuery !== null && !slashDismissed && slashCommands.length > 0;
+  const slashActiveId = slashCommands[slashActiveIndex]?.id ?? null;
+  const slashActiveOptionId =
+    slashMenuOpen && slashActiveId ? `${slashMenuId}-option-${slashActiveId}` : undefined;
+  // Reset highlight + un-dismiss whenever the query changes, so typing after
+  // Escape reopens the menu and a changed list always starts at the top. Done as
+  // a render-time adjustment (not an effect) per the "you might not need an
+  // effect" pattern — avoids a cascading-render lint error and an extra paint.
+  const [prevSlashQuery, setPrevSlashQuery] = useState(slashQuery);
+  if (slashQuery !== prevSlashQuery) {
+    setPrevSlashQuery(slashQuery);
+    setSlashActiveIndex(0);
+    setSlashDismissed(false);
+  }
+
+  const runSlashCommand = (command: SlashCommand, args = "") => {
+    const commandKey = command.id;
+    if (slashCommandInFlightRef.current.has(commandKey)) return;
+    slashCommandInFlightRef.current.add(commandKey);
+    startTransition(async () => {
+      try {
+        await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+      } finally {
+        slashCommandInFlightRef.current.delete(commandKey);
+      }
+    });
+  };
+
+  // Selecting a command from the menu inserts its trigger into the input (it does not
+  // run yet) — the trailing space ends the `/token` so the menu closes on its own, and
+  // the user runs it by pressing Enter to send. Keeps the textarea focused.
+  const insertSlashCommand = (command: SlashCommand) => {
+    const ctx = slashContext;
+    if (!ctx) return;
+    const before = input.slice(0, ctx.start);
+    const after = input.slice(ctx.end);
+    const next = `${before}${command.trigger} ${after}`;
+    const nextCaret = before.length + command.trigger.length + 1;
+    setInput(next);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
+    });
+  };
+
+  // Land the cursor in the composer when arriving at a fresh, empty session (e.g.
+  // right after `/clear` navigates here), so the user can start typing immediately.
+  const didAutofocusRef = useRef(false);
+  useEffect(() => {
+    if (didAutofocusRef.current) return;
+    didAutofocusRef.current = true;
+    if (visibleMessages.length === 0) textareaRef.current?.focus();
+  }, [visibleMessages.length]);
+
+  // Enter/send entrypoint: if the message carries a command token, run it (passing the
+  // text after the token as its args); otherwise send a normal chat message. Commands
+  // may run even while busy (they navigate away).
+  const handleSend = () => {
+    if (isPending) return;
+    const parsed = parseSlashCommand(input);
+    if (parsed) {
+      runSlashCommand(parsed.command, parsed.args);
+      return;
+    }
+    if (isBusy) return;
+    submit();
+  };
+
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
@@ -439,6 +824,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
           );
           seedSessionQueries(queryClient, workspaceId, next);
         }
+        // Schedule a scroll so the just-sent message snaps to the top of the viewport.
+        setPendingScrollMessageId(result.messageId);
         return;
       }
       pendingTtftRef.current = null; // failed send — drop the timer
@@ -461,7 +848,22 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
         </div>
 
         <div
-          className="relative flex-1 overflow-y-auto overscroll-contain px-8 lg:px-12 py-6"
+          ref={scrollContainerRef}
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-8 lg:px-12 py-6"
+          onWheel={markUserScrollIntent}
+          onTouchMove={markUserScrollIntent}
+          onScroll={(event) => {
+            // Only a genuine user scroll (flagged by the wheel/touch handlers above)
+            // updates the pinned-at-bottom state. Programmatic scrolls (snap + follow),
+            // layout-driven scrolls (reflow, overflow-anchor) and non-scroll pointer
+            // interactions fire onScroll too, but without user intent — ignoring them is
+            // what keeps the snapped message at the top instead of being yanked by the
+            // follow. (Scrollbar-drag / keyboard scroll without wheel is an accepted edge.)
+            if (!userScrollIntentRef.current) return;
+            const el = event.currentTarget;
+            const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
+          }}
           onDragEnter={(event) => {
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
@@ -542,97 +944,69 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               </div>
             ) : null}
 
-            {visibleMessages.map((message) => {
-              const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
-              const copyText =
-                message.role === "assistant"
-                  ? extractAssistantText(assistantParts) || message.content
-                  : message.content;
-              const canCopy = copyText.trim().length > 0;
+            {visibleMessages.slice(0, Math.max(lastUserTurnStart, 0)).map(renderMessage)}
 
-              return (
-                <div
-                  key={message.id}
-                  className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
-                >
-                  <div
-                    className={`group/message relative after:absolute after:inset-x-0 after:top-full after:h-5 after:content-[''] ${
-                      message.role === "user"
-                        ? "max-w-[62%] break-words rounded-2xl rounded-tr-md bg-surface-selected px-3.5 py-2.5 text-[14px] leading-6 text-ink"
-                        : "max-w-[68%] break-words text-[14px] leading-6 text-ink/90"
-                    }`}
-                  >
-                    {message.role === "assistant" ? (
-                      <AssistantMessageContent
-                        message={message}
-                        parts={assistantParts}
-                        sessionCanGenerate={sessionCanGenerate}
-                        reasoningActive={isReasoningInProgress(message, runtime.events)}
-                        activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
-                      />
-                    ) : (
-                      message.content
-                    )}
-                    {canCopy && message.status !== "running" ? (
-                      <CopyMessageButton
-                        text={copyText}
-                        align={message.role === "user" ? "right" : "left"}
-                      />
-                    ) : null}
-                  </div>
+            {/* Active turn: the last user message + its reply + indicators, wrapped in a
+                min-height box so the just-sent message can sit at the top with a viewport
+                of room below it. The reserve is pure CSS (sized from --chat-vh by the
+                ResizeObserver), so it adapts to any viewport size and needs no per-frame
+                re-pin — the source of the old jitter and resize drift. */}
+            <div
+              className="space-y-5"
+              style={
+                lastUserTurnStart >= 0
+                  ? { minHeight: `calc(var(--chat-vh, 100dvh) * ${LAST_TURN_MIN_HEIGHT_FACTOR})` }
+                  : undefined
+              }
+            >
+              {(lastUserTurnStart >= 0
+                ? visibleMessages.slice(lastUserTurnStart)
+                : visibleMessages
+              ).map(renderMessage)}
+
+              {showWaitingForAssistant ? (
+                <div className="flex justify-start">
+                  <WorkingIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
                 </div>
-              );
-            })}
+              ) : showStoppedAfterUser ? (
+                <div className="flex justify-start">
+                  <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
+                </div>
+              ) : null}
 
-            {showWaitingForAssistant ? (
-              <div className="flex justify-start">
-                <WorkingIndicator startedAt={lastVisibleMessage?.createdAt} thinking={false} />
-              </div>
-            ) : showStoppedAfterUser ? (
-              <div className="flex justify-start">
-                <AssistantStoppedNotice elapsedSeconds={stoppedElapsedSeconds} />
-              </div>
-            ) : null}
-
-            {backgroundParts.length > 0 ? (
-              <div className="space-y-1.5">
-                {backgroundParts.map((part) =>
-                  part.type === "tool-call" ? (
-                    <div key={part.toolCall.id} className="flex justify-start">
-                      <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
-                        <ToolCallCard toolCall={part.toolCall} />
+              {backgroundParts.length > 0 ? (
+                <div className="space-y-1.5">
+                  {backgroundParts.map((part) =>
+                    part.type === "tool-call" ? (
+                      <div key={part.toolCall.id} className="flex justify-start">
+                        <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
+                          <ToolCallCard toolCall={part.toolCall} />
+                        </div>
                       </div>
-                    </div>
-                  ) : null,
-                )}
-              </div>
-            ) : null}
+                    ) : null,
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
         <div className="bg-canvas px-8 lg:px-12 py-4">
           <div className="group/composer mx-auto max-w-[960px]">
-            {showStaleBanner ? (
-              <div
-                role="status"
-                aria-live="polite"
-                className="mb-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[12.5px] text-warning"
-              >
-                <span>Connection idle — waiting for updates…</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-                    void queryClient.invalidateQueries({ queryKey: detailKey });
-                  }}
-                  className="shrink-0 rounded border border-warning-border bg-surface px-2.5 py-1 text-[11.5px] font-medium text-warning hover:bg-warning-bg"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : null}
             {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+            <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
+              {slashMenuOpen ? (
+                <SlashCommandMenu
+                  id={slashMenuId}
+                  commands={slashCommands}
+                  activeId={slashActiveId}
+                  onSelect={(command) => insertSlashCommand(command)}
+                  onHover={(id) => {
+                    const idx = slashCommands.findIndex((command) => command.id === id);
+                    if (idx >= 0) setSlashActiveIndex(idx);
+                  }}
+                />
+              ) : null}
               <div ref={attachMenuRef} className="relative">
                 <button
                   type="button"
@@ -671,12 +1045,48 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(event) => setInput(event.target.value)}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  setCaret(event.target.selectionStart ?? event.target.value.length);
+                }}
+                onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
                 onKeyDown={(event) => {
+                  // While the slash menu is open it owns navigation keys; focus
+                  // stays in the textarea so typing keeps filtering the list.
+                  if (slashMenuOpen && !event.nativeEvent.isComposing) {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
+                      return;
+                    }
+                    if (event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setSlashActiveIndex(
+                        (i) => (i - 1 + slashCommands.length) % slashCommands.length,
+                      );
+                      return;
+                    }
+                    // Enter and Tab both insert the highlighted command into the input
+                    // (they do not run it) — the user runs it by then pressing Enter to send.
+                    if (event.key === "Enter" || event.key === "Tab") {
+                      if (event.key === "Enter" && event.shiftKey) {
+                        // shift+Enter falls through to a normal newline.
+                      } else {
+                        event.preventDefault();
+                        const command = slashCommands[slashActiveIndex];
+                        if (command) insertSlashCommand(command);
+                        return;
+                      }
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSlashDismissed(true);
+                      return;
+                    }
+                  }
                   if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                     event.preventDefault();
-                    if (isBusy) return;
-                    submit();
+                    handleSend();
                   }
                 }}
                 onPaste={(event) => {
@@ -702,6 +1112,11 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                   });
                 }}
                 placeholder="Ask this agent to do something"
+                role="combobox"
+                aria-expanded={slashMenuOpen}
+                aria-controls={slashMenuOpen ? slashMenuId : undefined}
+                aria-activedescendant={slashActiveOptionId}
+                aria-haspopup="listbox"
                 rows={1}
                 className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
                 style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
@@ -720,8 +1135,8 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
               ) : (
                 <button
                   type="button"
-                  disabled={isBusy || !input.trim()}
-                  onClick={submit}
+                  disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
+                  onClick={handleSend}
                   aria-label="Send message"
                   className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
                 >
@@ -729,19 +1144,48 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
                 </button>
               )}
             </div>
-            <div className="mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle opacity-0 transition-opacity duration-150 group-focus-within/composer:opacity-100">
-              <span>
-                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                  ↵
-                </kbd>{" "}
-                send
-              </span>
-              <span>
-                <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                  ⇧↵
-                </kbd>{" "}
-                new line
-              </span>
+            <div
+              className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
+                slashMenuOpen ? "opacity-100" : "opacity-0 group-focus-within/composer:opacity-100"
+              }`}
+            >
+              {slashMenuOpen ? (
+                <>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ↑↓
+                    </kbd>{" "}
+                    navigate
+                  </span>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ↵
+                    </kbd>{" "}
+                    insert
+                  </span>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      esc
+                    </kbd>{" "}
+                    dismiss
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ↵
+                    </kbd>{" "}
+                    send
+                  </span>
+                  <span>
+                    <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                      ⇧↵
+                    </kbd>{" "}
+                    new line
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -774,6 +1218,7 @@ export function SessionViewContent({ detail, workspaceId }: SessionViewContentPr
           lastError={runtime.lastError}
           streamStatus={stream.status}
           streamErrorMessage={stream.errorMessage}
+          connectionStale={connectionLooksStale}
           runnerConfigured={Boolean(runnerUrl && streamToken)}
           eventCount={inspectorEvents.length}
           usage={runtime.usage}
@@ -871,9 +1316,8 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
   return ref;
 }
 
-// Copy only the user-visible answer text — reasoning is hidden by default in
-// the UI and ChatGPT/Claude both exclude it from clipboard copies. Tool calls
-// are also intentionally excluded so what you paste matches what you read.
+// Copy only the user-visible answer text. Reasoning and tool calls are
+// intentionally excluded so what you paste matches the final assistant answer.
 function extractAssistantText(parts: AssistantTurnPart[]): string {
   return parts
     .map((part) => (part.type === "text" ? part.text : ""))
@@ -881,7 +1325,16 @@ function extractAssistantText(parts: AssistantTurnPart[]): string {
     .join("\n\n");
 }
 
-function CopyMessageButton({ text, align }: { text: string; align: "left" | "right" }) {
+// A turn parked at a tool gate: a tool-call part still needs the user to decide. A run that
+// durably pauses for approval is persisted as a `completed` message, so this is what tells
+// the difference between such a pause and a genuinely finished turn.
+function partsAwaitApproval(parts: AssistantTurnPart[]): boolean {
+  return parts.some(
+    (part) => part.type === "tool-call" && part.toolCall.approval?.status === "required",
+  );
+}
+
+function CopyMessageButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -904,15 +1357,13 @@ function CopyMessageButton({ text, align }: { text: string; align: "left" | "rig
     }
   };
 
-  const positionClasses = align === "right" ? "top-full right-0 mt-1" : "top-full left-0 mt-1";
-
   return (
     <button
       type="button"
       onClick={handleCopy}
       aria-label={copied ? "Copied" : "Copy message"}
       title={copied ? "Copied" : "Copy"}
-      className={`absolute ${positionClasses} z-10 inline-flex h-5 w-5 items-center justify-center rounded text-ink-subtle opacity-0 pointer-events-none transition-opacity hover:bg-surface-subtle hover:text-ink focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/message:opacity-100 group-hover/message:pointer-events-auto group-focus-within/message:opacity-100 group-focus-within/message:pointer-events-auto`}
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       {copied ? (
         <Check size={10} strokeWidth={2} className="text-success" />
@@ -927,12 +1378,14 @@ export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
+  sessionIsPaused = false,
   reasoningActive = false,
   activeStartedAt,
 }: {
   message: SessionMessage;
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
+  sessionIsPaused?: boolean;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
 }) {
@@ -942,10 +1395,23 @@ export function AssistantMessageContent({
     message.status === "failed" || (message.status === "running" && !sessionCanGenerate);
   const isCompleted = message.status === "completed";
   const runDurationSeconds = runDurationForMessage(message);
+  const hasPendingApproval = partsAwaitApproval(parts);
+  // The run is parked at the tool gate waiting on a human decision — it isn't doing
+  // work, so the tail should read as "paused" rather than a ticking spinner. This holds
+  // while the message is still streaming (legacy in-flight gate) AND once the run has
+  // durably paused: the session status is `awaiting_approval` and the assistant message
+  // is persisted as `completed`, but a tool-call part still needs approval.
+  const awaitingApproval = (isRunning || sessionIsPaused) && hasPendingApproval;
 
   // A still-running tool call on a stopped session reads as failed — it never returned.
+  // A tool call awaiting an approval decision is the exception: the run paused on purpose
+  // (session is `awaiting_approval`, not generating), so it must keep rendering its
+  // approval prompt rather than flipping to "Stopped before finishing".
   const normalizedParts: AssistantTurnPart[] = parts.map((part) =>
-    part.type === "tool-call" && part.toolCall.status === "running" && !sessionCanGenerate
+    part.type === "tool-call" &&
+    part.toolCall.status === "running" &&
+    !sessionCanGenerate &&
+    part.toolCall.approval?.status !== "required"
       ? {
           type: "tool-call",
           toolCall: {
@@ -970,8 +1436,12 @@ export function AssistantMessageContent({
   const deliverableStart = isCompleted
     ? deliverableStartIndex(normalizedParts)
     : normalizedParts.length;
+  // While paused at a tool gate the trailing tool call still needs the user to act on it,
+  // so keep the steps expanded inline (the pending call carries the approval prompt) rather
+  // than folding the completed turn into a "N steps" summary that would hide it.
   const collapseWork =
     isCompleted &&
+    !awaitingApproval &&
     normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
 
   const groups: RenderGroup[] = [];
@@ -1011,7 +1481,7 @@ export function AssistantMessageContent({
           }
           if (part.type === "reasoning") {
             return (
-              <ReasoningSummaryCard
+              <ReasoningCard
                 key={group.key}
                 text={part.text}
                 durationSeconds={part.durationSeconds}
@@ -1039,7 +1509,11 @@ export function AssistantMessageContent({
           </div>
         );
       })}
-      {!hasParts ? (
+      {awaitingApproval ? (
+        // Parked at the tool gate: the run is waiting on the user, not working. Show a
+        // static "paused" tail so the spinner and elapsed timer stop implying progress.
+        <PausedForApprovalNotice />
+      ) : !hasParts ? (
         isRunning ? (
           <WorkingIndicator
             startedAt={activeStartedAt ?? message.createdAt}
@@ -1186,7 +1660,16 @@ function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | 
   );
 }
 
-function ReasoningSummaryCard({
+function PausedForApprovalNotice() {
+  return (
+    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-warning">
+      <ShieldAlert size={13} strokeWidth={1.8} className="shrink-0" />
+      <span>Paused: waiting for your approval</span>
+    </div>
+  );
+}
+
+function ReasoningCard({
   text,
   durationSeconds,
 }: {
@@ -1233,9 +1716,35 @@ function ReasoningSummaryCard({
 
 function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
   const [expanded, setExpanded] = useState(false);
+  const approvalContext = useContext(ToolApprovalContext);
+  const { showError } = useToast();
+  const [isResolving, startResolve] = useTransition();
+  // Optimistic overlay: reflect the click immediately, before the runner's durable
+  // tool.approval_resolved event arrives over SSE and converges the derived state.
+  const [optimisticDecision, setOptimisticDecision] = useState<"approved" | "denied" | null>(null);
+
   const isCompleted = toolCall.status === "completed";
   const activityLine = latestActivityLine(toolCall.activityPreview);
   const isFailed = toolCall.status === "failed";
+  const awaitingApproval = toolCall.approval?.status === "required" && optimisticDecision === null;
+  const resolvingApproval = toolCall.approval?.status === "required" && optimisticDecision !== null;
+  const approvalStatusLabel = toolApprovalStatusLabel(toolCall, optimisticDecision);
+
+  const submitDecision = (decision: "approved" | "denied") => {
+    if (!approvalContext) return;
+    setOptimisticDecision(decision);
+    startResolve(async () => {
+      const result = await resolveToolApproval({
+        sessionId: approvalContext.sessionId,
+        toolCallId: toolCall.id,
+        decision,
+      });
+      if (!result.ok) {
+        setOptimisticDecision(null);
+        showError(result.error);
+      }
+    });
+  };
 
   return (
     <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
@@ -1265,19 +1774,41 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
             Brain updated
           </span>
         ) : null}
-        {isFailed ? (
+        {approvalStatusLabel ? (
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+              approvalStatusLabel.tone === "danger"
+                ? "text-danger"
+                : approvalStatusLabel.tone === "success"
+                  ? "text-success"
+                  : "text-warning"
+            }`}
+          >
+            <ShieldAlert size={9} strokeWidth={1.9} />
+            {approvalStatusLabel.label}
+          </span>
+        ) : isFailed ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-danger">
             <AlertCircle size={9} strokeWidth={1.9} />
             failed
           </span>
-        ) : null}
-        {!isCompleted && !isFailed ? (
+        ) : !isCompleted ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
             <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
             running
           </span>
         ) : null}
       </button>
+      {awaitingApproval || resolvingApproval ? (
+        <ToolApprovalPrompt
+          approval={toolCall.approval}
+          inputPreview={toolCall.inputPreview}
+          disabled={isResolving || resolvingApproval || !approvalContext}
+          optimisticDecision={optimisticDecision}
+          onApprove={() => submitDecision("approved")}
+          onDeny={() => submitDecision("denied")}
+        />
+      ) : null}
       {activityLine && !expanded && !toolCall.outputPreview ? (
         <div
           title={activityLine}
@@ -1302,6 +1833,111 @@ function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
           ) : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function toolApprovalStatusLabel(
+  toolCall: RuntimeToolCall,
+  optimisticDecision: "approved" | "denied" | null,
+): { label: string; tone: "warning" | "success" | "danger" } | null {
+  if (toolCall.approval?.status === "required") {
+    if (optimisticDecision === "approved") {
+      return { label: "approved, finishing...", tone: "success" };
+    }
+    if (optimisticDecision === "denied") {
+      return { label: "denying...", tone: "warning" };
+    }
+    return { label: "needs approval", tone: "warning" };
+  }
+
+  if (toolCall.approval?.status === "denied") {
+    return {
+      label: toolCall.approval.decisionSource === "timeout" ? "timed out" : "denied",
+      tone: "danger",
+    };
+  }
+
+  if (toolCall.approval?.status === "approved" && toolCall.status !== "completed") {
+    return { label: "approved", tone: "success" };
+  }
+
+  return null;
+}
+
+function ToolApprovalPrompt({
+  approval,
+  inputPreview,
+  disabled,
+  optimisticDecision,
+  onApprove,
+  onDeny,
+}: {
+  approval: RuntimeToolCall["approval"];
+  inputPreview: string | undefined;
+  disabled: boolean;
+  optimisticDecision: "approved" | "denied" | null;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  const providerName = approval
+    ? (PROVIDER_PERMISSION_REGISTRY[approval.providerKey]?.displayName ?? approval.providerKey)
+    : "";
+  const groupLabel = approval
+    ? approval.permissionGroup
+      ? PERMISSION_GROUP_LABELS[approval.permissionGroup]
+      : "Unknown permission"
+    : "";
+  const permissionDescription = approval?.permissionGroup
+    ? permissionDescriptionFor(approval.providerKey, approval.permissionGroup)
+    : "";
+  const pendingMessage =
+    optimisticDecision === "approved"
+      ? "Approved, finishing..."
+      : optimisticDecision === "denied"
+        ? "Denying..."
+        : "Waiting for your approval.";
+
+  return (
+    <div className="ml-6 mt-1 rounded-md border border-warning-border bg-warning-bg/40 px-2.5 py-2">
+      <div className="text-[11px] leading-4 text-ink/75">
+        This agent wants to use{" "}
+        <span className="font-medium text-ink">
+          {providerName}
+          {groupLabel ? ` · ${groupLabel}` : ""}
+        </span>
+        . Approve this action?
+      </div>
+      {permissionDescription ? (
+        <div className="mt-0.5 text-[11px] leading-4 text-ink/60">{permissionDescription}.</div>
+      ) : null}
+      <div role="status" aria-live="polite" className="mt-1 text-[11px] text-warning">
+        {pendingMessage}
+      </div>
+      {inputPreview ? (
+        <pre className="mt-1 max-h-20 overflow-hidden whitespace-pre-wrap break-words font-mono text-[10.5px] leading-4 text-ink/55">
+          {inputPreview}
+        </pre>
+      ) : null}
+      <div className="mt-2 flex items-center gap-1.5">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onApprove}
+          className="inline-flex h-6 items-center gap-1 rounded-md bg-ink px-2.5 text-[11px] font-medium text-surface transition-colors hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Check size={10} strokeWidth={2.2} />
+          Approve
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onDeny}
+          className="inline-flex h-6 items-center rounded-md border border-border bg-surface px-2.5 text-[11px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Deny
+        </button>
+      </div>
     </div>
   );
 }
@@ -1340,6 +1976,7 @@ function SessionInspector({
   lastError,
   streamStatus,
   streamErrorMessage,
+  connectionStale,
   runnerConfigured,
   eventCount,
   usage,
@@ -1356,6 +1993,7 @@ function SessionInspector({
   lastError: string | null;
   streamStatus: string;
   streamErrorMessage: string | null;
+  connectionStale: boolean;
   runnerConfigured: boolean;
   eventCount: number;
   usage: SessionUsageSummary;
@@ -1436,10 +2074,10 @@ function SessionInspector({
           <div className="mt-4 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[11.5px] leading-4 text-danger">
             {lastError}
           </div>
-        ) : streamErrorMessage || streamStatus === "stale" ? (
+        ) : streamErrorMessage || streamStatus === "stale" || connectionStale ? (
           <div className="mt-4 rounded-md border border-warning-border bg-warning-bg px-3 py-2 text-[11.5px] leading-4 text-warning">
-            {streamStatus === "stale"
-              ? "The live session stream is not responding. Reloading will show persisted events."
+            {streamStatus === "stale" || connectionStale
+              ? "The live session stream is not responding. Reconnecting and refreshing persisted progress."
               : streamErrorMessage}
           </div>
         ) : null}
@@ -1683,6 +2321,7 @@ function statusLabel(status: string) {
   if (status === "provisioning") return "Starting";
   if (status === "ready") return "Ready";
   if (status === "running") return "Running";
+  if (status === "awaiting_approval") return "Paused";
   if (status === "completed") return "Done";
   if (status === "aborting") return "Aborting";
   if (status === "archiving") return "Archiving";
@@ -1743,6 +2382,14 @@ function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "message.reasoning_started") return "Thinking started";
   if (event.type === "message.reasoning_completed") return "Thinking completed";
   if (event.type === "message.reasoning_summary") return "Thinking summary";
+  if (event.type === "message.reasoning_content") return "Reasoning content";
+  if (event.type === "session.incomplete") {
+    const reason = readString(event.payload.reason);
+    if (reason === "announced_unexecuted_next_action") {
+      return "Model stopped after announcing a next action";
+    }
+    return reason ? `Incomplete: ${reason}` : "Incomplete turn";
+  }
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
   if (event.type === "tool.completed") return `${readString(event.payload.name)} completed`;
   if (event.type === "session.tool_usage") {

@@ -1,8 +1,11 @@
+import type { JsonValue } from "@opencompany/agent-runtime/types";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import tippy, { type Instance as TippyInstance } from "tippy.js";
 import { MentionList, type MentionListHandle } from "./MentionList";
 import { type AgentMentionItem } from "./tools";
+
+type MentionCommandItem = { id: string; label: string } & Record<string, JsonValue>;
 
 export function createMentionSuggestion({
   getItems,
@@ -37,7 +40,18 @@ export function createMentionSuggestion({
       return {
         onStart: (props) => {
           component = new ReactRenderer(MentionList, {
-            props: { ...props, onSelect, showCategories },
+            props: {
+              ...props,
+              command: (item: MentionCommandItem) => {
+                if (item.action === "schedule") {
+                  props.editor.chain().focus().deleteRange(props.range).run();
+                  return;
+                }
+                props.command(item);
+              },
+              onSelect,
+              showCategories,
+            },
             editor: props.editor,
           });
 
@@ -52,10 +66,25 @@ export function createMentionSuggestion({
             trigger: "manual",
             placement: "bottom-start",
             offset: [0, 4],
+            // Sit beneath the model dropdown (a Radix Select at z-50) instead of
+            // tippy's default z-index (9999), so the popup never paints on top
+            // of that menu — it stays underneath when both are open.
+            zIndex: 40,
           });
         },
         onUpdate: (props) => {
-          component?.updateProps({ ...props, onSelect, showCategories });
+          component?.updateProps({
+            ...props,
+            command: (item: MentionCommandItem) => {
+              if (item.action === "schedule") {
+                props.editor.chain().focus().deleteRange(props.range).run();
+                return;
+              }
+              props.command(item);
+            },
+            onSelect,
+            showCategories,
+          });
           if (!props.clientRect || !popup) return;
           popup.setProps({
             getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
@@ -78,41 +107,12 @@ export function createMentionSuggestion({
     },
   };
 
-  if (char === "#") {
-    // Don't intercept `#` when it could be a markdown heading shortcut.
-    // The heading input rule fires on the current visual line, so a `#`
-    // that sits right after a hard break should pass through. We walk the
-    // current text block manually: text nodes contribute their characters,
-    // hard breaks reset the "current line" buffer, and other leaf nodes
-    // (mentions etc.) count as non-empty content so an inline mention
-    // before the `#` still suppresses the heading rule.
-    base.allow = ({ state, range }) => {
-      const $from = state.doc.resolve(range.from);
-      const parent = $from.parent;
-      const parentStart = $from.start();
-      let currentLine = "";
-      parent.descendants((node, offset) => {
-        const absoluteStart = parentStart + offset;
-        if (absoluteStart >= range.from) return false;
-        if (node.type.name === "hardBreak") {
-          currentLine = "";
-          return false;
-        }
-        if (node.isText && typeof node.text === "string") {
-          const available = range.from - absoluteStart;
-          currentLine += node.text.slice(0, Math.max(0, available));
-          return false;
-        }
-        if (node.isLeaf) {
-          // Mentions and other inline atoms count as non-whitespace content.
-          currentLine += "x";
-          return false;
-        }
-        return true;
-      });
-      return currentLine.trim().length > 0;
-    };
-  }
+  // `#` opens the hook menu (`#after-session`) and also prefixes markdown
+  // headings (`# `). We deliberately let `#` open the hook menu everywhere,
+  // including a lone `#` at the start of a line, so the hooks stay discoverable.
+  // The two don't collide: a heading needs a trailing space, and typing that
+  // space closes the suggestion (allowSpaces is off) so the heading input rule
+  // still fires. So `#` shows the menu and `# ` still turns into a heading.
 
   return base;
 }

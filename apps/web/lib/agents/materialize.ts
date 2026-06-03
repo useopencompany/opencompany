@@ -1,6 +1,12 @@
 import { serializeAgentFile } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { agentSyncJobs, agents, workspaces } from "@opencompany/db/schema";
+import {
+  agentFileSyncJobs,
+  agentFiles,
+  agentSyncJobs,
+  agents,
+  workspaces,
+} from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { hashAgentSource } from "@/lib/agents/hash";
@@ -23,6 +29,176 @@ export type MaterializeResult =
   | { status: "synced"; commitSha: string | null; blobSha: string | null }
   | { status: "unchanged" }
   | { status: "stale" };
+
+export async function materializeAgentFileToGitHub(input: { workspaceId: string; path: string }) {
+  const trace = startTimingTrace("agentFiles.materializeToGitHub", {
+    workspaceId: input.workspaceId,
+    path: input.path,
+  });
+  const db = getDb();
+
+  const [row] = await timeAsync(trace, "db.selectAgentFileSyncJob", () =>
+    db
+      .select({
+        workspace: workspaces,
+        file: agentFiles,
+        job: agentFileSyncJobs,
+      })
+      .from(agentFileSyncJobs)
+      .innerJoin(workspaces, eq(agentFileSyncJobs.workspaceId, workspaces.id))
+      .leftJoin(
+        agentFiles,
+        and(
+          eq(agentFiles.workspaceId, agentFileSyncJobs.workspaceId),
+          eq(agentFiles.path, agentFileSyncJobs.path),
+        ),
+      )
+      .where(
+        and(
+          eq(agentFileSyncJobs.workspaceId, input.workspaceId),
+          eq(agentFileSyncJobs.path, input.path),
+        ),
+      )
+      .limit(1),
+  );
+
+  if (!row?.job) {
+    endTimingTrace(trace, { status: "missing" });
+    return { status: "missing" as const };
+  }
+
+  if (row.job.nextRunAt.getTime() > Date.now()) {
+    endTimingTrace(trace, { status: "deferred" });
+    return { status: "deferred" as const, nextRunAt: row.job.nextRunAt };
+  }
+
+  await timeAsync(trace, "db.markAgentFileSyncing", () =>
+    db
+      .update(agentFileSyncJobs)
+      .set({ status: "syncing", lastError: null, updatedAt: new Date() })
+      .where(eq(agentFileSyncJobs.id, row.job.id)),
+  );
+
+  try {
+    const repository = await timeAsync(trace, "github.ensureRepository", () =>
+      ensureWorkspaceRepository({ db, workspace: row.workspace }),
+    );
+
+    let commitSha: string | null = null;
+    let blobSha: string | null = null;
+
+    if (row.job.operation === "delete") {
+      const result = await timeAsync(trace, "github.deleteAgentFile", () =>
+        deleteWorkspaceFile({
+          db,
+          repository,
+          path: row.job.path,
+          message: `Delete ${row.job.path}`,
+          blobSha: row.job.previousBlobSha,
+        }),
+      );
+      commitSha = result.commitSha;
+    } else {
+      // Upsert jobs normally have a corresponding agentFiles row. If the file
+      // was deleted between job creation and execution (a race), there is
+      // nothing to write — drop the now-orphaned job. This is expected cleanup,
+      // not an error condition.
+      if (!row.file) {
+        await db.delete(agentFileSyncJobs).where(eq(agentFileSyncJobs.id, row.job.id));
+        endTimingTrace(trace, { status: "missing-file" });
+        return { status: "missing-file" as const };
+      }
+
+      const file = row.file;
+      const result = await timeAsync(trace, "github.writeAgentFile", () =>
+        writeWorkspaceFile({
+          db,
+          repository,
+          path: file.path,
+          content: file.content,
+          message: `Update ${file.path}`,
+          blobSha: file.githubBlobSha,
+        }),
+      );
+      commitSha = result.commitSha;
+      blobSha = result.blobSha;
+
+      if (row.job.previousPath && row.job.previousPath !== file.path) {
+        const deleteResult = await timeAsync(trace, "github.deletePreviousAgentFile", () =>
+          deleteWorkspaceFile({
+            db,
+            repository,
+            path: row.job.previousPath!,
+            message: `Delete ${row.job.previousPath}`,
+            blobSha: row.job.previousBlobSha,
+          }),
+        );
+        commitSha = deleteResult.commitSha ?? commitSha;
+      }
+
+      await timeAsync(trace, "db.markAgentFileSynced", () =>
+        db
+          .update(agentFiles)
+          .set({
+            githubBlobSha: blobSha,
+            githubCommitSha: commitSha,
+            githubSyncedHash: file.contentHash,
+            githubSyncedAt: new Date(),
+            githubSyncStatus: "synced",
+            githubSyncError: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(agentFiles.workspaceId, file.workspaceId),
+              eq(agentFiles.path, file.path),
+              eq(agentFiles.contentHash, file.contentHash),
+            ),
+          ),
+      );
+    }
+
+    await timeAsync(trace, "db.deleteAgentFileSyncJob", () =>
+      db.delete(agentFileSyncJobs).where(eq(agentFileSyncJobs.id, row.job.id)),
+    );
+    endTimingTrace(trace, { status: "synced" });
+    return { status: "synced" as const, commitSha, blobSha };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown GitHub sync error";
+    const failedAttempts = row.job.attempts + 1;
+    const now = new Date();
+    captureException(error, {
+      event: "opencompany.agent_file_github_sync_failed",
+      workspace_id: input.workspaceId,
+      path: input.path,
+    });
+    await db.batch([
+      // If the file was deleted/replaced between sync start and this error, the
+      // update matches zero rows. That is acceptable: the replacement file
+      // carries its own sync job, so we don't treat a no-op here as a failure.
+      db
+        .update(agentFiles)
+        .set({
+          githubSyncStatus: "failed",
+          githubSyncError: message,
+          updatedAt: now,
+        })
+        .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, input.path))),
+      db
+        .update(agentFileSyncJobs)
+        .set({
+          status: "failed",
+          attempts: failedAttempts,
+          nextRunAt: nextSyncRetryAt(now, failedAttempts),
+          lastError: message,
+          updatedAt: now,
+        })
+        .where(eq(agentFileSyncJobs.id, row.job.id)),
+    ]);
+    endTimingTrace(trace, { status: "failed", error: message });
+    throw error;
+  }
+}
 
 export async function materializeAgentToGitHub(
   agentId: string,

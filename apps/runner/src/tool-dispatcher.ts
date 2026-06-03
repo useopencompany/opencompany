@@ -1,5 +1,7 @@
 import {
+  AGENT_SELF_EDIT_SKILL_ID,
   type AgentConfig,
+  buildDeniedToolOutput,
   newAgentSessionMessageId,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
@@ -12,11 +14,12 @@ import {
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
+import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
   buildGitHubCommandEnv,
   createKnownSecretRedactor,
-  loadGitHubWorkRepository,
   readSandboxBrainSnapshot,
+  resolveAttachedRepositoryInstallations,
   runAmpCoderTool,
 } from "./amp-tool";
 import { syncBrainFromSandbox } from "./brain";
@@ -47,17 +50,37 @@ import {
   withRunControlChecks,
 } from "./run-control";
 import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
-import type { ToolStartCoordinator } from "./tool-start-coordinator";
+import { hasReadSkill, markSkillRead } from "./self-edit-gate";
+import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
 const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, number>> = {
   exa_search: 8,
   exa_contents: 8,
   exa_answer: 4,
+  x_search_posts: 4,
+  x_get_profile: 8,
+  x_get_user_posts: 4,
+  x_get_discussion: 3,
+  x_get_trends: 4,
+  youtube_search: 6,
+  youtube_get_video: 8,
+  youtube_get_transcript: 6,
+  youtube_get_channel: 6,
+  youtube_list_channel_videos: 4,
+  tiktok_get_metadata: 8,
+  tiktok_get_transcript: 6,
+  instagram_get_metadata: 8,
+  instagram_get_transcript: 6,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
 const COMMAND_OUTPUT_FLUSH_CHARS = 1024;
+
+// Returned by a tool's execute() when the run is suspending at an "ask" gate. The stream
+// is torn down immediately after, so this value is discarded — it is never persisted as a
+// tool-result nor sent to the model. The real body runs in the resume run.
+export const SUSPENDED_TOOL_OUTPUT = { ok: false, suspended: true } as const;
 
 type ToolObservabilityContext = {
   workspaceId?: string;
@@ -132,7 +155,28 @@ export function createToolSet(input: {
         });
       },
       execute: async (toolInput, options) => {
-        await input.toolStartCoordinator.waitForStarted(options.toolCallId, input.signal);
+        const verdict = await input.toolStartCoordinator.waitForStarted(
+          options.toolCallId,
+          input.signal,
+        );
+        // The run is unwinding to wait for an approval decision. Return a discarded
+        // no-op: the stream is being torn down and this result is never persisted or
+        // sent to the model. The body runs later in the resume run.
+        if (verdict.decision === "suspend") {
+          return SUSPENDED_TOOL_OUTPUT;
+        }
+        if (verdict.decision === "deny") {
+          return persistDeniedToolResult({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            internalMessages: input.internalMessages,
+            toolCallId: options.toolCallId,
+            toolName: definition.name,
+            verdict,
+          });
+        }
         return executeRuntimeTool({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
@@ -278,6 +322,23 @@ async function executeRuntimeToolWithTracing(input: {
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "update_agent_file") {
+          if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {
+            return {
+              ok: false,
+              errors: [
+                'Read the agent-self-edit skill first: call read_skill({skillId:"agent-self-edit"}) and follow it, then call update_agent_file again. Nothing was saved.',
+              ],
+            };
+          }
+          return applyAgentSelfUpdate({
+            sessionId: input.sessionId,
+            assistantMessageId: input.assistantMessageId,
+            runLeaseId: input.runLeaseId,
+            runLeaseOwner: input.runLeaseOwner,
+            args: input.args,
+          });
+        }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
         }
@@ -329,7 +390,7 @@ async function executeRuntimeToolWithTracing(input: {
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
           : null;
       const shellGitHubAuth =
-        input.definition.name === "shell"
+        input.definition.name === "shell" || input.definition.name === "gh"
           ? await resolveShellGitHubAuth({
               workspaceId: input.workspaceId,
               agentConfig: input.agentConfig,
@@ -349,6 +410,12 @@ async function executeRuntimeToolWithTracing(input: {
           commandOutput.push(stream, delta);
         },
       });
+      // Reaching here means the read succeeded (read_skill throws on a missing file), so the
+      // session can be credited with having read this skill — clearing skill-gated tools.
+      if (input.definition.name === "read_skill" && isRecord(input.args)) {
+        const skillId = input.args.skillId;
+        if (typeof skillId === "string") markSkillRead(input.sessionId, skillId);
+      }
       if (
         input.definition.name === "shell" &&
         brainSnapshotBefore !== null &&
@@ -606,6 +673,12 @@ function toolTraceMetadata(input: {
   };
 }
 
+// Inject repo-scoped git + gh credentials into shell/gh whenever the agent has at
+// least one attached GitHub repository — independent of amp. A broken integration
+// (e.g. needs-reauth) propagates and surfaces as a recoverable tool error. A single
+// installation token cannot span installations, so we scope the token to the repos
+// of the first attached repository's installation; cross-installation sessions get
+// auth for one installation at a time.
 async function resolveShellGitHubAuth(input: {
   workspaceId?: string | undefined;
   agentConfig?: AgentConfig | undefined;
@@ -613,27 +686,22 @@ async function resolveShellGitHubAuth(input: {
 }) {
   if (!input.workspaceId || !input.agentConfig) return null;
 
-  const ampTool = input.agentConfig.tools.find((tool) => tool.id === "amp");
-  if (!ampTool || ampTool.id !== "amp" || !ampTool.repository) return null;
+  const repositories = input.agentConfig.integrations.github.repositories;
+  if (repositories.length === 0) return null;
 
-  const repository =
-    input.agentConfig.integrations.github.repositories.find(
-      (candidate) => candidate.id === ampTool.repository,
-    ) ?? null;
-  if (!repository) {
-    throw new Error(`GitHub repository binding ${ampTool.repository} was not found.`);
-  }
+  const resolved = await resolveAttachedRepositoryInstallations(input.workspaceId, repositories);
+  if (resolved.length === 0) return null;
 
-  const integrationRepository = await loadGitHubWorkRepository(input.workspaceId, repository);
+  const installationId = resolved[0]!.installationId;
+  const repositoryFullNames = resolved
+    .filter((repository) => repository.installationId === installationId)
+    .map((repository) => repository.fullName);
+
   const githubToken = await getGitHubWorkInstallationToken({
-    installationId: integrationRepository.installationId,
-    repositoryFullName: repository.fullName,
+    installationId,
+    repositoryFullNames,
   });
-  if (!githubToken) {
-    throw new Error(
-      "GitHub App credentials are required to run shell commands in a GitHub work repository.",
-    );
-  }
+  if (!githubToken) return null;
 
   const githubAuthHeader = gitAuthHeader(githubToken);
   return {
@@ -641,6 +709,7 @@ async function resolveShellGitHubAuth(input: {
       githubAuthHeader,
       githubToken,
       toolCallId: input.toolCallId,
+      ...(resolved.length === 1 ? { repositoryFullName: resolved[0]!.fullName } : {}),
     }),
     redact: createKnownSecretRedactor([githubToken, githubAuthHeader]),
   };
@@ -686,7 +755,7 @@ function preflightSandboxToolArgs(input: {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     throw new RecoverableToolError(
-      `${message} Use paths prefixed with work/ for scratch files or brain/ for mounted Brain files.`,
+      `${message} Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.`,
       "invalid_sandbox_path",
     );
   }
@@ -710,6 +779,66 @@ function isFatalToolError(
   if (error instanceof MissingEnvError) return true;
   if (error instanceof RecoverableToolError) return false;
   return toolKind === "sandbox" && !sandboxIdForCapture;
+}
+
+// A denied tool call still needs a persisted tool result (the model requires one
+// result per tool call) and a tool.failed event for the UI, but it never runs the
+// real tool body. This mirrors the persistence tail of executeRuntimeTool.
+export async function persistDeniedToolResult(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean | undefined;
+  toolCallId: string;
+  toolName: string;
+  verdict: ToolStartVerdict;
+}) {
+  const output = buildDeniedToolOutput({
+    toolName: input.toolName,
+    providerKey: input.verdict.providerKey,
+    group: input.verdict.group,
+    source: input.verdict.source,
+  });
+
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          output,
+        }),
+      ),
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: input.toolName,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+      },
+    }),
+  );
+
+  return output;
 }
 
 function buildFailedToolOutput(error: unknown): FailedToolOutput {

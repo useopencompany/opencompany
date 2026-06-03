@@ -1,9 +1,20 @@
+import { resolveToolDecision, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
-import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
-import { type AssistantReplayPart, appendAssistantTextPart } from "./model-messages";
+import {
+  appendRuntimeEventForLease,
+  insertToolApprovalForLease,
+  requireLeaseWrite,
+} from "./lease-writes";
+import {
+  type AssistantReplayPart,
+  appendAssistantReasoningPart,
+  appendAssistantTextPart,
+} from "./model-messages";
 import type { RunControlCheck } from "./run-control";
+import { RunSuspendedError } from "./runner-errors";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
+import { formatRuntimePreview } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 import { recordStepUsage } from "./usage-recorder";
 
@@ -21,15 +32,21 @@ export async function collectAssistantStream(input: {
   runLeaseOwner: string;
   modelProvider: string;
   modelName: string;
-  exposeReasoningSummary: boolean;
+  reasoningExposure: "hidden" | "summary" | "raw";
   signal: AbortSignal;
   checkAbort: RunControlCheck;
   toolStartCoordinator: ToolStartCoordinator;
+  policy: WorkspaceToolPolicyMap;
+  // Whether this run can durably suspend for an "ask" approval. Top-level user and
+  // scheduled runs can (they have a resumable session a human can approve in). Delegated
+  // children and after-session/background runs cannot, so their "ask" collapses to "deny".
+  suspendable: boolean;
   onFirstOutputPart?: () => void;
 }) {
   let assistantContent = "";
   const assistantReplayParts: AssistantReplayPart[] = [];
   let reasoningSummary = "";
+  let reasoningContent = "";
   let stepIndex = 0;
   let sawOutputPart = false;
   const modelSteps: Array<{
@@ -52,9 +69,9 @@ export async function collectAssistantStream(input: {
     });
   };
 
-  // Reasoning streams as its own transient `message.reasoning_delta` events so the UI can
-  // show a live "Thinking…" label only while the model is actually reasoning. The final
-  // reasoning summary still lands separately at message completion.
+  // Reasoning streams as its own transient `message.reasoning_delta` events when the model's
+  // reasoning is intentionally exposed. Raw Kimi reasoning is persisted separately from
+  // summary-style reasoning so the UI can label it honestly.
   const publishReasoningDelta = (delta: string) => {
     if (!delta) return;
     publishTransientRuntimeEvent({
@@ -108,12 +125,12 @@ export async function collectAssistantStream(input: {
       throwIfAborted(input.signal);
       throwIfStreamErrorPart(part);
 
-      if (!sawOutputPart && isModelOutputPart(part)) {
+      const reasoningDelta = readReasoningTextDelta(part);
+
+      if (!sawOutputPart && isModelOutputPart(part, reasoningDelta)) {
         sawOutputPart = true;
         input.onFirstOutputPart?.();
       }
-
-      const reasoningDelta = readReasoningTextDelta(part);
 
       if (part.type === "text-delta") {
         await completeReasoningPhase();
@@ -124,9 +141,16 @@ export async function collectAssistantStream(input: {
 
       if (reasoningDelta) {
         await startReasoningPhase();
-        if (input.exposeReasoningSummary) {
+        if (input.reasoningExposure === "summary") {
           reasoningSummary += reasoningDelta;
           publishReasoningDelta(reasoningDelta);
+        } else if (input.reasoningExposure === "raw") {
+          const uniqueDelta = uniqueReasoningDelta(reasoningContent, reasoningDelta);
+          if (uniqueDelta) {
+            reasoningContent += uniqueDelta;
+            appendAssistantReasoningPart(assistantReplayParts, uniqueDelta);
+            publishReasoningDelta(uniqueDelta);
+          }
         }
       }
 
@@ -167,6 +191,79 @@ export async function collectAssistantStream(input: {
           name: part.toolName,
           input: part.input,
         };
+
+        // Evaluate the workspace permission policy for this tool call. This is the
+        // hard gate: the tool's execute() is parked on waitForStarted() and only the
+        // verdict we attach via markStarted() decides whether the real body runs.
+        const { decision, providerKey, group } = resolveToolDecision({
+          toolName: toolStart.name,
+          policy: input.policy,
+          suspendable: input.suspendable,
+        });
+
+        const toolCallReplayPart: AssistantReplayPart = {
+          type: "tool-call",
+          toolCallId: part.toolCallId,
+          toolName: part.toolName,
+          input: part.input,
+        };
+
+        if (decision === "ask") {
+          // Durably suspend the run for a human decision. Persist the approval row (the
+          // source of truth the web action / backstop update) and emit the event that
+          // drives the in-chat Approve/Deny buttons. We do NOT block here: the run unwinds
+          // via RunSuspendedError, the lease is released, and the tool body runs later in
+          // a fresh resume run once the approval is decided.
+          await insertToolApprovalForLease({
+            sessionId: input.sessionId,
+            messageId: input.assistantMessageId,
+            toolCallId: part.toolCallId,
+            toolName: toolStart.name,
+            providerKey,
+            permissionGroup: group,
+            inputPreview: formatRuntimePreview(toolStart.input),
+            leaseId: input.runLeaseId,
+            leaseOwner: input.runLeaseOwner,
+          });
+          const requestedAtMs = Date.now();
+          await requireLeaseWrite(
+            appendRuntimeEventForLease({
+              sessionId: input.sessionId,
+              messageId: input.assistantMessageId,
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+              type: "tool.approval_required",
+              payload: {
+                messageId: input.assistantMessageId,
+                toolCallId: part.toolCallId,
+                name: toolStart.name,
+                providerKey,
+                permissionGroup: group,
+                inputPreview: formatRuntimePreview(toolStart.input),
+                requestedAt: new Date(requestedAtMs).toISOString(),
+              },
+            }),
+          );
+
+          // The persisted assistant message must end in this pending tool-call so the
+          // resume run can pair it with the tool-result. Release every parked tool call
+          // (this one + any concurrent siblings of the step) with a no-op suspend verdict
+          // so none hang, then unwind to suspend the run.
+          assistantReplayParts.push(toolCallReplayPart);
+          input.toolStartCoordinator.suspend();
+          throw new RunSuspendedError({
+            toolCallId: part.toolCallId,
+            providerKey,
+            group,
+            assistantContent,
+            assistantReplayParts,
+            reasoningSummary,
+            reasoningContent,
+          });
+        }
+
+        // allow / deny: emit tool.started and release execute() with the verdict. A
+        // denied call returns a permission_denied result instead of running its body.
         await requireLeaseWrite(
           appendRuntimeEventForLease({
             sessionId: input.sessionId,
@@ -182,13 +279,14 @@ export async function collectAssistantStream(input: {
             },
           }),
         );
-        input.toolStartCoordinator.markStarted(part.toolCallId);
-        assistantReplayParts.push({
-          type: "tool-call",
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          input: part.input,
+        input.toolStartCoordinator.markStarted(part.toolCallId, {
+          decision,
+          providerKey,
+          group,
+          source: "policy",
         });
+
+        assistantReplayParts.push(toolCallReplayPart);
       }
 
       next = await iterator.next();
@@ -210,6 +308,7 @@ export async function collectAssistantStream(input: {
     assistantContent,
     assistantReplayParts,
     reasoningSummary,
+    reasoningContent,
     modelSteps,
     stepCount: stepIndex,
     lastFinishReason,
@@ -218,8 +317,18 @@ export async function collectAssistantStream(input: {
   };
 }
 
-function isModelOutputPart(part: TextStreamPart<ToolSet>) {
-  return part.type === "text-delta" || part.type === "reasoning-delta" || part.type === "tool-call";
+function isModelOutputPart(part: TextStreamPart<ToolSet>, reasoningDelta: string) {
+  return part.type === "text-delta" || Boolean(reasoningDelta) || part.type === "tool-call";
+}
+
+function uniqueReasoningDelta(current: string, next: string) {
+  if (!current || !next) return next;
+  if (current.endsWith(next)) return "";
+  const maxOverlap = Math.min(current.length, next.length);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (current.endsWith(next.slice(0, size))) return next.slice(size);
+  }
+  return next;
 }
 
 function throwIfAborted(signal: AbortSignal) {

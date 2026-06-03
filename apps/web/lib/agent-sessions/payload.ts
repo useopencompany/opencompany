@@ -22,6 +22,8 @@ export type SidebarSessionPayload = {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  // ISO timestamp the current user starred this session, or null if unstarred.
+  starredAt: string | null;
 };
 
 export type AgentSessionPayload = {
@@ -82,11 +84,16 @@ export type AgentSessionDetailPayload = {
 export type SessionStreamCredentialPayload = {
   runnerUrl: string | null;
   streamToken: string | null;
+  streamTokenExpiresAt: number | null;
 };
 
-export type SidebarSessionSerializable = Omit<SidebarSessionPayload, "createdAt" | "updatedAt"> & {
+export type SidebarSessionSerializable = Omit<
+  SidebarSessionPayload,
+  "createdAt" | "updatedAt" | "starredAt"
+> & {
   createdAt: Date;
   updatedAt: Date;
+  starredAt: Date | null;
 };
 
 export type AgentSessionDetailSerializable = {
@@ -135,6 +142,7 @@ export function serializeSidebarSession(
     ...session,
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString(),
+    starredAt: session.starredAt?.toISOString() ?? null,
   };
 }
 
@@ -196,6 +204,10 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     lastError: detail.session.lastError,
     createdAt: detail.session.createdAt,
     updatedAt: detail.session.updatedAt,
+    // The session detail payload does not carry star state; a session projected
+    // from detail keeps whatever the cached sidebar entry already had (see
+    // upsertSidebarSession), and is treated as unstarred when it is brand new.
+    starredAt: null,
   };
 }
 
@@ -239,7 +251,11 @@ export function upsertSidebarSession(
 ) {
   const existing = sessions ?? [];
   const next = existing.some((item) => item.id === session.id)
-    ? existing.map((item) => (item.id === session.id ? { ...item, ...session } : item))
+    ? existing.map((item) =>
+        // Preserve server-truth star state: detail projections always carry
+        // starredAt = null, which must not clobber an already-starred entry.
+        item.id === session.id ? { ...item, ...session, starredAt: item.starredAt } : item,
+      )
     : [session, ...existing];
 
   return next
@@ -252,6 +268,63 @@ export function removeSidebarSession(
   sessionId: string,
 ) {
   return (sessions ?? []).filter((session) => session.id !== sessionId);
+}
+
+export function setSidebarSessionStar(
+  sessions: SidebarSessionPayload[] | undefined,
+  sessionId: string,
+  starredAt: string | null,
+) {
+  return (sessions ?? []).map((session) =>
+    session.id === sessionId ? { ...session, starredAt } : session,
+  );
+}
+
+export type ArchiveSidebarSessionResult = { ok: true } | { ok: false; error: string };
+
+// Archive a session with an optimistic sidebar update: the session leaves the list
+// immediately, then the server action runs. On failure the previous list is restored so
+// the session reappears; on success the detail cache is dropped and the list is refetched
+// to reconcile with the server. Extracted as a pure helper so the optimistic-removal and
+// rollback-on-error behavior can be unit-tested without rendering the component.
+export async function archiveSidebarSessionOptimistically({
+  queryClient,
+  workspaceId,
+  sessionId,
+  archive,
+}: {
+  queryClient: QueryClient;
+  workspaceId: string;
+  sessionId: string;
+  archive: (sessionId: string) => Promise<ArchiveSidebarSessionResult>;
+}): Promise<ArchiveSidebarSessionResult> {
+  const listKey = sessionQueryKeys.list(workspaceId);
+  const previousSessions = queryClient.getQueryData<SidebarSessionPayload[]>(listKey);
+
+  // Optimistically remove the session so the sidebar updates instantly.
+  queryClient.setQueryData<SidebarSessionPayload[]>(listKey, (sessions) =>
+    removeSidebarSession(sessions, sessionId),
+  );
+
+  let result: ArchiveSidebarSessionResult;
+  try {
+    result = await archive(sessionId);
+  } catch (error) {
+    result = {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not archive session.",
+    };
+  }
+
+  if (!result.ok) {
+    // Roll back to the pre-archive list so the session reappears.
+    queryClient.setQueryData<SidebarSessionPayload[]>(listKey, previousSessions);
+    return result;
+  }
+
+  queryClient.removeQueries({ queryKey: sessionQueryKeys.detail(workspaceId, sessionId) });
+  void queryClient.invalidateQueries({ queryKey: listKey });
+  return result;
 }
 
 export function mergeAgentSessionDetail(
@@ -581,6 +654,7 @@ export function parseSessionStreamCredentialResponse(
   return {
     runnerUrl: readNullableStringField(record, "runnerUrl"),
     streamToken: readNullableStringField(record, "streamToken"),
+    streamTokenExpiresAt: readNullableNumberField(record, "streamTokenExpiresAt"),
   };
 }
 
@@ -594,6 +668,7 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
     lastError: readNullableStringField(record, "lastError"),
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
+    starredAt: readNullableStringField(record, "starredAt"),
   };
 }
 
@@ -838,6 +913,13 @@ function readNumberField(record: Record<string, unknown>, field: string) {
 function readOptionalNumberField(record: Record<string, unknown>, field: string) {
   const value = record[field];
   if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readNullableNumberField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined || value === null) return null;
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
   return value;
 }

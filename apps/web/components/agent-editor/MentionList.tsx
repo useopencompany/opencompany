@@ -65,6 +65,13 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
     },
     {
       type: "category" as const,
+      kind: "schedule" as const,
+      label: "Schedules",
+      description: `${items.filter((item) => item.kind === "schedule").length} available`,
+      icon: Clock3,
+    },
+    {
+      type: "category" as const,
       kind: "hook" as const,
       label: "Hooks",
       description: `${items.filter((item) => item.kind === "hook").length} available`,
@@ -203,9 +210,16 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
                   className="ml-1 shrink-0 text-ink-subtle"
                 />
               ) : (
-                <span className="ml-1 shrink-0 rounded-[4px] bg-surface-subtle px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
-                  {row.item.kind}
-                </span>
+                <>
+                  {row.item.needsSetup && (
+                    <span className="ml-1 shrink-0 rounded-[4px] border border-warning-border bg-warning-bg px-1 py-0.5 text-[9.5px] font-medium text-warning">
+                      Needs setup
+                    </span>
+                  )}
+                  <span className="ml-1 shrink-0 rounded-[4px] bg-surface-subtle px-1 py-0.5 text-[9.5px] font-medium text-ink-subtle">
+                    {row.item.kind}
+                  </span>
+                </>
               )}
             </button>
           </div>
@@ -220,11 +234,16 @@ function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "tool") return "Tools";
   if (kind === "agent") return "Agents";
   if (kind === "integration") return "Work integrations";
+  if (kind === "schedule") return "Schedules";
   if (kind === "hook") return "Hooks";
   return "Brain";
 }
 
 function mentionCommandItem(item: AgentMentionItem) {
+  if (item.kind === "schedule") {
+    return { id: item.mentionId, label: item.label, action: "schedule" };
+  }
+
   return {
     id: item.mentionId,
     label: item.label,
