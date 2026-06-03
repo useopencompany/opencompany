@@ -1,5 +1,6 @@
 "use client";
 
+import { buildAgentTiptapDoc, type MentionResolver } from "@opencompany/agent-runtime";
 import { Mention } from "@tiptap/extension-mention";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -445,160 +446,22 @@ function stripEmptyMentions(node: JSONContent): JSONContent {
   return { ...node, content: next };
 }
 
-// Markers may appear without trailing content because `tiptapDocToBody` trims
-// trailing whitespace on save: an empty heading is persisted as "#" rather
-// than "# ", and likewise for "- " / "1. ". Allow the text portion to be
-// optional so an empty block survives a save → reload round-trip.
-const HEADING_PATTERN = /^(#{1,3})(?: +(.*))?$/;
-const BULLET_PATTERN = /^[-*](?: +(.*))?$/;
-const ORDERED_PATTERN = /^(\d+)\.(?: +(.*))?$/;
-
-function isBlockStarter(line: string) {
-  return HEADING_PATTERN.test(line) || BULLET_PATTERN.test(line) || ORDERED_PATTERN.test(line);
-}
-
+// Thin wrapper over the shared `buildAgentTiptapDoc` parser (in
+// `@opencompany/agent-runtime`, also used by the runner's self-edit path so a
+// runner-built `content` round-trips identically). The web editor supplies a
+// resolver backed by its rich mention catalog: `@` resolves against
+// `mentionItems`, `#` against the after-session hook items, and schedule items
+// never become pills.
 function bodyToTiptapDoc(body: string, mentionItems: AgentMentionItem[]): JSONContent {
-  const normalized = body.replace(/\r\n/g, "\n");
-  if (normalized.trim().length === 0) {
-    return { type: "doc", content: [{ type: "paragraph" }] };
-  }
-
-  const lines = normalized.split("\n");
-  const blocks: JSONContent[] = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-
-    if (line.trim() === "") {
-      index += 1;
-      continue;
-    }
-
-    const headingMatch = HEADING_PATTERN.exec(line);
-    if (headingMatch) {
-      const hashes = headingMatch[1] ?? "#";
-      const headingText = headingMatch[2] ?? "";
-      blocks.push({
-        type: "heading",
-        attrs: { level: hashes.length },
-        content: parseMentionText(headingText, mentionItems),
-      });
-      index += 1;
-      continue;
-    }
-
-    if (BULLET_PATTERN.test(line) || ORDERED_PATTERN.test(line)) {
-      const ordered = ORDERED_PATTERN.test(line);
-      const pattern = ordered ? ORDERED_PATTERN : BULLET_PATTERN;
-      const items: JSONContent[] = [];
-      let startNumber = 1;
-      let firstItem = true;
-      while (index < lines.length) {
-        const current = lines[index] ?? "";
-        const match = pattern.exec(current);
-        if (!match) break;
-        // Ordered pattern captures the leading number in group 1; bullet
-        // pattern captures the item text in group 1. Item text is therefore
-        // group 2 for ordered, group 1 for bullet.
-        const itemText = ordered ? (match[2] ?? "") : (match[1] ?? "");
-        if (ordered && firstItem) {
-          startNumber = Number.parseInt(match[1] ?? "1", 10);
-          if (!Number.isFinite(startNumber) || startNumber < 1) startNumber = 1;
-        }
-        firstItem = false;
-        items.push({
-          type: "listItem",
-          content: [
-            {
-              type: "paragraph",
-              content: parseMentionText(itemText, mentionItems),
-            },
-          ],
-        });
-        index += 1;
-      }
-      blocks.push(
-        ordered
-          ? { type: "orderedList", attrs: { start: startNumber }, content: items }
-          : { type: "bulletList", content: items },
-      );
-      continue;
-    }
-
-    const paragraphLines: string[] = [];
-    while (index < lines.length) {
-      const current = lines[index] ?? "";
-      if (current.trim() === "" || isBlockStarter(current)) break;
-      paragraphLines.push(current);
-      index += 1;
-    }
-    blocks.push({
-      type: "paragraph",
-      content: parseInlineContent(paragraphLines.join("\n"), mentionItems),
-    });
-  }
-
-  return {
-    type: "doc",
-    content: blocks.length > 0 ? blocks : [{ type: "paragraph" }],
-  };
-}
-
-function parseInlineContent(text: string, mentionItems: AgentMentionItem[]): JSONContent[] {
-  const content: JSONContent[] = [];
-  const lines = text.split("\n");
-
-  lines.forEach((line, lineIndex) => {
-    if (lineIndex > 0) content.push({ type: "hardBreak" });
-    content.push(...parseMentionText(line, mentionItems));
-  });
-
-  return content;
-}
-
-function parseMentionText(text: string, mentionItems: AgentMentionItem[]): JSONContent[] {
-  const content: JSONContent[] = [];
-  let cursor = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const trigger = text[index];
-    if (trigger !== "@" && trigger !== "#") continue;
-    if (index > 0 && !/[\s([{]/.test(text[index - 1] ?? "")) continue;
-
-    let end = index + 1;
-    while (end < text.length && isMentionChar(text[end] ?? "")) end += 1;
-
-    const rawToken = text.slice(index + 1, end);
-    const token = rawToken.replace(/[.,;:!?)}\]]+$/g, "");
-    const trailing = rawToken.slice(token.length);
+  const resolve: MentionResolver = (token, char) => {
     const item =
-      trigger === "@"
+      char === "@"
         ? findMentionItem(token, mentionItems)
         : findMentionItem(token, AGENT_AFTER_SESSION_MENTION_ITEMS);
-    if (!item || item.kind === "schedule") continue;
-
-    pushText(content, text.slice(cursor, index));
-    content.push({
-      type: "mention",
-      attrs: {
-        id: item.mentionId,
-        label: item.label,
-        mentionSuggestionChar: trigger,
-      },
-    });
-    pushText(content, trailing);
-    cursor = end;
-    index = end - 1;
-  }
-
-  pushText(content, text.slice(cursor));
-  return content;
-}
-
-function pushText(content: JSONContent[], text: string) {
-  if (text.length === 0) return;
-  content.push({ type: "text", text });
+    if (!item || item.kind === "schedule") return null;
+    return { id: item.mentionId, label: item.label };
+  };
+  return buildAgentTiptapDoc(body, resolve) as unknown as JSONContent;
 }
 
 function tiptapDocToBody(doc: JSONContent) {
