@@ -66,7 +66,7 @@ import {
   type RunContext,
 } from "./run-context";
 import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
-import { RunSuspendedError } from "./runner-errors";
+import { MessageTurnFailedError, RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
   appendAfterSessionSkipped,
@@ -81,7 +81,7 @@ import {
   loadNextSteerMessage,
   loadSession,
   loadUserMessage,
-  optionalUserName,
+  optionalUserContext,
   setStatus,
 } from "./session-lifecycle";
 import {
@@ -270,7 +270,7 @@ async function runMessageWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable },
     });
     modelProvider = runtime.model.provider;
@@ -593,7 +593,7 @@ async function runMessageWithContext(
       model_name: modelName,
       error,
     });
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -963,7 +963,7 @@ async function runAfterSessionWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: false },
     });
     modelProvider = runtime.model.provider;
@@ -1239,7 +1239,7 @@ async function runAfterSessionWithContext(
       model_name: modelName,
       error,
     });
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -1362,7 +1362,7 @@ async function resumeApprovalWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
@@ -1613,7 +1613,7 @@ async function resumeApprovalWithContext(
       tool_call_id: input.toolCallId,
     });
     outcome = "failed";
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -1838,7 +1838,7 @@ async function resumeQuestionResponseWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
@@ -2039,7 +2039,7 @@ async function resumeQuestionResponseWithContext(
       tool_call_id: input.toolCallId,
     });
     outcome = "failed";
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,

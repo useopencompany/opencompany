@@ -109,6 +109,16 @@ export async function startSeededAgentSession(input: {
     }),
   ]);
 
+  logger.info("Created seeded agent session", {
+    event: "opencompany.seeded_agent_session_created",
+    workspace_id: input.workspaceId,
+    user_id: input.userId,
+    agent_id: agent.id,
+    session_id: sessionId,
+    message_id: messageId,
+    source: input.source,
+  });
+
   after(async () => {
     const sideEffects = [
       {
