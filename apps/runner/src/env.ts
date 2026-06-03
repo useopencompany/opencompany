@@ -11,6 +11,7 @@ export type RunnerEnv = {
   integrationCredentialEncryptionKey: Buffer;
   exaApiKey: string | undefined;
   xApiBearerToken: string | undefined;
+  apifyApiToken?: string | undefined;
   supadataApiKey: string | undefined;
   ampApiKey: string | undefined;
   e2bTemplate: string | undefined;
@@ -31,6 +32,7 @@ export function loadEnv(): RunnerEnv {
     integrationCredentialEncryptionKey: requiredEncryptionKey(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
     xApiBearerToken: optionalEnv("X_API_BEARER_TOKEN"),
+    apifyApiToken: optionalEnv("APIFY_API_TOKEN"),
     supadataApiKey: optionalEnv("SUPADATA_API_KEY"),
     ampApiKey: optionalEnv("AMP_API_KEY"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
