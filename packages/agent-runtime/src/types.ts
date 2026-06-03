@@ -55,6 +55,7 @@ export type AgentToolId =
   | "tiktok"
   | "instagram"
   | "amp"
+  | "opencode"
   | "linear"
   | "slack"
   | "posthog";
@@ -103,9 +104,9 @@ export type AgentHostedToolConfig = {
 };
 
 export type AgentCodingToolConfig = {
-  id: "amp";
+  id: "amp" | "opencode";
   type: "coding_agent";
-  provider: "amp";
+  provider: "amp" | "opencode";
   label: string;
   description: string;
   prCapable: boolean;

@@ -432,7 +432,7 @@ function normalizeTools(value: unknown) {
     const definition = TOOL_BY_ID.get(id as AgentToolId);
     if (!definition) continue;
 
-    if (id === "amp") {
+    if (id === "amp" || id === "opencode") {
       const record = isRecord(item) ? item : {};
       tools.push(
         toConfigTool(definition, {
@@ -452,7 +452,7 @@ function normalizeTools(value: unknown) {
 
 function serializeTools(tools: AgentConfigTool[]) {
   return tools.map((tool) => {
-    if (tool.id === "amp") {
+    if (tool.id === "amp" || tool.id === "opencode") {
       return {
         id: tool.id,
         type: tool.type,

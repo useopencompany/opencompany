@@ -21,6 +21,7 @@ export type RuntimeToolName =
   | "update_agent_file"
   | "ask_user_question"
   | "amp_coder"
+  | "opencode_coder"
   | "exa_search"
   | "exa_contents"
   | "exa_answer"
@@ -74,7 +75,7 @@ export type AgentToolWorkspaceResourceRequirement = {
 export type AgentToolDefinition = {
   id: AgentToolId;
   type: AgentConfigTool["type"];
-  provider?: "amp";
+  provider?: "amp" | "opencode";
   server?: AgentMcpToolConfig["server"];
   label: string;
   description: string;
@@ -186,6 +187,19 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
       resourceType: "repository",
       binding: "required",
     },
+    prCapableDefault: true,
+  },
+  {
+    id: "opencode",
+    type: "coding_agent",
+    provider: "opencode",
+    label: "opencode",
+    description:
+      "Delegate coding work to opencode inside an E2B sandbox, using attached repositories or public GitHub repositories.",
+    runtimeTools: ["opencode_coder"],
+    defaultEnabled: true,
+    credentialSource: "mixed",
+    requiredPlatformEnvVars: ["VERCEL_AI_GATEWAY_API_KEY"],
     prCapableDefault: true,
   },
   {
@@ -628,6 +642,60 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool output includes ampResult, ampStatus, ampThreadId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on ampResult when present.",
       "Amp has repository-scoped GitHub CLI and git push access for the attached repositories.",
       "Set createPullRequest=true only when the instructions call for a reviewable PR. Amp may create the PR itself; if it leaves publishable local work behind, the runner creates the draft PR after Amp finishes.",
+      "The tool works on non-default branches and must never push directly to the default branch.",
+    ].join("\n"),
+  },
+  {
+    name: "opencode_coder",
+    kind: "sandbox",
+    configToolId: "opencode",
+    description:
+      "Delegate coding work to opencode in an attached GitHub repository or a public GitHub repository. opencode clones the repository into ./work on demand. Use for multi-file implementation, debugging, refactors, and PR-ready code changes. When more than one repository is attached, set the repository argument.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description: "Specific coding task for opencode to perform in the target repository.",
+        },
+        repository: {
+          type: "string",
+          description:
+            "Target attached repository full name/id, public GitHub owner/repo, or public https://github.com/owner/repo URL. Required when no repository is attached or more than one repository is attached; optional when exactly one repository is attached.",
+        },
+        model: {
+          type: "string",
+          description:
+            "Optional model id (provider/model, e.g. anthropic/claude-sonnet-4.6) for opencode to use. Must be one of the platform's supported models. Defaults to the platform's opencode default when omitted.",
+        },
+        createPullRequest: {
+          type: "boolean",
+          description:
+            "Whether to commit changes to a generated branch and open a draft pull request after opencode finishes.",
+          default: false,
+        },
+        pullRequestTitle: {
+          type: "string",
+          description: "Optional draft pull request title when createPullRequest is true.",
+        },
+        opencodeSessionId: {
+          type: "string",
+          description:
+            "Existing opencodeSessionId from a previous opencode_coder result to continue instead of starting a new opencode session.",
+        },
+      },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use opencode_coder for substantial codebase work that benefits from opencode's coding-agent loop.",
+      "Give opencode a concrete task and any constraints from the user or agent instructions.",
+      "Set the repository argument (owner/repo or id) when more than one repository is attached so opencode targets the right one. If no repository is attached, set repository to a public GitHub owner/repo or https://github.com/owner/repo URL.",
+      "Pass model only when the user or instructions call for a specific model; otherwise omit it to use the platform default.",
+      "When the user asks for a follow-up to prior opencode work, pass the previous opencodeSessionId so opencode continues that session with its existing context.",
+      "The tool output includes opencodeResult, opencodeStatus, opencodeSessionId, diffStat, diffPreview, and optional pullRequestUrl. Base your final response on opencodeResult when present.",
+      "opencode has repository-scoped GitHub CLI and git push access for attached repositories. Public repositories are cloned without workspace GitHub credentials and return sandbox diffs only.",
+      "Set createPullRequest=true only when the instructions call for a reviewable PR. opencode may create the PR itself for attached repositories; if it leaves publishable local work behind, the runner creates the draft PR after opencode finishes. Public repositories do not support platform-created pull requests.",
       "The tool works on non-default branches and must never push directly to the default branch.",
     ].join("\n"),
   },

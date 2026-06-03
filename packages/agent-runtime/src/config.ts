@@ -67,6 +67,7 @@ export function resolveAgentRuntimeConfig(input: {
     "One-off context that won't matter next session belongs in the conversation, not a file. How you behave going forward lives in your .agent definition via self-edit, not these folders.",
     "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/memory.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
+    ...opencodePublicRepositoryContext(input.agent, repositories),
     ...githubRepositoryContext(repositories),
     input.agent.brain?.length
       ? `Brain files are mounted under ./brain for this session: ${input.agent.brain
@@ -195,5 +196,17 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
     ghRepoGuidance,
     "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
     "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",
+  ];
+}
+
+function opencodePublicRepositoryContext(
+  config: AgentConfig,
+  repositories: AgentGitHubRepositoryConfig[],
+): string[] {
+  if (repositories.length > 0) return [];
+  if (!config.tools.some((tool) => tool.id === "opencode")) return [];
+
+  return [
+    "opencode can work without an attached GitHub repository when the user provides a public GitHub owner/repo or https://github.com/owner/repo URL. Public repositories are cloned without workspace GitHub credentials, so platform-created pull requests are unavailable for those targets.",
   ];
 }

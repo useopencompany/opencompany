@@ -100,13 +100,13 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   }
 }
 
-// The richer sandbox template (with git, gh, and amp installed) is used whenever
-// the agent has at least one GitHub repository attached or amp enabled; plain chat
-// agents get the lighter default template.
+// The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
+// is used whenever the agent has at least one GitHub repository attached or a
+// coding-agent tool enabled; plain chat agents get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
   const needsCodingTemplate =
     agentConfig.integrations.github.repositories.length > 0 ||
-    agentConfig.tools.some((tool) => tool.id === "amp");
+    agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode");
   return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
 }
 

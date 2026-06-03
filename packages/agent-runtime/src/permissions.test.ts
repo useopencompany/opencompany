@@ -58,6 +58,9 @@ describe("classifyByVerbHeuristic", () => {
     expect(classifyByVerbHeuristic("update_issue")).toBe("modify");
     expect(classifyByVerbHeuristic("delete_message")).toBe("admin");
     expect(classifyByVerbHeuristic("archive_channel")).toBe("admin");
+    // Upsert verbs degrade to modify, not the admin fallback.
+    expect(classifyByVerbHeuristic("save_widget")).toBe("modify");
+    expect(classifyByVerbHeuristic("upsert_record")).toBe("modify");
   });
 
   it("falls back to admin for unrecognized verbs", () => {
@@ -72,7 +75,6 @@ describe("classifyMcpTool", () => {
       group: "post",
     });
     expect(classifyTool("linear__create_issue")).toEqual({ providerKey: "linear", group: "post" });
-    expect(classifyTool("linear__save_comment")).toEqual({ providerKey: "linear", group: "post" });
     expect(classifyTool("linear__update_issue")).toEqual({
       providerKey: "linear",
       group: "modify",
@@ -94,12 +96,27 @@ describe("classifyMcpTool", () => {
       providerKey: "posthog",
       group: "admin",
     });
+    // Linear's `save_*` upsert family classifies as modify (static map).
+    expect(classifyTool("linear__save_comment")).toEqual({
+      providerKey: "linear",
+      group: "modify",
+    });
+    expect(classifyTool("linear__save_issue")).toEqual({
+      providerKey: "linear",
+      group: "modify",
+    });
   });
 
   it("falls back to the verb heuristic for unmapped MCP tools", () => {
     expect(classifyMcpTool("linear__list_cycles")).toEqual({
       providerKey: "linear",
       group: "read",
+    });
+    // An unlisted Linear `save_*` tool degrades to modify via the verb heuristic,
+    // not the admin fallback.
+    expect(classifyMcpTool("linear__save_customer_need")).toEqual({
+      providerKey: "linear",
+      group: "modify",
     });
     expect(classifyMcpTool("acme__delete_widget")).toEqual({ providerKey: "acme", group: "admin" });
   });
@@ -143,6 +160,7 @@ describe("resolveToolDecision", () => {
         .decision,
     ).toBe("deny");
 
+    // save_comment is an upsert tool classified as `modify`, so the modify policy governs it.
     const denyLinearModify: WorkspaceToolPolicyMap = new Map([
       [policyMapKey("linear", "modify"), "deny"],
     ]);
@@ -152,8 +170,10 @@ describe("resolveToolDecision", () => {
         policy: denyLinearModify,
         suspendable: true,
       }).decision,
-    ).toBe("ask");
+    ).toBe("deny");
 
+    // A post-only policy does not affect a modify-classified tool; it falls back to the
+    // default modify stance ("ask").
     const denyLinearPost: WorkspaceToolPolicyMap = new Map([
       [policyMapKey("linear", "post"), "deny"],
     ]);
@@ -163,7 +183,7 @@ describe("resolveToolDecision", () => {
         policy: denyLinearPost,
         suspendable: true,
       }).decision,
-    ).toBe("deny");
+    ).toBe("ask");
   });
 
   it("collapses ask to deny in non-suspendable runs", () => {
