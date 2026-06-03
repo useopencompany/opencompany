@@ -569,7 +569,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   }, [refetchSessionProgress, connectionLooksStale, stream.status]);
 
   useEffect(() => {
-    if (!awaitingAssistantWork || !streamCredential?.streamTokenExpiresAt) return;
+    // Keep credentials fresh whenever the SSE stream stays live: both while the assistant
+    // is actively working AND while the run is durably paused at a tool gate
+    // (`awaiting_approval`). A paused session keeps its stream open, so without this its
+    // token would silently expire and reconnects would retry expired URLs.
+    if ((!awaitingAssistantWork && !sessionIsPaused) || !streamCredential?.streamTokenExpiresAt)
+      return;
     const refreshInMs = Math.max(
       streamCredential.streamTokenExpiresAt - Date.now() - STREAM_TOKEN_REFRESH_BUFFER_MS,
       0,
@@ -580,6 +585,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     return () => window.clearTimeout(timer);
   }, [
     awaitingAssistantWork,
+    sessionIsPaused,
     queryClient,
     streamCredential?.streamTokenExpiresAt,
     streamCredentialKey,
