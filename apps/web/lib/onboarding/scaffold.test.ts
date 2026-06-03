@@ -1,12 +1,12 @@
 import { parseAgentFile, serializeAgentFile } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentSyncJobs, agents } from "@opencompany/db/schema";
+import { agentFiles, agentSyncJobs, agents } from "@opencompany/db/schema";
 import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
-import { DEFAULT_USER_AGENT_BODY, ensureUserOnboardingScaffold } from "./scaffold";
+import { DEFAULT_SOUL_MD, DEFAULT_USER_AGENT_BODY, ensureUserOnboardingScaffold } from "./scaffold";
 
 vi.mock("@opencompany/analytics/server", () => ({
   captureServerEvent: vi.fn(),
@@ -27,6 +27,7 @@ vi.mock("next/server", () => ({
 
 vi.mock("@/lib/agents/sync-events", () => ({
   dispatchAgentSyncRequested: vi.fn(),
+  dispatchAgentFileSyncRequested: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
@@ -74,7 +75,11 @@ describe("ensureUserOnboardingScaffold", () => {
       workspaceId: "wks_123",
     });
 
-    const source = serializeAgentFile({ title: "leo", body: DEFAULT_USER_AGENT_BODY });
+    const source = serializeAgentFile({
+      title: "leo",
+      body: DEFAULT_USER_AGENT_BODY,
+      model: "minimax/minimax-m2.7-highspeed",
+    });
     const parsed = parseAgentFile(source);
     const contentHash = hashAgentSource(source);
     // The starter body mounts the whole Brain so the first onboarding session can persist
@@ -83,6 +88,8 @@ describe("ensureUserOnboardingScaffold", () => {
     // It also enables zero-setup, platform-credentialed research tools so leo is useful
     // immediately. (Tools needing an attached repo or workspace MCP config are left out.)
     expect(parsed.config.tools.map((tool) => tool.id)).toEqual(["exa", "x"]);
+    // leo ships on throughput-optimized MiniMax M2.7 — capable and low-latency.
+    expect(parsed.config.model.name).toBe("minimax/minimax-m2.7-highspeed");
     const agentInsert = insertedValues.find((entry) => entry.table === agents)?.value as {
       id: string;
       workspaceId: string;
@@ -137,13 +144,29 @@ describe("ensureUserOnboardingScaffold", () => {
       lastError: null,
     });
     expect(syncJobInsert.nextRunAt).toBeInstanceOf(Date);
+    // leo's private operating doc is seeded alongside the agent in the same batch.
+    const soulInsert = insertedValues.find((entry) => entry.table === agentFiles)?.value as {
+      workspaceId: string;
+      agentId: string;
+      path: string;
+      content: string;
+      githubSyncStatus: string;
+    };
+    expect(soulInsert).toMatchObject({
+      workspaceId: "wks_123",
+      agentId: result.agentId,
+      path: "agents/leo/soul.md",
+      content: DEFAULT_SOUL_MD,
+      githubSyncStatus: "pending",
+    });
     expect(batch).toHaveBeenCalledOnce();
     expect(captureServerEventMock).toHaveBeenCalledWith("agent_created", "usr_123", {
       user_id: "usr_123",
       workspace_id: "wks_123",
       agent_id: result.agentId,
     });
-    expect(afterMock).toHaveBeenCalledOnce();
+    // Two dispatches scheduled: the agent definition sync and the soul.md file sync.
+    expect(afterMock).toHaveBeenCalledTimes(2);
 
     const callback = afterMock.mock.calls[0]?.[0];
     expect(callback).toBeTypeOf("function");

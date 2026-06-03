@@ -66,9 +66,9 @@ invalid, the tool returns errors and nothing is saved — fix them and call it a
   in one conversation (a standing preference, a tone, a workflow, a default tool).
 
 Do **not** use this for one-off task context — that belongs in the conversation, not a file.
-Durable context lives elsewhere too: keep private durable notes in your agent folder
-(\`agent/\`) and shared long-lived knowledge in the Brain (\`brain/\`). Use self-edit only when
-the change is to how you behave going forward.
+Durable context lives elsewhere too: keep your operating doc in \`agent/soul.md\` and other
+private notes in your agent folder (\`agent/\`), and shared long-lived knowledge in the Brain
+(\`brain/\`). Use self-edit only when the change is to how you behave going forward.
 
 ## How the .agent body works
 
@@ -175,79 +175,101 @@ export const OPENCOMPANY_SETUP_SKILL_ID = "opencompany-setup";
 function buildOpenCompanySetupSkillMd(): string {
   return `---
 name: opencompany-setup
-description: Set up an OpenCompany workspace for the user — establish the Brain (shared company knowledge) and tune your own definition so the user has great scaffolding from day one.
+description: Set up an OpenCompany workspace for the user — establish the Brain (a company wiki) and tune your own definition so the user has great scaffolding from day one.
 ---
 
 # Setting up OpenCompany
 
-You are an OpenCompany agent. This skill teaches you how the workspace fits together and
-how to set it up well for a new user — especially right after they sign up. The surface you
-set up here is the **Brain**. You shape your own behavior with the separate
-\`agent-self-edit\` skill, which this skill hands off to.
+You are an OpenCompany agent. This skill teaches you how the workspace fits together and how
+to set it up well for a new user — especially right after they sign up. You set up two
+surfaces: the **Brain** (shared knowledge) and **yourself** (your definition and your private
+\`agent/soul.md\`). Aim for a focused, high-signal starting point that the user can grow — not
+a pile of empty files.
 
 ## How the pieces relate
 
-- **The Brain** is your workspace's shared, long-lived knowledge: plain Markdown/text files
-  under \`brain/\` (for example \`brain/company/overview.md\`). It is **shared by every agent
-  in the workspace** and persists across sessions. Use it for durable facts about the company,
-  its goals, customers, voice, and processes — not for one-off task context.
-- **Your \`.agent\` definition** is *you*: your instructions (the Markdown body), your model,
-  your tools, and which Brain paths you mount. It controls **behavior**, the Brain holds
-  **knowledge**. You change your definition with the \`agent-self-edit\` skill.
-- An agent **mounts** Brain context by \`@mention\`-ing it in its body: \`@brain/folder/\`
-  mounts a folder, \`@brain/folder/file.md\` mounts one file. Mounted files appear under
-  \`./brain\` in your session and are the ones you can read and edit.
+- **The Brain** is your workspace's shared, long-lived knowledge — plain Markdown files that
+  every agent in the workspace can read and that persist across sessions. Treat it as a
+  **company wiki** under \`brain/wiki/\`. Use it for durable facts about the company, product,
+  customers, and processes — not one-off task context.
+- **Your \`.agent\` definition** is your behavior: instructions, model, tools, and which Brain
+  paths you mount. You change it with the \`agent-self-edit\` skill.
+- **\`agent/soul.md\`** is your private operating doc — who you serve and how you work. Read it
+  before any work and keep it current.
 
-## How to edit the Brain
+You **mount** Brain context by \`@mention\`-ing it in your definition: \`@brain/wiki/\` mounts the
+wiki. Files you write under a mounted path persist and show up in the user's **Brain** view.
 
-You edit the Brain by writing files in the \`brain/\` directory of your session with the
-normal file tools (paths must be prefixed with \`brain/\`, e.g. \`brain/company/overview.md\`).
-Changes you make are saved back to the workspace automatically when the turn finishes, and
-become visible to the user in the **Brain** view.
+## The Brain is a wiki
 
-Two rules to keep in mind:
+Organize the Brain as a wiki under \`brain/wiki/\`. Here is the canonical shape — a strong
+default, **not a fixed template**:
 
-- **A file persists only if it sits under a Brain path you have mounted.** During first-run
-  setup your definition mounts the whole Brain (\`@brain/\`), so any file you create under
-  \`brain/\` is saved. If you later narrow your mounts to specific folders, only files under
-  those folders are writable in future sessions.
-- **Keep files small and structured.** Each file must stay under 256 KB. Prefer a few
-  high-signal files in sensible folders (e.g. \`brain/company/\`, \`brain/customers/\`) over
-  many empty stubs.
+\`\`\`
+brain/wiki/
+  company/       # what we do, mission, structure, key facts
+  product/       # what we build, how it works, roadmap
+  team/          # who's who, roles, ways of working
+  growth/        # marketing, sales, acquisition
+  strategy/      # bets, positioning, priorities
+  competitors/   # who we're up against, how we differ
+  operations/    # processes, tools, vendors
+  projects/      # active initiatives
+  meetings/      # notes and decisions
+\`\`\`
+
+**Adapt it to the business.** An agency adds \`clients/\`; a software company adds
+\`engineering/\`; a creator adds \`content/\`. Drop folders that don't apply. Give each folder a
+one-line \`README.md\` naming what belongs there so it can evolve.
+
+**Keep it low-noise:**
+
+- Prefer a few high-signal files over many empty stubs.
+- Write only what you actually know — don't invent facts.
+- READMEs are a sentence, not a wall of boilerplate.
+- Let the structure grow over time; don't front-load everything.
+- Each file stays under 256 KB.
 
 ## First-run setup protocol
 
-When this is a fresh workspace, or the user asks you to "set up OpenCompany" / "get me set
-up", follow this loop. The user should feel guided and in control — not interrogated.
+When the workspace is fresh, or the user asks to "set up OpenCompany" / "get me set up",
+follow this loop. The user should feel guided and in control — not interrogated.
 
-1. **Read this skill** (you are doing that now) so you know the moves.
-2. **Ask 2–3 high-signal clarifying questions**, building on whatever signup details came in
-   the first message (their role, company URL, team size, and the areas they want help with).
-   Good questions: what the company actually does, who its customers are, and what they want
-   you to help with first. Ask them together, conversationally, and wait for the answer.
-3. **Write a small, tasteful starter Brain** capturing what you learned — for example
-   \`brain/company/overview.md\` (what the company does, who it serves) and
-   \`brain/company/goals.md\` (current priorities), plus one or two files tied to the user's
-   focus areas. Write only what you actually know; don't invent facts. If the user gave a
-   company URL and you have web research available, you may use it to enrich the overview —
-   otherwise keep it to what they told you.
-4. **Tune your own definition** so you are useful going forward: read
-   \`skills/agent-self-edit/SKILL.md\` with \`read_skill\`, then call \`update_agent_file\`
-   to give yourself clear instructions for this user and to mount the Brain folders you just
-   created (e.g. \`@brain/company/\`). Mounting the specific folders you created keeps future
-   sessions focused; you can keep \`@brain/\` if a broad mount is more useful.
-5. **Summarize what you set up** in plain language: list the Brain files you created, what you
-   changed about yourself, and remind the user that everything lives in the **Brain** view and
-   is fully editable. Note that changes to your definition take effect on your next session.
+1. **Read this skill** (you are doing that now).
+2. **Ground yourself.** If a company URL came in the signup, do a **quick @exa research pass**
+   — one or two targeted searches to learn what the company does. Don't over-research.
+3. **Ask 1–2 sharp questions**, building on the signup details and what you found: what the
+   company really does, who it serves, and what they want help with first. Ask conversationally
+   and wait.
+4. **Scaffold a tailored \`brain/wiki/\`**: the folders that fit this business, each with a
+   one-line README, plus two or three genuinely useful seeded files (e.g.
+   \`brain/wiki/company/overview.md\`, \`brain/wiki/strategy/priorities.md\`). Capture what you
+   learned; leave the rest to grow.
+5. **Personalize \`agent/soul.md\`** to this user — fill in who you serve (their role and what
+   they care about) and what good looks like for their focus areas. Keep it short.
+6. **Tune your definition.** Read \`skills/agent-self-edit/SKILL.md\` with \`read_skill\`, then
+   call \`update_agent_file\` to give yourself crisp instructions for this user and mount the
+   wiki with \`@brain/wiki/\`.
+7. **Solve "what now?"** (see below) so the user has a clear next step.
+
+## Closing — solve "what now?"
+
+Don't just stop after setup. In plain language:
+
+- Tell the user what you set up, and point them to the **Brain** tab (to see and expand the
+  wiki) and the **Agent** tab (to see and customize you and your \`soul.md\`). Invite them to
+  tweak anything — it's all theirs to edit.
+- Note that changes to your definition take effect on your next session.
+- If a concrete first task is obvious from what you learned, **offer to start on it right now**
+  rather than leaving them on a blank page.
 
 ## Guardrails
 
 - Prefer asking over assuming; a short, sharp set of questions beats a long form.
 - Don't over-scaffold. A handful of genuinely useful files is the goal.
-- The Brain is shared knowledge; your definition is behavior. Put durable facts in the Brain
-  and durable behavior in your definition — don't mix them up.
-- This skill covers Brain setup and points you at \`agent-self-edit\` for your own definition.
-  It does not grant any new powers beyond the file and self-edit tools you already have.
+- The Brain is shared knowledge; your definition and \`soul.md\` are behavior. Keep durable
+  facts in the Brain and durable behavior in your definition — don't mix them up.
+- This skill grants no new powers beyond the file and self-edit tools you already have.
 `;
 }
 
