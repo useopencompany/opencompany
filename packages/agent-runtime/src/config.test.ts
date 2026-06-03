@@ -24,6 +24,8 @@ describe("resolveAgentRuntimeConfig", () => {
       workspaceName: "Acme",
       sessionTitle: "Risk review",
       userName: "Ada Lovelace",
+      userFirstName: "Ada",
+      userLastName: "Lovelace",
     });
 
     expect(resolved.model).toEqual({
@@ -40,6 +42,8 @@ describe("resolveAgentRuntimeConfig", () => {
     });
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
     expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
+    expect(resolved.systemPrompt).toContain("User first name: Ada");
+    expect(resolved.systemPrompt).toContain("User last name: Lovelace");
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
     expect(resolved.systemPrompt).toContain("Check the workspace and summarize risk.");
@@ -49,6 +53,31 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).toContain("git_diff");
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
+  });
+
+  it("falls back to email for user context when WorkOS has not provided a name", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Ops agent",
+      instructions: "Check the workspace and summarize risk.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      userEmail: "ada@example.com",
+    });
+
+    expect(resolved.systemPrompt).toContain("User: ada@example.com");
+    expect(resolved.systemPrompt).not.toContain("User first name:");
+    expect(resolved.systemPrompt).not.toContain("User last name:");
   });
 
   it("nudges the agent to read the self-edit skill before update_agent_file", () => {

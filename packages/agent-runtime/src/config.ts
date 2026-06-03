@@ -38,6 +38,9 @@ export function resolveAgentRuntimeConfig(input: {
   workspaceName?: string;
   sessionTitle?: string;
   userName?: string;
+  userFirstName?: string;
+  userLastName?: string;
+  userEmail?: string;
   toolPolicy?: {
     policy: WorkspaceToolPolicyMap;
     suspendable: boolean;
@@ -92,7 +95,7 @@ export function resolveAgentRuntimeConfig(input: {
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
-    input.userName ? `User: ${input.userName}` : null,
+    ...formatUserContext(input),
   ].filter(Boolean);
 
   const modelRuntime = getAgentModelRuntimeOptions(input.agent.model.name);
@@ -114,6 +117,20 @@ export function resolveAgentRuntimeConfig(input: {
     }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
+}
+
+function formatUserContext(input: {
+  userName?: string;
+  userFirstName?: string;
+  userLastName?: string;
+  userEmail?: string;
+}) {
+  const userName = input.userName?.trim() || input.userEmail?.trim();
+  return [
+    userName ? `User: ${userName}` : null,
+    input.userFirstName?.trim() ? `User first name: ${input.userFirstName.trim()}` : null,
+    input.userLastName?.trim() ? `User last name: ${input.userLastName.trim()}` : null,
+  ].filter(Boolean);
 }
 
 export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
