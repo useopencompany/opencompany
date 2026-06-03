@@ -26,7 +26,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { submitAgentSessionMessage } from "@/lib/agent-sessions/actions";
+import {
+  submitAgentSessionMessage,
+  submitAgentSessionQuestionResponse,
+} from "@/lib/agent-sessions/actions";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { addUserMessageToSessionDetail } from "@/lib/agent-sessions/payload";
 import type {
@@ -88,14 +91,18 @@ vi.mock("@/components/useSessionEventStream", () => ({
 
 const actionMocks = vi.hoisted(() => ({
   abortAgentSession: vi.fn(),
+  cancelAgentSessionQuestion: vi.fn(),
   resolveToolApproval: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
+  submitAgentSessionQuestionResponse: vi.fn(),
 }));
 
 vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
+  cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
+  submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
 }));
 
 vi.mock("@/lib/agent-sessions/payload", () => ({
@@ -115,7 +122,9 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
 }));
 
 afterEach(() => {
+  actionMocks.cancelAgentSessionQuestion.mockReset();
   actionMocks.resolveToolApproval.mockReset();
+  actionMocks.submitAgentSessionQuestionResponse.mockReset();
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -611,6 +620,76 @@ function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatu
     </QueryClientProvider>,
   );
 }
+
+describe("SessionViewContent — ask tool questions", () => {
+  it("turns the selected Other option into the custom answer input", async () => {
+    const user = userEvent.setup();
+    vi.mocked(submitAgentSessionQuestionResponse).mockResolvedValue({ ok: true });
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_question", status: "awaiting_input" }),
+      messages: [
+        {
+          id: "msg_question",
+          role: "assistant",
+          content: "",
+          status: "completed",
+          modelMessage: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call_question",
+                toolName: "ask_user_question",
+                input: { questions: [] },
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "question.requested",
+          messageId: "msg_question",
+          createdAt: "2026-06-02T08:51:35.162Z",
+          payload: {
+            messageId: "msg_question",
+            toolCallId: "call_question",
+            questions: [
+              {
+                header: "Env",
+                question: "Which environment?",
+                options: [{ label: "Production" }, { label: "Staging" }],
+                allowMultiple: false,
+                allowOther: true,
+              },
+            ],
+            requestedAt: "2026-06-02T08:51:35.162Z",
+          },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    const otherOption = screen.getByRole("radio", { name: "Other answer" });
+    await user.click(otherOption);
+
+    const otherInput = screen.getByRole("textbox", { name: "Other answer text" });
+    expect(otherOption).toContainElement(otherInput);
+
+    await user.type(otherInput, "Canary");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() =>
+      expect(submitAgentSessionQuestionResponse).toHaveBeenCalledWith({
+        sessionId: "sess_question",
+        toolCallId: "call_question",
+        answers: [{ selectedLabels: [], otherText: "Canary" }],
+      }),
+    );
+  });
+});
 
 describe("SessionViewContent — active turn timer", () => {
   beforeEach(() => {

@@ -874,6 +874,211 @@ describe("buildAssistantTurnParts", () => {
     });
   });
 
+  it("builds a pending question card from a question.requested event", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_q",
+              toolName: "ask_user_question",
+              input: { questions: [] },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "question.requested", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          questions: [
+            {
+              header: "Env",
+              question: "Which environment?",
+              options: [{ label: "Production" }, { label: "Staging", description: "safe" }],
+              allowMultiple: false,
+              allowOther: true,
+            },
+          ],
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    const question = toolPart?.type === "tool-call" ? toolPart.toolCall.question : undefined;
+    expect(question?.status).toBe("pending");
+    expect(question?.questions).toHaveLength(1);
+    expect(question?.questions[0]).toMatchObject({
+      header: "Env",
+      question: "Which environment?",
+      allowMultiple: false,
+      allowOther: true,
+    });
+    expect(question?.questions[0]?.options).toEqual([
+      { label: "Production" },
+      { label: "Staging", description: "safe" },
+    ]);
+  });
+
+  it("marks a question answered and carries the answers through question.answered", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_q",
+              toolName: "ask_user_question",
+              input: { questions: [] },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "question.requested", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          questions: [
+            {
+              header: "Env",
+              question: "Which environment?",
+              options: [{ label: "Production" }],
+              allowMultiple: false,
+              allowOther: false,
+            },
+          ],
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+        event(2, "question.answered", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          answers: [{ selectedLabels: ["Production"] }],
+          resolutionSource: "user",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    const question = toolPart?.type === "tool-call" ? toolPart.toolCall.question : undefined;
+    expect(question?.status).toBe("answered");
+    expect(question?.answers).toEqual([{ selectedLabels: ["Production"] }]);
+    // The original questions survive so the summary can pair each with its answer.
+    expect(question?.questions[0]?.question).toBe("Which environment?");
+  });
+
+  it("marks a question cancelled when superseded", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_q",
+              toolName: "ask_user_question",
+              input: { questions: [] },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "question.requested", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          questions: [
+            {
+              header: "Env",
+              question: "Which?",
+              options: [{ label: "A" }],
+              allowMultiple: false,
+              allowOther: false,
+            },
+          ],
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+        event(2, "question.answered", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          answers: [],
+          resolutionSource: "superseded",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    const question = toolPart?.type === "tool-call" ? toolPart.toolCall.question : undefined;
+    expect(question?.status).toBe("cancelled");
+    expect(question?.resolutionSource).toBe("superseded");
+  });
+
+  it("marks a user X-decline cancelled via the explicit answered flag, not the resolution source", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_q",
+              toolName: "ask_user_question",
+              input: { questions: [] },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "question.requested", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          questions: [
+            {
+              header: "Env",
+              question: "Which?",
+              options: [{ label: "A" }],
+              allowMultiple: false,
+              allowOther: false,
+            },
+          ],
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+        // The X-dismiss resolves with (cancelled, user). Inferring from resolutionSource alone would
+        // wrongly read this as an answer; the explicit `answered: false` keeps it a skip.
+        event(2, "question.answered", {
+          messageId: "msg_assistant",
+          toolCallId: "call_q",
+          answered: false,
+          answers: [],
+          resolutionSource: "user",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    const question = toolPart?.type === "tool-call" ? toolPart.toolCall.question : undefined;
+    expect(question?.status).toBe("cancelled");
+    expect(question?.resolutionSource).toBe("user");
+  });
+
   it("preserves approval decision source after a paused tool call is resolved", () => {
     const timeoutParts = buildAssistantTurnParts(
       { id: "msg_assistant", role: "assistant", content: "", status: "running" },

@@ -19,6 +19,7 @@ export type RuntimeToolName =
   | "git_diff"
   | "delegate_to_agent"
   | "update_agent_file"
+  | "ask_user_question"
   | "amp_coder"
   | "exa_search"
   | "exa_contents"
@@ -33,10 +34,21 @@ export type RuntimeToolName =
   | "youtube_get_transcript"
   | "youtube_get_channel"
   | "youtube_list_channel_videos"
+  | "tiktok_get_profile"
+  | "tiktok_list_profile_posts"
+  | "tiktok_get_video"
+  | "tiktok_get_comments"
+  | "tiktok_search"
   | "tiktok_get_metadata"
   | "tiktok_get_transcript"
+  | "instagram_get_profile"
+  | "instagram_list_profile_posts"
+  | "instagram_get_post"
+  | "instagram_get_comments"
+  | "instagram_search_profiles"
   | "instagram_get_metadata"
   | "instagram_get_transcript"
+  | "social_get_job"
   | "web_fetch"
   | "tool_help";
 
@@ -44,6 +56,7 @@ export type RuntimeToolDefinition = {
   name: RuntimeToolName;
   kind: "sandbox" | "hosted" | "internal";
   configToolId?: AgentToolId;
+  sharedConfigToolIds?: AgentToolId[];
   requiresAttachedRepository?: boolean;
   description: string;
   parameters: JsonSchema;
@@ -122,22 +135,41 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     id: "tiktok",
     type: "hosted_tool",
     label: "tiktok",
-    description: "Read public TikTok video metadata and transcripts via Supadata.",
-    runtimeTools: ["tiktok_get_metadata", "tiktok_get_transcript"],
+    description:
+      "Read public TikTok profiles, recent videos, comments, and search results via Apify, plus direct video metadata and transcripts via Supadata.",
+    runtimeTools: [
+      "tiktok_get_profile",
+      "tiktok_list_profile_posts",
+      "tiktok_get_video",
+      "tiktok_get_comments",
+      "tiktok_search",
+      "social_get_job",
+      "tiktok_get_metadata",
+      "tiktok_get_transcript",
+    ],
     defaultEnabled: true,
     credentialSource: "platform",
-    requiredPlatformEnvVars: ["SUPADATA_API_KEY"],
+    requiredPlatformEnvVars: ["APIFY_API_TOKEN", "SUPADATA_API_KEY"],
   },
   {
     id: "instagram",
     type: "hosted_tool",
     label: "instagram",
     description:
-      "Read public Instagram post, reel, and video metadata and transcripts via Supadata.",
-    runtimeTools: ["instagram_get_metadata", "instagram_get_transcript"],
+      "Read public Instagram profiles, recent posts/reels, comments, and profile search via Apify, plus direct media metadata and transcripts via Supadata.",
+    runtimeTools: [
+      "instagram_get_profile",
+      "instagram_list_profile_posts",
+      "instagram_get_post",
+      "instagram_get_comments",
+      "instagram_search_profiles",
+      "social_get_job",
+      "instagram_get_metadata",
+      "instagram_get_transcript",
+    ],
     defaultEnabled: true,
     credentialSource: "platform",
-    requiredPlatformEnvVars: ["SUPADATA_API_KEY"],
+    requiredPlatformEnvVars: ["APIFY_API_TOKEN", "SUPADATA_API_KEY"],
   },
   {
     id: "amp",
@@ -463,6 +495,74 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
       "Pass the COMPLETE new Markdown body, not a diff.",
       "Changes apply on your next session, not the current one — offer to start one.",
+    ].join("\n"),
+  },
+  {
+    name: "ask_user_question",
+    kind: "internal",
+    description:
+      "Pause and ask the user one or more structured questions when you genuinely cannot proceed without their input — a real decision, a missing requirement, or an ambiguity that changes the outcome. The run suspends until the user answers, so do not use this for things you can reasonably decide yourself, and never use it to narrate progress or ask for permission to use a tool. Prefer a single round of questions over many sequential pauses: batch everything you need now. Each question presents selectable options; set allowMultiple when several options can be chosen together, and set allowOther when a sensible answer might fall outside the options (this lets the user type their own). Keep headers to two or three words and questions to one clear sentence.",
+    parameters: {
+      type: "object",
+      properties: {
+        questions: {
+          type: "array",
+          description: "Between 1 and 4 questions to ask in a single pause.",
+          items: {
+            type: "object",
+            properties: {
+              header: {
+                type: "string",
+                description: "Two or three word label for this question, shown as its title.",
+              },
+              question: {
+                type: "string",
+                description: "The full question, phrased as one clear sentence.",
+              },
+              options: {
+                type: "array",
+                description: "Between 2 and 6 selectable options.",
+                items: {
+                  type: "object",
+                  properties: {
+                    label: {
+                      type: "string",
+                      description: "Short option label shown to the user.",
+                    },
+                    description: {
+                      type: "string",
+                      description: "Optional one-line clarification of this option.",
+                    },
+                  },
+                  required: ["label"],
+                  additionalProperties: false,
+                },
+              },
+              allowMultiple: {
+                type: "boolean",
+                description: "Whether the user may select more than one option. Defaults to false.",
+                default: false,
+              },
+              allowOther: {
+                type: "boolean",
+                description:
+                  "Whether the user may provide a free-text answer outside the options. Defaults to false.",
+                default: false,
+              },
+            },
+            required: ["header", "question", "options"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["questions"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use ask_user_question only when user input is genuinely required to proceed correctly.",
+      "Batch every question you need into one call; the run pauses until the user answers.",
+      "Set allowMultiple for multi-select questions; set allowOther to let the user type their own answer.",
+      "Do not use it to narrate progress or to ask permission to run a tool.",
     ].join("\n"),
   },
   {
@@ -1043,6 +1143,147 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     ].join("\n"),
   },
   {
+    name: "tiktok_get_profile",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description:
+      "Get a normalized public TikTok profile by handle, username, or profile URL, including bio, avatar, verification, and public stats.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description:
+            "TikTok username, @handle, or profile URL. Public profiles only; no login or private profile access.",
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_get_profile when the user mentions a TikTok handle or profile URL.",
+      "This returns a normalized public Profile object with sourceProvider, sourceUrl, and fetchedAt.",
+      "It does not scrape follower/following lists, private profiles, login-gated data, emails, or phone numbers.",
+    ].join("\n"),
+  },
+  {
+    name: "tiktok_list_profile_posts",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description:
+      "List recent public TikTok videos for a profile, normalized as posts with caption, author, media URL, stats, hashtags, and publish time.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description: "TikTok username, @handle, or profile URL.",
+        },
+        limit: {
+          type: "number",
+          description: "Number of videos to return. Defaults to 12. Maximum 50.",
+          default: 12,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start a provider job and poll with social_get_job.",
+          default: "sync",
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_list_profile_posts for recent videos from a public profile.",
+      "Default limit is 12 and hard cap is 50. For bigger or slower jobs, set runMode=async and poll social_get_job.",
+      "Pass returned video URLs to tiktok_get_transcript when you need spoken content.",
+    ].join("\n"),
+  },
+  {
+    name: "tiktok_get_video",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description:
+      "Get normalized metadata for one public TikTok video URL using the social scraping provider.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "Public TikTok video URL, e.g. https://www.tiktok.com/@user/video/123.",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_get_video for one public video when you want the normalized social Post shape.",
+      "Use tiktok_get_transcript for spoken transcript content; transcripts remain backed by Supadata.",
+    ].join("\n"),
+  },
+  {
+    name: "tiktok_get_comments",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description: "Get top public comments for one public TikTok video URL.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Public TikTok video URL." },
+        limit: {
+          type: "number",
+          description: "Number of comments to return. Defaults to 25. Maximum 50.",
+          default: 25,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start a provider job and poll with social_get_job.",
+          default: "sync",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_get_comments to inspect public discussion on a specific video.",
+      "Default limit is 25 and hard cap is 50. The tool does not bypass login gates or private content.",
+    ].join("\n"),
+  },
+  {
+    name: "tiktok_search",
+    kind: "hosted",
+    configToolId: "tiktok",
+    description: "Search public TikTok content by keyword and return normalized public videos.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query." },
+        limit: {
+          type: "number",
+          description: "Number of results to return. Defaults to 10. Maximum 50.",
+          default: 10,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start a provider job and poll with social_get_job.",
+          default: "sync",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use tiktok_search for public TikTok keyword discovery.",
+      "Default limit is 10 and hard cap is 50. Search results are normalized as public Post objects.",
+    ].join("\n"),
+  },
+  {
     name: "tiktok_get_metadata",
     kind: "hosted",
     configToolId: "tiktok",
@@ -1061,6 +1302,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use tiktok_get_metadata to inspect a public TikTok video's creator, caption, media details, and engagement before reading its transcript.",
+      "This tool needs a direct video URL. TikTok profile handles and profile URLs are not supported by the Supadata integration.",
       "Only public URLs that can be viewed without signing in are supported.",
     ].join("\n"),
   },
@@ -1111,7 +1353,150 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use tiktok_get_transcript to read what is said in a public TikTok video.",
       "Provide either url or jobId. URL requests may return a jobId for longer generated transcripts; call this tool again with jobId to poll.",
+      "This tool needs a direct video URL. TikTok profile handles and profile URLs are not supported by the Supadata integration.",
       "Keep text=true for summarization. Set text=false only when timestamps matter.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_get_profile",
+    kind: "hosted",
+    configToolId: "instagram",
+    description:
+      "Get a normalized public Instagram profile by username, handle, or profile URL, including bio, avatar, verification, public links, and public stats.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description:
+            "Instagram username, @handle, or profile URL. Public profiles only; no login or private profile access.",
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_get_profile when the user mentions an Instagram handle or profile URL.",
+      "This returns a normalized public Profile object with sourceProvider, sourceUrl, and fetchedAt.",
+      "It does not scrape follower/following lists, private profiles, login-gated data, emails, or phone numbers.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_list_profile_posts",
+    kind: "hosted",
+    configToolId: "instagram",
+    description:
+      "List recent public Instagram posts and reels for a profile, normalized as posts with caption, author, media, stats, hashtags, and publish time.",
+    parameters: {
+      type: "object",
+      properties: {
+        username: {
+          type: "string",
+          description: "Instagram username, @handle, or profile URL.",
+        },
+        limit: {
+          type: "number",
+          description: "Number of posts/reels to return. Defaults to 12. Maximum 50.",
+          default: 12,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start a provider job and poll with social_get_job.",
+          default: "sync",
+        },
+      },
+      required: ["username"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_list_profile_posts for recent public posts or reels from a profile.",
+      "Default limit is 12 and hard cap is 50. For bigger or slower jobs, set runMode=async and poll social_get_job.",
+      "Pass returned reel/video URLs to instagram_get_transcript when you need spoken content.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_get_post",
+    kind: "hosted",
+    configToolId: "instagram",
+    description:
+      "Get normalized metadata for one public Instagram post, reel, video, or carousel URL using the social scraping provider.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description:
+            "Public Instagram post, reel, or video URL, e.g. https://www.instagram.com/reel/ABC123/.",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_get_post for one public Instagram media URL when you want the normalized social Post shape.",
+      "Use instagram_get_transcript for spoken transcript content; transcripts remain backed by Supadata.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_get_comments",
+    kind: "hosted",
+    configToolId: "instagram",
+    description: "Get top public comments for one public Instagram post, reel, or video URL.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Public Instagram post, reel, or video URL." },
+        limit: {
+          type: "number",
+          description: "Number of comments to return. Defaults to 25. Maximum 50.",
+          default: 25,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start a provider job and poll with social_get_job.",
+          default: "sync",
+        },
+      },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_get_comments to inspect public discussion on a specific post or reel.",
+      "Default limit is 25 and hard cap is 50. The tool does not bypass login gates or private content.",
+    ].join("\n"),
+  },
+  {
+    name: "instagram_search_profiles",
+    kind: "hosted",
+    configToolId: "instagram",
+    description: "Search public Instagram profiles by keyword and return normalized profiles.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Profile search query." },
+        limit: {
+          type: "number",
+          description: "Number of profiles to return. Defaults to 10. Maximum 50.",
+          default: 10,
+        },
+        runMode: {
+          type: "string",
+          enum: ["sync", "async"],
+          description:
+            "Use sync for small bounded calls. Use async to start a provider job and poll with social_get_job.",
+          default: "sync",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use instagram_search_profiles for public Instagram profile discovery.",
+      "Default limit is 10 and hard cap is 50. Results are normalized Profile objects.",
     ].join("\n"),
   },
   {
@@ -1134,6 +1519,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Use instagram_get_metadata to inspect a public Instagram post, reel, or video before reading its transcript.",
+      "This tool needs a direct post, reel, or video URL. Instagram profile handles and profile URLs are not supported by the Supadata integration.",
       "Only public URLs that can be viewed without signing in are supported.",
     ].join("\n"),
   },
@@ -1184,7 +1570,30 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Use instagram_get_transcript to read what is said in a public Instagram reel or video.",
       "Provide either url or jobId. URL requests may return a jobId for longer generated transcripts; call this tool again with jobId to poll.",
+      "This tool needs a direct reel or video URL. Instagram profile handles and profile URLs are not supported by the Supadata integration.",
       "Keep text=true for summarization. Set text=false only when timestamps matter.",
+    ].join("\n"),
+  },
+  {
+    name: "social_get_job",
+    kind: "hosted",
+    sharedConfigToolIds: ["instagram", "tiktok"],
+    description:
+      "Poll an async Instagram or TikTok social scraping job started by a profile, feed, comments, or search tool.",
+    parameters: {
+      type: "object",
+      properties: {
+        jobId: {
+          type: "string",
+          description: "Job id returned by a prior Instagram or TikTok social scraping tool.",
+        },
+      },
+      required: ["jobId"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use social_get_job only for job ids returned by Instagram/TikTok tools with runMode=async.",
+      "When status is processing, wait before polling again. When completed, results are returned in the same normalized shape as the original tool.",
     ].join("\n"),
   },
   {
@@ -1302,8 +1711,10 @@ function isRuntimeToolEnabledByConfig(
   selectedToolIds: Set<string>,
   hasAttachedRepository: boolean,
 ) {
-  if (!definition.configToolId) return false;
-  if (!selectedToolIds.has(definition.configToolId)) return false;
+  const configuredBy =
+    (definition.configToolId ? selectedToolIds.has(definition.configToolId) : false) ||
+    (definition.sharedConfigToolIds ?? []).some((toolId) => selectedToolIds.has(toolId));
+  if (!configuredBy) return false;
   if (definition.requiresAttachedRepository && !hasAttachedRepository) return false;
   return true;
 }

@@ -12,7 +12,7 @@ import {
   runClaimedRunnerJob,
   startRunnerJobWorker,
 } from "./jobs";
-import { ToolStepLimitExceededError } from "./runner-errors";
+import { MessageTurnFailedError, ToolStepLimitExceededError } from "./runner-errors";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -265,6 +265,70 @@ describe("runner job execution", () => {
     expect(firstJob(store).lastError).toBe(
       "Agent reached the tool-step limit before producing a final answer. Send another message to continue.",
     );
+  });
+
+  it("marks failed message turns failed without replaying side effects", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "running",
+        attempts: 1,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          runMessage: vi.fn(async () => {
+            throw new MessageTurnFailedError(new Error("tool call JSON was invalid"));
+          }),
+        }),
+      }),
+    ).rejects.toThrow("tool call JSON was invalid");
+
+    expect(firstJob(store).status).toBe("failed");
+    expect(firstJob(store).nextRunAt).toEqual(new Date("2026-05-27T12:00:00.000Z"));
+    expect(firstJob(store).lastError).toBe("tool call JSON was invalid");
+  });
+
+  it("marks failed resume turns failed without replaying side effects", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-27T12:00:00.000Z"));
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "resume_question",
+        status: "running",
+        attempts: 1,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          resumeQuestionResponse: vi.fn(async () => {
+            throw new MessageTurnFailedError(new Error("model stream dropped mid-turn"));
+          }),
+        }),
+      }),
+    ).rejects.toThrow("model stream dropped mid-turn");
+
+    expect(firstJob(store).status).toBe("failed");
+    expect(firstJob(store).nextRunAt).toEqual(new Date("2026-05-27T12:00:00.000Z"));
+    expect(firstJob(store).lastError).toBe("model stream dropped mid-turn");
   });
 
   it("marks jobs failed after the max attempt", async () => {
@@ -520,6 +584,7 @@ function handlers(overrides: Partial<RunnerJobHandlers> = {}): RunnerJobHandlers
     generateSessionTitleForMessage: async () => ({ ok: true as const, title: "Generated title" }),
     runAfterSession: async () => undefined,
     resumeApproval: async () => undefined,
+    resumeQuestionResponse: async () => undefined,
   };
   return { ...base, ...overrides };
 }

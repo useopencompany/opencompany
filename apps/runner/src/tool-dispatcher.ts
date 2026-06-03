@@ -68,10 +68,21 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   youtube_get_transcript: 6,
   youtube_get_channel: 6,
   youtube_list_channel_videos: 4,
+  tiktok_get_profile: 8,
+  tiktok_list_profile_posts: 4,
+  tiktok_get_video: 8,
+  tiktok_get_comments: 4,
+  tiktok_search: 4,
   tiktok_get_metadata: 8,
   tiktok_get_transcript: 6,
+  instagram_get_profile: 8,
+  instagram_list_profile_posts: 4,
+  instagram_get_post: 8,
+  instagram_get_comments: 4,
+  instagram_search_profiles: 4,
   instagram_get_metadata: 8,
   instagram_get_transcript: 6,
+  social_get_job: 8,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
@@ -338,6 +349,17 @@ async function executeRuntimeToolWithTracing(input: {
             runLeaseOwner: input.runLeaseOwner,
             args: input.args,
           });
+        }
+        if (input.definition.name === "ask_user_question") {
+          // The body only runs when the question could not suspend: a non-suspendable run
+          // (delegated child / after-session / background), or malformed questions. The
+          // suspend path in model-stream-runner never reaches execute(). Tell the model so it
+          // proceeds on its own rather than waiting on input that will never come.
+          return {
+            status: "unanswered" as const,
+            reason:
+              "You cannot ask the user a question in this context (no interactive session, or the questions were malformed). Proceed using your best judgment.",
+          };
         }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");

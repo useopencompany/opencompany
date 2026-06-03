@@ -8,6 +8,7 @@ import {
   agentSessionAfterSessionRuns,
   agentSessionEvents,
   agentSessionMessages,
+  agentSessionQuestions,
   agentSessions,
   agents,
   agentToolApprovals,
@@ -177,9 +178,16 @@ export async function loadSession(sessionId: string) {
   return { ...row, repository: repository ?? null };
 }
 
-export function optionalUserName(user: Pick<typeof users.$inferSelect, "firstName" | "lastName">) {
+export function optionalUserContext(
+  user: Pick<typeof users.$inferSelect, "email" | "firstName" | "lastName">,
+) {
   const userName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  return userName ? { userName } : {};
+  return {
+    ...(userName ? { userName } : {}),
+    ...(user.firstName ? { userFirstName: user.firstName } : {}),
+    ...(user.lastName ? { userLastName: user.lastName } : {}),
+    ...(user.email ? { userEmail: user.email } : {}),
+  };
 }
 
 export type LoadedSession = Awaited<ReturnType<typeof loadSession>>;
@@ -445,6 +453,44 @@ export async function abortSession(sessionId: string) {
     .where(
       and(eq(agentToolApprovals.sessionId, sessionId), eq(agentToolApprovals.status, "pending")),
     );
+  // Same hazard for a session paused on an ask_user_question: cancel any pending question so the
+  // backstop can't revive the aborted session via a question resume.
+  const cancelledQuestions = await db
+    .update(agentSessionQuestions)
+    .set({
+      status: "cancelled",
+      resolutionSource: "abort",
+      answeredAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, sessionId),
+        eq(agentSessionQuestions.status, "pending"),
+      ),
+    )
+    .returning({
+      toolCallId: agentSessionQuestions.toolCallId,
+      messageId: agentSessionQuestions.messageId,
+    });
+  // The web reducer only moves a question card out of its interactive `pending` state on a
+  // `question.answered` event, so without this the aborted session would keep rendering a live
+  // question card. Emit the resolution event the resume path would have produced.
+  for (const question of cancelledQuestions) {
+    const messageId = question.messageId ?? "";
+    await appendRuntimeEvent(db, {
+      sessionId,
+      messageId,
+      type: "question.answered",
+      payload: {
+        messageId,
+        toolCallId: question.toolCallId,
+        answered: false,
+        answers: [],
+        resolutionSource: "abort",
+      },
+    });
+  }
   await appendRuntimeEvent(db, {
     sessionId,
     type: "session.status",

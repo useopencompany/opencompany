@@ -57,6 +57,9 @@ describe("skill catalog", () => {
     expect(skillMd).toMatch(/@brain\//);
     // It points back at the self-edit skill for tuning the agent's own definition.
     expect(skillMd).toContain(AGENT_SELF_EDIT_SKILL_ID);
+    // It uses the structured question pause instead of a plain chat question for setup.
+    expect(skillMd).toContain("ask_user_question");
+    expect(skillMd).toContain("Do not ask these as plain chat questions");
   });
 
   test("the self-edit SKILL.md enumerates addable tool mentions with prerequisites", () => {
