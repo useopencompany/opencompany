@@ -103,10 +103,22 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       list_comments: "read",
       create_issue: "post",
       create_comment: "post",
-      save_comment: "post",
       update_issue: "modify",
       update_project: "modify",
       update_comment: "modify",
+      // Linear's official MCP server uses a `save_*` upsert convention (create-or-update
+      // in one tool). Classify the whole family as `modify` — they can overwrite existing
+      // items, so `modify` is the correct write tier. The `save` verb is also in the
+      // heuristic below, so any future/unlisted `save_*` tool degrades to `modify` rather
+      // than the `admin` fallback.
+      save_issue: "modify",
+      save_comment: "modify",
+      save_document: "modify",
+      save_project: "modify",
+      save_initiative: "modify",
+      save_project_update: "modify",
+      save_initiative_update: "modify",
+      save_project_milestone: "modify",
       archive_issue: "admin",
       delete_issue: "admin",
     },
@@ -212,6 +224,7 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // GitHub-effecting tools. gh is an unbounded CLI → admin; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "modify" },
+  opencode_coder: { providerKey: "github", group: "modify" },
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,
@@ -231,7 +244,20 @@ export function classifyRuntimeTool(name: string): ToolClassification {
 
 const READ_VERBS = ["get", "list", "search", "read", "fetch", "view", "describe", "find", "query"];
 const POST_VERBS = ["create", "post", "send", "add", "comment", "new", "open"];
-const MODIFY_VERBS = ["update", "edit", "set", "modify", "move", "assign", "rename", "patch"];
+const MODIFY_VERBS = [
+  "update",
+  "edit",
+  "set",
+  "modify",
+  "move",
+  "assign",
+  "rename",
+  "patch",
+  // Upsert verbs (e.g. Linear's `save_*` MCP tools): create-or-update. Treated as
+  // `modify` so an unmapped upsert tool isn't pushed into the `admin` fallback.
+  "save",
+  "upsert",
+];
 const ADMIN_VERBS = [
   "delete",
   "remove",

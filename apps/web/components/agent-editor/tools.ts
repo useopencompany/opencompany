@@ -123,6 +123,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   tiktok: Music2,
   instagram: InstagramIcon,
   amp: Code2,
+  opencode: Code2,
   linear: ListTodo,
   slack: MessageSquare,
 };
