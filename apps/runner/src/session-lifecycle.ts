@@ -155,9 +155,16 @@ export async function loadSession(sessionId: string) {
   return { ...row, repository: repository ?? null };
 }
 
-export function optionalUserName(user: Pick<typeof users.$inferSelect, "firstName" | "lastName">) {
+export function optionalUserContext(
+  user: Pick<typeof users.$inferSelect, "email" | "firstName" | "lastName">,
+) {
   const userName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  return userName ? { userName } : {};
+  return {
+    ...(userName ? { userName } : {}),
+    ...(user.firstName ? { userFirstName: user.firstName } : {}),
+    ...(user.lastName ? { userLastName: user.lastName } : {}),
+    ...(user.email ? { userEmail: user.email } : {}),
+  };
 }
 
 export type LoadedSession = Awaited<ReturnType<typeof loadSession>>;

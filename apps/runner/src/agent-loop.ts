@@ -81,7 +81,7 @@ import {
   loadNextSteerMessage,
   loadSession,
   loadUserMessage,
-  optionalUserName,
+  optionalUserContext,
   setStatus,
 } from "./session-lifecycle";
 import {
@@ -270,7 +270,7 @@ async function runMessageWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable },
     });
     modelProvider = runtime.model.provider;
@@ -963,7 +963,7 @@ async function runAfterSessionWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: false },
     });
     modelProvider = runtime.model.provider;
@@ -1362,7 +1362,7 @@ async function resumeApprovalWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
@@ -1838,7 +1838,7 @@ async function resumeQuestionResponseWithContext(
       agent: agentConfig,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
-      ...optionalUserName(row.user),
+      ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
