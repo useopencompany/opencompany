@@ -90,6 +90,7 @@ import {
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
+const STREAM_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 // How far from the bottom (in px) before we consider the user "pinned".
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -566,6 +567,29 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       ignoreRecoveryThrottle: stream.status === "stale",
     });
   }, [refetchSessionProgress, connectionLooksStale, stream.status]);
+
+  useEffect(() => {
+    // Keep credentials fresh whenever the SSE stream stays live: both while the assistant
+    // is actively working AND while the run is durably paused at a tool gate
+    // (`awaiting_approval`). A paused session keeps its stream open, so without this its
+    // token would silently expire and reconnects would retry expired URLs.
+    if ((!awaitingAssistantWork && !sessionIsPaused) || !streamCredential?.streamTokenExpiresAt)
+      return;
+    const refreshInMs = Math.max(
+      streamCredential.streamTokenExpiresAt - Date.now() - STREAM_TOKEN_REFRESH_BUFFER_MS,
+      0,
+    );
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
+    }, refreshInMs);
+    return () => window.clearTimeout(timer);
+  }, [
+    awaitingAssistantWork,
+    sessionIsPaused,
+    queryClient,
+    streamCredential?.streamTokenExpiresAt,
+    streamCredentialKey,
+  ]);
 
   useEffect(() => {
     if (!awaitingAssistantWork) return;

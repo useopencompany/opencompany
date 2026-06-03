@@ -45,6 +45,8 @@ const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
 const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
 const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
 const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
+const SETTINGS_FORMAT_LOCALE = "en-US";
+const SETTINGS_FORMAT_TIME_ZONE = "UTC";
 
 type Props = {
   profile: {
@@ -195,7 +197,7 @@ function AppearanceSection() {
 }
 
 function formatUsd(cents: number) {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(SETTINGS_FORMAT_LOCALE, {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
@@ -204,18 +206,19 @@ function formatUsd(cents: number) {
 function formatUsdMicros(micros: number) {
   const roundedCents = Math.round(micros / 10_000);
   const cents = roundedCents === 0 ? 0 : roundedCents;
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(SETTINGS_FORMAT_LOCALE, {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
 }
 
 function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(SETTINGS_FORMAT_LOCALE, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: SETTINGS_FORMAT_TIME_ZONE,
   }).format(new Date(value));
 }
 
