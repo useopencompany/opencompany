@@ -520,6 +520,7 @@ function handlers(overrides: Partial<RunnerJobHandlers> = {}): RunnerJobHandlers
     generateSessionTitleForMessage: async () => ({ ok: true as const, title: "Generated title" }),
     runAfterSession: async () => undefined,
     resumeApproval: async () => undefined,
+    resumeQuestionResponse: async () => undefined,
   };
   return { ...base, ...overrides };
 }

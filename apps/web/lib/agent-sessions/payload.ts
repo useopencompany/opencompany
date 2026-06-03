@@ -84,6 +84,7 @@ export type AgentSessionDetailPayload = {
 export type SessionStreamCredentialPayload = {
   runnerUrl: string | null;
   streamToken: string | null;
+  streamTokenExpiresAt: number | null;
 };
 
 export type SidebarSessionSerializable = Omit<
@@ -653,6 +654,7 @@ export function parseSessionStreamCredentialResponse(
   return {
     runnerUrl: readNullableStringField(record, "runnerUrl"),
     streamToken: readNullableStringField(record, "streamToken"),
+    streamTokenExpiresAt: readNullableNumberField(record, "streamTokenExpiresAt"),
   };
 }
 
@@ -911,6 +913,13 @@ function readNumberField(record: Record<string, unknown>, field: string) {
 function readOptionalNumberField(record: Record<string, unknown>, field: string) {
   const value = record[field];
   if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
+  return value;
+}
+
+function readNullableNumberField(record: Record<string, unknown>, field: string) {
+  const value = record[field];
+  if (value === undefined || value === null) return null;
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
   return value;
 }

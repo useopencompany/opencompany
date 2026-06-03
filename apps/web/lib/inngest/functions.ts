@@ -1,6 +1,6 @@
 import { TOOL_APPROVAL_BACKSTOP_MS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { agentToolApprovals } from "@opencompany/db/schema";
+import { agentSessionQuestions, agentToolApprovals } from "@opencompany/db/schema";
 import { and, eq, lt } from "drizzle-orm";
 import {
   AGENT_SCHEDULE_SWEEP_CRON,
@@ -10,10 +10,14 @@ import {
   AGENT_AFTER_SESSION_CHECK_EVENT,
   AGENT_APPROVAL_RESUME_EVENT,
   AGENT_MESSAGE_SUBMITTED_EVENT,
+  AGENT_QUESTION_RESUME_EVENT,
   AGENT_SESSION_ABORT_REQUESTED_EVENT,
   AGENT_SESSION_STARTED_EVENT,
 } from "@/lib/agent-sessions/events";
-import { triggerAgentApprovalResume } from "@/lib/agent-sessions/message-runner";
+import {
+  triggerAgentApprovalResume,
+  triggerAgentQuestionResume,
+} from "@/lib/agent-sessions/message-runner";
 import { callRunner } from "@/lib/agent-sessions/runner";
 import { materializeAgentFileToGitHub, materializeAgentToGitHub } from "@/lib/agents/materialize";
 import {
@@ -382,6 +386,101 @@ export const sweepExpiredToolApprovals = inngest.createFunction(
   },
 );
 
+export const runAgentQuestionResume = inngest.createFunction(
+  {
+    id: "run-agent-question-resume",
+    name: "Run agent question resume",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: AGENT_QUESTION_RESUME_EVENT },
+  },
+  async ({ event, step }) => {
+    return step.run("resume runner question", async () => {
+      await callRunner(
+        `/internal/sessions/${event.data.sessionId}/questions/${event.data.toolCallId}/resume`,
+        {
+          event: "opencompany.inngest_resume_question_failed",
+          session_id: event.data.sessionId,
+        },
+      );
+      return { ok: true };
+    });
+  },
+);
+
+// Backstop sweep for ask_user_question: pending questions older than the backstop window are
+// auto-cancelled with resolutionSource='timeout' so a run never hangs forever waiting on the user.
+// The atomic, status-guarded UPDATE means a concurrent user answer always wins; only rows this
+// sweep actually flips trigger a resume.
+export const sweepExpiredSessionQuestions = inngest.createFunction(
+  {
+    id: "sweep-expired-session-questions",
+    name: "Sweep expired session questions",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: TOOL_APPROVAL_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    const db = getDb();
+    const cutoff = new Date(Date.now() - TOOL_APPROVAL_BACKSTOP_MS);
+
+    const expired = await step.run("select expired pending questions", async () => {
+      return db
+        .select({
+          id: agentSessionQuestions.id,
+          sessionId: agentSessionQuestions.sessionId,
+          toolCallId: agentSessionQuestions.toolCallId,
+        })
+        .from(agentSessionQuestions)
+        .where(
+          and(
+            eq(agentSessionQuestions.status, "pending"),
+            lt(agentSessionQuestions.requestedAt, cutoff),
+          ),
+        )
+        .limit(100);
+    });
+
+    let cancelled = 0;
+    for (const question of expired) {
+      const flippedRow = await step.run(`cancel question ${question.id}`, async () => {
+        const updated = await db
+          .update(agentSessionQuestions)
+          .set({
+            status: "cancelled",
+            resolutionSource: "timeout",
+            answeredAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(agentSessionQuestions.id, question.id),
+              eq(agentSessionQuestions.status, "pending"),
+            ),
+          )
+          .returning({ id: agentSessionQuestions.id });
+        return updated.length > 0;
+      });
+
+      if (!flippedRow) continue;
+      cancelled += 1;
+
+      await step.run(`resume question ${question.id}`, async () => {
+        await triggerAgentQuestionResume({
+          sessionId: question.sessionId,
+          toolCallId: question.toolCallId,
+        });
+        return { ok: true };
+      });
+    }
+
+    return { scanned: expired.length, cancelled };
+  },
+);
+
 export const sendSignupWelcome = inngest.createFunction(
   {
     id: "send-signup-welcome-email",
@@ -414,5 +513,7 @@ export const inngestFunctions = [
   abortAgentSession,
   runAgentApprovalResume,
   sweepExpiredToolApprovals,
+  runAgentQuestionResume,
+  sweepExpiredSessionQuestions,
   sendSignupWelcome,
 ];

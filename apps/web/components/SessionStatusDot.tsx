@@ -6,7 +6,10 @@ export function SessionStatusDot({ status, pulse = false }: { status: string; pu
         ? "bg-danger shadow-[0_0_0_2px_rgba(220,38,38,0.1)]"
         : status === "running" || status === "provisioning"
           ? "bg-success shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
-          : status === "awaiting_approval" || status === "aborting" || status === "archiving"
+          : status === "awaiting_approval" ||
+              status === "awaiting_input" ||
+              status === "aborting" ||
+              status === "archiving"
             ? "bg-warning shadow-[0_0_0_2px_rgba(217,119,6,0.11)]"
             : "bg-ink-subtle/45";
     return <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} />;
@@ -18,7 +21,10 @@ export function SessionStatusDot({ status, pulse = false }: { status: string; pu
       ? "var(--color-danger)"
       : status === "running" || status === "provisioning"
         ? "var(--color-success)"
-        : status === "awaiting_approval" || status === "aborting" || status === "archiving"
+        : status === "awaiting_approval" ||
+            status === "awaiting_input" ||
+            status === "aborting" ||
+            status === "archiving"
           ? "var(--color-warning)"
           : "var(--color-ink-subtle)";
 

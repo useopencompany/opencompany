@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { resumeApproval, runAfterSession, runMessage, startSession } from "./agent-loop";
+import {
+  resumeApproval,
+  resumeQuestionResponse,
+  runAfterSession,
+  runMessage,
+  startSession,
+} from "./agent-loop";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { isNonRetryableRunnerError } from "./runner-errors";
@@ -24,7 +30,13 @@ export const RUNNER_JOB_MAX_ATTEMPTS = 5;
 const DEFAULT_WORKER_CONCURRENCY = 2;
 const DEFAULT_WORKER_POLL_INTERVAL_MS = 1_000;
 
-export type RunnerJobKind = "start" | "message" | "title" | "after_session" | "resume_approval";
+export type RunnerJobKind =
+  | "start"
+  | "message"
+  | "title"
+  | "after_session"
+  | "resume_approval"
+  | "resume_question";
 export type RunnerJobStatus = "pending" | "running" | "completed" | "failed";
 
 export type RunnerJob = {
@@ -441,6 +453,7 @@ export type RunnerJobHandlers = {
   generateSessionTitleForMessage: typeof generateSessionTitleForMessage;
   runAfterSession: typeof runAfterSession;
   resumeApproval: typeof resumeApproval;
+  resumeQuestionResponse: typeof resumeQuestionResponse;
 };
 
 const defaultRunnerJobHandlers: RunnerJobHandlers = {
@@ -449,6 +462,7 @@ const defaultRunnerJobHandlers: RunnerJobHandlers = {
   generateSessionTitleForMessage,
   runAfterSession,
   resumeApproval,
+  resumeQuestionResponse,
 };
 
 async function dispatchRunnerJob(
@@ -474,6 +488,16 @@ async function dispatchRunnerJob(
   if (job.kind === "resume_approval") {
     // The toolCallId rides in the message_id column for this job kind.
     await handlers.resumeApproval({
+      sessionId: job.sessionId,
+      toolCallId: messageId,
+      env,
+      externalSignal,
+    });
+    return;
+  }
+  if (job.kind === "resume_question") {
+    // The toolCallId rides in the message_id column for this job kind.
+    await handlers.resumeQuestionResponse({
       sessionId: job.sessionId,
       toolCallId: messageId,
       env,

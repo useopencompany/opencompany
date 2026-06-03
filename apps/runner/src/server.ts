@@ -106,6 +106,25 @@ export function createServer(env: RunnerEnv, options: { onJobEnqueued?: () => vo
     reply.status(202).send({ ok: true });
   });
 
+  app.post("/internal/sessions/:id/questions/:toolCallId/resume", async (request, reply) => {
+    requireInternalAuth(request.headers.authorization, env.internalToken);
+    const { id, toolCallId } = request.params as { id: string; toolCallId: string };
+    logger.info("Runner question resume accepted", {
+      event: "opencompany.runner_question_resume_accepted",
+      session_id: id,
+      tool_call_id: toolCallId,
+    });
+    // The resume job carries the toolCallId in the message_id column (its idempotency
+    // key is resume_question:{sessionId}:{toolCallId}).
+    await enqueueRunnerJob({
+      kind: "resume_question",
+      sessionId: id,
+      messageId: toolCallId,
+    });
+    wakeWorker();
+    reply.status(202).send({ ok: true });
+  });
+
   app.post("/internal/sessions/:id/messages/:messageId/title", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
     const { id, messageId } = request.params as { id: string; messageId: string };

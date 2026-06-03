@@ -1,4 +1,4 @@
-import type { AgentRuntimeEvent } from "@opencompany/agent-runtime";
+import type { AgentRuntimeEvent, AgentSessionQuestionPrompt } from "@opencompany/agent-runtime";
 import { agentSessions } from "@opencompany/db/schema";
 import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
@@ -93,6 +93,13 @@ type ToolApprovalInsert = {
   inputPreview: string | null;
 };
 
+type SessionQuestionInsert = {
+  sessionId: string;
+  messageId: string;
+  toolCallId: string;
+  questions: AgentSessionQuestionPrompt[];
+};
+
 export type ToolUsageInsert = {
   sessionId: string;
   messageId: string;
@@ -126,6 +133,10 @@ export type LeaseWriteStore = {
   insertToolMessage(input: ToolMessageInsert, lease: LeaseIdentity): Promise<boolean>;
   insertToolApproval(
     input: ToolApprovalInsert,
+    lease: LeaseIdentity,
+  ): Promise<AssistantInsertOutcome | null>;
+  insertSessionQuestion(
+    input: SessionQuestionInsert,
     lease: LeaseIdentity,
   ): Promise<AssistantInsertOutcome | null>;
   insertModelUsage(input: ModelUsageInsert, lease: LeaseIdentity): Promise<{ id: number } | null>;
@@ -244,6 +255,41 @@ export function createDbLeaseWriteStore(): LeaseWriteStore {
           SELECT
             ${input.sessionId}, ${input.messageId}, ${input.toolCallId}, ${input.toolName},
             ${input.providerKey}, ${input.permissionGroup}, 'pending', ${input.inputPreview}
+          WHERE EXISTS (SELECT 1 FROM lease)
+          ON CONFLICT (session_id, tool_call_id) DO NOTHING
+          RETURNING id
+        )
+        SELECT
+          EXISTS (SELECT 1 FROM lease) AS lease_current,
+          (SELECT id FROM ins) AS inserted_id
+      `);
+      const row = rowsFromExecute<{ lease_current: boolean; inserted_id: number | null }>(
+        result,
+      )[0];
+      if (!row || !row.lease_current) return null;
+      return row.inserted_id ? "inserted" : "conflict";
+    },
+
+    async insertSessionQuestion(input, lease) {
+      // Idempotent on (session_id, tool_call_id), exactly like insertToolApproval: a
+      // crash-recovery re-run resumes the existing question row (and its decided status)
+      // rather than resetting it to pending.
+      const result = await getDb().execute(sql`
+        WITH lease AS (
+          SELECT 1
+          FROM agent_sessions s
+          WHERE s.id = ${lease.sessionId}
+            AND s.run_lease_id = ${lease.leaseId}
+            AND s.run_lease_owner = ${lease.leaseOwner}
+            AND s.archived_at IS NULL
+        ),
+        ins AS (
+          INSERT INTO agent_session_questions (
+            session_id, message_id, tool_call_id, questions, status
+          )
+          SELECT
+            ${input.sessionId}, ${input.messageId}, ${input.toolCallId},
+            ${JSON.stringify(input.questions)}::jsonb, 'pending'
           WHERE EXISTS (SELECT 1 FROM lease)
           ON CONFLICT (session_id, tool_call_id) DO NOTHING
           RETURNING id
@@ -516,6 +562,35 @@ export async function insertToolApprovalForLease(
   return outcome;
 }
 
+export async function insertSessionQuestionForLease(
+  input: {
+    sessionId: string;
+    messageId: string;
+    toolCallId: string;
+    questions: AgentSessionQuestionPrompt[];
+    leaseId: string;
+    leaseOwner: string;
+  },
+  store: LeaseWriteStore = defaultLeaseWriteStore(),
+) {
+  const outcome = await store.insertSessionQuestion(
+    {
+      sessionId: input.sessionId,
+      messageId: input.messageId,
+      toolCallId: input.toolCallId,
+      questions: input.questions,
+    },
+    { sessionId: input.sessionId, leaseId: input.leaseId, leaseOwner: input.leaseOwner },
+  );
+  // Lease lost — the guard rejected the write. Throw so the run aborts cleanly rather than
+  // suspending on a question row that was never created. A conflict (idempotent re-entry) is
+  // success: the row already exists with whatever status it holds.
+  if (outcome === null) {
+    throw new StaleRunLeaseError();
+  }
+  return outcome;
+}
+
 export async function appendRuntimeEventForLease(
   input: {
     sessionId: string;
@@ -550,15 +625,21 @@ export async function failRunLease(
   return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: message });
 }
 
-// Park the run for a human approval decision: set `awaiting_approval` and release the
-// lease (clears lease fields) so no runner sits idle holding a stream. The session
-// resumes in a fresh `resume_approval` run once the approval row is decided.
-export async function suspendRunLease(sessionId: string, leaseId: string, leaseOwner: string) {
+// Park the run for a human decision: set the paused status (`awaiting_approval` for a tool
+// approval, `awaiting_input` for an ask_user_question) and release the lease (clears lease fields)
+// so no runner sits idle holding a stream. The session resumes in a fresh resume run once the
+// approval/question row is decided.
+export async function suspendRunLease(
+  sessionId: string,
+  leaseId: string,
+  leaseOwner: string,
+  status: "awaiting_approval" | "awaiting_input" = "awaiting_approval",
+) {
   return finishDbRunLease({
     sessionId,
     leaseId,
     leaseOwner,
-    status: "awaiting_approval",
+    status,
     lastError: null,
   });
 }
