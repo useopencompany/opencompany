@@ -53,9 +53,14 @@ const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const SIDEBAR_ACTIVE_POLL_MS = 2_000;
 const SIDEBAR_WATCH_POLL_MS = 6_000;
 // Statuses whose row can still change, so the sidebar keeps polling them at the watch
-// cadence. The generatable set (shared with SessionView via payload.ts) plus
-// awaiting_approval, whose amber dot would otherwise go stale in the background.
-const SIDEBAR_WATCHED_STATUSES = new Set([...GENERATABLE_SESSION_STATUSES, "awaiting_approval"]);
+// cadence. The generatable set (shared with SessionView via payload.ts) plus the paused
+// states (awaiting_approval / awaiting_input), whose amber dots would otherwise go stale
+// in the background.
+const SIDEBAR_WATCHED_STATUSES = new Set([
+  ...GENERATABLE_SESSION_STATUSES,
+  "awaiting_approval",
+  "awaiting_input",
+]);
 // Debounce route prefetches so dragging across the history list doesn't fire one per item.
 const SESSION_PREFETCH_HOVER_DELAY_MS = 150;
 // How long the red highlight shows on a session row before it is optimistically removed.
@@ -278,9 +283,9 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {session.status === "awaiting_approval" ? (
-          // Amber "needs your approval" dot (distinct from the green active dot).
-          <SessionStatusDot status="awaiting_approval" pulse />
+        {session.status === "awaiting_approval" || session.status === "awaiting_input" ? (
+          // Amber "needs you" dot (approval / question) — distinct from the green active dot.
+          <SessionStatusDot status={session.status} pulse />
         ) : session.active ? (
           <SessionStatusDot status="running" pulse />
         ) : null}

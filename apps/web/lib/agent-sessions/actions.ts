@@ -1,6 +1,10 @@
 "use server";
 
-import { newAgentSessionId, newAgentSessionMessageId } from "@opencompany/agent-runtime";
+import {
+  type AgentSessionQuestionAnswer,
+  newAgentSessionId,
+  newAgentSessionMessageId,
+} from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
@@ -8,6 +12,7 @@ import {
   type Agent,
   agentSessionEvents,
   agentSessionMessages,
+  agentSessionQuestions,
   agentSessions,
   agents,
   agentToolApprovals,
@@ -24,8 +29,10 @@ import {
 import {
   triggerAgentApprovalResume,
   triggerAgentMessageRun,
+  triggerAgentQuestionResume,
 } from "@/lib/agent-sessions/message-runner";
 import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
+import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { determineApprovalResolution } from "./approval-resolution";
@@ -172,6 +179,26 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
     return { ok: false, error: "Session not found." } as const;
   }
 
+  // A freeform reply while an ask_user_question is pending supersedes it: the user chose to
+  // answer in prose instead. Cancel the pending row so the backstop can't later revive the
+  // session, and do NOT trigger a question resume — the new message run continues the turn (the
+  // dangling tool-call is dropped from model history by buildModelMessages). Status-guarded so a
+  // concurrent answer/cancel always wins.
+  await db
+    .update(agentSessionQuestions)
+    .set({
+      status: "cancelled",
+      resolutionSource: "superseded",
+      answeredAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, sessionId),
+        eq(agentSessionQuestions.status, "pending"),
+      ),
+    );
+
   const messageId = await insertUserMessage(sessionId, trimmed);
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
@@ -304,6 +331,136 @@ export async function resolveToolApproval(input: {
       workspaceId: workspace.id,
     });
   }
+
+  return { ok: true } as const;
+}
+
+// Record the user's answers to a paused ask_user_question and drive the resume. The question row
+// is the source of truth (the runner does not poll it). The `status = 'pending'` guard makes this
+// idempotent and ensures only the winning caller resumes — a row the backstop already timed out,
+// or a concurrent submit, flips nothing and triggers no resume.
+export async function submitAgentSessionQuestionResponse(input: {
+  sessionId: string;
+  toolCallId: string;
+  answers: AgentSessionQuestionAnswer[];
+}) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+  const [row] = await db
+    .select({
+      questions: agentSessionQuestions.questions,
+      status: agentSessionQuestions.status,
+    })
+    .from(agentSessionQuestions)
+    .innerJoin(agentSessions, eq(agentSessions.id, agentSessionQuestions.sessionId))
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, input.sessionId),
+        eq(agentSessionQuestions.toolCallId, input.toolCallId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) {
+    return { ok: false, error: "Question not found." } as const;
+  }
+  if (row.status !== "pending") {
+    return { ok: false, error: "This question is no longer awaiting an answer." } as const;
+  }
+
+  const validationError = validateQuestionAnswers(row.questions, input.answers);
+  if (validationError) {
+    return { ok: false, error: validationError } as const;
+  }
+
+  const updated = await db
+    .update(agentSessionQuestions)
+    .set({
+      status: "answered",
+      answers: input.answers,
+      answeredAt: new Date(),
+      answeredByUserId: user.id,
+      resolutionSource: "user",
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, input.sessionId),
+        eq(agentSessionQuestions.toolCallId, input.toolCallId),
+        eq(agentSessionQuestions.status, "pending"),
+      ),
+    )
+    .returning({ id: agentSessionQuestions.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "This question is no longer awaiting an answer." } as const;
+  }
+
+  await triggerAgentQuestionResume({
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    workspaceId: workspace.id,
+  });
+
+  return { ok: true } as const;
+}
+
+// Dismiss a paused ask_user_question (the X / Skip). Cancels the row and triggers a resume that
+// resolves QUIETLY: the runner persists an "unanswered" tool-result and parks the session as
+// completed WITHOUT generating an assistant message (see the isQuietDecline branch in
+// resumeQuestionResponseWithContext). The composer returns and the agent only speaks again on the
+// user's next message — which then replays over assistant(ask) → tool(unanswered) → user(...). Same
+// status-guard and only-winner-resumes semantics as the answer path.
+export async function cancelAgentSessionQuestion(input: { sessionId: string; toolCallId: string }) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+  const [session] = await db
+    .select({ id: agentSessions.id })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.id, input.sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  const updated = await db
+    .update(agentSessionQuestions)
+    .set({
+      status: "cancelled",
+      resolutionSource: "user",
+      answeredAt: new Date(),
+      answeredByUserId: user.id,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, input.sessionId),
+        eq(agentSessionQuestions.toolCallId, input.toolCallId),
+        eq(agentSessionQuestions.status, "pending"),
+      ),
+    )
+    .returning({ id: agentSessionQuestions.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "This question is no longer awaiting an answer." } as const;
+  }
+
+  await triggerAgentQuestionResume({
+    sessionId: input.sessionId,
+    toolCallId: input.toolCallId,
+    workspaceId: workspace.id,
+  });
 
   return { ok: true } as const;
 }

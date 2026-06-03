@@ -111,6 +111,10 @@ function createMemoryLeaseWriteStore(initial: { leaseId: string; leaseOwner: str
       if (!isCurrent(guard)) return null;
       return "inserted";
     },
+    async insertSessionQuestion(_input, guard) {
+      if (!isCurrent(guard)) return null;
+      return "inserted";
+    },
     async insertToolMessage(input, guard) {
       if (!isCurrent(guard)) return false;
       messages.push({

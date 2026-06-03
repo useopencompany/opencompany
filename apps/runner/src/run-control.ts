@@ -63,7 +63,7 @@ export type ClaimRunLeaseInput = RunLeaseIdentity & {
 };
 
 export type FinishRunLeaseInput = RunLeaseIdentity & {
-  status: "completed" | "aborting" | "failed" | "awaiting_approval";
+  status: "completed" | "aborting" | "failed" | "awaiting_approval" | "awaiting_input";
   lastError?: string | null;
 };
 
@@ -301,9 +301,10 @@ export async function finishRunLease(
   const finished = await store.finishLease(input, new Date());
   if (finished) {
     // finishLease cleared the lease, so the lease-guarded append would always reject;
-    // append unconditionally instead. Emits the terminal status (completed/failed, or a
-    // duplicate idempotent `aborting` already sent at abort-request time — clients dedupe
-    // by event id and treat status as a state-set) so the dot clears in realtime.
+    // append unconditionally instead. Emits the new status — terminal (completed/failed)
+    // or a paused gate (awaiting_approval/awaiting_input) the run yields the lease at — so
+    // the dot updates in realtime. A duplicate `aborting` already sent at abort-request
+    // time is harmless: clients dedupe by event id and treat status as a state-set.
     await emitSessionStatusEvent({
       sessionId: input.sessionId,
       type: "session.status",

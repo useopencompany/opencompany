@@ -1,4 +1,8 @@
-import type { AgentConfig } from "@opencompany/agent-runtime";
+import type {
+  AgentConfig,
+  AgentSessionQuestionAnswer,
+  AgentSessionQuestionPrompt,
+} from "@opencompany/agent-runtime";
 import {
   agentSessionEvents,
   agentSessionMessages,
@@ -49,6 +53,16 @@ export type ToolApprovalState = {
   inputPreview: string | null;
 };
 
+export type SessionQuestionState = {
+  id: number;
+  sessionId: string;
+  messageId: string;
+  toolCallId: string;
+  questions: AgentSessionQuestionPrompt[];
+  answers: AgentSessionQuestionAnswer[] | null;
+  status: "pending" | "answered" | "cancelled";
+};
+
 export type DelegationSessionState = {
   id: string;
   workspaceId: string;
@@ -74,6 +88,7 @@ export type LeaseDbState = {
   usage: UsageState[];
   toolUsage: ToolUsageState[];
   approvals: ToolApprovalState[];
+  questions?: SessionQuestionState[];
 };
 
 // In-memory `LeaseWriteStore` that mirrors the atomic SQL semantics against the fake
@@ -156,6 +171,32 @@ export function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseW
       });
       return "inserted" as const;
     },
+    async insertSessionQuestion(input, lease) {
+      if (!leaseCurrent(lease)) return null;
+      // Bind to the actual state reference (seeding it when absent) so the push persists and the
+      // duplicate check below can see prior inserts — `?? []` would mutate a throwaway array.
+      const state = getState();
+      state.questions ??= [];
+      const questions = state.questions;
+      if (
+        questions.some(
+          (question) =>
+            question.sessionId === input.sessionId && question.toolCallId === input.toolCallId,
+        )
+      ) {
+        return "conflict";
+      }
+      questions.push({
+        id: questions.length + 1,
+        sessionId: input.sessionId,
+        messageId: input.messageId,
+        toolCallId: input.toolCallId,
+        questions: input.questions,
+        answers: null,
+        status: "pending",
+      });
+      return "inserted" as const;
+    },
     async insertModelUsage(input, lease) {
       if (!leaseCurrent(lease)) return null;
       const { usage } = getState();
@@ -192,6 +233,7 @@ export function createLeaseDb(input: {
     usage: [] as UsageState[],
     toolUsage: [] as ToolUsageState[],
     approvals: [] as ToolApprovalState[],
+    questions: [] as SessionQuestionState[],
     ledgerDebits: 0,
   };
 

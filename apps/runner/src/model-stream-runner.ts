@@ -3,6 +3,7 @@ import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
 import {
   appendRuntimeEventForLease,
+  insertSessionQuestionForLease,
   insertToolApprovalForLease,
   requireLeaseWrite,
 } from "./lease-writes";
@@ -13,6 +14,7 @@ import {
 } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
 import { RunSuspendedError } from "./runner-errors";
+import { normalizeQuestionsInput } from "./session-questions";
 import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
 import { formatRuntimePreview } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
@@ -191,6 +193,60 @@ export async function collectAssistantStream(input: {
           name: part.toolName,
           input: part.input,
         };
+
+        // ask_user_question suspends the run for structured user input, independent of the
+        // workspace tool policy. It only suspends on a resumable (suspendable) run with usable
+        // questions; otherwise it falls through to the normal path so the tool's execute() body
+        // returns a "cannot ask the user here" result and the model adapts.
+        if (toolStart.name === "ask_user_question" && input.suspendable) {
+          const questions = normalizeQuestionsInput(toolStart.input);
+          if (questions) {
+            await insertSessionQuestionForLease({
+              sessionId: input.sessionId,
+              messageId: input.assistantMessageId,
+              toolCallId: part.toolCallId,
+              questions,
+              leaseId: input.runLeaseId,
+              leaseOwner: input.runLeaseOwner,
+            });
+            await requireLeaseWrite(
+              appendRuntimeEventForLease({
+                sessionId: input.sessionId,
+                messageId: input.assistantMessageId,
+                leaseId: input.runLeaseId,
+                leaseOwner: input.runLeaseOwner,
+                type: "question.requested",
+                payload: {
+                  messageId: input.assistantMessageId,
+                  toolCallId: part.toolCallId,
+                  questions,
+                  requestedAt: new Date().toISOString(),
+                },
+              }),
+            );
+            // Persist the assistant message ending in this pending tool-call so the resume run
+            // can pair it with the synthesized tool-result. Release every parked tool call with a
+            // no-op suspend verdict, then unwind to suspend the run for input.
+            assistantReplayParts.push({
+              type: "tool-call",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              input: part.input,
+            });
+            input.toolStartCoordinator.suspend();
+            throw new RunSuspendedError({
+              reason: "question",
+              toolCallId: part.toolCallId,
+              providerKey: "system",
+              group: "read",
+              questions,
+              assistantContent,
+              assistantReplayParts,
+              reasoningSummary,
+              reasoningContent,
+            });
+          }
+        }
 
         // Evaluate the workspace permission policy for this tool call. This is the
         // hard gate: the tool's execute() is parked on waitForStarted() and only the
