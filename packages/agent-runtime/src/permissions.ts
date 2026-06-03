@@ -204,6 +204,8 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,
+  // Suspends the run for user input via a dedicated branch, not the policy "ask" gate.
+  ask_user_question: null,
 };
 
 export type ToolClassification = { providerKey: string; group: PermissionGroup } | null;

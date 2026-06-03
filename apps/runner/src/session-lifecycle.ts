@@ -7,6 +7,7 @@ import {
   agentSessionAfterSessionRuns,
   agentSessionEvents,
   agentSessionMessages,
+  agentSessionQuestions,
   agentSessions,
   agents,
   agentToolApprovals,
@@ -422,6 +423,44 @@ export async function abortSession(sessionId: string) {
     .where(
       and(eq(agentToolApprovals.sessionId, sessionId), eq(agentToolApprovals.status, "pending")),
     );
+  // Same hazard for a session paused on an ask_user_question: cancel any pending question so the
+  // backstop can't revive the aborted session via a question resume.
+  const cancelledQuestions = await db
+    .update(agentSessionQuestions)
+    .set({
+      status: "cancelled",
+      resolutionSource: "abort",
+      answeredAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessionQuestions.sessionId, sessionId),
+        eq(agentSessionQuestions.status, "pending"),
+      ),
+    )
+    .returning({
+      toolCallId: agentSessionQuestions.toolCallId,
+      messageId: agentSessionQuestions.messageId,
+    });
+  // The web reducer only moves a question card out of its interactive `pending` state on a
+  // `question.answered` event, so without this the aborted session would keep rendering a live
+  // question card. Emit the resolution event the resume path would have produced.
+  for (const question of cancelledQuestions) {
+    const messageId = question.messageId ?? "";
+    await appendRuntimeEvent(db, {
+      sessionId,
+      messageId,
+      type: "question.answered",
+      payload: {
+        messageId,
+        toolCallId: question.toolCallId,
+        answered: false,
+        answers: [],
+        resolutionSource: "abort",
+      },
+    });
+  }
   await appendRuntimeEvent(db, {
     sessionId,
     type: "session.status",

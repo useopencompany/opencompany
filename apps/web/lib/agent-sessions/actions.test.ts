@@ -419,7 +419,11 @@ describe("submitAgentSessionMessage", () => {
     const values = vi.fn().mockResolvedValue(undefined);
     const insert = vi.fn(() => ({ values }));
     const batch = vi.fn().mockResolvedValue(undefined);
-    getDbMock.mockReturnValue({ select, insert, batch } as never);
+    // submitAgentSessionMessage supersedes any pending ask_user_question via an UPDATE.
+    const update = vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
+    }));
+    getDbMock.mockReturnValue({ select, insert, batch, update } as never);
 
     const result = await submitAgentSessionMessage("ses_123", " Follow up ");
 

@@ -6,6 +6,30 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+// Shapes for the ask_user_question tool. A question prompt is what the model asks; an
+// answer is what the user submits back, one entry per question, in the same order.
+export type AgentSessionQuestionOption = {
+  label: string;
+  description?: string;
+};
+
+export type AgentSessionQuestionPrompt = {
+  header: string;
+  question: string;
+  options: AgentSessionQuestionOption[];
+  allowMultiple: boolean;
+  allowOther: boolean;
+};
+
+export type AgentSessionQuestionAnswer = {
+  // Labels of the options the user selected (empty when only a free-text "other" was given).
+  selectedLabels: string[];
+  // Free-text answer when the question allowed "other"; undefined otherwise.
+  otherText?: string;
+};
+
+export type AgentSessionQuestionResolutionSource = "user" | "abort" | "timeout" | "superseded";
+
 export type TiptapMark = {
   type: string;
   attrs?: Record<string, JsonValue>;
