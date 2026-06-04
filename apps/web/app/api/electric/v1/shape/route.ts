@@ -1,5 +1,3 @@
-import { and, eq } from "drizzle-orm";
-import { agentSessions, getDb } from "@opencompany/db";
 import { currentWorkspace } from "@/lib/auth";
 
 /**
@@ -25,8 +23,7 @@ type ShapeScope = {
   where: (ctx: {
     workspaceId: string;
     userId: string;
-    sessionId: string | null;
-  }) => Promise<{ clause: string; params: string[] } | null> | { clause: string; params: string[] } | null;
+  }) => { clause: string; params: string[] } | null;
 };
 
 // Allow-list: maps the client's requested table to its trusted server-side scope.
@@ -46,41 +43,7 @@ const SHAPE_SCOPES: Record<string, ShapeScope> = {
     table: "session_stars",
     where: ({ userId }) => ({ clause: `"user_id" = $1`, params: [userId] }),
   },
-  agent_session_messages: {
-    table: "agent_session_messages",
-    where: async ({ workspaceId, userId, sessionId }) => {
-      if (!(await isOwnedSession(sessionId, workspaceId, userId))) return null;
-      return { clause: `"session_id" = $1`, params: [sessionId as string] };
-    },
-  },
-  agent_session_events: {
-    table: "agent_session_events",
-    where: async ({ workspaceId, userId, sessionId }) => {
-      if (!(await isOwnedSession(sessionId, workspaceId, userId))) return null;
-      return { clause: `"session_id" = $1`, params: [sessionId as string] };
-    },
-  },
 };
-
-async function isOwnedSession(
-  sessionId: string | null,
-  workspaceId: string,
-  userId: string,
-): Promise<boolean> {
-  if (!sessionId) return false;
-  const rows = await getDb()
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.id, sessionId),
-        eq(agentSessions.workspaceId, workspaceId),
-        eq(agentSessions.userId, userId),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
-}
 
 function electricBaseUrl(): string | null {
   return process.env.ELECTRIC_URL?.replace(/\/+$/, "") ?? null;
@@ -105,10 +68,9 @@ export async function GET(request: Request): Promise<Response> {
     return new Response("Unknown or unauthorized shape.", { status: 403 });
   }
 
-  const resolved = await scope.where({
+  const resolved = scope.where({
     workspaceId: workspace.id,
     userId: user.id,
-    sessionId: requestUrl.searchParams.get("session_id"),
   });
   if (!resolved) {
     return new Response("Forbidden", { status: 403 });

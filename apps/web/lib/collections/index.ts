@@ -1,15 +1,7 @@
-import { createCollection, localOnlyCollectionOptions } from "@tanstack/react-db";
 import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
 import { deleteAgent } from "@/lib/agents/actions";
 import { createElectricCollection } from "@/lib/collections/electric";
-import type {
-  AgentRow,
-  AgentSessionEventRow,
-  AgentSessionMessageRow,
-  AgentSessionRow,
-  SessionStarRow,
-  TransientDelta,
-} from "@/lib/collections/types";
+import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
 
 /**
  * All client collections for a workspace. Built by a factory (not module
@@ -76,42 +68,7 @@ export function createCollections(workspaceId: string) {
     },
   });
 
-  // Live-only token buffer for in-flight assistant messages. Fed by the SSE
-  // stream (transient deltas only); unioned with the durable message row in the
-  // transcript live query; cleared when the durable row reaches "completed".
-  const transientDeltas = createCollection(
-    localOnlyCollectionOptions<TransientDelta>({
-      id: `transient_deltas:${workspaceId}`,
-      getKey: (row) => row.messageId,
-    }),
-  );
-
-  return { workspaceId, agents, agentSessions, sessionStars, transientDeltas };
+  return { workspaceId, agents, agentSessions, sessionStars };
 }
 
 export type Collections = ReturnType<typeof createCollections>;
-
-/**
- * Per-session collections, created on demand for the session currently open.
- * The proxy authorizes `session_id` (verifies the session belongs to the
- * caller's workspace/user) before scoping the shape to it.
- */
-export function createSessionCollections(workspaceId: string, sessionId: string) {
-  const messages = createElectricCollection<AgentSessionMessageRow>({
-    id: `agent_session_messages:${workspaceId}:${sessionId}`,
-    table: "agent_session_messages",
-    params: { session_id: sessionId },
-    getKey: (row) => row.id,
-  });
-
-  const events = createElectricCollection<AgentSessionEventRow>({
-    id: `agent_session_events:${workspaceId}:${sessionId}`,
-    table: "agent_session_events",
-    params: { session_id: sessionId },
-    getKey: (row) => row.id,
-  });
-
-  return { sessionId, messages, events };
-}
-
-export type SessionCollections = ReturnType<typeof createSessionCollections>;

@@ -59,34 +59,3 @@ export type SessionStarRow = {
   starred_at: string;
 };
 
-export type AgentSessionMessageRow = {
-  id: string;
-  session_id: string;
-  role: string;
-  status: string;
-  content: string;
-  internal: boolean;
-  model_message: Record<string, unknown> | null;
-  tool_name: string | null;
-  tool_call_id: string | null;
-  response_to_message_id: string | null;
-  created_at: string;
-  completed_at: string | null;
-};
-
-export type AgentSessionEventRow = {
-  id: number;
-  session_id: string;
-  message_id: string | null;
-  type: string;
-  payload: Record<string, unknown>;
-  created_at: string;
-};
-
-/** Accumulated, live-only token buffer for an in-flight assistant message. */
-export type TransientDelta = {
-  messageId: string;
-  text: string;
-  reasoning: string;
-  commandOutput: string;
-};
