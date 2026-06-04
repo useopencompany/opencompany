@@ -1,8 +1,10 @@
 import {
   newAgentSessionMessageId,
   normalizeAgentConfig,
+  RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
+  type RuntimeToolName,
   resolveAgentRuntimeConfig,
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
@@ -369,6 +371,14 @@ async function runMessageWithContext(
       },
     });
 
+    // Warm the sandbox up front (non-blocking) so the create/connect + materialization
+    // overlaps the model's first tokens instead of stalling the first tool call by ~10s.
+    // Gated on the turn actually exposing sandbox tools; never billed or synced unless a
+    // tool truly uses it (see createSandboxAcquirer / wasUsed).
+    if (runtimeHasSandboxTools(runtime.tools)) {
+      sandboxAcquirer.warm();
+    }
+
     const toolStartCoordinator = createToolStartCoordinator();
     const tools = createToolSet({
       sessionId: input.sessionId,
@@ -603,7 +613,9 @@ async function runMessageWithContext(
       outcome,
       modelProvider,
       modelName,
-      sandbox: sandboxAcquirer?.current ?? null,
+      // Await any in-flight warm-up so a warmed-but-unused sandbox is still parked
+      // (idle timeout re-armed to 30s) rather than left on its 60-minute active timeout.
+      sandbox: (await sandboxAcquirer?.settle()) ?? null,
     });
   }
 
@@ -740,7 +752,7 @@ async function executeStreamingTurn(input: {
   let { assistantContent } = streamResult;
   const { assistantReplayParts, reasoningSummary, reasoningContent } = streamResult;
 
-  if (sandboxAcquirer.current) {
+  if (sandboxAcquirer.wasUsed() && sandboxAcquirer.current) {
     const activeSandbox = sandboxAcquirer.current;
     await observeRunStep(ctx, input.brainStep, () =>
       syncBrainFromSandbox({
@@ -1262,7 +1274,9 @@ async function runAfterSessionWithContext(
       outcome,
       modelProvider,
       modelName,
-      sandbox: sandboxAcquirer?.current ?? null,
+      // Await any in-flight warm-up so a warmed-but-unused sandbox is still parked
+      // (idle timeout re-armed to 30s) rather than left on its 60-minute active timeout.
+      sandbox: (await sandboxAcquirer?.settle()) ?? null,
     });
   }
 }
@@ -1639,7 +1653,9 @@ async function resumeApprovalWithContext(
       outcome,
       modelProvider,
       modelName,
-      sandbox: sandboxAcquirer?.current ?? null,
+      // Await any in-flight warm-up so a warmed-but-unused sandbox is still parked
+      // (idle timeout re-armed to 30s) rather than left on its 60-minute active timeout.
+      sandbox: (await sandboxAcquirer?.settle()) ?? null,
     });
   }
 }
@@ -2065,7 +2081,9 @@ async function resumeQuestionResponseWithContext(
       outcome,
       modelProvider,
       modelName,
-      sandbox: sandboxAcquirer?.current ?? null,
+      // Await any in-flight warm-up so a warmed-but-unused sandbox is still parked
+      // (idle timeout re-armed to 30s) rather than left on its 60-minute active timeout.
+      sandbox: (await sandboxAcquirer?.settle()) ?? null,
     });
   }
 }
@@ -2134,10 +2152,24 @@ async function runDelegatedChildMessage(input: {
 }
 
 type SandboxAcquirer = {
+  // Kick off the sandbox create/connect + workspace materialization in the background so
+  // the ~10s warm-up overlaps the model's first tokens instead of stalling the first tool
+  // call. Fire-and-forget and idempotent; it does NOT open the billing window or mark the
+  // sandbox "used" — only a real tool call via get() does. Safe to call on a turn that may
+  // never touch the sandbox.
+  warm: () => void;
   get: () => Promise<SandboxHandle>;
+  // The live sandbox handle once it has been warmed or used (null until then). Read at
+  // teardown to park it (re-arm the idle timeout) whether or not a tool actually used it.
   readonly current: SandboxHandle | null;
+  // True only once a tool actually acquired the sandbox via get(). Gates post-turn brain/
+  // bundle sync so a warmed-but-unused turn doesn't sync needlessly.
+  wasUsed: () => boolean;
+  // Await any in-flight warm-up and hand back the handle to park at teardown (or null if
+  // the warm-up failed or never ran). Never throws.
+  settle: () => Promise<SandboxHandle | null>;
   // The active-runtime window for billing: present only once the sandbox has been
-  // hydrated (resumed) during this run. Null for chat-only turns that never touch it.
+  // hydrated (used) during this run. Null for turns that warm but never touch it.
   billingSnapshot: () => SandboxBillingSnapshot | null;
 };
 
@@ -2151,15 +2183,18 @@ function createSandboxAcquirer(input: {
   onHydrated: (sandbox: SandboxHandle) => void;
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
-  let sandboxPromise: Promise<SandboxHandle> | null = null;
+  let acquirePromise: Promise<SandboxHandle> | null = null;
   let hydratedAt: Date | null = null;
   const billing = resolveSandboxBilling(input.row, input.env);
 
-  const get = async () => {
-    if (sandbox) return sandbox;
-    if (sandboxPromise) return sandboxPromise;
+  // Create/connect the sandbox, materialize the workspace, and claim it under the run
+  // lease — everything except opening the billing window. Memoized so warm() and the
+  // first tool-call get() share one in-flight promise (no double-create, no races).
+  const acquire = () => {
+    if (sandbox) return Promise.resolve(sandbox);
+    if (acquirePromise) return acquirePromise;
 
-    sandboxPromise = (async () => {
+    acquirePromise = (async () => {
       const hydrated = await traceBraintrustStep(
         "ensure_sandbox",
         () =>
@@ -2194,22 +2229,48 @@ function createSandboxAcquirer(input: {
         throw new StaleRunLeaseError();
       }
       sandbox = hydrated;
-      hydratedAt = new Date();
       input.onHydrated(hydrated);
       return hydrated;
     })().catch((error) => {
-      sandboxPromise = null;
+      acquirePromise = null;
       throw error;
     });
 
-    return sandboxPromise;
+    return acquirePromise;
+  };
+
+  const get = async () => {
+    const hydrated = await acquire();
+    // The billing window opens on first real use, not on warm-up.
+    if (!hydratedAt) hydratedAt = new Date();
+    return hydrated;
+  };
+
+  const warm = () => {
+    // Swallow rejections here so an unobserved warm-up can't surface as an unhandled
+    // rejection; get()/settle() await the same promise and still see any error.
+    acquire().catch(() => {});
+  };
+
+  const settle = async () => {
+    if (!acquirePromise) return sandbox;
+    try {
+      return await acquirePromise;
+    } catch {
+      return null;
+    }
   };
 
   return {
+    warm,
     get,
     get current() {
       return sandbox;
     },
+    wasUsed() {
+      return hydratedAt !== null;
+    },
+    settle,
     billingSnapshot() {
       if (!sandbox || !hydratedAt) return null;
       return {
@@ -2221,4 +2282,12 @@ function createSandboxAcquirer(input: {
       };
     },
   };
+}
+
+// Whether a turn's enabled tools include any sandbox-backed tool, i.e. anything that can
+// trigger a sandbox warm-up. The core tools (shell, read/write_file, gh, …) are all
+// sandbox-kind, so this is true for essentially every agent — but it correctly skips a
+// turn whose toolset is purely hosted/internal, where warming would only waste compute.
+function runtimeHasSandboxTools(tools: readonly RuntimeToolName[]) {
+  return tools.some((name) => RUNTIME_TOOL_DEFINITION_BY_NAME.get(name)?.kind === "sandbox");
 }
