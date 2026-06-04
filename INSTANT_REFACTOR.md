@@ -219,21 +219,38 @@ handles deltas, tool calls, reasoning, questions, approvals, usage). That keeps 
   `lib/agent-sessions/durable-streams.ts` (lazy stream create). Client optimistic-echo overlay
   deferred — the append→SSE round-trip is fast; revisit if the echo feels laggy in the live test.
 
-**3.4 — Remove the legacy streaming path** (after 3.5 verification)
-- ⬜ Delete raw-SSE `useSessionEventStream` (EventSource) + stream-token credential flow if Durable
-  Streams uses its own auth; delete `seedSessionQueries`, `mergeAgentSessionDetail`,
-  `applyRuntimeEventToSessionDetail`, `addUserMessageToSessionDetail`. Keep the **pure event→view
-  derivations** (`buildAssistantTurnParts`, etc.) and the reducer.
-- ⬜ Drop the stubbed per-session Electric message/event collections (`createSessionCollections`) —
-  superseded by the Durable Stream. Remove the `agent_session_messages`/`agent_session_events` shape
-  scopes from the proxy if nothing else uses them.
-- ⬜ At this point also delete the **Phase-2-deferred** sidebar helpers + the **Phase-1** vestigial
-  `agentQueryKeys.list` plumbing.
+**Live verified ✅** against the real Electric Cloud service: end-to-end token streaming works in the
+browser. Required a read-proxy fix (`9dbb22c`) — the Next route handler buffered the live SSE
+(catch-up flushed, small live writes didn't); fixed with `force-dynamic` + no-store + full header
+relay + `accept-encoding: identity`. The runner publisher + live SSE were validated node-direct first.
 
-**3.5 — Verify**
-- ⬜ Round-trip: token stream is instant; tool/message boundaries instant (no replication lag);
-  refresh mid-generation resumes from offset without losing in-flight text; second tab mirrors live;
-  reconnect-after-drop catches up with no truncation. Only then remove the SSE fallback + flag.
+**Loose ends the cutover introduced** (the legacy path was masking these — fix them *during* 3.4 so the
+new path is correct, not just working):
+- ⬜ **Aggregates stale post-completion**: `runtime` takes usage/cost/toolUsage from the React-Query
+  `detail`, but with SSE off nothing invalidates that query when a turn ends → the inspector's
+  cost/usage won't refresh until reload. Fix: refetch `detail` when `streamState.currentStatus` reaches
+  a terminal state (or source aggregates from the stream reducer for childless sessions).
+- ⬜ **Inert SSE machinery when flag-on**: `applyRuntimeEvent`, `knownEventIds`, the stream-credential
+  query + token refresh, the `stream.status` staleness/recovery, and TTFT (`pendingTtftRef` never
+  clears → no `session_first_token` event). 3.4 deletes all of this; re-home TTFT onto the stream.
+
+**3.5 — Verify the resilience wins** (the gate before deleting the fallback)
+- ✅ Token stream instant; tool/message boundaries instant (no replication lag).
+- ⬜ Refresh mid-generation resumes from offset without losing in-flight text (the resumability win).
+- ⬜ Second tab mirrors live (multi-client).
+- ⬜ Abort shows "aborting" immediately. Only after these → 3.4.
+
+**3.4 — Remove the legacy streaming path** (after 3.5)
+- ⬜ Delete raw-SSE `useSessionEventStream` (EventSource) + the stream-token credential flow; delete
+  `seedSessionQueries`, `mergeAgentSessionDetail`, `applyRuntimeEventToSessionDetail`,
+  `addUserMessageToSessionDetail`, `updateSessionStatusInDetail`. Keep the **pure event→view
+  derivations** (`buildAssistantTurnParts`, etc.) and the reducer. Simplify the `detail` query's
+  `queryFn` to a plain fetch (no merge); keep it for session meta + related + aggregates.
+- ⬜ Drop the stubbed per-session Electric collections (`createSessionCollections`, `transientDeltas`)
+  + their row types — superseded by the Durable Stream. Remove the
+  `agent_session_messages`/`agent_session_events` scopes from the Electric shape proxy.
+- ⬜ Delete the **Phase-2-deferred** sidebar helpers + the **Phase-1** vestigial `agentQueryKeys.list`.
+- ⬜ Then **remove the `NEXT_PUBLIC_DURABLE_STREAMS` flag** — Durable Streams becomes the only path.
 
 ### Phase 4 — Cleanup + tests ⬜
 - ⬜ Delete dead fetchers / query keys / `payload.ts` serializers no longer referenced
@@ -268,18 +285,24 @@ write can't be isolated into one batch, fall back to `collection.utils.awaitMatc
 
 ## ▶ Next step for a fresh session
 
-Phases 1 (agents) and 2 (sidebar) are done. **Phase 3 is the Durable Streams refactor** (see
-[Streaming architecture v2](#streaming-architecture-v2--durable-streams)) — runner + web + infra,
-landed behind a flag. Work the sub-steps top-down:
+Phases 1–2 done. Phase 3 (Durable Streams) is **built and live-verified for streaming** — the runner
+publishes, the web materializes via the reducer, and token streaming works end-to-end against the real
+Electric Cloud service (behind `NEXT_PUBLIC_DURABLE_STREAMS`, off by default; SSE still primary).
 
-1. **3.0 scaffolding** (safe, in-repo, no infra blocker): verify + install `@durable-streams/client`
-   (web + runner), define the shared stream contract (`session-<id>`, `RuntimeEventForStream` framing),
-   add the env surface + a same-origin read proxy/auth route, and the `useSessionStream` transport seam.
-2. **3.0 infra** (needs Electric Cloud account): provision the hosted Durable Streams service + write
-   token; document the `PUT` + env in `.env.example`/`docs/stack`. → blocks live verification.
-3. **3.1 runner** then **3.2 web**: append events to the stream; consume + materialize via the existing
-   reducer; verify the round-trip (catch-up + live + resume-after-drop).
-4. **3.3 writes → 3.4 delete legacy → 3.5 verify**, then remove the SSE fallback + flag.
+**The path to "clean refactor done", in order:**
 
-**Open infra ask for the human:** provisioning the Electric Cloud Durable Streams service + write token
-(I can't create the cloud service without account access — exact `PUT`/env steps will be in the docs).
+1. **Verify the resilience trio (3.5 gate — human, ~5 min):** refresh mid-generation (in-flight text
+   survives), second tab mirrors live, abort shows instantly. These justify the architecture and gate
+   removing the fallback.
+2. **3.4 — delete the legacy SSE path** as a focused pass on `SessionView` + `payload.ts` + `collections/`
+   + the Electric proxy. Fix the two cutover loose ends *here* (aggregates refetch on completion; re-home
+   TTFT) since the legacy machinery currently masks them. This makes the open session single-path.
+3. **Remove the `NEXT_PUBLIC_DURABLE_STREAMS` flag** — Durable Streams becomes the only path.
+4. **Phase 4 — tests + dead-code sweep:** a `SessionView` component test driving a mocked stream;
+   delete the Phase-2-deferred sidebar helpers, `agentQueryKeys.list`, and dead `payload.ts` serializers.
+
+**Post-clean polish (non-blocking):** client optimistic-echo overlay for the user bubble; persist the
+offset / seed from the durable snapshot so long sessions don't replay every token delta on load; wire
+`flushSessionStream`/`closeSessionStream` into the runner's session lifecycle (mind the flush race).
+
+**Standing security item:** rotate the Durable Streams token (pasted in chat during setup).
