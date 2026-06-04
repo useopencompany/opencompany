@@ -3,6 +3,7 @@ import type { AgentRuntimeEvent, AgentRuntimeEventPayload } from "@opencompany/a
 import { agentSessionEvents } from "@opencompany/db/schema";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "./db";
+import { publishToDurableStream } from "./durable-streams";
 import { rowsFromExecute } from "./sql-exec";
 
 type Db = ReturnType<typeof getDb>;
@@ -149,7 +150,12 @@ export function subscribeSessionEvents(
 }
 
 export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
+  // In-process broker → SSE (the current transport). Single fan-out point for both
+  // durable (appendRuntimeEvent) and transient (publishTransientRuntimeEvent) events.
   sessionEventBroker.emit(brokerEventName(sessionId), event);
+  // Plane B: additionally mirror to the session's Durable Stream when configured
+  // (Phase 3). Fire-and-forget + flag-gated — no-op and harmless until cutover.
+  publishToDurableStream(sessionId, event);
 }
 
 function brokerEventName(sessionId: string) {
