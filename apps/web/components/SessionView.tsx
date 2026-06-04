@@ -328,11 +328,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
-  useEffect(() => {
-    setOptimisticUserMessages((current) =>
-      current.filter((message) => !hasDurableUserMessage(baseRuntime.messages, message)),
-    );
-  }, [baseRuntime.messages]);
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
   // drives the transcript, but usage/cost come from the detail query).
   const lastSettledStatusRef = useRef(runtime.currentStatus);
