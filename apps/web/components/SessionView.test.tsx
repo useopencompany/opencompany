@@ -8,7 +8,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -680,6 +680,35 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
     expect(screen.queryByText("Gateway down")).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionViewContent — optimistic send", () => {
+  it("clears the composer and paints the user message immediately on Enter", async () => {
+    const user = userEvent.setup();
+    let resolveSubmit!: (value: Awaited<ReturnType<typeof submitAgentSessionMessage>>) => void;
+    const submitPromise = new Promise<Awaited<ReturnType<typeof submitAgentSessionMessage>>>(
+      (resolve) => {
+        resolveSubmit = resolve;
+      },
+    );
+    vi.mocked(submitAgentSessionMessage).mockReturnValue(submitPromise);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "ready" }) }));
+
+    const composer = screen.getByPlaceholderText("Ask this agent to do something");
+    await user.type(composer, "Fast replay");
+    await user.keyboard("{Enter}");
+
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay");
+    expect(composer).toHaveValue("");
+    expect(screen.getByText("Fast replay")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSubmit({ ok: true, messageId: "msg_real" });
+      await submitPromise;
+    });
   });
 });
 

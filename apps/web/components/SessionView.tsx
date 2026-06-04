@@ -115,6 +115,13 @@ type SessionViewContentProps = {
   workspaceId: string;
 };
 
+type OptimisticUserMessage = SessionMessage & {
+  optimisticId: string;
+  submittedAtMs: number;
+  confirmedMessageId: string | null;
+  existingMessageIds: string[];
+};
+
 const MARKDOWN_COMPONENTS: Components = {
   a: ({ children, href }) => (
     <a
@@ -216,6 +223,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
@@ -287,7 +295,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       }
     },
   });
-  const runtime = useMemo(() => {
+  const baseRuntime = useMemo(() => {
     // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
     // session-tree rollup isn't reproduced client-side (D2); refreshed on
     // completion via the effect below.
@@ -308,6 +316,23 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: hasStreamData ? streamState.lastError : detail.session.lastError,
     };
   }, [detail, streamState]);
+  const runtime = useMemo(() => {
+    const pendingOptimisticMessages = optimisticUserMessages.filter(
+      (message) => !hasDurableUserMessage(baseRuntime.messages, message),
+    );
+    if (pendingOptimisticMessages.length === 0) return baseRuntime;
+    return {
+      ...baseRuntime,
+      messages: mergeMessages(baseRuntime.messages, pendingOptimisticMessages),
+      currentStatus: "running",
+      lastError: null,
+    };
+  }, [baseRuntime, optimisticUserMessages]);
+  useEffect(() => {
+    setOptimisticUserMessages((current) =>
+      current.filter((message) => !hasDurableUserMessage(baseRuntime.messages, message)),
+    );
+  }, [baseRuntime.messages]);
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
   // drives the transcript, but usage/cost come from the detail query).
   const lastSettledStatusRef = useRef(runtime.currentStatus);
@@ -706,6 +731,23 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     const content = input.trim();
     if (!content) return;
     setFormError(null);
+    const optimisticId = newOptimisticMessageId();
+    const submittedAtMs = Date.now();
+    const optimisticMessage: OptimisticUserMessage = {
+      optimisticId,
+      submittedAtMs,
+      confirmedMessageId: null,
+      existingMessageIds: baseRuntime.messages.map((message) => message.id),
+      id: optimisticId,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: new Date(submittedAtMs).toISOString(),
+      completedAt: new Date(submittedAtMs).toISOString(),
+    };
+    setOptimisticUserMessages((current) => [...current, optimisticMessage]);
+    setInput("");
+    setPendingScrollMessageId(optimisticId);
     // Start the felt-TTFT clock at the click, before the server round-trip, so
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
@@ -713,16 +755,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       const result = await submitAgentSessionMessage(session.id, content);
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
-        // Only clear the textarea once the server acknowledged the message —
-        // a failed submit should keep the user's draft so they don't lose it.
-        setInput("");
-        // The user bubble + "running" status arrive via the stream (the action
-        // appends the message.created event), so there is no optimistic cache write.
-        // Schedule a scroll so the just-sent message snaps to the top of the viewport.
-        setPendingScrollMessageId(result.messageId);
+        setOptimisticUserMessages((current) =>
+          current.map((message) =>
+            message.optimisticId === optimisticId
+              ? { ...message, confirmedMessageId: result.messageId }
+              : message,
+          ),
+        );
         return;
       }
       pendingTtftRef.current = null; // failed send — drop the timer
+      setOptimisticUserMessages((current) =>
+        current.filter((message) => message.optimisticId !== optimisticId),
+      );
+      setInput((current) => (current.trim() ? current : content));
       setFormError(result.error);
     });
   };
@@ -2677,6 +2723,25 @@ function relatedCountLabel(related: AgentSessionDetailPayload["related"]) {
 function relatedCount(related: AgentSessionDetailPayload["related"]) {
   const count = (related.parent ? 1 : 0) + related.children.length;
   return count;
+}
+
+function hasDurableUserMessage(messages: SessionMessage[], optimistic: OptimisticUserMessage) {
+  return messages.some((message) => {
+    if (message.role !== "user" || message.internal) return false;
+    if (optimistic.existingMessageIds.includes(message.id)) return false;
+    if (optimistic.confirmedMessageId && message.id === optimistic.confirmedMessageId) return true;
+    if (message.content !== optimistic.content) return false;
+    if (!message.createdAt) return false;
+    const createdAtMs = new Date(message.createdAt).getTime();
+    return Number.isFinite(createdAtMs) && createdAtMs >= optimistic.submittedAtMs - 5000;
+  });
+}
+
+function newOptimisticMessageId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `optimistic_${crypto.randomUUID()}`;
+  }
+  return `optimistic_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
 function InspectorLink({
