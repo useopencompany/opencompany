@@ -1,28 +1,16 @@
 import { type AgentBrainReference, shellQuote } from "@opencompany/agent-runtime";
-import {
-  agentSessionBrainMounts,
-  brainFiles,
-  brainSyncJobs,
-  type WorkspaceRepository,
-} from "@opencompany/db/schema";
-import { createLogger } from "@opencompany/observability";
+import { agentSessionBrainMounts, brainFiles } from "@opencompany/db/schema";
+import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
-import {
-  conflictPath,
-  deleteRepoFileFromGitHub,
-  hashContent,
-  upsertRepoFileSyncJob,
-  writeRepoFileToGitHub,
-} from "./repo-files";
+import { conflictPath, hashContent } from "./repo-files";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
 export const MAX_BRAIN_FILE_BYTES = 256 * 1024;
 export const MAX_BRAIN_MOUNT_FILES = 80;
 export const MAX_BRAIN_MOUNT_BYTES = 2 * 1024 * 1024;
 const BRAIN_REPO_PREFIX = "brain/";
-const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 type BrainFileRow = typeof brainFiles.$inferSelect;
 
@@ -139,7 +127,6 @@ export async function syncBrainFromSandbox(input: {
   sessionId: string;
   workspaceId: string;
   workdir: string;
-  repository?: WorkspaceRepository | null | undefined;
 }) {
   const db = getDb();
   const mounts = await db
@@ -187,7 +174,6 @@ export async function syncBrainFromSandbox(input: {
       path: targetPath,
       content,
       contentHash: hash,
-      repository: input.repository,
     });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -230,7 +216,10 @@ export async function syncBrainFromSandbox(input: {
       .from(brainFiles)
       .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, mount.path)))
       .limit(1);
-    if (current && current.contentHash !== mount.baseHash) {
+    // Nothing canonical to remove (already deleted) — skip without enqueuing a
+    // phantom GitHub delete.
+    if (!current) continue;
+    if (current.contentHash !== mount.baseHash) {
       await appendRuntimeEvent(db, {
         sessionId: input.sessionId,
         type: "brain.conflict",
@@ -238,10 +227,43 @@ export async function syncBrainFromSandbox(input: {
       });
       continue;
     }
-    await db
-      .delete(brainFiles)
-      .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, mount.path)));
-    await deleteBrainFileFromGitHub(input.repository, mount.path, current?.githubBlobSha ?? null);
+    // Compare-and-delete: only remove the row if it still matches the base we
+    // mounted, so a concurrent web/runner write that lands between the read
+    // above and this transaction is preserved instead of being silently
+    // dropped. The delete + enqueue commit together so the projection can't be
+    // orphaned.
+    const removed = await db.transaction(async (tx) => {
+      const deleted = await tx
+        .delete(brainFiles)
+        .where(
+          and(
+            eq(brainFiles.workspaceId, input.workspaceId),
+            eq(brainFiles.path, mount.path),
+            eq(brainFiles.contentHash, current.contentHash),
+          ),
+        )
+        .returning({ githubBlobSha: brainFiles.githubBlobSha });
+      if (deleted.length === 0) return null;
+      await enqueueWorkspaceSync(tx, {
+        workspaceId: input.workspaceId,
+        repoPath: brainRepoPath(mount.path),
+        sourceKind: "brain",
+        operation: "delete",
+        desiredHash: null,
+        previousBlobSha: deleted[0]?.githubBlobSha ?? null,
+      });
+      return deleted[0];
+    });
+    if (!removed) {
+      // The file changed after our read; keep the newer content and surface the
+      // conflict instead of deleting it.
+      await appendRuntimeEvent(db, {
+        sessionId: input.sessionId,
+        type: "brain.conflict",
+        payload: { path: mount.path, operation: "delete_conflict" },
+      });
+      continue;
+    }
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
       type: "brain.file_changed",
@@ -291,33 +313,21 @@ function isAllowed(
   );
 }
 
+// Canonical-only writeback: persist Brain content to Postgres and enqueue a
+// workspace sync job. GitHub projection happens asynchronously through the
+// unified projector, so the session never blocks on a GitHub round-trip.
 async function upsertBrainFileFromRunner(input: {
   workspaceId: string;
   path: string;
   content: string;
   contentHash: string;
-  repository?: WorkspaceRepository | null | undefined;
 }) {
   const db = getDb();
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
-  let github = { commitSha: null as string | null, blobSha: null as string | null };
-  let shouldQueueSync = false;
-
-  try {
-    github = await writeBrainFileToGitHub(input.repository, input.path, input.content);
-    shouldQueueSync = !github.commitSha;
-  } catch (error) {
-    logger.warn("Queued Brain GitHub sync after immediate write failed", {
-      error,
-      workspace_id: input.workspaceId,
-      brain_path: input.path,
-    });
-    shouldQueueSync = true;
-  }
-
   const now = new Date();
-  if (github.commitSha) {
-    await db
+
+  await db.transaction(async (tx) => {
+    await tx
       .insert(brainFiles)
       .values({
         workspaceId: input.workspaceId,
@@ -325,11 +335,7 @@ async function upsertBrainFileFromRunner(input: {
         content: input.content,
         contentHash: input.contentHash,
         sizeBytes,
-        githubBlobSha: github.blobSha,
-        githubCommitSha: github.commitSha,
-        githubSyncedHash: input.contentHash,
-        githubSyncedAt: now,
-        githubSyncStatus: "synced",
+        githubSyncStatus: "pending",
         githubSyncError: null,
         updatedAt: now,
       })
@@ -339,84 +345,19 @@ async function upsertBrainFileFromRunner(input: {
           content: input.content,
           contentHash: input.contentHash,
           sizeBytes,
-          githubBlobSha: github.blobSha,
-          githubCommitSha: github.commitSha,
-          githubSyncedHash: input.contentHash,
-          githubSyncedAt: now,
-          githubSyncStatus: "synced",
+          githubSyncStatus: "pending",
           githubSyncError: null,
           updatedAt: now,
         },
       });
-    return;
-  }
 
-  await db
-    .insert(brainFiles)
-    .values({
+    await enqueueWorkspaceSync(tx, {
       workspaceId: input.workspaceId,
-      path: input.path,
-      content: input.content,
-      contentHash: input.contentHash,
-      sizeBytes,
-      githubSyncStatus: "pending",
-      githubSyncError: null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [brainFiles.workspaceId, brainFiles.path],
-      set: {
-        content: input.content,
-        contentHash: input.contentHash,
-        sizeBytes,
-        githubSyncStatus: "pending",
-        githubSyncError: null,
-        updatedAt: now,
-      },
-    });
-
-  if (shouldQueueSync) {
-    await upsertBrainSyncJob({
-      workspaceId: input.workspaceId,
-      path: input.path,
+      repoPath: brainRepoPath(input.path),
+      sourceKind: "brain",
       operation: "upsert",
       desiredHash: input.contentHash,
     });
-  }
-}
-
-async function writeBrainFileToGitHub(
-  repository: WorkspaceRepository | null | undefined,
-  path: string,
-  content: string,
-) {
-  return writeRepoFileToGitHub(repository, brainRepoPath(path), content);
-}
-
-async function deleteBrainFileFromGitHub(
-  repository: WorkspaceRepository | null | undefined,
-  path: string,
-  blobSha: string | null,
-) {
-  await deleteRepoFileFromGitHub(repository, brainRepoPath(path), blobSha);
-}
-
-async function upsertBrainSyncJob(input: {
-  workspaceId: string;
-  path: string;
-  operation: "upsert" | "delete";
-  desiredHash: string | null;
-  previousPath?: string | null;
-  previousBlobSha?: string | null;
-}) {
-  await upsertRepoFileSyncJob({
-    jobsTable: brainSyncJobs,
-    workspaceId: input.workspaceId,
-    path: input.path,
-    operation: input.operation,
-    desiredHash: input.desiredHash,
-    previousPath: input.previousPath,
-    previousBlobSha: input.previousBlobSha,
   });
 }
 

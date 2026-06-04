@@ -303,7 +303,7 @@ If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix 
 
 ### Renames
 
-- **Editor-originated** (changing the title): the new slug is computed at save time, the file is written at the new path, and the old GitHub file is deleted as part of the same sync job (tracked via `previousPath` / `previousBlobSha` on `agent_sync_jobs`).
+- **Editor-originated** (changing the title): the new slug is computed at save time, the file is written at the new path, and the old GitHub file is deleted in the same projection commit (tracked via `previousPath` / `previousBlobSha` on the agent's `workspace_sync_jobs` row; the producer also clears any stale outbox row left at the old path so the rename never re-creates the old file).
 - **GitHub-originated** (renaming the file directly in the repo): handled only through manual
   import/reconciliation. Because the app keys workspace sync by file path, a GitHub rename is
   treated as a new agent on the next import and can stay out of sync until the editor re-saves the
@@ -314,9 +314,9 @@ If two agents resolve to the same slug, later ones get a `-2`, `-3`, … suffix 
 When the editor saves an agent:
 
 1. Postgres receives the title, body, body-derived config, sanitized editor content, content hash, and version — synchronously. This is the "saved" state from the user's perspective.
-2. `agent_sync_jobs` is upserted with a `nextRunAt` ~10 seconds out, debouncing rapid edits. If the title change produced a new path, the previous path and blob SHA are recorded on the job so the worker can delete the old GitHub file.
-3. `agent.sync_requested` is dispatched to Inngest.
-4. Inngest writes the file to GitHub asynchronously.
+2. A `workspace_sync_jobs` outbox row is enqueued (coalesced on `(workspaceId, repoPath)`) with a `nextRunAt` ~10 seconds out, debouncing rapid edits. If the title change produced a new path, the previous path and blob SHA are recorded on the row so the projector can delete the old GitHub file.
+3. `workspace.sync_requested` is dispatched to Inngest.
+4. The projector (`projectWorkspaceToGitHub`) commits the file to GitHub asynchronously, as one commit alongside any other due workspace changes.
 
 The editor only waits on step 1. GitHub sync status is surfaced separately and never blocks editing — a failing sync shows on the agent row, not on the save button.
 
