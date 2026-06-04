@@ -1,5 +1,5 @@
 {
-  "id": "6e28b7c4-f5a0-4be5-bdea-ac8fd4c82dc7",
+  "id": "83586e29-f0ba-46d6-a9d4-cd379c8a3f5d",
   "prevId": "cf5e0dab-0cb3-4b1f-bcd6-6be64b2f6c24",
   "version": "7",
   "dialect": "postgresql",
@@ -6072,13 +6072,13 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.workspace_skill_snapshots": {
-      "name": "workspace_skill_snapshots",
+    "public.workspace_sync_jobs": {
+      "name": "workspace_sync_jobs",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
+          "type": "serial",
           "primaryKey": true,
           "notNull": true
         },
@@ -6088,93 +6088,74 @@
           "primaryKey": false,
           "notNull": true
         },
-        "skill_id": {
-          "name": "skill_id",
+        "repo_path": {
+          "name": "repo_path",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "name": {
-          "name": "name",
+        "source_kind": {
+          "name": "source_kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "description": {
-          "name": "description",
+        "source_ref": {
+          "name": "source_ref",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "source_type": {
-          "name": "source_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'github'"
-        },
-        "source_url": {
-          "name": "source_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "requested_ref": {
-          "name": "requested_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "skill_path": {
-          "name": "skill_path",
+        "operation": {
+          "name": "operation",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "''"
+          "default": "'upsert'"
         },
-        "resolved_commit": {
-          "name": "resolved_commit",
+        "desired_hash": {
+          "name": "desired_hash",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "integrity": {
-          "name": "integrity",
+        "previous_path": {
+          "name": "previous_path",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "files": {
-          "name": "files",
-          "type": "jsonb",
+        "previous_blob_sha": {
+          "name": "previous_blob_sha",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "file_count": {
-          "name": "file_count",
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": 0
         },
-        "total_bytes": {
-          "name": "total_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_resolved_at": {
-          "name": "last_resolved_at",
+        "next_run_at": {
+          "name": "next_run_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": true
         },
-        "schema_version": {
-          "name": "schema_version",
-          "type": "integer",
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": 1
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -6192,8 +6173,23 @@
         }
       },
       "indexes": {
-        "workspace_skill_snapshots_source_idx": {
-          "name": "workspace_skill_snapshots_source_idx",
+        "workspace_sync_jobs_workspace_idx": {
+          "name": "workspace_sync_jobs_workspace_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "workspace_sync_jobs_workspace_repo_path_idx": {
+          "name": "workspace_sync_jobs_workspace_repo_path_idx",
           "columns": [
             {
               "expression": "workspace_id",
@@ -6202,19 +6198,7 @@
               "nulls": "last"
             },
             {
-              "expression": "source_url",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "requested_ref",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "skill_path",
+              "expression": "repo_path",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -6225,17 +6209,11 @@
           "method": "btree",
           "with": {}
         },
-        "workspace_skill_snapshots_skill_id_idx": {
-          "name": "workspace_skill_snapshots_skill_id_idx",
+        "workspace_sync_jobs_next_run_at_idx": {
+          "name": "workspace_sync_jobs_next_run_at_idx",
           "columns": [
             {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "skill_id",
+              "expression": "next_run_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -6248,9 +6226,9 @@
         }
       },
       "foreignKeys": {
-        "workspace_skill_snapshots_workspace_id_workspaces_id_fk": {
-          "name": "workspace_skill_snapshots_workspace_id_workspaces_id_fk",
-          "tableFrom": "workspace_skill_snapshots",
+        "workspace_sync_jobs_workspace_id_workspaces_id_fk": {
+          "name": "workspace_sync_jobs_workspace_id_workspaces_id_fk",
+          "tableFrom": "workspace_sync_jobs",
           "tableTo": "workspaces",
           "columnsFrom": [
             "workspace_id"
@@ -6265,7 +6243,20 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "workspace_sync_jobs_source_kind_check": {
+          "name": "workspace_sync_jobs_source_kind_check",
+          "value": "\"workspace_sync_jobs\".\"source_kind\" IN ('brain', 'agent_file', 'agent')"
+        },
+        "workspace_sync_jobs_operation_check": {
+          "name": "workspace_sync_jobs_operation_check",
+          "value": "\"workspace_sync_jobs\".\"operation\" IN ('upsert', 'delete')"
+        },
+        "workspace_sync_jobs_status_check": {
+          "name": "workspace_sync_jobs_status_check",
+          "value": "\"workspace_sync_jobs\".\"status\" IN ('pending', 'syncing', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.workspace_tool_policies": {

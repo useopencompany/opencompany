@@ -47,7 +47,8 @@
     "db:migrate": "bun --filter @opencompany/db db:migrate",
     "db:seed": "node scripts/seed.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",
-    "db:branch:delete": "node scripts/neon-branch.mjs delete"
+    "db:branch:delete": "node scripts/neon-branch.mjs delete",
+    "electric:dev": "node scripts/electric-dev.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
+    "@durable-streams/server": "^0.3.7",
     "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

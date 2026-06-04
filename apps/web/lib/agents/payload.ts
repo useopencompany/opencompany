@@ -163,7 +163,6 @@ export function agentHref(agent: Pick<AgentListItemPayload, "id" | "path">) {
 }
 
 export const agentQueryKeys = {
-  list: (workspaceId: string) => ["agents", workspaceId] as const,
   detail: (workspaceId: string, idOrPath: string) => ["agent", workspaceId, idOrPath] as const,
 };
 

@@ -27,9 +27,9 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 |---|---|---|
 | `DATABASE_URL` / `PRODUCTION_DATABASE_URL` | Hosted Vercel, Render, GitHub Actions | Same hosted Neon database. GitHub uses `PRODUCTION_DATABASE_URL`; apps read `DATABASE_URL`. Local dev gets `DATABASE_URL` from `.env.local` Neon branch setup. |
 | `RUNNER_INTERNAL_TOKEN` | Vercel, Render | Web/Inngest uses it to call runner internal endpoints. |
-| `RUNNER_STREAM_TOKEN_SECRET` | Vercel, Render | Web signs browser SSE tokens; runner verifies them. |
 | `RUNNER_PUBLIC_URL` | Vercel, GitHub Actions | Browser-reachable Render URL. |
-| `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin. |
+| `RUNNER_ALLOWED_ORIGINS` | Render, production web domain | Must include the exact Vercel production origin if browser-origin runner requests are enabled. |
+| `DURABLE_STREAMS_URL` / `DURABLE_STREAMS_TOKEN` | Vercel, Render | Web owns the read proxy and web-authored appends; runner owns model/tool appends. |
 | `GITHUB_APP_ID` | Vercel, Render | Same GitHub App for workspace repos and runner Brain sync. |
 | `GITHUB_APP_INSTALLATION_ID` | Vercel, Render | Managed workspace-state installation target used for workspace repo writes and runner Brain sync. |
 | `GITHUB_APP_PRIVATE_KEY` | Vercel, Render | Same private key, with newlines preserved or escaped as `\n`. |
@@ -73,10 +73,15 @@ Set these in Vercel Production.
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |
-| `RUNNER_PUBLIC_URL` | Yes | Browser SSE URL for Render runner. |
+| `RUNNER_PUBLIC_URL` | Yes | Browser-reachable Render runner URL. |
 | `RUNNER_INTERNAL_URL` | No | Server-to-server runner URL. Defaults to `RUNNER_PUBLIC_URL`. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Bearer token for runner internal endpoints. |
-| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Signs runner SSE tokens. |
+| `ELECTRIC_URL` | Yes | Electric shape service base URL. |
+| `ELECTRIC_SOURCE_ID` | Electric Cloud only | Electric Cloud source id. |
+| `ELECTRIC_SOURCE_SECRET` | Electric Cloud only | Electric Cloud source secret. |
+| `ELECTRIC_TOKEN` | Self-hosted Electric only | Bearer token for protected self-hosted Electric. |
+| `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for session transcript reads and web-authored appends. |
+| `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Server-only; never exposed to the browser. |
 | `LINEAR_API_KEY` | No | Enables feedback intake. |
 | `LINEAR_TEAM_ID` | No | Linear team for feedback. |
 | `LINEAR_FEEDBACK_PROJECT_ID` | No | Optional project routing for feedback. |
@@ -113,8 +118,10 @@ Set these in the Render `opencompany-runner` service.
 |---|---:|---|
 | `DATABASE_URL` | Hosted only | Same hosted Neon database used by web. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
 | `RUNNER_INTERNAL_TOKEN` | Yes | Must match Vercel. |
-| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Must match Vercel. |
-| `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for SSE. |
+| `RUNNER_STREAM_TOKEN_SECRET` | Yes | Runner signing secret used for hosted-tool polling job ids. |
+| `RUNNER_ALLOWED_ORIGINS` | Yes | Comma-separated browser origins allowed for runner requests. |
+| `DURABLE_STREAMS_URL` | Yes | Durable Streams base URL for model/tool transcript appends. Must match Vercel. |
+| `DURABLE_STREAMS_TOKEN` | Yes | Bearer token for the Durable Streams service. Must match Vercel. |
 | `E2B_API_KEY` | Yes | Creates/connects E2B sandboxes. |
 | `VERCEL_AI_GATEWAY_API_KEY` | Yes | Model calls through Vercel AI Gateway. |
 | `EXA_API_KEY` | No | Required only for agents that enable Exa. |
@@ -128,6 +135,7 @@ Set these in the Render `opencompany-runner` service.
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
+| `RUNNER_WORKER_CONCURRENCY` | No | Max parallel sessions per instance, defaults to `8` (prod 40). Bounded by the event loop + E2B sandbox quota + gateway rate limits, not CPU/RAM. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
 | `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |
 | `GITHUB_APP_INSTALLATION_ID` | Yes | Enables runner Brain sync to GitHub. |

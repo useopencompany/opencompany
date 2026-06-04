@@ -634,7 +634,6 @@ async function suspendRunForInput(input: {
         sessionId: ctx.sessionId,
         workspaceId: row.workspace.id,
         workdir: row.session.workdir,
-        repository: row.repository,
       }),
     );
   }
@@ -749,7 +748,6 @@ async function executeStreamingTurn(input: {
         sessionId: ctx.sessionId,
         workspaceId: row.workspace.id,
         workdir: row.session.workdir,
-        repository: row.repository,
       }),
     );
     // Bundle sync is best-effort: a DB/GitHub failure here must not fail the
@@ -763,7 +761,6 @@ async function executeStreamingTurn(input: {
           workspaceId: row.workspace.id,
           agentId: row.agent.id,
           workdir: row.session.workdir,
-          repository: row.repository,
         }),
       );
     } catch (error) {

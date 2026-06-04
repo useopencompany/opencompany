@@ -264,8 +264,22 @@
     {
       "idx": 37,
       "version": "7",
-      "when": 1780577544324,
-      "tag": "0037_gorgeous_maestro",
+      "when": 1780574313604,
+      "tag": "0037_open_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780578332546,
+      "tag": "0038_tiny_the_anarchist",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1780596846247,
+      "tag": "0039_fuzzy_maelstrom",
       "breakpoints": true
     }
   ]

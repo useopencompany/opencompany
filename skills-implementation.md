@@ -77,7 +77,7 @@ Refreshable cache, workspace-scoped. Columns: `id`, `workspace_id` (fk cascade),
 `skill_path`, `resolved_commit`, `integrity` (`sha256:…`), `files` (jsonb `AgentSkillFile[]`),
 `file_count`, `total_bytes`, `last_resolved_at`, `schema_version`, timestamps.
 Unique `(workspace_id, source_url, requested_ref, skill_path)`; index `(workspace_id, skill_id)`.
-Migration: `drizzle/0037_gorgeous_maestro.sql`.
+Migration: `drizzle/0039_fuzzy_maelstrom.sql`.
 
 ## Milestones
 
@@ -134,7 +134,7 @@ Migration: `drizzle/0037_gorgeous_maestro.sql`.
 - Tests: `skills.test.ts`, `skill-resolver.test.ts`, `mentions.test.ts`, `agent-file.test.ts`.
 
 **`packages/db/src`**
-- `schema.ts` — `workspaceSkillSnapshots`. Migration `drizzle/0037_gorgeous_maestro.sql`.
+- `schema.ts` — `workspaceSkillSnapshots`. Migration `drizzle/0039_fuzzy_maelstrom.sql`.
 
 **`apps/web`**
 - `lib/skills/{resolver,snapshots,client}.ts` (new), `lib/skills/snapshots.test.ts`.
@@ -153,7 +153,7 @@ Migration: `drizzle/0037_gorgeous_maestro.sql`.
 
 ## Pending
 
-The migration `drizzle/0037_gorgeous_maestro.sql` (creates `workspace_skill_snapshots`) is
+The migration `drizzle/0039_fuzzy_maelstrom.sql` (creates `workspace_skill_snapshots`) is
 **generated but not yet applied** — `bun run db:migrate` failed in the agent session with
 `password authentication failed for user 'neondb_owner'` (a stale/rotated dev credential in
 the available infisical context, not a code issue). **Run `bun run db:migrate` with a working

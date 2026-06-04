@@ -2,6 +2,14 @@ import "./load-env.mjs";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { argv, exit, versions } from "node:process";
+import {
+  directDatabaseUrl,
+  dockerRunArgs,
+  ELECTRIC_CONTAINER,
+  ELECTRIC_HEALTH_URL,
+  ELECTRIC_IMAGE,
+  ELECTRIC_LOCAL_URL,
+} from "./lib/electric-dev.mjs";
 
 const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
@@ -634,6 +642,119 @@ async function runMigrations() {
   run("bun", ["run", "db:migrate"]);
 }
 
+// Like run(), but returns the exit code instead of throwing so a failed Docker
+// step degrades to a warning rather than aborting the whole setup.
+function runAllowFail(cmd, args, opts = {}) {
+  const result = spawnSync(cmd, args, { stdio: "inherit", timeout: 180_000, ...opts });
+  return result.status ?? 1;
+}
+
+// "missing" = no Docker CLI; "stopped" = CLI present but engine not running;
+// "ready" = engine responds. OrbStack and Docker Desktop both expose `docker`.
+function dockerState() {
+  const probe = runCapture("docker", ["version", "--format", "{{.Server.Version}}"]);
+  if (probe.error?.code === "ENOENT") return "missing";
+  return probe.status === 0 ? "ready" : "stopped";
+}
+
+// A container runtime is a hard requirement for local dev: the agents/sessions
+// UI reads through a local Electric container, so without it the app's lists
+// 503. Fail fast with actionable instructions rather than limping on.
+function assertDocker() {
+  const state = dockerState();
+  if (state === "ready") return;
+
+  const reason =
+    state === "stopped"
+      ? "Docker is installed but its engine isn't running."
+      : "No container runtime found.";
+  const action =
+    state === "stopped"
+      ? "  Start the engine, then re-run \x1b[1mbun run setup\x1b[0m:\n\n" +
+        "    \x1b[1mopen -a OrbStack\x1b[0m   # or launch Docker Desktop"
+      : "  Install \x1b[1mOrbStack\x1b[0m (lightweight on macOS), start it, then re-run \x1b[1mbun run setup\x1b[0m:\n\n" +
+        "    \x1b[1mbrew install orbstack\x1b[0m   # or download from https://orbstack.dev\n" +
+        "    \x1b[1mopen -a OrbStack\x1b[0m        # start the engine — required, or Docker won't respond\n\n" +
+        "  (Docker Desktop also works.)";
+
+  console.error(
+    `\n\x1b[31m✗ ${reason}\x1b[0m\n` +
+      "  Local dev needs Electric, which runs as a local container, so a container\n" +
+      "  runtime is required.\n\n" +
+      `${action}\n\n` +
+      "  One-time: also enable \x1b[1mlogical replication\x1b[0m on the Neon project\n" +
+      "  (console → Settings) so Electric can replicate. See docs/stack/electric-sync.md.\n",
+  );
+  exit(1);
+}
+
+async function waitForElectricHealth(timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(ELECTRIC_HEALTH_URL, { signal: AbortSignal.timeout(2_000) });
+      if (res.status === 200) return true;
+    } catch {
+      // Not accepting requests yet — keep polling until the deadline.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  return false;
+}
+
+// Bring up the local Electric sync container so the agents/sessions UI has its
+// data source. The read layer is fully Electric-backed, so without this the
+// shape proxy 503s. Assumes the container runtime is present (assertDocker()
+// gates the setup run); an unhealthy container is a warning, not a failure.
+async function ensureElectric() {
+  step("Electric sync (local)");
+
+  const databaseUrl = directDatabaseUrl(readEffectiveLocalEnv());
+  if (!databaseUrl) {
+    warn("No DATABASE_URL yet — skipping Electric. Re-run setup once the database is configured.");
+    return;
+  }
+
+  // Pull up front (no-op if cached) so the first dev run doesn't stall on it.
+  if (runAllowFail("docker", ["pull", ELECTRIC_IMAGE]) !== 0) {
+    warn(`Could not pull ${ELECTRIC_IMAGE}. Check your network, then re-run setup.`);
+    return;
+  }
+
+  // Recreate so the container always tracks the current branch's DATABASE_URL.
+  spawnSync("docker", ["rm", "-f", ELECTRIC_CONTAINER], { stdio: "ignore" });
+  if (runAllowFail("docker", dockerRunArgs(databaseUrl, { detached: true })) !== 0) {
+    warn(`Failed to start the Electric container "${ELECTRIC_CONTAINER}".`);
+    return;
+  }
+
+  writeEnvValues(".env.local", { ELECTRIC_URL: ELECTRIC_LOCAL_URL });
+
+  if (await waitForElectricHealth()) {
+    ok(
+      `Electric live at ${ELECTRIC_LOCAL_URL} (container "${ELECTRIC_CONTAINER}"); set ELECTRIC_URL`,
+    );
+    return;
+  }
+
+  // Container is up but not serving — almost always logical replication is off.
+  warn(
+    "Electric started but isn't healthy yet. The usual cause is logical replication not being\n" +
+      "    enabled on the Neon project (console → Settings → enable logical replication).\n" +
+      `    ELECTRIC_URL is set; inspect with: docker logs --tail 40 ${ELECTRIC_CONTAINER}`,
+  );
+  const logs = runCapture("docker", ["logs", "--tail", "20", ELECTRIC_CONTAINER]);
+  const out = `${logs.stdout ?? ""}${logs.stderr ?? ""}`.trim();
+  if (out) {
+    console.log(
+      out
+        .split("\n")
+        .map((line) => `      ${line}`)
+        .join("\n"),
+    );
+  }
+}
+
 async function main() {
   if (PERSONAL_ENV_MODE) {
     console.log("\n\x1b[1mPersonal env override\x1b[0m");
@@ -713,12 +834,41 @@ async function main() {
         reason: "apply migrations against the configured DATABASE_URL",
       });
     }
-    console.log(JSON.stringify({ ...state, nextSteps }, null, 2));
+    const electric = dockerState();
+    const electricUrlSet = !isPlaceholder(readEffectiveLocalEnv().ELECTRIC_URL);
+    if (electric === "missing") {
+      nextSteps.push({
+        command: "brew install orbstack",
+        reason:
+          "install a container runtime so setup can start local Electric (the agents/sessions UI reads through it and 503s without it)",
+      });
+    } else if (electric === "stopped") {
+      nextSteps.push({
+        command: "open -a OrbStack",
+        reason: "start the Docker engine so `bun run setup` can bring up local Electric",
+      });
+    } else if (!electricUrlSet) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: "start local Electric and set ELECTRIC_URL for live agents/sessions sync",
+      });
+    }
+    console.log(
+      JSON.stringify(
+        { ...state, electric, electricUrl: electricUrlSet ? "set" : "placeholder", nextSteps },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
   console.log("\n\x1b[1mProject setup\x1b[0m");
   console.log("Wiring up your local env and running migrations.\n");
+
+  // Hard prerequisite — fail fast before touching env/db if the runtime that
+  // local Electric needs isn't available.
+  assertDocker();
 
   const state = inspectState();
   await ensureEnvFile(state);
@@ -732,6 +882,7 @@ async function main() {
   }
   await ensureStripe(inspectState());
   await runMigrations();
+  await ensureElectric();
 
   if (!START_DEV_MODE) {
     console.log("\n\x1b[1m\x1b[32m✓ All set.\x1b[0m Run \x1b[1mbun run dev\x1b[0m when ready.\n");

@@ -199,19 +199,27 @@ Prefer these correlation fields in all handled captures:
 - `opencompany.runner_session_completed`: runner completed a user message.
 - `opencompany.runner_session_aborted`: runner stopped a message after an abort.
 - `opencompany.runner_session_failed`: runner failed a message run.
-- `opencompany.runner_sse_connected`: browser connected to runner SSE; check `replayed_events`.
-- `opencompany.runner_sse_closed`: browser disconnected from runner SSE.
-- `opencompany.runner_sse_rejected`: runner rejected an SSE connection.
-- `opencompany.agent_sync_job_queued`: the app wrote or updated an `agent_sync_jobs` row after an
-  agent edit. Check `agent_id`, `workspace_id`, `path`, `desired_version`, and `next_run_at`.
-- `opencompany.agent_sync_dispatch_succeeded`: the app sent `agent.sync_requested` to Inngest.
-  Check `inngest_event_ids`.
-- `opencompany.agent_sync_dispatch_failed`: the app could not send the Inngest event after the DB
-  write. Check `error_name`, `error_message`, and `dispatch_status_marked_failed`.
-- `opencompany.agent_github_sync_started`: the Inngest worker started materializing an agent file.
-- `opencompany.agent_github_sync_succeeded`: GitHub materialization completed. Check `status`,
-  `commit_sha`, `blob_sha`, and `duration_ms`.
-- `opencompany.agent_github_sync_failed`: managed GitHub repo/file sync failed.
+- `opencompany.durable_stream_publish_failed`: runner could not append a runtime event to the
+  session Durable Stream.
+- `opencompany.durable_stream_proxy_read`: web proxy read from a session Durable Stream; check
+  `status` and `retried_after_create`.
+- `opencompany.durable_stream_proxy_create_failed`: web proxy could not create a missing stream
+  before retrying a read.
+- `opencompany.agent_sync_job_queued`: the app enqueued or coalesced a `workspace_sync_jobs` outbox
+  row after an agent edit. Check `agent_id`, `workspace_id`, `path`, `desired_version`, and
+  `next_run_at`.
+- `opencompany.workspace_sync_dispatch_succeeded`: the app sent `workspace.sync_requested` to
+  Inngest after a workspace write. Check `inngest_event_ids`.
+- `opencompany.workspace_sync_dispatch_failed`: the app could not send the Inngest event after the
+  DB write. Check `error_name` and `error_message`.
+- `opencompany.workspace_projection_capped`: due jobs exceeded the per-commit cap; the remainder
+  stays pending for the next drain iteration. Check `due` and `committing`.
+- `opencompany.workspace_github_sync_failed`: the projector's single-commit push to the managed
+  GitHub repo failed. Check `workspace_id`, `jobs`, and `error_message`.
+- `opencompany.sync_outbox_recovery_dispatched`: the once-a-minute sweeper re-dispatched
+  `workspace.sync_requested` for a workspace with due outbox jobs.
+- `opencompany.sync_outbox_recovery_dispatch_failed`: the sweeper failed to re-dispatch. Check
+  `error_name` and `error_message`.
 - `opencompany.auth_callback_failed`: WorkOS callback provisioning failed.
 - `opencompany.next_request_error`: Next.js caught a server render, route handler, or server
   action failure. Check `next_route_path`, `next_route_type`, `next_render_source`, and

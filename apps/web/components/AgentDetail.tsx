@@ -62,6 +62,7 @@ import {
   modelProviderLabel,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
+import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import {
   Command,
@@ -77,17 +78,14 @@ import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { deleteAgent, updateAgent } from "@/lib/agents/actions";
+import { updateAgent } from "@/lib/agents/actions";
 import type { AgentBundleFilePayload as AgentFolderFilePayload } from "@/lib/agents/bundle-files";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
   type AgentDetailPayload,
-  type AgentListItemPayload,
-  agentDetailToListItem,
   agentQueryKeys,
   fetchAgent,
-  fetchAgents,
 } from "@/lib/agents/payload";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import { cn } from "@/lib/utils";
@@ -150,29 +148,6 @@ function updateAgentQueries(
   if (agent.path) {
     queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), agent);
   }
-  const listItem = agentDetailToListItem(agent);
-  queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
-    // The list cache may be empty here when the agent was reached through the
-    // create→redirect flow (the client never fetched the list with this agent
-    // in it) or after the unobserved list query was garbage-collected. Seeding
-    // it with only this agent would hide every other agent until a manual
-    // refresh (PRO-94), so leave the cache untouched and let the invalidation
-    // below trigger an authoritative refetch when the list is next viewed.
-    if (!agents) return agents;
-
-    const next = agents.map((item) => (item.id === agent.id ? listItem : item));
-    if (!next.some((item) => item.id === agent.id)) next.unshift(listItem);
-    return next.toSorted(
-      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-    );
-  });
-  // Mark the list stale regardless of the optimistic update so a remount of the
-  // agents list (e.g. navigating back after editing a new agent) refetches the
-  // full server-side list rather than trusting a partial client cache.
-  void queryClient.invalidateQueries({
-    queryKey: agentQueryKeys.list(workspaceId),
-    refetchType: "none",
-  });
 }
 
 export default function AgentDetail({ initialAgent, idOrPath }: Props) {
@@ -210,6 +185,7 @@ function AgentDetailContent({
   workspaceId: string;
 }) {
   const queryClient = useQueryClient();
+  const { agents: agentsCollection } = useCollections();
   const { showError } = useToast();
   const { data: workspaceSkills } = useQuery({
     queryKey: ["workspace-skills", workspaceId],
@@ -235,7 +211,6 @@ function AgentDetailContent({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [isDeleting, startDeleteTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -403,7 +378,6 @@ function AgentDetailContent({
     startTransition(async () => {
       try {
         await Promise.all([
-          queryClient.cancelQueries({ queryKey: agentQueryKeys.list(workspaceId) }),
           queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, idOrPath) }),
           queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, agent.id) }),
           agent.path
@@ -497,19 +471,9 @@ function AgentDetailContent({
               prefetch
               onMouseEnter={() => {
                 router.prefetch("/agents");
-                void queryClient.prefetchQuery({
-                  queryKey: agentQueryKeys.list(workspaceId),
-                  queryFn: fetchAgents,
-                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
-                });
               }}
               onFocus={() => {
                 router.prefetch("/agents");
-                void queryClient.prefetchQuery({
-                  queryKey: agentQueryKeys.list(workspaceId),
-                  queryFn: fetchAgents,
-                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
-                });
               }}
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-surface-subtle/70"
             >
@@ -750,38 +714,27 @@ function AgentDetailContent({
       <DeleteAgentDialog
         agentName={agent.name}
         isOpen={showDeleteDialog}
-        isPending={isDeleting}
+        isPending={false}
         onClose={() => setShowDeleteDialog(false)}
         onConfirm={() => {
-          startDeleteTransition(async () => {
-            try {
-              const result = await deleteAgent(agent.id);
-              if (!result.ok) {
-                setShowDeleteDialog(false);
-                showError(result.error, "Could not delete agent");
-                return;
-              }
-              // Close the dialog before navigating so it doesn't stay open on
-              // the success path (mirrors the error branch above).
-              setShowDeleteDialog(false);
-              queryClient.setQueryData<AgentListItemPayload[]>(
-                agentQueryKeys.list(workspaceId),
-                (current) => (current ?? []).filter((item) => item.id !== agent.id),
-              );
-              router.push("/agents");
-            } catch (err) {
-              // Let Next.js redirect digests bubble — currentWorkspace() throws
-              // NEXT_REDIRECT for unauthenticated / incomplete-onboarding users
-              // and the framework needs to see it to navigate.
-              if (isNextRedirectError(err)) throw err;
-              // Server actions can throw (e.g. non-admin requireAdmin guard);
-              // surface as a toast instead of bubbling to the error boundary.
-              setShowDeleteDialog(false);
-              showError(
-                err instanceof Error ? err.message : "Could not delete agent",
-                "Could not delete agent",
-              );
-            }
+          // Optimistic delete: the row leaves the agents collection immediately
+          // (the list and this view update at once) and we navigate away
+          // synchronously. Reconciliation — the deleteAgent server action plus
+          // the txid match Electric observes — runs in the background, so the
+          // navigation is never blocked behind the ~1s GitHub/sandbox/db
+          // round-trip (the prior code awaited tx.isPersisted inside the same
+          // transition as router.push, which deferred the navigation commit and
+          // left a lingering spinner). A failed delete auto-rolls back the
+          // optimistic removal; we only surface why.
+          const tx = agentsCollection.delete(agent.id);
+          setShowDeleteDialog(false);
+          router.push("/agents");
+          void tx.isPersisted.promise.catch((err) => {
+            if (isNextRedirectError(err)) return;
+            showError(
+              err instanceof Error ? err.message : "Could not delete agent",
+              "Could not delete agent",
+            );
           });
         }}
       />

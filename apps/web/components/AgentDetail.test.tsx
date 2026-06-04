@@ -14,7 +14,6 @@ import {
   type AgentListItemPayload,
   agentQueryKeys,
   fetchAgent,
-  fetchAgents,
 } from "@/lib/agents/payload";
 import AgentDetail from "./AgentDetail";
 
@@ -60,12 +59,20 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
   seedSessionQueries: vi.fn(),
 }));
 
+// Stub the collections so AgentDetail's optimistic delete works without mounting
+// CollectionsProvider (which would pull the server-action import chain into the
+// test). The delete returns a resolved tx so the detached reconcile is a no-op.
+vi.mock("@/components/CollectionsProvider", () => ({
+  useCollections: () => ({
+    agents: { delete: vi.fn(() => ({ isPersisted: { promise: Promise.resolve() } })) },
+  }),
+}));
+
 vi.mock("@/lib/agents/payload", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/agents/payload")>();
   return {
     ...actual,
     fetchAgent: vi.fn(),
-    fetchAgents: vi.fn(),
   };
 });
 
@@ -196,29 +203,16 @@ const detailAgent: AgentDetailPayload = {
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
-const fetchAgentsMock = vi.mocked(fetchAgents);
 const updateAgentMock = vi.mocked(updateAgent);
 const runAgentScheduleNowMock = vi.mocked(runAgentScheduleNow);
 const seedSessionQueriesMock = vi.mocked(seedSessionQueries);
-
-const existingListAgent: AgentListItemPayload = {
-  id: "agt_existing",
-  workspaceId: "wks_123",
-  path: "agents/research.agent",
-  name: "Research",
-  config,
-  githubSyncStatus: "synced",
-  githubSyncError: null,
-  createdAt: "2026-05-20T10:00:00.000Z",
-  updatedAt: "2026-05-20T10:10:00.000Z",
-};
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
     queryClient,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceProvider workspaceId="wks_123">
+        <WorkspaceProvider workspaceId="wks_123" userId="usr_123">
           <ToastProvider>{ui}</ToastProvider>
         </WorkspaceProvider>
       </QueryClientProvider>,
@@ -242,9 +236,8 @@ describe("AgentDetail", () => {
     window.localStorage.clear();
   });
 
-  it("does not mount the editor from list-cache data", async () => {
+  it("shows the loading skeleton until the detail query resolves", async () => {
     const queryClient = createQueryClient();
-    queryClient.setQueryData(agentQueryKeys.list("wks_123"), [listAgent]);
     fetchAgentMock.mockReturnValue(new Promise(() => {}) as Promise<AgentDetailPayload>);
 
     renderWithProviders(<AgentDetail idOrPath="agents/leo/leo.agent" />, queryClient);
@@ -331,71 +324,6 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
-  });
-
-  it("keeps pre-existing agents in the list after saving a freshly created agent (PRO-94)", async () => {
-    // Reproduces PRO-94: after creating a new agent and editing it, the
-    // detail page's list-cache update must not clobber the agents the user
-    // hasn't loaded into the client cache yet. The new agent reaches the
-    // detail view via a server redirect, so the client list query has not
-    // been populated with it (and may not be populated at all). The server
-    // (fetchAgents) remains the source of truth and still has every agent.
-    const user = userEvent.setup();
-    const queryClient = createQueryClient();
-
-    // The server-side list always returns both the pre-existing agent and the
-    // freshly created one. AgentsView reads it through this query.
-    fetchAgentsMock.mockResolvedValue([detailAgent, existingListAgent]);
-
-    updateAgentMock.mockResolvedValue({
-      id: detailAgent.id,
-      workspaceId: detailAgent.workspaceId,
-      path: detailAgent.path ?? detailAgent.id,
-      pathChanged: false,
-      agent: { ...detailAgent, name: "Leo renamed" },
-    });
-
-    // Seed the list cache the way AgentsView would after loading it, so the
-    // test exercises the invalidate->refetch path. With an empty cache,
-    // ensureQueryData would fetch anyway — even if the fix were removed.
-    queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list("wks_123"), [
-      existingListAgent,
-    ]);
-
-    renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
-      queryClient,
-    );
-
-    // Editing the freshly created agent's name and blurring triggers a save.
-    const nameInput = await screen.findByPlaceholderText(/untitled agent/i);
-    await user.clear(nameInput);
-    await user.type(nameInput, "Leo renamed");
-    await user.tab();
-
-    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
-
-    // The fix must mark the seeded list query stale so a remount refetches the
-    // authoritative server list. Without it the seeded [existingListAgent]
-    // cache stays fresh and the freshly created agent / full list never reload.
-    await waitFor(() => {
-      expect(queryClient.getQueryState(agentQueryKeys.list("wks_123"))?.isInvalidated).toBe(true);
-    });
-
-    // Navigating back remounts AgentsView's useQuery, which revalidates the
-    // now-stale list and refetches via fetchAgents. Prove the stale mark
-    // actually triggers that refetch and that it surfaces every agent.
-    fetchAgentsMock.mockClear();
-    const list = await queryClient.ensureQueryData({
-      queryKey: agentQueryKeys.list("wks_123"),
-      queryFn: fetchAgents,
-      staleTime: 30_000,
-      revalidateIfStale: true,
-    });
-
-    expect(fetchAgentsMock).toHaveBeenCalled();
-    expect(list.map((agent) => agent.id)).toContain(existingListAgent.id);
-    expect(list.map((agent) => agent.id)).toContain(detailAgent.id);
   });
 
   it("saves a preset schedule from the inspector", async () => {

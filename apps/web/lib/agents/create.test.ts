@@ -1,12 +1,5 @@
-import { captureException } from "@opencompany/observability";
-import { after } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  logAgentSyncJobQueued,
-  prepareAgentSyncJobUpsert,
-  scheduleAgentSyncDispatch,
-} from "@/lib/agents/create";
-import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
+import { logAgentSyncJobQueued, prepareAgentSyncJobUpsert } from "@/lib/agents/create";
 
 const mocks = vi.hoisted(() => ({
   logger: {
@@ -19,18 +12,6 @@ vi.mock("@opencompany/observability", () => ({
   captureException: vi.fn(),
   createLogger: vi.fn(() => mocks.logger),
 }));
-
-vi.mock("next/server", () => ({
-  after: vi.fn(),
-}));
-
-vi.mock("@/lib/agents/sync-events", () => ({
-  dispatchAgentSyncRequested: vi.fn(),
-}));
-
-const afterMock = vi.mocked(after);
-const captureExceptionMock = vi.mocked(captureException);
-const dispatchAgentSyncRequestedMock = vi.mocked(dispatchAgentSyncRequested);
 
 function createDbMock() {
   const insertedValues: Record<string, unknown>[] = [];
@@ -58,7 +39,7 @@ describe("agent sync job logging", () => {
     vi.clearAllMocks();
   });
 
-  it("prepares the sync job upsert and queue metadata from the same next run time", () => {
+  it("enqueues the agent into the workspace projection outbox with deterministic timing", () => {
     const { db, conflictSets, insertedValues } = createDbMock();
     const now = new Date("2026-05-24T12:00:00.000Z");
 
@@ -78,27 +59,25 @@ describe("agent sync job logging", () => {
 
     expect(result.query).toEqual({ query: "agent-sync-job-upsert" });
     expect(insertedValues[0]).toMatchObject({
-      agentId: "agt_123",
       workspaceId: "wks_123",
-      path: "agents/leo/leo.agent",
+      repoPath: "agents/leo/leo.agent",
+      sourceKind: "agent",
+      sourceRef: "agt_123",
+      operation: "upsert",
       desiredHash: "hash_123",
-      desiredVersion: 4,
       previousPath: "agents/old/old.agent",
       previousBlobSha: "blob_123",
-      status: "pending",
-      attempts: 0,
       nextRunAt: new Date("2026-05-24T12:00:10.000Z"),
-      lastError: null,
       updatedAt: now,
     });
     expect(conflictSets[0]).toMatchObject({
-      path: "agents/leo/leo.agent",
+      sourceKind: "agent",
+      sourceRef: "agt_123",
+      operation: "upsert",
       desiredHash: "hash_123",
-      desiredVersion: 4,
       previousPath: "agents/old/old.agent",
       previousBlobSha: "blob_123",
       status: "pending",
-      attempts: 0,
       nextRunAt: new Date("2026-05-24T12:00:10.000Z"),
       lastError: null,
       updatedAt: now,
@@ -137,70 +116,6 @@ describe("agent sync job logging", () => {
       next_run_at: "2026-05-24T12:00:10.000Z",
       has_previous_path: false,
       has_previous_blob_sha: false,
-    });
-  });
-});
-
-describe("agent sync dispatch scheduling", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("logs Inngest event ids when dispatch succeeds", async () => {
-    dispatchAgentSyncRequestedMock.mockResolvedValue({ ids: ["evt_123"] });
-
-    scheduleAgentSyncDispatch({
-      id: "agt_123",
-      workspaceId: "wks_123",
-      path: "agents/leo/leo.agent",
-    });
-
-    const callback = afterMock.mock.calls[0]?.[0];
-    expect(callback).toBeTypeOf("function");
-    await callback?.();
-
-    expect(dispatchAgentSyncRequestedMock).toHaveBeenCalledWith({
-      agentId: "agt_123",
-      workspaceId: "wks_123",
-    });
-    expect(mocks.logger.info).toHaveBeenCalledWith("Dispatched agent GitHub sync event", {
-      event: "opencompany.agent_sync_dispatch_succeeded",
-      agent_id: "agt_123",
-      workspace_id: "wks_123",
-      path: "agents/leo/leo.agent",
-      inngest_event_ids: ["evt_123"],
-    });
-  });
-
-  it("captures and logs dispatch failures without changing sync status", async () => {
-    const error = new Error("Inngest API Error: 401 Event key not found");
-    dispatchAgentSyncRequestedMock.mockRejectedValue(error);
-
-    scheduleAgentSyncDispatch({
-      id: "agt_123",
-      workspaceId: "wks_123",
-      path: "agents/leo/leo.agent",
-    });
-
-    const callback = afterMock.mock.calls[0]?.[0];
-    expect(callback).toBeTypeOf("function");
-    await callback?.();
-
-    expect(captureExceptionMock).toHaveBeenCalledWith(error, {
-      event: "opencompany.agent_sync_dispatch_failed",
-      agent_id: "agt_123",
-      workspace_id: "wks_123",
-      path: "agents/leo/leo.agent",
-      dispatch_status_marked_failed: false,
-    });
-    expect(mocks.logger.error).toHaveBeenCalledWith("Failed to dispatch agent GitHub sync event", {
-      event: "opencompany.agent_sync_dispatch_failed",
-      agent_id: "agt_123",
-      workspace_id: "wks_123",
-      path: "agents/leo/leo.agent",
-      dispatch_status_marked_failed: false,
-      error_name: "Error",
-      error_message: "Inngest API Error: 401 Event key not found",
     });
   });
 });
