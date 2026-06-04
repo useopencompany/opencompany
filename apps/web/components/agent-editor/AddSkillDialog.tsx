@@ -2,6 +2,7 @@
 
 import { Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { saveSkill } from "@/lib/skills/actions";
 
 export type AddedSkill = {
   id: string;
@@ -91,18 +92,21 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
     setStatus("adding");
     setError(null);
     try {
-      const response = await fetch("/api/skills", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, selectedPath: preview.source.path }),
+      // Save the exact source we previewed, never the live input — the field may have changed
+      // since "Resolve" and we must persist what the user is looking at.
+      const result = await saveSkill({
+        url: preview.source.url,
+        selectedPath: preview.source.path,
       });
-      const data = await response.json();
-      if (!response.ok || data.status !== "saved") {
-        setError(typeof data.error === "string" ? data.error : "Couldn't add that skill.");
+      if (result.status !== "saved") {
+        setError(result.status === "error" ? result.message : "Couldn't add that skill.");
         return;
       }
-      const skill = data.skill as { id: string; name: string; description: string };
-      onAdded({ id: skill.id, name: skill.name, description: skill.description });
+      onAdded({
+        id: result.skill.id,
+        name: result.skill.name,
+        description: result.skill.description,
+      });
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -139,7 +143,14 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
               ref={inputRef}
               type="text"
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                // Editing the URL invalidates any resolved preview/candidates, so the dialog
+                // can't add a source that no longer matches what's in the field.
+                setUrl(e.target.value);
+                setPreview(null);
+                setCandidates(null);
+                setError(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && url.trim() && !busy) resolve();
               }}

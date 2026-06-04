@@ -55,6 +55,12 @@ vi.mock("@/lib/agent-schedules/actions", () => ({
   runAgentScheduleNow: vi.fn(),
 }));
 
+// The editor's "Add skill" dialog imports this server action; stub it so the test doesn't
+// pull the real auth/server import chain into the client render.
+vi.mock("@/lib/skills/actions", () => ({
+  saveSkill: vi.fn(),
+}));
+
 vi.mock("@/lib/agent-sessions/payload", () => ({
   seedSessionQueries: vi.fn(),
 }));

@@ -175,7 +175,7 @@ export function validateAgentFileSource(source: string): AgentFileValidationResu
     reparsed.title !== parsed.title ||
     reparsed.config.model.name !== parsed.config.model.name ||
     reparsed.config.instructions !== parsed.config.instructions ||
-    (reparsed.config.skills?.length ?? 0) !== (parsed.config.skills?.length ?? 0)
+    JSON.stringify(reparsed.config.skills ?? []) !== JSON.stringify(parsed.config.skills ?? [])
   ) {
     return {
       ok: false,

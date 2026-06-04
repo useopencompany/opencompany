@@ -144,10 +144,14 @@ export function createGitHubSkillFetcher(): SkillResolverFetcher {
       const entries = Array.isArray(json.tree) ? json.tree : [];
       return entries.flatMap<SkillTreeEntry>((entry) => {
         if (typeof entry.path !== "string" || typeof entry.mode !== "string") return [];
+        // Only files and directories are mountable. Drop anything else (notably submodules,
+        // which come back as type "commit") rather than misclassifying them as blobs and then
+        // trying to fetch their contents.
+        if (entry.type !== "blob" && entry.type !== "tree") return [];
         return [
           {
             path: entry.path,
-            type: entry.type === "tree" ? "tree" : "blob",
+            type: entry.type,
             mode: entry.mode,
             ...(typeof entry.size === "number" ? { size: entry.size } : {}),
           },
@@ -501,7 +505,15 @@ export async function resolveSkill(input: {
       throw new SkillResolverError("No valid SKILL.md (with name and description) was found.");
     }
     if (candidates.length === 1) {
-      return finalizeSkill({ ...input, parsed, commit, tree, candidate: candidates[0]!, reserved });
+      return finalizeSkill({
+        ...input,
+        parsed,
+        ref,
+        commit,
+        tree,
+        candidate: candidates[0]!,
+        reserved,
+      });
     }
     return {
       status: "ambiguous",
@@ -520,6 +532,7 @@ export async function resolveSkill(input: {
   return finalizeSkill({
     ...input,
     parsed,
+    ref,
     commit,
     tree,
     candidate: { path: chosenDir, ...frontmatter },
@@ -530,12 +543,15 @@ export async function resolveSkill(input: {
 async function finalizeSkill(input: {
   parsed: ParsedSkillUrl;
   fetcher: SkillResolverFetcher;
+  // The branch/ref already resolved by resolveSkill, threaded through so we don't re-fetch
+  // defaultBranch and risk source.ref drifting from the commit we resolved against.
+  ref: string;
   commit: string;
   tree: SkillTreeEntry[];
   candidate: SkillCandidate;
   reserved: Set<string>;
 }): Promise<ResolveSkillResult> {
-  const { parsed, commit, tree, candidate, reserved, fetcher } = input;
+  const { parsed, ref, commit, tree, candidate, reserved, fetcher } = input;
   const files = await gatherSkillFiles({
     tree,
     dir: candidate.path,
@@ -563,7 +579,7 @@ async function finalizeSkill(input: {
       source: {
         type: parsed.sourceType,
         url: parsed.url,
-        ref: parsed.ref ?? (await fetcher.defaultBranch(parsed.owner, parsed.repo)),
+        ref,
         path: candidate.path,
       },
       resolvedCommit: commit,

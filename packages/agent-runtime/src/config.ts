@@ -86,8 +86,14 @@ export function resolveAgentRuntimeConfig(input: {
     skills.length
       ? `Skills available this session — when a task matches one, read its SKILL.md first and follow it: ${skills
           .map((skill) => {
-            const provenance = skill.source ? ` [from ${skill.source.url}]` : "";
-            return `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)${provenance}`;
+            // External skills carry untrusted name/description (and a url) sourced from a
+            // third-party repo. Keep those out of the prompt — advertise only the trusted
+            // mount path and a normalized source type, and let the model read SKILL.md for the
+            // rest. Built-in skills ship in code, so their name/description are trusted.
+            if (skill.source) {
+              return `External ${skill.source.type} skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`;
+            }
+            return `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`;
           })
           .join(
             "; ",

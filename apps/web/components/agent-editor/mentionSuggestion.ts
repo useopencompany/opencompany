@@ -76,7 +76,7 @@ export function createMentionSuggestion({
           component?.updateProps({
             ...props,
             command: (item: MentionCommandItem) => {
-              if (item.action === "schedule") {
+              if (item.action === "schedule" || item.action === "add-skill") {
                 props.editor.chain().focus().deleteRange(props.range).run();
                 return;
               }

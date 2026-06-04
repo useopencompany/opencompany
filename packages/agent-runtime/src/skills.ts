@@ -454,6 +454,27 @@ export function resolveEnabledBuiltinSkillFiles(
   return AGENT_SKILL_CATALOG.filter((skill) => ids.has(skill.id));
 }
 
+// The only hosts an external skill source url may point at. Mirrors the resolver's SSRF
+// allowlist so a hand-edited `.agent` can't smuggle an arbitrary `https://…` through.
+const ALLOWED_SKILL_SOURCE_HOSTS = new Set([
+  "github.com",
+  "www.github.com",
+  "skills.sh",
+  "www.skills.sh",
+]);
+
+function isAllowedSkillSourceUrl(url: string): boolean {
+  if (!url) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  return ALLOWED_SKILL_SOURCE_HOSTS.has(parsed.hostname.toLowerCase());
+}
+
 // Validate the *shape* of an external skill reference (no DB, no network). Returns a
 // normalized reference or null. A malformed external object is dropped entirely so it can
 // never half-mount. Integrity-vs-content checks happen at resolve/materialize time.
@@ -473,7 +494,7 @@ export function normalizeExternalSkillReference(
   const type = sourceRecord.type;
   if (type !== "github" && type !== "skills.sh") return null;
   const url = typeof sourceRecord.url === "string" ? sourceRecord.url.trim() : "";
-  if (!/^https:\/\//.test(url)) return null;
+  if (!isAllowedSkillSourceUrl(url)) return null;
   const ref = typeof sourceRecord.ref === "string" ? sourceRecord.ref.trim() : "";
   if (!ref) return null;
   const path = typeof sourceRecord.path === "string" ? sourceRecord.path.trim() : "";

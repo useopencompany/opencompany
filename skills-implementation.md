@@ -18,7 +18,9 @@ built-in skills, just sourced externally.
 ## Design decisions
 
 1. **Workspace-scoped reusable catalog.** One `workspace_skill_snapshots` table; any agent in
-   the workspace references a skill via `@skill/<id>`. Deduped by content hash.
+   the workspace references a skill via `@skill/<id>`. Deduped by source
+   (`workspace_id`, `source_url`, `requested_ref`, `skill_path`); `integrity` is stored for
+   change detection but is not part of the unique key.
 2. **Track branch latest (not pinned).** The runner re-resolves each skill to its branch HEAD
    on session start (5-minute freshness TTL + cheap HEAD revalidation). Always fresh.
    Reproducibility was traded away deliberately; pinning can be added later with no schema
@@ -31,7 +33,7 @@ built-in skills, just sourced externally.
 
 ## Architecture & data flow
 
-```
+```text
 Editor (@skill → "Add skill from GitHub URL")
   → POST /api/skills/resolve   preview (parse URL, fetch, validate, hash) — no DB write
   → POST /api/skills           persist snapshot to workspace catalog

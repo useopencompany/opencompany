@@ -142,6 +142,9 @@ async function upsertSnapshot(
         workspaceSkillSnapshots.skillPath,
       ],
       set: {
+        // Realign the persisted mount id with the ref the session is materializing under, so
+        // anything that rebuilds refs from skill_id can't resurrect a stale mount id.
+        skillId: ref.id,
         name: resolved.name,
         description: resolved.description,
         resolvedCommit: resolved.resolvedCommit,
