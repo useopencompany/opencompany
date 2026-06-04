@@ -42,6 +42,9 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel web envs | Base64-encoded 32-byte key used to encrypt workspace provider credentials stored in Neon. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
+| `SLACK_SUPPORT_BOT_TOKEN` | Vercel, Render | `xoxb-…` bot token for OC's own support Slack app. Provisions a private Slack Connect channel per workspace after onboarding. Server-only, never `NEXT_PUBLIC`. Empty = feature disabled (no-ops to `failed`, onboarding never crashes). Distinct from `SLACK_MCP_*`. |
+| `SLACK_SUPPORT_TEAM_ID` | Vercel, Render | OC Slack workspace/team id (`T…`), denormalized for link building. |
+| `SLACK_SUPPORT_MEMBER_IDS` | Vercel, Render | Comma-separated `U…` ids of OC support members auto-invited to each channel. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
 ## Vercel Web
