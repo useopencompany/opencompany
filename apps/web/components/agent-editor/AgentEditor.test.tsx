@@ -5,6 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentEditor, type AgentEditorHandle } from "./AgentEditor";
 import { buildAgentMentionItems } from "./tools";
 
+// These tests drive a full TipTap editor through `userEvent`, and the first one
+// pays the editor's one-time extension warm-up. That stays well under a second
+// locally but can brush past the 5s default on a loaded CI runner (the suite
+// reports ~300s of jsdom environment time). Give the file generous headroom so a
+// slow runner doesn't flake; a genuinely hung test still fails at 20s.
+vi.setConfig({ testTimeout: 20_000 });
+
 const repositoryBinding = {
   provider: "github" as const,
   resourceType: "repository" as const,

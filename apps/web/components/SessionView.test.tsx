@@ -448,6 +448,46 @@ describe("AssistantMessageContent — tool approvals", () => {
     expect(screen.getByText("timed out")).toBeInTheDocument();
     expect(screen.queryByText("running")).not.toBeInTheDocument();
   });
+
+  it("does not keep showing the approval prompt after the approval is decided", () => {
+    const message = makeMessage({ status: "running" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "approved",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+        decisionSource: "user",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("approved")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for your approval.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
+  });
+
+  it("keeps an approved running tool visible when the suspended assistant message is completed", () => {
+    const message = makeMessage({ status: "completed" });
+    const parts = [
+      makeApprovalToolCallPart({
+        status: "approved",
+        providerKey: "linear",
+        permissionGroup: "post",
+        requestedAt: "2026-06-02T08:51:35.162Z",
+        decisionSource: "user",
+      }),
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.getByText("Saving Linear comment")).toBeInTheDocument();
+    expect(screen.getByText("approved")).toBeInTheDocument();
+    expect(screen.queryByText("1 step")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for your approval.")).not.toBeInTheDocument();
+  });
 });
 
 describe("AssistantMessageContent — completed message regression", () => {
@@ -602,6 +642,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       totalCostUsdMicros: 0,
       modelCostUsdMicros: 0,
       toolCostUsdMicros: 0,
+      sandboxCostUsdMicros: 0,
       providerCostUsdMicros: 0,
       platformFeeUsdMicros: 0,
     },

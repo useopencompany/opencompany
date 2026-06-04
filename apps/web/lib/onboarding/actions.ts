@@ -68,16 +68,13 @@ export async function completeOnboarding(
   const db = getDb();
   const now = new Date();
 
-  await db
-    .update(workspaces)
-    .set({
-      teamSize: values.teamSize,
-      companyUrl: normalized.companyUrl,
-      updatedAt: now,
-    })
-    .where(eq(workspaces.id, workspace.id));
+  logger.info("Completing onboarding", {
+    event: "opencompany.onboarding_completion_requested",
+    workspace_id: workspace.id,
+    user_id: user.id,
+  });
 
-  await db
+  const [insertedOnboarding] = await db
     .insert(onboardingResponses)
     .values({
       userId: user.id,
@@ -89,22 +86,40 @@ export async function completeOnboarding(
       helpAreas: normalized.helpAreas,
       updatedAt: now,
     })
-    .onConflictDoUpdate({
+    .onConflictDoNothing({
       target: onboardingResponses.userId,
-      set: {
-        workspaceId: workspace.id,
-        heardFrom: values.heardFrom,
-        heardFromDetail: values.heardFrom === "other" ? values.heardFromDetail : null,
-        role: values.role,
-        agentExperience: values.agentExperience,
-        helpAreas: normalized.helpAreas,
-        updatedAt: now,
-      },
+    })
+    .returning({ userId: onboardingResponses.userId });
+
+  if (!insertedOnboarding) {
+    logger.info("Skipping duplicate onboarding completion", {
+      event: "opencompany.onboarding_completion_duplicate",
+      workspace_id: workspace.id,
+      user_id: user.id,
     });
+    redirect("/");
+  }
+
+  await db
+    .update(workspaces)
+    .set({
+      teamSize: values.teamSize,
+      companyUrl: normalized.companyUrl,
+      updatedAt: now,
+    })
+    .where(eq(workspaces.id, workspace.id));
 
   const scaffold = await ensureUserOnboardingScaffold({
     userId: user.id,
     workspaceId: workspace.id,
+  });
+
+  logger.info("Resolved onboarding scaffold", {
+    event: "opencompany.onboarding_scaffold_resolved",
+    workspace_id: workspace.id,
+    user_id: user.id,
+    agent_id: scaffold.agentId,
+    created: scaffold.created,
   });
 
   await captureServerEvent("onboarding_completed", user.id, {
@@ -124,6 +139,12 @@ export async function completeOnboarding(
     let sessionId: string | null = null;
 
     try {
+      logger.info("Starting onboarding setup session", {
+        event: "opencompany.onboarding_setup_session_starting",
+        workspace_id: workspace.id,
+        user_id: user.id,
+        agent_id: scaffold.agentId,
+      });
       sessionId = await startSeededAgentSession({
         agentId: scaffold.agentId,
         userId: user.id,
@@ -153,8 +174,22 @@ export async function completeOnboarding(
     }
 
     if (sessionId) {
+      logger.info("Started onboarding setup session", {
+        event: "opencompany.onboarding_setup_session_started",
+        workspace_id: workspace.id,
+        user_id: user.id,
+        agent_id: scaffold.agentId,
+        session_id: sessionId,
+      });
       redirect(`/session/${sessionId}`);
     }
+
+    logger.warn("Onboarding setup session was not created", {
+      event: "opencompany.onboarding_setup_session_missing",
+      workspace_id: workspace.id,
+      user_id: user.id,
+      agent_id: scaffold.agentId,
+    });
   }
 
   redirect("/");

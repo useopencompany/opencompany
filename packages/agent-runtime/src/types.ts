@@ -55,8 +55,10 @@ export type AgentToolId =
   | "tiktok"
   | "instagram"
   | "amp"
+  | "opencode"
   | "linear"
-  | "slack";
+  | "slack"
+  | "posthog";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -102,18 +104,18 @@ export type AgentHostedToolConfig = {
 };
 
 export type AgentCodingToolConfig = {
-  id: "amp";
+  id: "amp" | "opencode";
   type: "coding_agent";
-  provider: "amp";
+  provider: "amp" | "opencode";
   label: string;
   description: string;
   prCapable: boolean;
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear" | "slack";
+  id: "linear" | "slack" | "posthog";
   type: "mcp";
-  server: "linear" | "slack";
+  server: "linear" | "slack" | "posthog";
   label: string;
   description: string;
 };

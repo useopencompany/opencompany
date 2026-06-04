@@ -12,6 +12,7 @@ import type {
 } from "@opencompany/agent-runtime/types";
 import {
   AtSign,
+  BarChart3,
   Clock3,
   Code2,
   FileText,
@@ -123,8 +124,10 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   tiktok: Music2,
   instagram: InstagramIcon,
   amp: Code2,
+  opencode: Code2,
   linear: ListTodo,
   slack: MessageSquare,
+  posthog: BarChart3,
 };
 
 // Real brand logos keyed by the provider prefix of the model id (the part
@@ -333,7 +336,7 @@ function agentMentionId(path: string) {
 }
 
 function isMcpToolId(id: AgentToolId) {
-  return id === "linear" || id === "slack";
+  return id === "linear" || id === "slack" || id === "posthog";
 }
 
 function repositoryMentionId(repository: {

@@ -146,16 +146,48 @@ developer terms.
 **Reconsider if:** Official API cost, rate limits, coverage, compliance requirements, or customer
 credential needs make workspace-owned credentials or another licensed data provider a better fit.
 
+## Apify (Instagram, TikTok social data)
+
+**What it is:** A hosted actor platform used for public Instagram and TikTok profile, feed,
+comment, and search scraping.
+
+**What it does for us:** Powers the profile-oriented `@instagram` and `@tiktok` hosted tools:
+profile lookup, recent profile posts/videos, direct post/video metadata, comments, and search.
+The runner normalizes actor-specific output into stable Profile, Post, and Comment shapes and keeps
+actor ids hidden from agents.
+
+**Where it is used:**
+
+- `packages/agent-runtime/src/tools.ts`.
+- `apps/runner/src/hosted-tools.ts`.
+- `APIFY_API_TOKEN` in `.env.example`.
+
+**Why we use it:** Supadata is a good fit for transcripts, but its public social endpoints are
+direct-media oriented. Apify actors cover handle/profile URLs, recent posts/reels/videos, comments,
+and search, which match real agent use cases like "research this creator" or "summarize recent
+posts from this account." The adapter is provider-agnostic so Bright Data or Data365 can be added
+later without changing the model-facing tool names.
+
+**Status:** Optional. Agents can run without Apify unless they enable `@tiktok` or `@instagram`
+and use profile/feed/comment/search tools. V1 is public data only: no login cookies, private
+profiles, follower/following list scraping, or contact-field extraction.
+
+**Owner:** AI Platform.
+
+**Reconsider if:** Actor reliability, pricing, scale requirements, or compliance requirements make
+Bright Data, Data365, official APIs, or first-party infrastructure a better fit.
+
 ## Supadata (YouTube, TikTok, Instagram)
 
 **What it is:** A hosted API for YouTube search, YouTube video/channel metadata, universal social
 media metadata, and — most importantly — video transcripts, with AI-generated transcription as a
 fallback when a video has no captions.
 
-**What it does for us:** Powers the optional `@youtube`, `@tiktok`, and `@instagram` hosted agent
-tools. Agents can search YouTube, read a video's transcript as text (so the model can "watch" it),
-inspect YouTube video/channel metadata, enumerate a channel's recent uploads, and inspect/read
-public TikTok and Instagram media via Supadata's universal metadata and transcript endpoints.
+**What it does for us:** Powers the optional `@youtube` hosted agent tools and the direct-media
+metadata/transcript tools inside `@tiktok` and `@instagram`. Agents can search YouTube, read a
+video's transcript as text (so the model can "watch" it), inspect YouTube video/channel metadata,
+enumerate a channel's recent uploads, and inspect/read public TikTok and Instagram media via
+Supadata's universal metadata and transcript endpoints.
 
 **Where it is used:**
 
@@ -170,7 +202,8 @@ scrapers are blocked from datacenter IPs. Supadata gives reliable server-side tr
 search and metadata behind one `x-api-key` GET API, matching the existing hosted-tool pattern.
 
 **Status:** Optional. Agents can run without Supadata unless they enable `@youtube`, `@tiktok`, or
-`@instagram`. Comments are not covered — Supadata has no comments endpoint.
+`@instagram`. TikTok and Instagram profile scraping, comments, and search are handled by Apify; the
+Supadata integration remains for direct public media URLs and transcripts.
 
 **Owner:** AI Platform.
 
@@ -237,9 +270,33 @@ Skill-enabled tools are enabled by agent skill configuration:
 Provider-backed coding tools are also enabled by agent configuration:
 
 - `amp_coder` when `@amp` is enabled and bound to a connected GitHub work repository
+- `opencode_coder` when `@opencode` is enabled and bound to a connected GitHub work repository
 
-AMP owns its coding checkout and may clone the selected connected repository directly into `work/`
-for that tool run.
+These coding-agent harnesses own their coding checkout and may clone the selected connected
+repository directly into `work/` for that tool run. They share the repo-clone, diff, draft-PR,
+artifact, and secret-redaction plumbing in `apps/runner/src/coding-agent-shared.ts`.
+
+opencode runs headless as `opencode run --format json` inside the same coding sandbox template.
+It is configured to reach the platform's Vercel AI Gateway through a generated `opencode.json`
+(custom `@ai-sdk/openai-compatible` provider, `OPENCODE_CONFIG` env), so it reuses the existing
+`VERCEL_AI_GATEWAY_API_KEY` rather than provisioning raw provider keys into the sandbox. The model
+is chosen per tool call via the optional `model` argument (validated against `AGENT_MODEL_CATALOG`),
+defaulting to a fixed platform model when omitted. Cost is recorded from opencode's reported token
+usage; dollar attribution is tracked through gateway spend (opencode has no per-run cost API).
+
+> Foundational note: opencode also speaks the Agent Client Protocol (`opencode acp`, JSON-RPC over
+> stdio). A future iteration can run harnesses through an in-runner ACP client to surface their
+> individual tool calls and permission requests through the existing approval gate, and to bring
+> additional harnesses (Claude Code, Codex, Gemini) the same way. Phase 1 intentionally uses the
+> simpler one-shot `opencode run` path that mirrors AMP.
+
+Both harnesses run in the coding sandbox template (which carries `git`, `gh`, and `amp`). The
+`opencode` CLI is made available defensively: `opencode-tool.ts` checks for the binary and installs
+it on demand if missing, so the tool works on the current template without a rebuild. The durable
+option is to bake opencode into `OPENCOMPANY_AMP_E2B_TEMPLATE` — either via the installer or by
+basing that image on e2b's prebuilt `opencode` template and layering `git`/`gh`/`amp` on top. We do
+not point the runner directly at e2b's stock `opencode` template because a session uses one template
+and still needs `gh`/`amp` for the other tools.
 
 Experimental MCP tools are enabled by workspace setup plus agent configuration:
 

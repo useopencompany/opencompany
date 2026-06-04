@@ -17,7 +17,10 @@ describe("AGENT_TOOL_CATALOG", () => {
           throw new Error(`${tool.id} references missing runtime tool ${runtimeToolName}.`);
         }
 
-        expect(runtimeTool.configToolId).toBe(tool.id);
+        const isOwnedByTool =
+          runtimeTool.configToolId === tool.id ||
+          runtimeTool.sharedConfigToolIds?.includes(tool.id) === true;
+        expect(isOwnedByTool).toBe(true);
       }
     }
   });
@@ -44,6 +47,24 @@ describe("AGENT_TOOL_CATALOG", () => {
         requiresAttachedRepository: true,
       }),
     );
+
+    const opencode = AGENT_TOOL_DEFINITION_BY_ID.get("opencode");
+    expect(opencode?.credentialSource).toBe("mixed");
+    expect(opencode?.requiredPlatformEnvVars).toEqual(["VERCEL_AI_GATEWAY_API_KEY"]);
+    expect(opencode?.requiredWorkspaceResource).toBeUndefined();
+    const opencodeRuntimeTools = (opencode?.runtimeTools ?? []).map((name) =>
+      RUNTIME_TOOL_DEFINITION_BY_NAME.get(name),
+    );
+    expect(opencodeRuntimeTools).toContainEqual(
+      expect.objectContaining({
+        name: "opencode_coder",
+        configToolId: "opencode",
+      }),
+    );
+    expect(
+      opencodeRuntimeTools.find((tool) => tool?.name === "opencode_coder")
+        ?.requiresAttachedRepository,
+    ).toBeUndefined();
   });
 
   it("exposes Amp modes on amp_coder", () => {
@@ -85,19 +106,37 @@ describe("AGENT_TOOL_CATALOG", () => {
     ]);
   });
 
-  it("documents platform-only credentials for TikTok and Instagram through Supadata", () => {
+  it("documents platform-only credentials for TikTok and Instagram through Apify and Supadata", () => {
     const tiktok = AGENT_TOOL_DEFINITION_BY_ID.get("tiktok");
     const instagram = AGENT_TOOL_DEFINITION_BY_ID.get("instagram");
 
     expect(tiktok?.credentialSource).toBe("platform");
-    expect(tiktok?.requiredPlatformEnvVars).toEqual(["SUPADATA_API_KEY"]);
+    expect(tiktok?.requiredPlatformEnvVars).toEqual(["APIFY_API_TOKEN", "SUPADATA_API_KEY"]);
     expect(tiktok?.requiredWorkspaceResource).toBeUndefined();
-    expect(tiktok?.runtimeTools).toEqual(["tiktok_get_metadata", "tiktok_get_transcript"]);
+    expect(tiktok?.runtimeTools).toEqual([
+      "tiktok_get_profile",
+      "tiktok_list_profile_posts",
+      "tiktok_get_video",
+      "tiktok_get_comments",
+      "tiktok_search",
+      "social_get_job",
+      "tiktok_get_metadata",
+      "tiktok_get_transcript",
+    ]);
 
     expect(instagram?.credentialSource).toBe("platform");
-    expect(instagram?.requiredPlatformEnvVars).toEqual(["SUPADATA_API_KEY"]);
+    expect(instagram?.requiredPlatformEnvVars).toEqual(["APIFY_API_TOKEN", "SUPADATA_API_KEY"]);
     expect(instagram?.requiredWorkspaceResource).toBeUndefined();
-    expect(instagram?.runtimeTools).toEqual(["instagram_get_metadata", "instagram_get_transcript"]);
+    expect(instagram?.runtimeTools).toEqual([
+      "instagram_get_profile",
+      "instagram_list_profile_posts",
+      "instagram_get_post",
+      "instagram_get_comments",
+      "instagram_search_profiles",
+      "social_get_job",
+      "instagram_get_metadata",
+      "instagram_get_transcript",
+    ]);
   });
 });
 
@@ -264,6 +303,19 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     ).not.toContain("amp_coder");
   });
 
+  it("enables opencode_coder when opencode is selected, even without an attached repository", () => {
+    const opencodeTool = { id: "opencode" };
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [opencodeTool] })).toContain(
+      "opencode_coder",
+    );
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [opencodeTool], repositories: [repo] }),
+    ).toContain("opencode_coder");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] }),
+    ).not.toContain("opencode_coder");
+  });
+
   it("adds delegate_to_agent only when delegatable agents are present", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
     expect(
@@ -284,6 +336,16 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
         "x_get_discussion",
         "x_get_trends",
       ]),
+    );
+  });
+
+  it("enables shared social job polling when either social platform is selected", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("social_get_job");
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "instagram" }] })).toEqual(
+      expect.arrayContaining(["instagram_get_profile", "social_get_job"]),
+    );
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "tiktok" }] })).toEqual(
+      expect.arrayContaining(["tiktok_get_profile", "social_get_job"]),
     );
   });
 });

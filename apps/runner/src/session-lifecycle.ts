@@ -3,6 +3,7 @@ import {
   normalizeAgentConfig,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
+import { DEFAULT_SANDBOX_RESOURCES, type SandboxResourceConfig } from "@opencompany/billing";
 import {
   agentSessionAfterSessionRuns,
   agentSessionEvents,
@@ -100,14 +101,36 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   }
 }
 
-// The richer sandbox template (with git, gh, and amp installed) is used whenever
-// the agent has at least one GitHub repository attached or amp enabled; plain chat
-// agents get the lighter default template.
+// The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
+// is used whenever the agent has at least one GitHub repository attached or a
+// coding-agent tool enabled; plain chat agents get the lighter default template.
 function resolveSandboxTemplate(agentConfig: AgentConfig, env: RunnerEnv) {
   const needsCodingTemplate =
     agentConfig.integrations.github.repositories.length > 0 ||
-    agentConfig.tools.some((tool) => tool.id === "amp");
+    agentConfig.tools.some((tool) => tool.id === "amp" || tool.id === "opencode");
   return needsCodingTemplate ? (env.ampE2bTemplate ?? "amp") : env.e2bTemplate;
+}
+
+// Per-template resource overrides used to price sandbox compute. Both current templates
+// run on E2B's base allocation; add an entry here if a template is ever provisioned with
+// a custom vCPU/RAM size so billing tracks the real allocation.
+const SANDBOX_TEMPLATE_RESOURCES: Record<string, SandboxResourceConfig> = {};
+
+export type SandboxBillingInfo = {
+  template: string | null;
+  vcpu: number;
+  ramMib: number;
+};
+
+// Resolve the template + resource allocation a session's sandbox runs on, for billing.
+// Deterministic from the session row + env, so the run lifecycle can compute it without
+// touching E2B.
+export function resolveSandboxBilling(row: LoadedSession, env: RunnerEnv): SandboxBillingInfo {
+  const agentConfig = normalizeAgentConfig(row.agent.config);
+  const template = resolveSandboxTemplate(agentConfig, env) ?? null;
+  const resources =
+    (template ? SANDBOX_TEMPLATE_RESOURCES[template] : undefined) ?? DEFAULT_SANDBOX_RESOURCES;
+  return { template, vcpu: resources.vcpu, ramMib: resources.ramMiB };
 }
 
 export async function parkSandboxWhenIdle(sandbox: SandboxHandle, env: RunnerEnv) {
@@ -155,9 +178,16 @@ export async function loadSession(sessionId: string) {
   return { ...row, repository: repository ?? null };
 }
 
-export function optionalUserName(user: Pick<typeof users.$inferSelect, "firstName" | "lastName">) {
+export function optionalUserContext(
+  user: Pick<typeof users.$inferSelect, "email" | "firstName" | "lastName">,
+) {
   const userName = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-  return userName ? { userName } : {};
+  return {
+    ...(userName ? { userName } : {}),
+    ...(user.firstName ? { userFirstName: user.firstName } : {}),
+    ...(user.lastName ? { userLastName: user.lastName } : {}),
+    ...(user.email ? { userEmail: user.email } : {}),
+  };
 }
 
 export type LoadedSession = Awaited<ReturnType<typeof loadSession>>;

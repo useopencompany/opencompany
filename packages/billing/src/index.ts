@@ -58,7 +58,8 @@ export type WorkspaceUsageDebitInput = {
   messageId?: string | null;
   modelUsageId?: number | null;
   toolUsageId?: number | null;
-  source: "model_usage" | "tool_usage";
+  sandboxUsageId?: number | null;
+  source: "model_usage" | "tool_usage" | "sandbox_usage";
   providerCostUsdMicros: number;
   platformFeeUsdMicros: number;
   totalCostUsdMicros: number;
@@ -487,6 +488,72 @@ export function calculateHostedToolUsageCost(input: {
   };
 }
 
+// --- E2B sandbox compute pricing ---------------------------------------------
+// E2B bills sandbox compute per second of *running* (non-paused) time, scaled by the
+// sandbox's allocated vCPU and RAM. Rates are expressed in USD micros per second.
+// ⚠️ Confirm these against E2B's current published compute pricing before relying on
+// the billed amounts — bump SANDBOX_PRICING_VERSION when they change.
+export const SANDBOX_VCPU_USD_MICROS_PER_SECOND = 14; // $0.000014 per vCPU-second
+export const SANDBOX_RAM_GIB_USD_MICROS_PER_SECOND = 4.5; // $0.0000045 per GiB-second
+const SANDBOX_PRICING_VERSION = "e2b.2026-06.standard";
+const MIB_PER_GIB = 1024;
+
+export type SandboxResourceConfig = {
+  vcpu: number;
+  ramMiB: number;
+};
+
+// E2B base sandbox allocation. Templates that change CPU/RAM should resolve their own
+// resources before pricing (see the runner's resolveSandboxResources).
+export const DEFAULT_SANDBOX_RESOURCES: SandboxResourceConfig = { vcpu: 2, ramMiB: 512 };
+
+export type SandboxUsageCostInput = {
+  template?: string | null;
+  vcpu: number;
+  ramMiB: number;
+  activeMs: number;
+};
+
+export function calculateSandboxUsageCost(input: SandboxUsageCostInput): UsageCostResult {
+  const activeMs =
+    Number.isFinite(input.activeMs) && input.activeMs > 0 ? Math.floor(input.activeMs) : 0;
+  const activeSeconds = activeMs / 1000;
+  const vcpu = Number.isFinite(input.vcpu) && input.vcpu > 0 ? input.vcpu : 0;
+  const ramGiB = Number.isFinite(input.ramMiB) && input.ramMiB > 0 ? input.ramMiB / MIB_PER_GIB : 0;
+
+  const vcpuCostUsdMicros = Math.round(activeSeconds * vcpu * SANDBOX_VCPU_USD_MICROS_PER_SECOND);
+  const ramCostUsdMicros = Math.round(
+    activeSeconds * ramGiB * SANDBOX_RAM_GIB_USD_MICROS_PER_SECOND,
+  );
+  const providerCostUsdMicros = vcpuCostUsdMicros + ramCostUsdMicros;
+  const platformFeeUsdMicros = calculatePlatformFeeUsdMicros(providerCostUsdMicros);
+  const totalCostUsdMicros = providerCostUsdMicros + platformFeeUsdMicros;
+
+  return {
+    billable: totalCostUsdMicros > 0,
+    providerCostUsdMicros,
+    platformFeeUsdMicros,
+    totalCostUsdMicros,
+    costBasis: {
+      kind: "sandbox_usage",
+      template: input.template ?? null,
+      pricingVersion: SANDBOX_PRICING_VERSION,
+      platformFeeBps: PLATFORM_FEE_BPS,
+      vcpu,
+      ramMiB: Number.isFinite(input.ramMiB) && input.ramMiB > 0 ? Math.floor(input.ramMiB) : 0,
+      activeMs,
+      ratesUsdMicrosPerSecond: {
+        vcpu: SANDBOX_VCPU_USD_MICROS_PER_SECOND,
+        ramGiB: SANDBOX_RAM_GIB_USD_MICROS_PER_SECOND,
+      },
+      costsUsdMicros: {
+        vcpu: vcpuCostUsdMicros,
+        ram: ramCostUsdMicros,
+      },
+    },
+  };
+}
+
 export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput) {
   if (input.totalCostUsdMicros <= 0) {
     return { ok: false as const, reason: "zero_cost" as const };
@@ -515,6 +582,7 @@ export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput)
         message_id,
         model_usage_id,
         tool_usage_id,
+        sandbox_usage_id,
         provider_cost_usd_micros,
         platform_fee_usd_micros,
         cost_basis,
@@ -530,6 +598,7 @@ export async function recordWorkspaceUsageDebit(input: WorkspaceUsageDebitInput)
         ${input.messageId ?? null},
         ${input.modelUsageId ?? null},
         ${input.toolUsageId ?? null},
+        ${input.sandboxUsageId ?? null},
         ${input.providerCostUsdMicros},
         ${input.platformFeeUsdMicros},
         ${JSON.stringify(input.costBasis)}::jsonb,

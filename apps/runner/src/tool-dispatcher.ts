@@ -43,6 +43,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import { runOpencodeCoderTool } from "./opencode-tool";
 import {
   RunAbortError,
   type RunControlCheck,
@@ -68,10 +69,21 @@ const HOSTED_TOOL_CALL_LIMITS_PER_MESSAGE: Partial<Record<RuntimeToolName, numbe
   youtube_get_transcript: 6,
   youtube_get_channel: 6,
   youtube_list_channel_videos: 4,
+  tiktok_get_profile: 8,
+  tiktok_list_profile_posts: 4,
+  tiktok_get_video: 8,
+  tiktok_get_comments: 4,
+  tiktok_search: 4,
   tiktok_get_metadata: 8,
   tiktok_get_transcript: 6,
+  instagram_get_profile: 8,
+  instagram_list_profile_posts: 4,
+  instagram_get_post: 8,
+  instagram_get_comments: 4,
+  instagram_search_profiles: 4,
   instagram_get_metadata: 8,
   instagram_get_transcript: 6,
+  social_get_job: 8,
   web_fetch: 12,
 };
 const COMMAND_OUTPUT_FLUSH_INTERVAL_MS = 250;
@@ -395,6 +407,32 @@ async function executeRuntimeToolWithTracing(input: {
           usage = ampResult.usage;
         }
         return ampResult;
+      }
+      if (input.definition.name === "opencode_coder") {
+        if (!input.workspaceId || !input.agentConfig) {
+          throw new Error("opencode requires workspace and agent configuration context.");
+        }
+        const opencodeResult = await runOpencodeCoderTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          sessionId: input.sessionId,
+          messageId: input.assistantMessageId,
+          workspaceId: input.workspaceId,
+          toolCallId: input.toolCallId,
+          agentConfig: input.agentConfig,
+          env: input.env,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          onOutput: async (delta) => {
+            await input.checkAbort();
+            commandOutput.push("stdout", delta);
+          },
+        });
+        if (opencodeResult.usage) {
+          usage = opencodeResult.usage;
+        }
+        return opencodeResult;
       }
       const brainSnapshotBefore =
         input.definition.name === "shell"
@@ -879,8 +917,37 @@ export function formatRuntimePreview(value: unknown) {
 
   const trimmed = text.trim();
   const maxLength = 900;
-  if (trimmed.length <= maxLength) return trimmed;
-  return `${trimmed.slice(0, maxLength - 1)}...`;
+  const preview = trimmed.length <= maxLength ? trimmed : `${trimmed.slice(0, maxLength - 1)}...`;
+  return redactPreviewSecrets(preview);
+}
+
+/**
+ * Redacts secret-like patterns from a tool output/input preview string before it is
+ * persisted to `agent_session_events.payload.outputPreview` (or `inputPreview`).
+ *
+ * This is a best-effort, defence-in-depth layer — it catches patterns that the
+ * known-secret redactor (used for sandbox/shell tools) does not cover, such as raw
+ * API keys returned inside MCP tool responses (e.g. PostHog `phc_…` project API keys).
+ *
+ * Patterns covered:
+ *  - HTTP Authorization header values  (Bearer / Basic tokens)
+ *  - Generic key=value credential pairs (api_key, token, secret, password, access_key)
+ *  - OpenAI-style secret keys          (sk-… ≥12 chars)
+ *  - PostHog personal/project API keys (phc_… ≥12 chars)
+ *  - GitHub personal access tokens     (ghp_ / ghs_ / github_pat_ prefixes)
+ */
+export function redactPreviewSecrets(value: string): string {
+  return value
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
+    .replace(
+      /\b(api[_-]?key|access[_-]?key|secret[_-]?key|secret|token|password)\s*[:=]\s*\S+/gi,
+      "$1=[redacted]",
+    )
+    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, "[redacted]")
+    .replace(/\b(phc_[A-Za-z0-9_-]{12,})\b/g, "[redacted]")
+    .replace(/\b(ghp_[A-Za-z0-9]{36,})\b/g, "[redacted]")
+    .replace(/\b(ghs_[A-Za-z0-9]{36,})\b/g, "[redacted]")
+    .replace(/\b(github_pat_[A-Za-z0-9_]{36,})\b/g, "[redacted]");
 }
 
 function braintrustError(error: unknown) {
