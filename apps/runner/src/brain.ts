@@ -216,7 +216,10 @@ export async function syncBrainFromSandbox(input: {
       .from(brainFiles)
       .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, mount.path)))
       .limit(1);
-    if (current && current.contentHash !== mount.baseHash) {
+    // Nothing canonical to remove (already deleted) — skip without enqueuing a
+    // phantom GitHub delete.
+    if (!current) continue;
+    if (current.contentHash !== mount.baseHash) {
       await appendRuntimeEvent(db, {
         sessionId: input.sessionId,
         type: "brain.conflict",
@@ -224,19 +227,43 @@ export async function syncBrainFromSandbox(input: {
       });
       continue;
     }
-    await db.transaction(async (tx) => {
-      await tx
+    // Compare-and-delete: only remove the row if it still matches the base we
+    // mounted, so a concurrent web/runner write that lands between the read
+    // above and this transaction is preserved instead of being silently
+    // dropped. The delete + enqueue commit together so the projection can't be
+    // orphaned.
+    const removed = await db.transaction(async (tx) => {
+      const deleted = await tx
         .delete(brainFiles)
-        .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, mount.path)));
+        .where(
+          and(
+            eq(brainFiles.workspaceId, input.workspaceId),
+            eq(brainFiles.path, mount.path),
+            eq(brainFiles.contentHash, current.contentHash),
+          ),
+        )
+        .returning({ githubBlobSha: brainFiles.githubBlobSha });
+      if (deleted.length === 0) return null;
       await enqueueWorkspaceSync(tx, {
         workspaceId: input.workspaceId,
         repoPath: brainRepoPath(mount.path),
         sourceKind: "brain",
         operation: "delete",
         desiredHash: null,
-        previousBlobSha: current?.githubBlobSha ?? null,
+        previousBlobSha: deleted[0]?.githubBlobSha ?? null,
       });
+      return deleted[0];
     });
+    if (!removed) {
+      // The file changed after our read; keep the newer content and surface the
+      // conflict instead of deleting it.
+      await appendRuntimeEvent(db, {
+        sessionId: input.sessionId,
+        type: "brain.conflict",
+        payload: { path: mount.path, operation: "delete_conflict" },
+      });
+      continue;
+    }
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
       type: "brain.file_changed",

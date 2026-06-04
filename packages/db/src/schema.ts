@@ -245,6 +245,13 @@ export const agentFiles = pgTable(
 // them to GitHub in one Git Data API commit. This is the consolidation target
 // that replaces brain_sync_jobs / agent_sync_jobs / agent_file_sync_jobs.
 //
+// Those three legacy tables are no longer modelled here, but migration 0038
+// only backfills their in-flight rows into this outbox — it deliberately does
+// NOT drop them. The DROP is deferred to a follow-up migration that should run
+// only after this projector-only release has fully deployed, so the previous
+// web/runner binaries (which still write those tables) keep working during the
+// rollout window.
+//
 // `sourceKind` + `sourceRef` tell the projector where to read desired content:
 //   - "brain"      -> brainFiles row keyed by (workspaceId, logical brain path)
 //   - "agent_file" -> agentFiles row keyed by (workspaceId, repoPath)
