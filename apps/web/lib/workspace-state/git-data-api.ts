@@ -43,6 +43,7 @@ type GitTreeResponse = {
   tree?: Array<{ path?: string; sha?: string; type?: string }>;
 };
 type GitCommitResponse = { sha?: string };
+type BranchHead = { commitSha: string; treeSha: string };
 
 class GitHubApiError extends Error {
   constructor(
@@ -61,6 +62,12 @@ function isRefConflict(error: unknown) {
   // 422 (unprocessable) / 409 (conflict) on ref update == the branch head moved
   // under us between read and update.
   return error instanceof GitHubApiError && (error.status === 409 || error.status === 422);
+}
+
+class GitRefConflictError extends Error {
+  constructor(cause: unknown) {
+    super("GitHub branch ref moved while committing workspace changes.", { cause });
+  }
 }
 
 const GITHUB_REQUEST_TIMEOUT_MS = Number(process.env.GITHUB_REQUEST_TIMEOUT_MS) || 30_000;
@@ -107,10 +114,7 @@ function refPath(repo: RepoRef) {
   return `heads/${encodeURIComponent(repo.defaultBranch)}`;
 }
 
-async function getBranchHead(
-  token: string,
-  repo: RepoRef,
-): Promise<{ commitSha: string; treeSha: string } | null> {
+async function getBranchHead(token: string, repo: RepoRef): Promise<BranchHead | null> {
   let ref: GitRef;
   try {
     ref = await gitHubRequest<GitRef>({
@@ -135,25 +139,53 @@ async function getBranchHead(
   return { commitSha, treeSha };
 }
 
-function buildTreeEntries(upserts: CommitUpsert[], deletes: CommitDelete[]): GitTreeEntryInput[] {
-  return [
-    ...upserts.map(
-      (file): GitTreeEntryInput => ({
-        path: file.path,
-        mode: "100644",
-        type: "blob",
-        content: file.content,
-      }),
-    ),
-    ...deletes.map(
-      (file): GitTreeEntryInput => ({
-        path: file.path,
-        mode: "100644",
-        type: "blob",
-        sha: null,
-      }),
-    ),
-  ];
+async function buildTreeEntries(input: {
+  token: string;
+  repo: RepoRef;
+  head: BranchHead | null;
+  upserts: CommitUpsert[];
+  deletes: CommitDelete[];
+}): Promise<GitTreeEntryInput[]> {
+  const entries: GitTreeEntryInput[] = input.upserts.map((file) => ({
+    path: file.path,
+    mode: "100644",
+    type: "blob",
+    content: file.content,
+  }));
+
+  if (input.deletes.length === 0 || !input.head) return entries;
+
+  const existingBlobPaths = await getTreeBlobPaths(input.token, input.repo, input.head.treeSha);
+  entries.push(
+    ...input.deletes
+      .filter((file) => existingBlobPaths.has(file.path))
+      .map(
+        (file): GitTreeEntryInput => ({
+          path: file.path,
+          mode: "100644",
+          type: "blob",
+          sha: null,
+        }),
+      ),
+  );
+  return entries;
+}
+
+async function getTreeBlobPaths(
+  token: string,
+  repo: RepoRef,
+  treeSha: string,
+): Promise<Set<string>> {
+  const tree = await gitHubRequest<GitTreeResponse>({
+    token,
+    path: `/repos/${repo.fullName}/git/trees/${encodeURIComponent(treeSha)}?recursive=1`,
+    method: "GET",
+  });
+  return new Set(
+    (tree.tree ?? [])
+      .filter((entry) => entry.type === "blob" && typeof entry.path === "string")
+      .map((entry) => entry.path!),
+  );
 }
 
 async function createTree(
@@ -193,21 +225,31 @@ async function createCommit(
 }
 
 async function updateBranchRef(token: string, repo: RepoRef, commitSha: string) {
-  await gitHubRequest({
-    token,
-    path: `/repos/${repo.fullName}/git/refs/${refPath(repo)}`,
-    method: "PATCH",
-    body: { sha: commitSha, force: false },
-  });
+  try {
+    await gitHubRequest({
+      token,
+      path: `/repos/${repo.fullName}/git/refs/${refPath(repo)}`,
+      method: "PATCH",
+      body: { sha: commitSha, force: false },
+    });
+  } catch (error) {
+    if (isRefConflict(error)) throw new GitRefConflictError(error);
+    throw error;
+  }
 }
 
 async function createBranchRef(token: string, repo: RepoRef, commitSha: string) {
-  await gitHubRequest({
-    token,
-    path: `/repos/${repo.fullName}/git/refs`,
-    method: "POST",
-    body: { ref: `refs/${refPath(repo)}`, sha: commitSha },
-  });
+  try {
+    await gitHubRequest({
+      token,
+      path: `/repos/${repo.fullName}/git/refs`,
+      method: "POST",
+      body: { ref: `refs/${refPath(repo)}`, sha: commitSha },
+    });
+  } catch (error) {
+    if (isRefConflict(error)) throw new GitRefConflictError(error);
+    throw error;
+  }
 }
 
 function collectBlobShas(tree: GitTreeResponse, upserts: CommitUpsert[]): Map<string, string> {
@@ -238,10 +280,18 @@ export async function commitWorkspaceChanges(input: {
   if (input.upserts.length === 0 && input.deletes.length === 0) return null;
 
   const token = await getWorkspaceGitHubInstallationToken();
-  const entries = buildTreeEntries(input.upserts, input.deletes);
 
   const attempt = async (): Promise<WorkspaceCommitResult | null> => {
     const head = await getBranchHead(token, input.repo);
+    const entries = await buildTreeEntries({
+      token,
+      repo: input.repo,
+      head,
+      upserts: input.upserts,
+      deletes: input.deletes,
+    });
+    if (entries.length === 0) return null;
+
     const tree = await createTree(token, input.repo, head?.treeSha ?? null, entries);
     if (!tree.sha) throw new Error("GitHub did not return a tree SHA.");
 
@@ -269,7 +319,7 @@ export async function commitWorkspaceChanges(input: {
   } catch (error) {
     // The branch head moved under us (e.g. a concurrent push). Rebuild the tree
     // on the new base and retry exactly once before surfacing the failure.
-    if (!isRefConflict(error)) throw error;
+    if (!(error instanceof GitRefConflictError)) throw error;
     return await attempt();
   }
 }

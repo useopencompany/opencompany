@@ -24,8 +24,8 @@ When an agent is created or edited:
 
 1. `createAgent()` or `updateAgent()` in `apps/web/lib/agents/actions.ts` serializes the agent into the `.agent` file format.
 2. The app stores the latest title, body, parsed config, content hash, and version in Postgres.
-3. The same transaction upserts `agent_sync_jobs` with the desired hash/version and a `nextRunAt` about 10 seconds out.
-4. After the response, the action dispatches `agent.sync_requested` to Inngest.
+3. The same `db.batch([...])` enqueues a row into the unified `workspace_sync_jobs` outbox (via `enqueueWorkspaceSync`) with the desired hash, repo path, and a `nextRunAt` about 10 seconds out.
+4. After the response, the action calls `scheduleWorkspaceSyncDispatch()`, which fire-and-forgets a `workspace.sync_requested` Inngest event.
 5. The UI treats the DB write as saved immediately and separately shows GitHub sync status.
 
 The editor debounces saves by about 600ms in `AgentDetail.tsx`. Failed GitHub syncs should not make the editor look unsaved; they set `githubSyncStatus = failed` and keep the error on the agent row.
@@ -61,43 +61,41 @@ of the normal authority path; they are only reflected after an explicit sync-fro
 ## Synced Workspace Resources
 
 A synced workspace resource is workspace-scoped state whose latest editable version is stored in
-Postgres and whose versioned file copy is materialized to the managed GitHub repo. A write updates
-Postgres and a sync job together, then an Inngest event materializes the desired GitHub file
-asynchronously. Content hashes make repeated jobs idempotent, and the sync job row stores the
-desired state plus retry metadata.
+Postgres and whose file copy is materialized to the managed GitHub repo. Postgres is authoritative.
+Every resource type (agents, brain files, agent bundle files) shares **one** outbox table,
+`workspace_sync_jobs`, and **one** projector. A write updates the canonical resource row and
+enqueues an outbox row in the same `db.batch([...])`; an Inngest event then drains the outbox and
+projects all due jobs for the workspace to GitHub as a single commit. Content hashes make repeated
+jobs idempotent, and each outbox row stores the desired state plus retry metadata.
 
-Current instances:
+Producers (all enqueue via `enqueueWorkspaceSync` from `@opencompany/db/sync-outbox`, which the web
+and runner share):
 
-- Agents use `agents` and `agent_sync_jobs`. Writes live in `apps/web/lib/agents/actions.ts`,
-  materialization lives in `apps/web/lib/agents/materialize.ts`, and dispatch uses
-  `agent.sync_requested`.
-- Brain files use `brain_files` and `brain_sync_jobs`. Writes live in
-  `apps/web/lib/brain/actions.ts`, materialization lives in `apps/web/lib/brain/materialize.ts`,
-  and dispatch uses `brain.sync_requested`.
+- Agents — `apps/web/lib/agents/actions.ts` and `apps/web/lib/agents/create.ts`. Outbox rows use
+  `sourceKind: "agent"` and carry `sourceRef = agentId` (the projector resolves the agent by id, so
+  the row survives title-driven renames).
+- Brain files — `apps/web/lib/brain/actions.ts`. Outbox rows use `sourceKind: "brain"`.
+- Agent bundle files — also enqueued from the agents actions with `sourceKind: "agent_file"`.
 
-Every implementation of this pattern should include:
+The shared pipeline:
 
-- A workspace-scoped unique index on `(workspaceId, path)` when path identifies the resource.
-- A resource `contentHash` column.
-- A `*_sync_jobs` table with desired hash, `nextRunAt`, status, attempts, last error, and previous
-  path/blob metadata for renames or deletes. Include desired version only when the resource is
-  versioned.
-- A single `db.batch([...])` that writes the resource row and upserts the sync job.
-- Fire-and-forget Inngest dispatch after the response has been sent.
-- Idempotent materialization that no-ops when the GitHub synced hash already matches current
-  content and no rename or delete remains.
+- **Outbox** — `workspace_sync_jobs` carries `workspaceId`, `repoPath`, `sourceKind`, `sourceRef`,
+  `operation` (`"upsert" | "delete"`), `desiredHash`, `previousPath`/`previousBlobSha` (for
+  renames/deletes), `status`, `attempts`, `nextRunAt`, and `lastError`. Coalescing is keyed on the
+  unique index `(workspaceId, repoPath)`, so rapid edits to the same path collapse into one pending
+  row. The enqueue helper lives in `packages/db/src/sync-outbox.ts`.
+- **Projector** — `projectWorkspaceToGitHub()` in `apps/web/lib/workspace-state/project.ts` is the
+  only place that writes workspace file state to GitHub. It leases due jobs, resolves canonical
+  content, and commits adds/deletes as a single commit through the Git Data API
+  (`commitWorkspaceChanges()` in `git-data-api.ts`). It marks source rows synced/failed and updates
+  `workspace_repositories.latestHeadSha`/`updatedAt`. It is idempotent under partial failure via
+  hash/status guards and caps a batch at 200 jobs per commit.
+- **Dispatch** — `scheduleWorkspaceSyncDispatch()` (`sync-dispatch.ts`) fire-and-forgets a
+  `workspace.sync_requested` event after the response.
 
-Keep the two current implementations separate. When a third synced workspace resource is added,
-first decide whether to extract shared helpers under `lib/workspace-state/synced-resource/`, and
-whether sync jobs should stay per-resource or move into a generic table. That tradeoff should be
-settled before copying the pattern a third time.
-
-Known differences to preserve or reconcile during extraction:
-
-- Agents are versioned and their sync jobs are keyed by `agentId`.
-- Brain sync jobs are keyed by `(workspaceId, path)` and carry `operation: "upsert" | "delete"`.
-- Brain supports folder rename/delete fan-out, while agents focus on one `.agent` path and
-  title-driven renames.
+When adding a new synced resource type, give it a `contentHash` column, enqueue through
+`enqueueWorkspaceSync` with a new `sourceKind`, and teach the projector's `resolveDesiredContent`
+how to serialize it. No new tables or Inngest functions are required.
 
 ## GitHub Work Integrations
 
@@ -158,17 +156,17 @@ Inngest setup is in:
 - `apps/web/app/api/inngest/route.ts`
 - `scripts/inngest-dev.mjs`
 
-`sync-agent-to-github` listens for `agent.sync_requested`, sleeps 10 seconds to coalesce rapid edits, then calls `materializeAgentToGitHub()`. Cron sweepers also scan due `agent_sync_jobs` and `brain_sync_jobs` rows once per minute and re-dispatch the same sync events, so a missed post-response dispatch can recover without another edit.
+`sync-workspace-to-github` listens for `workspace.sync_requested`, sleeps ~10 seconds to coalesce rapid edits, then calls `projectWorkspaceToGitHub()` in a short drain loop (up to 5 iterations, continuing while the status is `"synced"`) so a backlog larger than one commit's 200-job cap flushes in the same run. `sweep-workspace-sync-outbox` (`apps/web/lib/sync-outbox/sweeper.ts`) runs every minute, scans due `workspace_sync_jobs` rows (pending, retryable failed, or stale-leased `syncing`), groups them by workspace, and re-dispatches `workspace.sync_requested` per workspace, so a missed post-response dispatch recovers without another edit.
 
-`materializeAgentToGitHub()`:
+`projectWorkspaceToGitHub()`:
 
-- loads the latest agent, workspace, and sync job from Postgres;
-- defers if the job's `nextRunAt` is still in the future;
-- no-ops and deletes the job if `githubSyncedHash` already matches the current hash;
-- marks the agent `syncing`, writes the `.agent` file to GitHub, then marks it `synced`;
-- records failure on both the agent and sync job, then rethrows so Inngest retries.
+- loads due outbox jobs for the workspace and leases them (`status = "syncing"`);
+- resolves canonical content per job and plans tree adds/deletes (a rename emits an add at the new path plus a delete of the old);
+- skips no-op jobs whose `githubSyncedHash` already matches the current hash;
+- commits all changes as one commit via the Git Data API, then marks the source rows synced, advances `workspace_repositories.latestHeadSha`/`updatedAt`, and clears the leased jobs;
+- on failure, marks the jobs `failed` with backoff and the source rows `failed`, then rethrows so Inngest retries.
 
-Inngest concurrency is limited to one active sync per `agentId` for agents and one active sync per workspace/path for Brain files. The outbox sweepers fan out recovery events, while the existing sync functions remain the only materialization path.
+Inngest concurrency is limited to one active projection per workspace. The projector is the only path that materializes workspace files to GitHub.
 
 ## Database Model
 
@@ -176,7 +174,7 @@ The high-level table groups are:
 
 - Identity and tenancy: `users`, `workspaces`, `workspace_memberships`, with WorkOS Organizations mapped through `workspaces.workos_organization_id`.
 - Agent editing: `agents` stores the latest DB version and parsed config.
-- GitHub sync: `agent_sync_jobs` stores desired materialization state; `workspace_repositories` maps workspaces to managed GitHub backing repos.
+- GitHub sync: `workspace_sync_jobs` is the unified outbox of desired materialization state for all synced resources; `workspace_repositories` maps workspaces to managed GitHub backing repos and tracks the latest projected head SHA.
 - Agent work integrations: `workspace_integrations` stores connected provider accounts, and
   `workspace_integration_resources` stores provider resources such as GitHub repositories.
 - Agent sessions: `agent_sessions`, `agent_session_messages`, and `agent_session_events` store

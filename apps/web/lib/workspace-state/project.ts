@@ -4,6 +4,7 @@ import {
   agentFiles,
   agents,
   brainFiles,
+  workspaceRepositories,
   workspaceSyncJobs,
   workspaces,
 } from "@opencompany/db/schema";
@@ -125,16 +126,25 @@ export async function projectWorkspaceToGitHub(input: {
     });
 
     if (!commit) {
-      // The tree matched HEAD exactly (already in sync). Treat as a no-op.
-      await deleteLeasedJobs(db, jobIds);
+      // The desired tree already matches HEAD — the content provably exists on
+      // GitHub. Mark the planned source rows synced (so they don't stay stranded
+      // as "pending" with no remaining job to retry) and clear the leased jobs.
+      // We have no new commit/blob SHAs, so leave those columns untouched.
+      await markSyncedAndClear(db, {
+        workspaceId: input.workspaceId,
+        planned,
+        jobIds,
+        commit: null,
+        now: new Date(),
+      });
       return { status: "noop", jobs: planned.length };
     }
 
     await markSyncedAndClear(db, {
+      workspaceId: input.workspaceId,
       planned,
       jobIds,
-      commitSha: commit.commitSha,
-      blobShaByPath: commit.blobShaByPath,
+      commit: { commitSha: commit.commitSha, blobShaByPath: commit.blobShaByPath },
       now: new Date(),
     });
     return {
@@ -256,6 +266,14 @@ function planJob(
     return { job, upsert: null, deletePaths: [] };
   }
 
+  // Defense-in-depth: a stale agent job left at an old path (e.g. a producer that
+  // forgot to clear it on rename) would otherwise re-upsert the agent's content at
+  // that old path and suppress the intended delete. The agent now lives at
+  // currentPath, so this old path must be deleted, never re-written.
+  if (resolved.currentPath && resolved.currentPath !== job.repoPath) {
+    return { job, upsert: null, deletePaths: [job.repoPath] };
+  }
+
   // No-op: already committed at this hash and not a rename. Skip the tree entry
   // but still clear the job. (A rename must always re-emit the move.)
   if (!renamePath && resolved.syncedHash === resolved.committedHash) {
@@ -280,7 +298,15 @@ function resolveDesiredContent(
     agentFileByPath: Map<string, typeof agentFiles.$inferSelect>;
     agentById: Map<string, typeof agents.$inferSelect>;
   },
-): { content: string; committedHash: string; syncedHash: string | null } | null {
+): {
+  content: string;
+  committedHash: string;
+  syncedHash: string | null;
+  // The canonical row's current repo path, when it can move out from under a job
+  // (agents are keyed by id, so their path can drift from job.repoPath). Null for
+  // path-keyed sources (brain, agent_file) where job.repoPath IS the identity.
+  currentPath: string | null;
+} | null {
   if (job.sourceKind === "brain") {
     const row = lookups.brainByPath.get(brainLogicalPath(job.repoPath));
     if (!row) return null;
@@ -288,6 +314,7 @@ function resolveDesiredContent(
       content: row.content,
       committedHash: row.contentHash,
       syncedHash: row.githubSyncedHash,
+      currentPath: null,
     };
   }
   if (job.sourceKind === "agent_file") {
@@ -297,6 +324,7 @@ function resolveDesiredContent(
       content: row.content,
       committedHash: row.contentHash,
       syncedHash: row.githubSyncedHash,
+      currentPath: null,
     };
   }
   if (job.sourceKind === "agent") {
@@ -308,6 +336,7 @@ function resolveDesiredContent(
       content: source,
       committedHash: hashAgentSource(source),
       syncedHash: row.githubSyncedHash,
+      currentPath: row.path,
     };
   }
   return null;
@@ -334,30 +363,33 @@ function serializeAgentSource(agent: typeof agents.$inferSelect): string {
 async function markSyncedAndClear(
   db: Db,
   input: {
+    workspaceId: string;
     planned: PlannedJob[];
     jobIds: number[];
-    commitSha: string;
-    blobShaByPath: Map<string, string>;
+    // The commit just pushed, or null when the desired tree already matched HEAD.
+    // On null we only refresh the synced-hash/status gate columns and leave
+    // githubBlobSha/githubCommitSha (and the repo HEAD) untouched.
+    commit: { commitSha: string; blobShaByPath: Map<string, string> } | null;
     now: Date;
   },
 ) {
   const writes = [];
   for (const entry of input.planned) {
     if (!entry.upsert) continue;
-    const blobSha = input.blobShaByPath.get(entry.upsert.path) ?? null;
-    const synced = {
-      githubBlobSha: blobSha,
-      githubCommitSha: input.commitSha,
-      githubSyncedHash: entry.upsert.committedHash,
-      githubSyncedAt: input.now,
-      githubSyncStatus: "synced" as const,
-      githubSyncError: null,
-      updatedAt: input.now,
-    };
-    writes.push(
-      markSourceSynced(db, entry.job, entry.upsert.committedHash, synced, input.commitSha),
-    );
+    writes.push(markSourceSynced(db, entry.job, entry.upsert.committedHash, input.commit, input.now));
   }
+  // Keep the settings panel's "last synced" honest: a real commit advances both
+  // HEAD and the timestamp; an already-in-sync projection just bumps the time.
+  writes.push(
+    db
+      .update(workspaceRepositories)
+      .set(
+        input.commit
+          ? { latestHeadSha: input.commit.commitSha, updatedAt: input.now }
+          : { updatedAt: input.now },
+      )
+      .where(eq(workspaceRepositories.workspaceId, input.workspaceId)),
+  );
   // Hash/status-guarded job cleanup: only delete jobs still in the "syncing"
   // state we leased. A producer re-enqueue flips status back to "pending",
   // so a concurrently-edited path's job survives and re-dispatches.
@@ -375,17 +407,28 @@ function markSourceSynced(
   db: Db,
   job: WorkspaceSyncJobRow,
   committedHash: string,
-  synced: {
-    githubBlobSha: string | null;
-    githubCommitSha: string;
-    githubSyncedHash: string;
-    githubSyncedAt: Date;
-    githubSyncStatus: "synced";
-    githubSyncError: null;
-    updatedAt: Date;
-  },
-  commitSha: string,
+  commit: { commitSha: string; blobShaByPath: Map<string, string> } | null,
+  now: Date,
 ) {
+  // On an already-in-sync projection (commit === null) we have no fresh blob/commit
+  // SHAs, so only refresh the hash/status gate; leave githubBlobSha/githubCommitSha.
+  const synced = commit
+    ? {
+        githubBlobSha: commit.blobShaByPath.get(job.repoPath) ?? null,
+        githubCommitSha: commit.commitSha,
+        githubSyncedHash: committedHash,
+        githubSyncedAt: now,
+        githubSyncStatus: "synced" as const,
+        githubSyncError: null,
+        updatedAt: now,
+      }
+    : {
+        githubSyncedHash: committedHash,
+        githubSyncedAt: now,
+        githubSyncStatus: "synced" as const,
+        githubSyncError: null,
+        updatedAt: now,
+      };
   if (job.sourceKind === "brain") {
     return db
       .update(brainFiles)
@@ -413,7 +456,7 @@ function markSourceSynced(
   // agent
   return db
     .update(agents)
-    .set({ ...synced, commitSha })
+    .set(commit ? { ...synced, commitSha: commit.commitSha } : synced)
     .where(
       and(
         eq(agents.workspaceId, job.workspaceId),

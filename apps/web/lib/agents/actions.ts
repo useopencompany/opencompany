@@ -25,7 +25,7 @@ import {
 } from "@opencompany/db/schema";
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, notInArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
@@ -67,7 +67,6 @@ import {
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
   readWorkspaceFile,
-  writeWorkspaceFile,
 } from "@/lib/workspace-state/github";
 import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-state/sync-dispatch";
 
@@ -438,6 +437,26 @@ export async function updateAgent(
           ),
       ),
       syncJob.query,
+      // Coalescing is keyed on (workspaceId, repoPath), so a rename enqueues the
+      // new-path job without touching the agent's stale job still keyed at the old
+      // path. Left behind, that stale job re-upserts the agent's content at the old
+      // path during projection and suppresses the rename's delete (project.ts drops
+      // deletes whose path is also an upsert), leaving a duplicate .agent file.
+      // Delete every other outbox job for this agent so exactly one survives.
+      ...(pathChanged
+        ? [
+            db
+              .delete(workspaceSyncJobs)
+              .where(
+                and(
+                  eq(workspaceSyncJobs.workspaceId, workspace.id),
+                  eq(workspaceSyncJobs.sourceKind, "agent"),
+                  eq(workspaceSyncJobs.sourceRef, agent.id),
+                  ne(workspaceSyncJobs.repoPath, path),
+                ),
+              ),
+          ]
+        : []),
       ...bundleFileMoves.map((move) =>
         agentFileSyncJobUpsert(db, {
           workspaceId: workspace.id,
@@ -722,87 +741,6 @@ function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tipta
       tiptapRepositories: collectBodyRepositoryMentions(tiptapBody),
     }),
   );
-}
-
-export async function materializeLegacyAgentFiles() {
-  const trace = startTimingTrace("agents.materializeLegacy");
-  const { workspace } = await currentWorkspace();
-  const db = getDb();
-  const rows = await timeAsync(trace, "db.selectAgents", () =>
-    db
-      .select({
-        id: agents.id,
-        path: agents.path,
-        name: agents.name,
-        body: agents.body,
-        config: agents.config,
-      })
-      .from(agents)
-      .where(eq(agents.workspaceId, workspace.id)),
-  );
-  const repository = await timeAsync(trace, "github.ensureRepository", () =>
-    ensureWorkspaceRepository({ db, workspace }),
-  );
-
-  for (const agent of rows) {
-    if (agent.path) continue;
-
-    const config = normalizeAgentConfig(agent.config);
-    const body = agent.body || config.instructions;
-    const source = serializeAgentFile({
-      title: agent.name,
-      body,
-      model: config.model.name,
-      tools: config.tools,
-      brain: config.brain,
-      integrations: config.integrations,
-      triggers: config.triggers,
-    });
-    const parsed = parseAgentFile(source);
-    const contentHash = hashAgentSource(source);
-    const path = await nextAvailableAgentPath(db, workspace.id, agent.name);
-    const { commitSha, blobSha } = await timeAsync(
-      trace,
-      "github.writeWorkspaceFile",
-      () =>
-        writeWorkspaceFile({
-          db,
-          repository,
-          path,
-          content: source,
-          message: `Create ${path}`,
-        }),
-      { path },
-    );
-
-    await timeAsync(
-      trace,
-      "db.updateAgent",
-      () =>
-        db
-          .update(agents)
-          .set({
-            path,
-            name: parsed.title,
-            body: parsed.body,
-            commitSha,
-            contentHash,
-            githubBlobSha: blobSha,
-            githubCommitSha: commitSha,
-            githubSyncedHash: contentHash,
-            githubSyncedAt: new Date(),
-            githubSyncStatus: "synced",
-            githubSyncError: null,
-            config: parsed.config,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
-      { path },
-    );
-  }
-
-  revalidatePath("/agents");
-  endTimingTrace(trace, { count: rows.length });
 }
 
 export async function syncAgentsFromWorkspaceRepository() {

@@ -274,6 +274,13 @@
       "when": 1780578332546,
       "tag": "0038_tiny_the_anarchist",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1780578332547,
+      "tag": "0039_drop_legacy_sync_jobs",
+      "breakpoints": true
     }
   ]
 }

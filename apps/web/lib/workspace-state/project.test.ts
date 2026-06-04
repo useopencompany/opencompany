@@ -2,6 +2,7 @@ import {
   agentFiles,
   agents,
   brainFiles,
+  workspaceRepositories,
   workspaceSyncJobs,
   workspaces,
 } from "@opencompany/db/schema";
@@ -42,6 +43,7 @@ function createDb(rows: {
 }) {
   const batched: unknown[][] = [];
   const deleted: unknown[] = [];
+  const updated: Array<{ table: unknown; values: Record<string, unknown> }> = [];
 
   const rowsFor = (table: unknown): unknown[] => {
     if (table === workspaceSyncJobs) return rows.jobs ?? [];
@@ -62,8 +64,14 @@ function createDb(rows: {
     select: () => ({
       from: (table: unknown) => ({ where: () => thenable(rowsFor(table)) }),
     }),
-    update: () => ({
-      set: () => ({ where: () => ({ __op: "update", then: (r: () => void) => r() }) }),
+    update: (table: unknown) => ({
+      set: (values: Record<string, unknown>) => ({
+        where: () => {
+          const q = { __op: "update", table, values, then: (r: () => void) => r() };
+          updated.push({ table, values });
+          return q;
+        },
+      }),
     }),
     delete: (table: unknown) => ({
       where: () => {
@@ -78,7 +86,7 @@ function createDb(rows: {
     }),
   };
 
-  return { db, batched, deleted };
+  return { db, batched, deleted, updated };
 }
 
 const WORKSPACE = { id: "wsp_1", name: "Test" };
@@ -363,5 +371,122 @@ describe("projectWorkspaceToGitHub", () => {
     expect(content).toContain("path: agents/research/research.agent");
     expect(content).toContain("skills:");
     expect(content).toContain("- agent-self-edit");
+  });
+
+  it("advances workspace_repositories head + updatedAt on a successful commit", async () => {
+    const { db, updated } = createDb({
+      jobs: [
+        {
+          id: 8,
+          workspaceId: "wsp_1",
+          repoPath: "brain/a.md",
+          sourceKind: "brain",
+          sourceRef: null,
+          operation: "upsert",
+          desiredHash: "h_new",
+          previousPath: null,
+          attempts: 0,
+        },
+      ],
+      workspaces: [WORKSPACE],
+      brainFiles: [{ path: "a.md", content: "A", contentHash: "h_new", githubSyncedHash: "h_old" }],
+    });
+    dbMocks.getDb.mockReturnValue(db as never);
+    commitMock.mockResolvedValue({
+      commitSha: "commit_head",
+      blobShaByPath: new Map([["brain/a.md", "blob_a"]]),
+    });
+
+    await projectWorkspaceToGitHub({ workspaceId: "wsp_1" });
+
+    const repoUpdate = updated.find((u) => u.table === workspaceRepositories);
+    expect(repoUpdate?.values.latestHeadSha).toBe("commit_head");
+    expect(repoUpdate?.values.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("marks source rows synced (not stranded) when the tree already matches HEAD", async () => {
+    // The desired content was planned as an upsert (githubSyncedHash is stale), but
+    // GitHub already has the identical tree so commitWorkspaceChanges returns null.
+    // The row must be marked synced and its job cleared — never left pending.
+    const { db, batched, updated } = createDb({
+      jobs: [
+        {
+          id: 9,
+          workspaceId: "wsp_1",
+          repoPath: "brain/a.md",
+          sourceKind: "brain",
+          sourceRef: null,
+          operation: "upsert",
+          desiredHash: "h_new",
+          previousPath: null,
+          attempts: 0,
+        },
+      ],
+      workspaces: [WORKSPACE],
+      brainFiles: [{ path: "a.md", content: "A", contentHash: "h_new", githubSyncedHash: "h_old" }],
+    });
+    dbMocks.getDb.mockReturnValue(db as never);
+    commitMock.mockResolvedValue(null);
+
+    const result = await projectWorkspaceToGitHub({ workspaceId: "wsp_1" });
+
+    expect(result).toEqual({ status: "noop", jobs: 1 });
+    // The source row was reconciled to synced rather than left stranded as pending.
+    expect(batched.length).toBeGreaterThan(0);
+    const brainUpdate = updated.find((u) => u.table === brainFiles);
+    expect(brainUpdate?.values.githubSyncStatus).toBe("synced");
+    expect(brainUpdate?.values.githubSyncedHash).toBe("h_new");
+    // No new commit, so the repo HEAD is left untouched while "last synced" advances.
+    const repoUpdate = updated.find((u) => u.table === workspaceRepositories);
+    expect(repoUpdate?.values.latestHeadSha).toBeUndefined();
+    expect(repoUpdate?.values.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("deletes (never re-upserts) a stale agent job left at an old path", async () => {
+    // A stale job still keyed at the agent's old path. The agent now lives at a new
+    // path, so the projector must delete the old path, not re-create the file there.
+    const { db } = createDb({
+      jobs: [
+        {
+          id: 10,
+          workspaceId: "wsp_1",
+          repoPath: "agents/old/old.agent",
+          sourceKind: "agent",
+          sourceRef: "agt_1",
+          operation: "upsert",
+          desiredHash: "h_agent",
+          previousPath: null,
+          attempts: 0,
+        },
+      ],
+      workspaces: [WORKSPACE],
+      agents: [
+        {
+          id: "agt_1",
+          workspaceId: "wsp_1",
+          path: "agents/leo/leo.agent",
+          name: "Leo",
+          body: "Body.",
+          githubSyncedHash: null,
+          config: {
+            model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+            tools: [],
+            brain: [],
+            agents: [],
+            skills: [],
+            integrations: { github: { repositories: [] } },
+            triggers: [],
+          },
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db as never);
+    commitMock.mockResolvedValue({ commitSha: "commit_stale", blobShaByPath: new Map() });
+
+    await projectWorkspaceToGitHub({ workspaceId: "wsp_1" });
+
+    const arg = commitMock.mock.calls[0]![0];
+    expect(arg.upserts).toEqual([]);
+    expect(arg.deletes).toEqual([{ path: "agents/old/old.agent" }]);
   });
 });

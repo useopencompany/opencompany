@@ -52,6 +52,9 @@ describe("commitWorkspaceChanges", () => {
   it("commits many file changes as a single commit and preserves base_tree", async () => {
     const { calls } = installFetch({
       ...HEAD,
+      "GET /repos/opencompany/test/git/trees/tree_1": [
+        { body: { tree: [{ path: "brain/old.md", sha: "blob_old", type: "blob" }] } },
+      ],
       "POST /repos/opencompany/test/git/trees": [
         {
           body: {
@@ -179,6 +182,82 @@ describe("commitWorkspaceChanges", () => {
     // Second attempt rebuilt on tree_x and succeeded.
     expect(result?.commitSha).toBe("commit_3");
     expect(result?.blobShaByPath.get("brain/a.md")).toBe("blob_a2");
+  });
+
+  it("skips stale delete entries that are already absent from the base tree", async () => {
+    const { calls } = installFetch({
+      ...HEAD,
+      "GET /repos/opencompany/test/git/trees/tree_1": [
+        { body: { tree: [{ path: "brain/other.md", sha: "blob_other", type: "blob" }] } },
+      ],
+    });
+
+    const result = await commitWorkspaceChanges({
+      repo,
+      message: "delete stale",
+      upserts: [],
+      deletes: [{ path: "brain/missing.md" }],
+    });
+
+    expect(result).toBeNull();
+    expect(calls.some((c) => c.url.endsWith("/git/trees") && c.method === "POST")).toBe(false);
+    expect(calls.some((c) => c.url.endsWith("/git/commits"))).toBe(false);
+  });
+
+  it("filters missing deletes while still committing upserts", async () => {
+    const { calls } = installFetch({
+      ...HEAD,
+      "GET /repos/opencompany/test/git/trees/tree_1": [
+        { body: { tree: [{ path: "brain/old.md", sha: "blob_old", type: "blob" }] } },
+      ],
+      "POST /repos/opencompany/test/git/trees": [
+        {
+          body: {
+            sha: "tree_2",
+            tree: [{ path: "brain/a.md", sha: "blob_a", type: "blob" }],
+          },
+        },
+      ],
+      "POST /repos/opencompany/test/git/commits": [{ body: { sha: "commit_2" } }],
+      "PATCH /repos/opencompany/test/git/refs/heads/main": [{ body: {} }],
+    });
+
+    const result = await commitWorkspaceChanges({
+      repo,
+      message: "update and delete",
+      upserts: [{ path: "brain/a.md", content: "A" }],
+      deletes: [{ path: "brain/missing.md" }, { path: "brain/old.md" }],
+    });
+
+    expect(result?.commitSha).toBe("commit_2");
+    const treeCall = calls.find((c) => c.url.endsWith("/git/trees") && c.method === "POST");
+    const entries = (treeCall?.body as { tree: Array<Record<string, unknown>> }).tree;
+    expect(entries).toEqual([
+      expect.objectContaining({ path: "brain/a.md", content: "A" }),
+      expect.objectContaining({ path: "brain/old.md", sha: null }),
+    ]);
+  });
+
+  it("does not retry non-ref GitHub 422 responses", async () => {
+    const { calls } = installFetch({
+      ...HEAD,
+      "POST /repos/opencompany/test/git/trees": [
+        { status: 422, body: { message: "GitRPC::BadObjectState" } },
+      ],
+    });
+
+    await expect(
+      commitWorkspaceChanges({
+        repo,
+        message: "bad tree",
+        upserts: [{ path: "brain/a.md", content: "A" }],
+        deletes: [],
+      }),
+    ).rejects.toThrow("GitHub Git Data API request failed with 422");
+
+    expect(calls.filter((c) => c.url.endsWith("/git/trees") && c.method === "POST")).toHaveLength(
+      1,
+    );
   });
 
   it("returns null without any request when there are no changes", async () => {
