@@ -100,7 +100,11 @@ export async function GET(request: Request): Promise<Response> {
   const response = await fetch(originUrl, {
     headers: process.env.ELECTRIC_SOURCE_SECRET
       ? {}
-      : { ...(process.env.ELECTRIC_TOKEN ? { Authorization: `Bearer ${process.env.ELECTRIC_TOKEN}` } : {}) },
+      : {
+          ...(process.env.ELECTRIC_TOKEN
+            ? { Authorization: `Bearer ${process.env.ELECTRIC_TOKEN}` }
+            : {}),
+        },
   });
 
   // Electric responses are gzipped/length-bound for its own origin; strip those

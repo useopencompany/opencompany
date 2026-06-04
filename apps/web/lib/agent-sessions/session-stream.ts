@@ -29,8 +29,8 @@ function debugLog(message: string, fields: Record<string, unknown>): void {
 }
 
 /**
- * Framework-agnostic consumer for a session's Durable Stream (Phase 3, plane B —
- * see INSTANT_REFACTOR.md). Catches up the durable + transient history, then live
+ * Framework-agnostic consumer for a session's Durable Stream (see
+ * docs/stack/electric-sync.md). Catches up the durable + transient history, then live
  * tails, folding every event through the existing `applyRuntimeEventToState`
  * reducer to rebuild the rendered transcript. The React hook (`useSessionStream`)
  * wraps this; keeping it framework-free makes the materialization unit-testable

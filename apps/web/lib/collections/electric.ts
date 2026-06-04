@@ -1,8 +1,8 @@
-import { createCollection } from "@tanstack/react-db";
 import {
   type ElectricCollectionConfig,
   electricCollectionOptions,
 } from "@tanstack/electric-db-collection";
+import { createCollection } from "@tanstack/react-db";
 
 /**
  * Absolute URL of our same-origin auth proxy (see

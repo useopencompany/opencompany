@@ -8,8 +8,8 @@ const logger = createLogger({ service: "opencompany-web", runtime: "durable-stre
 const JSON_CONTENT_TYPE = "application/json";
 
 /**
- * Same-origin read proxy in front of the Durable Streams service (Phase 3, plane
- * B — see INSTANT_REFACTOR.md). The browser's `@durable-streams/client` reads a
+ * Same-origin read proxy in front of the Durable Streams service (see
+ * docs/stack/electric-sync.md). The browser's `@durable-streams/client` reads a
  * session's transcript from THIS route, never from the Durable Streams service
  * directly: we authenticate the caller, verify they own the session, and forward
  * to the trusted `session-<id>` stream with the server-side write/read token. The
@@ -100,7 +100,10 @@ async function authorizeUpstream(
 > {
   const config = durableStreamsConfig();
   if (!config) {
-    return { ok: false, response: new Response("Durable Streams is not configured.", { status: 503 }) };
+    return {
+      ok: false,
+      response: new Response("Durable Streams is not configured.", { status: 503 }),
+    };
   }
 
   const context = await currentWorkspace({ optional: true, skipOnboarding: true });

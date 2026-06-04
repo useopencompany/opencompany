@@ -30,7 +30,6 @@ import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
-import { batchWithTxid } from "@/lib/db/txid";
 import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   derivePreviewConfigFromTiptapDoc,
@@ -61,6 +60,7 @@ import {
 } from "@/lib/agents/sync-job";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
+import { batchWithTxid } from "@/lib/db/txid";
 import {
   GITHUB_INTEGRATION_PROVIDER,
   GITHUB_REPOSITORY_RESOURCE_TYPE,

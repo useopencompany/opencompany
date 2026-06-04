@@ -258,7 +258,7 @@ export async function abortAgentSession(sessionId: string) {
 
   // Reflect the optimistic "aborting" status on the Durable Stream so a
   // stream-sourced transcript shows it immediately; the runner's subsequent
-  // durable status events (aborting → aborted) reconcile. Best-effort + flag-gated.
+  // durable status events (aborting → aborted) reconcile. Best-effort.
   await appendSessionStreamEvent(sessionId, {
     id: null,
     type: "session.status",
@@ -725,7 +725,7 @@ async function insertUserMessage(sessionId: string, content: string) {
 
   // Mirror the user message onto the session's Durable Stream so it appears in a
   // stream-sourced transcript (the runner never re-emits web-written events).
-  // Best-effort + flag-gated.
+  // Best-effort.
   const eventRow = (results[1] as Array<{ id: number; createdAt: Date }>)[0];
   if (eventRow) {
     await appendSessionStreamEvent(sessionId, {

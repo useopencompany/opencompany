@@ -13,9 +13,7 @@ export function CollectionsProvider({ children }: { children: React.ReactNode })
   // subscribes, so creating them here opens no network connections.
   const collections = useMemo(() => createCollections(workspaceId), [workspaceId]);
 
-  return (
-    <CollectionsContext.Provider value={collections}>{children}</CollectionsContext.Provider>
-  );
+  return <CollectionsContext.Provider value={collections}>{children}</CollectionsContext.Provider>;
 }
 
 export function useCollections(): Collections {

@@ -4,20 +4,19 @@ import { createLogger } from "@opencompany/observability";
 import type { RuntimeEventForStream } from "./events";
 
 /**
- * Durable Streams publisher (Phase 3, plane B — see INSTANT_REFACTOR.md). Appends
+ * Durable Streams publisher (see docs/stack/electric-sync.md). Appends
  * every session runtime event (durable rows AND transient token deltas) to a
  * per-session Durable Stream so the web client can consume a resumable, offset
  * addressable transcript instead of the in-process-broker SSE.
  *
- * This is ADDITIVE and flag-gated: it does nothing unless `DURABLE_STREAMS_URL`
- * is set, so the existing SSE path keeps working until we cut over. Publishing is
- * fire-and-forget and best-effort — a streaming failure must never break the run
- * (Postgres remains the system of record; the runner still persists durable rows).
+ * It does nothing unless `DURABLE_STREAMS_URL` is set. Publishing is fire-and-forget
+ * and best-effort — a streaming failure must never break the run (Postgres remains
+ * the system of record; the runner still persists durable rows).
  *
  * Why this module reads `process.env` directly rather than RunnerEnv: events are
  * published from `events.ts`, a standalone module that already reaches for global
  * process state (`getDb()`); threading typed env through every `publishRuntimeEvent`
- * call site would be invasive for an optional, flag-gated transport.
+ * call site would be invasive for this optional transport.
  */
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "durable-streams" });
@@ -57,10 +56,7 @@ function authHeaders(token: string | undefined): Record<string, string> {
 // don't pay a network round-trip each.
 const producers = new Map<string, Promise<IdempotentProducer>>();
 
-async function ensureStream(
-  url: string,
-  headers: Record<string, string>,
-): Promise<DurableStream> {
+async function ensureStream(url: string, headers: Record<string, string>): Promise<DurableStream> {
   try {
     return await DurableStream.create({ url, headers, contentType: JSON_CONTENT_TYPE });
   } catch (error) {

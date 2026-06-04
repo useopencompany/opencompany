@@ -9,9 +9,9 @@ import {
 } from "@/lib/agent-sessions/session-stream";
 
 /**
- * Subscribe the open session's transcript to its Durable Stream (Phase 3, plane
- * B). Returns the live-materialized runtime state (rebuilt from the stream via
- * the existing reducer) plus the connection status. Client-only: the stream is
+ * Subscribe the open session's transcript to its Durable Stream. Returns the
+ * live-materialized runtime state (rebuilt from the stream via the existing
+ * reducer) plus the connection status. Client-only: the stream is
  * read through the same-origin proxy built from `window.location.origin`, so the
  * subscription opens in an effect (never during SSR).
  *

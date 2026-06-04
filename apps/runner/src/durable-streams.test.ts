@@ -34,7 +34,11 @@ afterEach(() => {
   __resetDurableStreamsForTests();
 });
 
-function durableEvent(id: number, type: string, payload: Record<string, unknown>): RuntimeEventForStream {
+function durableEvent(
+  id: number,
+  type: string,
+  payload: Record<string, unknown>,
+): RuntimeEventForStream {
   return {
     id,
     sessionId: "ses_pub",
@@ -57,7 +61,12 @@ function transientEvent(type: string, payload: Record<string, unknown>): Runtime
   } as RuntimeEventForStream;
 }
 
-type WireEvent = { id: number | null; type: string; transient?: boolean; payload: Record<string, unknown> };
+type WireEvent = {
+  id: number | null;
+  type: string;
+  transient?: boolean;
+  payload: Record<string, unknown>;
+};
 
 async function readAll(sessionId: string): Promise<WireEvent[]> {
   const url = `${baseUrl}/${sessionStreamName(sessionId)}`;
@@ -69,7 +78,9 @@ describe("durable streams publisher", () => {
   it("is disabled (no-op) when DURABLE_STREAMS_URL is unset", () => {
     expect(isDurableStreamsEnabled()).toBe(false);
     // Must not throw even though streaming is unconfigured.
-    expect(() => publishToDurableStream("ses_noop", transientEvent("message.delta", { delta: "x" }))).not.toThrow();
+    expect(() =>
+      publishToDurableStream("ses_noop", transientEvent("message.delta", { delta: "x" })),
+    ).not.toThrow();
   });
 
   it("publishes durable + transient events to the session's stream in order", async () => {
@@ -86,7 +97,9 @@ describe("durable streams publisher", () => {
     for (const event of events) publishToDurableStream(sessionId, event);
     await flushSessionStream(sessionId);
 
-    await expect.poll(async () => (await readAll(sessionId)).length, { timeout: 5000 }).toBe(events.length);
+    await expect
+      .poll(async () => (await readAll(sessionId)).length, { timeout: 5000 })
+      .toBe(events.length);
 
     const items = await readAll(sessionId);
     expect(items.map((e) => [e.id, e.type])).toEqual([
@@ -99,7 +112,10 @@ describe("durable streams publisher", () => {
     // Transient flag and payloads survive the wire (so the consumer can reduce them).
     expect(items.filter((e) => e.transient === true)).toHaveLength(2);
     expect(
-      items.filter((e) => e.type === "message.delta").map((e) => e.payload.delta).join(""),
+      items
+        .filter((e) => e.type === "message.delta")
+        .map((e) => e.payload.delta)
+        .join(""),
     ).toBe("Hello");
   });
 

@@ -24,6 +24,10 @@ services:
         sync: false
       - key: RUNNER_STREAM_TOKEN_SECRET
         sync: false
+      - key: DURABLE_STREAMS_URL
+        sync: false
+      - key: DURABLE_STREAMS_TOKEN
+        sync: false
       - key: INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
         sync: false
       - key: RUNNER_ALLOWED_ORIGINS

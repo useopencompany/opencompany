@@ -2,7 +2,7 @@ import { DurableStream, DurableStreamError } from "@durable-streams/client";
 import { createLogger } from "@opencompany/observability";
 
 /**
- * Web-side Durable Streams publisher (Phase 3, plane B — see INSTANT_REFACTOR.md).
+ * Web-side Durable Streams publisher (see docs/stack/electric-sync.md).
  *
  * Some durable session events are written by the WEB, not the runner: the user's
  * message (submitAgentSessionMessage → insertUserMessage) and the optimistic abort
@@ -10,8 +10,8 @@ import { createLogger } from "@opencompany/observability";
  * sourced from the Durable Stream they would never appear. This appends them to
  * the session's stream so the stream stays a complete, durable transcript.
  *
- * Flag-gated (no-op unless DURABLE_STREAMS_URL is set) and best-effort — a stream
- * failure never breaks the write (Postgres remains the system of record).
+ * No-op unless DURABLE_STREAMS_URL is set and best-effort — a stream failure never
+ * breaks the write (Postgres remains the system of record).
  */
 
 const logger = createLogger({ service: "opencompany-web", runtime: "durable-streams" });

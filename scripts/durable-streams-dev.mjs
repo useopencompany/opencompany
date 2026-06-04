@@ -1,12 +1,11 @@
-// Local Durable Streams server for dev / the Phase 3 live test (no Electric Cloud
-// needed). Starts the @durable-streams/server reference server on a fixed port
-// and prints the URL to export as DURABLE_STREAMS_URL.
+// Local Durable Streams server for dev (no Electric Cloud needed). Starts the
+// @durable-streams/server reference server on a fixed port and prints the URL to
+// export as DURABLE_STREAMS_URL.
 //
 // Usage:
 //   bun scripts/durable-streams-dev.mjs
 // Then, in the runner AND web env:
 //   DURABLE_STREAMS_URL="http://127.0.0.1:4150"
-//   NEXT_PUBLIC_DURABLE_STREAMS="1"   # web only — flips SessionView to the stream
 //
 // The runner appends session events here; the web read proxy
 // (/api/streams/v1/session/[id]) forwards browser reads to it.
@@ -20,7 +19,6 @@ const url = await server.start();
 
 console.log(`\n  Durable Streams dev server listening at ${url}`);
 console.log(`  → export DURABLE_STREAMS_URL="${url}" (runner + web)`);
-console.log(`  → export NEXT_PUBLIC_DURABLE_STREAMS="1" (web)\n`);
 
 const shutdown = async () => {
   await server.stop();

@@ -1,7 +1,7 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
 import { useLiveQuery } from "@tanstack/react-db";
+import { useQueryClient } from "@tanstack/react-query";
 import { AtSign, Bot, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -13,8 +13,8 @@ import {
   findMentionItem,
 } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
-import { useHydrated } from "@/components/useHydrated";
 import { useToast } from "@/components/ToastProvider";
+import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentsPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgent } from "@/lib/agents/actions";

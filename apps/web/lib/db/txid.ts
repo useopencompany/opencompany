@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
 import { getDb } from "@opencompany/db";
+import { sql } from "drizzle-orm";
 
 type Db = ReturnType<typeof getDb>;
 type BatchItem = Parameters<Db["batch"]>[0][number];

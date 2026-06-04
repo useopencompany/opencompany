@@ -58,4 +58,3 @@ export type SessionStarRow = {
   session_id: string;
   starred_at: string;
 };
-

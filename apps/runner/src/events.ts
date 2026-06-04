@@ -137,8 +137,8 @@ export async function listSessionEvents(input: {
 export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
   // Single fan-out point for durable (appendRuntimeEvent) and transient
   // (publishTransientRuntimeEvent) events → the session's Durable Stream, the sole
-  // live transport (Phase 3 cutover; the in-process-broker SSE path was removed).
-  // Fire-and-forget + flag-gated — a streaming failure never breaks the run
+  // live transport; the in-process-broker SSE path was removed. Fire-and-forget:
+  // a streaming failure never breaks the run
   // (Postgres remains the system of record).
   publishToDurableStream(sessionId, event);
 }

@@ -38,7 +38,9 @@ async function producer(sessionId: string) {
   });
   let seq = 0;
   return {
-    async append(event: Partial<RuntimeEvent> & { type: string; payload: Record<string, unknown> }) {
+    async append(
+      event: Partial<RuntimeEvent> & { type: string; payload: Record<string, unknown> },
+    ) {
       seq += 1;
       const full: RuntimeEvent = {
         id: event.transient ? null : seq,
@@ -61,15 +63,37 @@ describe("subscribeSessionStream", () => {
   it("materializes a completed assistant turn from catch-up history", async () => {
     const sessionId = "catchup";
     const stream = await producer(sessionId);
-    await stream.append({ type: "message.created", messageId: "msg_a", payload: { messageId: "msg_a", role: "assistant", status: "running" } });
-    await stream.append({ type: "message.delta", messageId: "msg_a", transient: true, payload: { messageId: "msg_a", delta: "Hel" } });
-    await stream.append({ type: "message.delta", messageId: "msg_a", transient: true, payload: { messageId: "msg_a", delta: "lo" } });
-    await stream.append({ type: "message.completed", messageId: "msg_a", payload: { messageId: "msg_a", content: "Hello" } });
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_a",
+      payload: { messageId: "msg_a", role: "assistant", status: "running" },
+    });
+    await stream.append({
+      type: "message.delta",
+      messageId: "msg_a",
+      transient: true,
+      payload: { messageId: "msg_a", delta: "Hel" },
+    });
+    await stream.append({
+      type: "message.delta",
+      messageId: "msg_a",
+      transient: true,
+      payload: { messageId: "msg_a", delta: "lo" },
+    });
+    await stream.append({
+      type: "message.completed",
+      messageId: "msg_a",
+      payload: { messageId: "msg_a", content: "Hello" },
+    });
 
     let latest: SessionRuntimeState | null = null;
-    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), { onState: (state) => (latest = state) });
+    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), {
+      onState: (state) => (latest = state),
+    });
 
-    await expect.poll(() => findMessage(latest, "msg_a")?.status, { timeout: 15000 }).toBe("completed");
+    await expect
+      .poll(() => findMessage(latest, "msg_a")?.status, { timeout: 15000 })
+      .toBe("completed");
     const message = findMessage(latest, "msg_a");
     expect(message?.role).toBe("assistant");
     expect(message?.content).toBe("Hello");
@@ -86,16 +110,42 @@ describe("subscribeSessionStream", () => {
     // reducer rebuilds a multi-message transcript correctly from the stream.
     const sessionId = "multimessage";
     const stream = await producer(sessionId);
-    await stream.append({ type: "message.created", messageId: "msg_u", payload: { messageId: "msg_u", role: "user", content: "hi", status: "completed" } });
-    await stream.append({ type: "message.created", messageId: "msg_b", payload: { messageId: "msg_b", role: "assistant", status: "running" } });
-    await stream.append({ type: "message.delta", messageId: "msg_b", transient: true, payload: { messageId: "msg_b", delta: "Wor" } });
-    await stream.append({ type: "message.delta", messageId: "msg_b", transient: true, payload: { messageId: "msg_b", delta: "ld" } });
-    await stream.append({ type: "message.completed", messageId: "msg_b", payload: { messageId: "msg_b", content: "World" } });
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_u",
+      payload: { messageId: "msg_u", role: "user", content: "hi", status: "completed" },
+    });
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_b",
+      payload: { messageId: "msg_b", role: "assistant", status: "running" },
+    });
+    await stream.append({
+      type: "message.delta",
+      messageId: "msg_b",
+      transient: true,
+      payload: { messageId: "msg_b", delta: "Wor" },
+    });
+    await stream.append({
+      type: "message.delta",
+      messageId: "msg_b",
+      transient: true,
+      payload: { messageId: "msg_b", delta: "ld" },
+    });
+    await stream.append({
+      type: "message.completed",
+      messageId: "msg_b",
+      payload: { messageId: "msg_b", content: "World" },
+    });
 
     let latest: SessionRuntimeState | null = null;
-    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), { onState: (state) => (latest = state) });
+    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), {
+      onState: (state) => (latest = state),
+    });
 
-    await expect.poll(() => findMessage(latest, "msg_b")?.status, { timeout: 15000 }).toBe("completed");
+    await expect
+      .poll(() => findMessage(latest, "msg_b")?.status, { timeout: 15000 })
+      .toBe("completed");
     expect(findMessage(latest, "msg_u")?.content).toBe("hi");
     expect(findMessage(latest, "msg_b")?.role).toBe("assistant");
     expect(findMessage(latest, "msg_b")?.content).toBe("World");
@@ -110,9 +160,21 @@ describe("subscribeSessionStream", () => {
     // only materialize events appended after subscribing — not replay the whole history.
     const sessionId = "seedfromend";
     const stream = await producer(sessionId);
-    await stream.append({ type: "message.created", messageId: "msg_old", payload: { messageId: "msg_old", role: "user", content: "old", status: "completed" } });
-    await stream.append({ type: "message.created", messageId: "msg_done", payload: { messageId: "msg_done", role: "assistant", status: "running" } });
-    await stream.append({ type: "message.completed", messageId: "msg_done", payload: { messageId: "msg_done", content: "done" } });
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_old",
+      payload: { messageId: "msg_old", role: "user", content: "old", status: "completed" },
+    });
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_done",
+      payload: { messageId: "msg_done", role: "assistant", status: "running" },
+    });
+    await stream.append({
+      type: "message.completed",
+      messageId: "msg_done",
+      payload: { messageId: "msg_done", content: "done" },
+    });
 
     let latest: SessionRuntimeState | null = null;
     let resolveLive: () => void = () => {};
@@ -131,9 +193,15 @@ describe("subscribeSessionStream", () => {
     // Only append once the live tail is open (offset pinned to the end), so the new
     // event lands strictly after the seek point — no race with the HEAD.
     await liveReady;
-    await stream.append({ type: "message.created", messageId: "msg_new", payload: { messageId: "msg_new", role: "user", content: "new", status: "completed" } });
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_new",
+      payload: { messageId: "msg_new", role: "user", content: "new", status: "completed" },
+    });
 
-    await expect.poll(() => findMessage(latest, "msg_new")?.content, { timeout: 15000 }).toBe("new");
+    await expect
+      .poll(() => findMessage(latest, "msg_new")?.content, { timeout: 15000 })
+      .toBe("new");
     // Pre-subscribe history is NOT replayed (it's painted from the snapshot in the app).
     expect(findMessage(latest, "msg_old")).toBeUndefined();
     expect(findMessage(latest, "msg_done")).toBeUndefined();

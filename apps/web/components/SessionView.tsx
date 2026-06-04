@@ -372,7 +372,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   }, [runtime.events, runtime.messages]);
   // The single ask_user_question awaiting an answer (the run suspends, so at most one exists). It
   // drives the stepped QuestionComposer that takes over the composer slot. Derived from the same
-  // parts that render the transcript, so it stays reactive to SSE.
+  // parts that render the transcript, so it stays reactive to the session stream.
   const pendingQuestion = useMemo(() => {
     const findPending = (parts: AssistantTurnPart[]) =>
       parts.find(
@@ -1705,7 +1705,7 @@ function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
   const { showError } = useToast();
   const [isResolving, startResolve] = useTransition();
   // Optimistic overlay: reflect the click immediately, before the runner's durable
-  // tool.approval_resolved event arrives over SSE and converges the derived state.
+  // tool.approval_resolved event arrives over the stream and converges the derived state.
   const [optimisticDecision, setOptimisticDecision] = useState<"approved" | "denied" | null>(null);
 
   const isCompleted = toolCall.status === "completed";
@@ -1883,7 +1883,7 @@ function QuestionComposer({
   const { showError } = useToast();
   const [isResolving, startResolve] = useTransition();
   // Optimistic overlay so the surface stays put until the runner's durable question.answered event
-  // arrives over SSE and the composer swaps back to its text form.
+  // arrives over the stream and the composer swaps back to its text form.
   const [optimistic, setOptimistic] = useState<"submitting" | "cancelling" | null>(null);
   const [step, setStep] = useState(0);
   const stepRef = useRef<HTMLDivElement | null>(null);
