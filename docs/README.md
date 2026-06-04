@@ -2,6 +2,7 @@
 
 - [getting-started.md](./getting-started.md) — new engineer checklist and fastest path to a running dev environment.
 - [architecture.md](./architecture.md) — rough map of the app, agent editing, GitHub storage, and Inngest sync.
+- [future-concepts/README.md](./future-concepts/README.md) — speculative product and architecture notes for ideas that are not active implementation contracts yet.
 - [stack/README.md](./stack/README.md) — technology register: what we use, why, owners, and exit triggers.
 - [database.md](./database.md) — Neon, schema changes, Drizzle, and optional branch databases.
 - [auth.md](./auth.md) — WorkOS AuthKit flow, env vars, identity model.
