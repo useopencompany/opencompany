@@ -1,6 +1,6 @@
-import type { AgentModelId } from "./types";
+import type { AgentModelId, JsonValue } from "./types";
 
-export type ModelProviderOptions = Record<string, Record<string, boolean | number | string | null>>;
+export type ModelProviderOptions = Record<string, Record<string, JsonValue>>;
 export type ReasoningExposure = "hidden" | "summary" | "raw";
 
 // Glanceable decision signals surfaced in the model picker. Three ordinal tiers
@@ -26,6 +26,12 @@ export type AgentModelDefinition = {
     exposure: ReasoningExposure;
   };
 };
+
+export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
+  gateway: {
+    caching: "auto",
+  },
+} satisfies ModelProviderOptions;
 
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
 // Intelligence Index, output tokens/sec; OpenRouter / provider output pricing)
@@ -438,24 +444,41 @@ export function getAgentModelDefinition(id: string) {
 
 export function getAgentModelRuntimeOptions(id: string) {
   const model = getAgentModelDefinition(id);
+  const providerOptions = mergeModelProviderOptions(
+    GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+    model?.reasoning?.providerOptions,
+  );
+
   if (!model?.reasoning) {
     return {
       supportsReasoning: Boolean(model?.supportsReasoning),
-      providerOptions: undefined,
+      providerOptions,
       reasoningExposure: "hidden" as const,
     };
   }
 
-  const providerOptions = copyProviderOptions(model.reasoning.providerOptions);
   return {
     supportsReasoning: true,
-    ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
+    providerOptions,
     reasoningExposure: model.reasoning.exposure,
   };
 }
 
-function copyProviderOptions(options: ModelProviderOptions): ModelProviderOptions {
-  return Object.fromEntries(
-    Object.entries(options).map(([provider, values]) => [provider, { ...values }]),
-  );
+export function mergeModelProviderOptions(
+  ...options: Array<ModelProviderOptions | undefined>
+): ModelProviderOptions {
+  const merged: ModelProviderOptions = {};
+
+  for (const option of options) {
+    if (!option) continue;
+
+    for (const [provider, values] of Object.entries(option)) {
+      merged[provider] = {
+        ...(merged[provider] ?? {}),
+        ...values,
+      };
+    }
+  }
+
+  return merged;
 }

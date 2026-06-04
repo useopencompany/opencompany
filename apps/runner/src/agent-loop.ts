@@ -64,9 +64,11 @@ import {
   finalizeRun,
   observeRunStep,
   type RunContext,
+  recordSandboxUsageBestEffort,
+  type SandboxBillingSnapshot,
 } from "./run-context";
 import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
-import { RunSuspendedError } from "./runner-errors";
+import { MessageTurnFailedError, RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
   appendAfterSessionSkipped,
@@ -82,6 +84,7 @@ import {
   loadSession,
   loadUserMessage,
   optionalUserContext,
+  resolveSandboxBilling,
   setStatus,
 } from "./session-lifecycle";
 import {
@@ -593,7 +596,7 @@ async function runMessageWithContext(
       model_name: modelName,
       error,
     });
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -617,6 +620,7 @@ async function suspendRunForInput(input: {
   ctx: RunContext;
   row: LoadedSession;
   sandbox: SandboxHandle | null;
+  sandboxBilling: SandboxBillingSnapshot | null;
   assistantMessageId: string;
   error: RunSuspendedError;
 }) {
@@ -659,6 +663,12 @@ async function suspendRunForInput(input: {
       payload: { status, message },
     }),
   );
+  // Bill the sandbox active window while the lease is still held (see executeStreamingTurn).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxBilling,
+  });
   await requireLeaseWrite(suspendRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, status));
 }
 
@@ -719,6 +729,7 @@ async function executeStreamingTurn(input: {
         ctx,
         row,
         sandbox: sandboxAcquirer.current,
+        sandboxBilling: sandboxAcquirer.billingSnapshot(),
         assistantMessageId,
         error,
       });
@@ -824,6 +835,14 @@ async function executeStreamingTurn(input: {
   await requireLeaseWrite(input.appendCompletedEvent());
 
   if (input.beforeRelease) await input.beforeRelease();
+
+  // Bill the sandbox active window before releasing the lease: recordSandboxUsage is
+  // lease-guarded, so it must run while we still own the lease (finalizeRun is too late).
+  await recordSandboxUsageBestEffort({
+    ctx,
+    assistantMessageId,
+    sandboxBilling: input.sandboxAcquirer.billingSnapshot(),
+  });
 
   await requireLeaseWrite(releaseRunLease(ctx.sessionId, ctx.leaseId, ctx.leaseOwner, "completed"));
 
@@ -1239,7 +1258,7 @@ async function runAfterSessionWithContext(
       model_name: modelName,
       error,
     });
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -1445,6 +1464,26 @@ async function resumeApprovalWithContext(
       const toolName = toolCall?.toolName ?? approval.toolName;
       const toolArgs = toolCall?.input;
 
+      // Approval resolution is the user's decision, not the tool's completion. Emit it before
+      // executing the resumed tool so long-running or failing tools do not leave the approval card
+      // stuck in a pending/resolving state.
+      await requireLeaseWrite(
+        appendRuntimeEventForLease({
+          sessionId: input.sessionId,
+          messageId: suspendedAssistantMessageId,
+          leaseId: ctx.leaseId,
+          leaseOwner: ctx.leaseOwner,
+          type: "tool.approval_resolved",
+          payload: {
+            messageId: suspendedAssistantMessageId,
+            toolCallId: input.toolCallId,
+            name: toolName,
+            decision: approval.status === "approved" ? "approved" : "denied",
+            decisionSource: approval.decisionSource ?? "user",
+          },
+        }),
+      );
+
       if (approval.status === "approved") {
         await requireLeaseWrite(
           appendRuntimeEventForLease({
@@ -1539,23 +1578,6 @@ async function resumeApprovalWithContext(
           },
         });
       }
-
-      await requireLeaseWrite(
-        appendRuntimeEventForLease({
-          sessionId: input.sessionId,
-          messageId: suspendedAssistantMessageId,
-          leaseId: ctx.leaseId,
-          leaseOwner: ctx.leaseOwner,
-          type: "tool.approval_resolved",
-          payload: {
-            messageId: suspendedAssistantMessageId,
-            toolCallId: input.toolCallId,
-            name: toolName,
-            decision: approval.status === "approved" ? "approved" : "denied",
-            decisionSource: approval.decisionSource ?? "user",
-          },
-        }),
-      );
     }
 
     // Continue the turn with a fresh assistant message over the reconciled history.
@@ -1613,7 +1635,7 @@ async function resumeApprovalWithContext(
       tool_call_id: input.toolCallId,
     });
     outcome = "failed";
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -2039,7 +2061,7 @@ async function resumeQuestionResponseWithContext(
       tool_call_id: input.toolCallId,
     });
     outcome = "failed";
-    throw error;
+    throw leaseAcquired ? new MessageTurnFailedError(error) : error;
   } finally {
     await finalizeRun({
       ctx,
@@ -2117,6 +2139,9 @@ async function runDelegatedChildMessage(input: {
 type SandboxAcquirer = {
   get: () => Promise<SandboxHandle>;
   readonly current: SandboxHandle | null;
+  // The active-runtime window for billing: present only once the sandbox has been
+  // hydrated (resumed) during this run. Null for chat-only turns that never touch it.
+  billingSnapshot: () => SandboxBillingSnapshot | null;
 };
 
 function createSandboxAcquirer(input: {
@@ -2130,6 +2155,8 @@ function createSandboxAcquirer(input: {
 }): SandboxAcquirer {
   let sandbox: SandboxHandle | null = null;
   let sandboxPromise: Promise<SandboxHandle> | null = null;
+  let hydratedAt: Date | null = null;
+  const billing = resolveSandboxBilling(input.row, input.env);
 
   const get = async () => {
     if (sandbox) return sandbox;
@@ -2170,6 +2197,7 @@ function createSandboxAcquirer(input: {
         throw new StaleRunLeaseError();
       }
       sandbox = hydrated;
+      hydratedAt = new Date();
       input.onHydrated(hydrated);
       return hydrated;
     })().catch((error) => {
@@ -2184,6 +2212,16 @@ function createSandboxAcquirer(input: {
     get,
     get current() {
       return sandbox;
+    },
+    billingSnapshot() {
+      if (!sandbox || !hydratedAt) return null;
+      return {
+        sandboxId: sandbox.sandboxId,
+        hydratedAt,
+        template: billing.template,
+        vcpu: billing.vcpu,
+        ramMib: billing.ramMib,
+      };
     },
   };
 }
