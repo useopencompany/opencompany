@@ -208,8 +208,28 @@ The runner must connect to Neon's **direct** (non-pooled) endpoint, not the `-po
 host: PgBouncer transaction pooling cannot do interactive transactions or
 `LISTEN`/`NOTIFY`. Set `RUNNER_DATABASE_URL` to the direct URL, or leave it unset and
 the runner derives the direct host from `DATABASE_URL` by stripping `-pooler`. Pool size
-is `RUNNER_DB_POOL_MAX` (default 10). The pool is drained on `SIGTERM`/`SIGINT` after
-in-flight jobs and HTTP requests finish, before the process exits.
+is `RUNNER_DB_POOL_MAX` (default 10; prod 60). The pool is drained on `SIGTERM`/`SIGINT`
+after in-flight jobs and HTTP requests finish, before the process exits.
+
+## Session concurrency and scaling
+
+Each instance runs up to `RUNNER_WORKER_CONCURRENCY` sessions in parallel (default 8;
+prod 40). Sessions are **I/O-bound** — a turn spends most of its wall-clock waiting on
+model token streaming (via the AI gateway) and remote E2B sandbox commands, with only
+brief local CPU for parsing/publishing token deltas and short DB writes. So the practical
+per-instance ceiling is the **single event loop** (token processing + Durable Streams
+publishing across all live streams on one core), not CPU or RAM — followed by the **E2B
+concurrent-sandbox quota** (one sandbox per tool-using session) and **model-gateway rate
+limits**. The Neon connection pool is far from binding (see
+[database.md](./database.md#runner-pool-sizing)).
+
+The prod value of 40 is deliberately aggressive for a single Render Standard instance: it
+exists to find the real ceiling, not to sit safely below it. When raising it, watch live
+transcript lag (event-loop pressure), the E2B dashboard's active-sandbox count against
+your plan limit, and gateway rate-limit/429s. To scale beyond one instance's ceiling, add
+`numInstances` in `render.yaml` — the job-delivery lease and per-session run lease already
+make multiple instances safe, and each instance gets its own event loop and DB pool (keep
+`instances × RUNNER_DB_POOL_MAX` under Neon's `max_connections`).
 
 ## Local development
 
@@ -219,6 +239,7 @@ Required environment variables:
 - `RUNNER_DATABASE_URL` (optional; direct/non-pooled Neon URL for the runner pool.
   Defaults to `DATABASE_URL` with the `-pooler` host label stripped.)
 - `RUNNER_DB_POOL_MAX` (optional; runner DB pool size, defaults to `10`)
+- `RUNNER_WORKER_CONCURRENCY` (optional; max parallel sessions per instance, defaults to `8`)
 - `RUNNER_PUBLIC_URL` (`http://localhost:3040` locally)
 - `RUNNER_INTERNAL_URL` (`http://localhost:3040` locally; optional when it matches `RUNNER_PUBLIC_URL`)
 - `RUNNER_INTERNAL_TOKEN`
