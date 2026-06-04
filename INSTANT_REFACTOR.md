@@ -240,17 +240,20 @@ new path is correct, not just working):
 - ⬜ Second tab mirrors live (multi-client).
 - ⬜ Abort shows "aborting" immediately. Only after these → 3.4.
 
-**3.4 — Remove the legacy streaming path** (after 3.5)
-- ⬜ Delete raw-SSE `useSessionEventStream` (EventSource) + the stream-token credential flow; delete
-  `seedSessionQueries`, `mergeAgentSessionDetail`, `applyRuntimeEventToSessionDetail`,
-  `addUserMessageToSessionDetail`, `updateSessionStatusInDetail`. Keep the **pure event→view
-  derivations** (`buildAssistantTurnParts`, etc.) and the reducer. Simplify the `detail` query's
-  `queryFn` to a plain fetch (no merge); keep it for session meta + related + aggregates.
-- ⬜ Drop the stubbed per-session Electric collections (`createSessionCollections`, `transientDeltas`)
-  + their row types — superseded by the Durable Stream. Remove the
-  `agent_session_messages`/`agent_session_events` scopes from the Electric shape proxy.
-- ⬜ Delete the **Phase-2-deferred** sidebar helpers + the **Phase-1** vestigial `agentQueryKeys.list`.
-- ⬜ Then **remove the `NEXT_PUBLIC_DURABLE_STREAMS` flag** — Durable Streams becomes the only path.
+**3.4 — Remove the legacy streaming path** ✅ (`36a493f`, `391d448`, `eb3735a`)
+- ✅ `SessionView` is **stream-only**; the `NEXT_PUBLIC_DURABLE_STREAMS` flag is **removed** (Durable
+  Streams is the only path). `runtime` always sources from `useSessionStream` (server `detail` is the
+  instant-paint fallback). Loose ends fixed: aggregates refetch on terminal status; TTFT re-homed onto
+  the stream via an `onEvent` hook. submit/abort dropped their optimistic cache writes (the stream
+  delivers the bubble + status); the `detail` queryFn is a plain fetch (kept for meta/related/aggregates).
+- ✅ Deleted: raw-SSE `useSessionEventStream` (+ test), the stream-token route + loader + client fetch,
+  `seedSessionQueries`'s SSE callers, `mergeAgentSessionDetail`, `applyRuntimeEventToSessionDetail`,
+  `addUserMessageToSessionDetail`, `updateSessionStatusInDetail`, `invalidateRelatedCachesForSessionEvent`
+  + their private support fns, and the credential payload/parser/key. Stubbed per-session Electric
+  collections (`createSessionCollections`/`useSessionCollections`/`transientDeltas`) + row types +
+  the `agent_session_messages`/`agent_session_events` shape-proxy scopes are gone.
+- ⬜ Still pending (Phase 4): the **Phase-2-deferred** sidebar helpers + the **Phase-1** vestigial
+  `agentQueryKeys.list` (`seedSessionQueries` is kept — still used for instant session-open seeding).
 
 ### Phase 4 — Cleanup + tests ⬜
 - ⬜ Delete dead fetchers / query keys / `payload.ts` serializers no longer referenced
@@ -289,17 +292,24 @@ Phases 1–2 done. Phase 3 (Durable Streams) is **built and live-verified for st
 publishes, the web materializes via the reducer, and token streaming works end-to-end against the real
 Electric Cloud service (behind `NEXT_PUBLIC_DURABLE_STREAMS`, off by default; SSE still primary).
 
-**The path to "clean refactor done", in order:**
+Phase 3 is **done**: the session transcript streams over Durable Streams end-to-end (live-verified),
+`SessionView` is single-path, the flag is gone, and the legacy SSE path + its dead code are deleted.
+typecheck + lint + full suites green.
 
-1. **Verify the resilience trio (3.5 gate — human, ~5 min):** refresh mid-generation (in-flight text
-   survives), second tab mirrors live, abort shows instantly. These justify the architecture and gate
-   removing the fallback.
-2. **3.4 — delete the legacy SSE path** as a focused pass on `SessionView` + `payload.ts` + `collections/`
-   + the Electric proxy. Fix the two cutover loose ends *here* (aggregates refetch on completion; re-home
-   TTFT) since the legacy machinery currently masks them. This makes the open session single-path.
-3. **Remove the `NEXT_PUBLIC_DURABLE_STREAMS` flag** — Durable Streams becomes the only path.
-4. **Phase 4 — tests + dead-code sweep:** a `SessionView` component test driving a mocked stream;
-   delete the Phase-2-deferred sidebar helpers, `agentQueryKeys.list`, and dead `payload.ts` serializers.
+**What's left for a fully clean tree (Phase 4 housekeeping, low-risk):**
+
+1. Delete the **Phase-2-deferred** sidebar React-Query helpers (`upsertSidebarSession`,
+   `removeSidebarSession`, `setSidebarSessionStar`, `archiveSidebarSessionOptimistically`,
+   `fetchSidebarSessions`, `sessionQueryKeys.list`) + their tests — the sidebar reads collections now.
+2. Delete the **Phase-1** vestigial `agentQueryKeys.list` seeding in `updateAgentQueries` + the
+   back-link list prefetch (AgentsView/MainPanel read the collection).
+3. Unwind `seedSessionQueries`' sidebar branch (keep its detail-seeding for instant session-open).
+
+**Post-clean polish (non-blocking):** client optimistic-echo overlay for the user bubble; persist the
+stream offset / seed from the durable snapshot so long sessions don't replay every token delta on load;
+wire `flushSessionStream`/`closeSessionStream` into the runner session lifecycle.
+
+**Standing security item:** rotate the Durable Streams token (pasted in chat during setup).
 
 **Post-clean polish (non-blocking):** client optimistic-echo overlay for the user bubble; persist the
 offset / seed from the durable snapshot so long sessions don't replay every token delta on load; wire
