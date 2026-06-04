@@ -1,5 +1,12 @@
-import { type AgentConfig, resolveEnabledSkills, shellQuote } from "@opencompany/agent-runtime";
+import {
+  type AgentConfig,
+  type AgentSkillFile,
+  isExternalSkillReference,
+  resolveEnabledBuiltinSkillFiles,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
+import { loadExternalSkillFiles } from "./skill-snapshots";
 
 const SANDBOX_ROOT_USER = "root";
 
@@ -7,13 +14,21 @@ const SANDBOX_ROOT_USER = "root";
 // skills/<id>/<file> (e.g. skills/agent-self-edit/SKILL.md). Files are root-owned and
 // world-readable but not writable, so the agent can read them with read_skill but never edit
 // them — the same isolation idea as the brain manifest, but readable.
+//
+// Built-in skill files ship in code; external skill files come from the workspace snapshot
+// cache (refreshed to branch HEAD here in the trusted runner host). Both mount identically;
+// the agent can't tell them apart beyond the provenance noted in the system prompt.
 export async function materializeSkillsForSession(input: {
   sandbox: SandboxHandle;
   workdir: string;
+  workspaceId: string;
   config: Pick<AgentConfig, "skills">;
 }) {
   const layout = sandboxLayout(input.workdir);
-  const skills = resolveEnabledSkills(input.config);
+  const builtins = resolveEnabledBuiltinSkillFiles(input.config);
+  const externalRefs = (input.config.skills ?? []).filter(isExternalSkillReference);
+  const externals = await loadExternalSkillFiles(input.workspaceId, externalRefs);
+  const skills: Array<{ id: string; files: AgentSkillFile[] }> = [...builtins, ...externals];
 
   await input.sandbox.commands.run(
     `rm -rf ${shellQuote(layout.skillsRoot)} && mkdir -p ${shellQuote(layout.skillsRoot)}`,

@@ -26,6 +26,7 @@ import type {
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
+import { isExternalSkillReference } from "./types";
 
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));
@@ -173,7 +174,8 @@ export function validateAgentFileSource(source: string): AgentFileValidationResu
   if (
     reparsed.title !== parsed.title ||
     reparsed.config.model.name !== parsed.config.model.name ||
-    reparsed.config.instructions !== parsed.config.instructions
+    reparsed.config.instructions !== parsed.config.instructions ||
+    JSON.stringify(reparsed.config.skills ?? []) !== JSON.stringify(parsed.config.skills ?? [])
   ) {
     return {
       ok: false,
@@ -229,6 +231,21 @@ export function serializeAgentFile(input: {
   ].join("\n");
 }
 
+function serializeSkillReference(skill: AgentSkillReference): string | Record<string, unknown> {
+  if (!isExternalSkillReference(skill)) return skill.id;
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    source: {
+      type: skill.source.type,
+      url: skill.source.url,
+      ref: skill.source.ref,
+      path: skill.source.path,
+    },
+  };
+}
+
 export function serializeAgentFrontmatter(input: {
   title: string;
   model: AgentModelId;
@@ -256,7 +273,9 @@ export function serializeAgentFrontmatter(input: {
     agents: serializeAgentReferences(agents),
     // Omit `skills:` entirely when empty so existing agent files don't gain a noisy
     // empty key on re-serialize. The built-in default skill is implicit, not persisted.
-    ...(skills.length > 0 ? { skills: skills.map((skill) => skill.id) } : {}),
+    // Built-ins serialize as bare string ids (back-compat); external skills serialize as
+    // objects in a fixed key order so the YAML output (and GitHub-sync hash) is deterministic.
+    ...(skills.length > 0 ? { skills: skills.map(serializeSkillReference) } : {}),
     integrations: {
       github: {
         repositories,
