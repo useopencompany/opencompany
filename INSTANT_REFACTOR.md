@@ -15,16 +15,21 @@ Rebuild the web client's data foundation so the app feels **near-instant and opt
 
 - Every **read** becomes a reactive **live query** over a **TanStack DB** collection.
 - Every **write** is **optimistic** (applied instantly) and **reconciled** against the server.
-- Durable state syncs **Postgres → client in real time via ElectricSQL** (Electric Cloud).
-- The custom **SSE stream is reduced to a pure transient-token channel** for live agent
-  streaming (durable message/event rows now arrive via Electric).
+- Durable CRUD state (agents, session list, stars) syncs **Postgres → client in real time via
+  ElectricSQL** (Electric Cloud shape sync).
+- The **live session transcript** streams over a **resumable Durable Stream** (Electric's
+  streaming primitive) — **not** raw SSE and **not** through the DB hot path. See the
+  [Streaming architecture v2](#streaming-architecture-v2--durable-streams) section below.
 - **No legacy support** — the old TanStack Query + hand-rolled optimistic-cache layer is
   deleted surface-by-surface as it migrates.
 
 **Decisions locked in:** (1) full ElectricSQL now, not a future swap; (2) migrate the
 interactive surfaces first (agents, sessions sidebar, session detail + streaming) and leave
-brain files / integrations / tool policies / credit balance server-rendered; (3) streaming
-tokens live in a `localOnly` collection unioned with the durable message row.
+brain files / integrations / tool policies / credit balance server-rendered; (3) **[REVISED
+after research — see v2 below]** the live transcript streams over a **Durable Stream**
+(resumable, offset-based), not over raw SSE with a `localOnly` token buffer. Electric **shape
+sync** stays for durable CRUD collections (agents, session list, stars); the **Durable Stream**
+is the read path for the open session's transcript.
 
 ### Architecture
 
@@ -40,6 +45,85 @@ component → collection.update()    Neon ──logical repl──▶         ru
 Electric syncs **raw snake_case rows**; camelCase derivation happens client-side in
 **live-query selectors**. Collections are **normalized** (one per table). Writes stay on
 **Server Actions** (Electric is read-path only) and reconcile by Postgres **txid**.
+
+---
+
+## Streaming architecture v2 — Durable Streams
+
+> This supersedes the original Phase 3 design ("SSE reduced to transient-only + durable rows via
+> Electric shapes"). We researched Electric's own AI-app guidance and pivoted. Decision locked in
+> with the product owner: **adopt Durable Streams for the live session, pre-launch, as a deep
+> refactor of both the web client and the runner.**
+
+### Why we pivoted (the research)
+
+Electric's explicit position for AI apps ([_Building AI apps? You need sync_](https://electric.ax/blog/2025/04/09/building-ai-apps-on-sync)):
+**don't stream tokens directly to the UI over fragile SSE, and don't write per-token rows to the
+DB.** Stream over a **resumable stream**; use the DB / Electric shape-sync for **durable CRUD
+state**. They productised the streaming half as **[Durable Streams](https://electric.ax/blog/2025/12/09/announcing-durable-streams)** —
+a persistent, append-only HTTP log with **offset-based resumption** (catch-up read from any
+offset, then live tail), CDN-cacheable reads, "<15ms end-to-end". It's the transport under
+Electric 2.0; **1.5 years in production, 10 language clients**. [Hosted on Electric
+Cloud](https://electric.ax/blog/2026/01/22/announcing-hosted-durable-streams): `PUT
+…/v1/stream/<service>/<name>` to create, **reads free, 5M writes/month free**, 240K writes/s.
+
+The original plan's flaw against our north-star (**very fast + robust live streaming**): routing
+durable event boundaries (tool-completed, message-completed) through Electric **shape** sync puts
+logical-replication + shape-poll latency in the live path. Durable Streams removes that — the live
+transcript (durable boundaries *and* token deltas) flows over one resumable stream, while Postgres
+stays the system of record for the sidebar / billing / history.
+
+It also fixes a **latent runner bug**: `apps/runner/src/events.ts` fans events over an **in-process
+`EventEmitter`** (`sessionEventBroker`) → SSE. That only works when the SSE connection and the agent
+run land on the **same runner instance**. A Durable Stream is a shared, addressable log — multi
+instance-safe by construction.
+
+### The two-plane model
+
+```
+PLANE A — durable CRUD state (Electric shape sync)      PLANE B — live transcript (Durable Stream)
+agents · agent_sessions · session_stars                 per-session stream: stream/<svc>/session-<id>
+Neon ──logical repl──▶ Electric Cloud ──▶ shapes        runner ──append (durable + transient events)──▶
+  → workspace collections (sidebar, agents list)          Electric Cloud Durable Stream
+  → already DONE in Phases 0–2                             → web: @durable-streams/client (resumable
+                                                             from offset) → materialize via the
+                                                             existing applyRuntimeEventToState reducer
+                                                             → useLiveQuery transcript
+```
+
+- **Runner** keeps persisting durable rows to Postgres (system of record — feeds the sidebar via
+  Plane A, plus billing/usage/history). It **additionally appends every event** (durable + transient)
+  to the session's Durable Stream — replacing the in-process broker fan-out. Per-token deltas go to
+  the **stream only**, never to Postgres → **no obsessive DB writes** (write volume to PG is
+  unchanged; the stream is not the DB).
+- **Web client** drops the raw-SSE `useSessionEventStream` + the HTTP detail-refetch/merge path.
+  The transcript is materialized from the Durable Stream: read from the persisted offset (instant
+  history, no fetch), live-tail the rest, fold through the **existing, battle-tested
+  `applyRuntimeEventToState` reducer** into the rendered `AgentSessionDetailPayload`. Resumable
+  across refresh / network drop / re-render; multi-tab and multi-device for free.
+- **Per-session Electric message/event shapes are NOT needed** (the stub `createSessionCollections`
+  is superseded) — the Durable Stream is the transcript read path. Electric shapes remain for Plane A.
+
+### Materialization: reducer first, StreamDB maybe later
+
+**[StreamDB](https://electric.ax/blog/2026/03/26/stream-db)** (`@durable-streams/state`) can route stream
+events into TanStack DB collections by type and materialize them with `useLiveQuery`. It's the
+elegant end-state — but it's **new (Mar 2026), docs sparse**. We will **first** consume the raw
+stream with `@durable-streams/client` and fold events through our existing reducer (which already
+handles deltas, tool calls, reasoning, questions, approvals, usage). That keeps the risk on the
+**mature** transport and reuses tested logic. Adopt StreamDB only if it clearly simplifies.
+
+### Keep the transport swappable / risk posture
+
+- Build the consumer behind one seam (`useSessionStream`) so SSE → Durable Streams (and later →
+  StreamDB) is a localized change. Land it **behind a flag**, keep SSE working until the stream
+  round-trip is verified end-to-end, then delete SSE.
+- **Maturity caveat:** Durable Streams *transport* is production-grade; **StreamDB and the hosted
+  service are early** — this is a launch-critical path, so verify the round-trip (catch-up + live +
+  resume-after-drop) before removing the SSE fallback.
+- **Per-session aggregates** (usage/cost recursive CTE, parent/children `related`) stay on a
+  lightweight server fetch that refetches on completion — not reproduced client-side, not on the
+  live hot path (unchanged from the earlier D2 decision).
 
 ---
 
@@ -96,16 +180,56 @@ Electric syncs **raw snake_case rows**; camelCase derivation happens client-side
   longer reads React Query) but harmless, and unwinding `seedSessionQueries` is entangled with Phase 3's
   session-detail rewrite + the large `payload.test.ts`. Clean up wholesale in Phase 3/4.
 
-### Phase 3 — Session detail + streaming ⬜
-- ⬜ Per-session `messages` + `events` collections via `createSessionCollections(sessionId)` (already stubbed)
-- ⬜ Transcript = live query composing messages + events (+ usage) for the open session
-- ⬜ `SessionView` top read → `useLiveQuery`
-- ⬜ Rewrite `applyRuntimeEvent` to handle **transient events only** → `transientDeltas` localOnly collection
-- ⬜ Union live query: durable message content ⊕ transient token buffer; clear buffer on `completed`
-- ⬜ Optimistic `submitAgentSessionMessage` (insert user row) + `abortAgentSession` (status)
-- ⬜ Remove SSE durable-reconnect/merge path; delete `seedSessionQueries`,
-  `mergeAgentSessionDetail`, `applyRuntimeEventToSessionDetail`, `addUserMessageToSessionDetail`
-  (keep the pure event→view derivations and `useSessionEventStream` as transient-only)
+### Phase 3 — Session detail + streaming (Durable Streams refactor) 🚧
+
+> **Revised** per [Streaming architecture v2](#streaming-architecture-v2--durable-streams). Spans the
+> **runner** (`apps/runner`) + **web** (`apps/web`) + **infra** (Electric Cloud Durable Streams). Land
+> behind a flag; keep SSE until the round-trip is verified, then delete it.
+
+**3.0 — Infra + contract + scaffolding** (safe, in-repo, unblocks the rest)
+- ⬜ Verify packages on npm (`@durable-streams/client`, `@durable-streams/server` for tests,
+  `@durable-streams/state` for the later StreamDB option) and install in `web` + `runner`.
+- ⬜ Provision a hosted Durable Streams service on Electric Cloud; add env vars
+  (`DURABLE_STREAMS_URL`/service id + write token for the runner; read URL/proxy for the web client).
+  Document exact `PUT` provisioning + env in `.env.example` + `docs/stack/`.
+- ⬜ Define the shared **stream contract**: stream name `session-<sessionId>`, event framing =
+  the existing `RuntimeEventForStream` JSON (durable rows carry numeric `id` + offset; transient
+  carry `id: null`). Write a same-origin **read proxy/auth** route (mirrors the Electric shape proxy:
+  verify session ownership, never trust client params) so the browser never holds the write token.
+
+**3.1 — Runner: append to the Durable Stream** (`apps/runner/src/events.ts`)
+- ⬜ Add a Durable Streams publisher; have `publishRuntimeEvent` (durable) and
+  `publishTransientRuntimeEvent` append to `session-<id>` **in addition to** Postgres persistence
+  (durable) — replacing the in-process `EventEmitter` fan-out as the client transport. Behind the flag.
+- ⬜ Keep the durable Postgres writes unchanged (system of record / Plane A / billing).
+
+**3.2 — Web: consume the stream + materialize the transcript**
+- ⬜ New `useSessionStream(sessionId)` over `@durable-streams/client`: catch-up from the persisted
+  offset → live tail; fold events through the **existing `applyRuntimeEventToState` reducer** into the
+  rendered detail. One transport seam (SSE today → Durable Stream behind flag → StreamDB maybe later).
+- ⬜ `SessionView` reads the transcript from the materialized live view (gated by `useHydrated`);
+  session meta (status/title) can come from the Plane-A `agentSessions` collection.
+- ⬜ Resumability: persist the last offset; on refresh/drop, resume without losing in-flight tokens.
+
+**3.3 — Optimistic writes**
+- ⬜ `submitAgentSessionMessage` (user row) + `abortAgentSession` (status) stay Server Actions; the
+  user bubble + status reflect optimistically (append to the stream materialization or Plane-A status).
+
+**3.4 — Remove the legacy streaming path**
+- ⬜ Delete raw-SSE `useSessionEventStream` (EventSource) + stream-token credential flow if Durable
+  Streams uses its own auth; delete `seedSessionQueries`, `mergeAgentSessionDetail`,
+  `applyRuntimeEventToSessionDetail`, `addUserMessageToSessionDetail`. Keep the **pure event→view
+  derivations** (`buildAssistantTurnParts`, etc.) and the reducer.
+- ⬜ Drop the stubbed per-session Electric message/event collections (`createSessionCollections`) —
+  superseded by the Durable Stream. Remove the `agent_session_messages`/`agent_session_events` shape
+  scopes from the proxy if nothing else uses them.
+- ⬜ At this point also delete the **Phase-2-deferred** sidebar helpers + the **Phase-1** vestigial
+  `agentQueryKeys.list` plumbing.
+
+**3.5 — Verify**
+- ⬜ Round-trip: token stream is instant; tool/message boundaries instant (no replication lag);
+  refresh mid-generation resumes from offset without losing in-flight text; second tab mirrors live;
+  reconnect-after-drop catches up with no truncation. Only then remove the SSE fallback + flag.
 
 ### Phase 4 — Cleanup + tests ⬜
 - ⬜ Delete dead fetchers / query keys / `payload.ts` serializers no longer referenced
@@ -130,25 +254,28 @@ write can't be isolated into one batch, fall back to `collection.utils.awaitMatc
 - `useLiveQuery` is **client-only** — always gate with `useHydrated()`.
 - Shape URL must be **absolute** (`ShapeStream` does `new URL(url)`) — built from `window.location.origin`.
 - **neon-http has no interactive transactions** — use `db.batch([write, SELECT pg_current_xact_id()])`. `awaitTxId` wants a **numeric** txid (`::xid` → `Number`).
-- **HTTP/2 in dev**: plain-HTTP localhost caps ~6 connections/origin; each live shape holds one. Keep concurrent shapes low (only the open session syncs messages/events). Fine in prod over HTTPS.
-- Proxy sets `table`/`columns`/`where` **server-side** from `currentWorkspace()` — never trust client params.
-- **Rotate the Electric source secret** — it was pasted in chat during setup.
+- **HTTP/2 in dev**: plain-HTTP localhost caps ~6 connections/origin; each live shape holds one. Keep concurrent shapes low. With Durable Streams (Plane B) the open session no longer holds per-session message/event *shapes* — it holds **one** resumable stream connection instead, easing the cap.
+- Proxy sets `table`/`columns`/`where` **server-side** from `currentWorkspace()` — never trust client params. Mirror this for the Durable Stream read proxy (verify session ownership; keep the write token server-side).
+- **Rotate the Electric source secret** — it was pasted in chat during setup. (Same discipline for the Durable Streams write token: server-side only.)
+- **Durable Streams maturity**: transport is production-grade; **StreamDB + hosted service are early (2026)** — verify the live round-trip before deleting the SSE fallback.
+- **Runner broker is in-process** (`EventEmitter`): today's SSE only works on the same instance as the run. Durable Streams fixes this; don't reintroduce in-process fan-out as the client transport.
 
 ---
 
 ## ▶ Next step for a fresh session
 
-Phases 1 (agents) and 2 (sidebar) are done; the optimistic-write reference pattern is proven on the
-sidebar (star = txid-reconciled insert/delete; archive = txid-reconciled soft delete + status-excluding
-selector). Next is **Phase 3 — session detail + streaming** (the hardest, highest-value slice):
+Phases 1 (agents) and 2 (sidebar) are done. **Phase 3 is the Durable Streams refactor** (see
+[Streaming architecture v2](#streaming-architecture-v2--durable-streams)) — runner + web + infra,
+landed behind a flag. Work the sub-steps top-down:
 
-1. Per-session `messages` + `events` collections via `createSessionCollections(sessionId)` (stubbed;
-   only the open session syncs — mind the HTTP/2 dev cap, keep concurrent shapes low).
-2. Transcript = live query composing messages + events (+ usage) for the open session; `SessionView`
-   top read → `useLiveQuery` (gated by `useHydrated`).
-3. Rewrite `applyRuntimeEvent` to handle **transient events only** → `transientDeltas` localOnly
-   collection; union live query (durable message content ⊕ transient token buffer; clear on `completed`).
-4. Optimistic `submitAgentSessionMessage` (insert user row) + `abortAgentSession` (status).
-5. Remove the SSE durable-reconnect/merge path; delete `seedSessionQueries`, `mergeAgentSessionDetail`,
-   `applyRuntimeEventToSessionDetail`, `addUserMessageToSessionDetail` — and at that point also delete
-   the Phase-2-deferred legacy sidebar helpers + the Phase-1 vestigial `agentQueryKeys.list` plumbing.
+1. **3.0 scaffolding** (safe, in-repo, no infra blocker): verify + install `@durable-streams/client`
+   (web + runner), define the shared stream contract (`session-<id>`, `RuntimeEventForStream` framing),
+   add the env surface + a same-origin read proxy/auth route, and the `useSessionStream` transport seam.
+2. **3.0 infra** (needs Electric Cloud account): provision the hosted Durable Streams service + write
+   token; document the `PUT` + env in `.env.example`/`docs/stack`. → blocks live verification.
+3. **3.1 runner** then **3.2 web**: append events to the stream; consume + materialize via the existing
+   reducer; verify the round-trip (catch-up + live + resume-after-drop).
+4. **3.3 writes → 3.4 delete legacy → 3.5 verify**, then remove the SSE fallback + flag.
+
+**Open infra ask for the human:** provisioning the Electric Cloud Durable Streams service + write token
+(I can't create the cloud service without account access — exact `PUT`/env steps will be in the docs).

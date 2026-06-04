@@ -123,9 +123,15 @@ component → collection.update()    Neon ──logical repl──▶         ru
   write it controls, so the overlay holds flicker-free and the status-excluding selector covers the
   runner's deferred `archived_at`). `WorkspaceContext` now carries `userId`. Legacy `payload.ts` sidebar
   helpers are dead but **deferred to Phase 3/4** (entangled with `seedSessionQueries` + `payload.test.ts`).
-- ⬜ **Phase 3 — Session detail + streaming**: per-session `messages`/`events` collections; transcript
-  live query; SSE → transient-only into `transientDeltas`; remove SSE durable-reconnect/merge path;
-  delete `seedSessionQueries`/`mergeAgentSessionDetail`/`applyRuntimeEventToSessionDetail`.
+- 🚧 **Phase 3 — Session detail + streaming (REVISED → Durable Streams)**: after researching Electric's
+  AI-app guidance we pivoted off the original "SSE-transient + Electric message/event shapes" design.
+  The live transcript now streams over a **resumable Durable Stream** (Electric's streaming primitive),
+  with the runner appending events (replacing its in-process `EventEmitter` broker) and the web client
+  materialising via the existing `applyRuntimeEventToState` reducer. Electric **shape sync** stays for
+  Plane A (agents/sidebar/stars); the Durable Stream is Plane B (the open session). Postgres remains the
+  system of record; **no per-token DB writes**. Full design + sub-steps (3.0 infra/contract → 3.5 verify)
+  live in [`INSTANT_REFACTOR.md`](../INSTANT_REFACTOR.md#streaming-architecture-v2--durable-streams). The
+  per-session Electric message/event collection stubs are **superseded** by the stream.
 - ⬜ **Phase 4 — Cleanup + tests**: delete dead fetchers/query-keys/serializers (incl. the deferred
   sidebar helpers + vestigial `agentQueryKeys.list` plumbing); broaden component-test coverage.
 
