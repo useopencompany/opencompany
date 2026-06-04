@@ -15,11 +15,7 @@ import { observeRunStep, type RunContext } from "./run-context";
 import type { RunControlCheck } from "./run-control";
 import { ToolStepLimitExceededError } from "./runner-errors";
 import type { LoadedSession } from "./session-lifecycle";
-import {
-  addAnthropicCacheControlToLastMessage,
-  buildCacheableSystemPrompt,
-  normalizeReasoningSummary,
-} from "./stream-helpers";
+import { normalizeReasoningSummary } from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -69,7 +65,6 @@ export async function streamAssistantResponse(input: {
       suspendable: input.suspendable,
     }),
   );
-  const modelSystem = buildCacheableSystemPrompt(input.system, input.runtime.model.name);
   const selectedTools = {
     ...pickRuntimeTools(input.tools, input.runtime.tools),
     ...mcpToolSet.tools,
@@ -81,7 +76,7 @@ export async function streamAssistantResponse(input: {
   // no usage logged. `observeRunStep` -> `traceBraintrustStep` always calls `span.end()` in a
   // finally, so the span closes deterministically and we log usage/cost from data we collect.
   const modelInput = [
-    ...(modelSystem ? [{ role: "system", content: modelSystem }] : []),
+    ...(input.system ? [{ role: "system", content: input.system }] : []),
     ...input.messages,
   ];
   try {
@@ -93,15 +88,12 @@ export async function streamAssistantResponse(input: {
       async (span) => {
         const result = ai.streamText({
           model: gateway(input.runtime.model.name),
-          system: modelSystem,
+          system: input.system,
           messages: input.messages,
           tools: selectedTools,
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           abortSignal: input.ctx.controller.signal,
           includeRawChunks: input.runtime.model.reasoningExposure === "raw",
-          prepareStep: ({ messages }) => ({
-            messages: addAnthropicCacheControlToLastMessage(messages, input.runtime.model.name),
-          }),
           ...(input.runtime.model.providerOptions
             ? { providerOptions: input.runtime.model.providerOptions }
             : {}),
