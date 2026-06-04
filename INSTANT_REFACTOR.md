@@ -301,19 +301,38 @@ Electric Cloud service (behind `NEXT_PUBLIC_DURABLE_STREAMS`, off by default; SS
   `sessionQueryKeys.list` + `seedSessionQueries`' sidebar branch (kept detail-seeding), and the
   `agentQueryKeys.list` seeding/prefetch.
 
-**Post-clean polish (non-blocking, optional):**
+### Phase 5 — Lifecycle, resumption & robustness hardening ✅
+
+A post-launch-foundation pass closing the gaps where the *new* Durable-Streams path didn't yet follow
+the library's intended lifecycle/resumption model (see the deep review + the plan in
+`~/.claude/plans/`):
+
+- ✅ **Producer lifecycle (runner).** `finishRunLease` now fires `detachSessionStream` (flush + detach +
+  evict) when a run ends, so the `producers` map stays bounded to currently-running turns in the
+  long-lived runner; the graceful-shutdown drain (`index.ts`) flushes all producers so a deploy doesn't
+  drop an in-flight turn's tail. Each producer gets a **unique id per instance**
+  (`runner-<sessionId>-<uuid>`) — reusing a stable id after eviction would restart at epoch 0/seq 0 and
+  get the first append silently deduped (event lost). The run lease already guarantees a single writer
+  per session, so cross-instance fencing isn't needed.
+- ✅ **EOF where provably safe.** `closeSessionStream` (runner + web) closes the stream (EOF) on the
+  **archive** path only (`session-lifecycle.ts` `archiveSession`, web `archiveSessionLocally`) — the one
+  point a session can never append again (a closed stream is monotonic; a completed/aborted session can
+  still start a new turn). Runner close uses a **cold handle** when the producer was already detached;
+  both treat `NOT_FOUND`/`STREAM_CLOSED` as success.
+- ✅ **Offset seeding.** Sessions with no in-flight turn at open time seed the transcript from the
+  Postgres snapshot and tail the stream from its **current end** (resolved via a new `HEAD` on the read
+  proxy → `seedFromEnd`), instead of replaying every historical token delta from `-1`. Actively-
+  generating sessions (`running`/`aborting`) still replay from `-1` to reconstruct in-flight text.
+- ✅ **Consumer retry.** The give-up budget is now **consecutive** failures (reset on any healthy
+  batch), not lifetime; the hand-rolled `setTimeout` backoff is dropped in favour of the client's own
+  `backoffOptions` + `sseResilience` (SSE→long-poll fallback).
+
+**Post-clean polish (still non-blocking, optional):**
 - Client optimistic-echo overlay for the user bubble (the append→SSE round-trip is fast, but an
   overlay would make it feel instant).
-- Persist the stream offset / seed from the durable snapshot so long sessions don't replay every
-  token delta from offset `-1` on load.
-- Wire `flushSessionStream`/`closeSessionStream` into the runner's session lifecycle.
+- Per-message start-offset persistence so even *actively-generating* sessions can skip early-delta
+  replay on load (the status-gated `seedFromEnd` already removes replay for the common case).
 - Consider StreamDB (`@durable-streams/state`) to materialize the transcript collections directly
   (deferred originally for maturity; the reducer approach works today).
-
-**Standing security item:** rotate the Durable Streams token (pasted in chat during setup).
-
-**Post-clean polish (non-blocking):** client optimistic-echo overlay for the user bubble; persist the
-offset / seed from the durable snapshot so long sessions don't replay every token delta on load; wire
-`flushSessionStream`/`closeSessionStream` into the runner's session lifecycle (mind the flush race).
 
 **Standing security item:** rotate the Durable Streams token (pasted in chat during setup).

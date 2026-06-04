@@ -1,8 +1,11 @@
-import { stream } from "@durable-streams/client";
+import { DurableStream, stream } from "@durable-streams/client";
 import { DurableStreamTestServer } from "@durable-streams/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   __resetDurableStreamsForTests,
+  closeSessionStream,
+  detachSessionStream,
+  flushAllSessionStreams,
   flushSessionStream,
   isDurableStreamsEnabled,
   publishToDurableStream,
@@ -112,5 +115,71 @@ describe("durable streams publisher", () => {
 
     expect((await readAll("ses_one")).map((e) => e.type)).toEqual(["message.created"]);
     expect((await readAll("ses_two")).map((e) => e.type)).toEqual(["session.status"]);
+  });
+});
+
+describe("durable streams lifecycle", () => {
+  async function isClosed(sessionId: string): Promise<boolean> {
+    const head = await DurableStream.head({ url: `${baseUrl}/${sessionStreamName(sessionId)}` });
+    return head.exists && head.streamClosed;
+  }
+
+  it("flushAllSessionStreams delivers pending appends across every cached session", async () => {
+    process.env.DURABLE_STREAMS_URL = baseUrl;
+    publishToDurableStream("ses_flush_a", durableEvent(1, "message.created", {}));
+    publishToDurableStream("ses_flush_b", durableEvent(2, "message.created", {}));
+
+    await flushAllSessionStreams();
+
+    await expect.poll(async () => (await readAll("ses_flush_a")).length, { timeout: 5000 }).toBe(1);
+    await expect.poll(async () => (await readAll("ses_flush_b")).length, { timeout: 5000 }).toBe(1);
+  });
+
+  it("detachSessionStream evicts, and a later turn re-creates the producer without losing events", async () => {
+    process.env.DURABLE_STREAMS_URL = baseUrl;
+    const sessionId = "ses_detach";
+
+    publishToDurableStream(sessionId, durableEvent(1, "message.created", {}));
+    await flushSessionStream(sessionId); // deterministic delivery of event 1
+    await detachSessionStream(sessionId);
+    await expect.poll(async () => (await readAll(sessionId)).length, { timeout: 5000 }).toBe(1);
+
+    // The stream stays open (not EOF) — a new turn re-creates a producer (fresh id) and
+    // its first append must NOT be deduped against the detached producer's sequence.
+    publishToDurableStream(sessionId, durableEvent(2, "message.completed", { content: "ok" }));
+    await flushSessionStream(sessionId);
+
+    await expect
+      .poll(async () => (await readAll(sessionId)).map((e) => e.id), { timeout: 5000 })
+      .toEqual([1, 2]);
+    expect(await isClosed(sessionId)).toBe(false);
+  });
+
+  it("closeSessionStream closes the stream (EOF) through the cached producer", async () => {
+    process.env.DURABLE_STREAMS_URL = baseUrl;
+    const sessionId = "ses_close_warm";
+
+    publishToDurableStream(sessionId, durableEvent(1, "message.created", {}));
+    await flushSessionStream(sessionId);
+    await closeSessionStream(sessionId);
+
+    expect(await isClosed(sessionId)).toBe(true);
+  });
+
+  it("closeSessionStream closes via a cold handle when the producer was already detached", async () => {
+    process.env.DURABLE_STREAMS_URL = baseUrl;
+    const sessionId = "ses_close_cold";
+
+    publishToDurableStream(sessionId, durableEvent(1, "message.created", {}));
+    await flushSessionStream(sessionId);
+    await detachSessionStream(sessionId); // evicts the producer (turn ended)
+    await closeSessionStream(sessionId); // no cached producer → cold-handle close
+
+    expect(await isClosed(sessionId)).toBe(true);
+  });
+
+  it("closeSessionStream is a best-effort no-op for a never-created stream", async () => {
+    process.env.DURABLE_STREAMS_URL = baseUrl;
+    await expect(closeSessionStream("ses_close_missing")).resolves.toBeUndefined();
   });
 });

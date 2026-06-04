@@ -21,7 +21,7 @@ import {
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
-import { appendSessionStreamEvent } from "@/lib/agent-sessions/durable-streams";
+import { appendSessionStreamEvent, closeSessionStream } from "@/lib/agent-sessions/durable-streams";
 import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionAbortRequested,
@@ -615,7 +615,7 @@ async function archiveSessionLocally(
   const db = getDb();
   const now = new Date();
 
-  return batchWithTxid(
+  const txid = await batchWithTxid(
     db
       .update(agentSessions)
       .set({
@@ -647,6 +647,13 @@ async function archiveSessionLocally(
       },
     }),
   );
+
+  // The session is permanently archived — the one provably-safe point to close the
+  // Durable Stream (EOF). Best-effort; never blocks the archive (Postgres is the
+  // system of record).
+  await closeSessionStream(sessionId);
+
+  return txid;
 }
 
 async function loadAgentForSession(idOrPath: string, workspaceId: string) {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DurableStream, DurableStreamError, IdempotentProducer } from "@durable-streams/client";
 import { createLogger } from "@opencompany/observability";
 import type { RuntimeEventForStream } from "./events";
@@ -82,11 +83,15 @@ async function ensureProducer(sessionId: string): Promise<IdempotentProducer | n
     pending = ensureStream(streamUrl(config.baseUrl, sessionId), headers)
       .then(
         (handle) =>
-          new IdempotentProducer(handle, `runner-${sessionId}`, {
+          // A UNIQUE producer id per instance. Producers are detached + evicted when a
+          // turn ends (`detachSessionStream`), so a session's later turn (or a resume)
+          // re-creates one. Reusing a stable id would restart the producer at epoch 0,
+          // seq 0 — colliding with the prior instance's already-committed (id, epoch,
+          // seq) and getting silently deduped (event lost). A fresh id per instance
+          // gives each turn its own idempotency scope; the run lease already guarantees a
+          // single writer per session, so cross-instance fencing isn't needed.
+          new IdempotentProducer(handle, `runner-${sessionId}-${randomUUID()}`, {
             headers,
-            // Runner instances are ephemeral; tolerate a stale epoch after a
-            // restart by transparently claiming epoch+1.
-            autoClaim: true,
             onError: (error) =>
               logger.warn("Durable stream producer error", {
                 event: "opencompany.durable_stream_producer_error",
@@ -143,15 +148,71 @@ export async function flushSessionStream(sessionId: string): Promise<void> {
   }
 }
 
-/** Close and evict a session's producer (e.g. on terminal session status). */
-export async function closeSessionStream(sessionId: string): Promise<void> {
+/** Flush every cached producer. Used by the graceful-shutdown drain so an in-flight
+ * batch isn't lost on deploy/SIGTERM. Best-effort. */
+export async function flushAllSessionStreams(): Promise<void> {
+  const sessionIds = [...producers.keys()];
+  await Promise.allSettled(sessionIds.map((sessionId) => flushSessionStream(sessionId)));
+}
+
+/**
+ * End this instance's producer for a session without closing the stream: flush any
+ * pending appends, stop the producer, and evict it from the cache. Called when a run
+ * finishes (any terminal/pause status) so the producer map doesn't grow unbounded in
+ * the long-lived runner. A later turn (or a resume) transparently re-creates the
+ * producer — `autoClaim` claims a fresh epoch, so the stream stays writable. No-op
+ * when no producer is cached. Best-effort.
+ *
+ * Evicts BEFORE detaching so a publish racing in re-creates a fresh producer rather
+ * than appending to the one we're tearing down (detach makes `append` throw).
+ */
+export async function detachSessionStream(sessionId: string): Promise<void> {
   const pending = producers.get(sessionId);
   if (!pending) return;
   producers.delete(sessionId);
   try {
     const producer = await pending;
-    await producer.close();
+    await producer.detach();
   } catch (error) {
+    logger.warn("Durable stream detach failed", {
+      event: "opencompany.durable_stream_detach_failed",
+      session_id: sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Close a session's stream (EOF) — call ONLY when the session is permanently done
+ * (archived/deleted), never on turn completion: a closed stream is monotonic and
+ * rejects all future appends, but a completed session can still receive a new user
+ * message → a new turn. If this instance still holds a producer, close through it
+ * (flush + EOF, idempotent) and evict; otherwise the turn already ended and the
+ * producer was detached, so close via a cold handle. Treats "never created"
+ * (NOT_FOUND) and "already closed" (STREAM_CLOSED) as success. Best-effort.
+ */
+export async function closeSessionStream(sessionId: string): Promise<void> {
+  const config = readConfig();
+  if (!config) return;
+
+  const pending = producers.get(sessionId);
+  producers.delete(sessionId);
+  try {
+    if (pending) {
+      const producer = await pending;
+      await producer.close();
+      return;
+    }
+    const headers = authHeaders(config.token);
+    const url = streamUrl(config.baseUrl, sessionId);
+    await new DurableStream({ url, headers, contentType: JSON_CONTENT_TYPE }).close();
+  } catch (error) {
+    if (
+      error instanceof DurableStreamError &&
+      (error.code === "NOT_FOUND" || error.code === "STREAM_CLOSED")
+    ) {
+      return;
+    }
     logger.warn("Durable stream close failed", {
       event: "opencompany.durable_stream_close_failed",
       session_id: sessionId,

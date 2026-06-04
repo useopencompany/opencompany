@@ -21,7 +21,15 @@ import {
  */
 export function useSessionStream(
   sessionId: string,
-  options?: { enabled?: boolean; onEvent?: (event: RuntimeEvent) => void },
+  options?: {
+    enabled?: boolean;
+    onEvent?: (event: RuntimeEvent) => void;
+    // Tail from the stream's current end instead of replaying from "-1" — pass true
+    // when there's no in-flight turn (the transcript is already painted from the
+    // server snapshot). Captured at subscribe time, so a later status change doesn't
+    // re-open the stream. See SessionStreamOptions.seedFromEnd.
+    seedFromEnd?: boolean;
+  },
 ): {
   state: SessionRuntimeState;
   status: SessionStreamStatus;
@@ -31,8 +39,10 @@ export function useSessionStream(
   const [status, setStatus] = useState<SessionStreamStatus>("connecting");
 
   const onEventRef = useRef(options?.onEvent);
+  const seedFromEndRef = useRef(options?.seedFromEnd);
   useEffect(() => {
     onEventRef.current = options?.onEvent;
+    seedFromEndRef.current = options?.seedFromEnd;
   });
 
   // Reset to an empty transcript when the session changes, adjusting state during
@@ -48,11 +58,15 @@ export function useSessionStream(
   useEffect(() => {
     if (!enabled) return;
     const url = `${window.location.origin}/api/streams/v1/session/${sessionId}`;
-    const unsubscribe = subscribeSessionStream(url, {
-      onState: setState,
-      onStatus: setStatus,
-      onEvent: (event) => onEventRef.current?.(event),
-    });
+    const unsubscribe = subscribeSessionStream(
+      url,
+      {
+        onState: setState,
+        onStatus: setStatus,
+        onEvent: (event) => onEventRef.current?.(event),
+      },
+      { seedFromEnd: seedFromEndRef.current },
+    );
     return unsubscribe;
   }, [sessionId, enabled]);
 

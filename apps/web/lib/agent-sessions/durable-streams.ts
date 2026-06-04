@@ -78,3 +78,36 @@ export async function appendSessionStreamEvent(
     });
   }
 }
+
+/**
+ * Close a session's Durable Stream (EOF). Call ONLY when the session is permanently
+ * archived/deleted (the web's no-sandbox archive path) — a closed stream is monotonic
+ * and rejects all future appends, so closing a session that could still receive a
+ * message would break its next turn. Idempotent and best-effort: "already closed"
+ * (STREAM_CLOSED) and "never created" (NOT_FOUND) are success; any other failure is
+ * logged, never thrown (Postgres remains the system of record). No-op when streaming
+ * is unconfigured.
+ */
+export async function closeSessionStream(sessionId: string): Promise<void> {
+  const config = readConfig();
+  if (!config) return;
+
+  const url = `${config.baseUrl}/session-${sessionId}`;
+  const headers = config.token ? { Authorization: `Bearer ${config.token}` } : {};
+
+  try {
+    await new DurableStream({ url, headers, contentType: JSON_CONTENT_TYPE }).close();
+  } catch (error) {
+    if (
+      error instanceof DurableStreamError &&
+      (error.code === "STREAM_CLOSED" || error.code === "NOT_FOUND")
+    ) {
+      return;
+    }
+    logger.warn("Durable stream close failed", {
+      event: "opencompany.durable_stream_web_close_failed",
+      session_id: sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}

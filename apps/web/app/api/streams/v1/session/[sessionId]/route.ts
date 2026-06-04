@@ -88,41 +88,88 @@ const HOP_BY_HOP_HEADERS = [
   "connection",
 ];
 
-export async function GET(
+// Validate the caller and resolve the trusted upstream request (URL + headers) for a
+// session, shared by GET and HEAD. Returns a 503/401/403 Response on failure. The
+// upstream URL is built from the VALIDATED session — clients cannot widen their scope.
+async function authorizeUpstream(
   request: Request,
-  { params }: { params: Promise<{ sessionId: string }> },
-): Promise<Response> {
+  sessionId: string,
+): Promise<
+  | { ok: true; config: { baseUrl: string; token: string | undefined }; url: URL; headers: Headers }
+  | { ok: false; response: Response }
+> {
   const config = durableStreamsConfig();
   if (!config) {
-    return new Response("Durable Streams is not configured.", { status: 503 });
+    return { ok: false, response: new Response("Durable Streams is not configured.", { status: 503 }) };
   }
 
   const context = await currentWorkspace({ optional: true, skipOnboarding: true });
   if (!context) {
-    return new Response("Unauthorized", { status: 401 });
+    return { ok: false, response: new Response("Unauthorized", { status: 401 }) };
   }
 
-  const { sessionId } = await params;
   if (!(await ownsSession(sessionId, context.workspace.id, context.user.id))) {
-    return new Response("Forbidden", { status: 403 });
+    return { ok: false, response: new Response("Forbidden", { status: 403 }) };
   }
 
-  // Trusted upstream stream URL — built from the validated session, never client input.
-  const upstreamUrl = new URL(`${config.baseUrl}/session-${sessionId}`);
+  const url = new URL(`${config.baseUrl}/session-${sessionId}`);
   // Forward the client's protocol params verbatim (offset, live mode, cursor, …);
   // they only control where in the stream to read, not which stream.
   for (const [key, value] of new URL(request.url).searchParams) {
-    upstreamUrl.searchParams.set(key, value);
+    url.searchParams.set(key, value);
   }
 
   // Relay the client's request headers (the Durable Streams protocol negotiates
   // live/SSE via Accept + its own headers) minus the denylist; inject the token.
-  const requestHeaders = new Headers();
+  const headers = new Headers();
   for (const [key, value] of request.headers) {
-    if (!SKIP_REQUEST_HEADERS.has(key.toLowerCase())) requestHeaders.set(key, value);
+    if (!SKIP_REQUEST_HEADERS.has(key.toLowerCase())) headers.set(key, value);
   }
-  requestHeaders.set("accept-encoding", "identity");
-  if (config.token) requestHeaders.set("authorization", `Bearer ${config.token}`);
+  headers.set("accept-encoding", "identity");
+  if (config.token) headers.set("authorization", `Bearer ${config.token}`);
+
+  return { ok: true, config, url, headers };
+}
+
+// HEAD: relay the stream's metadata (existence + Stream-* headers, incl. the tail
+// offset) so the client can seed a live read from the current end instead of replaying
+// from "-1". No create-on-404 — a missing stream simply reports not-exists and the
+// client falls back to "-1".
+export async function HEAD(
+  request: Request,
+  { params }: { params: Promise<{ sessionId: string }> },
+): Promise<Response> {
+  const { sessionId } = await params;
+  const authorized = await authorizeUpstream(request, sessionId);
+  if (!authorized.ok) return authorized.response;
+
+  const upstream = await fetch(authorized.url, {
+    method: "HEAD",
+    headers: authorized.headers,
+    signal: request.signal,
+    cache: "no-store",
+  });
+
+  const responseHeaders = new Headers(upstream.headers);
+  for (const header of HOP_BY_HOP_HEADERS) responseHeaders.delete(header);
+  responseHeaders.set("Cache-Control", "no-cache, no-transform");
+  responseHeaders.set("Vary", "Cookie");
+
+  return new Response(null, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers: responseHeaders,
+  });
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ sessionId: string }> },
+): Promise<Response> {
+  const { sessionId } = await params;
+  const authorized = await authorizeUpstream(request, sessionId);
+  if (!authorized.ok) return authorized.response;
+  const { config, url: upstreamUrl, headers: requestHeaders } = authorized;
 
   const fetchUpstream = () =>
     fetch(upstreamUrl, { headers: requestHeaders, signal: request.signal, cache: "no-store" });

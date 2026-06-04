@@ -103,4 +103,42 @@ describe("subscribeSessionStream", () => {
 
     unsubscribe();
   });
+
+  it("seedFromEnd tails from the current end and skips prior history", async () => {
+    // A session with no in-flight turn seeds the transcript from the server snapshot,
+    // so the live read should start at the stream's CURRENT END (resolved via HEAD) and
+    // only materialize events appended after subscribing — not replay the whole history.
+    const sessionId = "seedfromend";
+    const stream = await producer(sessionId);
+    await stream.append({ type: "message.created", messageId: "msg_old", payload: { messageId: "msg_old", role: "user", content: "old", status: "completed" } });
+    await stream.append({ type: "message.created", messageId: "msg_done", payload: { messageId: "msg_done", role: "assistant", status: "running" } });
+    await stream.append({ type: "message.completed", messageId: "msg_done", payload: { messageId: "msg_done", content: "done" } });
+
+    let latest: SessionRuntimeState | null = null;
+    let resolveLive: () => void = () => {};
+    const liveReady = new Promise<void>((resolve) => (resolveLive = resolve));
+    const unsubscribe = subscribeSessionStream(
+      streamUrl(sessionId),
+      {
+        onState: (state) => (latest = state),
+        onStatus: (status) => {
+          if (status === "live") resolveLive();
+        },
+      },
+      { seedFromEnd: true },
+    );
+
+    // Only append once the live tail is open (offset pinned to the end), so the new
+    // event lands strictly after the seek point — no race with the HEAD.
+    await liveReady;
+    await stream.append({ type: "message.created", messageId: "msg_new", payload: { messageId: "msg_new", role: "user", content: "new", status: "completed" } });
+
+    await expect.poll(() => findMessage(latest, "msg_new")?.content, { timeout: 15000 }).toBe("new");
+    // Pre-subscribe history is NOT replayed (it's painted from the snapshot in the app).
+    expect(findMessage(latest, "msg_old")).toBeUndefined();
+    expect(findMessage(latest, "msg_done")).toBeUndefined();
+    expect(latest?.messages.map((m) => m.id)).toEqual(["msg_new"]);
+
+    unsubscribe();
+  });
 });

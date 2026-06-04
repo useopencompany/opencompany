@@ -1,4 +1,4 @@
-import { DurableStreamError, stream } from "@durable-streams/client";
+import { DurableStream, DurableStreamError, stream } from "@durable-streams/client";
 import {
   applyRuntimeEventToState,
   emptyCostSummary,
@@ -57,6 +57,16 @@ type SessionStreamHandlers = {
   onEvent?: (event: RuntimeEvent) => void;
 };
 
+type SessionStreamOptions = {
+  // When true, tail from the stream's current end (resolved via a HEAD) instead of
+  // replaying from offset "-1". Use for sessions with no in-flight turn: the durable
+  // transcript is already painted from the Postgres snapshot, so replaying every
+  // historical token delta is pure waste. An actively-generating session must still
+  // replay from "-1" to reconstruct the in-flight assistant text. Falls back to "-1"
+  // if the stream doesn't exist yet (a brand-new session) or the HEAD fails.
+  seedFromEnd?: boolean | undefined;
+};
+
 export function createEmptySessionRuntimeState(status = "created"): SessionRuntimeState {
   return {
     events: [],
@@ -73,18 +83,30 @@ export function createEmptySessionRuntimeState(status = "created"): SessionRunti
  * Subscribe to a session stream at `url` (the same-origin read proxy). Returns an
  * unsubscribe function.
  *
- * A single SSE read from offset `-1` replays the durable + transient history and
+ * A single SSE read replays the durable + transient history from the start offset and
  * then live-tails in one connection — `subscribeJson` delivers catch-up batches
  * followed by live ones, so there is no catch-up→live handoff gap. SSE gives the
  * lowest delivery latency; `@durable-streams/client` reconnects internally and
- * resumes from its tracked offset. We also track the offset for observability and
- * a future manual re-open.
+ * resumes from its tracked offset, applying exponential backoff (see `backoffOptions`)
+ * between attempts. We also track the offset for observability and a future manual
+ * re-open.
+ *
+ * Start offset: "-1" (whole stream) by default, so a refresh mid-generation rebuilds
+ * the in-flight assistant text from the streamed deltas. For a session with no active
+ * turn, pass `seedFromEnd` to tail from the current end instead (the snapshot already
+ * carries the durable transcript) — see `SessionStreamOptions.seedFromEnd`.
  */
-export function subscribeSessionStream(url: string, handlers: SessionStreamHandlers): () => void {
+export function subscribeSessionStream(
+  url: string,
+  handlers: SessionStreamHandlers,
+  options?: SessionStreamOptions,
+): () => void {
   let state = createEmptySessionRuntimeState();
   let offset = "-1";
   let stopped = false;
   let cancelLive: (() => void) | null = null;
+  // Consecutive failed (re)connect attempts — reset to 0 on any healthy batch, so the
+  // give-up budget tracks a sustained outage, not blips spread across a long session.
   let connectAttempts = 0;
 
   const reduce = (items: ReadonlyArray<RuntimeEvent>) => {
@@ -96,42 +118,58 @@ export function subscribeSessionStream(url: string, handlers: SessionStreamHandl
     handlers.onState(state);
   };
 
-  // `stream()` rejects on the first failed request (auth/404/network). Returning
-  // an options object asks it to retry; returning undefined re-throws (terminal).
-  // The proxy now creates a not-yet-existing stream on 404, but a cold start or a
-  // transient blip can still surface here — back off and retry so the session
-  // self-heals instead of latching on a spinner until a manual reload.
-  const onError = async (error: Error): Promise<Record<string, never> | undefined> => {
+  // Recoverable-error handler (Electric/Durable-Streams pattern): return `{}` to
+  // retry, `undefined` to propagate (terminal). The client already applies the
+  // configured exponential backoff before reconnecting, so we don't sleep here — we
+  // only decide whether to keep going. Auth/shape errors are terminal; everything
+  // else self-heals until the consecutive-failure budget is spent.
+  const onError = (error: Error): Record<string, never> | undefined => {
     if (stopped || isTerminalStreamError(error) || connectAttempts >= MAX_CONNECT_ATTEMPTS) {
       return undefined;
     }
     connectAttempts += 1;
-    const delayMs = Math.min(250 * 2 ** (connectAttempts - 1), 5000);
-    debugLog("connect retry", {
-      url,
-      attempt: connectAttempts,
-      delayMs,
-      code: streamErrorCode(error),
-    });
+    debugLog("connect retry", { url, attempt: connectAttempts, code: streamErrorCode(error) });
     handlers.onStatus?.("connecting");
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    return stopped ? undefined : {};
+    return {};
   };
 
   void (async () => {
     try {
       handlers.onStatus?.("connecting");
+
+      // Seed from the stream's current end when there's no in-flight turn: resolve the
+      // tail offset via HEAD and tail from there (no historical-delta replay). Fall back
+      // to "-1" when the stream doesn't exist yet or HEAD fails — replaying an empty or
+      // full stream is correct, just less efficient.
+      if (options?.seedFromEnd) {
+        try {
+          const head = await DurableStream.head({ url });
+          if (head.exists && head.offset) offset = head.offset;
+          debugLog("seed-from-end", { url, exists: head.exists, offset });
+        } catch (error) {
+          debugLog("head failed", { url, code: streamErrorCode(error) });
+        }
+        if (stopped) return;
+      }
+
       const live = await stream<RuntimeEvent>({
         url,
         json: true,
         live: "sse",
         offset,
         onError,
+        // Lean on the client's own exponential backoff instead of a hand-rolled sleep.
+        backoffOptions: { initialDelay: 250, maxDelay: 5000, multiplier: 2 },
+        // If the SSE connection keeps cutting short (e.g. an intermediary buffering the
+        // tail), fall back to long-poll rather than thrashing reconnects.
+        sseResilience: { logWarnings: false },
       });
       connectAttempts = 0;
       handlers.onStatus?.("live");
       debugLog("live", { url, offset });
       const unsubscribe = live.subscribeJson((batch) => {
+        // A delivered batch means the connection is healthy — reset the failure budget.
+        connectAttempts = 0;
         offset = batch.offset;
         debugLog("batch", {
           offset: batch.offset,

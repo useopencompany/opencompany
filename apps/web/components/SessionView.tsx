@@ -91,6 +91,12 @@ import {
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
 
+// A turn is actively generating tokens right now — the transcript must replay from
+// offset "-1" to reconstruct the in-flight assistant text. Every other status (settled,
+// paused, or brand-new) seeds the live read from the stream's current end instead, since
+// the durable transcript is already painted from the server snapshot.
+const ACTIVE_STREAMING_STATUSES = new Set(["running", "aborting"]);
+
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
@@ -249,6 +255,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // (durable rows + transient token deltas) through the shared reducer. `onEvent`
   // resolves the felt-TTFT timer on the first streamed assistant activity.
   const { state: streamState, status: streamStatus } = useSessionStream(session.id, {
+    // Seed from the stream's current end unless a turn is actively generating at open
+    // time (then replay from "-1" to rebuild in-flight text). Read from the server
+    // snapshot status, which is stable for this session load; captured at subscribe
+    // time inside the hook, so the later terminal-status flip doesn't re-open the stream.
+    seedFromEnd: !ACTIVE_STREAMING_STATUSES.has(detail.session.status),
     onEvent: (event) => {
       const pending = pendingTtftRef.current;
       if (
