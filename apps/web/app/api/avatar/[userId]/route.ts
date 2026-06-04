@@ -9,7 +9,9 @@ import { currentWorkspace } from "@/lib/auth";
 // The `?v=<updatedAt>` query param the caller appends busts the browser cache after an
 // upload.
 export async function GET(_request: Request, { params }: { params: Promise<{ userId: string }> }) {
-  const context = await currentWorkspace({ optional: true });
+  // skipOnboarding: this is a raw image-byte endpoint — it must never 307-redirect to
+  // /onboarding (which currentWorkspace does for onboarding-incomplete users by default).
+  const context = await currentWorkspace({ optional: true, skipOnboarding: true });
   if (!context) {
     return new Response(null, { status: 401 });
   }
