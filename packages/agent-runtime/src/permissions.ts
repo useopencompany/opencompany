@@ -336,6 +336,41 @@ export function classifyByVerbHeuristic(rawToolName: string): PermissionGroup {
 
 export const MCP_TOOL_NAME_SEPARATOR = "__";
 
+// Lazy MCP tools. Injecting every server tool into the model's tool set (dozens per
+// server) re-sends and re-bills their full schemas on every step. Instead each
+// connected server exposes two meta-tools: `{server}__search_tools` lists that
+// server's tools and input schemas on demand, and `{server}__use_tool` runs one by
+// name. A raw tool's schema only reaches the model when it asks for it.
+export const MCP_SEARCH_TOOLS_RAW_NAME = "search_tools";
+export const MCP_USE_TOOL_RAW_NAME = "use_tool";
+
+export function mcpSearchToolsName(providerKey: string) {
+  return `${providerKey}${MCP_TOOL_NAME_SEPARATOR}${MCP_SEARCH_TOOLS_RAW_NAME}`;
+}
+
+export function mcpUseToolName(providerKey: string) {
+  return `${providerKey}${MCP_TOOL_NAME_SEPARATOR}${MCP_USE_TOOL_RAW_NAME}`;
+}
+
+// `{server}__use_tool` carries the real action in its `tool` argument, so the gate must
+// classify by `{server}__{tool}` — the generic invoke name has no verb and would fall to
+// the admin-safe heuristic fallback. Returns the effective classification name; any other
+// tool (including a use_tool call missing a usable `tool` arg) is returned unchanged, so an
+// unparseable invoke stays gated conservatively as `admin`.
+export function mcpInvokeEffectiveToolName(toolName: string, toolInput: unknown): string {
+  const separatorIndex = toolName.indexOf(MCP_TOOL_NAME_SEPARATOR);
+  if (separatorIndex <= 0) return toolName;
+  const rawTool = toolName.slice(separatorIndex + MCP_TOOL_NAME_SEPARATOR.length);
+  if (rawTool !== MCP_USE_TOOL_RAW_NAME) return toolName;
+  const requested =
+    toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
+      ? (toolInput as Record<string, unknown>).tool
+      : undefined;
+  if (typeof requested !== "string" || !requested.trim()) return toolName;
+  const providerKey = toolName.slice(0, separatorIndex);
+  return `${providerKey}${MCP_TOOL_NAME_SEPARATOR}${requested.trim()}`;
+}
+
 // MCP tool names are "{serverKey}__{rawTool}". Resolve the provider from the prefix
 // and classify the raw tool via the registry's static map, then the verb heuristic.
 export function classifyMcpTool(prefixedName: string): ToolClassification {
@@ -455,10 +490,14 @@ export type ToolDecision = {
 // durably (see RunSuspendedError).
 export function resolveToolDecision(input: {
   toolName: string;
+  // The tool-call arguments. Required to gate the lazy MCP invoke tool
+  // (`{server}__use_tool`) by the real action in its `tool` argument rather than the
+  // generic invoke name. Omitting it is safe for every other tool.
+  toolInput?: unknown;
   policy: WorkspaceToolPolicyMap;
   suspendable: boolean;
 }): ToolDecision {
-  const classification = classifyTool(input.toolName);
+  const classification = classifyTool(mcpInvokeEffectiveToolName(input.toolName, input.toolInput));
   if (!classification) {
     return { decision: "allow", providerKey: SYSTEM_PROVIDER_KEY, group: "read" };
   }

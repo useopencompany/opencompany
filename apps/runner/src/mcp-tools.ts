@@ -9,11 +9,11 @@ import {
 } from "@ai-sdk/mcp";
 import {
   type AgentConfig,
-  classifyMcpTool,
-  effectivePolicyDecisionForGroup,
-  formatPolicyDecision,
+  MCP_SEARCH_TOOLS_RAW_NAME,
+  MCP_USE_TOOL_RAW_NAME,
+  mcpSearchToolsName,
+  mcpUseToolName,
   newAgentSessionMessageId,
-  PERMISSION_GROUP_LABELS,
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import {
@@ -171,10 +171,42 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   const clients: MCPClient[] = [];
   const tools: ToolSet = {};
   const usedNames = new Set<string>();
-  const bodiesByName = new Map<
-    string,
-    { server: McpProviderKey; rawName: string; execute: McpToolBody }
-  >();
+  // Keyed by both meta-tool names (`{server}__search_tools` / `{server}__use_tool`) so
+  // an approval resume can re-dispatch either without re-deriving which provider it hit.
+  const providerByToolName = new Map<string, ConnectedMcpProvider>();
+
+  // Park on the approval gate, then run the body — shared by both meta-tools. A suspend
+  // returns a discarded no-op (body runs in the resume run); a deny persists the
+  // permission_denied result; an allow runs `run()`.
+  async function runGatedMetaTool(opts: {
+    toolName: string;
+    toolCallId: string;
+    run: () => Promise<unknown>;
+  }) {
+    const verdict = await input.toolStartCoordinator.waitForStarted(opts.toolCallId, input.signal);
+    if (verdict.decision === "suspend") return SUSPENDED_TOOL_OUTPUT;
+    if (verdict.decision === "deny") {
+      return persistDeniedToolResult({
+        sessionId: input.sessionId,
+        assistantMessageId: input.assistantMessageId,
+        runLeaseId: input.runLeaseId,
+        runLeaseOwner: input.runLeaseOwner,
+        internalMessages: input.internalMessages,
+        toolCallId: opts.toolCallId,
+        toolName: opts.toolName,
+        verdict,
+      });
+    }
+    return opts.run();
+  }
+
+  function recordMetaToolStart(name: string) {
+    return async ({ input: toolInput, toolCallId }: { input: unknown; toolCallId: string }) => {
+      await input.checkAbort();
+      input.toolStartCoordinator.record({ toolCallId, name, input: toolInput });
+    };
+  }
+
   try {
     for (const provider of requestedProviders) {
       let connection: Awaited<ReturnType<typeof loadMcpConnection>>;
@@ -213,96 +245,77 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
       const definitions = await client.listTools({ options: { signal: input.signal } });
       const rawTools = client.toolsFromDefinitions(definitions);
 
+      // The catalog (name + description + JSON input schema) comes straight from the MCP
+      // listTools response so `search_tools` returns plain schemas the model can read.
+      const catalog: McpToolCatalogEntry[] =
+        (definitions as { tools?: McpToolCatalogEntry[] }).tools ?? [];
+      const bodyByRawName = new Map<string, McpToolBody>();
       for (const [rawName, rawTool] of Object.entries(rawTools)) {
-        const prefixedName = uniqueToolName(
-          `${provider.key}__${sanitizeMcpToolName(rawName)}`,
-          usedNames,
-        );
-        const mcpTool = rawTool as {
-          description?: string;
-          inputSchema?: unknown;
-          execute?: (input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>;
-        };
-        tools[prefixedName] = tool({
-          description: mcpToolDescription({
-            providerName: provider.displayName,
-            rawName,
-            description: mcpTool.description,
-            prefixedName,
-            policy: input.policy,
-            suspendable: input.suspendable,
-          }),
-          inputSchema:
-            (mcpTool.inputSchema as never) ??
-            jsonSchema({ type: "object", properties: {} } as never),
-          onInputAvailable: async ({
-            input: toolInput,
-            toolCallId,
-          }: {
-            input: unknown;
-            toolCallId: string;
-          }) => {
-            await input.checkAbort();
-            input.toolStartCoordinator.record({
-              toolCallId,
-              name: prefixedName,
-              input: toolInput,
-            });
-          },
-          execute: async (toolInput: unknown, options: { toolCallId: string }) => {
-            const verdict = await input.toolStartCoordinator.waitForStarted(
-              options.toolCallId,
-              input.signal,
-            );
-            // Suspending at an "ask" gate — return a discarded no-op (the stream is torn
-            // down and this result is never persisted). The body runs in the resume run.
-            if (verdict.decision === "suspend") {
-              return SUSPENDED_TOOL_OUTPUT;
-            }
-            if (verdict.decision === "deny") {
-              return persistDeniedToolResult({
-                sessionId: input.sessionId,
-                assistantMessageId: input.assistantMessageId,
-                runLeaseId: input.runLeaseId,
-                runLeaseOwner: input.runLeaseOwner,
-                internalMessages: input.internalMessages,
-                toolCallId: options.toolCallId,
-                toolName: prefixedName,
-                verdict,
-              });
-            }
-            return executeMcpTool({
-              ...input,
-              mcpServer: provider.key,
-              toolCallId: options.toolCallId,
-              toolName: prefixedName,
-              rawToolName: rawName,
-              execute: mcpTool.execute,
-              args: toolInput,
-            });
-          },
-        } as never) as ToolSet[string];
-        bodiesByName.set(prefixedName, {
-          server: provider.key,
-          rawName,
-          execute: mcpTool.execute,
-        });
+        bodyByRawName.set(rawName, (rawTool as unknown as { execute?: McpToolBody }).execute);
       }
+
+      const connected: ConnectedMcpProvider = { provider, catalog, bodyByRawName };
+      const searchName = uniqueToolName(mcpSearchToolsName(provider.key), usedNames);
+      const useName = uniqueToolName(mcpUseToolName(provider.key), usedNames);
+      providerByToolName.set(searchName, connected);
+      providerByToolName.set(useName, connected);
+
+      tools[searchName] = tool({
+        description: searchToolsDescription(provider),
+        inputSchema: jsonSchema(MCP_SEARCH_TOOLS_INPUT_SCHEMA as never),
+        onInputAvailable: recordMetaToolStart(searchName),
+        execute: async (toolInput: unknown, options: { toolCallId: string }) =>
+          runGatedMetaTool({
+            toolName: searchName,
+            toolCallId: options.toolCallId,
+            run: () =>
+              executeMcpTool({
+                ...input,
+                mcpServer: provider.key,
+                toolCallId: options.toolCallId,
+                toolName: searchName,
+                rawToolName: MCP_SEARCH_TOOLS_RAW_NAME,
+                execute: () => buildMcpCatalogResult(connected, toolInput),
+                args: toolInput,
+              }),
+          }),
+      } as never) as ToolSet[string];
+
+      tools[useName] = tool({
+        description: useToolDescription(provider),
+        inputSchema: jsonSchema(MCP_USE_TOOL_INPUT_SCHEMA as never),
+        onInputAvailable: recordMetaToolStart(useName),
+        execute: async (toolInput: unknown, options: { toolCallId: string }) =>
+          runGatedMetaTool({
+            toolName: useName,
+            toolCallId: options.toolCallId,
+            run: () =>
+              dispatchMcpUseTool({
+                ...input,
+                connected,
+                toolCallId: options.toolCallId,
+                args: toolInput,
+              }),
+          }),
+      } as never) as ToolSet[string];
     }
 
     return {
       tools,
       close: () => closeMcpClients(clients),
       runApprovedTool: ({ toolName, toolCallId, args }) => {
-        const body = bodiesByName.get(toolName);
-        if (!body) return null;
+        const connected = providerByToolName.get(toolName);
+        if (!connected) return null;
+        if (toolName === mcpUseToolName(connected.provider.key)) {
+          return dispatchMcpUseTool({ ...input, connected, toolCallId, args });
+        }
         return executeMcpTool({
           ...input,
-          mcpServer: body.server,
+          mcpServer: connected.provider.key,
           toolCallId,
           toolName,
-          rawToolName: body.rawName,
-          execute: body.execute,
+          rawToolName: MCP_SEARCH_TOOLS_RAW_NAME,
+          execute: () => buildMcpCatalogResult(connected, args),
           args,
         });
       },
@@ -317,25 +330,129 @@ type McpToolBody =
   | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
   | undefined;
 
-function mcpToolDescription(input: {
-  providerName: string;
-  rawName: string;
-  description: string | undefined;
-  prefixedName: string;
-  policy: WorkspaceToolPolicyMap;
-  suspendable: boolean;
-}) {
-  const base = `${input.providerName} MCP: ${input.description ?? input.rawName}`;
-  const classification = classifyMcpTool(input.prefixedName);
-  if (!classification) return base;
+type McpToolCatalogEntry = {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+};
 
-  const decision = effectivePolicyDecisionForGroup({
-    providerKey: classification.providerKey,
-    group: classification.group,
-    policy: input.policy,
-    suspendable: input.suspendable,
+// A live server connection reduced to what the meta-tools need: the discovery catalog
+// and the executable bodies keyed by raw tool name.
+type ConnectedMcpProvider = {
+  provider: McpProvider;
+  catalog: McpToolCatalogEntry[];
+  bodyByRawName: Map<string, McpToolBody>;
+};
+
+const MCP_SEARCH_TOOLS_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      description: "Optional case-insensitive substring filter over tool names and descriptions.",
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+const MCP_USE_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    tool: {
+      type: "string",
+      description: "Exact tool name returned by the matching search_tools call.",
+    },
+    arguments: {
+      type: "object",
+      description: "Arguments object for the chosen tool, matching its input schema.",
+      additionalProperties: true,
+    },
+  },
+  required: ["tool"],
+  additionalProperties: false,
+} as const;
+
+function searchToolsDescription(provider: McpProvider) {
+  return (
+    `${provider.displayName} MCP — list available ${provider.displayName} tools. ` +
+    `Returns each tool's name, description, and input schema. ${provider.displayName} tools ` +
+    `are not preloaded, so call this first, then run one with ${mcpUseToolName(provider.key)}. ` +
+    `Pass an optional "query" to filter. Read-only.`
+  );
+}
+
+function useToolDescription(provider: McpProvider) {
+  return (
+    `${provider.displayName} MCP — run one ${provider.displayName} tool. Set "tool" to a name ` +
+    `from ${mcpSearchToolsName(provider.key)} and "arguments" to that tool's input. Each ` +
+    `underlying tool keeps its own permission, so a write or destructive tool may require approval.`
+  );
+}
+
+function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } {
+  if (isRecord(args)) {
+    const tool = typeof args.tool === "string" ? args.tool.trim() : "";
+    return { tool, arguments: args.arguments ?? {} };
+  }
+  return { tool: "", arguments: {} };
+}
+
+// The body run when the model names a tool the server didn't list. executeMcpTool
+// catches the throw and persists a recoverable failure so the model can recover.
+function unknownMcpToolBody(provider: McpProvider, rawName: string): McpToolBody {
+  return () => {
+    throw new Error(
+      rawName
+        ? `Unknown ${provider.displayName} tool "${rawName}". Call ${mcpSearchToolsName(provider.key)} to list available tools.`
+        : `Missing "tool" argument. Call ${mcpSearchToolsName(provider.key)} to list ${provider.displayName} tools, then pass one as "tool".`,
+    );
+  };
+}
+
+function buildMcpCatalogResult(connected: ConnectedMcpProvider, args: unknown) {
+  const query =
+    isRecord(args) && typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+  const entries = query
+    ? connected.catalog.filter(
+        (entry) =>
+          entry.name.toLowerCase().includes(query) ||
+          (entry.description ?? "").toLowerCase().includes(query),
+      )
+    : connected.catalog;
+  return {
+    ok: true as const,
+    server: connected.provider.key,
+    useTool: mcpUseToolName(connected.provider.key),
+    toolCount: entries.length,
+    tools: entries.map((entry) => ({
+      name: entry.name,
+      description: entry.description,
+      inputSchema: entry.inputSchema,
+    })),
+  };
+}
+
+// Resolve the named raw tool's body and run it through the shared execution tail. The
+// persisted tool-result keeps the invoke tool's name (so it pairs with the model's
+// `{server}__use_tool` call) while observability records the real raw tool name.
+function dispatchMcpUseTool(
+  input: McpToolContext & {
+    connected: ConnectedMcpProvider;
+    toolCallId: string;
+    args: unknown;
+  },
+) {
+  const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
+  const body = input.connected.bodyByRawName.get(rawName);
+  return executeMcpTool({
+    ...input,
+    mcpServer: input.connected.provider.key,
+    toolCallId: input.toolCallId,
+    toolName: mcpUseToolName(input.connected.provider.key),
+    rawToolName: rawName || MCP_USE_TOOL_RAW_NAME,
+    execute: body ?? unknownMcpToolBody(input.connected.provider, rawName),
+    args: rawArgs,
   });
-  return `${base}\nPermission: ${PERMISSION_GROUP_LABELS[classification.group]} (${formatPolicyDecision(decision)}).`;
 }
 
 function requestedMcpProviders(agentConfig: AgentConfig) {
@@ -1041,11 +1158,6 @@ function isOAuthTokens(value: unknown): value is OAuthTokens {
     (value.scope === undefined || typeof value.scope === "string") &&
     (value.refresh_token === undefined || typeof value.refresh_token === "string")
   );
-}
-
-function sanitizeMcpToolName(name: string) {
-  const normalized = name.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  return normalized || "tool";
 }
 
 function uniqueToolName(base: string, usedNames: Set<string>) {

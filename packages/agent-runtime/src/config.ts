@@ -49,6 +49,13 @@ export function resolveAgentRuntimeConfig(input: {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
   const skills = resolveEnabledSkillMetadata(input.agent);
+  const mcpServerKeys = [
+    ...new Set(
+      input.agent.tools
+        .filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp")
+        .map((tool) => tool.server),
+    ),
+  ];
   const toolPolicyContext = input.toolPolicy
     ? formatWorkspaceToolPolicyContext({
         providerKeys: enabledGatedProviderKeys(input.agent, repositories),
@@ -101,6 +108,16 @@ export function resolveAgentRuntimeConfig(input: {
       : null,
     skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
       ? "You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first."
+      : null,
+    mcpServerKeys.length
+      ? `MCP integrations enabled this session: ${mcpServerKeys
+          .map((key) => {
+            const displayName = PROVIDER_PERMISSION_REGISTRY[key]?.displayName ?? key;
+            return `${displayName} (${key}__search_tools, ${key}__use_tool)`;
+          })
+          .join(
+            "; ",
+          )}. To save context their individual tools are not preloaded: call <server>__search_tools to list a server's tools and input schemas, then <server>__use_tool with the chosen tool name and its arguments to run one. Permissions are enforced per underlying tool, so a write tool may still require approval.`
       : null,
     toolPolicyContext,
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
