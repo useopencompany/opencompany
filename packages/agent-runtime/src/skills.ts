@@ -39,13 +39,15 @@ function availableToolMentionLines(): string {
   ).join("\n");
 }
 
-// The coding agents from the catalog, named dynamically so the guidance stays correct as
-// providers are added or renamed.
-function codingToolMentions(): string {
-  const mentions = AGENT_TOOL_CATALOG.filter((tool) => tool.type === "coding_agent").map(
+// Tool mentions for a given catalog type, named dynamically so the guidance always reflects
+// exactly the tools that exist (no hard-coded ids that can drift from the catalog).
+function toolMentionsOfType(type: AgentToolDefinition["type"], join: "and" | "comma"): string {
+  const mentions = AGENT_TOOL_CATALOG.filter((tool) => tool.type === type).map(
     (tool) => `\`@${tool.id}\``,
   );
-  return mentions.join(" and ");
+  if (join === "and") return mentions.join(" and ");
+  if (mentions.length <= 1) return mentions.join("");
+  return `${mentions.slice(0, -1).join(", ")}, or ${mentions[mentions.length - 1]}`;
 }
 
 function buildSelfEditSkillMd(): string {
@@ -141,12 +143,12 @@ job. Think about the agent's purpose first, then mention the tools that serve it
   works on attached *and* public GitHub repositories, so it's useful even before a human
   attaches a repo. Add \`@amp\` as well when a repository is attached (Amp requires one). If
   you're setting up an engineering agent and unsure, mention \`@opencode\` — never ship a
-  coding agent with no coding tool. (Available coding tools: ${codingToolMentions()}.)
+  coding agent with no coding tool. (Available coding tools: ${toolMentionsOfType("coding_agent", "and")}.)
 - **Research agent →** \`@exa\` for web search, content extraction, and cited answers.
 - **Social / audience agent →** the relevant \`@x\`, \`@youtube\`, \`@tiktok\`, or \`@instagram\`
   tools.
-- **Ops / project agent →** workspace integrations like \`@linear\`, \`@slack\`, or \`@posthog\`
-  when configured.
+- **Ops / project agent →** workspace integrations (${toolMentionsOfType("mcp", "comma")}) when
+  configured.
 
 When in doubt about which tools fit, that is exactly what the personalization questions
 below are for — ask the user rather than guessing or under-equipping yourself.
