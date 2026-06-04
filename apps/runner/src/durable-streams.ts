@@ -50,10 +50,21 @@ function authHeaders(token: string | undefined): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// How long the producer holds appends to coalesce them into one batch (one HTTP
+// POST). The client default is 5ms — far below the model's inter-token gap
+// (~25-33ms), so each token delta would flush alone and pay its own network
+// round-trip to the (remote, in prod) Durable Streams service. With maxInFlight
+// capped at 5 and the server enforcing strict per-batch sequence ordering, that
+// serializes delivery toward ~1 append/RTT and makes the live transcript trail
+// inference in prod (invisible locally, where the stream server is in-process).
+// A wider window batches several tokens per POST so throughput scales with batch
+// size rather than RTT; 100ms is imperceptible for streaming text.
+const PRODUCER_LINGER_MS = 100;
+
 // One idempotent producer per session, created lazily on first publish. The
-// producer batches appends (lingerMs ~5ms), preserves order, and gives
-// exactly-once delivery via producerId + epoch — so high-frequency token deltas
-// don't pay a network round-trip each.
+// producer batches appends, preserves order, and gives exactly-once delivery via
+// producerId + epoch — so high-frequency token deltas don't pay a network
+// round-trip each.
 const producers = new Map<string, Promise<IdempotentProducer>>();
 
 async function ensureStream(url: string, headers: Record<string, string>): Promise<DurableStream> {
@@ -88,6 +99,7 @@ async function ensureProducer(sessionId: string): Promise<IdempotentProducer | n
           // single writer per session, so cross-instance fencing isn't needed.
           new IdempotentProducer(handle, `runner-${sessionId}-${randomUUID()}`, {
             headers,
+            lingerMs: PRODUCER_LINGER_MS,
             onError: (error) =>
               logger.warn("Durable stream producer error", {
                 event: "opencompany.durable_stream_producer_error",
