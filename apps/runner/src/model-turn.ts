@@ -253,7 +253,12 @@ export function assertTurnComplete(
     "assistantContent" | "assistantReplayParts" | "lastStepEndedWithToolCalls" | "stepCount"
   >,
 ) {
-  if (!streamResult.assistantContent && streamResult.assistantReplayParts.length === 0) {
+  // Check the final step, not whether any step touched a tool: a turn that ends
+  // on a `stop` after an earlier tool call but with no text delivered nothing to
+  // the user. `lastStepEndedWithToolCalls` is the "final step produced tools"
+  // signal — true only when the loop ended on tool calls (step limit / custom
+  // stop), which is the legitimate tool-only case we keep valid.
+  if (!streamResult.assistantContent && !streamResult.lastStepEndedWithToolCalls) {
     throw new Error("Model stream completed without text or tool calls.");
   }
 
