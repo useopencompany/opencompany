@@ -363,9 +363,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       events: mergeEvents(detail.events, streamState.events),
       messages: mergeMessages(detail.messages, streamState.messages),
       ...aggregates,
-      currentStatus: streamState.statusObserved
-        ? streamState.currentStatus
-        : detail.session.status,
+      currentStatus: streamState.statusObserved ? streamState.currentStatus : detail.session.status,
       lastError: streamState.statusObserved ? streamState.lastError : detail.session.lastError,
     };
   }, [detail, streamState]);
