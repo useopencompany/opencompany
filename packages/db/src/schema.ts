@@ -1351,6 +1351,32 @@ export const onboardingResponses = pgTable(
   }),
 );
 
+export type SlackChannelStatus = "pending" | "active" | "failed";
+
+// One private Slack Connect support channel per workspace, provisioned after the
+// customer's first onboarding. Unique workspaceId + the "already active" short-circuit
+// in the Inngest provisioning function guarantee exactly one channel per workspace
+// even under retries or a double event dispatch.
+export const workspaceSlackChannels = pgTable(
+  "workspace_slack_channels",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    slackChannelId: text("slack_channel_id"),
+    slackTeamId: text("slack_team_id"),
+    inviteUrl: text("invite_url"),
+    status: text("status").$type<SlackChannelStatus>().notNull().default("pending"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: uniqueIndex("workspace_slack_channels_workspace_idx").on(table.workspaceId),
+  }),
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   memberships: many(workspaceMemberships),
   createdWorkspaces: many(workspaces),
