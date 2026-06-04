@@ -21,11 +21,29 @@ function streamErrorCode(error: unknown): string {
   return error instanceof DurableStreamError ? error.code : "UNKNOWN";
 }
 
+// Trace is always on outside production; in production it's opt-in per-page via
+// the `?d=1` URL flag (which survives the refresh we're trying to observe).
+// Resolved lazily once so we don't reparse the URL on every batch.
+let traceEnabled: boolean | undefined;
+
+function isTraceEnabled(): boolean {
+  if (traceEnabled === undefined) {
+    if (process.env.NODE_ENV !== "production") {
+      traceEnabled = true;
+    } else if (typeof window === "undefined") {
+      traceEnabled = false; // SSR: no URL to read.
+    } else {
+      traceEnabled = new URLSearchParams(window.location.search).get("d") === "1";
+    }
+  }
+  return traceEnabled;
+}
+
 function debugLog(message: string, fields: Record<string, unknown>): void {
   // Browser-side structured trace for the streaming lifecycle (the channel the
-  // user actually reads). Quiet in production builds.
-  if (process.env.NODE_ENV === "production") return;
-  console.debug(`[session-stream] ${message}`, fields);
+  // user actually reads). console.info so it shows without enabling Verbose.
+  if (!isTraceEnabled()) return;
+  console.info(`[session-stream] ${message}`, fields);
 }
 
 /**
