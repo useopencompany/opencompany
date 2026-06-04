@@ -5,6 +5,10 @@ Goal: get a local dev environment running with auth and an isolated Neon branch 
 ## Prerequisites
 
 - Node 20+ and Bun 1.3+
+- A container runtime — [OrbStack](https://orbstack.dev) (`brew install orbstack`) or Docker
+  Desktop. **Required:** `bun run setup` uses it to start local Electric, which the
+  agents/sessions UI syncs through, and fails fast if it's missing. Also enable logical
+  replication on the Neon project (Neon console → Settings) so Electric can replicate.
 - Access to this project's Infisical project for shared development environment variables.
 - (optional) A WorkOS account — https://dashboard.workos.com. Most local development should use the shared WorkOS staging/local environment from Infisical.
 
@@ -76,6 +80,9 @@ bun run dev
 3. Create or reuse a Neon branch for the current Git branch and write its `DATABASE_URL` to `.env.local`.
 4. Fill missing local Stripe credentials from the Stripe CLI when available.
 5. Run migrations against that branch database.
+6. Start a local Electric sync container against that database and set `ELECTRIC_URL`. A
+   container runtime is required — setup fails fast with install instructions if OrbStack/Docker
+   is missing or not running. See [docs/stack/electric-sync.md](stack/electric-sync.md).
 
 Re-running it is safe.
 
