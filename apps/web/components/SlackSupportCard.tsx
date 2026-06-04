@@ -45,7 +45,7 @@ export default async function SlackSupportCard({ workspaceId }: { workspaceId: s
       <section className="mt-8 rounded-lg border border-border bg-surface p-4 text-left">
         <h2 className="text-[13px] font-semibold text-ink">Setting up your Slack channel…</h2>
         <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-          We're opening your private support channel — the invite arrives by email shortly.
+          We&rsquo;re opening your private support channel — the invite arrives by email shortly.
         </p>
         <a
           href={BOOK_CALL_URL}
