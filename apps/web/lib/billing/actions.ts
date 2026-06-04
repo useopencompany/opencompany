@@ -1,8 +1,10 @@
 "use server";
 
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { captureException } from "@opencompany/observability";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { AUTHENTICATION_REQUIRED_MESSAGE, currentWorkspace } from "@/lib/auth";
 import {
   isValidTopUpAmountCents,
@@ -103,6 +105,15 @@ export async function createCreditCheckoutSession(amountCents: number) {
     });
 
     checkoutUrl = session.url;
+    const capturedCheckoutRecordId = checkoutRecordId;
+    after(() =>
+      captureServerEvent("credit_top_up_started", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        checkout_record_id: capturedCheckoutRecordId,
+        amount_cents: amountCents,
+      }),
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start checkout.";
 

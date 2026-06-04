@@ -82,6 +82,20 @@ export type AnalyticsEventPropertiesByName = {
     tool_cost_usd_micros: number;
     sandbox_cost_usd_micros: number;
   };
+  credit_top_up_started: {
+    user_id: string;
+    workspace_id: string;
+    checkout_record_id: string;
+    amount_cents: number;
+  };
+  credit_top_up_completed: {
+    user_id: string;
+    workspace_id: string;
+    checkout_record_id: string;
+    ledger_id: number;
+    amount_cents: number;
+    balance_cents: number;
+  };
   sign_out: {
     user_id: string;
     workspace_id: string;
@@ -205,6 +219,23 @@ export const analyticsEvents = {
       "model_cost_usd_micros",
       "tool_cost_usd_micros",
       "sandbox_cost_usd_micros",
+    ],
+  },
+  credit_top_up_started: {
+    name: "credit_top_up_started",
+    description: "A user started a credit top-up by opening a Stripe Checkout Session.",
+    safeProperties: ["user_id", "workspace_id", "checkout_record_id", "amount_cents"],
+  },
+  credit_top_up_completed: {
+    name: "credit_top_up_completed",
+    description: "A paid Stripe Checkout Session credited a workspace balance.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "checkout_record_id",
+      "ledger_id",
+      "amount_cents",
+      "balance_cents",
     ],
   },
   sign_out: {
