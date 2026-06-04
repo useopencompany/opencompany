@@ -106,7 +106,7 @@ Current tables (see `packages/db/src/schema.ts` for the source of truth):
 - `workspaces` — internal tenant boundary; each new workspace maps to a WorkOS Organization through `workos_organization_id`.
 - `workspace_memberships` — local mirror of user↔workspace membership with a `role`; WorkOS is the source of truth.
 - `agents` — latest editable agent state: path, title/body, parsed config, content hash, version, and GitHub sync status.
-- `agent_sync_jobs` — desired GitHub materialization state for an agent edit. Repeated edits coalesce by updating the same row.
+- `workspace_sync_jobs` — unified GitHub materialization outbox for all synced resources (agents, brain files, agent bundle files). Each row records desired state (`repoPath`, `sourceKind`, `sourceRef`, `operation`, `desiredHash`, rename/delete metadata) plus retry bookkeeping. Repeated edits to the same path coalesce on the unique `(workspaceId, repoPath)` index. Drained by `projectWorkspaceToGitHub()`.
 - `workspace_repositories` — one managed private GitHub repo per workspace, including repo id, full name, default branch, and latest head SHA.
 - `onboarding_responses` — user's onboarding answers for a workspace.
 

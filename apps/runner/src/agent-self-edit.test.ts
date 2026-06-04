@@ -62,6 +62,11 @@ function createDb(opts: { row?: unknown; updateReturning?: unknown[] }) {
       select: () => selectBuilder,
       update: () => updateBuilder,
       insert: () => insertBuilder,
+      transaction: async (callback: (tx: unknown) => unknown) =>
+        callback({
+          update: () => updateBuilder,
+          insert: () => insertBuilder,
+        }),
     },
   };
 }
@@ -115,9 +120,14 @@ describe("applyAgentSelfUpdate", () => {
     };
     (updated.content?.content ?? []).forEach(walk);
     expect(mentions.map((m) => m.attrs?.id)).toContain("tool:exa");
-    // sync job queued for the GitHub sweeper.
+    // workspace sync job queued for the unified projector.
     expect(calls.insert).toHaveLength(1);
-    expect(calls.insert[0]).toMatchObject({ agentId: "agt_1", desiredVersion: 4 });
+    expect(calls.insert[0]).toMatchObject({
+      repoPath: "agents/leo.agent",
+      sourceKind: "agent",
+      sourceRef: "agt_1",
+      operation: "upsert",
+    });
     // self-update event emitted.
     expect(leaseMocks.appendRuntimeEventForLease).toHaveBeenCalledWith(
       expect.objectContaining({ type: "agent.self_updated" }),

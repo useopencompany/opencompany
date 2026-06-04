@@ -19,6 +19,10 @@
     "./pool": {
       "types": "./src/pool.ts",
       "default": "./src/pool.ts"
+    },
+    "./sync-outbox": {
+      "types": "./src/sync-outbox.ts",
+      "default": "./src/sync-outbox.ts"
     }
   },
   "scripts": {

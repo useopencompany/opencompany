@@ -1,11 +1,12 @@
 import { getDb } from "@opencompany/db/client";
-import { userAvatars, workspaceRepositories } from "@opencompany/db/schema";
+import { userAvatars } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import { loadWorkspaceSyncStatus } from "@/lib/workspace-state/status";
 
 function initialsFor(name: string, email: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -32,14 +33,8 @@ function formatDate(date: Date) {
 export default async function SettingsPage() {
   const { authUser, user, workspace } = await currentWorkspace();
   const db = getDb();
-  const [[repository], [avatar], billing, mcp, toolPolicies] = await Promise.all([
-    db
-      .select({
-        updatedAt: workspaceRepositories.updatedAt,
-      })
-      .from(workspaceRepositories)
-      .where(eq(workspaceRepositories.workspaceId, workspace.id))
-      .limit(1),
+  const [syncStatus, [avatar], billing, mcp, toolPolicies] = await Promise.all([
+    loadWorkspaceSyncStatus(db, workspace.id),
     db
       .select({ updatedAt: userAvatars.updatedAt })
       .from(userAvatars)
@@ -69,11 +64,14 @@ export default async function SettingsPage() {
       workspace={{
         name: workspace.name,
         createdAt: formatDate(new Date(workspace.createdAt)),
-        repository: repository
-          ? {
-              updatedAt: formatDate(new Date(repository.updatedAt)),
-            }
-          : null,
+        sync: {
+          hasRepo: syncStatus.hasRepo,
+          lastSyncedAt: syncStatus.lastSyncedAt
+            ? formatDate(new Date(syncStatus.lastSyncedAt))
+            : null,
+          pendingCount: syncStatus.pendingCount,
+          failedCount: syncStatus.failedCount,
+        },
       }}
       billing={{
         balanceUsdMicros: billing.balanceUsdMicros,

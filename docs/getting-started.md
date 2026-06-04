@@ -5,6 +5,10 @@ Goal: get a local dev environment running with auth and an isolated Neon branch 
 ## Prerequisites
 
 - Node 20+ and Bun 1.3+
+- A container runtime — [OrbStack](https://orbstack.dev) (`brew install orbstack`) or Docker
+  Desktop. **Required:** `bun run setup` uses it to start local Electric, which the
+  agents/sessions UI syncs through, and fails fast if it's missing. Also enable logical
+  replication on the Neon project (Neon console → Settings) so Electric can replicate.
 - Access to this project's Infisical project for shared development environment variables.
 - (optional) A WorkOS account — https://dashboard.workos.com. Most local development should use the shared WorkOS staging/local environment from Infisical.
 
@@ -76,6 +80,9 @@ bun run dev
 3. Create or reuse a Neon branch for the current Git branch and write its `DATABASE_URL` to `.env.local`.
 4. Fill missing local Stripe credentials from the Stripe CLI when available.
 5. Run migrations against that branch database.
+6. Start a local Electric sync container against that database and set `ELECTRIC_URL`. A
+   container runtime is required — setup fails fast with install instructions if OrbStack/Docker
+   is missing or not running. See [docs/stack/electric-sync.md](stack/electric-sync.md).
 
 Re-running it is safe.
 
@@ -90,10 +97,11 @@ These are the root commands a contributor is expected to run directly:
 | `bun run setup:personal` | Create `.env.override.local` for developer-owned values such as a personal Neon project. |
 | `bun run setup:stripe` | Fill only missing local Stripe values after the main setup already ran. |
 | `bun run env:pull` | Merge shared Infisical dev values into `.env.local` without replacing local database settings. |
-| `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, and ngrok when available. |
+| `bun run dev` | Start the full local stack with the Turbo TUI: web, runner, Inngest, Stripe webhooks, a local Durable Streams server (auto-sets `DURABLE_STREAMS_URL`), and ngrok when available. |
 | `bun run dev:stream` | Start the same full local stack with streaming logs instead of the Turbo TUI. |
 | `bun run dev:web` | Start only the Next.js web app. |
 | `bun run dev:runner` | Start only the runner service. |
+| `bun run electric:dev` | Run the local Electric sync container in the foreground to tail its logs or restart it against a freshly rebranched database. `bun run setup` already starts it detached. |
 | `bun run dev:kill-port` | Stop whichever process is listening on port 3000, or pass another port after `--`. |
 | `bun run dev:kill-3000` | Stop whichever process is listening on port 3000. |
 | `bun run github:tunnel` | Start or refresh an ngrok tunnel for local GitHub integration callbacks. |
@@ -135,6 +143,12 @@ If you want setup to launch the dev server after migrations, run `bun run setup:
 That gives integrations such as GitHub a public callback URL without a separate command. Set
 `OPENCOMPANY_NGROK_DISABLED=1` to skip the tunnel. WorkOS still redirects to localhost for local
 sign-in.
+
+`bun run dev` additionally starts a local Durable Streams server (in-memory, no Docker) and injects
+`DURABLE_STREAMS_URL` into the web and runner processes so live session transcripts stream out of the
+box. It steps aside if you set `DURABLE_STREAMS_URL` yourself (e.g. Electric Cloud) and reuses an
+already-running server. Live sync data (agents, sessions) is separate — it comes from the Electric
+container that `bun run setup` starts. See [stack/electric-sync.md](stack/electric-sync.md).
 
 The older shared database path is still available with `bun run setup -- --shared-db`, but the default is branch isolation because this repo is commonly used from multiple Git worktrees. See [database.md](./database.md).
 
@@ -203,6 +217,9 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
   stable ngrok domain when testing the user-facing GitHub work integration locally. ngrok is required
   for the smoothest developer experience on callback/webhook integrations. See
   [github-local-dev.md](./github-local-dev.md).
+- **Neon logical replication (one-time per project):** enable logical replication in the Neon console
+  (project → Settings) so Electric can create its replication slot. Project-level, so it covers every
+  branch. `bun run setup` starts Electric but cannot flip this toggle for you.
 - **Production WorkOS:** create a production WorkOS environment in the dashboard and set the redirect
   URI to your prod callback URL. Keep production values in Infisical `prod`, separate from `dev`.
 
@@ -220,6 +237,14 @@ The Inngest values in `.env.example` are for background jobs. Local `bun run dev
   `infisical login` again.
 - Neon branch creation fails: confirm `NEON_PROJECT_ID` is in `.env.override.local` and run
   `bunx neonctl auth`.
+- Setup fails with "No container runtime found": install OrbStack (`brew install orbstack`) and start
+  it (`open -a OrbStack`), then re-run `bun run setup`.
+- Electric started but isn't healthy, or the agents/sessions UI shows nothing / shape proxy returns
+  503: enable logical replication on the Neon project (console → Settings), then re-run setup. Inspect
+  with `docker logs --tail 40 opencompany-electric`.
+- Session transcript not updating live: `bun run dev` starts the Durable Streams server; if you run
+  the apps outside `bun run dev`, start `bun scripts/durable-streams-dev.mjs` and set
+  `DURABLE_STREAMS_URL`.
 - WorkOS redirect fails: local redirect URI must include `http://localhost:3000/auth/callback`.
 - Stripe setup warns: run `stripe login`, or skip it unless the task touches billing.
 

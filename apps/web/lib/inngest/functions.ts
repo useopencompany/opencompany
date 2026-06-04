@@ -19,137 +19,57 @@ import {
   triggerAgentQuestionResume,
 } from "@/lib/agent-sessions/message-runner";
 import { callRunner } from "@/lib/agent-sessions/runner";
-import { materializeAgentFileToGitHub, materializeAgentToGitHub } from "@/lib/agents/materialize";
-import {
-  AGENT_FILE_SYNC_REQUESTED_EVENT,
-  AGENT_SYNC_REQUESTED_EVENT,
-} from "@/lib/agents/sync-events";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
-import { materializeBrainFileToGitHub } from "@/lib/brain/materialize";
-import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import {
-  sweepAgentFileSyncOutbox as runAgentFileSyncOutboxSweep,
-  sweepAgentSyncOutbox as runAgentSyncOutboxSweep,
-  sweepBrainSyncOutbox as runBrainSyncOutboxSweep,
+  sweepWorkspaceSyncOutbox as runWorkspaceSyncOutboxSweep,
   SYNC_OUTBOX_SWEEP_CRON,
 } from "@/lib/sync-outbox/sweeper";
+import { projectWorkspaceToGitHub } from "@/lib/workspace-state/project";
+import { WORKSPACE_SYNC_REQUESTED_EVENT } from "@/lib/workspace-state/sync-events";
 
-export const syncAgentToGitHub = inngest.createFunction(
+// Unified workspace projection. One event per workspace (deduped by the
+// concurrency key) drains all due workspace_sync_jobs into a single GitHub
+// commit. The loop re-projects while a batch committed, absorbing edits that
+// landed during the GitHub round-trip; the cap bounds a busy workspace.
+export const syncWorkspaceToGitHub = inngest.createFunction(
   {
-    id: "sync-agent-to-github",
-    name: "Sync agent to GitHub",
+    id: "sync-workspace-to-github",
+    name: "Sync workspace to GitHub",
     retries: 5,
     concurrency: {
       limit: 1,
-      key: "event.data.agentId",
+      key: "event.data.workspaceId",
     },
-    triggers: { event: AGENT_SYNC_REQUESTED_EVENT },
+    triggers: { event: WORKSPACE_SYNC_REQUESTED_EVENT },
   },
   async ({ event, step }) => {
-    await step.sleep("coalesce agent edits", "10s");
+    await step.sleep("coalesce workspace edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
 
-    return step.run("materialize latest agent file", async () => {
-      return materializeAgentToGitHub(event.data.agentId, {
-        mode: "scheduled",
-      });
+    return step.run("project workspace to github", async () => {
+      const MAX_ITERATIONS = 5;
+      let last: Awaited<ReturnType<typeof projectWorkspaceToGitHub>> = { status: "idle" };
+      for (let iteration = 0; iteration < MAX_ITERATIONS; iteration += 1) {
+        last = await projectWorkspaceToGitHub({ workspaceId: event.data.workspaceId });
+        if (last.status !== "synced") break;
+      }
+      return last;
     });
   },
 );
 
-export const syncBrainToGitHub = inngest.createFunction(
+export const sweepWorkspaceSyncOutbox = inngest.createFunction(
   {
-    id: "sync-brain-to-github",
-    name: "Sync brain to GitHub",
-    retries: 5,
-    concurrency: {
-      limit: 1,
-      key: "event.data.workspaceId + ':' + event.data.path",
-    },
-    triggers: { event: BRAIN_SYNC_REQUESTED_EVENT },
-  },
-  async ({ event, step }) => {
-    await step.sleep("coalesce brain edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
-
-    return step.run("materialize latest brain file", async () => {
-      return materializeBrainFileToGitHub({
-        workspaceId: event.data.workspaceId,
-        path: event.data.path,
-      });
-    });
-  },
-);
-
-export const syncAgentFileToGitHub = inngest.createFunction(
-  {
-    id: "sync-agent-file-to-github",
-    name: "Sync agent file to GitHub",
-    retries: 5,
-    concurrency: {
-      limit: 1,
-      key: "event.data.workspaceId + ':' + event.data.path",
-    },
-    triggers: { event: AGENT_FILE_SYNC_REQUESTED_EVENT },
-  },
-  async ({ event, step }) => {
-    // Intentionally reuses BRAIN_SYNC_DELAY_MS: agent files coalesce on the same
-    // window as brain files, so rapid successive edits collapse into one sync.
-    await step.sleep("coalesce agent file edits", `${BRAIN_SYNC_DELAY_MS / 1000}s`);
-
-    return step.run("materialize latest agent folder file", async () => {
-      return materializeAgentFileToGitHub({
-        workspaceId: event.data.workspaceId,
-        path: event.data.path,
-      });
-    });
-  },
-);
-
-// Two distinct outbox sweepers run on the same cron but drain different tables:
-// - sweepAgentSyncOutbox drains agent_sync_jobs (the .agent definition record)
-//   and re-dispatches agent.sync_requested -> syncAgentToGitHub.
-// - sweepAgentFileSyncOutbox drains agent_file_sync_jobs (bundle files such as
-//   agent/memory.md) and re-dispatches agent_file.sync_requested ->
-//   syncAgentFileToGitHub.
-// Both exist so a missed/failed event still gets retried from its own outbox.
-export const sweepAgentSyncOutbox = inngest.createFunction(
-  {
-    id: "sweep-agent-sync-outbox",
-    name: "Sweep agent sync outbox",
+    id: "sweep-workspace-sync-outbox",
+    name: "Sweep workspace sync outbox",
     retries: 3,
     concurrency: { limit: 1 },
     triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
   },
   async ({ step }) => {
-    return runAgentSyncOutboxSweep(step);
-  },
-);
-
-export const sweepAgentFileSyncOutbox = inngest.createFunction(
-  {
-    id: "sweep-agent-file-sync-outbox",
-    name: "Sweep agent file sync outbox",
-    retries: 3,
-    concurrency: { limit: 1 },
-    triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
-  },
-  async ({ step }) => {
-    return runAgentFileSyncOutboxSweep(step);
-  },
-);
-
-export const sweepBrainSyncOutbox = inngest.createFunction(
-  {
-    id: "sweep-brain-sync-outbox",
-    name: "Sweep brain sync outbox",
-    retries: 3,
-    concurrency: { limit: 1 },
-    triggers: { cron: SYNC_OUTBOX_SWEEP_CRON },
-  },
-  async ({ step }) => {
-    return runBrainSyncOutboxSweep(step);
+    return runWorkspaceSyncOutboxSweep(step);
   },
 );
 
@@ -500,11 +420,8 @@ export const sendSignupWelcome = inngest.createFunction(
 );
 
 export const inngestFunctions = [
-  syncAgentToGitHub,
-  syncBrainToGitHub,
-  sweepAgentSyncOutbox,
-  sweepAgentFileSyncOutbox,
-  sweepBrainSyncOutbox,
+  syncWorkspaceToGitHub,
+  sweepWorkspaceSyncOutbox,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,
