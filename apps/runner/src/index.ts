@@ -16,7 +16,7 @@ initializeExceptionReporting();
 
 const env = loadEnv();
 assertRunnerDbConfig();
-const jobWorker = startRunnerJobWorker(env);
+const jobWorker = startRunnerJobWorker(env, { concurrency: env.workerConcurrency });
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

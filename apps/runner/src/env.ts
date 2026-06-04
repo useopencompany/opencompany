@@ -17,6 +17,7 @@ export type RunnerEnv = {
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
+  workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
   instanceId: string;
@@ -38,6 +39,12 @@ export function loadEnv(): RunnerEnv {
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
+    // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
+    // model token streaming + remote E2B sandboxes), so this is bounded by the single
+    // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not
+    // CPU/RAM. The DB pool (RUNNER_DB_POOL_MAX) must comfortably exceed this. Scale past one
+    // instance's ceiling with Render `numInstances`; the job + run leases make that safe.
+    workerConcurrency: optionalPositiveIntegerEnv("RUNNER_WORKER_CONCURRENCY", 8),
     port: Number(process.env.PORT ?? "3040"),
     allowedOrigins: (process.env.RUNNER_ALLOWED_ORIGINS ?? "http://localhost:3000")
       .split(",")

@@ -17,7 +17,15 @@ services:
       # the runner derives it from DATABASE_URL by stripping the "-pooler" host label.
       - key: RUNNER_DATABASE_URL
         sync: false
-      # Optional: runner DB pool size (default 10). instances * max < Neon limit.
+      # Max parallel sessions per instance (default 8). Sessions are I/O-bound, so the real
+      # ceiling is the single event loop + E2B sandbox quota + model-gateway rate limits, not
+      # CPU/RAM. Scale past one instance with `numInstances`; job + run leases make that safe.
+      - key: RUNNER_WORKER_CONCURRENCY
+        sync: false
+      # Optional: runner DB pool size (default 10). Size it as RUNNER_WORKER_CONCURRENCY plus
+      # headroom for HTTP routes, the poller, and lease heartbeats. Hard ceiling is Neon's
+      # max_connections (~901), shared with the web app + Inngest: keep instances * max well
+      # under it.
       - key: RUNNER_DB_POOL_MAX
         sync: false
       - key: RUNNER_INTERNAL_TOKEN
