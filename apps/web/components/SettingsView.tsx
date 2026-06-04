@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { Toggle } from "@/components/ui/toggle";
@@ -40,6 +40,7 @@ import {
   setWorkspaceMcpExperimentEnabled,
 } from "@/lib/mcp/actions";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import { removeAvatar, updateAvatar } from "@/lib/users/actions";
 import { updateWorkspaceName } from "@/lib/workspaces/actions";
 
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
@@ -57,6 +58,7 @@ type Props = {
     name: string;
     email: string;
     avatarUrl: string | null;
+    hasCustomAvatar: boolean;
     initials: string;
   };
   workspace: {
@@ -1200,6 +1202,135 @@ function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; init
   );
 }
 
+// Resize any picked image to a centered 256px square and encode as webp on the client,
+// so we never ship a multi-MB original to the server or store one in Postgres.
+async function resizeImageToSquareWebp(
+  file: File,
+): Promise<{ dataBase64: string; previewUrl: string }> {
+  const SIZE = 256;
+  const bitmap = await createImageBitmap(file);
+  if (!bitmap.width || !bitmap.height) {
+    bitmap.close?.();
+    throw new Error("Invalid image dimensions.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available.");
+  const scale = Math.max(SIZE / bitmap.width, SIZE / bitmap.height);
+  const drawW = bitmap.width * scale;
+  const drawH = bitmap.height * scale;
+  ctx.drawImage(bitmap, (SIZE - drawW) / 2, (SIZE - drawH) / 2, drawW, drawH);
+  bitmap.close?.();
+  // The server derives the real mime from magic bytes, so we just hand over the bytes.
+  // (Browsers without webp encode fall back to png, which the server also accepts.)
+  const dataUrl = canvas.toDataURL("image/webp", 0.9);
+  const dataBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  return { dataBase64, previewUrl: dataUrl };
+}
+
+function AvatarForm({
+  avatarUrl,
+  initials,
+  hasCustomAvatar,
+}: {
+  avatarUrl: string | null;
+  initials: string;
+  hasCustomAvatar: boolean;
+}) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+
+  const hasPhoto = (hasCustomAvatar && !removed) || Boolean(preview);
+  const shownUrl = removed ? null : (preview ?? avatarUrl);
+
+  const onPick = async (file: File) => {
+    setError(null);
+    let resized: { dataBase64: string; previewUrl: string };
+    try {
+      resized = await resizeImageToSquareWebp(file);
+    } catch {
+      setError("Could not process that image.");
+      return;
+    }
+    setPreview(resized.previewUrl);
+    setRemoved(false);
+    startTransition(async () => {
+      const res = await updateAvatar({ dataBase64: resized.dataBase64 });
+      if (res.ok) {
+        router.refresh();
+      } else {
+        setError(res.error);
+        setPreview(null);
+      }
+    });
+  };
+
+  const onRemove = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await removeAvatar();
+      if (res.ok) {
+        setPreview(null);
+        setRemoved(true);
+        router.refresh();
+      } else {
+        setError(res.error);
+      }
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-4">
+      <ProfileAvatar avatarUrl={shownUrl} initials={initials} />
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void onPick(file);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={isPending}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isPending ? "Saving…" : hasPhoto ? "Change photo" : "Upload photo"}
+          </button>
+          {hasPhoto && !isPending && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="inline-flex h-8 items-center rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:text-ink"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        {error ? (
+          <span className="text-[12px] text-danger">{error}</span>
+        ) : (
+          <span className="text-[11.5px] text-ink-subtle">
+            PNG, JPEG or WebP. Square images look best.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WorkspaceNameForm({ initial }: { initial: string }) {
   const [value, setValue] = useState(initial);
   const [saved, setSaved] = useState(false);
@@ -1268,13 +1399,21 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
         </div>
 
         <div className="mt-8">
-          <Section title="Profile" description="Managed by your identity provider (WorkOS).">
-            <div className="flex items-center gap-3">
-              <ProfileAvatar avatarUrl={profile.avatarUrl} initials={profile.initials} />
-              <div className="min-w-0">
-                <div className="truncate text-[14px] font-medium text-ink">{profile.name}</div>
-                <div className="truncate text-[12.5px] text-ink-muted">{profile.email}</div>
-              </div>
+          <Section
+            title="Profile"
+            description="Shown on your profile. Email is managed by your identity provider."
+          >
+            {/* key resets the optimistic preview/removed state once the server
+                refresh delivers a new avatarUrl (e.g. the IdP avatar after a remove). */}
+            <AvatarForm
+              key={profile.avatarUrl ?? "none"}
+              avatarUrl={profile.avatarUrl}
+              initials={profile.initials}
+              hasCustomAvatar={profile.hasCustomAvatar}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-medium text-ink">{profile.name}</div>
+              <div className="truncate text-[12.5px] text-ink-muted">{profile.email}</div>
             </div>
             <Field label="Email">
               <ReadOnly value={profile.email} />

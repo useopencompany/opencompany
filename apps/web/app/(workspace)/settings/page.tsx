@@ -1,5 +1,5 @@
 import { getDb } from "@opencompany/db/client";
-import { workspaceRepositories } from "@opencompany/db/schema";
+import { userAvatars, workspaceRepositories } from "@opencompany/db/schema";
 import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
@@ -30,9 +30,9 @@ function formatDate(date: Date) {
 }
 
 export default async function SettingsPage() {
-  const { authUser, workspace } = await currentWorkspace();
+  const { authUser, user, workspace } = await currentWorkspace();
   const db = getDb();
-  const [[repository], billing, mcp, toolPolicies] = await Promise.all([
+  const [[repository], [avatar], billing, mcp, toolPolicies] = await Promise.all([
     db
       .select({
         updatedAt: workspaceRepositories.updatedAt,
@@ -40,10 +40,18 @@ export default async function SettingsPage() {
       .from(workspaceRepositories)
       .where(eq(workspaceRepositories.workspaceId, workspace.id))
       .limit(1),
+    db
+      .select({ updatedAt: userAvatars.updatedAt })
+      .from(userAvatars)
+      .where(eq(userAvatars.userId, user.id))
+      .limit(1),
     loadBillingOverview(workspace.id),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
     loadWorkspaceToolPolicyOverrides(workspace.id),
   ]);
+  const customAvatarUrl = avatar
+    ? `/api/avatar/${user.id}?v=${new Date(avatar.updatedAt).getTime()}`
+    : null;
   const displayName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
     authUser.email.split("@")[0] ||
@@ -54,7 +62,8 @@ export default async function SettingsPage() {
       profile={{
         name: displayName,
         email: authUser.email,
-        avatarUrl: authUser.profilePictureUrl ?? null,
+        avatarUrl: customAvatarUrl ?? authUser.profilePictureUrl ?? null,
+        hasCustomAvatar: Boolean(customAvatarUrl),
         initials: initialsFor(displayName, authUser.email),
       }}
       workspace={{
