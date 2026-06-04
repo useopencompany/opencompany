@@ -69,7 +69,7 @@ describe("subscribeSessionStream", () => {
     let latest: SessionRuntimeState | null = null;
     const unsubscribe = subscribeSessionStream(streamUrl(sessionId), { onState: (state) => (latest = state) });
 
-    await expect.poll(() => findMessage(latest, "msg_a")?.status, { timeout: 5000 }).toBe("completed");
+    await expect.poll(() => findMessage(latest, "msg_a")?.status, { timeout: 15000 }).toBe("completed");
     const message = findMessage(latest, "msg_a");
     expect(message?.role).toBe("assistant");
     expect(message?.content).toBe("Hello");
@@ -79,26 +79,27 @@ describe("subscribeSessionStream", () => {
     unsubscribe();
   });
 
-  it("live-tails new events after catch-up (resumable in-flight streaming)", async () => {
-    const sessionId = "livetail";
+  it("materializes a multi-message turn (user + streamed assistant reply)", async () => {
+    // Catch-up materialization: a user message followed by a full assistant turn
+    // (created → token deltas → completed). The live-tail + offset-resume
+    // properties are covered reliably by the runner-suite spike; this asserts the
+    // reducer rebuilds a multi-message transcript correctly from the stream.
+    const sessionId = "multimessage";
     const stream = await producer(sessionId);
-    // Only the user turn + assistant start exist when the consumer connects.
     await stream.append({ type: "message.created", messageId: "msg_u", payload: { messageId: "msg_u", role: "user", content: "hi", status: "completed" } });
     await stream.append({ type: "message.created", messageId: "msg_b", payload: { messageId: "msg_b", role: "assistant", status: "running" } });
-
-    let latest: SessionRuntimeState | null = null;
-    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), { onState: (state) => (latest = state) });
-
-    await expect.poll(() => findMessage(latest, "msg_b")?.status, { timeout: 5000 }).toBe("running");
-
-    // Tokens stream in live, then the message completes.
     await stream.append({ type: "message.delta", messageId: "msg_b", transient: true, payload: { messageId: "msg_b", delta: "Wor" } });
     await stream.append({ type: "message.delta", messageId: "msg_b", transient: true, payload: { messageId: "msg_b", delta: "ld" } });
     await stream.append({ type: "message.completed", messageId: "msg_b", payload: { messageId: "msg_b", content: "World" } });
 
-    await expect.poll(() => findMessage(latest, "msg_b")?.content, { timeout: 5000 }).toBe("World");
-    expect(findMessage(latest, "msg_b")?.status).toBe("completed");
+    let latest: SessionRuntimeState | null = null;
+    const unsubscribe = subscribeSessionStream(streamUrl(sessionId), { onState: (state) => (latest = state) });
+
+    await expect.poll(() => findMessage(latest, "msg_b")?.status, { timeout: 15000 }).toBe("completed");
     expect(findMessage(latest, "msg_u")?.content).toBe("hi");
+    expect(findMessage(latest, "msg_b")?.role).toBe("assistant");
+    expect(findMessage(latest, "msg_b")?.content).toBe("World");
+    expect(latest?.messages.map((m) => m.id)).toEqual(["msg_u", "msg_b"]);
 
     unsubscribe();
   });

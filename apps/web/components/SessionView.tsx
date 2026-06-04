@@ -49,6 +49,7 @@ import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
+import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
@@ -93,6 +94,12 @@ import {
   parseSlashCommand,
   type SlashCommand,
 } from "@/lib/slash-commands/registry";
+
+// Phase 3 cutover flag. When set, the live transcript is materialized from the
+// session's Durable Stream (plane B) instead of the raw-SSE + React-Query path.
+// Off by default so the legacy path stays primary until the stream round-trip is
+// verified end-to-end; requires the runner + read proxy to be configured.
+const DURABLE_STREAMS_ENABLED = process.env.NEXT_PUBLIC_DURABLE_STREAMS === "1";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
@@ -260,18 +267,38 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const runtime = useMemo(
-    () => ({
+  // Plane B: materialize the live transcript from the session's Durable Stream.
+  // No-op (returns empty state) unless the cutover flag is on.
+  const { state: streamState } = useSessionStream(session.id, {
+    enabled: DURABLE_STREAMS_ENABLED,
+  });
+  const runtime = useMemo(() => {
+    // The aggregates (usage/cost/toolUsage) stay server-sourced (the recursive
+    // session-tree rollup isn't reproduced client-side — D2 decision).
+    const aggregates = { usage: detail.usage, toolUsage: detail.toolUsage, cost: detail.cost };
+    if (DURABLE_STREAMS_ENABLED) {
+      // Until the stream has replayed its history, fall back to the server snapshot
+      // so the transcript paints instantly with no empty flash; then the live
+      // stream takes over.
+      const streamReady = streamState.events.length > 0 || streamState.messages.length > 0;
+      if (streamReady) {
+        return {
+          events: streamState.events,
+          messages: streamState.messages,
+          ...aggregates,
+          currentStatus: streamState.currentStatus,
+          lastError: streamState.lastError,
+        };
+      }
+    }
+    return {
       events: detail.events,
       messages: detail.messages,
-      usage: detail.usage,
-      toolUsage: detail.toolUsage,
-      cost: detail.cost,
+      ...aggregates,
       currentStatus: detail.session.status,
       lastError: detail.session.lastError,
-    }),
-    [detail],
-  );
+    };
+  }, [detail, streamState]);
   const knownEventIds = useMemo(
     () => runtime.events.flatMap((event) => (typeof event.id === "number" ? [event.id] : [])),
     [runtime.events],
@@ -503,9 +530,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     void queryClient.invalidateQueries({ queryKey: detailKey });
   }, [detailKey, queryClient]);
 
+  // When the Durable Streams cutover is on, the transcript comes from the stream
+  // (above) — disable the raw-SSE channel by withholding the runner URL so this
+  // hook stays inert (it no-ops without a runnerUrl/streamToken).
   const stream = useSessionEventStream({
-    runnerUrl,
-    streamToken,
+    runnerUrl: DURABLE_STREAMS_ENABLED ? null : runnerUrl,
+    streamToken: DURABLE_STREAMS_ENABLED ? null : streamToken,
     sessionId: session.id,
     knownEventIds,
     onEvent: applyRuntimeEvent,

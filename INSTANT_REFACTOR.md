@@ -180,42 +180,46 @@ handles deltas, tool calls, reasoning, questions, approvals, usage). That keeps 
   longer reads React Query) but harmless, and unwinding `seedSessionQueries` is entangled with Phase 3's
   session-detail rewrite + the large `payload.test.ts`. Clean up wholesale in Phase 3/4.
 
-### Phase 3 — Session detail + streaming (Durable Streams refactor) 🚧
+### Phase 3 — Session detail + streaming (Durable Streams refactor) 🚧 (flag-gated, awaiting live verification)
 
 > **Revised** per [Streaming architecture v2](#streaming-architecture-v2--durable-streams). Spans the
-> **runner** (`apps/runner`) + **web** (`apps/web`) + **infra** (Electric Cloud Durable Streams). Land
-> behind a flag; keep SSE until the round-trip is verified, then delete it.
+> **runner** (`apps/runner`) + **web** (`apps/web`) + **infra** (Electric Cloud Durable Streams).
+> Built behind `NEXT_PUBLIC_DURABLE_STREAMS` (off by default); SSE stays primary until the live
+> round-trip is verified (3.5), then delete the legacy path (3.4). **Local dev needs no Electric
+> Cloud** — `bun scripts/durable-streams-dev.mjs` runs a local stream server.
 
-**3.0 — Infra + contract + scaffolding** (safe, in-repo, unblocks the rest)
-- ⬜ Verify packages on npm (`@durable-streams/client`, `@durable-streams/server` for tests,
-  `@durable-streams/state` for the later StreamDB option) and install in `web` + `runner`.
-- ⬜ Provision a hosted Durable Streams service on Electric Cloud; add env vars
-  (`DURABLE_STREAMS_URL`/service id + write token for the runner; read URL/proxy for the web client).
-  Document exact `PUT` provisioning + env in `.env.example` + `docs/stack/`.
-- ⬜ Define the shared **stream contract**: stream name `session-<sessionId>`, event framing =
-  the existing `RuntimeEventForStream` JSON (durable rows carry numeric `id` + offset; transient
-  carry `id: null`). Write a same-origin **read proxy/auth** route (mirrors the Electric shape proxy:
-  verify session ownership, never trust client params) so the browser never holds the write token.
+**3.0 — Infra + contract + scaffolding** ✅ (spike `e185e45`)
+- ✅ Packages verified + installed (`@durable-streams/client` in web+runner, `@durable-streams/server`
+  as dev). Architecture spike pinned the real client API (create w/ `contentType: application/json`;
+  one JSON message per `append`; SSE read from offset `-1` replays history then tails; offset resume).
+- ✅ Shared **stream contract**: stream name `session-<sessionId>`, framing = `RuntimeEventForStream`
+  JSON (durable rows numeric `id`, transient `id: null`). Same-origin **read proxy**
+  `app/api/streams/v1/session/[sessionId]/route.ts` (ownership-checked, server-side token, streaming
+  passthrough). Env in `.env.example`; `scripts/durable-streams-dev.mjs` for local dev.
+- ⬜ **Infra ask (prod only):** provision the hosted Durable Streams service + token on Electric Cloud.
 
-**3.1 — Runner: append to the Durable Stream** (`apps/runner/src/events.ts`)
-- ⬜ Add a Durable Streams publisher; have `publishRuntimeEvent` (durable) and
-  `publishTransientRuntimeEvent` append to `session-<id>` **in addition to** Postgres persistence
-  (durable) — replacing the in-process `EventEmitter` fan-out as the client transport. Behind the flag.
-- ⬜ Keep the durable Postgres writes unchanged (system of record / Plane A / billing).
+**3.1 — Runner: append to the Durable Stream** ✅ (`dda3e07`)
+- ✅ `publishRuntimeEvent` (the single fan-out for durable + transient events) also appends to
+  `session-<id>` via a per-session `IdempotentProducer` (batched ~5ms, ordered, exactly-once,
+  `autoClaim` for restarts). Additive + flag-gated; Postgres writes unchanged (system of record).
 
-**3.2 — Web: consume the stream + materialize the transcript**
-- ⬜ New `useSessionStream(sessionId)` over `@durable-streams/client`: catch-up from the persisted
-  offset → live tail; fold events through the **existing `applyRuntimeEventToState` reducer** into the
-  rendered detail. One transport seam (SSE today → Durable Stream behind flag → StreamDB maybe later).
-- ⬜ `SessionView` reads the transcript from the materialized live view (gated by `useHydrated`);
-  session meta (status/title) can come from the Plane-A `agentSessions` collection.
-- ⬜ Resumability: persist the last offset; on refresh/drop, resume without losing in-flight tokens.
+**3.2 — Web: consume the stream + materialize + cut over** ✅ (`c3bfdc3`, `23c18f4`, this commit)
+- ✅ `subscribeSessionStream` / `useSessionStream`: one SSE read from offset `-1` replays history +
+  live-tails (no handoff gap), folded through the **existing `applyRuntimeEventToState` reducer**.
+- ✅ `SessionView` cutover (flag-gated): `runtime` (already the `SessionRuntimeState` shape) sources
+  from the stream when on, with the server snapshot as the instant-paint fallback; raw-SSE
+  `useSessionEventStream` disabled (null runner URL). Aggregates stay server-sourced (D2).
+- ⬜ Resumability polish: catch-up replays from `-1` (rebuilds in-flight text on refresh — the win);
+  a later pass can persist the offset / seed from the durable snapshot to avoid replaying all deltas.
 
-**3.3 — Optimistic writes**
-- ⬜ `submitAgentSessionMessage` (user row) + `abortAgentSession` (status) stay Server Actions; the
-  user bubble + status reflect optimistically (append to the stream materialization or Plane-A status).
+**3.3 — Writes reach the stream** ✅ (this commit)
+- ✅ Web-written durable events (the runner never re-emits them) now append to the stream:
+  `insertUserMessage` mirrors the user `message.created` (real event id via `.returning()`);
+  `abortAgentSession` emits an optimistic `session.status: aborting`. Best-effort + flag-gated via
+  `lib/agent-sessions/durable-streams.ts` (lazy stream create). Client optimistic-echo overlay
+  deferred — the append→SSE round-trip is fast; revisit if the echo feels laggy in the live test.
 
-**3.4 — Remove the legacy streaming path**
+**3.4 — Remove the legacy streaming path** (after 3.5 verification)
 - ⬜ Delete raw-SSE `useSessionEventStream` (EventSource) + stream-token credential flow if Durable
   Streams uses its own auth; delete `seedSessionQueries`, `mergeAgentSessionDetail`,
   `applyRuntimeEventToSessionDetail`, `addUserMessageToSessionDetail`. Keep the **pure event→view

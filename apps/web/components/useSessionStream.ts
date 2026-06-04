@@ -18,10 +18,14 @@ import {
  * Replaces `useSessionEventStream` (raw EventSource SSE + React-Query cache
  * mutation) once SessionView is cut over.
  */
-export function useSessionStream(sessionId: string): {
+export function useSessionStream(
+  sessionId: string,
+  options?: { enabled?: boolean },
+): {
   state: SessionRuntimeState;
   status: SessionStreamStatus;
 } {
+  const enabled = options?.enabled ?? true;
   const [state, setState] = useState<SessionRuntimeState>(createEmptySessionRuntimeState);
   const [status, setStatus] = useState<SessionStreamStatus>("connecting");
 
@@ -36,13 +40,14 @@ export function useSessionStream(sessionId: string): {
   }
 
   useEffect(() => {
+    if (!enabled) return;
     const url = `${window.location.origin}/api/streams/v1/session/${sessionId}`;
     const unsubscribe = subscribeSessionStream(url, {
       onState: setState,
       onStatus: setStatus,
     });
     return unsubscribe;
-  }, [sessionId]);
+  }, [sessionId, enabled]);
 
   return { state, status };
 }

@@ -21,6 +21,7 @@ import {
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
+import { appendSessionStreamEvent } from "@/lib/agent-sessions/durable-streams";
 import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionAbortRequested,
@@ -254,6 +255,17 @@ export async function abortAgentSession(sessionId: string) {
       updatedAt: new Date(),
     })
     .where(eq(agentSessions.id, sessionId));
+
+  // Reflect the optimistic "aborting" status on the Durable Stream so a
+  // stream-sourced transcript shows it immediately; the runner's subsequent
+  // durable status events (aborting → aborted) reconcile. Best-effort + flag-gated.
+  await appendSessionStreamEvent(sessionId, {
+    id: null,
+    type: "session.status",
+    messageId: null,
+    payload: { status: "aborting" },
+    createdAt: new Date().toISOString(),
+  });
 
   after(async () => {
     await dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id });
@@ -686,8 +698,9 @@ async function insertAgentSession(input: {
 async function insertUserMessage(sessionId: string, content: string) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
+  const payload = { messageId, role: "user", content, status: "completed" };
 
-  await db.batch([
+  const results = await db.batch([
     db.insert(agentSessionMessages).values({
       id: messageId,
       sessionId,
@@ -697,13 +710,25 @@ async function insertUserMessage(sessionId: string, content: string) {
       modelMessage: { role: "user", content },
       completedAt: new Date(),
     }),
-    db.insert(agentSessionEvents).values({
-      sessionId,
-      messageId,
-      type: "message.created",
-      payload: { messageId, role: "user", content, status: "completed" },
-    }),
+    db
+      .insert(agentSessionEvents)
+      .values({ sessionId, messageId, type: "message.created", payload })
+      .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt }),
   ]);
+
+  // Mirror the user message onto the session's Durable Stream so it appears in a
+  // stream-sourced transcript (the runner never re-emits web-written events).
+  // Best-effort + flag-gated.
+  const eventRow = (results[1] as Array<{ id: number; createdAt: Date }>)[0];
+  if (eventRow) {
+    await appendSessionStreamEvent(sessionId, {
+      id: eventRow.id,
+      type: "message.created",
+      messageId,
+      payload,
+      createdAt: eventRow.createdAt.toISOString(),
+    });
+  }
 
   return messageId;
 }

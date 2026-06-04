@@ -144,9 +144,13 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
   const select = vi.fn(() => ({ from }));
-  const values = vi.fn().mockResolvedValue(undefined);
+  // insertUserMessage reads the message.created event row back from .returning().
+  const returning = vi.fn(() => ({}));
+  const values = vi.fn(() => ({ returning }));
   const insert = vi.fn(() => ({ values }));
-  const batch = vi.fn().mockResolvedValue(undefined);
+  const batch = vi
+    .fn()
+    .mockResolvedValue([undefined, [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }]]);
   return { select, insert, batch } as never;
 }
 
@@ -419,9 +423,13 @@ describe("submitAgentSessionMessage", () => {
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
-    const values = vi.fn().mockResolvedValue(undefined);
+    // insertUserMessage reads the message.created event row back from .returning().
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn(() => ({ returning }));
     const insert = vi.fn(() => ({ values }));
-    const batch = vi.fn().mockResolvedValue(undefined);
+    const batch = vi
+      .fn()
+      .mockResolvedValue([undefined, [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }]]);
     // submitAgentSessionMessage supersedes any pending ask_user_question via an UPDATE.
     const update = vi.fn(() => ({
       set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
