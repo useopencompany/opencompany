@@ -29,12 +29,12 @@ describe("renderSlackInviteEmail", () => {
       inviteUrl: "https://join.slack.com/share/abc",
     });
 
-    expect(email.subject).toBe("I set up a Slack channel for your team");
+    expect(email.subject).toBe("Connect with our team on Slack");
     expect(email.text).toContain("Hi Sam,");
     expect(email.text).toContain("https://join.slack.com/share/abc");
     expect(email.html).toContain("Hi Sam,");
     expect(email.html).toContain('href="https://join.slack.com/share/abc"');
-    expect(email.html).toContain("Join the channel");
+    expect(email.html).toContain("Connect on Slack");
   });
 
   it("falls back to a neutral greeting without a name", () => {
@@ -76,7 +76,7 @@ describe("sendSlackInviteEmail", () => {
       expect.objectContaining({
         from: "Louis from OpenCompany <louis@opencompany.cloud>",
         to: "customer@acme.com",
-        subject: "I set up a Slack channel for your team",
+        subject: "Connect with our team on Slack",
         replyTo: "louis@opencompany.cloud",
         tags: [
           { name: "category", value: "transactional" },

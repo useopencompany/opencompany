@@ -5,7 +5,7 @@ const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 const DEFAULT_FROM = "Louis from OpenCompany <louis@opencompany.cloud>";
 const DEFAULT_REPLY_TO = "louis@opencompany.cloud";
-const SLACK_INVITE_SUBJECT = "I set up a Slack channel for your team";
+const SLACK_INVITE_SUBJECT = "Connect with our team on Slack";
 
 export type SlackInviteEmailInput = {
   userId: string;
@@ -77,13 +77,13 @@ export function renderSlackInviteEmail(input: {
   const text = [
     greeting,
     "",
-    "I'm Louis from OpenCompany. Now that you're up and running, I wanted to give you a direct line to our team.",
+    "I'm Louis from OpenCompany. Now that you're set up, I'd love to stay close while you get going.",
     "",
-    "I just opened a private Slack channel shared between your workspace and ours — it's the fastest way to reach us. Ask anything, tell us what's broken, or what you'd like to see next.",
+    "I've opened a private Slack channel just for your team and ours — the easiest way to reach us. Ask anything, share what's not working, or tell us what you'd like to see next.",
     "",
-    `Join the channel: ${url}`,
+    `Connect on Slack: ${url}`,
     "",
-    "It's just you and the OpenCompany team in there. And if you'd rather not use Slack, just reply to this email — it comes straight to me.",
+    "It's just you and the OpenCompany team in there. Not on Slack? Just reply to this email — it comes straight to me.",
     "",
     "Louis",
     "OpenCompany",
@@ -95,11 +95,11 @@ export function renderSlackInviteEmail(input: {
     '<body style="margin:0;padding:0;background:#ffffff;">',
     "<div style=\"max-width:480px;margin:0 auto;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1a1a1a;\">",
     `<p style="margin:0 0 16px;">${escapeHtml(greeting)}</p>`,
-    "<p style=\"margin:0 0 16px;\">I'm Louis from OpenCompany. Now that you're up and running, I wanted to give you a direct line to our team.</p>",
-    "<p style=\"margin:0 0 16px;\">I just opened a private Slack channel shared between your workspace and ours — it's the fastest way to reach us. Ask anything, tell us what's broken, or what you'd like to see next.</p>",
-    `<p style="margin:0 0 20px;"><a href="${safeUrl}" style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:500;">Join the channel</a></p>`,
+    "<p style=\"margin:0 0 16px;\">I'm Louis from OpenCompany. Now that you're set up, I'd love to stay close while you get going.</p>",
+    "<p style=\"margin:0 0 16px;\">I've opened a private Slack channel just for your team and ours — the easiest way to reach us. Ask anything, share what's not working, or tell us what you'd like to see next.</p>",
+    `<p style="margin:0 0 20px;"><a href="${safeUrl}" style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:500;">Connect on Slack</a></p>`,
     `<p style="margin:0 0 16px;color:#6b7280;font-size:13px;">Or paste this link into your browser:<br><a href="${safeUrl}" style="color:#6b7280;">${safeUrl}</a></p>`,
-    "<p style=\"margin:0 0 16px;\">It's just you and the OpenCompany team in there. And if you'd rather not use Slack, just reply to this email — it comes straight to me.</p>",
+    '<p style="margin:0 0 16px;">It\'s just you and the OpenCompany team in there. Not on Slack? Just reply to this email — it comes straight to me.</p>',
     '<p style="margin:0;">Louis<br><span style="color:#6b7280;">OpenCompany</span></p>',
     "</div>",
     "</body>",
