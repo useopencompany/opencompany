@@ -39,6 +39,17 @@ function availableToolMentionLines(): string {
   ).join("\n");
 }
 
+// Tool mentions for a given catalog type, named dynamically so the guidance always reflects
+// exactly the tools that exist (no hard-coded ids that can drift from the catalog).
+function toolMentionsOfType(type: AgentToolDefinition["type"], join: "and" | "comma"): string {
+  const mentions = AGENT_TOOL_CATALOG.filter((tool) => tool.type === type).map(
+    (tool) => `\`@${tool.id}\``,
+  );
+  if (join === "and") return mentions.join(" and ");
+  if (mentions.length <= 1) return mentions.join("");
+  return `${mentions.slice(0, -1).join(", ")}, or ${mentions[mentions.length - 1]}`;
+}
+
 function buildSelfEditSkillMd(): string {
   return `---
 name: agent-self-edit
@@ -78,6 +89,37 @@ it; delete the mention to remove it. The model is separate per-agent config and 
 changes here when you pass the explicit \`model\` argument to \`update_agent_file\`.
 
 - \`@brain/path\` or \`@brain/folder/\` — mount Brain context.
+- \`@toolname\` — enable a tool (see the list below).
+
+## Keep the body light
+
+The body is a quick-reference for your future self, **not an essay**. Write it as tight
+bullets and one-line sentences, not paragraphs. Cover only:
+
+- **What to do when** — the jobs you handle and how you approach each.
+- **How to behave** — tone, defaults, standing preferences.
+- **Which tool for which job** — keep the \`@mentions\` you want active, each with a short
+  "use it for X" note.
+- **A little context** — who you serve and what good looks like. Keep durable facts in the
+  Brain, not here.
+
+Cut filler and restating-the-obvious. A scannable definition beats a long one — the user
+reads and edits this. A good body is closer to this shape:
+
+\`\`\`
+You are Ada, an engineering agent for the team.
+
+## What you do
+- Implement features, fixes, and refactors. Delegate the actual coding to @opencode.
+- Research libraries and prior art with @exa before proposing an approach.
+
+## How you work
+- Confirm scope before large changes; keep PRs small and reviewable.
+- Default to TypeScript; match existing code style.
+
+## Context
+- See @brain/wiki/engineering/ for stack, conventions, and architecture.
+\`\`\`
 
 ## Tools and integrations you can add or remove
 
@@ -91,6 +133,25 @@ yourself when to use it (for example: "Research the live web with @exa before an
 factual questions."). To **remove** one, leave its mention out of the new body. Adding a
 tool whose prerequisites are not met is allowed and won't fail validation, but the tool
 stays inert until the prerequisite is satisfied.
+
+## Pick tools for the job
+
+Match tools to what this agent is *for* — don't leave an agent without a way to do its core
+job. Think about the agent's purpose first, then mention the tools that serve it:
+
+- **Engineering / coding agent → it must have a coding tool.** Default to \`@opencode\`: it
+  works on attached *and* public GitHub repositories, so it's useful even before a human
+  attaches a repo. Add \`@amp\` as well when a repository is attached (Amp requires one). If
+  you're setting up an engineering agent and unsure, mention \`@opencode\` — never ship a
+  coding agent with no coding tool. (Available coding tools: ${toolMentionsOfType("coding_agent", "and")}.)
+- **Research agent →** \`@exa\` for web search, content extraction, and cited answers.
+- **Social / audience agent →** the relevant \`@x\`, \`@youtube\`, \`@tiktok\`, or \`@instagram\`
+  tools.
+- **Ops / project agent →** workspace integrations (${toolMentionsOfType("mcp", "comma")}) when
+  configured.
+
+When in doubt about which tools fit, that is exactly what the personalization questions
+below are for — ask the user rather than guessing or under-equipping yourself.
 
 ## Schedules (recurring triggers)
 
@@ -131,18 +192,27 @@ cron or an empty prompt is rejected and nothing is saved — fix it and call aga
 > \`update_agent_file\`. If you call the tool without having read this skill in the current
 > session, it returns \`ok: false\` and saves nothing — read this skill, then retry.
 
-1. Read your current definition. It is not in \`work/\` or \`brain/\`; use the description the
-   runner gave you in the system prompt, and ask the user what they want changed if it is
-   not obvious.
-2. Draft the **complete new body** — not a diff. Keep what should stay, add or rewrite what
-   should change, and keep any \`@mentions\` for tools and Brain mounts you still want active.
-3. Call \`update_agent_file\` with:
+1. **Read your current definition and think first.** It is not in \`work/\` or \`brain/\`; use
+   the description the runner gave you in the system prompt. Reason about the agent's
+   purpose, what the user actually asked for, and which of the tools above genuinely serve
+   that purpose — don't jump straight to writing.
+2. **Ask before you guess.** Unless the change is trivial and fully specified (e.g. "add web
+   search" → just add \`@exa\`), pause **once** with \`ask_user_question\` to personalize.
+   Batch 2–4 short, structured questions covering how the agent should behave, which
+   tools/integrations it should use, tone and defaults, and any recurring schedule. Keep
+   options short; set \`allowOther: true\` where a sensible answer may fall outside them. Do
+   **not** ask these as plain chat questions, and do **not** pause for a trivial,
+   already-specified edit.
+3. Draft the **complete new body** — not a diff — and keep it light (see "Keep the body
+   light"). Keep what should stay, add or rewrite what should change, and keep any
+   \`@mentions\` for tools and Brain mounts you still want active.
+4. Call \`update_agent_file\` with:
    - \`body\`: the full new Markdown body (required).
    - \`model\`: an optional model id to switch to. Omit it to keep your current model.
    - \`triggers\`: an optional complete list of your recurring schedules (see "Schedules"
      above). Omit it to keep your current schedules.
    - \`summary\`: a one-line description of what you changed and why.
-4. If the tool returns \`ok: false\`, read the \`errors\`, fix the body, and call it again.
+5. If the tool returns \`ok: false\`, read the \`errors\`, fix the body, and call it again.
    Common failures: empty body, an unknown model id, or malformed content.
 
 ## Important constraints
@@ -161,8 +231,10 @@ cron or an empty prompt is rejected and nothing is saved — fix it and call aga
 
 ## A good loop
 
-Briefly confirm the intent with the user → draft the full new body → \`update_agent_file\` →
-report the new version and what changed → remind them it applies to the next session.
+Think about the agent's purpose and which tools fit → ask the user a short, structured
+round of personalization questions (\`ask_user_question\`) unless the change is trivial →
+draft a light, scannable body with the right \`@mentions\` → \`update_agent_file\` → report the
+new version and what changed → remind them it applies to the next session.
 `;
 }
 

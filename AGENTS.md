@@ -103,6 +103,7 @@ Useful docs:
 
 - `README.md` - project overview
 - `CONTRIBUTING.md` - local checks and PR conventions
+- `docs/future-concepts/README.md` - speculative product and architecture ideas that may inform future work
 - `docs/getting-started.md` - local setup
 - `docs/database.md` - Neon, Drizzle, and migrations
 - `docs/deployment.md` - release flow

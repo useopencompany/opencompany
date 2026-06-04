@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { captureServerEvent } from "@opencompany/analytics/server";
+import { after, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { fulfillCheckoutSession } from "@/lib/billing/service";
 import { getStripe, getStripeWebhookSecret } from "@/lib/billing/stripe";
@@ -24,7 +25,20 @@ export async function POST(request: Request) {
   }
 
   if (event.type === "checkout.session.completed") {
-    await fulfillCheckoutSession(event.data.object, { eventId: event.id });
+    const result = await fulfillCheckoutSession(event.data.object, { eventId: event.id });
+
+    if (result.ok) {
+      after(() =>
+        captureServerEvent("credit_top_up_completed", result.userId, {
+          user_id: result.userId,
+          workspace_id: result.workspaceId,
+          checkout_record_id: result.checkoutRecordId,
+          ledger_id: result.ledgerId,
+          amount_cents: result.amountCents,
+          balance_cents: result.balanceCents,
+        }),
+      );
+    }
   }
 
   return NextResponse.json({ received: true });

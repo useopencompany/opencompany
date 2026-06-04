@@ -308,6 +308,8 @@ describe("fulfillCheckoutSession", () => {
       executeRows: [
         {
           checkoutRecordId: "chk_123",
+          workspaceId: "wks_123",
+          userId: "usr_123",
           amountCents: 2500,
           balanceCents: 5000,
           ledgerId: 22,
@@ -332,6 +334,8 @@ describe("fulfillCheckoutSession", () => {
     expect(result).toEqual({
       ok: true,
       checkoutRecordId: "chk_123",
+      workspaceId: "wks_123",
+      userId: "usr_123",
       amountCents: 2500,
       balanceCents: 5000,
       ledgerId: 22,

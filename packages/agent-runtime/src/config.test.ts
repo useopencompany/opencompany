@@ -1,7 +1,42 @@
 import { describe, expect, it } from "vitest";
 import { agentGitHubRepositories, normalizeAgentConfig, resolveAgentRuntimeConfig } from "./config";
+import {
+  GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  type ModelProviderOptions,
+  mergeModelProviderOptions,
+} from "./models";
 import { policyMapKey } from "./permissions";
 import type { AgentConfig } from "./types";
+
+describe("mergeModelProviderOptions", () => {
+  it("merges provider namespaces without dropping existing options", () => {
+    const reasoning = {
+      openai: {
+        reasoningEffort: "medium",
+        reasoningSummary: "concise",
+      },
+    } satisfies ModelProviderOptions;
+    const cache = {
+      openai: {
+        promptCacheKey: "workspace-agent",
+      },
+      gateway: {
+        caching: "auto",
+      },
+    } satisfies ModelProviderOptions;
+
+    expect(mergeModelProviderOptions(reasoning, cache)).toEqual({
+      openai: {
+        reasoningEffort: "medium",
+        reasoningSummary: "concise",
+        promptCacheKey: "workspace-agent",
+      },
+      gateway: {
+        caching: "auto",
+      },
+    });
+  });
+});
 
 describe("resolveAgentRuntimeConfig", () => {
   it("builds the system prompt and keeps the configured Vercel AI Gateway model", () => {
@@ -33,6 +68,7 @@ describe("resolveAgentRuntimeConfig", () => {
       name: "openai/gpt-5.4",
       supportsReasoning: true,
       providerOptions: {
+        ...GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
         openai: {
           reasoningEffort: "medium",
           reasoningSummary: "concise",
@@ -432,6 +468,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: "anthropic/claude-haiku-4.5",
       supportsReasoning: false,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "hidden",
     });
   });
@@ -466,6 +503,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: false,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "hidden",
     });
   });
@@ -507,6 +545,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: true,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "hidden",
     });
   });
@@ -537,6 +576,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: true,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "raw",
     });
   });
@@ -563,6 +603,7 @@ describe("resolveAgentRuntimeConfig", () => {
       name: "openai/gpt-5.2-codex",
       supportsReasoning: true,
       providerOptions: {
+        ...GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
         openai: {
           reasoningEffort: "medium",
           reasoningSummary: "concise",

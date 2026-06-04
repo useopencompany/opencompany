@@ -1254,6 +1254,39 @@ describe("buildAssistantTurnParts", () => {
     ).toBe("user");
   });
 
+  it("marks a pending approval as approved once the resumed tool starts", () => {
+    const parts = buildAssistantTurnParts(
+      { id: "msg_assistant", role: "assistant", content: "", status: "running" },
+      [
+        event(1, "tool.approval_required", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "opencode_coder",
+          providerKey: "opencode",
+          permissionGroup: "modify",
+          inputPreview: '{\n  "task": "Fix the bug"\n}',
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+        event(2, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "opencode_coder",
+          input: { task: "Fix the bug" },
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.approval : undefined).toEqual({
+      status: "approved",
+      providerKey: "opencode",
+      permissionGroup: "modify",
+      requestedAt: "2026-06-02T08:51:35.162Z",
+      decisionSource: "user",
+    });
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.status : null).toBe("running");
+  });
+
   it("does not coerce malformed approval permission groups to admin", () => {
     const parts = buildAssistantTurnParts(
       { id: "msg_assistant", role: "assistant", content: "", status: "running" },

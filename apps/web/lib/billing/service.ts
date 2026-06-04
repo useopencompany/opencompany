@@ -354,6 +354,8 @@ export async function fulfillCheckoutSession(
     )
     SELECT
       fulfilled_session.id AS "checkoutRecordId",
+      fulfilled_session.workspace_id AS "workspaceId",
+      fulfilled_session.user_id AS "userId",
       fulfilled_session.amount_cents AS "amountCents",
       balance.balance_cents AS "balanceCents",
       ledger.id AS "ledgerId"
@@ -364,6 +366,8 @@ export async function fulfillCheckoutSession(
 
   const rows = rowsFromExecute<{
     checkoutRecordId: string;
+    workspaceId: string;
+    userId: string;
     amountCents: number;
     balanceCents: number;
     ledgerId: number;

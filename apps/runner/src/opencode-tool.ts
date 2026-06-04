@@ -397,6 +397,14 @@ export function resolveOpencodeTarget(input: {
 
     const publicRepositoryFullName = parsePublicGitHubRepository(requested);
     if (publicRepositoryFullName) {
+      const attachedByRepositoryName = resolveSingleAttachedRepositoryByName(
+        input.repositories,
+        publicRepositoryFullName,
+      );
+      if (attachedByRepositoryName) {
+        return { kind: "attached", repository: attachedByRepositoryName };
+      }
+
       return { kind: "public", repositoryFullName: publicRepositoryFullName };
     }
 
@@ -420,6 +428,18 @@ export function resolveOpencodeTarget(input: {
   throw new Error(
     "opencode_coder needs a repository argument when no GitHub repository is attached. Use a public GitHub owner/repo or https://github.com/owner/repo URL.",
   );
+}
+
+function resolveSingleAttachedRepositoryByName(
+  repositories: AgentGitHubRepositoryConfig[],
+  requestedRepositoryFullName: string,
+) {
+  if (repositories.length !== 1) return null;
+  const repository = repositories[0]!;
+  return repositoryName(repository.fullName).toLowerCase() ===
+    repositoryName(requestedRepositoryFullName).toLowerCase()
+    ? repository
+    : null;
 }
 
 export function parsePublicGitHubRepository(value: string): string | null {
@@ -518,6 +538,10 @@ function normalizeGitHubRepositoryFullName(
   if (!owner || !repo) return null;
   if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) return null;
   return `${owner}/${repo}`;
+}
+
+function repositoryName(repositoryFullName: string) {
+  return repositoryFullName.split("/")[1] ?? "";
 }
 
 export function buildOpencodeCommand(input: {
