@@ -37,6 +37,7 @@ bun run dev
 - `scripts` — setup, env-pull, and Neon branching automation
 - `drizzle` — checked-in migrations
 - `docs` — concept, format spec, and operational guides
+- `docs/future-concepts` — speculative product and architecture ideas to consider before related implementation work
 - `.claude/skills` — agent skills (`start-work`, `pre-merge-check`)
 
 ## Quality gates
@@ -48,6 +49,7 @@ Every PR runs on GitHub Actions: `format:check`, `lint`, `typecheck`, `build`, `
 - [The `.agent` file format](./docs/agent-file.md) — deep dive into the file that defines every agent
 - [Getting started](./docs/getting-started.md) — new engineer checklist and local dev setup in under five minutes
 - [Architecture](./docs/architecture.md) — runtime shape, sync, and database model
+- [Future concepts](./docs/future-concepts/README.md) — speculative product and architecture notes
 - [Technology stack](./docs/stack/README.md) — technology register, owners, and replacement triggers
 - [Database](./docs/database.md) — Neon branching, schema changes, Drizzle
 - [Deployment](./docs/deployment.md) — production release flow, Vercel, Render, env, smoke checks
