@@ -50,6 +50,18 @@ vi.mock("@/components/WorkspaceContext", () => ({
   useWorkspaceContext: () => ({ workspaceId: "wks_test" }),
 }));
 
+// useLiveQuery + the workspace collections are only read by the default SessionView
+// export (these tests render SessionViewContent directly). Stub both so importing
+// SessionView does not pull CollectionsProvider's server-action import chain into the
+// test — mirrors Sidebar.test.
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: () => ({ data: [], isLoading: false }),
+}));
+
+vi.mock("@/components/CollectionsProvider", () => ({
+  useCollections: () => ({ agentSessions: {}, agents: {} }),
+}));
+
 vi.mock("@/components/ToastProvider", () => ({
   useToast: () => ({ showError: vi.fn() }),
 }));
