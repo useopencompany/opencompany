@@ -376,7 +376,9 @@ async function markSyncedAndClear(
   const writes = [];
   for (const entry of input.planned) {
     if (!entry.upsert) continue;
-    writes.push(markSourceSynced(db, entry.job, entry.upsert.committedHash, input.commit, input.now));
+    writes.push(
+      markSourceSynced(db, entry.job, entry.upsert.committedHash, input.commit, input.now),
+    );
   }
   // Keep the settings panel's "last synced" honest: a real commit advances both
   // HEAD and the timestamp; an already-in-sync projection just bumps the time.
