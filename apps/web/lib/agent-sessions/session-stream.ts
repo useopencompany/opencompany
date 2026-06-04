@@ -1,4 +1,4 @@
-import { stream } from "@durable-streams/client";
+import { DurableStreamError, stream } from "@durable-streams/client";
 import {
   applyRuntimeEventToState,
   emptyCostSummary,
@@ -6,6 +6,27 @@ import {
   type RuntimeEvent,
   type SessionRuntimeState,
 } from "@/lib/agent-sessions/runtime-events";
+
+// Auth/shape errors won't fix themselves — give up immediately. Everything else
+// (NOT_FOUND on a not-yet-created stream, RATE_LIMITED, BUSY, network/UNKNOWN) is
+// transient and worth a backed-off retry.
+const TERMINAL_ERROR_CODES = new Set(["UNAUTHORIZED", "FORBIDDEN", "BAD_REQUEST"]);
+const MAX_CONNECT_ATTEMPTS = 8;
+
+function isTerminalStreamError(error: unknown): boolean {
+  return error instanceof DurableStreamError && TERMINAL_ERROR_CODES.has(error.code);
+}
+
+function streamErrorCode(error: unknown): string {
+  return error instanceof DurableStreamError ? error.code : "UNKNOWN";
+}
+
+function debugLog(message: string, fields: Record<string, unknown>): void {
+  // Browser-side structured trace for the streaming lifecycle (the channel the
+  // user actually reads). Quiet in production builds.
+  if (process.env.NODE_ENV === "production") return;
+  console.debug(`[session-stream] ${message}`, fields);
+}
 
 /**
  * Framework-agnostic consumer for a session's Durable Stream (Phase 3, plane B —
@@ -64,6 +85,7 @@ export function subscribeSessionStream(url: string, handlers: SessionStreamHandl
   let offset = "-1";
   let stopped = false;
   let cancelLive: (() => void) | null = null;
+  let connectAttempts = 0;
 
   const reduce = (items: ReadonlyArray<RuntimeEvent>) => {
     if (items.length === 0) return;
@@ -74,6 +96,28 @@ export function subscribeSessionStream(url: string, handlers: SessionStreamHandl
     handlers.onState(state);
   };
 
+  // `stream()` rejects on the first failed request (auth/404/network). Returning
+  // an options object asks it to retry; returning undefined re-throws (terminal).
+  // The proxy now creates a not-yet-existing stream on 404, but a cold start or a
+  // transient blip can still surface here — back off and retry so the session
+  // self-heals instead of latching on a spinner until a manual reload.
+  const onError = async (error: Error): Promise<Record<string, never> | undefined> => {
+    if (stopped || isTerminalStreamError(error) || connectAttempts >= MAX_CONNECT_ATTEMPTS) {
+      return undefined;
+    }
+    connectAttempts += 1;
+    const delayMs = Math.min(250 * 2 ** (connectAttempts - 1), 5000);
+    debugLog("connect retry", {
+      url,
+      attempt: connectAttempts,
+      delayMs,
+      code: streamErrorCode(error),
+    });
+    handlers.onStatus?.("connecting");
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return stopped ? undefined : {};
+  };
+
   void (async () => {
     try {
       handlers.onStatus?.("connecting");
@@ -82,11 +126,18 @@ export function subscribeSessionStream(url: string, handlers: SessionStreamHandl
         json: true,
         live: "sse",
         offset,
-        onError: (error) => handlers.onError?.(error),
+        onError,
       });
+      connectAttempts = 0;
       handlers.onStatus?.("live");
+      debugLog("live", { url, offset });
       const unsubscribe = live.subscribeJson((batch) => {
         offset = batch.offset;
+        debugLog("batch", {
+          offset: batch.offset,
+          count: batch.items.length,
+          upToDate: (batch as { upToDate?: boolean }).upToDate ?? null,
+        });
         reduce(batch.items);
       });
       cancelLive = () => {
@@ -96,6 +147,7 @@ export function subscribeSessionStream(url: string, handlers: SessionStreamHandl
       if (stopped) cancelLive();
     } catch (error) {
       if (stopped) return;
+      debugLog("error", { url, code: streamErrorCode(error) });
       handlers.onStatus?.("error");
       handlers.onError?.(error instanceof Error ? error : new Error(String(error)));
     }

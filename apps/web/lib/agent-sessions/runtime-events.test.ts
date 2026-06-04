@@ -10,10 +10,75 @@ import {
   emptyUsageSummary,
   isInspectableRuntimeEvent,
   isReasoningInProgress,
+  mergeEvents,
+  mergeMessages,
   type RuntimeEvent,
   type SessionMessage,
   type SessionRuntimeState,
 } from "./runtime-events";
+
+function message(id: string, role: string, content: string): SessionMessage {
+  return { id, role, content, status: "completed" };
+}
+
+describe("mergeMessages", () => {
+  it("keeps a snapshot-only message the stream is missing (Bug B)", () => {
+    const snapshot = [message("msg_user", "user", "Hi"), message("msg_asst", "assistant", "Hello")];
+    // The stream lacks the user message (best-effort web append never landed).
+    const overlay = [message("msg_asst", "assistant", "Hello there")];
+
+    const merged = mergeMessages(snapshot, overlay);
+
+    expect(merged.map((m) => m.id)).toEqual(["msg_user", "msg_asst"]);
+    // Overlay's copy of the shared message wins (live content).
+    expect(merged[1]?.content).toBe("Hello there");
+  });
+
+  it("appends stream-only messages in stream order after the snapshot", () => {
+    const snapshot = [message("msg_user", "user", "Hi")];
+    const overlay = [
+      message("msg_user", "user", "Hi"),
+      message("msg_asst", "assistant", "Reply"),
+      message("msg_user2", "user", "Again"),
+    ];
+
+    const merged = mergeMessages(snapshot, overlay);
+
+    expect(merged.map((m) => m.id)).toEqual(["msg_user", "msg_asst", "msg_user2"]);
+  });
+
+  it("returns the snapshot unchanged when the overlay is empty", () => {
+    const snapshot = [message("msg_user", "user", "Hi")];
+    expect(mergeMessages(snapshot, [])).toEqual(snapshot);
+  });
+});
+
+describe("mergeEvents", () => {
+  it("dedupes durable events by id and appends transient deltas", () => {
+    const snapshot = [event(1, "message.created", { messageId: "m" })];
+    const overlay = [
+      event(1, "message.created", { messageId: "m" }),
+      event(null, "message.delta", { messageId: "m", delta: "hi" }),
+      event(2, "message.completed", { messageId: "m" }),
+    ];
+
+    const merged = mergeEvents(snapshot, overlay);
+
+    expect(merged.map((e) => e.id)).toEqual([1, null, 2]);
+  });
+
+  it("keeps snapshot durable events not present on the stream", () => {
+    const snapshot = [
+      event(1, "message.created", { messageId: "m" }),
+      event(2, "session.status", {}),
+    ];
+    const overlay = [event(3, "message.delta", { messageId: "m" })];
+
+    const merged = mergeEvents(snapshot, overlay);
+
+    expect(merged.map((e) => e.id)).toEqual([1, 2, 3]);
+  });
+});
 
 function initialState(): SessionRuntimeState {
   return {
@@ -169,6 +234,55 @@ describe("applyRuntimeEventToState", () => {
       content: "Please ship this",
       status: "completed",
     });
+  });
+
+  it("treats a new non-internal user message as the start of a new pending turn", () => {
+    let state: SessionRuntimeState = {
+      ...initialState(),
+      currentStatus: "failed",
+      lastError: "Gateway down",
+    };
+
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "message.created", {
+        messageId: "msg_new_user",
+        role: "user",
+        content: "Try again",
+        status: "completed",
+      }),
+    );
+
+    expect(state.currentStatus).toBe("running");
+    expect(state.lastError).toBeNull();
+    expect(state.messages.find((message) => message.id === "msg_new_user")).toMatchObject({
+      role: "user",
+      content: "Try again",
+      status: "completed",
+    });
+
+    state = applyRuntimeEventToState(state, event(2, "session.error", { message: "Still down" }));
+
+    expect(state.currentStatus).toBe("failed");
+    expect(state.lastError).toBe("Still down");
+  });
+
+  it("does not start a visible pending turn for internal user messages", () => {
+    const state = applyRuntimeEventToState(
+      {
+        ...initialState(),
+        currentStatus: "completed",
+      },
+      event(1, "message.created", {
+        messageId: "msg_internal",
+        role: "user",
+        content: "Hidden steering",
+        status: "completed",
+        internal: true,
+      }),
+    );
+
+    expect(state.currentStatus).toBe("completed");
   });
 
   it("does not apply duplicate event ids twice", () => {

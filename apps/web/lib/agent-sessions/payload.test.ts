@@ -19,9 +19,7 @@ describe("session payload cache helpers", () => {
     seedSessionQueries(queryClient, workspaceId, sessionDetail);
 
     expect(
-      queryClient.getQueryData(
-        sessionQueryKeys.detail(workspaceId, sessionDetail.session.id),
-      ),
+      queryClient.getQueryData(sessionQueryKeys.detail(workspaceId, sessionDetail.session.id)),
     ).toEqual(sessionDetail);
   });
 
@@ -81,7 +79,6 @@ describe("session payload cache helpers", () => {
       usage: base.usage,
       toolUsage: base.toolUsage,
       cost: base.cost,
-      runnerUrl: base.runnerUrl,
       related: { parent: null, children: [] },
       session: {
         ...base.session,
@@ -245,6 +242,5 @@ function detail(
       toolCostUsdMicros: 0,
       sandboxCostUsdMicros: 0,
     },
-    runnerUrl: null,
   };
 }

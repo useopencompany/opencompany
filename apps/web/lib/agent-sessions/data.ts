@@ -14,7 +14,6 @@ import {
   serializeAgentSessionDetail,
   serializeSidebarSession,
 } from "@/lib/agent-sessions/payload";
-import { getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 
 const SIDEBAR_RECENCY_LIMIT = 50;
@@ -315,7 +314,6 @@ export async function loadAgentSessionDetailForWorkspace(
   });
   const toolUsage = rollup.toolUsage;
   const cost = rollup.cost;
-  const runnerUrl = getRunnerPublicUrl();
   const serializedSession = {
     ...session,
     source: session.source === "agent" ? ("agent" as const) : ("user" as const),
@@ -332,10 +330,8 @@ export async function loadAgentSessionDetailForWorkspace(
     usage,
     toolUsage,
     cost,
-    runnerUrl,
   });
 }
-
 
 function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {
   return {

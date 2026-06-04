@@ -1,6 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { DurableStream, DurableStreamError } from "@durable-streams/client";
 import { agentSessions, getDb } from "@opencompany/db";
+import { createLogger } from "@opencompany/observability";
+import { and, eq } from "drizzle-orm";
 import { currentWorkspace } from "@/lib/auth";
+
+const logger = createLogger({ service: "opencompany-web", runtime: "durable-streams-proxy" });
+const JSON_CONTENT_TYPE = "application/json";
 
 /**
  * Same-origin read proxy in front of the Durable Streams service (Phase 3, plane
@@ -17,6 +22,23 @@ function durableStreamsConfig(): { baseUrl: string; token: string | undefined } 
   const baseUrl = process.env.DURABLE_STREAMS_URL?.replace(/\/+$/, "");
   if (!baseUrl) return null;
   return { baseUrl, token: process.env.DURABLE_STREAMS_TOKEN?.trim() || undefined };
+}
+
+/**
+ * Idempotently create a session's Durable Stream. A stream is created lazily on
+ * the first append (runner or web), so a reader that connects before any event
+ * has been published gets a 404. Creating it here lets the read attach to a live
+ * (possibly empty) stream and tail — subsequent appends then flow through.
+ * Treats "already exists" as success (the producer raced us, which is fine).
+ */
+async function ensureStreamExists(baseStreamUrl: string, token: string | undefined): Promise<void> {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  try {
+    await DurableStream.create({ url: baseStreamUrl, headers, contentType: JSON_CONTENT_TYPE });
+  } catch (error) {
+    if (error instanceof DurableStreamError && error.code === "CONFLICT_EXISTS") return;
+    throw error;
+  }
 }
 
 async function ownsSession(
@@ -59,7 +81,12 @@ const SKIP_REQUEST_HEADERS = new Set([
 ]);
 
 // Upstream transfer headers that don't apply to our re-emitted body.
-const HOP_BY_HOP_HEADERS = ["content-encoding", "content-length", "transfer-encoding", "connection"];
+const HOP_BY_HOP_HEADERS = [
+  "content-encoding",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+];
 
 export async function GET(
   request: Request,
@@ -97,10 +124,34 @@ export async function GET(
   requestHeaders.set("accept-encoding", "identity");
   if (config.token) requestHeaders.set("authorization", `Bearer ${config.token}`);
 
-  const upstream = await fetch(upstreamUrl, {
-    headers: requestHeaders,
-    signal: request.signal,
-    cache: "no-store",
+  const fetchUpstream = () =>
+    fetch(upstreamUrl, { headers: requestHeaders, signal: request.signal, cache: "no-store" });
+
+  let upstream = await fetchUpstream();
+  let retriedAfterCreate = false;
+  if (upstream.status === 404) {
+    // The stream doesn't exist yet (created lazily on the first append). Create
+    // it, then retry the read once so the client tails a live stream instead of
+    // treating the 404 as terminal (which left sessions stuck on a spinner until
+    // a manual reload). Best-effort: if creation fails, fall through with the 404.
+    try {
+      await ensureStreamExists(`${config.baseUrl}/session-${sessionId}`, config.token);
+      upstream = await fetchUpstream();
+      retriedAfterCreate = true;
+    } catch (error) {
+      logger.warn("Durable stream proxy create-on-404 failed", {
+        event: "opencompany.durable_stream_proxy_create_failed",
+        session_id: sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  logger.info("Durable stream proxy read", {
+    event: "opencompany.durable_stream_proxy_read",
+    session_id: sessionId,
+    status: upstream.status,
+    retried_after_create: retriedAfterCreate,
   });
 
   // Stream the body through unbuffered (SSE/long-poll), preserving the Durable

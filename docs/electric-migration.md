@@ -135,6 +135,27 @@ component → collection.update()    Neon ──logical repl──▶         ru
 - ✅ **Phase 4 — Cleanup + tests**: deleted dead fetchers/query-keys/serializers (the sidebar
   React-Query helpers + `sessionQueryKeys.list` + `seedSessionQueries`' sidebar branch, and the
   vestigial `agentQueryKeys.list` plumbing); component tests drive collections / a mocked stream.
+- ✅ **Phase 5 — Streaming bug-fixes + SSE cutover**: fixed two field-reported bugs and finished the
+  cutover.
+  - **Stuck spinner (no live tokens until reload)**: a Durable Stream is created lazily on the first
+    append, so a reader connecting first got a 404 — and `@durable-streams/client.stream()` rejects on
+    404 with no retry, latching the subscription on `error`. Fix: the read proxy
+    (`app/api/streams/v1/session/[sessionId]/route.ts`) now **creates the stream on upstream 404 and
+    retries once** (mirrors the web append's `ensureCreated`), and `subscribeSessionStream` backs off and
+    retries transient connect errors instead of giving up.
+  - **User message vanishing after ~1s**: the old `streamReady` swap **replaced** the server snapshot
+    with the stream wholesale, dropping any durable message the stream lacked (user messages are only
+    published by the best-effort web append; pre-stream history isn't on the stream at all). Fix:
+    `SessionView` now **union-merges** the Postgres snapshot (floor) with the stream overlay via
+    `mergeMessages`/`mergeEvents` (`runtime-events.ts`) — durable rows never disappear, live deltas still
+    flow.
+  - **Full SSE cutover**: removed the runner's in-process `EventEmitter` broker + `GET /sessions/:id/events`
+    endpoint, the `@opencompany/agent-runtime` stream-token utils (`tokens.ts`), the dead
+    `NEXT_PUBLIC_DURABLE_STREAMS` flag, and the unused `runnerUrl` detail-payload field /
+    `getRunnerStreamTokenSecret`. The Durable Stream is now the **sole** live transport.
+  - Env note: `DURABLE_STREAMS_URL`/`_TOKEN` were already correct — the 404 was a real not-yet-created
+    condition, not a misconfiguration. Added structured logs (proxy upstream status + client status/offset/
+    upToDate) to diagnose the race in prod.
 
 ## Verification per surface
 

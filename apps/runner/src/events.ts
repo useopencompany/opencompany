@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import type { AgentRuntimeEvent, AgentRuntimeEventPayload } from "@opencompany/agent-runtime";
 import { agentSessionEvents } from "@opencompany/db/schema";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
@@ -27,9 +26,6 @@ export type TransientRuntimeEvent = {
   transient: true;
 };
 export type RuntimeEventForStream = PersistedRuntimeEvent | TransientRuntimeEvent;
-
-const sessionEventBroker = new EventEmitter();
-sessionEventBroker.setMaxListeners(0);
 
 export async function appendRuntimeEvent(
   db: Db,
@@ -138,28 +134,13 @@ export async function listSessionEvents(input: {
     .limit(input.limit ?? 100);
 }
 
-export function subscribeSessionEvents(
-  sessionId: string,
-  listener: (event: RuntimeEventForStream) => void,
-) {
-  const eventName = brokerEventName(sessionId);
-  sessionEventBroker.on(eventName, listener);
-  return () => {
-    sessionEventBroker.off(eventName, listener);
-  };
-}
-
 export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
-  // In-process broker → SSE (the current transport). Single fan-out point for both
-  // durable (appendRuntimeEvent) and transient (publishTransientRuntimeEvent) events.
-  sessionEventBroker.emit(brokerEventName(sessionId), event);
-  // Plane B: additionally mirror to the session's Durable Stream when configured
-  // (Phase 3). Fire-and-forget + flag-gated — no-op and harmless until cutover.
+  // Single fan-out point for durable (appendRuntimeEvent) and transient
+  // (publishTransientRuntimeEvent) events → the session's Durable Stream, the sole
+  // live transport (Phase 3 cutover; the in-process-broker SSE path was removed).
+  // Fire-and-forget + flag-gated — a streaming failure never breaks the run
+  // (Postgres remains the system of record).
   publishToDurableStream(sessionId, event);
-}
-
-function brokerEventName(sessionId: string) {
-  return `session:${sessionId}`;
 }
 
 // Raw `db.execute` rows skip Drizzle's value mapping, so a timestamptz can arrive as a

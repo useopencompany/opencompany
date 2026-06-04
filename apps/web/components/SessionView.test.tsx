@@ -21,7 +21,9 @@ import type {
   AssistantTurnPart,
   RuntimeToolCall,
   SessionMessage,
+  SessionRuntimeState,
 } from "@/lib/agent-sessions/runtime-events";
+import type { SessionStreamStatus } from "@/lib/agent-sessions/session-stream";
 import { AssistantMessageContent, SessionViewContent } from "./SessionView";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
@@ -59,18 +61,21 @@ vi.mock("@opencompany/analytics/client", () => ({
 // The transcript is materialized from the Durable Stream via useSessionStream. The
 // full-component tests pass `detail` (used as the pre-catch-up fallback), so the
 // mock returns an empty stream state + a controllable status per test.
-const streamMock = vi.hoisted(() => ({ status: "live" as string }));
+const streamMock = vi.hoisted(() => ({
+  status: "live" as SessionStreamStatus,
+  state: {
+    events: [],
+    messages: [],
+    usage: {},
+    toolUsage: {},
+    cost: {},
+    currentStatus: "",
+    lastError: null,
+  } as unknown as SessionRuntimeState,
+}));
 vi.mock("@/components/useSessionStream", () => ({
   useSessionStream: () => ({
-    state: {
-      events: [],
-      messages: [],
-      usage: {},
-      toolUsage: {},
-      cost: {},
-      currentStatus: "",
-      lastError: null,
-    },
+    state: streamMock.state,
     status: streamMock.status,
   }),
 }));
@@ -103,6 +108,9 @@ afterEach(() => {
   actionMocks.cancelAgentSessionQuestion.mockReset();
   actionMocks.resolveToolApproval.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
+  actionMocks.submitAgentSessionMessage.mockReset();
+  streamMock.status = "live";
+  streamMock.state = emptyStreamState();
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -357,7 +365,6 @@ describe("AssistantMessageContent — tool approvals", () => {
           },
         },
       ],
-      runnerUrl: null,
     });
 
     renderSessionViewContent(detail);
@@ -393,7 +400,6 @@ describe("AssistantMessageContent — tool approvals", () => {
           },
         },
       ],
-      runnerUrl: null,
     });
 
     renderSessionViewContent(detail);
@@ -584,12 +590,27 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       providerCostUsdMicros: 0,
       platformFeeUsdMicros: 0,
     },
-    runnerUrl: "https://runner.example.com",
     ...overrides,
   };
 }
 
-function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatus = "idle") {
+function emptyStreamState(overrides: Partial<SessionRuntimeState> = {}): SessionRuntimeState {
+  return {
+    events: [],
+    messages: [],
+    usage: makeDetail().usage,
+    toolUsage: makeDetail().toolUsage,
+    cost: makeDetail().cost,
+    currentStatus: "",
+    lastError: null,
+    ...overrides,
+  };
+}
+
+function renderSessionViewContent(
+  detail: AgentSessionDetailPayload,
+  streamStatus: SessionStreamStatus = "live",
+) {
   streamMock.status = streamStatus;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -598,6 +619,69 @@ function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatu
     </QueryClientProvider>,
   );
 }
+
+describe("SessionViewContent — stream-sourced pending turn", () => {
+  it("shows waiting state, not the previous terminal error, after a new user message starts a turn", () => {
+    const detail = makeDetail({
+      session: makeSession({
+        id: "sess_retry",
+        status: "failed",
+        lastError: "Gateway down",
+      }),
+      messages: [
+        {
+          id: "msg_old_user",
+          role: "user",
+          content: "First try",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    streamMock.state = emptyStreamState({
+      events: [
+        {
+          id: 1,
+          type: "message.created",
+          messageId: "msg_new_user",
+          createdAt: "2026-06-04T10:01:00.000Z",
+          payload: {
+            messageId: "msg_new_user",
+            role: "user",
+            content: "Try again",
+            status: "completed",
+          },
+        },
+      ],
+      messages: [
+        {
+          id: "msg_old_user",
+          role: "user",
+          content: "First try",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        {
+          id: "msg_new_user",
+          role: "user",
+          content: "Try again",
+          status: "completed",
+          createdAt: "2026-06-04T10:01:00.000Z",
+        },
+      ],
+      currentStatus: "running",
+      lastError: null,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.getByText("Try again")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gateway down")).not.toBeInTheDocument();
+  });
+});
 
 describe("SessionViewContent — ask tool questions", () => {
   it("turns the selected Other option into the custom answer input", async () => {
@@ -700,7 +784,7 @@ describe("SessionViewContent — active turn timer", () => {
       ],
     });
 
-    renderSessionViewContent(detail, "open");
+    renderSessionViewContent(detail, "live");
 
     expect(screen.getByText("5s")).toBeInTheDocument();
     expect(screen.queryByText("0s")).not.toBeInTheDocument();
@@ -722,7 +806,7 @@ describe("SessionViewContent — live reasoning rendering", () => {
       ],
     });
 
-    renderSessionViewContent(detail, "open");
+    renderSessionViewContent(detail, "live");
 
     await user.click(screen.getByRole("button", { name: /Thought/ }));
 
@@ -758,7 +842,7 @@ describe("SessionViewContent — live reasoning rendering", () => {
         ],
       });
 
-      renderSessionViewContent(detail, "open");
+      renderSessionViewContent(detail, "live");
 
       await user.click(screen.getByRole("button", { name: "Copy message" }));
 
@@ -771,7 +855,6 @@ describe("SessionViewContent — live reasoning rendering", () => {
     }
   });
 });
-
 
 function setVisibility(value: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", {
@@ -858,7 +941,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       ],
     });
 
-    streamMock.status = "open";
+    streamMock.status = "live";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
@@ -934,7 +1017,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       },
     ];
     const detail = makeDetail({ messages: baseMessages });
-    streamMock.status = "open";
+    streamMock.status = "live";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = render(
       <QueryClientProvider client={queryClient}>

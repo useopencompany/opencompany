@@ -55,7 +55,6 @@ export type RelatedSessionPayload = {
   updatedAt: string;
 };
 
-
 export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
   related: {
@@ -67,7 +66,6 @@ export type AgentSessionDetailPayload = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
-  runnerUrl: string | null;
 };
 
 export type SidebarSessionSerializable = Omit<
@@ -99,7 +97,6 @@ export type AgentSessionDetailSerializable = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
-  runnerUrl: string | null;
 };
 
 type RuntimeEventSerializable = Omit<RuntimeEvent, "createdAt"> & {
@@ -149,7 +146,6 @@ export function serializeAgentSessionDetail(
     usage: detail.usage,
     toolUsage: detail.toolUsage,
     cost: detail.cost,
-    runnerUrl: detail.runnerUrl,
   });
 }
 
@@ -250,7 +246,6 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     usage: parseUsageSummary(record.usage),
     toolUsage: parseToolUsageSummary(record.toolUsage),
     cost: parseCostSummary(record.cost),
-    runnerUrl: readNullableStringField(record, "runnerUrl"),
   });
 }
 
@@ -486,7 +481,6 @@ function readOptionalNumberField(record: Record<string, unknown>, field: string)
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
   return value;
 }
-
 
 function readNullableRecord(value: unknown) {
   if (value === null || value === undefined) return null;

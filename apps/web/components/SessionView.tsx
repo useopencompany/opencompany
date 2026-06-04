@@ -70,6 +70,8 @@ import {
   buildBackgroundActivityParts,
   isInspectableRuntimeEvent,
   isReasoningInProgress,
+  mergeEvents,
+  mergeMessages,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -279,25 +281,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // session-tree rollup isn't reproduced client-side (D2); refreshed on
     // completion via the effect below.
     const aggregates = { usage: detail.usage, toolUsage: detail.toolUsage, cost: detail.cost };
-    // Until the stream has replayed its history, fall back to the server snapshot
-    // so the transcript paints instantly with no empty flash; then the live stream
-    // takes over.
-    const streamReady = streamState.events.length > 0 || streamState.messages.length > 0;
-    if (streamReady) {
-      return {
-        events: streamState.events,
-        messages: streamState.messages,
-        ...aggregates,
-        currentStatus: streamState.currentStatus,
-        lastError: streamState.lastError,
-      };
-    }
+    // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
+    // Stream (`streamState`) is the live overlay. Union-merge the two so the
+    // transcript paints instantly from the snapshot AND never drops a durable
+    // message/event the stream happens to be missing (e.g. a user message that only
+    // the best-effort web append publishes, or pre-stream history) — while live
+    // deltas still flow. Status/error prefer the live stream once it has produced
+    // any event, else the snapshot.
+    const hasStreamData = streamState.events.length > 0 || streamState.messages.length > 0;
     return {
-      events: detail.events,
-      messages: detail.messages,
+      events: mergeEvents(detail.events, streamState.events),
+      messages: mergeMessages(detail.messages, streamState.messages),
       ...aggregates,
-      currentStatus: detail.session.status,
-      lastError: detail.session.lastError,
+      currentStatus: hasStreamData ? streamState.currentStatus : detail.session.status,
+      lastError: hasStreamData ? streamState.lastError : detail.session.lastError,
     };
   }, [detail, streamState]);
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
