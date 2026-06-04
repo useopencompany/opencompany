@@ -257,4 +257,3 @@ export function detectIncompleteTurn(
     reasonDetail: INCOMPLETE_TURN_REASON_DETAIL,
   };
 }
-

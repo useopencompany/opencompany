@@ -2,8 +2,8 @@ import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime"
 import { calculateModelUsageCost, recordWorkspaceUsageDebit } from "@opencompany/billing";
 import { agentSessionMessages, agentSessions, agentSessionUsage } from "@opencompany/db/schema";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
-import { createGateway, type LanguageModelUsage } from "ai";
 import * as ai from "ai";
+import { createGateway, type LanguageModelUsage } from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
