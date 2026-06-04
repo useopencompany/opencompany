@@ -15,7 +15,11 @@ import { observeRunStep, type RunContext } from "./run-context";
 import type { RunControlCheck } from "./run-control";
 import { ToolStepLimitExceededError } from "./runner-errors";
 import type { LoadedSession } from "./session-lifecycle";
-import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
+import {
+  addAnthropicCacheControlToLastMessage,
+  buildCacheableSystemPrompt,
+  normalizeReasoningSummary,
+} from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -95,6 +99,9 @@ export async function streamAssistantResponse(input: {
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           abortSignal: input.ctx.controller.signal,
           includeRawChunks: input.runtime.model.reasoningExposure === "raw",
+          prepareStep: ({ messages }) => ({
+            messages: addAnthropicCacheControlToLastMessage(messages, input.runtime.model.name),
+          }),
           ...(input.runtime.model.providerOptions
             ? { providerOptions: input.runtime.model.providerOptions }
             : {}),
