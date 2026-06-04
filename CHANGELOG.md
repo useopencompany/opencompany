@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- External skills support (V1) — attach a public GitHub repo or skills.sh page to an agent via an `@skill` mention; the skill is snapshotted workspace-side and materialized read-only into the runner sandbox at session start alongside built-in skills (#296) — @louis.
+
+### Changed
+- MCP server tools are now lazy-loaded via per-server `search_tools` / `use_tool` meta-tools, so raw tool schemas are only sent to the model on demand instead of being injected on every turn — eliminating the per-turn token cost of large MCP catalogs like Slack (#298) — @louis.
+- Starting a new session from the root-route prompt now navigates instantly; session detail is assembled in-memory from the just-inserted rows instead of waiting on seven follow-up database reads (#295) — @louis.
+- E2B sandbox warm-up now begins at the start of a turn so the ~10 s cold-start overlaps the model's initial token stream rather than blocking the first tool call (#297) — @louis.
+- Runner parallel-session concurrency is now configurable via `RUNNER_WORKER_CONCURRENCY` (default 8); production limit raised to 40 (#294) — @louis.
+
+### Fixed
+- Session status and error no longer flicker blank at the start of a session; the live stream only takes authority over the Postgres snapshot once it has received a status-bearing event (#299) — @louis.
+
 ## [0.8.0] - 2026-06-04
 
 ### Added
