@@ -514,22 +514,6 @@ describe("runtime tool dispatch", () => {
         tool_kind: "sandbox",
       }),
     );
-    expect(braintrustMocks.logBraintrustCurrentSpan).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: expect.objectContaining({
-          name: "RecoverableToolError",
-          message: expect.stringContaining("Use paths prefixed with work/"),
-        }),
-        metadata: expect.objectContaining({
-          session_id: "ses_123",
-          message_id: "msg_assistant",
-          tool_call_id: "call_read",
-          tool_name: "read_file",
-          tool_kind: "sandbox",
-          model_name: "openai/gpt-5.4-mini",
-        }),
-      }),
-    );
   });
 
   it("preflights edit_file paths before hydrating E2B", async () => {

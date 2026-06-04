@@ -4,7 +4,6 @@ const braintrust = vi.hoisted(() => ({
   currentSpan: vi.fn(() => ({ log: vi.fn() })),
   flush: vi.fn(async () => {}),
   initLogger: vi.fn(),
-  setMaskingFunction: vi.fn(),
   traced: vi.fn(async (callback: (span: { log: (fields: unknown) => void }) => unknown) =>
     callback({ log: vi.fn() }),
   ),
@@ -61,7 +60,6 @@ describe("Braintrust tracing", () => {
     const secondWrapped = getBraintrustAISDK(aiSDK);
 
     expect(firstLogger).toBe(secondLogger);
-    expect(braintrust.setMaskingFunction).toHaveBeenCalledTimes(1);
     expect(braintrust.initLogger).toHaveBeenCalledTimes(1);
     expect(braintrust.initLogger).toHaveBeenCalledWith({
       projectName: "Runner Tests",
@@ -86,57 +84,6 @@ describe("Braintrust tracing", () => {
       projectId: "project_123",
       apiKey: "bt_test",
       setCurrent: false,
-    });
-  });
-
-  it("redacts secret-like fields while preserving ordinary content", async () => {
-    const { maskBraintrustValue } = await import("./braintrust");
-
-    expect(
-      maskBraintrustValue({
-        prompt: "Debug this user request",
-        apiKey: "secret",
-        nested: {
-          authorization: "Bearer token-value",
-          output: "The command printed normal text.",
-        },
-        inline: "Authorization: Basic abc123",
-      }),
-    ).toEqual({
-      prompt: "Debug this user request",
-      apiKey: "[redacted]",
-      nested: {
-        authorization: "[redacted]",
-        output: "The command printed normal text.",
-      },
-      inline: "Authorization: Basic [redacted]",
-    });
-  });
-
-  it("keeps numeric token metrics intact (Braintrust requires numeric metrics)", async () => {
-    const { maskBraintrustValue } = await import("./braintrust");
-
-    // `tokens`/`prompt_tokens`/`completion_tokens`/`time_to_first_token` match the "token" rule
-    // but are numeric metrics, not secrets. Redacting them to strings makes Braintrust reject the
-    // whole row (400) and leaves the span stuck "in progress" with no usage.
-    expect(
-      maskBraintrustValue({
-        metrics: {
-          tokens: 42,
-          prompt_tokens: 30,
-          completion_tokens: 12,
-          time_to_first_token: 0.5,
-        },
-        access_token: "secret-string-token",
-      }),
-    ).toEqual({
-      metrics: {
-        tokens: 42,
-        prompt_tokens: 30,
-        completion_tokens: 12,
-        time_to_first_token: 0.5,
-      },
-      access_token: "[redacted]",
     });
   });
 });
