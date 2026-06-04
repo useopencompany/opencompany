@@ -152,6 +152,8 @@ describe("syncBrainFromSandbox", () => {
       }),
     ).resolves.toBeUndefined();
 
+    expect(githubMocks.getGitHubInstallationToken).not.toHaveBeenCalled();
+
     // Canonical content persisted as pending; GitHub is projected asynchronously
     // through the unified workspace_sync_jobs outbox.
     expect(db.insertedValues).toEqual(
@@ -224,6 +226,7 @@ function createSyncDb(input: {
         };
       }),
     })),
+    transaction: vi.fn(async (callback: (tx: unknown) => unknown) => callback(db)),
   };
   return db;
 }

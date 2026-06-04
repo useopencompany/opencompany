@@ -216,16 +216,18 @@ export async function syncAgentBundleFromSandbox(input: {
       });
       continue;
     }
-    await db
-      .delete(agentFiles)
-      .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, mount.path)));
-    await enqueueWorkspaceSync(db, {
-      workspaceId: input.workspaceId,
-      repoPath: mount.path,
-      sourceKind: "agent_file",
-      operation: "delete",
-      desiredHash: null,
-      previousBlobSha: current?.githubBlobSha ?? null,
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(agentFiles)
+        .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, mount.path)));
+      await enqueueWorkspaceSync(tx, {
+        workspaceId: input.workspaceId,
+        repoPath: mount.path,
+        sourceKind: "agent_file",
+        operation: "delete",
+        desiredHash: null,
+        previousBlobSha: current?.githubBlobSha ?? null,
+      });
     });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -294,38 +296,40 @@ async function upsertAgentFileFromRunner(input: {
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
   const now = new Date();
 
-  await db
-    .insert(agentFiles)
-    .values({
-      workspaceId: input.workspaceId,
-      agentId: input.agentId,
-      path: input.path,
-      content: input.content,
-      contentHash: input.contentHash,
-      sizeBytes,
-      githubSyncStatus: "pending",
-      githubSyncError: null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [agentFiles.workspaceId, agentFiles.path],
-      set: {
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(agentFiles)
+      .values({
+        workspaceId: input.workspaceId,
         agentId: input.agentId,
+        path: input.path,
         content: input.content,
         contentHash: input.contentHash,
         sizeBytes,
         githubSyncStatus: "pending",
         githubSyncError: null,
         updatedAt: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: [agentFiles.workspaceId, agentFiles.path],
+        set: {
+          agentId: input.agentId,
+          content: input.content,
+          contentHash: input.contentHash,
+          sizeBytes,
+          githubSyncStatus: "pending",
+          githubSyncError: null,
+          updatedAt: now,
+        },
+      });
 
-  await enqueueWorkspaceSync(db, {
-    workspaceId: input.workspaceId,
-    repoPath: input.path,
-    sourceKind: "agent_file",
-    operation: "upsert",
-    desiredHash: input.contentHash,
+    await enqueueWorkspaceSync(tx, {
+      workspaceId: input.workspaceId,
+      repoPath: input.path,
+      sourceKind: "agent_file",
+      operation: "upsert",
+      desiredHash: input.contentHash,
+    });
   });
 }
 

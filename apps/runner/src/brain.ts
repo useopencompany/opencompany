@@ -224,16 +224,18 @@ export async function syncBrainFromSandbox(input: {
       });
       continue;
     }
-    await db
-      .delete(brainFiles)
-      .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, mount.path)));
-    await enqueueWorkspaceSync(db, {
-      workspaceId: input.workspaceId,
-      repoPath: brainRepoPath(mount.path),
-      sourceKind: "brain",
-      operation: "delete",
-      desiredHash: null,
-      previousBlobSha: current?.githubBlobSha ?? null,
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(brainFiles)
+        .where(and(eq(brainFiles.workspaceId, input.workspaceId), eq(brainFiles.path, mount.path)));
+      await enqueueWorkspaceSync(tx, {
+        workspaceId: input.workspaceId,
+        repoPath: brainRepoPath(mount.path),
+        sourceKind: "brain",
+        operation: "delete",
+        desiredHash: null,
+        previousBlobSha: current?.githubBlobSha ?? null,
+      });
     });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -297,36 +299,38 @@ async function upsertBrainFileFromRunner(input: {
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
   const now = new Date();
 
-  await db
-    .insert(brainFiles)
-    .values({
-      workspaceId: input.workspaceId,
-      path: input.path,
-      content: input.content,
-      contentHash: input.contentHash,
-      sizeBytes,
-      githubSyncStatus: "pending",
-      githubSyncError: null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [brainFiles.workspaceId, brainFiles.path],
-      set: {
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(brainFiles)
+      .values({
+        workspaceId: input.workspaceId,
+        path: input.path,
         content: input.content,
         contentHash: input.contentHash,
         sizeBytes,
         githubSyncStatus: "pending",
         githubSyncError: null,
         updatedAt: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: [brainFiles.workspaceId, brainFiles.path],
+        set: {
+          content: input.content,
+          contentHash: input.contentHash,
+          sizeBytes,
+          githubSyncStatus: "pending",
+          githubSyncError: null,
+          updatedAt: now,
+        },
+      });
 
-  await enqueueWorkspaceSync(db, {
-    workspaceId: input.workspaceId,
-    repoPath: brainRepoPath(input.path),
-    sourceKind: "brain",
-    operation: "upsert",
-    desiredHash: input.contentHash,
+    await enqueueWorkspaceSync(tx, {
+      workspaceId: input.workspaceId,
+      repoPath: brainRepoPath(input.path),
+      sourceKind: "brain",
+      operation: "upsert",
+      desiredHash: input.contentHash,
+    });
   });
 }
 

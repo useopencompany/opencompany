@@ -225,6 +225,8 @@ describe("syncAgentBundleFromSandbox", () => {
       workdir: "/home/user/workspace",
     });
 
+    expect(githubMocks.getGitHubInstallationToken).not.toHaveBeenCalled();
+
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -494,6 +496,7 @@ function createAgentBundleDb(input: { selectResults: unknown[][] }) {
     delete: vi.fn(() => ({
       where: vi.fn().mockResolvedValue(undefined),
     })),
+    transaction: vi.fn(async (callback: (tx: unknown) => unknown) => callback(db)),
   };
   return db;
 }

@@ -2,7 +2,7 @@ import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace } from "@/lib/auth";
 import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-state/sync-dispatch";
-import { deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
+import { createBrainFile, deleteBrainFolder, renameBrainFile, renameBrainFolder } from "./actions";
 
 vi.mock("@opencompany/db/client", () => ({
   getDb: vi.fn(),
@@ -90,6 +90,21 @@ describe("renameBrainFile", () => {
     await expect(renameBrainFile("docs/old.md", "docs/new.md")).resolves.toEqual({
       ok: false,
       error: "A Brain file already exists at that path.",
+    });
+    expect(insert).not.toHaveBeenCalled();
+    expect(batch).not.toHaveBeenCalled();
+    expect(scheduleWorkspaceSyncDispatchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate creates without enqueueing a workspace sync", async () => {
+    const { db, insert, batch } = createDbMock({
+      selectResults: [[{ path: "docs/existing.md" }]],
+    });
+    getDbMock.mockReturnValue(db as never);
+
+    await expect(createBrainFile("docs/existing.md", "new")).resolves.toEqual({
+      ok: false,
+      error: "A Brain file already exists at this path.",
     });
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();

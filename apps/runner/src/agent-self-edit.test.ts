@@ -62,6 +62,11 @@ function createDb(opts: { row?: unknown; updateReturning?: unknown[] }) {
       select: () => selectBuilder,
       update: () => updateBuilder,
       insert: () => insertBuilder,
+      transaction: async (callback: (tx: unknown) => unknown) =>
+        callback({
+          update: () => updateBuilder,
+          insert: () => insertBuilder,
+        }),
     },
   };
 }

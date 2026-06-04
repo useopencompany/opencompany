@@ -255,4 +255,113 @@ describe("projectWorkspaceToGitHub", () => {
     expect(arg.upserts).toEqual([{ path: "brain/new.md", content: "R" }]);
     expect(arg.deletes).toEqual([{ path: "brain/old.md" }]);
   });
+
+  it("does not delete a path that is recreated in the same commit", async () => {
+    const { db } = createDb({
+      jobs: [
+        {
+          id: 5,
+          workspaceId: "wsp_1",
+          repoPath: "brain/recreated.md",
+          sourceKind: "brain",
+          sourceRef: null,
+          operation: "upsert",
+          desiredHash: "h_recreated",
+          previousPath: null,
+          attempts: 0,
+        },
+        {
+          id: 6,
+          workspaceId: "wsp_1",
+          repoPath: "brain/new.md",
+          sourceKind: "brain",
+          sourceRef: null,
+          operation: "upsert",
+          desiredHash: "h_new",
+          previousPath: "brain/recreated.md",
+          attempts: 0,
+        },
+      ],
+      workspaces: [WORKSPACE],
+      brainFiles: [
+        {
+          path: "recreated.md",
+          content: "Recreated",
+          contentHash: "h_recreated",
+          githubSyncedHash: null,
+        },
+        {
+          path: "new.md",
+          content: "Renamed",
+          contentHash: "h_new",
+          githubSyncedHash: null,
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db as never);
+    commitMock.mockResolvedValue({
+      commitSha: "commit_recreate",
+      blobShaByPath: new Map([["brain/recreated.md", "blob_recreated"]]),
+    });
+
+    await projectWorkspaceToGitHub({ workspaceId: "wsp_1" });
+
+    const arg = commitMock.mock.calls[0]![0];
+    expect(arg.upserts).toEqual([
+      { path: "brain/recreated.md", content: "Recreated" },
+      { path: "brain/new.md", content: "Renamed" },
+    ]);
+    expect(arg.deletes).toEqual([]);
+  });
+
+  it("preserves delegated agents and opt-in skills when projecting agent source", async () => {
+    const { db } = createDb({
+      jobs: [
+        {
+          id: 7,
+          workspaceId: "wsp_1",
+          repoPath: "agents/leo/leo.agent",
+          sourceKind: "agent",
+          sourceRef: "agt_1",
+          operation: "upsert",
+          desiredHash: "h_agent",
+          previousPath: null,
+          attempts: 0,
+        },
+      ],
+      workspaces: [WORKSPACE],
+      agents: [
+        {
+          id: "agt_1",
+          workspaceId: "wsp_1",
+          path: "agents/leo/leo.agent",
+          name: "Leo",
+          body: "Coordinate with the research agent.",
+          githubSyncedHash: null,
+          config: {
+            model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+            tools: [],
+            brain: [],
+            agents: [{ path: "agents/research/research.agent", name: "Research" }],
+            skills: [{ id: "agent-self-edit" }],
+            integrations: { github: { repositories: [] } },
+            triggers: [],
+          },
+        },
+      ],
+    });
+    dbMocks.getDb.mockReturnValue(db as never);
+    commitMock.mockResolvedValue({
+      commitSha: "commit_agent",
+      blobShaByPath: new Map([["agents/leo/leo.agent", "blob_agent"]]),
+    });
+
+    await projectWorkspaceToGitHub({ workspaceId: "wsp_1" });
+
+    const content = commitMock.mock.calls[0]![0].upserts[0]?.content ?? "";
+    expect(content).toContain("agents:");
+    expect(content).toContain("path: agents/research/research.agent");
+    expect(content).toContain("skills:");
+    expect(content).toContain("- agent-self-edit");
+  });
 });

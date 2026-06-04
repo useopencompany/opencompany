@@ -279,6 +279,18 @@ export const workspaceSyncJobs = pgTable(
       table.repoPath,
     ),
     nextRunAtIdx: index("workspace_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+    sourceKindCheck: check(
+      "workspace_sync_jobs_source_kind_check",
+      sql`${table.sourceKind} IN ('brain', 'agent_file', 'agent')`,
+    ),
+    operationCheck: check(
+      "workspace_sync_jobs_operation_check",
+      sql`${table.operation} IN ('upsert', 'delete')`,
+    ),
+    statusCheck: check(
+      "workspace_sync_jobs_status_check",
+      sql`${table.status} IN ('pending', 'syncing', 'failed')`,
+    ),
   }),
 );
 

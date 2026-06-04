@@ -14,14 +14,17 @@ type RouteResponse = { status?: number; body?: unknown };
 // responses per attempt.
 function installFetch(routes: Record<string, RouteResponse[]>) {
   const calls: Array<{ method: string; url: string; body: unknown }> = [];
+  const routeQueues = Object.fromEntries(
+    Object.entries(routes).map(([key, queue]) => [key, [...queue]]),
+  );
   const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
     const method = init.method ?? "GET";
     const pathname = new URL(url).pathname;
     const key = `${method} ${pathname}`;
     const body = init.body ? JSON.parse(init.body as string) : undefined;
     calls.push({ method, url: pathname, body });
-    const queue = routes[key];
-    const route = queue && queue.length > 1 ? queue.shift()! : queue?.[0];
+    const queue = routeQueues[key];
+    const route = queue?.shift();
     if (!route) throw new Error(`Unexpected request: ${key}`);
     const status = route.status ?? 200;
     return {

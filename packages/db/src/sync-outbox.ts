@@ -38,7 +38,7 @@ export type EnqueueWorkspaceSyncInput = {
 };
 
 export function enqueueWorkspaceSync<TQuery extends PgQueryResultHKT>(
-  db: PgDatabase<TQuery, typeof schema>,
+  db: Pick<PgDatabase<TQuery, typeof schema>, "insert">,
   input: EnqueueWorkspaceSyncInput,
 ) {
   const now = input.now ?? new Date();
@@ -66,6 +66,7 @@ export function enqueueWorkspaceSync<TQuery extends PgQueryResultHKT>(
         desiredHash: input.desiredHash,
         previousPath: input.previousPath ?? null,
         previousBlobSha: input.previousBlobSha ?? null,
+        attempts: 0,
         status: "pending",
         nextRunAt,
         lastError: null,

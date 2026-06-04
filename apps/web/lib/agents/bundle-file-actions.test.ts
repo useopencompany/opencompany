@@ -137,6 +137,7 @@ describe("updateAgentBundleFile", () => {
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
     expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 

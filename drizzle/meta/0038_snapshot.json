@@ -5766,7 +5766,20 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "workspace_sync_jobs_source_kind_check": {
+          "name": "workspace_sync_jobs_source_kind_check",
+          "value": "\"workspace_sync_jobs\".\"source_kind\" IN ('brain', 'agent_file', 'agent')"
+        },
+        "workspace_sync_jobs_operation_check": {
+          "name": "workspace_sync_jobs_operation_check",
+          "value": "\"workspace_sync_jobs\".\"operation\" IN ('upsert', 'delete')"
+        },
+        "workspace_sync_jobs_status_check": {
+          "name": "workspace_sync_jobs_status_check",
+          "value": "\"workspace_sync_jobs\".\"status\" IN ('pending', 'syncing', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.workspace_tool_policies": {

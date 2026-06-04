@@ -56,7 +56,3 @@ SELECT
   now()
 FROM "agent_sync_jobs"
 ON CONFLICT ("workspace_id","repo_path") DO NOTHING;
---> statement-breakpoint
-DROP TABLE "agent_file_sync_jobs" CASCADE;--> statement-breakpoint
-DROP TABLE "agent_sync_jobs" CASCADE;--> statement-breakpoint
-DROP TABLE "brain_sync_jobs" CASCADE;

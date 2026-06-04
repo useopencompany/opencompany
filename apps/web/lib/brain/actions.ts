@@ -327,6 +327,17 @@ async function upsertBrainFile(input: {
     const db = getDb();
     const contentHash = hashBrainContent(input.content);
     const now = new Date();
+    if (input.createOnly) {
+      const [existing] = await db
+        .select({ path: brainFiles.path })
+        .from(brainFiles)
+        .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, path)))
+        .limit(1);
+      if (existing) {
+        return { ok: false, error: "A Brain file already exists at this path." };
+      }
+    }
+
     const insert = db.insert(brainFiles).values({
       workspaceId: workspace.id,
       path,
@@ -340,7 +351,7 @@ async function upsertBrainFile(input: {
 
     await db.batch([
       input.createOnly
-        ? insert.onConflictDoNothing()
+        ? insert
         : insert.onConflictDoUpdate({
             target: [brainFiles.workspaceId, brainFiles.path],
             set: {

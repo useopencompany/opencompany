@@ -159,6 +159,7 @@ describe("ensureUserOnboardingScaffold", () => {
     });
     // Both the agent definition sync and the soul.md file sync dispatch through
     // the unified workspace pipeline (one event per workspace).
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
     expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 

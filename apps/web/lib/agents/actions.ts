@@ -590,6 +590,7 @@ export async function deleteAgent(
   // rows. NOTE: unlike the previous GitHub-first delete, this is asynchronous —
   // a deleted agent's files linger in the repo until the next projection commit,
   // an accepted trade-off for a single consistent pipeline.
+  let deletionSyncQueries: ReturnType<typeof enqueueWorkspaceSync>[] = [];
   if (agent.path) {
     const bundleFiles = await timeAsync(trace, "db.selectAgentBundleFiles", () =>
       db
@@ -598,7 +599,7 @@ export async function deleteAgent(
         .where(and(eq(agentFiles.agentId, agent.id), eq(agentFiles.workspaceId, workspace.id))),
     );
 
-    const deletions = [
+    deletionSyncQueries = [
       enqueueWorkspaceSync(db, {
         workspaceId: workspace.id,
         repoPath: agent.path,
@@ -621,9 +622,6 @@ export async function deleteAgent(
           }),
         ),
     ];
-    await timeAsync(trace, "db.enqueueAgentDeletions", () =>
-      db.batch(deletions as [(typeof deletions)[number], ...(typeof deletions)[number][]]),
-    );
   }
 
   // Archive any live e2b sandboxes for this agent before the cascade removes
@@ -682,8 +680,14 @@ export async function deleteAgent(
     }
   }
 
+  const deleteAgentQuery = db
+    .delete(agents)
+    .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
+  const deleteQueries = [...deletionSyncQueries, deleteAgentQuery];
   await timeAsync(trace, "db.deleteAgent", () =>
-    db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+    db.batch(
+      deleteQueries as [(typeof deleteQueries)[number], ...(typeof deleteQueries)[number][]],
+    ),
   );
 
   await captureServerEvent("agent_deleted", user.id, {
@@ -812,6 +816,7 @@ export async function syncAgentsFromWorkspaceRepository() {
     listWorkspaceAgentFiles({ repository }),
   );
   const canonicalFiles = selectCanonicalAgentRepositoryFiles(files);
+  let canonicalSyncQueued = false;
 
   for (const file of canonicalFiles) {
     const { content, sha } = await timeAsync(
@@ -898,7 +903,7 @@ export async function syncAgentsFromWorkspaceRepository() {
           path: file.canonicalPath,
         });
         logAgentSyncJobQueued(syncJob.metadata);
-        scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
+        canonicalSyncQueued = true;
       }
       continue;
     }
@@ -938,10 +943,11 @@ export async function syncAgentsFromWorkspaceRepository() {
         path: file.canonicalPath,
       });
       logAgentSyncJobQueued(syncJob.metadata);
-      scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
+      canonicalSyncQueued = true;
     }
   }
 
+  if (canonicalSyncQueued) scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   revalidatePath("/agents");
   endTimingTrace(trace, { count: canonicalFiles.length });
 }

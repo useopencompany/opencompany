@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import { workspaceSyncJobs } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, asc, eq, inArray, lte, or } from "drizzle-orm";
+import { and, eq, lt, lte, or, sql } from "drizzle-orm";
 import { SYNC_OUTBOX_MAX_ATTEMPTS } from "@/lib/sync-outbox/retry";
 import { WORKSPACE_SYNC_REQUESTED_EVENT } from "@/lib/workspace-state/sync-events";
 
@@ -23,8 +23,6 @@ const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export const SYNC_OUTBOX_SWEEP_CRON = "* * * * *";
 export const SYNC_OUTBOX_SWEEP_LIMIT = 50;
-
-const RETRYABLE_SYNC_JOB_STATUSES = ["pending", "failed"] as const;
 
 export type WorkspaceSyncDispatch = {
   workspaceId: string;
@@ -52,16 +50,18 @@ export async function loadDueWorkspaceSyncDispatches(
   const rows = await db
     .select({
       workspaceId: workspaceSyncJobs.workspaceId,
-      status: workspaceSyncJobs.status,
-      attempts: workspaceSyncJobs.attempts,
-      nextRunAt: workspaceSyncJobs.nextRunAt,
+      nextRunAt: sql<Date>`min(${workspaceSyncJobs.nextRunAt})`,
     })
     .from(workspaceSyncJobs)
     .where(
       and(
         lte(workspaceSyncJobs.nextRunAt, now),
         or(
-          inArray(workspaceSyncJobs.status, RETRYABLE_SYNC_JOB_STATUSES),
+          eq(workspaceSyncJobs.status, "pending"),
+          and(
+            eq(workspaceSyncJobs.status, "failed"),
+            lt(workspaceSyncJobs.attempts, SYNC_OUTBOX_MAX_ATTEMPTS),
+          ),
           and(
             eq(workspaceSyncJobs.status, "syncing"),
             lte(workspaceSyncJobs.updatedAt, leaseCutoff),
@@ -69,18 +69,11 @@ export async function loadDueWorkspaceSyncDispatches(
         ),
       ),
     )
-    .orderBy(asc(workspaceSyncJobs.nextRunAt));
+    .groupBy(workspaceSyncJobs.workspaceId)
+    .orderBy(sql`min(${workspaceSyncJobs.nextRunAt})`)
+    .limit(limit);
 
-  const seen = new Set<string>();
-  const dispatches: WorkspaceSyncDispatch[] = [];
-  for (const row of rows) {
-    if (row.status === "failed" && row.attempts >= SYNC_OUTBOX_MAX_ATTEMPTS) continue;
-    if (seen.has(row.workspaceId)) continue;
-    seen.add(row.workspaceId);
-    dispatches.push({ workspaceId: row.workspaceId });
-    if (dispatches.length >= limit) break;
-  }
-  return dispatches;
+  return rows.map((row) => ({ workspaceId: row.workspaceId }));
 }
 
 export async function sweepWorkspaceSyncOutbox(

@@ -102,9 +102,10 @@ export async function projectWorkspaceToGitHub(input: {
   const planned = await planJobs(db, input.workspaceId, jobs);
 
   const upserts = planned.flatMap((entry) => (entry.upsert ? [entry.upsert] : []));
-  const deletes = dedupePaths(planned.flatMap((entry) => entry.deletePaths)).map((path) => ({
-    path,
-  }));
+  const upsertPaths = new Set(upserts.map((file) => file.path));
+  const deletes = dedupePaths(planned.flatMap((entry) => entry.deletePaths))
+    .filter((path) => !upsertPaths.has(path))
+    .map((path) => ({ path }));
 
   // Everything was a no-op or a dropped/orphaned job: nothing to commit. Clean
   // up the leased jobs (status-guarded) and return.
@@ -223,7 +224,7 @@ async function planJobs(
       ? db
           .select()
           .from(agents)
-          .where(inArray(agents.id, [...agentIds]))
+          .where(and(eq(agents.workspaceId, workspaceId), inArray(agents.id, [...agentIds])))
       : Promise.resolve([]),
   ]);
 
@@ -323,6 +324,8 @@ function serializeAgentSource(agent: typeof agents.$inferSelect): string {
     model: config.model.name,
     tools: config.tools,
     brain: config.brain,
+    agents: config.agents ?? [],
+    skills: config.skills ?? [],
     integrations: config.integrations,
     triggers: config.triggers,
   });
@@ -411,7 +414,13 @@ function markSourceSynced(
   return db
     .update(agents)
     .set({ ...synced, commitSha })
-    .where(and(eq(agents.id, job.sourceRef ?? ""), eq(agents.contentHash, committedHash)));
+    .where(
+      and(
+        eq(agents.workspaceId, job.workspaceId),
+        eq(agents.id, job.sourceRef ?? ""),
+        eq(agents.contentHash, committedHash),
+      ),
+    );
 }
 
 async function markFailed(db: Db, input: { planned: PlannedJob[]; now: Date; message: string }) {
@@ -431,14 +440,22 @@ async function markFailed(db: Db, input: { planned: PlannedJob[]; now: Date; mes
         .where(eq(workspaceSyncJobs.id, entry.job.id)),
     );
     if (entry.upsert) {
-      writes.push(markSourceFailed(db, entry.job, input.message, input.now));
+      writes.push(
+        markSourceFailed(db, entry.job, entry.upsert.committedHash, input.message, input.now),
+      );
     }
   }
   if (writes.length === 0) return;
   await db.batch(writes as [(typeof writes)[number], ...(typeof writes)[number][]]);
 }
 
-function markSourceFailed(db: Db, job: WorkspaceSyncJobRow, message: string, now: Date) {
+function markSourceFailed(
+  db: Db,
+  job: WorkspaceSyncJobRow,
+  committedHash: string,
+  message: string,
+  now: Date,
+) {
   const failed = { githubSyncStatus: "failed", githubSyncError: message, updatedAt: now };
   if (job.sourceKind === "brain") {
     return db
@@ -448,6 +465,7 @@ function markSourceFailed(db: Db, job: WorkspaceSyncJobRow, message: string, now
         and(
           eq(brainFiles.workspaceId, job.workspaceId),
           eq(brainFiles.path, brainLogicalPath(job.repoPath)),
+          eq(brainFiles.contentHash, committedHash),
         ),
       );
   }
@@ -455,12 +473,24 @@ function markSourceFailed(db: Db, job: WorkspaceSyncJobRow, message: string, now
     return db
       .update(agentFiles)
       .set(failed)
-      .where(and(eq(agentFiles.workspaceId, job.workspaceId), eq(agentFiles.path, job.repoPath)));
+      .where(
+        and(
+          eq(agentFiles.workspaceId, job.workspaceId),
+          eq(agentFiles.path, job.repoPath),
+          eq(agentFiles.contentHash, committedHash),
+        ),
+      );
   }
   return db
     .update(agents)
     .set(failed)
-    .where(eq(agents.id, job.sourceRef ?? ""));
+    .where(
+      and(
+        eq(agents.workspaceId, job.workspaceId),
+        eq(agents.id, job.sourceRef ?? ""),
+        eq(agents.contentHash, committedHash),
+      ),
+    );
 }
 
 async function deleteLeasedJobs(db: Db, jobIds: number[]) {

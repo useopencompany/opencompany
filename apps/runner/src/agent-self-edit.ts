@@ -113,21 +113,40 @@ export async function applyAgentSelfUpdate(input: {
 
   // Optimistic concurrency: only write if the version is still what we read, so a
   // simultaneous editor save isn't silently clobbered.
-  const updated = await db
-    .update(agents)
-    .set({
-      name: validation.parsed.title,
-      body: validation.parsed.body,
-      content,
-      config: nextConfig,
-      contentHash,
-      version: nextVersion,
-      githubSyncStatus: "pending",
-      githubSyncError: null,
-      updatedAt: now,
-    })
-    .where(and(eq(agents.id, row.agentId), eq(agents.version, row.version)))
-    .returning({ id: agents.id });
+  const updated = await db.transaction(async (tx) => {
+    const rows = await tx
+      .update(agents)
+      .set({
+        name: validation.parsed.title,
+        body: validation.parsed.body,
+        content,
+        config: nextConfig,
+        contentHash,
+        version: nextVersion,
+        githubSyncStatus: "pending",
+        githubSyncError: null,
+        updatedAt: now,
+      })
+      .where(and(eq(agents.id, row.agentId), eq(agents.version, row.version)))
+      .returning({ id: agents.id });
+
+    // Enqueue the unified workspace projection; the sync-outbox sweeper (runs every
+    // minute) commits the .agent file along with any other pending workspace
+    // changes in one commit. Only possible once the agent has a path.
+    if (rows.length > 0 && row.path) {
+      await enqueueWorkspaceSync(tx, {
+        workspaceId: row.workspaceId,
+        repoPath: row.path,
+        sourceKind: "agent",
+        sourceRef: row.agentId,
+        operation: "upsert",
+        desiredHash: contentHash,
+        delayMs: 0,
+      });
+    }
+
+    return rows;
+  });
 
   if (updated.length === 0) {
     return {
@@ -136,21 +155,6 @@ export async function applyAgentSelfUpdate(input: {
         "The agent definition changed while you were editing it. Re-read your current definition and try again.",
       ],
     };
-  }
-
-  // Enqueue the unified workspace projection; the sync-outbox sweeper (runs every
-  // minute) commits the .agent file along with any other pending workspace
-  // changes in one commit. Only possible once the agent has a path.
-  if (row.path) {
-    await enqueueWorkspaceSync(db, {
-      workspaceId: row.workspaceId,
-      repoPath: row.path,
-      sourceKind: "agent",
-      sourceRef: row.agentId,
-      operation: "upsert",
-      desiredHash: contentHash,
-      delayMs: 0,
-    });
   }
 
   const changedFields = diffChangedFields(current, nextConfig);
