@@ -65,7 +65,10 @@ function escapeHtml(value: string) {
 // "1:1 human email" shape is the strongest in-content signal against spam folders.
 // The rest of deliverability is domain auth (SPF/DKIM/DMARC) + sender reputation,
 // which is infra, not this template.
-export function renderSlackInviteEmail(input: { firstName?: string | null; inviteUrl: string }) {
+export function renderSlackInviteEmail(input: {
+  firstName?: string | null | undefined;
+  inviteUrl: string;
+}) {
   const greetingName = trimmed(input.firstName ?? undefined) ?? "there";
   const greeting = `Hi ${greetingName},`;
   const url = input.inviteUrl;
