@@ -7,6 +7,7 @@ import type {
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
+  AgentExternalSkillReference,
   AgentGitHubPullRequestTriggerConfig,
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
@@ -37,6 +38,9 @@ export type AgentConfigDerivationAgent = {
   path: string;
   name: string;
 };
+
+// The workspace's resolved external skills, matched against `@skill/<id>` body mentions.
+export type AgentConfigDerivationSkill = AgentExternalSkillReference;
 
 export const SUPPORTED_AGENT_TOOLS: AgentToolDefinition[] = AGENT_TOOL_CATALOG;
 
@@ -127,6 +131,7 @@ export function deriveAgentConfigFromBody(input: {
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
   agents?: AgentConfigDerivationAgent[];
+  skills?: AgentConfigDerivationSkill[];
   preferredRepositories?: AgentConfigDerivationRepository[];
   triggers?: AgentTriggerConfig[];
 }): { body: string; config: AgentConfig } {
@@ -136,6 +141,7 @@ export function deriveAgentConfigFromBody(input: {
     input.repositories,
     input.preferredRepositories ?? [],
     input.agents ?? [],
+    input.skills ?? [],
   );
   const afterSession = extractAfterSessionConfig(body);
   const model =
@@ -155,6 +161,7 @@ export function deriveAgentConfigFromBody(input: {
       tools,
       brain: mentions.brain,
       agents: mentions.agents,
+      ...(mentions.skills.length > 0 ? { skills: mentions.skills } : {}),
       ...(afterSession ? { afterSession } : {}),
       integrations: {
         github: {
@@ -207,16 +214,28 @@ function collectBodyMentions(
   repositories: AgentConfigDerivationRepository[],
   preferredRepositories: AgentConfigDerivationRepository[] = [],
   agents: AgentConfigDerivationAgent[] = [],
+  skills: AgentConfigDerivationSkill[] = [],
 ) {
   const repositoryCatalog = repositoryCatalogForDerivation(repositories, preferredRepositories);
   const agentCatalog = agentCatalogForDerivation(agents);
+  const skillCatalog = new Map(skills.map((skill) => [skill.id.toLowerCase(), skill]));
   let activeRepository: AgentGitHubRepositoryConfig | null = null;
   const repositoriesById = new Map<string, AgentGitHubRepositoryConfig>();
   const tools = new Set<AgentToolId>();
   const brain = new Map<string, AgentBrainReference>();
   const agentReferences = new Map<string, AgentReference>();
+  const enabledSkills = new Map<string, AgentExternalSkillReference>();
 
   for (const rawId of extractMentionIds(body)) {
+    // `@skill/<id>` enables a workspace skill. The mention is the enable signal; the resolved
+    // object (with provenance) comes from the injected catalog. An unknown id is dropped so it
+    // renders as an unresolved mention in the editor and never reaches the runtime config.
+    if (rawId.toLowerCase().startsWith("skill/")) {
+      const resolved = skillCatalog.get(rawId.slice("skill/".length).toLowerCase());
+      if (resolved) enabledSkills.set(resolved.id, resolved);
+      continue;
+    }
+
     const agentReference = agentCatalog.byMentionId.get(normalizeAgentMentionId(rawId));
     if (agentReference) {
       agentReferences.set(agentReference.path, agentReference);
@@ -253,6 +272,7 @@ function collectBodyMentions(
     tools: Array.from(tools),
     brain: Array.from(brain.values()),
     agents: Array.from(agentReferences.values()),
+    skills: Array.from(enabledSkills.values()),
     repositories: Array.from(repositoriesById.values()),
     activeRepository,
   };
@@ -495,6 +515,7 @@ function mentionIdDisplayText(id: string) {
   if (trimmed.startsWith("model:")) return trimmed.slice("model:".length);
   if (trimmed.startsWith("brain/")) return trimmed;
   if (trimmed.startsWith("agent/")) return trimmed;
+  if (trimmed.startsWith("skill/")) return trimmed;
   if (trimmed === "integration:github") return "github";
   if (trimmed === "after-session") return "after-session";
   return "";
@@ -530,6 +551,8 @@ export function buildConfigMentionResolver(config: AgentConfig): MentionResolver
     if (name) agentMentionIdByKey.set(name, mentionId);
   }
 
+  const skillIds = new Set((config.skills ?? []).map((skill) => skill.id.toLowerCase()));
+
   const resolveCandidate = (
     token: string,
     char: "@" | "#",
@@ -545,6 +568,12 @@ export function buildConfigMentionResolver(config: AgentConfig): MentionResolver
     if (toolId) return { id: `tool:${toolId}`, label: toolId };
 
     if (brainReferenceFromMention(token)) return { id: token, label: token };
+
+    if (token.toLowerCase().startsWith("skill/")) {
+      return skillIds.has(token.slice("skill/".length).toLowerCase())
+        ? { id: token, label: token }
+        : null;
+    }
 
     if (token === "github") return { id: "integration:github", label: "github" };
 

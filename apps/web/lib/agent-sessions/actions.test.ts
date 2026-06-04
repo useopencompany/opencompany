@@ -3,7 +3,6 @@ import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
 import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionStarted,
@@ -12,7 +11,6 @@ import {
   triggerAgentApprovalResume,
   triggerAgentMessageRun,
 } from "@/lib/agent-sessions/message-runner";
-import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
 import { currentWorkspace } from "@/lib/auth";
 import {
   createAgentSession,
@@ -49,8 +47,12 @@ vi.mock("@/lib/auth", () => ({
   currentWorkspace: vi.fn(),
 }));
 
-vi.mock("@/lib/agent-sessions/data", () => ({
-  loadAgentSessionDetailForWorkspace: vi.fn(),
+// data.ts is intentionally NOT mocked: buildCreatedSessionDetail (a pure synthesizer) is
+// exercised for real so these tests cover the actual create-session detail payload.
+
+vi.mock("@/lib/agent-sessions/durable-streams", () => ({
+  appendSessionStreamEvent: vi.fn().mockResolvedValue(undefined),
+  closeSessionStream: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/agent-sessions/events", () => ({
@@ -74,7 +76,6 @@ const hasPositiveWorkspaceBalanceMock = vi.mocked(hasPositiveWorkspaceBalance);
 const getDbMock = vi.mocked(getDb);
 const newAgentSessionIdMock = vi.mocked(newAgentSessionId);
 const newAgentSessionMessageIdMock = vi.mocked(newAgentSessionMessageId);
-const loadAgentSessionDetailForWorkspaceMock = vi.mocked(loadAgentSessionDetailForWorkspace);
 const dispatchAgentAfterSessionCheckMock = vi.mocked(dispatchAgentAfterSessionCheck);
 const dispatchAgentSessionStartedMock = vi.mocked(dispatchAgentSessionStarted);
 const triggerAgentApprovalResumeMock = vi.mocked(triggerAgentApprovalResume);
@@ -91,66 +92,80 @@ function fakeAgent() {
   };
 }
 
-function fakeDetail(): AgentSessionDetailPayload {
+const CREATED_AT = new Date("2026-06-04T10:00:00.000Z");
+
+function fakeSessionRow(overrides: Record<string, unknown> = {}) {
   return {
-    session: {
-      id: "ses_123",
-      agentId: "agt_123",
-      agentName: "Leo",
-      agentPath: "agents/leo/leo.agent",
-      title: "Untitled",
-      status: "created",
-      source: "user",
-      modelProvider: "vercel-ai-gateway",
-      modelName: "openai/gpt-5.4-mini",
-      parentSessionId: null,
-      parentMessageId: null,
-      parentToolCallId: null,
-      e2bSandboxId: null,
-      workdir: "/workspace",
-      runLeaseId: null,
-      abortRequestedAt: null,
-      lastError: null,
-      createdAt: "2026-05-24T10:00:00.000Z",
-      updatedAt: "2026-05-24T10:00:00.000Z",
-    },
-    related: { parent: null, children: [] },
-    messages: [],
-    events: [],
-    usage: {
-      inputTokens: 0,
-      inputNoCacheTokens: 0,
-      inputCacheReadTokens: 0,
-      inputCacheWriteTokens: 0,
-      outputTokens: 0,
-      outputTextTokens: 0,
-      outputReasoningTokens: 0,
-      totalTokens: 0,
-    },
-    toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
-    cost: {
-      providerCostUsdMicros: 0,
-      platformFeeUsdMicros: 0,
-      totalCostUsdMicros: 0,
-      modelCostUsdMicros: 0,
-      toolCostUsdMicros: 0,
-    },
-    runnerUrl: null,
+    id: "ses_123",
+    workspaceId: "wks_123",
+    userId: "usr_123",
+    agentId: "agt_123",
+    title: "Ship it",
+    status: "created",
+    source: "user",
+    modelProvider: "vercel-ai-gateway",
+    modelName: "openai/gpt-5.4-mini",
+    parentSessionId: null,
+    parentMessageId: null,
+    parentToolCallId: null,
+    e2bSandboxId: null,
+    workdir: "/home/user/workspace",
+    runLeaseId: null,
+    runLeaseOwner: null,
+    runLeaseMessageId: null,
+    runLeaseExpiresAt: null,
+    runHeartbeatAt: null,
+    abortRequestedAt: null,
+    lastError: null,
+    archivedAt: null,
+    sandboxTerminatedAt: null,
+    createdAt: CREATED_AT,
+    updatedAt: CREATED_AT,
+    ...overrides,
   };
 }
+
+function fakeMessageRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "msg_123",
+    sessionId: "ses_123",
+    role: "user",
+    status: "completed",
+    content: "Ship it",
+    internal: false,
+    modelMessage: { role: "user", content: "Ship it" },
+    toolName: null,
+    toolCallId: null,
+    responseToMessageId: null,
+    createdAt: CREATED_AT,
+    completedAt: CREATED_AT,
+    ...overrides,
+  };
+}
+
+const statusEventRow = {
+  id: 1,
+  type: "session.status",
+  messageId: null,
+  payload: { status: "created", message: "Session created" },
+  createdAt: CREATED_AT,
+};
 
 function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const limit = vi.fn().mockResolvedValue(agent ? [agent] : []);
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
   const select = vi.fn(() => ({ from }));
-  // insertUserMessage reads the message.created event row back from .returning().
   const returning = vi.fn(() => ({}));
   const values = vi.fn(() => ({ returning }));
   const insert = vi.fn(() => ({ values }));
+  // insertAgentSession reads back [sessionRow, statusEvent]; insertUserMessage (only on
+  // the prompt path) reads back [messageRow, createdEvent]. Both go through db.batch and
+  // synthesize the detail payload from these rows.
   const batch = vi
     .fn()
-    .mockResolvedValue([undefined, [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }]]);
+    .mockResolvedValueOnce([[fakeSessionRow()], [statusEventRow]])
+    .mockResolvedValueOnce([[fakeMessageRow()], [{ id: 2, createdAt: CREATED_AT }]]);
   return { select, insert, batch } as never;
 }
 
@@ -189,32 +204,38 @@ describe("createAgentSession", () => {
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
   });
 
-  it("returns the freshly loaded session detail and sidebar projection on success", async () => {
+  it("synthesizes the session detail and sidebar projection on success", async () => {
     getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
-    const detail = fakeDetail();
-    loadAgentSessionDetailForWorkspaceMock.mockResolvedValue(detail);
 
     const result = await createAgentSession("agt_123");
 
-    expect(result).toEqual({
-      ok: true,
-      detail,
-      session: {
-        id: detail.session.id,
-        title: detail.session.title,
-        status: detail.session.status,
-        modelName: detail.session.modelName,
-        lastError: detail.session.lastError,
-        createdAt: detail.session.createdAt,
-        updatedAt: detail.session.updatedAt,
-        starredAt: null,
-      },
+    if (!result.ok) throw new Error("expected ok result");
+    // The detail is synthesized from the just-written rows — no follow-up read.
+    expect(result.detail.session).toMatchObject({
+      id: "ses_123",
+      agentId: "agt_123",
+      agentName: "Leo",
+      agentPath: "agents/leo/leo.agent",
+      status: "created",
+      source: "user",
+      modelProvider: "vercel-ai-gateway",
+      modelName: "openai/gpt-5.4-mini",
+      createdAt: CREATED_AT.toISOString(),
     });
-    expect(loadAgentSessionDetailForWorkspaceMock).toHaveBeenCalledWith(
-      "ses_123",
-      "usr_123",
-      "wks_123",
-    );
+    // A freshly created agent session (no prompt) has no messages and a single status event.
+    expect(result.detail.messages).toEqual([]);
+    expect(result.detail.events).toHaveLength(1);
+    expect(result.detail.events[0]).toMatchObject({ type: "session.status" });
+    expect(result.session).toEqual({
+      id: "ses_123",
+      title: "Ship it",
+      status: "created",
+      modelName: "openai/gpt-5.4-mini",
+      lastError: null,
+      createdAt: CREATED_AT.toISOString(),
+      updatedAt: CREATED_AT.toISOString(),
+      starredAt: null,
+    });
     expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
       workspaceId: "wks_123",
@@ -227,22 +248,6 @@ describe("createAgentSession", () => {
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
       source: "agent",
-    });
-  });
-
-  it("returns a typed error when the created session cannot be loaded", async () => {
-    getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
-    loadAgentSessionDetailForWorkspaceMock.mockResolvedValue(null);
-
-    const result = await createAgentSession("agt_123");
-
-    expect(result).toEqual({
-      ok: false,
-      error: "Session was created but could not be loaded.",
-    });
-    expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
-      sessionId: "ses_123",
-      workspaceId: "wks_123",
     });
   });
 });
@@ -288,18 +293,22 @@ describe("createAgentSessionFromPrompt", () => {
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 
-  it("returns the freshly loaded session detail and triggers the runner", async () => {
+  it("synthesizes the session detail with the user message and triggers the runner", async () => {
     getDbMock.mockReturnValue(dbWithAgent(fakeAgent()));
-    const detail = fakeDetail();
-    loadAgentSessionDetailForWorkspaceMock.mockResolvedValue(detail);
 
     const result = await createAgentSessionFromPrompt("agt_123", "Ship it");
 
-    expect(result).toMatchObject({
-      ok: true,
-      detail,
-      session: { id: detail.session.id, status: detail.session.status },
-    });
+    if (!result.ok) throw new Error("expected ok result");
+    expect(result.session).toMatchObject({ id: "ses_123", status: "created" });
+    // The prompt's user message is carried in the synthesized detail (instant paint on
+    // the destination route) alongside the status + message.created events.
+    expect(result.detail.messages).toEqual([
+      expect.objectContaining({ id: "msg_123", role: "user", content: "Ship it" }),
+    ]);
+    expect(result.detail.events.map((event) => event.type)).toEqual([
+      "session.status",
+      "message.created",
+    ]);
     expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
       messageId: "msg_123",
@@ -423,13 +432,16 @@ describe("submitAgentSessionMessage", () => {
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
-    // insertUserMessage reads the message.created event row back from .returning().
+    // insertUserMessage reads back [messageRow, createdEvent] from .returning().
     const returning = vi.fn(() => ({}));
     const values = vi.fn(() => ({ returning }));
     const insert = vi.fn(() => ({ values }));
     const batch = vi
       .fn()
-      .mockResolvedValue([undefined, [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }]]);
+      .mockResolvedValue([
+        [{ id: "msg_456" }],
+        [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+      ]);
     // submitAgentSessionMessage supersedes any pending ask_user_question via an UPDATE.
     const update = vi.fn(() => ({
       set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),

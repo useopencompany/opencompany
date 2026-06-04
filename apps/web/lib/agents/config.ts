@@ -1,5 +1,6 @@
 import {
   type AgentConfigDerivationRepository,
+  type AgentConfigDerivationSkill,
   deriveAgentConfigFromBody,
   SUPPORTED_AGENT_TOOLS,
 } from "@opencompany/agent-runtime";
@@ -25,6 +26,7 @@ export function derivePreviewConfigFromTiptapDoc(input: {
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
   agents?: AgentReference[];
+  skills?: AgentConfigDerivationSkill[];
   preferredRepositories?: AgentConfigDerivationRepository[];
   triggers?: AgentTriggerConfig[];
 }): { body: string; config: AgentConfig } {
@@ -40,6 +42,7 @@ export function derivePreviewConfigFromTiptapDoc(input: {
     body,
     repositories: input.repositories,
     agents: input.agents ?? [],
+    skills: input.skills ?? [],
     preferredRepositories,
     ...(input.model ? { model: input.model } : {}),
     ...(input.triggers ? { triggers: input.triggers } : {}),
@@ -118,6 +121,7 @@ function mentionDisplayText(attrs: Record<string, unknown> | null) {
   if (id.startsWith("model:")) return id.slice("model:".length);
   if (id.startsWith("brain/")) return id;
   if (id.startsWith("agent/")) return id;
+  if (id.startsWith("skill/")) return id;
   if (id.startsWith("integration:github:")) {
     const label = typeof attrs?.label === "string" ? attrs.label.trim() : "";
     return label || id.slice("integration:github:".length);

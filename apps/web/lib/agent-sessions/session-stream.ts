@@ -94,6 +94,7 @@ export function createEmptySessionRuntimeState(status = "created"): SessionRunti
     cost: emptyCostSummary(),
     currentStatus: status,
     lastError: null,
+    statusObserved: false,
   };
 }
 

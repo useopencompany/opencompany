@@ -256,4 +256,49 @@ describe("deriveAgentConfigFromBody", () => {
 
     expect(config.agents).toEqual([{ path: "agents/research/research.agent", name: "Research" }]);
   });
+
+  const skill = {
+    id: "improve-codebase-architecture",
+    name: "Improve Codebase Architecture",
+    description: "Analyze codebases for architectural friction.",
+    source: {
+      type: "github" as const,
+      url: "https://github.com/mattpocock/skills",
+      ref: "main",
+      path: "skills/improve-codebase-architecture",
+    },
+  };
+
+  it("attaches a resolved external skill referenced via @skill/<id>", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Architect",
+      body: "Use @skill/improve-codebase-architecture when reviewing.",
+      repositories: [],
+      skills: [skill],
+    });
+
+    expect(config.skills).toEqual([skill]);
+  });
+
+  it("drops an @skill mention with no matching resolved skill", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Architect",
+      body: "Use @skill/not-resolved.",
+      repositories: [],
+      skills: [skill],
+    });
+
+    expect(config.skills).toBeUndefined();
+  });
+
+  it("does not persist skills when the body drops the mention", () => {
+    const { config } = deriveAgentConfigFromBody({
+      title: "Architect",
+      body: "No skills mentioned here.",
+      repositories: [],
+      skills: [skill],
+    });
+
+    expect(config.skills).toBeUndefined();
+  });
 });
