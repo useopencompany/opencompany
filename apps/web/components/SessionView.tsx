@@ -346,15 +346,27 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // transcript paints instantly from the snapshot AND never drops a durable
     // message/event the stream happens to be missing (e.g. a user message that only
     // the best-effort web append publishes, or pre-stream history) — while live
-    // deltas still flow. Status/error prefer the live stream once it has produced
-    // any event, else the snapshot.
-    const hasStreamData = streamState.events.length > 0 || streamState.messages.length > 0;
+    // deltas still flow.
+    //
+    // Status/error are scalars, not a union, so they need an explicit authority
+    // rule. The stream's scalar status/lastError become authoritative only once it
+    // has actually reduced a status-bearing event (`statusObserved`) — NOT merely
+    // once it has emitted any event. The distinction matters because, with
+    // `seedFromEnd`, the stream tails from the current end without replaying history,
+    // so its scalars start at the empty seed (`"created"` / `null`); a lone token or
+    // usage delta would otherwise flip authority to that seed and momentarily blank
+    // out (or wrongly clear) the snapshot's real status/error — the start-of-session
+    // flicker. Until the stream genuinely knows the status, the snapshot stays the
+    // source of truth; once it does, the live stream wins (e.g. a brand-new turn, or
+    // an error and its recovery).
     return {
       events: mergeEvents(detail.events, streamState.events),
       messages: mergeMessages(detail.messages, streamState.messages),
       ...aggregates,
-      currentStatus: hasStreamData ? streamState.currentStatus : detail.session.status,
-      lastError: hasStreamData ? streamState.lastError : detail.session.lastError,
+      currentStatus: streamState.statusObserved
+        ? streamState.currentStatus
+        : detail.session.status,
+      lastError: streamState.statusObserved ? streamState.lastError : detail.session.lastError,
     };
   }, [detail, streamState]);
   const runtime = useMemo(() => {
