@@ -8,6 +8,11 @@ const isLocalDev = process.env.NODE_ENV === "development" && !process.env.VERCEL
 export const metadata: Metadata = {
   title: isLocalDev ? "opencompany (local)" : "opencompany",
   description: "Company workspace for agents, inbox, and shared context.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    shortcut: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/brand/opencompany-icon-dark.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
