@@ -359,17 +359,16 @@ describe("createMcpToolSet", () => {
       ok: false,
       error: { code: "mcp_tool_execution_failed", recoverable: true },
     });
-    expect(braintrust.logBraintrustCurrentSpan).toHaveBeenCalledWith(
+    expect(observability.captureException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Linear unavailable" }),
       expect.objectContaining({
-        error: expect.objectContaining({ name: "Error", message: "Linear unavailable" }),
-        metadata: expect.objectContaining({
-          session_id: "ses_123",
-          message_id: "msg_123",
-          tool_call_id: "call_123",
-          tool_name: "linear__create_issue",
-          mcp_server: "linear",
-          mcp_tool_name: "create_issue",
-        }),
+        event: "opencompany.runner_mcp_tool_failed",
+        session_id: "ses_123",
+        message_id: "msg_123",
+        tool_call_id: "call_123",
+        tool_name: "linear__create_issue",
+        mcp_server: "linear",
+        mcp_tool_name: "create_issue",
       }),
     );
   });

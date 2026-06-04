@@ -5,7 +5,6 @@ import {
   initLogger,
   type Span,
   type StartSpanArgs,
-  setMaskingFunction,
   traced,
   wrapAISDK,
 } from "braintrust";
@@ -25,7 +24,6 @@ const logger = createLogger({ service: "opencompany-braintrust", runtime: "serve
 const DEFAULT_PROJECT_NAME = "OpenCompany Runner";
 
 let braintrustLogger: BraintrustLogger<true> | null | undefined;
-let maskingConfigured = false;
 let loggedMissingApiKey = false;
 let loggedInitializationFailure = false;
 const wrappedAISDKs = new WeakMap<object, unknown>();
@@ -58,7 +56,6 @@ export function getBraintrustLogger() {
   }
 
   try {
-    configureMasking();
     const projectId = getEnv("BRAINTRUST_PROJECT_ID")?.trim();
     const projectName = getEnv("BRAINTRUST_PROJECT_NAME")?.trim() || DEFAULT_PROJECT_NAME;
     braintrustLogger = initLogger({
@@ -183,16 +180,6 @@ export async function flushBraintrust() {
   }
 }
 
-export function maskBraintrustValue(value: unknown): unknown {
-  return maskValue(value, new WeakSet<object>());
-}
-
-function configureMasking() {
-  if (maskingConfigured) return;
-  setMaskingFunction(maskBraintrustValue);
-  maskingConfigured = true;
-}
-
 function eventFromTraceInput(input: BraintrustTraceInput) {
   const event = {
     ...(input.input !== undefined ? { input: input.input } : {}),
@@ -212,72 +199,4 @@ function isExplicitlyEnabled() {
 function getEnv(name: string) {
   if (typeof process === "undefined") return undefined;
   return process.env?.[name];
-}
-
-function maskValue(value: unknown, seen: WeakSet<object>): unknown {
-  if (value === null || value === undefined) return value;
-  if (typeof value === "string") return maskString(value);
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return value;
-  }
-  if (typeof value === "symbol" || typeof value === "function") return String(value);
-  if (value instanceof Date) return value.toISOString();
-  if (value instanceof Error) {
-    return {
-      name: value.name,
-      message: maskString(value.message),
-      ...(value.stack ? { stack: maskString(value.stack) } : {}),
-    };
-  }
-  if (Array.isArray(value)) return value.map((item) => maskValue(item, seen));
-  if (!isPlainObject(value)) return value;
-  if (seen.has(value)) return "[circular]";
-
-  seen.add(value);
-  const masked: LogFields = {};
-  for (const [key, fieldValue] of Object.entries(value)) {
-    // Only redact secret-like *string* values. Numeric/boolean values are never credentials, and
-    // redacting them to "[redacted]" breaks Braintrust's schema: metric keys such as `tokens`,
-    // `prompt_tokens`, `completion_tokens`, and `time_to_first_token` match the "token" rule but
-    // must stay numbers, or the API rejects the whole row (400) and the span never closes.
-    if (isSensitiveKey(key) && !isNonRedactableValue(fieldValue)) {
-      masked[key] = "[redacted]";
-    } else {
-      masked[key] = maskValue(fieldValue, seen);
-    }
-  }
-  seen.delete(value);
-  return masked;
-}
-
-function isNonRedactableValue(value: unknown) {
-  return typeof value === "number" || typeof value === "boolean" || typeof value === "bigint";
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object") return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-function isSensitiveKey(key: string) {
-  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-  return (
-    normalized.includes("secret") ||
-    normalized.includes("token") ||
-    normalized.includes("password") ||
-    normalized.includes("cookie") ||
-    normalized.includes("authorization") ||
-    normalized.includes("privatekey") ||
-    normalized.includes("apikey") ||
-    normalized.includes("credential") ||
-    normalized.includes("dsn")
-  );
-}
-
-function maskString(value: string) {
-  return value
-    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [redacted]")
-    .replace(/\b(api[_-]?key|password|secret|token)\s*[:=]\s*\S+/gi, "$1=[redacted]")
-    .replace(/\b(sk-[A-Za-z0-9_-]{12,})\b/g, "[redacted]");
 }

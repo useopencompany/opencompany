@@ -1,7 +1,9 @@
 import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost, recordWorkspaceUsageDebit } from "@opencompany/billing";
 import { agentSessionMessages, agentSessions, agentSessionUsage } from "@opencompany/db/schema";
-import { createGateway, generateText, type LanguageModelUsage } from "ai";
+import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
+import { createGateway, type LanguageModelUsage } from "ai";
+import * as ai from "ai";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -85,6 +87,8 @@ async function generateSessionTitleWithUsage(input: {
   apiKey: string;
 }) {
   const gateway = createGateway({ apiKey: input.apiKey });
+  // Traced by Braintrust's `wrapAISDK` when enabled; falls back to the unwrapped `ai` otherwise.
+  const { generateText } = getBraintrustAISDK(ai);
   const result = await generateText({
     model: gateway(TITLE_MODEL),
     system:
