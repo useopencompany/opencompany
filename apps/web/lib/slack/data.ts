@@ -40,6 +40,25 @@ export async function upsertPending(workspaceId: string): Promise<WorkspaceSlack
   return row;
 }
 
+// Persist the Slack channel id as soon as it is created, BEFORE the remaining
+// provisioning calls. On an Inngest retry this lets the create step resume the
+// existing channel instead of minting a second (orphaned) one.
+export async function setSlackChannelId(input: {
+  workspaceId: string;
+  slackChannelId: string;
+  slackTeamId: string | null;
+}): Promise<void> {
+  const db = getDb();
+  await db
+    .update(workspaceSlackChannels)
+    .set({
+      slackChannelId: input.slackChannelId,
+      slackTeamId: input.slackTeamId,
+      updatedAt: new Date(),
+    })
+    .where(eq(workspaceSlackChannels.workspaceId, input.workspaceId));
+}
+
 export async function markActive(input: {
   workspaceId: string;
   slackChannelId: string;

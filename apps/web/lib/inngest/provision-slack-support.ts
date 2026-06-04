@@ -3,8 +3,21 @@ import { workspaces } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
 import { sendSlackInviteEmail } from "@/lib/email/slack-invite";
-import { getWorkspaceSlackChannel, markActive, markFailed, upsertPending } from "@/lib/slack/data";
-import { isSlackSupportConfigured, provisionSupportChannel } from "@/lib/slack/support-client";
+import {
+  getWorkspaceSlackChannel,
+  markActive,
+  markFailed,
+  setSlackChannelId,
+  upsertPending,
+} from "@/lib/slack/data";
+import {
+  createSupportChannel,
+  getSupportTeamId,
+  inviteCustomerToChannel,
+  inviteSupportMembers,
+  isSlackSupportConfigured,
+  postIntroMessage,
+} from "@/lib/slack/support-client";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
@@ -63,16 +76,32 @@ export async function runProvisionSlackSupport(args: {
 
   let inviteUrl: string | null = null;
   try {
-    const result = await step.run("provision", () =>
-      provisionSupportChannel({ workspace, customerEmail }),
+    // Each Slack call is its own step so Inngest memoizes it across retries. The
+    // channel id is persisted right after creation, so a retry of any later step
+    // resumes the SAME channel instead of minting a second (orphaned) one — this is
+    // what makes "exactly one channel per workspace" hold at the Slack level too.
+    const channelId = await step.run("create-channel", async () => {
+      const current = await getWorkspaceSlackChannel(workspaceId);
+      if (current?.slackChannelId) return current.slackChannelId;
+      const id = await createSupportChannel(workspace);
+      await setSlackChannelId({ workspaceId, slackChannelId: id, slackTeamId: getSupportTeamId() });
+      return id;
+    });
+
+    await step.run("invite-members", () => inviteSupportMembers(channelId));
+
+    inviteUrl = await step.run("invite-customer", () =>
+      inviteCustomerToChannel(channelId, customerEmail),
     );
-    inviteUrl = result.inviteUrl;
+
+    await step.run("post-intro", () => postIntroMessage(channelId));
+
     await step.run("mark-active", () =>
       markActive({
         workspaceId,
-        slackChannelId: result.channelId,
-        slackTeamId: result.teamId,
-        inviteUrl: result.inviteUrl,
+        slackChannelId: channelId,
+        slackTeamId: getSupportTeamId(),
+        inviteUrl,
       }),
     );
   } catch (error) {

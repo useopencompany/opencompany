@@ -1,17 +1,6 @@
 import { WebClient } from "@slack/web-api";
 import { channelName, workspaceChannelSlug } from "./slugify";
 
-export type ProvisionInput = {
-  workspace: { id: string; name: string };
-  customerEmail: string;
-};
-
-export type ProvisionResult = {
-  channelId: string;
-  teamId: string | null;
-  inviteUrl: string | null;
-};
-
 export class SlackNotConfiguredError extends Error {
   constructor(message = "SLACK_SUPPORT_BOT_TOKEN is not configured") {
     super(message);
@@ -43,6 +32,8 @@ type SlackProvisionClient = {
   chat: { postMessage: (args: { channel: string; text: string }) => Promise<unknown> };
 };
 
+export type SupportClientDeps = { client?: SlackProvisionClient };
+
 function getConfig() {
   return {
     token: process.env.SLACK_SUPPORT_BOT_TOKEN?.trim() ?? "",
@@ -58,58 +49,115 @@ export function isSlackSupportConfigured(): boolean {
   return getConfig().token.length > 0;
 }
 
+export function getSupportTeamId(): string | null {
+  return getConfig().teamId;
+}
+
+function resolveClient(deps?: SupportClientDeps): SlackProvisionClient {
+  const { token } = getConfig();
+  if (!token) throw new SlackNotConfiguredError();
+  return deps?.client ?? (new WebClient(token) as unknown as SlackProvisionClient);
+}
+
 function slackErrorCode(error: unknown): string | undefined {
   return (error as { data?: { error?: string } } | undefined)?.data?.error;
 }
 
-export async function provisionSupportChannel(
-  input: ProvisionInput,
-  deps?: { client?: SlackProvisionClient },
-): Promise<ProvisionResult> {
-  const { token, teamId, memberIds } = getConfig();
-  if (!token) throw new SlackNotConfiguredError();
-  const client = deps?.client ?? (new WebClient(token) as unknown as SlackProvisionClient);
+// Some Slack errors are benign for our idempotent retry model: re-inviting a member
+// who is already in the channel, etc. Treat them as success.
+function isBenign(error: unknown): boolean {
+  const code = slackErrorCode(error);
+  return code === "already_in_channel" || code === "is_archived" || code === "cant_invite_self";
+}
 
-  const slug = workspaceChannelSlug(input.workspace.name);
+// Step 1 of provisioning: create the private channel. Each call is its own Inngest
+// step in the orchestrator, and the channel id is persisted immediately after, so a
+// retry never re-creates (no orphaned channels).
+export async function createSupportChannel(
+  workspace: { id: string; name: string },
+  deps?: SupportClientDeps,
+): Promise<string> {
+  const client = resolveClient(deps);
+  const slug = workspaceChannelSlug(workspace.name);
 
-  let channelId: string | undefined;
   try {
     const created = await client.conversations.create({
       name: channelName(slug),
       is_private: true,
     });
-    channelId = created.channel?.id;
+    const id = created.channel?.id;
+    if (!id) throw new SlackProvisionError("conversations.create returned no channel id");
+    return id;
   } catch (error) {
+    if (error instanceof SlackProvisionError) throw error;
     if (slackErrorCode(error) !== "name_taken") {
       throw new SlackProvisionError("conversations.create failed", slackErrorCode(error));
     }
-    // Collision: retry once with a short id-derived suffix.
-    const suffix = input.workspace.id
+    // Genuine cross-workspace name collision: retry once with an id-derived suffix
+    // (unique per workspace, so this never re-collides for the same workspace).
+    const suffix = workspace.id
       .replace(/[^a-z0-9]/gi, "")
       .slice(-6)
       .toLowerCase();
-    const retry = await client.conversations.create({
-      name: channelName(slug, suffix),
-      is_private: true,
-    });
-    channelId = retry.channel?.id;
+    try {
+      const retry = await client.conversations.create({
+        name: channelName(slug, suffix),
+        is_private: true,
+      });
+      const id = retry.channel?.id;
+      if (!id) throw new SlackProvisionError("conversations.create returned no channel id");
+      return id;
+    } catch (retryError) {
+      if (retryError instanceof SlackProvisionError) throw retryError;
+      throw new SlackProvisionError(
+        "conversations.create failed on collision retry",
+        slackErrorCode(retryError),
+      );
+    }
   }
-  if (!channelId) throw new SlackProvisionError("conversations.create returned no channel id");
+}
 
-  if (memberIds.length > 0) {
+// Step 2: invite the OC support members. No-op when none configured; re-invites of
+// already-present members are treated as success so a retry stays idempotent.
+export async function inviteSupportMembers(
+  channelId: string,
+  deps?: SupportClientDeps,
+): Promise<void> {
+  const { memberIds } = getConfig();
+  if (memberIds.length === 0) return;
+  const client = resolveClient(deps);
+  try {
     await client.conversations.invite({ channel: channelId, users: memberIds.join(",") });
+  } catch (error) {
+    if (isBenign(error)) return;
+    throw new SlackProvisionError("conversations.invite failed", slackErrorCode(error));
   }
+}
 
-  const shared = await client.conversations.inviteShared({
-    channel: channelId,
-    emails: [input.customerEmail],
-  });
-  const inviteUrl = (shared as { url?: string }).url ?? null;
+// Step 3: send the external Slack Connect invite to the customer; return the
+// shareable invite url (or null if Slack returns none).
+export async function inviteCustomerToChannel(
+  channelId: string,
+  customerEmail: string,
+  deps?: SupportClientDeps,
+): Promise<string | null> {
+  const client = resolveClient(deps);
+  try {
+    const shared = await client.conversations.inviteShared({
+      channel: channelId,
+      emails: [customerEmail],
+    });
+    return shared.url ?? null;
+  } catch (error) {
+    throw new SlackProvisionError("conversations.inviteShared failed", slackErrorCode(error));
+  }
+}
 
+// Step 4: best-effort intro message.
+export async function postIntroMessage(channelId: string, deps?: SupportClientDeps): Promise<void> {
+  const client = resolveClient(deps);
   await client.chat.postMessage({
     channel: channelId,
     text: "👋 This is your private support channel with OpenCompany. Ask us anything here — we read it in real time.",
   });
-
-  return { channelId, teamId, inviteUrl };
 }

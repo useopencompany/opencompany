@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { provisionSupportChannel, SlackNotConfiguredError } from "./support-client";
+import {
+  createSupportChannel,
+  inviteCustomerToChannel,
+  inviteSupportMembers,
+  postIntroMessage,
+  SlackNotConfiguredError,
+} from "./support-client";
 
 const originalEnv = { ...process.env };
 
@@ -16,74 +22,93 @@ function makeClient() {
 
 const workspace = { id: "wks_aaaaaaaa", name: "Acme Corp" };
 
-describe("provisionSupportChannel", () => {
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    process.env.SLACK_SUPPORT_BOT_TOKEN = "xoxb-test";
-    process.env.SLACK_SUPPORT_TEAM_ID = "T1";
-    process.env.SLACK_SUPPORT_MEMBER_IDS = "U1, U2";
-  });
+beforeEach(() => {
+  process.env = { ...originalEnv };
+  process.env.SLACK_SUPPORT_BOT_TOKEN = "xoxb-test";
+  process.env.SLACK_SUPPORT_TEAM_ID = "T1";
+  process.env.SLACK_SUPPORT_MEMBER_IDS = "U1, U2";
+});
 
-  it("creates a private channel, invites the team, sends a shared invite, posts an intro", async () => {
+describe("createSupportChannel", () => {
+  it("creates a private oc-<slug> channel and returns its id", async () => {
     const client = makeClient();
-
-    const result = await provisionSupportChannel(
-      { workspace, customerEmail: "c@acme.com" },
-      { client },
-    );
-
+    const id = await createSupportChannel(workspace, { client });
     expect(client.conversations.create).toHaveBeenCalledWith({
       name: "oc-acme-corp",
       is_private: true,
     });
-    expect(client.conversations.invite).toHaveBeenCalledWith({ channel: "C123", users: "U1,U2" });
-    expect(client.conversations.inviteShared).toHaveBeenCalledWith({
-      channel: "C123",
-      emails: ["c@acme.com"],
-    });
-    expect(client.chat.postMessage).toHaveBeenCalled();
-    expect(result).toEqual({
-      channelId: "C123",
-      teamId: "T1",
-      inviteUrl: "https://join.slack.com/share/x",
-    });
+    expect(id).toBe("C123");
   });
 
-  it("retries with a suffix on name_taken", async () => {
-    process.env.SLACK_SUPPORT_MEMBER_IDS = "";
+  it("retries once with an id-derived suffix on name_taken", async () => {
     const client = makeClient();
     client.conversations.create = vi
       .fn()
       .mockRejectedValueOnce({ data: { error: "name_taken" } })
       .mockResolvedValueOnce({ ok: true, channel: { id: "C999" } });
 
-    const result = await provisionSupportChannel(
-      { workspace, customerEmail: "c@acme.com" },
-      { client },
-    );
+    const id = await createSupportChannel(workspace, { client });
 
     expect(client.conversations.create).toHaveBeenCalledTimes(2);
     expect(client.conversations.create.mock.calls[1][0].name).toBe("oc-acme-corp-aaaaaa");
-    expect(client.conversations.invite).not.toHaveBeenCalled();
-    expect(result.channelId).toBe("C999");
+    expect(id).toBe("C999");
   });
 
   it("throws SlackNotConfiguredError when the bot token is missing", async () => {
     process.env.SLACK_SUPPORT_BOT_TOKEN = "";
-    await expect(
-      provisionSupportChannel({ workspace, customerEmail: "c@acme.com" }, { client: makeClient() }),
-    ).rejects.toBeInstanceOf(SlackNotConfiguredError);
+    await expect(createSupportChannel(workspace, { client: makeClient() })).rejects.toBeInstanceOf(
+      SlackNotConfiguredError,
+    );
+  });
+});
+
+describe("inviteSupportMembers", () => {
+  it("invites the configured members", async () => {
+    const client = makeClient();
+    await inviteSupportMembers("C123", { client });
+    expect(client.conversations.invite).toHaveBeenCalledWith({ channel: "C123", users: "U1,U2" });
   });
 
-  it("captures a null invite url when Slack returns none", async () => {
+  it("is a no-op when no members are configured", async () => {
+    process.env.SLACK_SUPPORT_MEMBER_IDS = "";
+    const client = makeClient();
+    await inviteSupportMembers("C123", { client });
+    expect(client.conversations.invite).not.toHaveBeenCalled();
+  });
+
+  it("treats already_in_channel as success (idempotent retry)", async () => {
+    const client = makeClient();
+    client.conversations.invite = vi
+      .fn()
+      .mockRejectedValue({ data: { error: "already_in_channel" } });
+    await expect(inviteSupportMembers("C123", { client })).resolves.toBeUndefined();
+  });
+});
+
+describe("inviteCustomerToChannel", () => {
+  it("returns the shareable invite url", async () => {
+    const client = makeClient();
+    const url = await inviteCustomerToChannel("C123", "c@acme.com", { client });
+    expect(client.conversations.inviteShared).toHaveBeenCalledWith({
+      channel: "C123",
+      emails: ["c@acme.com"],
+    });
+    expect(url).toBe("https://join.slack.com/share/x");
+  });
+
+  it("returns null when Slack provides no url", async () => {
     const client = makeClient();
     client.conversations.inviteShared = vi.fn(async () => ({ ok: true }));
+    expect(await inviteCustomerToChannel("C123", "c@acme.com", { client })).toBeNull();
+  });
+});
 
-    const result = await provisionSupportChannel(
-      { workspace, customerEmail: "c@acme.com" },
-      { client },
+describe("postIntroMessage", () => {
+  it("posts an intro message to the channel", async () => {
+    const client = makeClient();
+    await postIntroMessage("C123", { client });
+    expect(client.chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "C123" }),
     );
-
-    expect(result.inviteUrl).toBeNull();
   });
 });
