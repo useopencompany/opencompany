@@ -118,7 +118,7 @@ describe("materializeBrainForSession", () => {
 });
 
 describe("syncBrainFromSandbox", () => {
-  it("keeps the runner turn alive and queues GitHub sync when immediate GitHub write conflicts", async () => {
+  it("writes canonical brain content and enqueues a workspace sync job (no inline GitHub)", async () => {
     const db = createSyncDb({
       mounts: [
         {
@@ -134,17 +134,6 @@ describe("syncBrainFromSandbox", () => {
       currentFiles: [],
     });
     dbMocks.getDb.mockReturnValue(db);
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ sha: "blob_old" }) })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 409,
-          text: async () => "conflict",
-        }),
-    );
     const sandbox = {
       commands: {
         run: vi.fn().mockResolvedValue({ stdout: "brain/README.md\n", stderr: "", exitCode: 0 }),
@@ -160,13 +149,11 @@ describe("syncBrainFromSandbox", () => {
         sessionId: "ses_123",
         workspaceId: "wsp_123",
         workdir: "/home/user/workspace",
-        repository: {
-          fullName: "opencompany/test",
-          defaultBranch: "main",
-        } as never,
       }),
     ).resolves.toBeUndefined();
 
+    // Canonical content persisted as pending; GitHub is projected asynchronously
+    // through the unified workspace_sync_jobs outbox.
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -177,7 +164,8 @@ describe("syncBrainFromSandbox", () => {
         }),
         expect.objectContaining({
           workspaceId: "wsp_123",
-          path: "README.md",
+          repoPath: "brain/README.md",
+          sourceKind: "brain",
           operation: "upsert",
           desiredHash: expect.any(String),
         }),
@@ -188,14 +176,6 @@ describe("syncBrainFromSandbox", () => {
       expect.objectContaining({
         sessionId: "ses_123",
         type: "brain.file_changed",
-      }),
-    );
-    expect(observabilityMocks.logger.warn).toHaveBeenCalledWith(
-      "Queued Brain GitHub sync after immediate write failed",
-      expect.objectContaining({
-        brain_path: "README.md",
-        error: expect.any(Error),
-        workspace_id: "wsp_123",
       }),
     );
   });

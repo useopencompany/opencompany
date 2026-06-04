@@ -1,13 +1,9 @@
 import { getDb } from "@opencompany/db/client";
-import { agentFileSyncJobs, agentSyncJobs, brainSyncJobs } from "@opencompany/db/schema";
+import { workspaceSyncJobs } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
-import { and, asc, inArray, lte } from "drizzle-orm";
-import {
-  AGENT_FILE_SYNC_REQUESTED_EVENT,
-  AGENT_SYNC_REQUESTED_EVENT,
-} from "@/lib/agents/sync-events";
-import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
+import { and, asc, eq, inArray, lte, or } from "drizzle-orm";
 import { SYNC_OUTBOX_MAX_ATTEMPTS } from "@/lib/sync-outbox/retry";
+import { WORKSPACE_SYNC_REQUESTED_EVENT } from "@/lib/workspace-state/sync-events";
 
 export {
   nextSyncRetryAt,
@@ -17,7 +13,11 @@ export {
 } from "@/lib/sync-outbox/retry";
 
 type Db = ReturnType<typeof getDb>;
-type SyncResourceType = "agent" | "agent_file" | "brain";
+
+// A "syncing" job whose lease is older than this is reclaimable (the owning run
+// likely crashed). Mirrors SYNCING_LEASE_MS in workspace-state/project.ts so the
+// sweeper wakes a workspace whose projection died mid-flight.
+const WORKSPACE_SYNCING_LEASE_MS = 5 * 60_000;
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
@@ -26,235 +26,77 @@ export const SYNC_OUTBOX_SWEEP_LIMIT = 50;
 
 const RETRYABLE_SYNC_JOB_STATUSES = ["pending", "failed"] as const;
 
-type SyncJobCandidate = {
-  status: string;
-  attempts: number;
-  nextRunAt: Date;
-};
-
-type AgentSyncJobCandidate = SyncJobCandidate & {
-  agentId: string;
+export type WorkspaceSyncDispatch = {
   workspaceId: string;
 };
 
-type BrainSyncJobCandidate = SyncJobCandidate & {
-  workspaceId: string;
-  path: string;
-};
-
-type AgentFileSyncJobCandidate = SyncJobCandidate & {
-  workspaceId: string;
-  path: string;
-};
-
-export type AgentSyncDispatch = {
-  agentId: string;
-  workspaceId: string;
-};
-
-export type BrainSyncDispatch = {
-  workspaceId: string;
-  path: string;
-};
-
-export type AgentFileSyncDispatch = {
-  workspaceId: string;
-  path: string;
-};
-
-type SyncOutboxEvent =
-  | { name: typeof AGENT_SYNC_REQUESTED_EVENT; data: AgentSyncDispatch }
-  | {
-      name: typeof AGENT_FILE_SYNC_REQUESTED_EVENT;
-      data: AgentFileSyncDispatch;
-    }
-  | { name: typeof BRAIN_SYNC_REQUESTED_EVENT; data: BrainSyncDispatch };
+type SyncOutboxEvent = { name: typeof WORKSPACE_SYNC_REQUESTED_EVENT; data: WorkspaceSyncDispatch };
 
 type SyncOutboxStep = {
   run(id: string, handler: () => unknown): Promise<unknown>;
   sendEvent(id: string, payload: SyncOutboxEvent[]): Promise<unknown>;
 };
 
-export function filterDueAgentSyncJobs(
-  rows: AgentSyncJobCandidate[],
-  options: { now?: Date; limit?: number } = {},
-): AgentSyncDispatch[] {
-  const now = options.now ?? new Date();
-  return filterDueSyncJobs(rows, now, options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT).map((row) => ({
-    agentId: row.agentId,
-    workspaceId: row.workspaceId,
-  }));
-}
-
-export function filterDueBrainSyncJobs(
-  rows: BrainSyncJobCandidate[],
-  options: { now?: Date; limit?: number } = {},
-): BrainSyncDispatch[] {
-  const now = options.now ?? new Date();
-  return filterDueSyncJobs(rows, now, options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT).map((row) => ({
-    workspaceId: row.workspaceId,
-    path: row.path,
-  }));
-}
-
-export function filterDueAgentFileSyncJobs(
-  rows: AgentFileSyncJobCandidate[],
-  options: { now?: Date; limit?: number } = {},
-): AgentFileSyncDispatch[] {
-  const now = options.now ?? new Date();
-  return filterDueSyncJobs(rows, now, options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT).map((row) => ({
-    workspaceId: row.workspaceId,
-    path: row.path,
-  }));
-}
-
-export async function loadDueAgentSyncDispatches(
+// Workspace projection outbox: one event per workspace (not per path), because
+// projectWorkspaceToGitHub drains all due jobs for a workspace into one commit.
+// This is the runner's only path to GitHub (it does not dispatch) and the
+// backstop for any missed web dispatch.
+export async function loadDueWorkspaceSyncDispatches(
   options: { db?: Db; now?: Date; limit?: number } = {},
-): Promise<AgentSyncDispatch[]> {
+): Promise<WorkspaceSyncDispatch[]> {
   const db = options.db ?? getDb();
   const now = options.now ?? new Date();
   const limit = options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT;
+  const leaseCutoff = new Date(now.getTime() - WORKSPACE_SYNCING_LEASE_MS);
+
   const rows = await db
     .select({
-      agentId: agentSyncJobs.agentId,
-      workspaceId: agentSyncJobs.workspaceId,
-      status: agentSyncJobs.status,
-      attempts: agentSyncJobs.attempts,
-      nextRunAt: agentSyncJobs.nextRunAt,
+      workspaceId: workspaceSyncJobs.workspaceId,
+      status: workspaceSyncJobs.status,
+      attempts: workspaceSyncJobs.attempts,
+      nextRunAt: workspaceSyncJobs.nextRunAt,
     })
-    .from(agentSyncJobs)
+    .from(workspaceSyncJobs)
     .where(
       and(
-        inArray(agentSyncJobs.status, RETRYABLE_SYNC_JOB_STATUSES),
-        lte(agentSyncJobs.nextRunAt, now),
+        lte(workspaceSyncJobs.nextRunAt, now),
+        or(
+          inArray(workspaceSyncJobs.status, RETRYABLE_SYNC_JOB_STATUSES),
+          and(
+            eq(workspaceSyncJobs.status, "syncing"),
+            lte(workspaceSyncJobs.updatedAt, leaseCutoff),
+          ),
+        ),
       ),
     )
-    .orderBy(asc(agentSyncJobs.nextRunAt))
-    .limit(limit);
+    .orderBy(asc(workspaceSyncJobs.nextRunAt));
 
-  return filterDueAgentSyncJobs(rows, { now, limit });
+  const seen = new Set<string>();
+  const dispatches: WorkspaceSyncDispatch[] = [];
+  for (const row of rows) {
+    if (row.status === "failed" && row.attempts >= SYNC_OUTBOX_MAX_ATTEMPTS) continue;
+    if (seen.has(row.workspaceId)) continue;
+    seen.add(row.workspaceId);
+    dispatches.push({ workspaceId: row.workspaceId });
+    if (dispatches.length >= limit) break;
+  }
+  return dispatches;
 }
 
-export async function loadDueBrainSyncDispatches(
-  options: { db?: Db; now?: Date; limit?: number } = {},
-): Promise<BrainSyncDispatch[]> {
-  const db = options.db ?? getDb();
-  const now = options.now ?? new Date();
-  const limit = options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT;
-  const rows = await db
-    .select({
-      workspaceId: brainSyncJobs.workspaceId,
-      path: brainSyncJobs.path,
-      status: brainSyncJobs.status,
-      attempts: brainSyncJobs.attempts,
-      nextRunAt: brainSyncJobs.nextRunAt,
-    })
-    .from(brainSyncJobs)
-    .where(
-      and(
-        inArray(brainSyncJobs.status, RETRYABLE_SYNC_JOB_STATUSES),
-        lte(brainSyncJobs.nextRunAt, now),
-      ),
-    )
-    .orderBy(asc(brainSyncJobs.nextRunAt))
-    .limit(limit);
-
-  return filterDueBrainSyncJobs(rows, { now, limit });
-}
-
-export async function loadDueAgentFileSyncDispatches(
-  options: { db?: Db; now?: Date; limit?: number } = {},
-): Promise<AgentFileSyncDispatch[]> {
-  const db = options.db ?? getDb();
-  const now = options.now ?? new Date();
-  const limit = options.limit ?? SYNC_OUTBOX_SWEEP_LIMIT;
-  const rows = await db
-    .select({
-      workspaceId: agentFileSyncJobs.workspaceId,
-      path: agentFileSyncJobs.path,
-      status: agentFileSyncJobs.status,
-      attempts: agentFileSyncJobs.attempts,
-      nextRunAt: agentFileSyncJobs.nextRunAt,
-    })
-    .from(agentFileSyncJobs)
-    .where(
-      and(
-        inArray(agentFileSyncJobs.status, RETRYABLE_SYNC_JOB_STATUSES),
-        lte(agentFileSyncJobs.nextRunAt, now),
-      ),
-    )
-    .orderBy(asc(agentFileSyncJobs.nextRunAt))
-    .limit(limit);
-
-  return filterDueAgentFileSyncJobs(rows, { now, limit });
-}
-
-export async function sweepAgentSyncOutbox(
+export async function sweepWorkspaceSyncOutbox(
   step: SyncOutboxStep,
-  options: { loadDueDispatches?: () => Promise<AgentSyncDispatch[]> } = {},
+  options: { loadDueDispatches?: () => Promise<WorkspaceSyncDispatch[]> } = {},
 ) {
-  const dueJobs = (await step.run("load due agent sync jobs", () =>
-    (options.loadDueDispatches ?? loadDueAgentSyncDispatches)(),
-  )) as AgentSyncDispatch[];
+  const dueJobs = (await step.run("load due workspace sync jobs", () =>
+    (options.loadDueDispatches ?? loadDueWorkspaceSyncDispatches)(),
+  )) as WorkspaceSyncDispatch[];
   if (dueJobs.length === 0) return { dispatched: 0 };
 
   const events: SyncOutboxEvent[] = dueJobs.map((job) => ({
-    name: AGENT_SYNC_REQUESTED_EVENT,
+    name: WORKSPACE_SYNC_REQUESTED_EVENT,
     data: job,
   }));
-  await dispatchRecoveryEvents(
-    step,
-    "dispatch agent sync requests",
-    events,
-    "agent",
-    dueJobs.length,
-  );
-  return { dispatched: dueJobs.length };
-}
-
-export async function sweepBrainSyncOutbox(
-  step: SyncOutboxStep,
-  options: { loadDueDispatches?: () => Promise<BrainSyncDispatch[]> } = {},
-) {
-  const dueJobs = (await step.run("load due brain sync jobs", () =>
-    (options.loadDueDispatches ?? loadDueBrainSyncDispatches)(),
-  )) as BrainSyncDispatch[];
-  if (dueJobs.length === 0) return { dispatched: 0 };
-
-  const events: SyncOutboxEvent[] = dueJobs.map((job) => ({
-    name: BRAIN_SYNC_REQUESTED_EVENT,
-    data: job,
-  }));
-  await dispatchRecoveryEvents(
-    step,
-    "dispatch brain sync requests",
-    events,
-    "brain",
-    dueJobs.length,
-  );
-  return { dispatched: dueJobs.length };
-}
-
-export async function sweepAgentFileSyncOutbox(
-  step: SyncOutboxStep,
-  options: { loadDueDispatches?: () => Promise<AgentFileSyncDispatch[]> } = {},
-) {
-  const dueJobs = (await step.run("load due agent file sync jobs", () =>
-    (options.loadDueDispatches ?? loadDueAgentFileSyncDispatches)(),
-  )) as AgentFileSyncDispatch[];
-  if (dueJobs.length === 0) return { dispatched: 0 };
-
-  const events: SyncOutboxEvent[] = dueJobs.map((job) => ({
-    name: AGENT_FILE_SYNC_REQUESTED_EVENT,
-    data: job,
-  }));
-  await dispatchRecoveryEvents(
-    step,
-    "dispatch agent file sync requests",
-    events,
-    "agent_file",
-    dueJobs.length,
-  );
+  await dispatchRecoveryEvents(step, "dispatch workspace sync requests", events, dueJobs.length);
   return { dispatched: dueJobs.length };
 }
 
@@ -262,7 +104,6 @@ async function dispatchRecoveryEvents(
   step: SyncOutboxStep,
   id: string,
   events: SyncOutboxEvent[],
-  resourceType: SyncResourceType,
   dispatchedCount: number,
 ) {
   try {
@@ -270,12 +111,12 @@ async function dispatchRecoveryEvents(
   } catch (error) {
     captureException(error, {
       event: "opencompany.sync_outbox_recovery_dispatch_failed",
-      resource_type: resourceType,
+      resource_type: "workspace",
       dispatched_count: dispatchedCount,
     });
     logger.error("Failed to dispatch sync outbox recovery events", {
       event: "opencompany.sync_outbox_recovery_dispatch_failed",
-      resource_type: resourceType,
+      resource_type: "workspace",
       dispatched_count: dispatchedCount,
       ...errorLogFields(error),
     });
@@ -284,7 +125,7 @@ async function dispatchRecoveryEvents(
 
   logger.warn("Dispatched sync outbox recovery events", {
     event: "opencompany.sync_outbox_recovery_dispatched",
-    resource_type: resourceType,
+    resource_type: "workspace",
     dispatched_count: dispatchedCount,
   });
 }
@@ -301,18 +142,4 @@ function errorLogFields(error: unknown) {
     error_name: typeof error,
     error_message: typeof error === "string" ? error : "Unknown error",
   };
-}
-
-function filterDueSyncJobs<T extends SyncJobCandidate>(rows: T[], now: Date, limit: number): T[] {
-  return rows
-    .filter(
-      (row) =>
-        RETRYABLE_SYNC_JOB_STATUSES.includes(
-          row.status as (typeof RETRYABLE_SYNC_JOB_STATUSES)[number],
-        ) &&
-        row.nextRunAt.getTime() <= now.getTime() &&
-        (row.status !== "failed" || row.attempts < SYNC_OUTBOX_MAX_ATTEMPTS),
-    )
-    .sort((a, b) => a.nextRunAt.getTime() - b.nextRunAt.getTime())
-    .slice(0, limit);
 }

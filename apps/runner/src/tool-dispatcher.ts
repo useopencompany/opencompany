@@ -559,7 +559,6 @@ async function executeRuntimeToolWithTracing(input: {
       sessionId: input.sessionId,
       workspaceId: input.observabilityContext?.workspaceId ?? "",
       workdir: input.workdir,
-      repository: input.repository,
     });
   }
 

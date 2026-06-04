@@ -13,7 +13,8 @@ import {
   serializeAgentFile,
   validateAgentFileSource,
 } from "@opencompany/agent-runtime";
-import { agentSessions, agentSyncJobs, agents } from "@opencompany/db/schema";
+import { agentSessions, agents } from "@opencompany/db/schema";
+import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "./db";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
@@ -137,40 +138,19 @@ export async function applyAgentSelfUpdate(input: {
     };
   }
 
-  // Queue the GitHub sync the same way the web editor does; the sync-outbox sweeper
-  // (runs every minute) commits the .agent file. Only possible once the agent has a path.
+  // Enqueue the unified workspace projection; the sync-outbox sweeper (runs every
+  // minute) commits the .agent file along with any other pending workspace
+  // changes in one commit. Only possible once the agent has a path.
   if (row.path) {
-    await db
-      .insert(agentSyncJobs)
-      .values({
-        agentId: row.agentId,
-        workspaceId: row.workspaceId,
-        path: row.path,
-        desiredHash: contentHash,
-        desiredVersion: nextVersion,
-        previousPath: null,
-        previousBlobSha: null,
-        status: "pending",
-        attempts: 0,
-        nextRunAt: now,
-        lastError: null,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: agentSyncJobs.agentId,
-        set: {
-          path: row.path,
-          desiredHash: contentHash,
-          desiredVersion: nextVersion,
-          previousPath: null,
-          previousBlobSha: null,
-          status: "pending",
-          attempts: 0,
-          nextRunAt: now,
-          lastError: null,
-          updatedAt: now,
-        },
-      });
+    await enqueueWorkspaceSync(db, {
+      workspaceId: row.workspaceId,
+      repoPath: row.path,
+      sourceKind: "agent",
+      sourceRef: row.agentId,
+      operation: "upsert",
+      desiredHash: contentHash,
+      delayMs: 0,
+    });
   }
 
   const changedFields = diffChangedFields(current, nextConfig);

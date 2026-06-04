@@ -260,6 +260,20 @@
       "when": 1780567097619,
       "tag": "0036_loud_chimera",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1780574313604,
+      "tag": "0037_open_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780578332546,
+      "tag": "0038_tiny_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

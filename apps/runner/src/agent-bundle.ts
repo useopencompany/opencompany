@@ -1,23 +1,12 @@
 import { agentBundleDir, shellQuote } from "@opencompany/agent-runtime";
-import {
-  agentFileSyncJobs,
-  agentFiles,
-  agentSessionBundleMounts,
-  agents,
-  type WorkspaceRepository,
-} from "@opencompany/db/schema";
+import { agentFiles, agentSessionBundleMounts, agents } from "@opencompany/db/schema";
+import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { createLogger } from "@opencompany/observability";
 import { and, eq } from "drizzle-orm";
 import { MAX_BRAIN_FILE_BYTES, MAX_BRAIN_MOUNT_BYTES, MAX_BRAIN_MOUNT_FILES } from "./brain";
 import { getDb } from "./db";
 import { appendRuntimeEvent } from "./events";
-import {
-  conflictPath,
-  deleteRepoFileFromGitHub,
-  hashContent,
-  upsertRepoFileSyncJob,
-  writeRepoFileToGitHub,
-} from "./repo-files";
+import { conflictPath, hashContent } from "./repo-files";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 
 const MAX_AGENT_BUNDLE_FILE_BYTES = MAX_BRAIN_FILE_BYTES;
@@ -101,7 +90,6 @@ export async function syncAgentBundleFromSandbox(input: {
   workspaceId: string;
   agentId: string;
   workdir: string;
-  repository?: WorkspaceRepository | null | undefined;
 }) {
   const db = getDb();
   const bundle = await loadAgentBundle(input.workspaceId, input.agentId);
@@ -172,7 +160,6 @@ export async function syncAgentBundleFromSandbox(input: {
       path: targetPath,
       content,
       contentHash: hash,
-      repository: input.repository,
     });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
@@ -232,7 +219,14 @@ export async function syncAgentBundleFromSandbox(input: {
     await db
       .delete(agentFiles)
       .where(and(eq(agentFiles.workspaceId, input.workspaceId), eq(agentFiles.path, mount.path)));
-    await deleteAgentFileFromGitHub(input.repository, mount.path, current?.githubBlobSha ?? null);
+    await enqueueWorkspaceSync(db, {
+      workspaceId: input.workspaceId,
+      repoPath: mount.path,
+      sourceKind: "agent_file",
+      operation: "delete",
+      desiredHash: null,
+      previousBlobSha: current?.githubBlobSha ?? null,
+    });
     await appendRuntimeEvent(db, {
       sessionId: input.sessionId,
       type: "agent_bundle.file_changed",
@@ -287,69 +281,18 @@ async function mountAgentBundleFile(input: {
     });
 }
 
+// Canonical-only writeback: persist the bundle file to Postgres and enqueue a
+// workspace sync job. GitHub projection is async via the unified projector.
 async function upsertAgentFileFromRunner(input: {
   workspaceId: string;
   agentId: string;
   path: string;
   content: string;
   contentHash: string;
-  repository?: WorkspaceRepository | null | undefined;
 }) {
   const db = getDb();
   const sizeBytes = Buffer.byteLength(input.content, "utf8");
-  let github = { commitSha: null as string | null, blobSha: null as string | null };
-  let shouldQueueSync = false;
-
-  try {
-    github = await writeRepoFileToGitHub(input.repository, input.path, input.content);
-    shouldQueueSync = !github.commitSha;
-  } catch (error) {
-    logger.warn("Queued agent bundle GitHub sync after immediate write failed", {
-      error,
-      workspace_id: input.workspaceId,
-      agent_id: input.agentId,
-      path: input.path,
-    });
-    shouldQueueSync = true;
-  }
-
   const now = new Date();
-  if (github.commitSha) {
-    await db
-      .insert(agentFiles)
-      .values({
-        workspaceId: input.workspaceId,
-        agentId: input.agentId,
-        path: input.path,
-        content: input.content,
-        contentHash: input.contentHash,
-        sizeBytes,
-        githubBlobSha: github.blobSha,
-        githubCommitSha: github.commitSha,
-        githubSyncedHash: input.contentHash,
-        githubSyncedAt: now,
-        githubSyncStatus: "synced",
-        githubSyncError: null,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [agentFiles.workspaceId, agentFiles.path],
-        set: {
-          agentId: input.agentId,
-          content: input.content,
-          contentHash: input.contentHash,
-          sizeBytes,
-          githubBlobSha: github.blobSha,
-          githubCommitSha: github.commitSha,
-          githubSyncedHash: input.contentHash,
-          githubSyncedAt: now,
-          githubSyncStatus: "synced",
-          githubSyncError: null,
-          updatedAt: now,
-        },
-      });
-    return;
-  }
 
   await db
     .insert(agentFiles)
@@ -377,40 +320,12 @@ async function upsertAgentFileFromRunner(input: {
       },
     });
 
-  if (shouldQueueSync) {
-    await upsertAgentFileSyncJob({
-      workspaceId: input.workspaceId,
-      path: input.path,
-      operation: "upsert",
-      desiredHash: input.contentHash,
-    });
-  }
-}
-
-async function deleteAgentFileFromGitHub(
-  repository: WorkspaceRepository | null | undefined,
-  path: string,
-  blobSha: string | null,
-) {
-  await deleteRepoFileFromGitHub(repository, path, blobSha);
-}
-
-async function upsertAgentFileSyncJob(input: {
-  workspaceId: string;
-  path: string;
-  operation: "upsert" | "delete";
-  desiredHash: string | null;
-  previousPath?: string | null;
-  previousBlobSha?: string | null;
-}) {
-  await upsertRepoFileSyncJob({
-    jobsTable: agentFileSyncJobs,
+  await enqueueWorkspaceSync(db, {
     workspaceId: input.workspaceId,
-    path: input.path,
-    operation: input.operation,
-    desiredHash: input.desiredHash,
-    previousPath: input.previousPath,
-    previousBlobSha: input.previousBlobSha,
+    repoPath: input.path,
+    sourceKind: "agent_file",
+    operation: "upsert",
+    desiredHash: input.contentHash,
   });
 }
 

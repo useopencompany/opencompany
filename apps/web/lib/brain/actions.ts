@@ -1,14 +1,46 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { brainFiles, brainSyncJobs } from "@opencompany/db/schema";
+import { brainFiles, workspaceSyncJobs } from "@opencompany/db/schema";
+import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
-import { brainSyncJobUpsert, resolveBrainSyncRename } from "@/lib/brain/jobs";
-import { isBrainTextFile, MAX_BRAIN_FILE_BYTES, normalizeBrainPath } from "@/lib/brain/paths";
-import { scheduleBrainSyncDispatch } from "@/lib/brain/sync-dispatch";
+import { resolveBrainSyncRename } from "@/lib/brain/jobs";
+import {
+  isBrainTextFile,
+  MAX_BRAIN_FILE_BYTES,
+  normalizeBrainPath,
+  workspaceBrainPath,
+} from "@/lib/brain/paths";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-state/sync-dispatch";
+
+// Brain edits are projected through the unified workspace outbox. `path` is the
+// logical brain path (converted to the full brain/<path> repo path here);
+// `previousRepoPath` (for renames) is already a full repo path so the projector
+// emits the delete tree entry directly.
+function enqueueBrainSync(
+  db: ReturnType<typeof getDb>,
+  input: {
+    workspaceId: string;
+    path: string;
+    operation: "upsert" | "delete";
+    desiredHash: string | null;
+    previousRepoPath?: string | null;
+    previousBlobSha?: string | null;
+  },
+) {
+  return enqueueWorkspaceSync(db, {
+    workspaceId: input.workspaceId,
+    repoPath: workspaceBrainPath(input.path),
+    sourceKind: "brain",
+    operation: input.operation,
+    desiredHash: input.desiredHash,
+    previousPath: input.previousRepoPath ?? null,
+    previousBlobSha: input.previousBlobSha ?? null,
+  });
+}
 
 type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
 
@@ -48,16 +80,21 @@ export async function renameBrainFile(
 
     const [existingRenameJob] = await db
       .select({
-        previousPath: brainSyncJobs.previousPath,
-        previousBlobSha: brainSyncJobs.previousBlobSha,
+        previousPath: workspaceSyncJobs.previousPath,
+        previousBlobSha: workspaceSyncJobs.previousBlobSha,
       })
-      .from(brainSyncJobs)
-      .where(and(eq(brainSyncJobs.workspaceId, workspace.id), eq(brainSyncJobs.path, from)))
+      .from(workspaceSyncJobs)
+      .where(
+        and(
+          eq(workspaceSyncJobs.workspaceId, workspace.id),
+          eq(workspaceSyncJobs.repoPath, workspaceBrainPath(from)),
+        ),
+      )
       .limit(1);
     const rename = resolveBrainSyncRename({
       existingPreviousPath: existingRenameJob?.previousPath,
       existingPreviousBlobSha: existingRenameJob?.previousBlobSha,
-      renamePreviousPath: from,
+      renamePreviousPath: workspaceBrainPath(from),
       renamePreviousBlobSha: existing.githubBlobSha,
     });
 
@@ -82,17 +119,17 @@ export async function renameBrainFile(
       db
         .delete(brainFiles)
         .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, from))),
-      brainSyncJobUpsert(db, {
+      enqueueBrainSync(db, {
         workspaceId: workspace.id,
         path: to,
         operation: "upsert",
         desiredHash: existing.contentHash,
-        previousPath: rename.previousPath,
+        previousRepoPath: rename.previousPath,
         previousBlobSha: rename.previousBlobSha,
       }),
     ]);
 
-    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: to });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: to };
   } catch (error) {
@@ -143,13 +180,13 @@ export async function renameBrainFolder(
 
     const existingRenameJobs = await db
       .select({
-        path: brainSyncJobs.path,
-        previousPath: brainSyncJobs.previousPath,
-        previousBlobSha: brainSyncJobs.previousBlobSha,
+        repoPath: workspaceSyncJobs.repoPath,
+        previousPath: workspaceSyncJobs.previousPath,
+        previousBlobSha: workspaceSyncJobs.previousBlobSha,
       })
-      .from(brainSyncJobs)
-      .where(eq(brainSyncJobs.workspaceId, workspace.id));
-    const jobByPath = new Map(existingRenameJobs.map((job) => [job.path, job]));
+      .from(workspaceSyncJobs)
+      .where(eq(workspaceSyncJobs.workspaceId, workspace.id));
+    const jobByRepoPath = new Map(existingRenameJobs.map((job) => [job.repoPath, job]));
     const now = new Date();
 
     await db.batch([
@@ -171,27 +208,25 @@ export async function renameBrainFolder(
           .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, file.path))),
       ),
       ...movedFiles.map(({ file, path }) => {
-        const existingRenameJob = jobByPath.get(file.path);
+        const existingRenameJob = jobByRepoPath.get(workspaceBrainPath(file.path));
         const rename = resolveBrainSyncRename({
           existingPreviousPath: existingRenameJob?.previousPath,
           existingPreviousBlobSha: existingRenameJob?.previousBlobSha,
-          renamePreviousPath: file.path,
+          renamePreviousPath: workspaceBrainPath(file.path),
           renamePreviousBlobSha: file.githubBlobSha,
         });
-        return brainSyncJobUpsert(db, {
+        return enqueueBrainSync(db, {
           workspaceId: workspace.id,
           path,
           operation: "upsert",
           desiredHash: file.contentHash,
-          previousPath: rename.previousPath,
+          previousRepoPath: rename.previousPath,
           previousBlobSha: rename.previousBlobSha,
         });
       }),
     ]);
 
-    for (const move of movedFiles) {
-      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: move.path });
-    }
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: to };
   } catch (error) {
@@ -215,7 +250,7 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
       db
         .delete(brainFiles)
         .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, normalized))),
-      brainSyncJobUpsert(db, {
+      enqueueBrainSync(db, {
         workspaceId: workspace.id,
         path: normalized,
         operation: "delete",
@@ -224,7 +259,7 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
       }),
     ]);
 
-    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: normalized });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: normalized };
   } catch (error) {
@@ -252,7 +287,7 @@ export async function deleteBrainFolder(path: string): Promise<BrainActionResult
       db
         .delete(brainFiles)
         .where(and(eq(brainFiles.workspaceId, workspace.id), eq(brainFiles.path, file.path))),
-      brainSyncJobUpsert(db, {
+      enqueueBrainSync(db, {
         workspaceId: workspace.id,
         path: file.path,
         operation: "delete",
@@ -265,9 +300,7 @@ export async function deleteBrainFolder(path: string): Promise<BrainActionResult
 
     await db.batch([firstDeleteQuery, ...deleteQueries.slice(1)]);
 
-    for (const file of deletedFiles) {
-      scheduleBrainSyncDispatch({ workspaceId: workspace.id, path: file.path });
-    }
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path: folderPath };
   } catch (error) {
@@ -319,7 +352,7 @@ async function upsertBrainFile(input: {
               updatedAt: now,
             },
           }),
-      brainSyncJobUpsert(db, {
+      enqueueBrainSync(db, {
         workspaceId: workspace.id,
         path,
         operation: "upsert",
@@ -327,7 +360,7 @@ async function upsertBrainFile(input: {
       }),
     ]);
 
-    scheduleBrainSyncDispatch({ workspaceId: workspace.id, path });
+    scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
     revalidatePath("/brain");
     return { ok: true, path };
   } catch (error) {
