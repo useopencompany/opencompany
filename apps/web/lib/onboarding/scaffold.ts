@@ -8,11 +8,10 @@ import {
   buildPendingAgent,
   logAgentSyncJobQueued,
   prepareAgentSyncJobUpsert,
-  scheduleAgentSyncDispatch,
 } from "@/lib/agents/create";
-import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
 import { agentFileSyncJobUpsert } from "@/lib/agents/sync-job";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-state/sync-dispatch";
 
 const DEFAULT_USER_AGENT_TITLE = "leo";
 const DEFAULT_USER_AGENT_PATH = agentPathForSlug(DEFAULT_USER_AGENT_TITLE);
@@ -116,12 +115,7 @@ export async function ensureUserOnboardingScaffold(input: { userId: string; work
     agent_id: pending.id,
   });
 
-  scheduleAgentSyncDispatch({
-    id: pending.id,
-    workspaceId: input.workspaceId,
-    path: DEFAULT_USER_AGENT_PATH,
-  });
-  scheduleAgentFileSyncDispatch({ workspaceId: input.workspaceId, path: soulPath });
+  scheduleWorkspaceSyncDispatch({ workspaceId: input.workspaceId });
 
   return {
     created: true as const,

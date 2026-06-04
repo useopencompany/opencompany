@@ -1,13 +1,12 @@
 import { parseAgentFile, serializeAgentFile } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { getDb } from "@opencompany/db/client";
-import { agentSyncJobs, agents } from "@opencompany/db/schema";
-import { captureException, createLogger } from "@opencompany/observability";
+import { agents } from "@opencompany/db/schema";
+import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
+import { createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
-import { after } from "next/server";
 import { hashAgentSource } from "@/lib/agents/hash";
 import { resolveAgentPath } from "@/lib/agents/paths";
-import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 const AGENT_SYNC_DISPATCH_DELAY_MS = 10_000;
@@ -102,38 +101,29 @@ export function buildPendingAgent(input: {
   };
 }
 
+// Enqueues the agent .agent definition into the unified workspace projection
+// outbox. The agent is identified by sourceRef (agentId) because its repo path
+// can change within a coalesce window; the projector re-serializes from the
+// agents row at projection time.
 export function prepareAgentSyncJobUpsert(
-  db: Pick<ReturnType<typeof getDb>, "insert">,
+  db: ReturnType<typeof getDb>,
   input: AgentSyncJobInput,
   options: { now?: Date } = {},
 ) {
   const now = options.now ?? new Date();
   const nextRunAt = new Date(now.getTime() + AGENT_SYNC_DISPATCH_DELAY_MS);
-  const query = db
-    .insert(agentSyncJobs)
-    .values({
-      ...input,
-      status: "pending",
-      attempts: 0,
-      nextRunAt,
-      lastError: null,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: agentSyncJobs.agentId,
-      set: {
-        path: input.path,
-        desiredHash: input.desiredHash,
-        desiredVersion: input.desiredVersion,
-        previousPath: input.previousPath,
-        previousBlobSha: input.previousBlobSha,
-        status: "pending",
-        attempts: 0,
-        nextRunAt,
-        lastError: null,
-        updatedAt: now,
-      },
-    });
+  const query = enqueueWorkspaceSync(db, {
+    workspaceId: input.workspaceId,
+    repoPath: input.path,
+    sourceKind: "agent",
+    sourceRef: input.agentId,
+    operation: "upsert",
+    desiredHash: input.desiredHash,
+    previousPath: input.previousPath,
+    previousBlobSha: input.previousBlobSha,
+    delayMs: AGENT_SYNC_DISPATCH_DELAY_MS,
+    now,
+  });
 
   return {
     query,
@@ -155,56 +145,4 @@ export function logAgentSyncJobQueued(metadata: AgentSyncJobQueueMetadata) {
     event: "opencompany.agent_sync_job_queued",
     ...metadata,
   });
-}
-
-export function scheduleAgentSyncDispatch(input: {
-  id: string;
-  workspaceId: string;
-  path?: string | null;
-}) {
-  after(async () => {
-    try {
-      const result = await dispatchAgentSyncRequested({
-        agentId: input.id,
-        workspaceId: input.workspaceId,
-      });
-      logger.info("Dispatched agent GitHub sync event", {
-        event: "opencompany.agent_sync_dispatch_succeeded",
-        agent_id: input.id,
-        workspace_id: input.workspaceId,
-        path: input.path ?? null,
-        inngest_event_ids: result.ids,
-      });
-    } catch (error) {
-      captureException(error, {
-        event: "opencompany.agent_sync_dispatch_failed",
-        agent_id: input.id,
-        workspace_id: input.workspaceId,
-        path: input.path ?? null,
-        dispatch_status_marked_failed: false,
-      });
-      logger.error("Failed to dispatch agent GitHub sync event", {
-        event: "opencompany.agent_sync_dispatch_failed",
-        agent_id: input.id,
-        workspace_id: input.workspaceId,
-        path: input.path ?? null,
-        dispatch_status_marked_failed: false,
-        ...errorLogFields(error),
-      });
-    }
-  });
-}
-
-function errorLogFields(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      error_name: error.name,
-      error_message: error.message,
-    };
-  }
-
-  return {
-    error_name: typeof error,
-    error_message: typeof error === "string" ? error : "Unknown error",
-  };
 }
