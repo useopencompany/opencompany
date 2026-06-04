@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes } from "node:crypto";
 import { createMCPClient } from "@ai-sdk/mcp";
-import { type AgentConfig, policyMapKey, resolveToolDecision } from "@opencompany/agent-runtime";
+import { type AgentConfig, resolveToolDecision } from "@opencompany/agent-runtime";
 import { jsonSchema, type ToolSet } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpToolSet } from "./mcp-tools";
@@ -184,9 +184,11 @@ describe("createMcpToolSet", () => {
     const mcpTools = await createMcpToolSet(baseInput(mixedConfig));
     const tools = mcpTools.tools as ToolSet;
 
-    // Linear degrades to a stub, Slack builds its real tool.
+    // Linear degrades to a stub, Slack exposes its two lazy meta-tools (not slack__search).
     expect(tools.linear__get_connection_status).toBeDefined();
-    expect(tools.slack__search).toBeDefined();
+    expect(tools.slack__search_tools).toBeDefined();
+    expect(tools.slack__use_tool).toBeDefined();
+    expect(tools.slack__search).toBeUndefined();
 
     const stubOutput = await tools.linear__get_connection_status?.execute?.(
       {},
@@ -225,7 +227,7 @@ describe("createMcpToolSet", () => {
     expect(observability.captureException).not.toHaveBeenCalled();
   });
 
-  it("wraps discovered Linear MCP tools with runtime lifecycle writes", async () => {
+  it("dispatches a named tool through the lazy use_tool meta-tool", async () => {
     const execute = vi.fn(async () => ({ identifier: "OC-123" }));
     db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
@@ -243,77 +245,112 @@ describe("createMcpToolSet", () => {
 
     const toolStartCoordinator = createToolStartCoordinator();
     const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
-    const linearTool = (mcpTools.tools as ToolSet).linear__create_issue;
-    await linearTool?.onInputAvailable?.({
-      input: { title: "Fix login" },
+    // The raw tool is never exposed to the model — only the two meta-tools are.
+    expect((mcpTools.tools as ToolSet).linear__create_issue).toBeUndefined();
+    const useTool = (mcpTools.tools as ToolSet).linear__use_tool;
+    const useInput = { tool: "create_issue", arguments: { title: "Fix login" } };
+    await useTool?.onInputAvailable?.({
+      input: useInput,
       toolCallId: "call_123",
       messages: [],
       abortSignal: new AbortController().signal,
     });
     expect(toolStartCoordinator.read("call_123")).toEqual({
       toolCallId: "call_123",
-      name: "linear__create_issue",
-      input: { title: "Fix login" },
+      name: "linear__use_tool",
+      input: useInput,
     });
     toolStartCoordinator.markStarted("call_123");
-    const output = await linearTool?.execute?.(
-      { title: "Fix login" },
-      {
-        toolCallId: "call_123",
-        messages: [],
-        abortSignal: new AbortController().signal,
-      },
-    );
+    const output = await useTool?.execute?.(useInput, {
+      toolCallId: "call_123",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
 
     expect(output).toEqual({ identifier: "OC-123" });
+    // The underlying tool receives only its own arguments, not the use_tool envelope.
     expect(execute).toHaveBeenCalledWith({ title: "Fix login" }, { toolCallId: "call_123" });
-    expect(leaseWrites.appendRuntimeEventForLease).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "tool.started" }),
-    );
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
       expect.objectContaining({ type: "tool.completed" }),
     );
+    // The persisted tool-result keeps the invoke name so it pairs with the model's call.
     expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
-      expect.objectContaining({ toolName: "linear__create_issue", toolCallId: "call_123" }),
+      expect.objectContaining({ toolName: "linear__use_tool", toolCallId: "call_123" }),
     );
 
     await mcpTools.close();
     expect(mcpClient.close).toHaveBeenCalled();
   });
 
-  it("annotates discovered Linear MCP tools with effective workspace policy", async () => {
+  it("lists the server's tools through the search_tools meta-tool", async () => {
     db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({
-      tools: [{ name: "list_teams" }, { name: "create_issue" }],
+      tools: [
+        { name: "list_teams", description: "List Linear teams", inputSchema: { type: "object" } },
+        {
+          name: "create_issue",
+          description: "Create a Linear issue",
+          inputSchema: { type: "object" },
+        },
+      ],
     } as never);
     mcpClient.toolsFromDefinitions.mockReturnValueOnce({
-      list_teams: {
-        description: "List Linear teams",
-        inputSchema: jsonSchema({ type: "object", properties: {} }),
-        execute: vi.fn(),
-      },
-      create_issue: {
-        description: "Create a Linear issue",
-        inputSchema: jsonSchema({ type: "object", properties: {} }),
-        execute: vi.fn(),
-      },
+      list_teams: { description: "List Linear teams", execute: vi.fn() },
+      create_issue: { description: "Create a Linear issue", execute: vi.fn() },
     });
 
-    const mcpTools = await createMcpToolSet(
-      baseInput(agentConfig, createToolStartCoordinator(), {
-        policy: new Map([
-          [policyMapKey("linear", "read"), "ask"],
-          [policyMapKey("linear", "post"), "deny"],
-          [policyMapKey("linear", "modify"), "deny"],
-          [policyMapKey("linear", "admin"), "deny"],
-        ]),
-        suspendable: true,
-      }),
-    );
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
+    const searchTool = (mcpTools.tools as ToolSet).linear__search_tools;
+    await searchTool?.onInputAvailable?.({
+      input: { query: "issue" },
+      toolCallId: "call_search",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_search");
+    const output = (await searchTool?.execute?.(
+      { query: "issue" },
+      { toolCallId: "call_search", messages: [], abortSignal: new AbortController().signal },
+    )) as { ok: boolean; server: string; useTool: string; tools: { name: string }[] };
 
-    const tools = mcpTools.tools as Record<string, { description?: string }>;
-    expect(tools.linear__list_teams?.description).toContain("Permission: Read (ask first).");
-    expect(tools.linear__create_issue?.description).toContain("Permission: Post (deny).");
+    expect(output.ok).toBe(true);
+    expect(output.server).toBe("linear");
+    expect(output.useTool).toBe("linear__use_tool");
+    // The "issue" query filters down to create_issue.
+    expect(output.tools.map((entry) => entry.name)).toEqual(["create_issue"]);
+
+    await mcpTools.close();
+  });
+
+  it("returns a recoverable error when use_tool names an unknown tool", async () => {
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      create_issue: { description: "Create a Linear issue", execute: vi.fn() },
+    });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
+    const useTool = (mcpTools.tools as ToolSet).linear__use_tool;
+    const useInput = { tool: "delete_everything", arguments: {} };
+    await useTool?.onInputAvailable?.({
+      input: useInput,
+      toolCallId: "call_unknown",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_unknown");
+    const output = await useTool?.execute?.(useInput, {
+      toolCallId: "call_unknown",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+
+    expect(output).toMatchObject({
+      ok: false,
+      error: { code: "mcp_tool_execution_failed", recoverable: true },
+    });
 
     await mcpTools.close();
   });
@@ -338,22 +375,20 @@ describe("createMcpToolSet", () => {
 
     const toolStartCoordinator = createToolStartCoordinator();
     const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
-    const linearTool = (mcpTools.tools as ToolSet).linear__create_issue;
-    await linearTool?.onInputAvailable?.({
-      input: { title: "Fix login" },
+    const useTool = (mcpTools.tools as ToolSet).linear__use_tool;
+    const useInput = { tool: "create_issue", arguments: { title: "Fix login" } };
+    await useTool?.onInputAvailable?.({
+      input: useInput,
       toolCallId: "call_123",
       messages: [],
       abortSignal: new AbortController().signal,
     });
     toolStartCoordinator.markStarted("call_123");
-    const output = await linearTool?.execute?.(
-      { title: "Fix login" },
-      {
-        toolCallId: "call_123",
-        messages: [],
-        abortSignal: new AbortController().signal,
-      },
-    );
+    const output = await useTool?.execute?.(useInput, {
+      toolCallId: "call_123",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
 
     expect(output).toMatchObject({
       ok: false,
@@ -366,7 +401,7 @@ describe("createMcpToolSet", () => {
           session_id: "ses_123",
           message_id: "msg_123",
           tool_call_id: "call_123",
-          tool_name: "linear__create_issue",
+          tool_name: "linear__use_tool",
           mcp_server: "linear",
           mcp_tool_name: "create_issue",
         }),
@@ -423,27 +458,25 @@ describe("createMcpToolSet", () => {
 
     const toolStartCoordinator = createToolStartCoordinator();
     const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig, toolStartCoordinator));
-    const slackTool = (mcpTools.tools as ToolSet).slack__search;
+    const slackTool = (mcpTools.tools as ToolSet).slack__use_tool;
+    const useInput = { tool: "search", arguments: { query: "launch" } };
     await slackTool?.onInputAvailable?.({
-      input: { query: "launch" },
+      input: useInput,
       toolCallId: "call_slack",
       messages: [],
       abortSignal: new AbortController().signal,
     });
     toolStartCoordinator.markStarted("call_slack");
-    const output = await slackTool?.execute?.(
-      { query: "launch" },
-      {
-        toolCallId: "call_slack",
-        messages: [],
-        abortSignal: new AbortController().signal,
-      },
-    );
+    const output = await slackTool?.execute?.(useInput, {
+      toolCallId: "call_slack",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
 
     expect(output).toEqual({ messages: [{ text: "hello" }] });
     expect(execute).toHaveBeenCalledWith({ query: "launch" }, { toolCallId: "call_slack" });
     expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
-      expect.objectContaining({ toolName: "slack__search", toolCallId: "call_slack" }),
+      expect.objectContaining({ toolName: "slack__use_tool", toolCallId: "call_slack" }),
     );
     expect(createMCPClient).toHaveBeenCalledWith(
       expect.objectContaining({

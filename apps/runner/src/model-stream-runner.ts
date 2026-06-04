@@ -253,6 +253,9 @@ export async function collectAssistantStream(input: {
         // verdict we attach via markStarted() decides whether the real body runs.
         const { decision, providerKey, group } = resolveToolDecision({
           toolName: toolStart.name,
+          // Gate the lazy MCP invoke tool by the real action in its `tool` argument, not
+          // the generic `{server}__use_tool` name (which carries no verb to classify).
+          toolInput: toolStart.input,
           policy: input.policy,
           suspendable: input.suspendable,
         });

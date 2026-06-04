@@ -6,6 +6,7 @@ import {
   classifyRuntimeTool,
   classifyTool,
   formatWorkspaceToolPolicyContext,
+  mcpInvokeEffectiveToolName,
   policyMapKey,
   resolveToolDecision,
   type WorkspaceToolPolicyMap,
@@ -210,6 +211,60 @@ describe("resolveToolDecision", () => {
       resolveToolDecision({ toolName: "slack__search", policy: empty, suspendable: false })
         .decision,
     ).toBe("allow");
+  });
+
+  // The lazy MCP invoke tool `{server}__use_tool` carries the real action in its `tool`
+  // argument, so the gate must classify by that — not the generic invoke name.
+  it("gates the lazy MCP invoke tool by its `tool` argument", () => {
+    // A read tool routed through use_tool stays allowed.
+    expect(
+      resolveToolDecision({
+        toolName: "slack__use_tool",
+        toolInput: { tool: "search", arguments: { query: "launch" } },
+        policy: empty,
+        suspendable: true,
+      }),
+    ).toMatchObject({ decision: "allow", providerKey: "slack", group: "read" });
+
+    // A write tool routed through use_tool still hits its write gate.
+    expect(
+      resolveToolDecision({
+        toolName: "slack__use_tool",
+        toolInput: { tool: "chat_postMessage", arguments: {} },
+        policy: empty,
+        suspendable: true,
+      }),
+    ).toMatchObject({ decision: "ask", providerKey: "slack", group: "post" });
+  });
+
+  it("gates an invoke call with no usable `tool` argument conservatively as admin", () => {
+    // No verb to classify → admin fallback → gated (default admin stance is "ask").
+    const decision = resolveToolDecision({
+      toolName: "slack__use_tool",
+      toolInput: { arguments: {} },
+      policy: empty,
+      suspendable: true,
+    });
+    expect(decision.group).toBe("admin");
+    expect(decision.decision).not.toBe("allow");
+  });
+});
+
+describe("mcpInvokeEffectiveToolName", () => {
+  it("rewrites a use_tool call to the real action name", () => {
+    expect(mcpInvokeEffectiveToolName("slack__use_tool", { tool: "chat_postMessage" })).toBe(
+      "slack__chat_postMessage",
+    );
+  });
+
+  it("leaves non-invoke and unparseable tool names unchanged", () => {
+    expect(mcpInvokeEffectiveToolName("slack__search_tools", { query: "x" })).toBe(
+      "slack__search_tools",
+    );
+    expect(mcpInvokeEffectiveToolName("shell", { command: "ls" })).toBe("shell");
+    // Missing/blank tool arg keeps the invoke name so it classifies as the admin fallback.
+    expect(mcpInvokeEffectiveToolName("slack__use_tool", {})).toBe("slack__use_tool");
+    expect(mcpInvokeEffectiveToolName("slack__use_tool", { tool: "  " })).toBe("slack__use_tool");
   });
 });
 
