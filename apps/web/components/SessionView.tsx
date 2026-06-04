@@ -32,7 +32,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useId,
@@ -48,7 +47,6 @@ import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
-import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -62,16 +60,9 @@ import {
 } from "@/lib/agent-sessions/actions";
 import {
   type AgentSessionDetailPayload,
-  addUserMessageToSessionDetail,
-  applyRuntimeEventToSessionDetail,
   fetchAgentSession,
-  fetchSessionStreamCredential,
-  invalidateRelatedCachesForSessionEvent,
-  mergeAgentSessionDetail,
   SESSIONS_QUERY_STALE_TIME_MS,
-  seedSessionQueries,
   sessionQueryKeys,
-  updateSessionStatusInDetail,
 } from "@/lib/agent-sessions/payload";
 import {
   type AssistantTurnPart,
@@ -95,15 +86,11 @@ import {
   type SlashCommand,
 } from "@/lib/slash-commands/registry";
 
-// Phase 3 cutover flag. When set, the live transcript is materialized from the
-// session's Durable Stream (plane B) instead of the raw-SSE + React-Query path.
-// Off by default so the legacy path stays primary until the stream round-trip is
-// verified end-to-end; requires the runner + read proxy to be configured.
-const DURABLE_STREAMS_ENABLED = process.env.NEXT_PUBLIC_DURABLE_STREAMS === "1";
+// A turn has settled (no more streaming) — trigger an aggregates refresh.
+const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
-const STREAM_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 // How far from the bottom (in px) before we consider the user "pinned".
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -139,7 +126,6 @@ const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   const { workspaceId } = useWorkspaceContext();
-  const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
   const {
     data: detail,
@@ -149,14 +135,10 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     isRefetching,
   } = useQuery({
     queryKey: detailKey,
-    queryFn: async () => {
-      const incoming = await fetchAgentSession(sessionId);
-      if (incoming === null) return null;
-      return mergeAgentSessionDetail(
-        queryClient.getQueryData<AgentSessionDetailPayload>(detailKey) ?? undefined,
-        incoming,
-      );
-    },
+    // The transcript (messages/events/status) is live from the Durable Stream; this
+    // query supplies session meta, related sessions, and the usage/cost aggregates,
+    // and is refetched on turn completion to refresh those aggregates.
+    queryFn: () => fetchAgentSession(sessionId),
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
   });
 
@@ -219,17 +201,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const queryClient = useQueryClient();
   const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
-  const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
-  const { data: streamCredential } = useQuery({
-    queryKey: streamCredentialKey,
-    queryFn: () => fetchSessionStreamCredential(session.id),
-    enabled: Boolean(detail.runnerUrl),
-    staleTime: 55 * 60 * 1000,
-  });
-  const runnerUrl = streamCredential?.runnerUrl ?? detail.runnerUrl;
-  const streamToken = streamCredential?.streamToken ?? null;
   const relatedSessionCount = relatedCount(detail.related);
   const previousRelatedSessionCountRef = useRef(relatedSessionCount);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
@@ -267,29 +240,57 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Plane B: materialize the live transcript from the session's Durable Stream.
-  // No-op (returns empty state) unless the cutover flag is on.
-  const { state: streamState } = useSessionStream(session.id, {
-    enabled: DURABLE_STREAMS_ENABLED,
+  // Felt time-to-first-token: stamped at the Send click, resolved when the first
+  // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
+  const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
+  // Plane B: the live transcript is materialized from the session's Durable Stream
+  // (durable rows + transient token deltas) through the shared reducer. `onEvent`
+  // resolves the felt-TTFT timer on the first streamed assistant activity.
+  const { state: streamState, status: streamStatus } = useSessionStream(session.id, {
+    onEvent: (event) => {
+      const pending = pendingTtftRef.current;
+      if (
+        pending &&
+        (event.type === "message.delta" ||
+          event.type === "message.reasoning_delta" ||
+          event.type === "message.reasoning_started")
+      ) {
+        if (pending.messageId) {
+          captureEvent("session_first_token", {
+            workspace_id: workspaceId,
+            agent_id: session.agentId,
+            session_id: session.id,
+            message_id: pending.messageId,
+            model_provider: session.modelProvider,
+            model_name: session.modelName,
+            ttft_ms: Math.round(performance.now() - pending.startedAt),
+            first_token_kind: event.type === "message.delta" ? "text" : "reasoning",
+          });
+        }
+        pendingTtftRef.current = null;
+      } else if (pending && event.type === "message.completed") {
+        // Turn ended without ever streaming a delta — drop the stuck timer.
+        pendingTtftRef.current = null;
+      }
+    },
   });
   const runtime = useMemo(() => {
-    // The aggregates (usage/cost/toolUsage) stay server-sourced (the recursive
-    // session-tree rollup isn't reproduced client-side — D2 decision).
+    // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
+    // session-tree rollup isn't reproduced client-side (D2); refreshed on
+    // completion via the effect below.
     const aggregates = { usage: detail.usage, toolUsage: detail.toolUsage, cost: detail.cost };
-    if (DURABLE_STREAMS_ENABLED) {
-      // Until the stream has replayed its history, fall back to the server snapshot
-      // so the transcript paints instantly with no empty flash; then the live
-      // stream takes over.
-      const streamReady = streamState.events.length > 0 || streamState.messages.length > 0;
-      if (streamReady) {
-        return {
-          events: streamState.events,
-          messages: streamState.messages,
-          ...aggregates,
-          currentStatus: streamState.currentStatus,
-          lastError: streamState.lastError,
-        };
-      }
+    // Until the stream has replayed its history, fall back to the server snapshot
+    // so the transcript paints instantly with no empty flash; then the live stream
+    // takes over.
+    const streamReady = streamState.events.length > 0 || streamState.messages.length > 0;
+    if (streamReady) {
+      return {
+        events: streamState.events,
+        messages: streamState.messages,
+        ...aggregates,
+        currentStatus: streamState.currentStatus,
+        lastError: streamState.lastError,
+      };
     }
     return {
       events: detail.events,
@@ -299,10 +300,17 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: detail.session.lastError,
     };
   }, [detail, streamState]);
-  const knownEventIds = useMemo(
-    () => runtime.events.flatMap((event) => (typeof event.id === "number" ? [event.id] : [])),
-    [runtime.events],
-  );
+  // Refresh the server aggregates once a turn reaches a terminal state (the stream
+  // drives the transcript, but usage/cost come from the detail query).
+  const lastSettledStatusRef = useRef(runtime.currentStatus);
+  useEffect(() => {
+    const previous = lastSettledStatusRef.current;
+    const current = runtime.currentStatus;
+    lastSettledStatusRef.current = current;
+    if (previous !== current && TERMINAL_SESSION_STATUSES.has(current)) {
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+    }
+  }, [runtime.currentStatus, detailKey, queryClient]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -436,9 +444,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   };
 
   const waitStartedAtRef = useRef<number | null>(null);
-  // Felt time-to-first-token: stamped at the Send click, resolved when the first
-  // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
-  const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
   const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
   useEffect(() => {
     const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
@@ -464,105 +469,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       const result = await abortAgentSession(session.id);
       if (!result.ok) {
         showError(result.error, "Could not abort session");
-        return;
       }
-      queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
-        current ? updateSessionStatusInDetail(current, "aborting") : current,
-      );
+      // The "aborting" status arrives via the stream (the action appends it), so
+      // there is no optimistic cache write here.
     });
   };
-
-  const applyRuntimeEvent = useCallback(
-    (event: RuntimeEvent) => {
-      // Felt TTFT: the first visible assistant activity (text or reasoning) ends the timer.
-      const pending = pendingTtftRef.current;
-      if (
-        pending &&
-        (event.type === "message.delta" ||
-          event.type === "message.reasoning_delta" ||
-          event.type === "message.reasoning_started")
-      ) {
-        if (pending.messageId) {
-          captureEvent("session_first_token", {
-            workspace_id: workspaceId,
-            agent_id: session.agentId,
-            session_id: session.id,
-            message_id: pending.messageId,
-            model_provider: session.modelProvider,
-            model_name: session.modelName,
-            ttft_ms: Math.round(performance.now() - pending.startedAt),
-            first_token_kind: event.type === "message.delta" ? "text" : "reasoning",
-          });
-        }
-        pendingTtftRef.current = null;
-      } else if (pendingTtftRef.current && event.type === "message.completed") {
-        // Turn ended without ever streaming a delta — drop the stuck timer.
-        pendingTtftRef.current = null;
-      }
-
-      const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
-      if (!current) return;
-      const next = applyRuntimeEventToSessionDetail(current, event);
-      seedSessionQueries(queryClient, workspaceId, next);
-      invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event, {
-        sessionId: session.id,
-      });
-      if (
-        event.type === "message.completed" ||
-        event.type === "tool.completed" ||
-        event.type === "tool.failed"
-      ) {
-        void queryClient.invalidateQueries({ queryKey: detailKey });
-      }
-    },
-    [
-      detailKey,
-      queryClient,
-      workspaceId,
-      session.agentId,
-      session.id,
-      session.modelProvider,
-      session.modelName,
-    ],
-  );
-
-  const refetchSessionDetail = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: detailKey });
-  }, [detailKey, queryClient]);
-
-  // When the Durable Streams cutover is on, the transcript comes from the stream
-  // (above) — disable the raw-SSE channel by withholding the runner URL so this
-  // hook stays inert (it no-ops without a runnerUrl/streamToken).
-  const stream = useSessionEventStream({
-    runnerUrl: DURABLE_STREAMS_ENABLED ? null : runnerUrl,
-    streamToken: DURABLE_STREAMS_ENABLED ? null : streamToken,
-    sessionId: session.id,
-    knownEventIds,
-    onEvent: applyRuntimeEvent,
-    onOpen: refetchSessionDetail,
-  });
-
-  // Data-freshness staleness detection: derive the timestamp of the last runtime event
-  // from runtime.events and compare against a ticked `now` so the stale banner triggers
-  // even when SSE reconnects keep flipping stream.status away from "stale".
-  const STALE_THRESHOLD_MS = 45_000;
-  const [now, setNow] = useState<number>(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, []);
-  const lastRuntimeActivityMs = useMemo(() => {
-    const last = runtime.events.at(-1);
-    if (last?.createdAt) return Date.parse(last.createdAt);
-    return Date.parse(detail.session.updatedAt);
-  }, [runtime.events, detail.session.updatedAt]);
-  const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
-  const sessionFeedsLooksStale =
-    awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
-  // Used only to gate silent background recovery and to surface status in the inspector's
-  // Runtime section — there is intentionally no user-facing banner for this in the chat UX.
-  const connectionLooksStale =
-    awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -588,85 +499,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
 
-  // Stale stream/data means the browser may have missed durable events while the tab was
-  // backgrounded or connected to a runner that did not own the active job. Refresh the canonical
-  // detail so persisted completions appear without a manual page reload.
-  const lastRecoveryRefetchAtRef = useRef(0);
-  const refetchSessionProgress = useCallback(
-    ({
-      refreshStreamCredential = false,
-      ignoreRecoveryThrottle = false,
-    }: {
-      refreshStreamCredential?: boolean;
-      ignoreRecoveryThrottle?: boolean;
-    } = {}) => {
-      if (!awaitingAssistantWork) return;
-      const currentTime = Date.now();
-      if (
-        !ignoreRecoveryThrottle &&
-        currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS
-      ) {
-        return;
-      }
-      lastRecoveryRefetchAtRef.current = currentTime;
-      if (refreshStreamCredential) {
-        void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-      }
-      void queryClient.invalidateQueries({ queryKey: detailKey });
-    },
-    [awaitingAssistantWork, detailKey, queryClient, streamCredentialKey],
-  );
-
-  useEffect(() => {
-    if (!connectionLooksStale) return;
-    refetchSessionProgress({
-      refreshStreamCredential: stream.status === "stale",
-      ignoreRecoveryThrottle: stream.status === "stale",
-    });
-  }, [refetchSessionProgress, connectionLooksStale, stream.status]);
-
-  useEffect(() => {
-    // Keep credentials fresh whenever the SSE stream stays live: both while the assistant
-    // is actively working AND while the run is durably paused at a tool gate
-    // (`awaiting_approval`). A paused session keeps its stream open, so without this its
-    // token would silently expire and reconnects would retry expired URLs.
-    if ((!awaitingAssistantWork && !sessionIsPaused) || !streamCredential?.streamTokenExpiresAt)
-      return;
-    const refreshInMs = Math.max(
-      streamCredential.streamTokenExpiresAt - Date.now() - STREAM_TOKEN_REFRESH_BUFFER_MS,
-      0,
-    );
-    const timer = window.setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-    }, refreshInMs);
-    return () => window.clearTimeout(timer);
-  }, [
-    awaitingAssistantWork,
-    sessionIsPaused,
-    queryClient,
-    streamCredential?.streamTokenExpiresAt,
-    streamCredentialKey,
-  ]);
-
-  useEffect(() => {
-    if (!awaitingAssistantWork) return;
-
-    const refetchOnVisible = () => {
-      if (document.visibilityState !== "hidden") {
-        refetchSessionProgress();
-      }
-    };
-    const refetchOnOnline = () => {
-      refetchSessionProgress();
-    };
-
-    document.addEventListener("visibilitychange", refetchOnVisible);
-    window.addEventListener("online", refetchOnOnline);
-    return () => {
-      document.removeEventListener("visibilitychange", refetchOnVisible);
-      window.removeEventListener("online", refetchOnOnline);
-    };
-  }, [awaitingAssistantWork, refetchSessionProgress]);
+  // The Durable Stream self-recovers (the client reconnects + resumes from its
+  // offset) and refresh/visibility recovery is no longer needed — a refresh
+  // replays the whole transcript from the stream.
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -873,14 +708,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         // Only clear the textarea once the server acknowledged the message —
         // a failed submit should keep the user's draft so they don't lose it.
         setInput("");
-        const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
-        if (current) {
-          const next = updateSessionStatusInDetail(
-            addUserMessageToSessionDetail(current, { messageId: result.messageId, content }),
-            "running",
-          );
-          seedSessionQueries(queryClient, workspaceId, next);
-        }
+        // The user bubble + "running" status arrive via the stream (the action
+        // appends the message.created event), so there is no optimistic cache write.
         // Schedule a scroll so the just-sent message snaps to the top of the viewport.
         setPendingScrollMessageId(result.messageId);
         return;
@@ -1295,10 +1124,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           related={detail.related}
           currentStatus={runtime.currentStatus}
           lastError={runtime.lastError}
-          streamStatus={stream.status}
-          streamErrorMessage={stream.errorMessage}
-          connectionStale={connectionLooksStale}
-          runnerConfigured={Boolean(runnerUrl && streamToken)}
+          streamStatus={streamStatus}
+          streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
+          connectionStale={false}
+          runnerConfigured={true}
           eventCount={inspectorEvents.length}
           usage={runtime.usage}
           toolUsage={runtime.toolUsage}
@@ -2884,9 +2713,8 @@ function statusLabel(status: string) {
 }
 
 function streamStatusLabel(status: string) {
-  if (status === "open") return "live";
+  if (status === "live" || status === "open") return "live";
   if (status === "connecting") return "connecting";
-  if (status === "stale") return "stale";
   if (status === "error") return "error";
   return "idle";
 }

@@ -31,6 +31,9 @@ type SessionStreamHandlers = {
   onState: (state: SessionRuntimeState) => void;
   onStatus?: (status: SessionStreamStatus) => void;
   onError?: (error: Error) => void;
+  // Fired once per reduced event (durable + transient), in stream order. Used for
+  // per-event side effects like the felt-TTFT analytics timer.
+  onEvent?: (event: RuntimeEvent) => void;
 };
 
 export function createEmptySessionRuntimeState(status = "created"): SessionRuntimeState {
@@ -64,7 +67,10 @@ export function subscribeSessionStream(url: string, handlers: SessionStreamHandl
 
   const reduce = (items: ReadonlyArray<RuntimeEvent>) => {
     if (items.length === 0) return;
-    for (const item of items) state = applyRuntimeEventToState(state, item);
+    for (const item of items) {
+      state = applyRuntimeEventToState(state, item);
+      handlers.onEvent?.(item);
+    }
     handlers.onState(state);
   };
 
