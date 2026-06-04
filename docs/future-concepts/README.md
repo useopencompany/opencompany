@@ -1,0 +1,15 @@
+# Future Concepts
+
+This folder stores speculative product and architecture notes that we want future
+agents and teammates to find before designing related work.
+
+Future concepts are not implementation contracts. Treat them as directional
+thinking: useful context for planning, discovery, research, and proposal work.
+When a concept becomes active product behavior, move the relevant decisions into
+the owning spec, architecture doc, migration plan, or code comments.
+
+## Concepts
+
+- [Folder State Architecture](./folder-state-architecture.md) - future model for
+  workspace file materialization across Postgres, object storage, GitHub, and
+  runtime sandboxes.
