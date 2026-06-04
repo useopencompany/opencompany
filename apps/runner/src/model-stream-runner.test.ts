@@ -713,6 +713,20 @@ describe("stream error handling", () => {
     ).toThrow("Model stream completed without text or tool calls.");
   });
 
+  it("rejects multi-step turns where the final step produces only reasoning", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "",
+        assistantReplayParts: [
+          { type: "tool-call", toolCallId: "call_1", toolName: "list_files", input: {} },
+          { type: "reasoning", text: "Now I should answer." },
+        ],
+        lastStepEndedWithToolCalls: false,
+        stepCount: 2,
+      }),
+    ).toThrow("Model stream completed without text or tool calls.");
+  });
+
   it("flags a tool-driven turn that stops after announcing an unexecuted action", () => {
     const result = detectIncompleteTurn({
       assistantContent:
