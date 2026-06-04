@@ -46,7 +46,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
-import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
+import { revealStep, shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
 import { useSessionEventStream } from "@/components/useSessionEventStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -95,7 +95,11 @@ import {
 } from "@/lib/slash-commands/registry";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
-const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
+// Lowered from 120ms: at high token rates the old threshold caused most deltas
+// to be skipped entirely, producing a mechanical "pop then freeze" cadence.
+// 40ms still throttles at ~25 fps so we never queue more work than the browser
+// can paint, but smooth-streams no longer drop frames.
+const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 40;
 const STREAM_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 // How far from the bottom (in px) before we consider the user "pinned".
@@ -1302,15 +1306,88 @@ function AssistantMarkdown({
   content: string;
   streaming?: boolean;
 }) {
-  const ref = useStreamingMarkdownAppendAnimation(content, streaming);
+  // Pace bursty network deltas onto the screen at an even cadence (display only —
+  // never gates how fast tokens arrive), then fade each reveal in.
+  const displayed = useSmoothStreamingText(content, streaming);
+  const ref = useStreamingMarkdownAppendAnimation(displayed, streaming);
 
   return (
     <div ref={ref} className="session-markdown" data-streaming={streaming ? "true" : undefined}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-        {content}
+        {displayed}
       </ReactMarkdown>
     </div>
   );
+}
+
+function prefersReducedMotion() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+// Smoothly paces streamed text onto the screen. Network token deltas arrive in
+// uneven bursts; rendering them verbatim reads as choppy "burst, freeze, burst".
+// We keep the fully-received text as a target and reveal it a few characters per
+// animation frame (see revealStep), so a steady stream flows at an even cadence
+// while a sudden burst is caught up quickly. This paces *display* only — it never
+// slows how fast tokens are received, so inference speed is unaffected. When not
+// streaming, on reduced-motion, or on a non-append change (a new or edited
+// message), we show the full text immediately.
+function useSmoothStreamingText(content: string, streaming: boolean) {
+  const [displayed, setDisplayed] = useState(content);
+  const displayedRef = useRef(displayed);
+  const targetRef = useRef(content);
+  const frameRef = useRef<number | null>(null);
+
+  // Mirror the rendered text into a ref for the rAF drain loop to read. Done in
+  // an effect (not during render — refs must not be written while rendering) and
+  // declared before the drain effect so the ref is already current when it runs.
+  useEffect(() => {
+    displayedRef.current = displayed;
+  });
+
+  useEffect(() => {
+    targetRef.current = content;
+    const shown = displayedRef.current;
+    const isAppend = content.startsWith(shown);
+
+    if (!streaming || !isAppend || prefersReducedMotion()) {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      if (shown !== content) setDisplayed(content);
+      return;
+    }
+
+    // A drain loop is already running; it will pick up the new target.
+    if (frameRef.current !== null) return;
+
+    const tick = () => {
+      const target = targetRef.current;
+      const shownLength = displayedRef.current.length;
+      const step = revealStep(target.length - shownLength);
+      if (step === 0) {
+        frameRef.current = null;
+        return;
+      }
+      setDisplayed(target.slice(0, shownLength + step));
+      frameRef.current = requestAnimationFrame(tick);
+    };
+    frameRef.current = requestAnimationFrame(tick);
+  }, [content, streaming]);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    },
+    [],
+  );
+
+  return displayed;
 }
 
 function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean) {
@@ -1324,12 +1401,7 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
     previousContentRef.current = content;
 
     if (!streaming || !shouldAnimateStreamingAppend(previousContent, content)) return;
-    if (
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      return;
-    }
+    if (prefersReducedMotion()) return;
 
     const now = performance.now();
     if (now - lastAnimationAtRef.current < STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS) return;
@@ -1341,14 +1413,20 @@ function useStreamingMarkdownAppendAnimation(content: string, streaming: boolean
 
     lastAnimationAtRef.current = now;
     animationRef.current?.cancel();
+    // Soft fade-in for newly streamed text: opacity 0.85→1 plus a whisper of
+    // blur that resolves. Deliberately NO transform — animating translateY on
+    // the whole last block re-runs every throttled delta and visibly jitters
+    // the entire paragraph. Opacity starts high (0.85) so already-rendered text
+    // never washes out as the block keeps re-animating, and 140ms keeps each
+    // entrance well inside the gap between tokens without blocking perception.
     const animation = animatedElement.animate(
       [
-        { opacity: 0.9, filter: "blur(0.2px)" },
+        { opacity: 0.85, filter: "blur(0.4px)" },
         { opacity: 1, filter: "blur(0)" },
       ],
       {
-        duration: 160,
-        easing: "cubic-bezier(0.16, 1, 0.3, 1)",
+        duration: 140,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
       },
     );
     animationRef.current = animation;
