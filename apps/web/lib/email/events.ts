@@ -16,3 +16,20 @@ export function dispatchSignupWelcomeEmailRequested(input: SignupWelcomeEmailReq
     data: input,
   });
 }
+
+export const SLACK_INVITE_EMAIL_REQUESTED_EVENT = "email.slack_invite_requested";
+
+export type SlackInviteEmailRequestedEventData = {
+  userId: string;
+  workspaceId: string;
+  email: string;
+  firstName?: string | null;
+  inviteUrl: string;
+};
+
+export function dispatchSlackInviteEmailRequested(input: SlackInviteEmailRequestedEventData) {
+  return inngest.send({
+    name: SLACK_INVITE_EMAIL_REQUESTED_EVENT,
+    data: input,
+  });
+}
