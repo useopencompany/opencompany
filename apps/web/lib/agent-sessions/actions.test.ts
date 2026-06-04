@@ -343,13 +343,16 @@ describe("setSessionStar", () => {
     const selectWhere = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where: selectWhere }));
     const select = vi.fn(() => ({ from }));
-    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const onConflictDoUpdate = vi.fn(() => ({}));
     const values = vi.fn(() => ({ onConflictDoUpdate }));
     const insert = vi.fn(() => ({ values }));
-    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const deleteWhere = vi.fn(() => ({}));
     const del = vi.fn(() => ({ where: deleteWhere }));
+    // batchWithTxid runs the write + a pg_current_xact_id() SELECT in one batch.
+    const execute = vi.fn(() => ({}));
+    const batch = vi.fn().mockResolvedValue([undefined, [{ txid: "4242" }]]);
     return {
-      db: { select, insert, delete: del } as never,
+      db: { select, insert, delete: del, execute, batch } as never,
       values,
       onConflictDoUpdate,
       del,
@@ -386,7 +389,7 @@ describe("setSessionStar", () => {
 
     const result = await setSessionStar("ses_123", false);
 
-    expect(result).toEqual({ ok: true, starredAt: null });
+    expect(result).toEqual({ ok: true, txid: 4242, starredAt: null });
     expect(del).toHaveBeenCalled();
     expect(deleteWhere).toHaveBeenCalled();
     expect(values).not.toHaveBeenCalled();

@@ -104,23 +104,30 @@ component → collection.update()    Neon ──logical repl──▶         ru
 
 - ✅ **Phase 0 — Foundation**: packages, auth proxy, collection factory + provider, txid helper,
   env + docs. Electric Cloud + Neon logical replication verified.
-- 🚧 **Phase 1 — Agents**:
+- ✅ **Phase 1 — Agents**:
   - ✅ Reads: `AgentsView` + `MainPanel` on `useLiveQuery` (live cross-tab updates confirmed).
-  - 🚧 Writes: optimistic **delete** done — `deleteAgent` returns numeric txid via `batchWithTxid`;
-    agents collection `onDelete`; `AgentDetail` deletes via `collection.delete()` + `tx.isPersisted`.
-    ⬜ `updateAgent` `onUpdate` next (its agents-row write already uses `db.batch`, so swap to
-    `batchWithTxid` and reconstruct the patch from `mutation.changes`).
-  - ⬜ Optionally promote `agentDetail` to a collection (currently still on React Query).
-  - Note: Electric's `awaitTxId` wants a **numeric** txid (`number`), hence `::xid` (32-bit) →
-    `Number(...)` in `batchWithTxid`. Delete degrades gracefully even if a txid match is missed
-    (row is already gone optimistically + via synced delete).
-- ⬜ **Phase 2 — Sidebar sessions + stars**: `agentSessions` + `sessionStars` collections; star/archive
-  optimistic handlers; delete sidebar optimistic helpers from `payload.ts`.
+  - ✅ Delete: `deleteAgent` returns numeric txid via `batchWithTxid`; agents collection `onDelete`;
+    `AgentDetail` deletes via `collection.delete()`. Spinner fixed — the optimistic delete + navigate
+    are synchronous and reconciliation runs in a detached `.catch` (was blocked behind `tx.isPersisted`
+    inside the navigation transition).
+  - ✅ Update: stays on the `updateAgent` server action; list reflects via Electric sync. **No
+    `onUpdate` overlay** — `agentDetail` stays React-Query-backed (its aggregate straddles server-only
+    MCP/integration domains that are out of scope), so an overlay's txid would be unused and the
+    semantic patch doesn't map onto raw-row columns. Reference optimistic-write pattern lives on the
+    sidebar instead.
+  - Note: `awaitTxId` wants a **numeric** txid, hence `::xid` (32-bit) → `Number(...)` in `batchWithTxid`.
+- ✅ **Phase 2 — Sidebar sessions + stars**: `agentSessions` + `sessionStars` collections with write
+  handlers; `deriveSidebarSessions` selector (join + status-exclude + recency window); `Sidebar` split
+  into Content/Live/hydration-gate; optimistic **star** (`sessionStars` insert/delete, `setSessionStar`
+  → txid) and **archive** (`agentSessions.delete()` → `archiveAgentSession` → txid of the synchronous
+  write it controls, so the overlay holds flicker-free and the status-excluding selector covers the
+  runner's deferred `archived_at`). `WorkspaceContext` now carries `userId`. Legacy `payload.ts` sidebar
+  helpers are dead but **deferred to Phase 3/4** (entangled with `seedSessionQueries` + `payload.test.ts`).
 - ⬜ **Phase 3 — Session detail + streaming**: per-session `messages`/`events` collections; transcript
   live query; SSE → transient-only into `transientDeltas`; remove SSE durable-reconnect/merge path;
   delete `seedSessionQueries`/`mergeAgentSessionDetail`/`applyRuntimeEventToSessionDetail`.
-- ⬜ **Phase 4 — Cleanup + tests**: delete dead fetchers/query-keys/serializers; update component tests
-  to drive collections.
+- ⬜ **Phase 4 — Cleanup + tests**: delete dead fetchers/query-keys/serializers (incl. the deferred
+  sidebar helpers + vestigial `agentQueryKeys.list` plumbing); broaden component-test coverage.
 
 ## Verification per surface
 

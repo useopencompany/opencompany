@@ -60,6 +60,15 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
   seedSessionQueries: vi.fn(),
 }));
 
+// Stub the collections so AgentDetail's optimistic delete works without mounting
+// CollectionsProvider (which would pull the server-action import chain into the
+// test). The delete returns a resolved tx so the detached reconcile is a no-op.
+vi.mock("@/components/CollectionsProvider", () => ({
+  useCollections: () => ({
+    agents: { delete: vi.fn(() => ({ isPersisted: { promise: Promise.resolve() } })) },
+  }),
+}));
+
 vi.mock("@/lib/agents/payload", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/agents/payload")>();
   return {
@@ -206,7 +215,7 @@ function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
     queryClient,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceProvider workspaceId="wks_123">
+        <WorkspaceProvider workspaceId="wks_123" userId="usr_123">
           <ToastProvider>{ui}</ToastProvider>
         </WorkspaceProvider>
       </QueryClientProvider>,

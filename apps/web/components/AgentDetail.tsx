@@ -218,7 +218,6 @@ function AgentDetailContent({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [isDeleting, startDeleteTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -709,26 +708,27 @@ function AgentDetailContent({
       <DeleteAgentDialog
         agentName={agent.name}
         isOpen={showDeleteDialog}
-        isPending={isDeleting}
+        isPending={false}
         onClose={() => setShowDeleteDialog(false)}
         onConfirm={() => {
-          startDeleteTransition(async () => {
-            // Optimistic delete: the row vanishes from the agents collection
-            // immediately (so the list and this view update at once) and we
-            // navigate away. The onDelete handler runs deleteAgent and the
-            // collection reconciles via txid; a failure rolls the row back.
-            const tx = agentsCollection.delete(agent.id);
-            setShowDeleteDialog(false);
-            router.push("/agents");
-            try {
-              await tx.isPersisted.promise;
-            } catch (err) {
-              if (isNextRedirectError(err)) throw err;
-              showError(
-                err instanceof Error ? err.message : "Could not delete agent",
-                "Could not delete agent",
-              );
-            }
+          // Optimistic delete: the row leaves the agents collection immediately
+          // (the list and this view update at once) and we navigate away
+          // synchronously. Reconciliation — the deleteAgent server action plus
+          // the txid match Electric observes — runs in the background, so the
+          // navigation is never blocked behind the ~1s GitHub/sandbox/db
+          // round-trip (the prior code awaited tx.isPersisted inside the same
+          // transition as router.push, which deferred the navigation commit and
+          // left a lingering spinner). A failed delete auto-rolls back the
+          // optimistic removal; we only surface why.
+          const tx = agentsCollection.delete(agent.id);
+          setShowDeleteDialog(false);
+          router.push("/agents");
+          void tx.isPersisted.promise.catch((err) => {
+            if (isNextRedirectError(err)) return;
+            showError(
+              err instanceof Error ? err.message : "Could not delete agent",
+              "Could not delete agent",
+            );
           });
         }}
       />

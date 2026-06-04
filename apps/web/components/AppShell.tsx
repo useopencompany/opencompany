@@ -59,7 +59,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
       }}
     >
       <QueryProvider>
-        <WorkspaceProvider workspaceId={workspace.id}>
+        <WorkspaceProvider workspaceId={workspace.id} userId={user.id}>
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />

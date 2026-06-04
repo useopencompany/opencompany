@@ -55,25 +55,46 @@ Electric syncs **raw snake_case rows**; camelCase derivation happens client-side
 - ✅ Env + docs (`.env.example`, `docs/stack/electric-sync.md`)
 - ✅ **Infra**: Neon `wal_level=logical` + Electric Cloud source provisioned and verified end-to-end
 
-### Phase 1 — Agents 🚧
+### Phase 1 — Agents ✅
 - ✅ **Reads**: `AgentsView` + `MainPanel` on `useLiveQuery` (live cross-tab updates confirmed)
 - ✅ **Write — delete**: `deleteAgent` returns txid via `batchWithTxid`; agents collection `onDelete`;
   `AgentDetail` deletes via `agentsCollection.delete()` + optimistic navigate
-  - ⬜ **Polish**: deleting still shows a ~1s spinner — investigate the pending UI gated on
-    `tx.isPersisted.promise` (the row IS removed optimistically; the lingering spinner is the issue)
-- ⬜ **Write — update**: `updateAgent` `onUpdate` handler. Its agents-row write already uses
-  `db.batch`, so swap to `batchWithTxid` and reconstruct the patch from `mutation.changes`; wire
-  `AgentDetail` save through `agentsCollection.update()`
-- ⬜ **Write — create**: confirm `createAgent` flow (server redirect) lands the new row live (optional `awaitMatch` for instant-open)
-- ⬜ Optional: promote `agentDetail` to a collection (still on React Query today)
+  - ✅ **Spinner fixed**: the ~1s spinner was `router.push` running *inside* the same transition that
+    awaited `tx.isPersisted.promise` — React deferred the navigation commit until reconciliation
+    settled. Now the optimistic delete + navigate are synchronous and reconciliation runs in a
+    detached `.catch` (rollback + toast on failure). Delete is instant.
+- ✅ **Write — update**: kept on the existing `updateAgent` server action (+ `revalidatePath`); the
+  agents list reflects edits via Electric sync. **Decision:** no agents `onUpdate` overlay — the
+  detail view stays React-Query-backed (below), so an overlay's txid would be unused, and the edit's
+  semantic patch (`{name,body,model,config}` — `model` lives in `config.model.name`) doesn't map
+  cleanly onto raw-row column mutations. The optimistic-write *reference pattern* is established on
+  the sidebar (Phase 2) instead, where it's clean and actually matters.
+- ✅ **Decision — `agentDetail` stays on React Query**, not promoted to a collection. Its aggregate
+  straddles synced data (the base row) and **server-only domains intentionally out of scope** (MCP
+  settings, GitHub integration repo catalogs). Promotion would fight decision #2. `AgentDetail`
+  already feels optimistic locally (`saveState`, `optimisticGitHubSync`, local field state).
+- ⬜ Phase 4 cleanup: `updateAgentQueries`' `agentQueryKeys.list` seeding + the back-link list
+  prefetch are now vestigial (AgentsView/MainPanel read the collection, not that cache). Harmless;
+  remove with the other dead React-Query plumbing in Phase 4.
 
-### Phase 2 — Sidebar sessions + stars ⬜
-- ⬜ `agentSessions` + `sessionStars` Electric collections (factory already stubs `agentSessions`/`sessionStars`)
-- ⬜ Selectors: session row → `SidebarSessionPayload`; sidebar = live query joining sessions ⨝ stars
-- ⬜ `Sidebar` → `useLiveQuery` (gated by `useHydrated`, SSR `initialSessions` as fallback)
-- ⬜ Optimistic `setSessionStar` (insert/delete on `sessionStars`) + `archiveAgentSession` (update `archived_at`)
-- ⬜ Delete legacy helpers: `upsertSidebarSession`, `removeSidebarSession`, `setSidebarSessionStar`,
-  `archiveSidebarSessionOptimistically`, sidebar branch of `seedSessionQueries`
+### Phase 2 — Sidebar sessions + stars ✅ (helper deletion deferred to Phase 4)
+- ✅ `agentSessions` + `sessionStars` Electric collections wired with write handlers
+- ✅ Selector `deriveSidebarSessions(sessions, stars)` joins the two collections → `SidebarSessionPayload`,
+  excludes `status IN ('archiving','archived')`, mirrors the SSR recency window (top-50 ∪ all pinned)
+- ✅ `Sidebar` split into `SidebarContent` (presentational) / `SidebarLive` (`useLiveQuery` ×2 + handlers)
+  / default export gated on `useHydrated` (SSR `initialSessions` as the pre-hydration fallback)
+- ✅ Optimistic **star**: `sessionStars.insert/delete`; `setSessionStar` returns txid via `batchWithTxid`
+- ✅ Optimistic **archive**: `agentSessions.delete()` → `onDelete` → `archiveAgentSession`. **Flicker-free**
+  via txid: `archiveAgentSession` returns the txid of the synchronous write it controls — `archived_at`
+  on the local (no-sandbox) path, `status='archiving'` on the runner path — so the optimistic overlay
+  holds until Electric streams *that* transaction, after which the status-excluding selector keeps the
+  row hidden until `archived_at` finally lands. `WorkspaceContext` now also carries `userId` (needed to
+  build optimistic `session_stars` rows).
+- ⬜ **Deferred to Phase 4**: delete legacy helpers `upsertSidebarSession`, `removeSidebarSession`,
+  `setSidebarSessionStar`, `archiveSidebarSessionOptimistically`, `fetchSidebarSessions`,
+  `sessionQueryKeys.list`, and the sidebar branch of `seedSessionQueries`. They're dead (the sidebar no
+  longer reads React Query) but harmless, and unwinding `seedSessionQueries` is entangled with Phase 3's
+  session-detail rewrite + the large `payload.test.ts`. Clean up wholesale in Phase 3/4.
 
 ### Phase 3 — Session detail + streaming ⬜
 - ⬜ Per-session `messages` + `events` collections via `createSessionCollections(sessionId)` (already stubbed)
@@ -117,10 +138,17 @@ write can't be isolated into one batch, fall back to `collection.utils.awaitMatc
 
 ## ▶ Next step for a fresh session
 
-Finish **Phase 1 writes**:
-1. Add the agents collection **`onUpdate`** handler — refactor `updateAgent` to return a txid via
-   `batchWithTxid` (its agents-row write already uses `db.batch`) and reconstruct the patch from
-   `mutation.changes`; route `AgentDetail`'s save through `agentsCollection.update()`.
-2. Fix the **delete ~1s spinner** (pending UI gated on `tx.isPersisted.promise`).
+Phases 1 (agents) and 2 (sidebar) are done; the optimistic-write reference pattern is proven on the
+sidebar (star = txid-reconciled insert/delete; archive = txid-reconciled soft delete + status-excluding
+selector). Next is **Phase 3 — session detail + streaming** (the hardest, highest-value slice):
 
-Then Phase 1 is the complete reference slice and Phase 2 (sidebar) replicates the pattern.
+1. Per-session `messages` + `events` collections via `createSessionCollections(sessionId)` (stubbed;
+   only the open session syncs — mind the HTTP/2 dev cap, keep concurrent shapes low).
+2. Transcript = live query composing messages + events (+ usage) for the open session; `SessionView`
+   top read → `useLiveQuery` (gated by `useHydrated`).
+3. Rewrite `applyRuntimeEvent` to handle **transient events only** → `transientDeltas` localOnly
+   collection; union live query (durable message content ⊕ transient token buffer; clear on `completed`).
+4. Optimistic `submitAgentSessionMessage` (insert user row) + `abortAgentSession` (status).
+5. Remove the SSE durable-reconnect/merge path; delete `seedSessionQueries`, `mergeAgentSessionDetail`,
+   `applyRuntimeEventToSessionDetail`, `addUserMessageToSessionDetail` — and at that point also delete
+   the Phase-2-deferred legacy sidebar helpers + the Phase-1 vestigial `agentQueryKeys.list` plumbing.
