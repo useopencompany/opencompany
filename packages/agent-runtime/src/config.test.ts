@@ -1,7 +1,42 @@
 import { describe, expect, it } from "vitest";
 import { agentGitHubRepositories, normalizeAgentConfig, resolveAgentRuntimeConfig } from "./config";
+import {
+  GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
+  type ModelProviderOptions,
+  mergeModelProviderOptions,
+} from "./models";
 import { policyMapKey } from "./permissions";
 import type { AgentConfig } from "./types";
+
+describe("mergeModelProviderOptions", () => {
+  it("merges provider namespaces without dropping existing options", () => {
+    const reasoning = {
+      openai: {
+        reasoningEffort: "medium",
+        reasoningSummary: "concise",
+      },
+    } satisfies ModelProviderOptions;
+    const cache = {
+      openai: {
+        promptCacheKey: "workspace-agent",
+      },
+      gateway: {
+        caching: "auto",
+      },
+    } satisfies ModelProviderOptions;
+
+    expect(mergeModelProviderOptions(reasoning, cache)).toEqual({
+      openai: {
+        reasoningEffort: "medium",
+        reasoningSummary: "concise",
+        promptCacheKey: "workspace-agent",
+      },
+      gateway: {
+        caching: "auto",
+      },
+    });
+  });
+});
 
 describe("resolveAgentRuntimeConfig", () => {
   it("builds the system prompt and keeps the configured Vercel AI Gateway model", () => {
@@ -24,6 +59,8 @@ describe("resolveAgentRuntimeConfig", () => {
       workspaceName: "Acme",
       sessionTitle: "Risk review",
       userName: "Ada Lovelace",
+      userFirstName: "Ada",
+      userLastName: "Lovelace",
     });
 
     expect(resolved.model).toEqual({
@@ -31,6 +68,7 @@ describe("resolveAgentRuntimeConfig", () => {
       name: "openai/gpt-5.4",
       supportsReasoning: true,
       providerOptions: {
+        ...GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
         openai: {
           reasoningEffort: "medium",
           reasoningSummary: "concise",
@@ -40,6 +78,8 @@ describe("resolveAgentRuntimeConfig", () => {
     });
     expect(resolved.systemPrompt).toContain("Workspace: Acme");
     expect(resolved.systemPrompt).toContain("User: Ada Lovelace");
+    expect(resolved.systemPrompt).toContain("User first name: Ada");
+    expect(resolved.systemPrompt).toContain("User last name: Lovelace");
     expect(resolved.systemPrompt).toContain("Avoid launching more than eight tool calls");
     expect(resolved.systemPrompt).toContain("call ask_user_question");
     expect(resolved.systemPrompt).toContain("Use edit_file for targeted changes");
@@ -51,6 +91,31 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).toContain("ask_user_question");
     expect(resolved.tools).toContain("tool_help");
     expect(resolved.tools).not.toContain("exa_search");
+  });
+
+  it("falls back to email for user context when WorkOS has not provided a name", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Ops agent",
+      instructions: "Check the workspace and summarize risk.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      userEmail: "ada@example.com",
+    });
+
+    expect(resolved.systemPrompt).toContain("User: ada@example.com");
+    expect(resolved.systemPrompt).not.toContain("User first name:");
+    expect(resolved.systemPrompt).not.toContain("User last name:");
   });
 
   it("nudges the agent to read the self-edit skill before update_agent_file", () => {
@@ -148,6 +213,38 @@ describe("resolveAgentRuntimeConfig", () => {
 
     expect(resolved.tools).not.toContain("gh");
     expect(resolved.systemPrompt).not.toContain("Attached GitHub repositories");
+  });
+
+  it("explains opencode can target public GitHub repositories without an attached repository", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "opencode agent",
+      instructions: "@opencode",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [
+        {
+          id: "opencode",
+          type: "coding_agent",
+          provider: "opencode",
+          label: "opencode",
+          description: "Delegate coding work to opencode inside an E2B sandbox.",
+          prCapable: true,
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    expect(resolved.tools).toContain("opencode_coder");
+    expect(resolved.systemPrompt).toContain(
+      "opencode can work without an attached GitHub repository when the user provides a public GitHub owner/repo",
+    );
+    expect(resolved.systemPrompt).toContain(
+      "Public repositories are cloned without workspace GitHub credentials",
+    );
   });
 
   it("enables hosted runtime tools from selected agent config tools", () => {
@@ -371,6 +468,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: "anthropic/claude-haiku-4.5",
       supportsReasoning: false,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "hidden",
     });
   });
@@ -405,6 +503,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: false,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "hidden",
     });
   });
@@ -446,6 +545,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: true,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "hidden",
     });
   });
@@ -476,6 +576,7 @@ describe("resolveAgentRuntimeConfig", () => {
       provider: "vercel-ai-gateway",
       name: modelName,
       supportsReasoning: true,
+      providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
       reasoningExposure: "raw",
     });
   });
@@ -502,6 +603,7 @@ describe("resolveAgentRuntimeConfig", () => {
       name: "openai/gpt-5.2-codex",
       supportsReasoning: true,
       providerOptions: {
+        ...GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
         openai: {
           reasoningEffort: "medium",
           reasoningSummary: "concise",

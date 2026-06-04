@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BarChart3,
   Check,
   ChevronRight,
   CreditCard,
@@ -20,7 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { Toggle } from "@/components/ui/toggle";
@@ -33,11 +34,13 @@ import {
 } from "@/lib/billing/constants";
 import {
   removeLinearMcpToken,
+  removePostHogMcpConnection,
   removeSlackMcpConnection,
   saveLinearMcpToken,
   setWorkspaceMcpExperimentEnabled,
 } from "@/lib/mcp/actions";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
+import { removeAvatar, updateAvatar } from "@/lib/users/actions";
 import { updateWorkspaceName } from "@/lib/workspaces/actions";
 
 const LINEAR_API_KEYS_URL = "https://linear.app/settings/account/security";
@@ -45,6 +48,8 @@ const LINEAR_MCP_DOCS_URL = "https://linear.app/docs/mcp";
 const LINEAR_MCP_START_URL = "/api/mcp/linear/start?returnTo=/settings";
 const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
 const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
+const POSTHOG_MCP_DOCS_URL = "https://posthog.com/docs/model-context-protocol";
+const POSTHOG_MCP_START_URL = "/api/mcp/posthog/start?returnTo=/settings";
 const SETTINGS_FORMAT_LOCALE = "en-US";
 const SETTINGS_FORMAT_TIME_ZONE = "UTC";
 
@@ -53,6 +58,7 @@ type Props = {
     name: string;
     email: string;
     avatarUrl: string | null;
+    hasCustomAvatar: boolean;
     initials: string;
   };
   workspace: {
@@ -73,6 +79,7 @@ type Props = {
       totalUsdMicros: number;
       modelCostUsdMicros: number;
       toolCostUsdMicros: number;
+      sandboxCostUsdMicros: number;
       providerCostUsdMicros: number;
       platformFeeUsdMicros: number;
       createdAt: string;
@@ -99,6 +106,12 @@ type Props = {
       updatedAt: string | null;
     };
     slack: {
+      configured: boolean;
+      status: "configured" | "missing_credential" | "disabled" | "error" | null;
+      statusReason: string | null;
+      updatedAt: string | null;
+    };
+    posthog: {
       configured: boolean;
       status: "configured" | "missing_credential" | "disabled" | "error" | null;
       statusReason: string | null;
@@ -233,6 +246,7 @@ function ledgerLabel(source: string) {
   if (source === "credit_code") return "Redeemed code";
   if (source === "model_usage") return "Model usage";
   if (source === "tool_usage") return "Tool usage";
+  if (source === "sandbox_usage") return "Sandbox compute";
   if (source === "usage") return "Usage";
   return "Credit event";
 }
@@ -248,7 +262,10 @@ function CostLine({ label, value }: { label: string; value: number }) {
 
 function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCharges"][number] }) {
   const otherCostUsdMicros = Math.max(
-    entry.totalUsdMicros - entry.modelCostUsdMicros - entry.toolCostUsdMicros,
+    entry.totalUsdMicros -
+      entry.modelCostUsdMicros -
+      entry.toolCostUsdMicros -
+      entry.sandboxCostUsdMicros,
     0,
   );
 
@@ -282,6 +299,7 @@ function SessionChargeRow({ entry }: { entry: Props["billing"]["recentSessionCha
             <div className="space-y-1 text-[12px]">
               <CostLine label="Model usage" value={entry.modelCostUsdMicros} />
               <CostLine label="Tool usage" value={entry.toolCostUsdMicros} />
+              <CostLine label="Sandbox compute" value={entry.sandboxCostUsdMicros} />
               {otherCostUsdMicros > 0 && (
                 <CostLine label="Other usage" value={otherCostUsdMicros} />
               )}
@@ -620,6 +638,14 @@ function ExperimentsSection({
   const normalizedSlackSetupStatus =
     slackSetupStatus === "connected" || slackSetupStatus === "error" ? slackSetupStatus : null;
   const slackSetupReason = searchParams.get("mcp") === "slack" ? searchParams.get("reason") : null;
+  const posthogSetupStatus =
+    searchParams.get("mcp") === "posthog" ? searchParams.get("setup") : null;
+  const normalizedPosthogSetupStatus =
+    posthogSetupStatus === "connected" || posthogSetupStatus === "error"
+      ? posthogSetupStatus
+      : null;
+  const posthogSetupReason =
+    searchParams.get("mcp") === "posthog" ? searchParams.get("reason") : null;
 
   return (
     <div className="space-y-3">
@@ -682,6 +708,12 @@ function ExperimentsSection({
             setupStatus={normalizedSlackSetupStatus}
             setupReason={slackSetupReason}
             policyOverrides={toolPolicies.slack}
+          />
+          <PostHogMcpCard
+            posthog={mcp.posthog}
+            setupStatus={normalizedPosthogSetupStatus}
+            setupReason={posthogSetupReason}
+            policyOverrides={toolPolicies.posthog}
           />
         </>
       ) : null}
@@ -973,6 +1005,122 @@ function SlackMcpCard({
   );
 }
 
+function PostHogMcpCard({
+  posthog,
+  setupStatus,
+  setupReason,
+  policyOverrides,
+}: {
+  posthog: Props["mcp"]["posthog"];
+  setupStatus: "connected" | "error" | null;
+  setupReason: string | null;
+  policyOverrides: WorkspaceToolPolicyOverrides[string] | undefined;
+}) {
+  const router = useRouter();
+  const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
+    null,
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const configured = posthog.configured;
+  const setupMessage =
+    setupStatus && setupStatus !== dismissedSetupStatus
+      ? {
+          type: setupStatus === "connected" ? ("success" as const) : ("error" as const),
+          text:
+            setupStatus === "connected"
+              ? "PostHog connected."
+              : posthogMcpSetupErrorMessage(setupReason),
+        }
+      : null;
+  const visibleMessage = message ?? setupMessage;
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+            <BarChart3 size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+                PostHog MCP
+              </div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
+                  configured
+                    ? "border-success-border bg-success-bg text-success"
+                    : "border-warning-border bg-warning-bg text-warning"
+                }`}
+              >
+                {configured ? "Configured" : "Not connected"}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+              Agents can opt in with @posthog after PostHog is connected.
+            </p>
+            {posthog.statusReason ? (
+              <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">{posthog.statusReason}</p>
+            ) : null}
+          </div>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => {
+              setMessage(null);
+              setDismissedSetupStatus(setupStatus);
+              startTransition(async () => {
+                const result = await removePostHogMcpConnection();
+                if (result.ok) {
+                  setMessage({ type: "success", text: "PostHog MCP connection removed." });
+                  router.refresh();
+                }
+              });
+            }}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 border-t border-border-subtle pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={POSTHOG_MCP_START_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {configured ? "Reconnect PostHog" : "Connect PostHog"}
+          </a>
+          <a
+            href={POSTHOG_MCP_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted hover:text-ink"
+          >
+            MCP docs
+            <ExternalLink size={12} strokeWidth={1.9} />
+          </a>
+        </div>
+      </div>
+      {visibleMessage && (
+        <div
+          className={`mt-2 text-[12px] ${
+            visibleMessage.type === "success" ? "text-success" : "text-danger"
+          }`}
+        >
+          {visibleMessage.text}
+        </div>
+      )}
+      {configured ? <ToolPolicyEditor providerKey="posthog" overrides={policyOverrides} /> : null}
+    </div>
+  );
+}
+
 function linearMcpSetupErrorMessage(reason: string | null) {
   switch (reason) {
     case "invalid_state":
@@ -1011,6 +1159,25 @@ function slackMcpSetupErrorMessage(reason: string | null) {
   }
 }
 
+function posthogMcpSetupErrorMessage(reason: string | null) {
+  switch (reason) {
+    case "invalid_state":
+      return "PostHog connection expired or was started in another browser tab. Try reconnecting PostHog.";
+    case "session_mismatch":
+      return "PostHog returned to a different OpenCompany session. Sign in to the same workspace and try again.";
+    case "posthog_denied":
+      return "PostHog did not authorize the connection.";
+    case "missing_code":
+      return "PostHog did not return an authorization code. Try reconnecting PostHog.";
+    case "token_exchange_failed":
+      return "PostHog authorized the connection, but token exchange failed. Check the server logs and try again.";
+    case "start_failed":
+      return "Could not start PostHog authorization. Check the server logs and try again.";
+    default:
+      return "PostHog connection failed. Try reconnecting PostHog.";
+  }
+}
+
 function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; initials: string }) {
   if (avatarUrl) {
     return (
@@ -1031,6 +1198,135 @@ function ProfileAvatar({ avatarUrl, initials }: { avatarUrl: string | null; init
       }}
     >
       {initials}
+    </div>
+  );
+}
+
+// Resize any picked image to a centered 256px square and encode as webp on the client,
+// so we never ship a multi-MB original to the server or store one in Postgres.
+async function resizeImageToSquareWebp(
+  file: File,
+): Promise<{ dataBase64: string; previewUrl: string }> {
+  const SIZE = 256;
+  const bitmap = await createImageBitmap(file);
+  if (!bitmap.width || !bitmap.height) {
+    bitmap.close?.();
+    throw new Error("Invalid image dimensions.");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available.");
+  const scale = Math.max(SIZE / bitmap.width, SIZE / bitmap.height);
+  const drawW = bitmap.width * scale;
+  const drawH = bitmap.height * scale;
+  ctx.drawImage(bitmap, (SIZE - drawW) / 2, (SIZE - drawH) / 2, drawW, drawH);
+  bitmap.close?.();
+  // The server derives the real mime from magic bytes, so we just hand over the bytes.
+  // (Browsers without webp encode fall back to png, which the server also accepts.)
+  const dataUrl = canvas.toDataURL("image/webp", 0.9);
+  const dataBase64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  return { dataBase64, previewUrl: dataUrl };
+}
+
+function AvatarForm({
+  avatarUrl,
+  initials,
+  hasCustomAvatar,
+}: {
+  avatarUrl: string | null;
+  initials: string;
+  hasCustomAvatar: boolean;
+}) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+
+  const hasPhoto = (hasCustomAvatar && !removed) || Boolean(preview);
+  const shownUrl = removed ? null : (preview ?? avatarUrl);
+
+  const onPick = async (file: File) => {
+    setError(null);
+    let resized: { dataBase64: string; previewUrl: string };
+    try {
+      resized = await resizeImageToSquareWebp(file);
+    } catch {
+      setError("Could not process that image.");
+      return;
+    }
+    setPreview(resized.previewUrl);
+    setRemoved(false);
+    startTransition(async () => {
+      const res = await updateAvatar({ dataBase64: resized.dataBase64 });
+      if (res.ok) {
+        router.refresh();
+      } else {
+        setError(res.error);
+        setPreview(null);
+      }
+    });
+  };
+
+  const onRemove = () => {
+    setError(null);
+    startTransition(async () => {
+      const res = await removeAvatar();
+      if (res.ok) {
+        setPreview(null);
+        setRemoved(true);
+        router.refresh();
+      } else {
+        setError(res.error);
+      }
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-4">
+      <ProfileAvatar avatarUrl={shownUrl} initials={initials} />
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void onPick(file);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={isPending}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isPending ? "Saving…" : hasPhoto ? "Change photo" : "Upload photo"}
+          </button>
+          {hasPhoto && !isPending && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="inline-flex h-8 items-center rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:text-ink"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        {error ? (
+          <span className="text-[12px] text-danger">{error}</span>
+        ) : (
+          <span className="text-[11.5px] text-ink-subtle">
+            PNG, JPEG or WebP. Square images look best.
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1103,13 +1399,21 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
         </div>
 
         <div className="mt-8">
-          <Section title="Profile" description="Managed by your identity provider (WorkOS).">
-            <div className="flex items-center gap-3">
-              <ProfileAvatar avatarUrl={profile.avatarUrl} initials={profile.initials} />
-              <div className="min-w-0">
-                <div className="truncate text-[14px] font-medium text-ink">{profile.name}</div>
-                <div className="truncate text-[12.5px] text-ink-muted">{profile.email}</div>
-              </div>
+          <Section
+            title="Profile"
+            description="Shown on your profile. Email is managed by your identity provider."
+          >
+            {/* key resets the optimistic preview/removed state once the server
+                refresh delivers a new avatarUrl (e.g. the IdP avatar after a remove). */}
+            <AvatarForm
+              key={profile.avatarUrl ?? "none"}
+              avatarUrl={profile.avatarUrl}
+              initials={profile.initials}
+              hasCustomAvatar={profile.hasCustomAvatar}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-medium text-ink">{profile.name}</div>
+              <div className="truncate text-[12.5px] text-ink-muted">{profile.email}</div>
             </div>
             <Field label="Email">
               <ReadOnly value={profile.email} />

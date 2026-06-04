@@ -10,6 +10,9 @@ import {
   LINEAR_MCP_SERVER_KEY,
   MCP_EXPERIMENT_KEY,
   type McpProviderKey,
+  POSTHOG_MCP_ENDPOINT_URL,
+  POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
+  POSTHOG_MCP_SERVER_KEY,
   SLACK_MCP_ENDPOINT_URL,
   SLACK_MCP_OAUTH_CREDENTIAL_KIND,
   SLACK_MCP_SERVER_KEY,
@@ -99,6 +102,23 @@ export async function removeSlackMcpConnection() {
   return { ok: true as const };
 }
 
+export async function removePostHogMcpConnection() {
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  const server = await upsertPostHogMcpServer(
+    workspace.id,
+    "missing_credential",
+    "PostHog MCP connection was removed.",
+  );
+  await deleteMcpCredential({
+    workspaceId: workspace.id,
+    serverId: server.id,
+    kind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
+  });
+
+  revalidateMcpPaths();
+  return { ok: true as const };
+}
+
 export async function upsertLinearMcpServer(
   workspaceId: string,
   status: "configured" | "missing_credential" | "error",
@@ -124,6 +144,21 @@ export async function upsertSlackMcpServer(
     serverKey: SLACK_MCP_SERVER_KEY,
     displayName: "Slack",
     endpointUrl: SLACK_MCP_ENDPOINT_URL,
+    status,
+    statusReason,
+  });
+}
+
+export async function upsertPostHogMcpServer(
+  workspaceId: string,
+  status: "configured" | "missing_credential" | "error",
+  statusReason: string | null,
+) {
+  return upsertMcpServer({
+    workspaceId,
+    serverKey: POSTHOG_MCP_SERVER_KEY,
+    displayName: "PostHog",
+    endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
     status,
     statusReason,
   });

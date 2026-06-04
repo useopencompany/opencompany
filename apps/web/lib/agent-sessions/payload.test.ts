@@ -975,6 +975,7 @@ function detail(
       totalCostUsdMicros: 0,
       modelCostUsdMicros: 0,
       toolCostUsdMicros: 0,
+      sandboxCostUsdMicros: 0,
     },
     runnerUrl: null,
   };

@@ -60,6 +60,8 @@ const LINEAR_MCP_SERVER_KEY = "linear";
 const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_MCP_SERVER_KEY = "slack";
 const SLACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const POSTHOG_MCP_SERVER_KEY = "posthog";
+const POSTHOG_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_READ_SCOPES = [
   "search:read.public",
   "search:read.private",
@@ -82,7 +84,10 @@ const SLACK_READ_SCOPES = [
 const ENCRYPTION_KEY_VERSION = 1;
 const logger = createLogger({ service: "opencompany-runner" });
 
-type McpProviderKey = typeof LINEAR_MCP_SERVER_KEY | typeof SLACK_MCP_SERVER_KEY;
+type McpProviderKey =
+  | typeof LINEAR_MCP_SERVER_KEY
+  | typeof SLACK_MCP_SERVER_KEY
+  | typeof POSTHOG_MCP_SERVER_KEY;
 
 type McpProvider = {
   key: McpProviderKey;
@@ -113,6 +118,13 @@ const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
       clientSecret: "SLACK_MCP_CLIENT_SECRET",
     },
     scopes: SLACK_READ_SCOPES,
+  },
+  posthog: {
+    key: POSTHOG_MCP_SERVER_KEY,
+    displayName: "PostHog",
+    oauthCredentialKind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
+    // OAuth-only with Dynamic Client Registration (no static client) — same as Linear.
+    supportsBearerToken: false,
   },
 };
 
@@ -340,7 +352,11 @@ function requestedMcpProviders(agentConfig: AgentConfig) {
 }
 
 function isMcpProviderKey(value: string): value is McpProviderKey {
-  return value === LINEAR_MCP_SERVER_KEY || value === SLACK_MCP_SERVER_KEY;
+  return (
+    value === LINEAR_MCP_SERVER_KEY ||
+    value === SLACK_MCP_SERVER_KEY ||
+    value === POSTHOG_MCP_SERVER_KEY
+  );
 }
 
 function mcpTransportForConnection(input: {

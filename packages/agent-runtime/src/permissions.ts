@@ -103,12 +103,71 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       list_comments: "read",
       create_issue: "post",
       create_comment: "post",
-      save_comment: "post",
       update_issue: "modify",
       update_project: "modify",
       update_comment: "modify",
+      // Linear's official MCP server uses a `save_*` upsert convention (create-or-update
+      // in one tool). Classify the whole family as `modify` — they can overwrite existing
+      // items, so `modify` is the correct write tier. The `save` verb is also in the
+      // heuristic below, so any future/unlisted `save_*` tool degrades to `modify` rather
+      // than the `admin` fallback.
+      save_issue: "modify",
+      save_comment: "modify",
+      save_document: "modify",
+      save_project: "modify",
+      save_initiative: "modify",
+      save_project_update: "modify",
+      save_initiative_update: "modify",
+      save_project_milestone: "modify",
       archive_issue: "admin",
       delete_issue: "admin",
+    },
+  },
+  posthog: {
+    providerKey: "posthog",
+    displayName: "PostHog",
+    groups: ["read", "post", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      post: "Create feature flags, insights, dashboards, or experiments",
+      modify: "Edit existing feature flags, insights, dashboards, or experiments",
+      admin: "Delete resources or change the active project/organization",
+    },
+    // PostHog MCP tool names are hyphenated (e.g. "feature-flag-get-all"). Keys here
+    // use the snake_case form so they match via classifyMcpTool's normalizeRawToolName
+    // fold regardless of whether the runtime delivers hyphenated, underscored, or
+    // camelCase names — important so admin actions like "*-set-active" can't slip to
+    // the verb heuristic (which would read "set" as modify). Anything not listed falls
+    // back to the heuristic. Refine against the live tool list.
+    toolGroups: {
+      get_sql_insight: "read",
+      query_run: "read",
+      insights_get_all: "read",
+      insight_get: "read",
+      dashboards_get_all: "read",
+      dashboard_get: "read",
+      feature_flag_get_all: "read",
+      feature_flag_get_definition: "read",
+      experiment_get_all: "read",
+      list_errors: "read",
+      error_details: "read",
+      docs_search: "read",
+      organizations_get: "read",
+      projects_get: "read",
+      create_feature_flag: "post",
+      insight_create_from_query: "post",
+      dashboard_create: "post",
+      add_insight_to_dashboard: "post",
+      experiment_create: "post",
+      update_feature_flag: "modify",
+      insight_update: "modify",
+      dashboard_update: "modify",
+      experiment_update: "modify",
+      delete_feature_flag: "admin",
+      insight_delete: "admin",
+      dashboard_delete: "admin",
+      project_set_active: "admin",
+      organization_set_active: "admin",
     },
   },
   github: {
@@ -212,6 +271,7 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // GitHub-effecting tools. gh is an unbounded CLI → admin; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "modify" },
+  opencode_coder: { providerKey: "github", group: "modify" },
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,
@@ -231,7 +291,20 @@ export function classifyRuntimeTool(name: string): ToolClassification {
 
 const READ_VERBS = ["get", "list", "search", "read", "fetch", "view", "describe", "find", "query"];
 const POST_VERBS = ["create", "post", "send", "add", "comment", "new", "open"];
-const MODIFY_VERBS = ["update", "edit", "set", "modify", "move", "assign", "rename", "patch"];
+const MODIFY_VERBS = [
+  "update",
+  "edit",
+  "set",
+  "modify",
+  "move",
+  "assign",
+  "rename",
+  "patch",
+  // Upsert verbs (e.g. Linear's `save_*` MCP tools): create-or-update. Treated as
+  // `modify` so an unmapped upsert tool isn't pushed into the `admin` fallback.
+  "save",
+  "upsert",
+];
 const ADMIN_VERBS = [
   "delete",
   "remove",

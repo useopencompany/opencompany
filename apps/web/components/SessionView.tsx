@@ -355,12 +355,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         : message.content;
     const canCopy = copyText.trim().length > 0;
     const duration = message.role === "assistant" ? runDurationForMessage(message) : 0;
-    // The run paused at a tool gate or on a pending user question: the message persists as
-    // `completed`, but it hasn't actually finished, so suppress the copy + duration footer
-    // that would make an unresolved turn read as a delivered answer.
+    // Paused turns and resumed-but-running tools persist the assistant message as `completed`,
+    // but the turn has not actually finished. Suppress the copy + duration footer so it does not
+    // read as a delivered answer.
     const awaitingInput =
       message.role === "assistant" &&
-      (partsAwaitApproval(assistantParts) || partsAwaitQuestion(assistantParts));
+      (partsAwaitApproval(assistantParts) ||
+        partsAwaitQuestion(assistantParts) ||
+        partsHaveRunningTool(assistantParts));
 
     return (
       <div
@@ -1389,6 +1391,10 @@ function partsAwaitQuestion(parts: AssistantTurnPart[]): boolean {
   );
 }
 
+function partsHaveRunningTool(parts: AssistantTurnPart[]): boolean {
+  return parts.some((part) => part.type === "tool-call" && part.toolCall.status === "running");
+}
+
 function CopyMessageButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1451,6 +1457,7 @@ export function AssistantMessageContent({
   const isCompleted = message.status === "completed";
   const runDurationSeconds = runDurationForMessage(message);
   const hasPendingApproval = partsAwaitApproval(parts);
+  const hasRunningTool = partsHaveRunningTool(parts);
   // The run is parked at the tool gate waiting on a human decision — it isn't doing
   // work, so the tail should read as "paused" rather than a ticking spinner. This holds
   // while the message is still streaming (legacy in-flight gate) AND once the run has
@@ -1498,12 +1505,12 @@ export function AssistantMessageContent({
   const deliverableStart = isCompleted
     ? deliverableStartIndex(normalizedParts)
     : normalizedParts.length;
-  // While paused at a tool gate the trailing tool call still needs the user to act on it,
-  // so keep the steps expanded inline (the pending call carries the approval prompt) rather
-  // than folding the completed turn into a "N steps" summary that would hide it.
+  // While paused at a tool gate or running a resumed tool, keep the steps expanded inline
+  // rather than folding the completed message into a "N steps" summary that would hide it.
   const collapseWork =
     isCompleted &&
     !awaitingApproval &&
+    !hasRunningTool &&
     !hasQuestionPart &&
     normalizedParts.slice(0, deliverableStart).some((part) => part.type === "tool-call");
 
@@ -2361,7 +2368,7 @@ function toolApprovalStatusLabel(
 ): { label: string; tone: "warning" | "success" | "danger" } | null {
   if (toolCall.approval?.status === "required") {
     if (optimisticDecision === "approved") {
-      return { label: "approved, finishing...", tone: "success" };
+      return { label: "approved, starting...", tone: "success" };
     }
     if (optimisticDecision === "denied") {
       return { label: "denying...", tone: "warning" };
@@ -2411,7 +2418,7 @@ function ToolApprovalPrompt({
     : "";
   const pendingMessage =
     optimisticDecision === "approved"
-      ? "Approved, finishing..."
+      ? "Approved, starting..."
       : optimisticDecision === "denied"
         ? "Denying..."
         : "Waiting for your approval.";
@@ -2636,6 +2643,10 @@ function SessionInspector({
         <div className="space-y-4">
           <InspectorField label="Model charges" value={formatUsdMicros(cost.modelCostUsdMicros)} />
           <InspectorField label="Tool charges" value={formatUsdMicros(cost.toolCostUsdMicros)} />
+          <InspectorField
+            label="Sandbox compute"
+            value={formatUsdMicros(cost.sandboxCostUsdMicros)}
+          />
           <InspectorField
             label="Provider cost"
             value={formatUsdMicros(cost.providerCostUsdMicros)}
@@ -2914,6 +2925,12 @@ function summarizeEvent(event: RuntimeEvent) {
     return `${readString(event.payload.provider)} ${formatUsdMicros(
       Number(event.payload.costUsdMicros ?? 0),
     )}`;
+  }
+  if (event.type === "session.sandbox_usage") {
+    const activeSeconds = Math.round(Number(event.payload.activeMs ?? 0) / 1000);
+    return `Sandbox compute ${formatUsdMicros(
+      Number(event.payload.chargedCostUsdMicros ?? 0),
+    )} (${activeSeconds}s active)`;
   }
   if (event.type === "session.delegated_usage") {
     const cost =

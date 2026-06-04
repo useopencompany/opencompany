@@ -214,25 +214,42 @@ function OnboardingCallEmbed({ onBooked }: { onBooked: (label: string | null) =>
       <div
         ref={containerRef}
         aria-label="Book an onboarding call"
-        className="min-h-[620px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_1px_2px_rgba(17,17,17,0.04)]"
+        className="max-h-[calc(100vh-345px)] overflow-auto rounded-lg border border-border bg-surface shadow-[0_1px_2px_rgba(17,17,17,0.04)]"
       />
     </div>
   );
 }
 
-// Final-step actions. Before a call is booked, Skip + Finish share one
-// segmented control (Skip is the quiet escape hatch, Finish the primary). Once
-// a call is booked, Skip disappears and Finish takes the full width under a
-// confirmation. Both buttons submit the same form — booking lives in the cal
-// iframe, so "skip" and "finish" complete onboarding identically.
+// Final-step actions. Finish is the full-width primary; beneath it a single
+// row carries the centered Back control with a quiet, box-less Skip pinned to
+// the right (Skip reuses the Back styling, minus the arrow). Once a call is
+// booked, Skip disappears and Finish stays full width above the confirmation,
+// with Back centered below. Skip and Finish submit the same form — booking
+// lives in the cal iframe, so "skip" and "finish" complete onboarding
+// identically.
 function OnboardingCallActions({
   booked,
   bookedLabel,
+  onBack,
+  showBack,
 }: {
   booked: boolean;
   bookedLabel: string | null;
+  onBack: () => void;
+  showBack: boolean;
 }) {
   const { pending } = useFormStatus();
+
+  const backButton = showBack ? (
+    <button
+      type="button"
+      onClick={onBack}
+      className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <ArrowLeft size={12} strokeWidth={2} />
+      <span>Back</span>
+    </button>
+  ) : null;
 
   if (booked) {
     return (
@@ -249,27 +266,31 @@ function OnboardingCallActions({
           <span>{pending ? "Saving" : "Finish onboarding"}</span>
           <ArrowRight size={12} strokeWidth={2} />
         </button>
+        {backButton}
       </div>
     );
   }
 
   return (
-    <div className="flex h-9 w-full overflow-hidden rounded-md border border-border-strong shadow-[0_1px_2px_rgba(0,0,0,0.18)]">
+    <div className="space-y-2">
       <button
         type="submit"
         disabled={pending}
-        className="flex items-center justify-center border-r border-border-strong px-4 text-[12px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {pending ? "Saving" : "Skip"}
-      </button>
-      <button
-        type="submit"
-        disabled={pending}
-        className="flex flex-1 items-center justify-center gap-1.5 bg-ink px-3 text-[12px] font-medium text-canvas transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
+        className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
       >
         <span>{pending ? "Saving" : "Finish onboarding"}</span>
         <ArrowRight size={12} strokeWidth={2} />
       </button>
+      <div className="relative flex h-7 items-center justify-center">
+        {backButton}
+        <button
+          type="submit"
+          disabled={pending}
+          className="absolute right-0 flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {pending ? "Saving" : "Skip"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -423,8 +444,8 @@ export default function OnboardingForm({
   return (
     <main className="flex min-h-screen w-screen bg-canvas px-5">
       <section
-        className={`mx-auto flex min-h-screen w-full flex-col pb-8 ${
-          isCalendarStep ? "max-w-[960px] pt-8" : "max-w-[460px] pt-[13vh]"
+        className={`mx-auto flex w-full flex-col pb-8 ${
+          isCalendarStep ? "max-w-[960px] pt-8" : "min-h-screen max-w-[460px] pt-[13vh]"
         }`}
       >
         <form action={action}>
@@ -575,7 +596,15 @@ export default function OnboardingForm({
 
           <div className="mt-5 space-y-3">
             {isLastStep ? (
-              <OnboardingCallActions booked={callBooked} bookedLabel={callBookedLabel} />
+              <OnboardingCallActions
+                booked={callBooked}
+                bookedLabel={callBookedLabel}
+                showBack={step > 0}
+                onBack={() => {
+                  setError("");
+                  setStep((current) => Math.max(current - 1, 0));
+                }}
+              />
             ) : (
               <button
                 type="button"
@@ -603,12 +632,14 @@ export default function OnboardingForm({
           </div>
         </form>
 
-        <div className="mt-auto pt-8 text-center text-[12.5px] leading-5 text-ink-muted">
-          <div>Using {userEmail}</div>
-          <a href="/auth/sign-out" className="text-ink-subtle transition-colors hover:text-ink">
-            Use a different email
-          </a>
-        </div>
+        {isCalendarStep ? null : (
+          <div className="mt-auto pt-8 text-center text-[12.5px] leading-5 text-ink-muted">
+            <div>Using {userEmail}</div>
+            <a href="/auth/sign-out" className="text-ink-subtle transition-colors hover:text-ink">
+              Use a different email
+            </a>
+          </div>
+        )}
       </section>
     </main>
   );
