@@ -684,6 +684,35 @@ describe("stream error handling", () => {
     ).not.toThrow();
   });
 
+  it("allows tool-only turns because the tool call is actionable progress", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "",
+        assistantReplayParts: [
+          {
+            type: "tool-call",
+            toolCallId: "call_123",
+            toolName: "list_files",
+            input: {},
+          },
+        ],
+        lastStepEndedWithToolCalls: true,
+        stepCount: 1,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects reasoning-only turns because they have no user-visible answer", () => {
+    expect(() =>
+      assertTurnComplete({
+        assistantContent: "",
+        assistantReplayParts: [{ type: "reasoning", text: "I need answer the user." }],
+        lastStepEndedWithToolCalls: false,
+        stepCount: 1,
+      }),
+    ).toThrow("Model stream completed without text or tool calls.");
+  });
+
   it("flags a tool-driven turn that stops after announcing an unexecuted action", () => {
     const result = detectIncompleteTurn({
       assistantContent:

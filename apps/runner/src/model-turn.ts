@@ -253,7 +253,9 @@ export function assertTurnComplete(
     "assistantContent" | "assistantReplayParts" | "lastStepEndedWithToolCalls" | "stepCount"
   >,
 ) {
-  if (!streamResult.assistantContent && streamResult.assistantReplayParts.length === 0) {
+  const hasToolCall = streamResult.assistantReplayParts.some((part) => part.type === "tool-call");
+
+  if (!streamResult.assistantContent && !hasToolCall) {
     throw new Error("Model stream completed without text or tool calls.");
   }
 
