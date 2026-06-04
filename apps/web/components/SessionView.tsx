@@ -6,6 +6,7 @@ import {
   permissionDescriptionFor,
 } from "@opencompany/agent-runtime";
 import { captureEvent } from "@opencompany/analytics/client";
+import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -43,10 +44,12 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useCollections } from "@/components/CollectionsProvider";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -81,6 +84,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import {
   getSlashContext,
   matchSlashCommands,
@@ -140,6 +144,37 @@ const MARKDOWN_COMPONENTS: Components = {
 const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
+  // useLiveQuery is client-only and must not run during SSR / the first hydration
+  // pass, so until hydrated we render the query view with no collection
+  // placeholder — the server markup is the loading skeleton, matching SSR. Once
+  // hydrated, SessionViewLive derives an instant placeholder from the synced
+  // agent_sessions + agents collections so the session chrome paints with no
+  // network round-trip.
+  const hydrated = useHydrated();
+  if (!hydrated) return <SessionViewQuery sessionId={sessionId} placeholder={null} />;
+  return <SessionViewLive sessionId={sessionId} />;
+}
+
+// Client-only: derives the instant session-detail placeholder (meta + related
+// tree) from the synced collections and hands it to the query view.
+function SessionViewLive({ sessionId }: { sessionId: string }) {
+  const { agentSessions, agents } = useCollections();
+  const { data: sessionRows } = useLiveQuery((q) => q.from({ session: agentSessions }));
+  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const placeholder = useMemo(
+    () => deriveSessionDetailPlaceholder(sessionId, sessionRows ?? [], agentRows ?? []),
+    [sessionId, sessionRows, agentRows],
+  );
+  return <SessionViewQuery sessionId={sessionId} placeholder={placeholder} />;
+}
+
+function SessionViewQuery({
+  sessionId,
+  placeholder,
+}: {
+  sessionId: string;
+  placeholder: AgentSessionDetailPayload | null;
+}) {
   const { workspaceId } = useWorkspaceContext();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
   const {
@@ -155,6 +190,12 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     // and is refetched on turn completion to refresh those aggregates.
     queryFn: () => fetchAgentSession(sessionId),
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
+    // Instant paint from TanStack DB: while the server detail (transcript history
+    // floor + usage/cost aggregates) is in flight, render the session chrome from
+    // the synced collections. placeholderData (not initialData) keeps the query
+    // un-fresh, so it always fetches the server-only fields and still refetches on
+    // the post-turn invalidation.
+    placeholderData: placeholder,
   });
 
   if (!detail && isPending) return <SessionPageSkeleton />;

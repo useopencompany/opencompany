@@ -23,13 +23,47 @@ async function main() {
 }
 
 async function triggerDeploy() {
-  const response = await renderRequest(`/services/${serviceId}/deploys`, {
-    method: "POST",
-    body: JSON.stringify({ commitId: releaseSha }),
-  });
+  const response = await renderRequest(
+    `/services/${serviceId}/deploys`,
+    {
+      method: "POST",
+      body: JSON.stringify({ commitId: releaseSha }),
+    },
+    {
+      allowEmpty: true,
+    },
+  );
+
+  if (!response) {
+    return waitForTriggeredDeploy();
+  }
 
   assertDeployCommit(response, releaseSha);
   return response;
+}
+
+async function waitForTriggeredDeploy() {
+  const deadline = Date.now() + 30000;
+
+  while (Date.now() < deadline) {
+    const deploy = await findDeployForRelease();
+    if (deploy) {
+      assertDeployCommit(deploy, releaseSha);
+      return deploy;
+    }
+    await sleep(2000);
+  }
+
+  throw new Error(
+    `Render accepted the deploy request but did not expose a deploy for ${releaseSha}.`,
+  );
+}
+
+async function findDeployForRelease() {
+  const response = await renderRequest(`/services/${serviceId}/deploys`);
+  const deploys = Array.isArray(response) ? response.map((item) => item.deploy ?? item) : [];
+
+  return deploys.find((deploy) => deployCommitMatches(deploy, releaseSha)) ?? null;
 }
 
 async function waitForDeploy(deployId) {
@@ -63,7 +97,7 @@ async function waitForDeploy(deployId) {
   );
 }
 
-async function renderRequest(path, init = {}) {
+async function renderRequest(path, init = {}, options = {}) {
   let response;
   try {
     response = await fetch(`${renderApiUrl}${path}`, {
@@ -86,6 +120,10 @@ async function renderRequest(path, init = {}) {
     throw new Error(`Render API ${response.status} ${response.statusText}: ${detail}`);
   }
 
+  if (!payload && options.allowEmpty) {
+    return null;
+  }
+
   if (!payload || typeof payload !== "object") {
     throw new Error(`Render API returned a non-JSON response: ${body.slice(0, 300)}`);
   }
@@ -95,15 +133,19 @@ async function renderRequest(path, init = {}) {
 
 function assertDeployCommit(deploy, expectedSha) {
   const commitId = deploy.commit?.id;
-  if (
-    typeof commitId === "string" &&
-    !expectedSha.startsWith(commitId) &&
-    !commitId.startsWith(expectedSha)
-  ) {
+  if (typeof commitId === "string" && !deployCommitMatches(deploy, expectedSha)) {
     throw new Error(
       `Render deploy ${deploy.id ?? "(unknown)"} is for ${commitId}, expected ${expectedSha}.`,
     );
   }
+}
+
+function deployCommitMatches(deploy, expectedSha) {
+  const commitId = deploy?.commit?.id;
+  return (
+    typeof commitId === "string" &&
+    (expectedSha.startsWith(commitId) || commitId.startsWith(expectedSha))
+  );
 }
 
 function isFailedStatus(status) {
