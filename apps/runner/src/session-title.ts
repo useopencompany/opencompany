@@ -1,3 +1,4 @@
+import { GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS } from "@opencompany/agent-runtime";
 import { calculateModelUsageCost, recordWorkspaceUsageDebit } from "@opencompany/billing";
 import { agentSessionMessages, agentSessions, agentSessionUsage } from "@opencompany/db/schema";
 import { createGateway, generateText, type LanguageModelUsage } from "ai";
@@ -94,6 +95,7 @@ async function generateSessionTitleWithUsage(input: {
     )}`,
     maxOutputTokens: 20,
     temperature: 0,
+    providerOptions: GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   });
 
   return {
