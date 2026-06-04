@@ -89,8 +89,62 @@ function initialState(): SessionRuntimeState {
     cost: emptyCostSummary(),
     currentStatus: "running",
     lastError: null,
+    statusObserved: false,
   };
 }
+
+describe("statusObserved (stream scalar authority)", () => {
+  it("stays false after non-status-bearing deltas so the snapshot stays authoritative", () => {
+    let state = initialState();
+    expect(state.statusObserved).toBe(false);
+
+    state = applyRuntimeEventToState(
+      state,
+      event(null, "message.delta", { messageId: "msg_asst", delta: "hi" }),
+    );
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "session.usage", { messageId: "msg_asst", inputTokens: 10 }),
+    );
+
+    // A token or usage delta is not status-bearing: the live stream must not yet
+    // override the Postgres snapshot's status/lastError (the start-of-session flicker).
+    expect(state.statusObserved).toBe(false);
+  });
+
+  it("flips true once a status-bearing event is reduced", () => {
+    const fromStatus = applyRuntimeEventToState(
+      initialState(),
+      event(1, "session.status", { status: "running" }),
+    );
+    expect(fromStatus.statusObserved).toBe(true);
+
+    const fromError = applyRuntimeEventToState(
+      initialState(),
+      event(1, "session.error", { message: "boom" }),
+    );
+    expect(fromError.statusObserved).toBe(true);
+
+    const fromUserMessage = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", { messageId: "msg_new_user", role: "user", content: "hi" }),
+    );
+    expect(fromUserMessage.statusObserved).toBe(true);
+  });
+
+  it("does not flip on an internal user message (no visible turn starts)", () => {
+    const state = applyRuntimeEventToState(
+      initialState(),
+      event(1, "message.created", {
+        messageId: "msg_internal",
+        role: "user",
+        content: "Hidden steering",
+        internal: true,
+      }),
+    );
+    expect(state.statusObserved).toBe(false);
+  });
+});
 
 describe("applyRuntimeEventToState", () => {
   it("applies assistant message lifecycle events", () => {

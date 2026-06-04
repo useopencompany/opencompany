@@ -655,6 +655,7 @@ function emptyStreamState(overrides: Partial<SessionRuntimeState> = {}): Session
     cost: makeDetail().cost,
     currentStatus: "",
     lastError: null,
+    statusObserved: false,
     ...overrides,
   };
 }
@@ -724,6 +725,9 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
       ],
       currentStatus: "running",
       lastError: null,
+      // The stream reduced a non-internal user message.created — a status-bearing
+      // event — so its scalar status/error are authoritative over the snapshot.
+      statusObserved: true,
     });
 
     renderSessionViewContent(detail);
@@ -732,6 +736,35 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
     expect(screen.queryByText("Gateway down")).not.toBeInTheDocument();
+  });
+
+  it("keeps the snapshot's status/error while the stream has only emitted non-status events", () => {
+    // Reopening a session whose snapshot carries an error: the stream connects and
+    // delivers a stray non-status event (e.g. a late usage delta) but has not yet
+    // observed any session.status/error — statusObserved stays false. The snapshot
+    // must remain authoritative so the error does not flicker away and back.
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_err", status: "failed", lastError: "Gateway down" }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    streamMock.state = emptyStreamState({
+      events: [{ id: 1, type: "session.usage", messageId: null, payload: {} }],
+      // statusObserved defaults to false: a usage delta is not status-bearing.
+    });
+
+    renderSessionViewContent(detail);
+
+    // Rendered in both the inline transcript banner and the inspector runtime panel.
+    expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
   });
 });
 

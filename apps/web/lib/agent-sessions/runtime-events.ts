@@ -61,6 +61,14 @@ export type SessionRuntimeState = {
   cost: SessionCostSummary;
   currentStatus: string;
   lastError: string | null;
+  // True once the stream has reduced an event that establishes the session's
+  // status/error — a `session.status`, a `session.error`, or a non-internal user
+  // `message.created`. Until then `currentStatus`/`lastError` are still the empty
+  // seed and must NOT be trusted over the Postgres snapshot. The view reads this to
+  // decide when the live stream is authoritative for the scalar health signals (a
+  // token/usage delta alone leaves it false), so the displayed status/error can
+  // never momentarily regress to the seed and flicker. See the merge in SessionView.
+  statusObserved: boolean;
 };
 
 /**
@@ -198,6 +206,7 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
+        statusObserved: true,
         messages:
           status === "failed"
             ? stopRunningAssistantMessages(next.messages, next.events)
@@ -212,6 +221,7 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
+      statusObserved: true,
       messages: stopRunningAssistantMessages(next.messages, next.events),
     };
   }
@@ -318,6 +328,7 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: "running",
         lastError: null,
+        statusObserved: true,
       };
     }
   }
