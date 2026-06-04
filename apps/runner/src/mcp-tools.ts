@@ -53,6 +53,7 @@ import {
   persistDeniedToolResult,
   SUSPENDED_TOOL_OUTPUT,
 } from "./tool-dispatcher";
+import type { McpToolSchemaMetadata } from "./tool-schema-summary";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 const MCP_EXPERIMENT_KEY = "mcp";
@@ -153,6 +154,7 @@ type McpToolContext = {
 
 export type McpToolSet = {
   tools: ToolSet;
+  toolSchemaMetadata: ReadonlyMap<string, McpToolSchemaMetadata>;
   close: () => Promise<void>;
   // Execute an MCP tool body directly (bypassing the stream gate) for an approval resume.
   // Returns null when no MCP tool with that prefixed name is connected. Persists the
@@ -171,6 +173,7 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
   const clients: MCPClient[] = [];
   const tools: ToolSet = {};
   const usedNames = new Set<string>();
+  const toolSchemaMetadata = new Map<string, McpToolSchemaMetadata>();
   const bodiesByName = new Map<
     string,
     { server: McpProviderKey; rawName: string; execute: McpToolBody }
@@ -195,6 +198,12 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
           provider,
           error,
           checkAbort: input.checkAbort,
+        });
+        toolSchemaMetadata.set(stubName, {
+          providerKey: provider.key,
+          providerName: provider.displayName,
+          rawName: NOT_CONNECTED_STUB_RAW_NAME,
+          isStub: true,
         });
         continue;
       }
@@ -287,11 +296,17 @@ export async function createMcpToolSet(input: McpToolContext): Promise<McpToolSe
           rawName,
           execute: mcpTool.execute,
         });
+        toolSchemaMetadata.set(prefixedName, {
+          providerKey: provider.key,
+          providerName: provider.displayName,
+          rawName,
+        });
       }
     }
 
     return {
       tools,
+      toolSchemaMetadata,
       close: () => closeMcpClients(clients),
       runApprovedTool: ({ toolName, toolCallId, args }) => {
         const body = bodiesByName.get(toolName);
@@ -1060,7 +1075,12 @@ function uniqueToolName(base: string, usedNames: Set<string>) {
 }
 
 function emptyMcpToolSet(): McpToolSet {
-  return { tools: {}, close: async () => {}, runApprovedTool: () => null };
+  return {
+    tools: {},
+    toolSchemaMetadata: new Map(),
+    close: async () => {},
+    runApprovedTool: () => null,
+  };
 }
 
 async function closeMcpClient(client: MCPClient) {

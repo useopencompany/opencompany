@@ -1,6 +1,10 @@
 import { resolveAgentRuntimeConfig, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
 import type { LogFields } from "@opencompany/observability";
-import { logBraintrustCurrentSpan, logBraintrustSpan } from "@opencompany/observability/braintrust";
+import {
+  isBraintrustTracingEnabled,
+  logBraintrustCurrentSpan,
+  logBraintrustSpan,
+} from "@opencompany/observability/braintrust";
 import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
 import {
@@ -17,6 +21,7 @@ import { ToolStepLimitExceededError } from "./runner-errors";
 import type { LoadedSession } from "./session-lifecycle";
 import { buildCacheableSystemPrompt, normalizeReasoningSummary } from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
+import { buildToolSchemaSummary, shouldCaptureRawToolSchemas } from "./tool-schema-summary";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
 export const MAX_MODEL_STEPS = 16;
@@ -81,6 +86,16 @@ export async function streamAssistantResponse(input: {
     ...input.messages,
   ];
   try {
+    const toolSchemaSummary = isBraintrustTracingEnabled()
+      ? buildToolSchemaSummary({
+          tools: selectedTools,
+          mcpToolMetadata: mcpToolSet.toolSchemaMetadata,
+          modelProvider: input.runtime.model.provider,
+          modelName: input.runtime.model.name,
+          modelSystem,
+          captureRawSchemas: shouldCaptureRawToolSchemas(),
+        })
+      : undefined;
     const streamStartedAt = Date.now();
     let firstStreamPartAt: number | undefined;
     return await observeRunStep(
@@ -156,6 +171,7 @@ export async function streamAssistantResponse(input: {
         model_provider: input.runtime.model.provider,
         model_name: input.runtime.model.name,
         assistant_message_id: input.assistantMessageId,
+        ...(toolSchemaSummary ? { tool_schema_summary: toolSchemaSummary } : {}),
       },
       { type: "llm", input: modelInput },
     );

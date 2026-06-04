@@ -44,6 +44,7 @@ BRAINTRUST_ENABLED=false
 BRAINTRUST_API_KEY=...
 BRAINTRUST_PROJECT_ID=...
 BRAINTRUST_PROJECT_NAME="OpenCompany Runner"
+BRAINTRUST_CAPTURE_RAW_TOOL_SCHEMAS=false
 ```
 
 When enabled, Braintrust captures runner-only agent traces: agent turn spans, model stream spans,

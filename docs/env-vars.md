@@ -98,6 +98,7 @@ Set these in Vercel Production.
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
+| `BRAINTRUST_CAPTURE_RAW_TOOL_SCHEMAS` | No | Debug-only raw model tool schema capture in Braintrust. Defaults off; summaries are always schema-size only. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENV` | No | Browser observability environment. |
@@ -144,6 +145,7 @@ Set these in the Render `opencompany-runner` service.
 | `BRAINTRUST_API_KEY` | Required with `BRAINTRUST_ENABLED` | Braintrust API key for runner traces. |
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
+| `BRAINTRUST_CAPTURE_RAW_TOOL_SCHEMAS` | No | Debug-only raw model tool schema capture in Braintrust. Defaults off; summaries are always schema-size only. |
 
 Render also injects `PORT` and `RENDER_GIT_COMMIT`; do not set them manually unless debugging.
 

@@ -130,6 +130,12 @@ describe("createMcpToolSet", () => {
     const mcpTools = await createMcpToolSet(baseInput());
     const stub = (mcpTools.tools as ToolSet).linear__get_connection_status;
     expect(stub).toBeDefined();
+    expect(mcpTools.toolSchemaMetadata.get("linear__get_connection_status")).toEqual({
+      providerKey: "linear",
+      providerName: "Linear",
+      rawName: "get_connection_status",
+      isStub: true,
+    });
 
     const output = await stub?.execute?.(
       {},
@@ -187,6 +193,16 @@ describe("createMcpToolSet", () => {
     // Linear degrades to a stub, Slack builds its real tool.
     expect(tools.linear__get_connection_status).toBeDefined();
     expect(tools.slack__search).toBeDefined();
+    expect(mcpTools.toolSchemaMetadata.get("linear__get_connection_status")).toMatchObject({
+      providerKey: "linear",
+      rawName: "get_connection_status",
+      isStub: true,
+    });
+    expect(mcpTools.toolSchemaMetadata.get("slack__search")).toMatchObject({
+      providerKey: "slack",
+      providerName: "Slack",
+      rawName: "search",
+    });
 
     const stubOutput = await tools.linear__get_connection_status?.execute?.(
       {},
@@ -424,6 +440,11 @@ describe("createMcpToolSet", () => {
     const toolStartCoordinator = createToolStartCoordinator();
     const mcpTools = await createMcpToolSet(baseInput(slackAgentConfig, toolStartCoordinator));
     const slackTool = (mcpTools.tools as ToolSet).slack__search;
+    expect(mcpTools.toolSchemaMetadata.get("slack__search")).toEqual({
+      providerKey: "slack",
+      providerName: "Slack",
+      rawName: "search",
+    });
     await slackTool?.onInputAvailable?.({
       input: { query: "launch" },
       toolCallId: "call_slack",
