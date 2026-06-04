@@ -1,6 +1,10 @@
 "use client";
 
-import { buildAgentTiptapDoc, type MentionResolver } from "@opencompany/agent-runtime";
+import {
+  buildAgentTiptapDoc,
+  MENTION_BOUNDARY_CHARS_RE,
+  type MentionResolver,
+} from "@opencompany/agent-runtime";
 import { Mention } from "@tiptap/extension-mention";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -150,10 +154,16 @@ const createAutoMentionExtension = (getItems: () => AgentMentionItem[]) =>
 
                 if (matchStart > 0) {
                   const charBefore = newState.doc.textBetween(matchStart - 1, matchStart, "\n", "");
-                  if (charBefore && !/[\s([{]/.test(charBefore)) continue;
+                  if (charBefore && !MENTION_BOUNDARY_CHARS_RE.test(charBefore)) continue;
                 }
 
                 const tokenEnd = matchStart + 1 + token.length;
+                // Leave a mention written inside an inline-code span as literal
+                // code — the user formatted it that way on purpose. (The save
+                // path still unwraps backtick-wrapped mentions in the raw .agent
+                // body, which has no code marks.)
+                const codeMark = newState.schema.marks.code;
+                if (codeMark && newState.doc.rangeHasMark(matchStart, tokenEnd, codeMark)) continue;
                 if (
                   wasTypingForward &&
                   cursorEmpty &&

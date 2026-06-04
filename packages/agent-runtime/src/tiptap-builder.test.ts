@@ -102,6 +102,19 @@ describe("buildAgentTiptapDoc", () => {
     expect(mentions[0]?.attrs).toMatchObject({ id: "tool:exa", label: "exa" });
     expect(tiptapDocToBody(doc)).toBe("Use @exa.");
   });
+
+  it("pills a backtick-wrapped mention (backticks remain as text until the save path unwraps them)", () => {
+    const doc = buildAgentTiptapDoc("Use `@exa` now", passthrough);
+    const mentions = collectMentions(doc);
+    expect(mentions[0]?.attrs).toMatchObject({ id: "tool:exa", label: "exa" });
+    expect(tiptapDocToBody(doc)).toBe("Use `@exa` now");
+  });
+
+  it("pills cleanly once the backticks are unwrapped", () => {
+    const doc = buildAgentTiptapDoc("Use @exa now", passthrough);
+    expect(collectMentions(doc)).toHaveLength(1);
+    expect(tiptapDocToBody(doc)).toBe("Use @exa now");
+  });
 });
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {

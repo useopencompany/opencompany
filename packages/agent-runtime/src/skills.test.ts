@@ -92,6 +92,12 @@ describe("skill catalog", () => {
     expect(skillMd).toMatch(/GitHub repository attached/i);
   });
 
+  test("the self-edit SKILL.md warns against wrapping mentions in backticks", () => {
+    const [skill] = resolveEnabledBuiltinSkillFiles(baseConfig());
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toMatch(/never wrap them in\s+backticks/i);
+  });
+
   test("the self-edit SKILL.md documents the read-before-edit gate", () => {
     const [skill] = resolveEnabledBuiltinSkillFiles(baseConfig());
     const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";

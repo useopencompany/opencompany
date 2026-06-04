@@ -1,6 +1,6 @@
 import { AFTER_SESSION_TAG, extractAfterSessionConfig } from "./after-session";
 import { AGENT_MODEL_CATALOG, type ModelRatings } from "./models";
-import type { MentionResolver } from "./tiptap-builder";
+import { MENTION_BOUNDARY_CHARS_RE, type MentionResolver } from "./tiptap-builder";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import type {
   AgentBrainReference,
@@ -87,7 +87,7 @@ export function extractMentionIds(body: string) {
 
   for (let index = 0; index < body.length; index += 1) {
     if (body[index] !== "@") continue;
-    if (index > 0 && !/[\s([{]/.test(body[index - 1] ?? "")) continue;
+    if (index > 0 && !MENTION_BOUNDARY_CHARS_RE.test(body[index - 1] ?? "")) continue;
 
     let end = index + 1;
     while (end < body.length && isMentionChar(body[end] ?? "")) end += 1;
@@ -494,7 +494,7 @@ function isMentionChar(char: string) {
 
 // Mirrors the web editor's `repositoryMentionId` so a config-derived repository
 // pill carries the same id the editor would have stored.
-function repositoryMentionIdForConfig(repository: AgentGitHubRepositoryConfig) {
+export function repositoryMentionIdForConfig(repository: AgentGitHubRepositoryConfig) {
   const repositoryId = repositoryIdForFullName(repository.fullName);
   if (!repository.binding) return `integration:github:${repositoryId}`;
   return [
@@ -596,4 +596,126 @@ export function buildConfigMentionResolver(config: AgentConfig): MentionResolver
     if (mentionDisplayText(candidate.id, candidate.label) !== token) return null;
     return candidate;
   };
+}
+
+// Trailing punctuation that is trimmed off a mention token (mirrors
+// `parseMentionText` in tiptap-builder) so "@exa." resolves as "@exa".
+const MENTION_TRAILING_PUNCTUATION_RE = /[.,;:!?)}\]]+$/g;
+
+// A single-backtick-wrapped mention found at `index` (the opening backtick),
+// e.g. "`@opencode`". Returns the trigger, the bare token, and `closeIndex`
+// (the closing backtick position) — or null when the span isn't a clean,
+// adjacent, single-backtick wrapper. The match is intentionally strict so we
+// never disturb real inline code: the inside must be exactly `@token` of
+// mention chars, the closing backtick must sit immediately after them, and the
+// character after must not continue a word (so "`@exa`tra" is left alone).
+function matchBacktickWrappedMention(
+  body: string,
+  index: number,
+): { trigger: "@" | "#"; token: string; closeIndex: number } | null {
+  if (body[index] !== "`") return null;
+  // Reject double/triple fences and mid-word backticks; the opening backtick
+  // must itself sit at a boundary (start, whitespace, or an opening bracket).
+  if (index > 0 && !/[\s([{]/.test(body[index - 1] ?? "")) return null;
+
+  const trigger = body[index + 1];
+  if (trigger !== "@" && trigger !== "#") return null;
+
+  let end = index + 2;
+  while (end < body.length && isMentionChar(body[end] ?? "")) end += 1;
+  if (body[end] !== "`") return null; // closing backtick must be adjacent to the token
+
+  const after = body[end + 1];
+  if (after !== undefined && isMentionChar(after)) return null; // would merge into a word
+
+  const token = body.slice(index + 2, end).replace(MENTION_TRAILING_PUNCTUATION_RE, "");
+  if (!token) return null;
+
+  return { trigger, token, closeIndex: end };
+}
+
+/**
+ * Strip the surrounding single backticks from any mention written as inline
+ * code (e.g. ``Use `@opencode` `` → `Use @opencode`) when the enclosed token
+ * actually resolves via `resolve`. Agents commonly format a mention as code out
+ * of habit; backtick-wrapped mentions ARE now recognized by the tokenizer, but
+ * leaving the backticks in place would render a pill wrapped in stray
+ * backticks. Unwrapping keeps the stored body clean and `tiptapDocToBody`
+ * round-tripping. Tokens that don't resolve (real inline code like `` `@param` ``)
+ * are left untouched. Idempotent.
+ */
+export function unwrapBacktickWrappedMentions(body: string, resolve: MentionResolver): string {
+  let out = "";
+  let index = 0;
+  while (index < body.length) {
+    const match = body[index] === "`" ? matchBacktickWrappedMention(body, index) : null;
+    if (match && resolve(match.token, match.trigger)) {
+      // Emit "@token" (between the backticks) and skip both backticks.
+      out += body.slice(index + 1, match.closeIndex);
+      index = match.closeIndex + 1;
+      continue;
+    }
+    out += body[index];
+    index += 1;
+  }
+  return out;
+}
+
+// Mention namespaces that are unambiguously mention-intent (as opposed to prose
+// containing an "@", like an email). Used by the linter to warn only on tokens
+// the author clearly meant as a mention.
+const NAMESPACED_MENTION_PREFIXES = ["brain/", "skill/", "agent/", "agents/"];
+
+/**
+ * Inspect a `.agent` body for mention authoring mistakes and return
+ * human-readable warnings the model can act on. Two cases, chosen to keep
+ * signal high (no false positives on ordinary prose or emails):
+ *
+ * 1. A mention wrapped in backticks whose token resolves — the save path
+ *    auto-unwraps it, but the model is told so it stops doing it.
+ * 2. A namespaced token (`@brain/…`, `@skill/…`, `@agent/…`) at a valid mention
+ *    boundary that does NOT resolve — it looks like a mention but binds nothing.
+ */
+export function lintAgentBodyMentions(body: string, resolve: MentionResolver): string[] {
+  const warnings: string[] = [];
+  const seen = new Set<string>();
+  const push = (warning: string) => {
+    if (seen.has(warning)) return;
+    seen.add(warning);
+    warnings.push(warning);
+  };
+
+  // Case 1: backtick-wrapped resolvable mentions.
+  for (let index = 0; index < body.length; index += 1) {
+    if (body[index] !== "`") continue;
+    const match = matchBacktickWrappedMention(body, index);
+    if (match && resolve(match.token, match.trigger)) {
+      push(
+        `Mention "${match.trigger}${match.token}" is wrapped in backticks. Write it as ${match.trigger}${match.token} (no backticks) — backtick-wrapped mentions are not recognized.`,
+      );
+    }
+  }
+
+  // Case 2: namespaced tokens that look like a mention but don't resolve.
+  for (let index = 0; index < body.length; index += 1) {
+    const trigger = body[index];
+    if (trigger !== "@") continue;
+    if (index > 0 && !MENTION_BOUNDARY_CHARS_RE.test(body[index - 1] ?? "")) continue;
+
+    let end = index + 1;
+    while (end < body.length && isMentionChar(body[end] ?? "")) end += 1;
+    const token = body.slice(index + 1, end).replace(MENTION_TRAILING_PUNCTUATION_RE, "");
+    if (!token) continue;
+
+    const lower = token.toLowerCase();
+    const isNamespaced = NAMESPACED_MENTION_PREFIXES.some((prefix) => lower.startsWith(prefix));
+    if (!isNamespaced) continue;
+    if (resolve(token, "@")) continue;
+
+    push(
+      `"@${token}" looks like a mention but could not be resolved (unknown brain/skill/agent reference); it will not be enabled or highlighted.`,
+    );
+  }
+
+  return warnings;
 }

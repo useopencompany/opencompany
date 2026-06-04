@@ -94,6 +94,10 @@ changes here when you pass the explicit \`model\` argument to \`update_agent_fil
 - \`@brain/path\` or \`@brain/folder/\` — mount Brain context.
 - \`@toolname\` — enable a tool (see the list below).
 
+Write mention tokens bare (for example: @opencode or @brain/wiki/) and never wrap them in
+backticks or other inline-code formatting. A backtick-wrapped mention is treated as literal
+text, so the tool or Brain mount it names is silently not bound.
+
 ## Keep the body light
 
 The body is a quick-reference for your future self, **not an essay**. Write it as tight

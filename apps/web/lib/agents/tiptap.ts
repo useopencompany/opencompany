@@ -7,13 +7,21 @@ import type {
 
 export type { TiptapNode } from "@opencompany/agent-runtime/types";
 
-export function sanitizeTiptapDoc(value: unknown): TiptapDoc {
+export type SanitizeTiptapOptions = {
+  // Invoked whenever a mention node is dropped because it lacks renderable
+  // attrs. The node carries no recoverable token text, so dropping stays
+  // correct — but the save path passes this to log the loss instead of letting
+  // it happen silently (read paths leave it unset and stay quiet).
+  onDroppedMention?: (node: Record<string, unknown>) => void;
+};
+
+export function sanitizeTiptapDoc(value: unknown, options?: SanitizeTiptapOptions): TiptapDoc {
   const doc = asRecord(value);
   if (!doc || doc.type !== "doc") {
     return { type: "doc", content: [] };
   }
 
-  const content = sanitizeContent(doc.content);
+  const content = sanitizeContent(doc.content, options);
   return content.length > 0 ? { type: "doc", content } : { type: "doc", content: [] };
 }
 
@@ -30,17 +38,20 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function sanitizeContent(value: unknown): TiptapNode[] {
+function sanitizeContent(value: unknown, options?: SanitizeTiptapOptions): TiptapNode[] {
   if (!Array.isArray(value)) return [];
-  return value.map(sanitizeNode).filter((node): node is TiptapNode => Boolean(node));
+  return value
+    .map((item) => sanitizeNode(item, options))
+    .filter((node): node is TiptapNode => Boolean(node));
 }
 
-function sanitizeNode(value: unknown): TiptapNode | null {
+function sanitizeNode(value: unknown, options?: SanitizeTiptapOptions): TiptapNode | null {
   const node = asRecord(value);
   const type = typeof node?.type === "string" ? node.type : null;
   if (!node || !type) return null;
 
   if (type === "mention" && !hasRenderableMentionAttrs(node.attrs)) {
+    options?.onDroppedMention?.(node);
     return null;
   }
 
@@ -60,7 +71,7 @@ function sanitizeNode(value: unknown): TiptapNode | null {
     out.marks = marks;
   }
 
-  const content = sanitizeContent(node.content);
+  const content = sanitizeContent(node.content, options);
   if (content.length > 0) {
     out.content = content;
   }

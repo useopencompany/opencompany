@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   agentMentionIdForPath,
+  buildConfigMentionResolver,
   deriveAgentConfigFromBody,
   extractConfigFromMentions,
+  extractMentionIds,
+  lintAgentBodyMentions,
+  unwrapBacktickWrappedMentions,
 } from "./mentions";
 
 const repositories = [
@@ -300,5 +304,87 @@ describe("deriveAgentConfigFromBody", () => {
     });
 
     expect(config.skills).toBeUndefined();
+  });
+});
+
+// A resolver backed by a real derived config so tool/brain round-trip guards
+// behave exactly as they do in production.
+const resolver = buildConfigMentionResolver(
+  deriveAgentConfigFromBody({
+    title: "Reviewer",
+    body: "Use @opencode and @exa and @brain/wiki/",
+    repositories: [],
+  }).config,
+);
+
+describe("extractMentionIds with backtick-wrapped mentions", () => {
+  it("recognizes a mention wrapped in inline-code backticks", () => {
+    expect(extractMentionIds("Use `@opencode` to do the work")).toEqual(["opencode"]);
+    expect(extractMentionIds("Reference `@brain/`")).toEqual(["brain/"]);
+  });
+
+  it("enables the tool when the only mention is backtick-wrapped", () => {
+    expect(extractConfigFromMentions("Delegate to `@opencode` for coding.").tools).toEqual([
+      "opencode",
+    ]);
+  });
+});
+
+describe("unwrapBacktickWrappedMentions", () => {
+  it("unwraps a resolvable backtick-wrapped mention", () => {
+    expect(unwrapBacktickWrappedMentions("Use `@opencode` to fetch diffs", resolver)).toBe(
+      "Use @opencode to fetch diffs",
+    );
+    expect(unwrapBacktickWrappedMentions("Reference `@brain/wiki/` for context", resolver)).toBe(
+      "Reference @brain/wiki/ for context",
+    );
+  });
+
+  it("leaves unresolvable, double-backtick, and spaced spans untouched", () => {
+    expect(unwrapBacktickWrappedMentions("Set the `@param` value", resolver)).toBe(
+      "Set the `@param` value",
+    );
+    expect(unwrapBacktickWrappedMentions("Use ``@opencode`` here", resolver)).toBe(
+      "Use ``@opencode`` here",
+    );
+    expect(unwrapBacktickWrappedMentions("Use ` @opencode ` here", resolver)).toBe(
+      "Use ` @opencode ` here",
+    );
+  });
+
+  it("does not merge into an adjacent word", () => {
+    expect(unwrapBacktickWrappedMentions("`@opencode`extra", resolver)).toBe("`@opencode`extra");
+  });
+
+  it("is idempotent", () => {
+    const once = unwrapBacktickWrappedMentions("Use `@opencode` now", resolver);
+    expect(unwrapBacktickWrappedMentions(once, resolver)).toBe(once);
+  });
+
+  it("leaves a bare mention unchanged", () => {
+    expect(unwrapBacktickWrappedMentions("Use @opencode now", resolver)).toBe("Use @opencode now");
+  });
+});
+
+describe("lintAgentBodyMentions", () => {
+  it("warns about a backtick-wrapped resolvable mention", () => {
+    const warnings = lintAgentBodyMentions("Use `@opencode` for coding", resolver);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("@opencode");
+    expect(warnings[0]).toContain("backticks");
+  });
+
+  it("warns about a namespaced mention that does not resolve", () => {
+    const warnings = lintAgentBodyMentions("Enable @skill/does-not-exist please", resolver);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("@skill/does-not-exist");
+    expect(warnings[0]).toContain("could not be resolved");
+  });
+
+  it("does not warn on prose @, emails, or resolved bare mentions", () => {
+    expect(lintAgentBodyMentions("Email me at louis@acta.so or ping @someone", resolver)).toEqual(
+      [],
+    );
+    expect(lintAgentBodyMentions("Use @opencode and @brain/wiki/ as usual", resolver)).toEqual([]);
   });
 });

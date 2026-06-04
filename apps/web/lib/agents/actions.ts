@@ -5,11 +5,14 @@ import {
   agentBundleDir,
   agentPathForSlug,
   agentSlugFromPath,
+  buildAgentTiptapDoc,
+  buildConfigMentionResolver,
   collectBodyRepositoryMentions,
   deriveAgentConfigFromBody,
   normalizeAgentBody,
   parseAgentFile,
   serializeAgentFile,
+  unwrapBacktickWrappedMentions,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
@@ -32,6 +35,7 @@ import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   derivePreviewConfigFromTiptapDoc,
+  enrichGitHubMentionAttrs,
   extractPreferredGitHubRepositoriesFromTiptapDoc,
 } from "@/lib/agents/config";
 import {
@@ -192,7 +196,15 @@ export async function updateAgent(
       : agent.path;
   const previousPath = agent.path;
   const pathChanged = Boolean(previousPath && path !== previousPath);
-  const sanitizedContent = patch.content ? sanitizeTiptapDoc(patch.content) : null;
+  const sanitizedContent = patch.content
+    ? sanitizeTiptapDoc(patch.content, {
+        onDroppedMention: () => {
+          console.warn(
+            `[agent-save] dropped a mention node with no renderable attrs (agent ${agent.id})`,
+          );
+        },
+      })
+    : null;
   const githubIntegrationRepositories = await timeAsync(
     trace,
     "db.selectGitHubIntegrationRepositories",
@@ -310,7 +322,15 @@ export async function updateAgent(
     ...(typeof patch.body === "string" ? { body: patch.body } : {}),
     ...(typeof derivedFromTiptap?.body === "string" ? { tiptapBody: derivedFromTiptap.body } : {}),
   });
-  const body = typeof patch.body === "string" ? patch.body : (derived?.body ?? agent.body);
+  // Mentions written as inline code (e.g. `@opencode` wrapped in backticks) are
+  // recognized but would otherwise render a pill wrapped in stray backticks.
+  // Unwrap them so the stored body is clean and round-trips with the rebuilt
+  // content below. The derived config's resolver ensures only real, resolvable
+  // mentions are unwrapped — genuine inline code is left untouched.
+  const body =
+    typeof patch.body === "string" && derived
+      ? unwrapBacktickWrappedMentions(derived.body, buildConfigMentionResolver(derived.config))
+      : (derived?.body ?? agent.body);
   const model = derived?.config.model.name ?? patch.model ?? currentConfig.model.name;
   const nextIntegrations =
     derived?.config.integrations ?? patch.config?.integrations ?? currentConfig.integrations;
@@ -336,6 +356,19 @@ export async function updateAgent(
     triggers: nextTriggers,
   });
   const parsed = parseAgentFile(source);
+  // Rebuild the rendered Tiptap doc from the authoritative body so `content`
+  // can never drift from `body`. A stale or lossy client doc previously left
+  // recognized mentions missing (dropped as attrless nodes), so the detail page
+  // rendered gaps where pills should be. On the tiptap-only save path (no body)
+  // keep the sanitized client doc. GitHub repo pills are re-enriched with the
+  // binding attrs the resolver drops so preferred-repo extraction still works.
+  const contentToStore =
+    typeof patch.body === "string"
+      ? enrichGitHubMentionAttrs(
+          buildAgentTiptapDoc(parsed.body, buildConfigMentionResolver(parsed.config)),
+          parsed.config.integrations?.github?.repositories ?? [],
+        )
+      : sanitizedContent;
   const contentHash = hashAgentSource(source);
   const version = agent.version + 1;
   const [existingSyncJob] = await timeAsync(trace, "db.selectExistingSyncJob", () =>
@@ -422,7 +455,7 @@ export async function updateAgent(
           path,
           name: parsed.title,
           body: parsed.body,
-          ...(sanitizedContent ? { content: sanitizedContent } : {}),
+          ...(contentToStore ? { content: contentToStore } : {}),
           contentHash,
           version,
           config: parsed.config,

@@ -1,7 +1,14 @@
-import { deriveAgentConfigFromBody } from "@opencompany/agent-runtime";
+import {
+  deriveAgentConfigFromBody,
+  repositoryMentionIdForConfig,
+} from "@opencompany/agent-runtime";
 import type { TiptapDoc } from "@opencompany/agent-runtime/types";
 import { describe, expect, it } from "vitest";
-import { derivePreviewConfigFromTiptapDoc } from "./config";
+import {
+  derivePreviewConfigFromTiptapDoc,
+  enrichGitHubMentionAttrs,
+  extractPreferredGitHubRepositoriesFromTiptapDoc,
+} from "./config";
 
 const repositories = [
   { fullName: "opencompany/web", defaultBranch: "main" },
@@ -280,6 +287,40 @@ describe("deriveAgentConfigFromBody", () => {
     ]);
     expect(bodyResult.config.tools).toEqual([expect.objectContaining({ id: "amp" })]);
     expect(bodyResult.config.tools[0]).not.toHaveProperty("repository");
+  });
+});
+
+describe("enrichGitHubMentionAttrs", () => {
+  it("re-attaches binding/fullName/defaultBranch so preferred-repo extraction still works", () => {
+    const repoConfig = {
+      id: "opencompany-web",
+      fullName: "opencompany/web",
+      defaultBranch: "main",
+      binding: repositoryBinding,
+    };
+    // Shaped like `buildConfigMentionResolver` output: canonical id + label, but
+    // no binding attrs (those are exactly what enrichment restores).
+    const rebuilt = doc([mention(repositoryMentionIdForConfig(repoConfig), "opencompany/web")]);
+
+    const enriched = enrichGitHubMentionAttrs(rebuilt, [repoConfig]);
+    const node = (enriched.content?.[0]?.content?.[0] ?? {}) as {
+      attrs?: Record<string, unknown>;
+    };
+    expect(node.attrs?.binding).toEqual(repositoryBinding);
+    expect(node.attrs?.fullName).toBe("opencompany/web");
+    expect(node.attrs?.defaultBranch).toBe("main");
+
+    const preferred = extractPreferredGitHubRepositoriesFromTiptapDoc(enriched, [
+      { fullName: "opencompany/web", defaultBranch: "main", binding: repositoryBinding },
+    ]);
+    expect(preferred).toEqual([
+      expect.objectContaining({ fullName: "opencompany/web", binding: repositoryBinding }),
+    ]);
+  });
+
+  it("returns the doc unchanged when there are no repositories to match", () => {
+    const original = doc([mention("tool:exa", "exa")]);
+    expect(enrichGitHubMentionAttrs(original, [])).toBe(original);
   });
 });
 

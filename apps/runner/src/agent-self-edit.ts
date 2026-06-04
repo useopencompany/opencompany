@@ -8,9 +8,11 @@ import {
   buildConfigMentionResolver,
   getAgentModelDefinition,
   isSupportedScheduleCron,
+  lintAgentBodyMentions,
   normalizeAgentConfig,
   normalizeScheduleTimezone,
   serializeAgentFile,
+  unwrapBacktickWrappedMentions,
   validateAgentFileSource,
 } from "@opencompany/agent-runtime";
 import { agentSessions, agents } from "@opencompany/db/schema";
@@ -20,7 +22,14 @@ import { getDb } from "./db";
 import { appendRuntimeEventForLease, requireLeaseWrite } from "./lease-writes";
 
 export type AgentSelfUpdateResult =
-  | { ok: true; version: number; changedFields: string[]; summary?: string; appliesTo: string }
+  | {
+      ok: true;
+      version: number;
+      changedFields: string[];
+      summary?: string;
+      warnings?: string[];
+      appliesTo: string;
+    }
   | { ok: false; errors: string[] };
 
 type ParsedArgs = {
@@ -84,17 +93,39 @@ export async function applyAgentSelfUpdate(input: {
       ? current.triggers
       : [...scheduleTriggers, ...preservedNonScheduleTriggers];
 
-  const source = serializeAgentFile({
-    title: row.name,
-    body,
-    model: model ?? current.model.name,
-    agents: current.agents ?? [],
-    skills: current.skills ?? [],
-    integrations: current.integrations,
-    triggers: nextTriggers,
-  });
+  const buildSource = (bodyText: string) =>
+    serializeAgentFile({
+      title: row.name,
+      body: bodyText,
+      model: model ?? current.model.name,
+      agents: current.agents ?? [],
+      skills: current.skills ?? [],
+      integrations: current.integrations,
+      triggers: nextTriggers,
+    });
 
-  const validation = validateAgentFileSource(source);
+  const initialSource = buildSource(body);
+  const initialValidation = validateAgentFileSource(initialSource);
+  if (!initialValidation.ok) return { ok: false, errors: initialValidation.errors };
+
+  // Mentions are the binding contract for tools and Brain mounts. Agents often
+  // format a mention as inline code (`` `@opencode` ``) out of habit, which the
+  // tokenizer would otherwise treat as literal text. Warn about that (and other
+  // mention mistakes) so the model learns, then unwrap the backticks so the
+  // mention actually binds and highlights. Lint runs on the body the model
+  // wrote so the warning describes what it did.
+  const initialResolver = buildConfigMentionResolver(initialValidation.parsed.config);
+  const warnings = lintAgentBodyMentions(initialValidation.parsed.body, initialResolver);
+  const normalizedBody = unwrapBacktickWrappedMentions(
+    initialValidation.parsed.body,
+    initialResolver,
+  );
+
+  // Re-serialize and re-validate from the normalized body so the stored body,
+  // derived config, content hash, and the committed .agent file all agree.
+  const source =
+    normalizedBody === initialValidation.parsed.body ? initialSource : buildSource(normalizedBody);
+  const validation = source === initialSource ? initialValidation : validateAgentFileSource(source);
   if (!validation.ok) return { ok: false, errors: validation.errors };
   const nextConfig = validation.parsed.config;
 
@@ -179,6 +210,7 @@ export async function applyAgentSelfUpdate(input: {
     version: nextVersion,
     changedFields,
     ...(summary ? { summary } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
     appliesTo:
       "Saved. This takes effect on your next session — the current session keeps its existing configuration.",
   };

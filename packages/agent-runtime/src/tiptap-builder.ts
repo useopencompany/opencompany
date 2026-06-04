@@ -8,6 +8,15 @@ export type MentionResolver = (
   char: "@" | "#",
 ) => { id: string; label: string } | null;
 
+// A mention trigger (`@`/`#`) only starts a mention when it sits at a word
+// boundary: the start of the text, or right after whitespace, an opening
+// bracket, or a backtick. Backtick is included so an agent that wraps a mention
+// in inline-code (e.g. `` `@opencode` ``) still has it recognized — the save
+// path then unwraps the surrounding backticks. Shared by every tokenizer
+// (this parser, `extractMentionIds`, and the web editor's auto-mention plugin)
+// so the recognition rule never drifts between them.
+export const MENTION_BOUNDARY_CHARS_RE = /[\s([{`]/;
+
 // Markers may appear without trailing content because `tiptapDocToBody` trims
 // trailing whitespace on save: an empty heading is persisted as "#" rather
 // than "# ", and likewise for "- " / "1. ". Allow the text portion to be
@@ -132,7 +141,7 @@ function parseMentionText(text: string, resolve: MentionResolver): TiptapNode[] 
   for (let index = 0; index < text.length; index += 1) {
     const trigger = text[index];
     if (trigger !== "@" && trigger !== "#") continue;
-    if (index > 0 && !/[\s([{]/.test(text[index - 1] ?? "")) continue;
+    if (index > 0 && !MENTION_BOUNDARY_CHARS_RE.test(text[index - 1] ?? "")) continue;
 
     let end = index + 1;
     while (end < text.length && isMentionChar(text[end] ?? "")) end += 1;

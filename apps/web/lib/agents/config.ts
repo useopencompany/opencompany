@@ -2,14 +2,17 @@ import {
   type AgentConfigDerivationRepository,
   type AgentConfigDerivationSkill,
   deriveAgentConfigFromBody,
+  repositoryMentionIdForConfig,
   SUPPORTED_AGENT_TOOLS,
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
   AgentGitHubRepositoryBinding,
+  AgentGitHubRepositoryConfig,
   AgentModelId,
   AgentReference,
   AgentTriggerConfig,
+  JsonValue,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import { asRecord, sanitizeTiptapDoc, type TiptapNode } from "./tiptap";
@@ -85,6 +88,53 @@ export function extractPreferredGitHubRepositoriesFromTiptapDoc(
   });
 
   return Array.from(preferred.values());
+}
+
+/**
+ * Re-attach the GitHub repository pill attrs (`binding`, `fullName`,
+ * `defaultBranch`) that `buildConfigMentionResolver` drops. When `content` is
+ * rebuilt server-side from the authoritative body, repo mentions come back with
+ * only `{id, label}`; this restores the binding the editor stored so
+ * {@link extractPreferredGitHubRepositoriesFromTiptapDoc} keeps working. Repos
+ * are matched by recomputing each config repo's canonical mention id, so the
+ * match is exact rather than label-based.
+ */
+export function enrichGitHubMentionAttrs(
+  doc: TiptapDoc,
+  repositories: AgentGitHubRepositoryConfig[],
+): TiptapDoc {
+  if (repositories.length === 0) return doc;
+
+  const byMentionId = new Map<string, AgentGitHubRepositoryConfig>();
+  for (const repository of repositories) {
+    byMentionId.set(repositoryMentionIdForConfig(repository), repository);
+  }
+
+  const enrichNode = (node: TiptapNode): TiptapNode => {
+    let next = node;
+    if (node.type === "mention") {
+      const attrs = asRecord(node.attrs);
+      const id = typeof attrs?.id === "string" ? attrs.id : "";
+      const repository = id.startsWith("integration:github:") ? byMentionId.get(id) : undefined;
+      if (repository) {
+        next = {
+          ...node,
+          attrs: {
+            ...(attrs ?? {}),
+            fullName: repository.fullName,
+            defaultBranch: repository.defaultBranch,
+            ...(repository.binding ? { binding: repository.binding as unknown as JsonValue } : {}),
+          },
+        };
+      }
+    }
+    if (next.content) {
+      next = { ...next, content: next.content.map(enrichNode) };
+    }
+    return next;
+  };
+
+  return { ...doc, content: (doc.content ?? []).map(enrichNode) };
 }
 
 function extractPlainText(doc: TiptapDoc) {

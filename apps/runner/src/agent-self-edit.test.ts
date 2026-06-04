@@ -134,6 +134,43 @@ describe("applyAgentSelfUpdate", () => {
     );
   });
 
+  it("unwraps a backtick-wrapped mention, enables the tool, and warns the model", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(
+      input({ body: "Delegate coding to `@opencode` for every PR." }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.warnings ?? []).toHaveLength(1);
+      expect(result.warnings?.[0]).toContain("@opencode");
+      expect(result.warnings?.[0]).toContain("backticks");
+    }
+
+    const updated = calls.update[0] as {
+      body: string;
+      config: AgentConfig;
+      content?: { content?: unknown[] };
+    };
+    // The stored body is normalized — backticks stripped so the mention binds.
+    expect(updated.body).toContain("@opencode");
+    expect(updated.body).not.toContain("`@opencode`");
+    // The tool is now enabled in the derived config.
+    expect(updated.config.tools.map((tool) => tool.id)).toContain("opencode");
+    // And the rendered Tiptap doc carries a real pill (not a dropped/attrless node).
+    const mentions: Array<{ attrs?: Record<string, unknown> }> = [];
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== "object") return;
+      const n = node as { type?: string; attrs?: Record<string, unknown>; content?: unknown[] };
+      if (n.type === "mention") mentions.push(n);
+      (n.content ?? []).forEach(walk);
+    };
+    (updated.content?.content ?? []).forEach(walk);
+    expect(mentions.map((m) => m.attrs?.id)).toContain("tool:opencode");
+  });
+
   it("switches the model when a valid one is provided", async () => {
     const { db, calls } = createDb({ row: baseRow });
     dbMocks.getDb.mockReturnValue(db);
