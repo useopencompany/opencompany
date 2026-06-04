@@ -63,7 +63,3 @@ export async function callRunner(path: string, context: RunnerContext = {}) {
 export function getRunnerPublicUrl() {
   return process.env.RUNNER_PUBLIC_URL?.replace(/\/+$/, "") ?? null;
 }
-
-export function getRunnerStreamTokenSecret() {
-  return process.env.RUNNER_STREAM_TOKEN_SECRET?.trim() || null;
-}

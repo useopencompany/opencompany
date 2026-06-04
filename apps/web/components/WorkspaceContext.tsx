@@ -4,6 +4,7 @@ import { createContext, useContext } from "react";
 
 type WorkspaceContextValue = {
   workspaceId: string;
+  userId: string;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -11,11 +12,17 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({
   children,
   workspaceId,
+  userId,
 }: {
   children: React.ReactNode;
   workspaceId: string;
+  userId: string;
 }) {
-  return <WorkspaceContext.Provider value={{ workspaceId }}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={{ workspaceId, userId }}>
+      {children}
+    </WorkspaceContext.Provider>
+  );
 }
 
 export function useWorkspaceContext() {

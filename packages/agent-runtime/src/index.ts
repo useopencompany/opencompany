@@ -11,6 +11,5 @@ export * from "./permissions";
 export * from "./schedules";
 export * from "./skills";
 export * from "./tiptap-builder";
-export * from "./tokens";
 export * from "./tools";
 export * from "./types";

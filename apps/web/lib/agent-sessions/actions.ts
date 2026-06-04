@@ -21,6 +21,7 @@ import {
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
+import { appendSessionStreamEvent, closeSessionStream } from "@/lib/agent-sessions/durable-streams";
 import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionAbortRequested,
@@ -35,6 +36,7 @@ import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
+import { batchWithTxid } from "@/lib/db/txid";
 import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {
@@ -253,6 +255,17 @@ export async function abortAgentSession(sessionId: string) {
       updatedAt: new Date(),
     })
     .where(eq(agentSessions.id, sessionId));
+
+  // Reflect the optimistic "aborting" status on the Durable Stream so a
+  // stream-sourced transcript shows it immediately; the runner's subsequent
+  // durable status events (aborting → aborted) reconcile. Best-effort.
+  await appendSessionStreamEvent(sessionId, {
+    id: null,
+    type: "session.status",
+    messageId: null,
+    payload: { status: "aborting" },
+    createdAt: new Date().toISOString(),
+  });
 
   after(async () => {
     await dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id });
@@ -490,8 +503,8 @@ export async function archiveAgentSession(sessionId: string) {
   }
 
   if (!session.e2bSandboxId) {
-    await archiveSessionLocally(sessionId, null);
-    return { ok: true } as const;
+    const txid = await archiveSessionLocally(sessionId, null);
+    return { ok: true, txid } as const;
   }
 
   if (!getRunnerPublicUrl() || !process.env.RUNNER_INTERNAL_TOKEN) {
@@ -502,7 +515,11 @@ export async function archiveAgentSession(sessionId: string) {
     } as const;
   }
 
-  await db.batch([
+  // The runner sets archived_at later (out of band), so we reconcile the
+  // optimistic delete against THIS transaction — the status="archiving" write.
+  // Once it syncs the sidebar selector keeps the row hidden (it excludes the
+  // "archiving" status) until archived_at lands and removes it from the shape.
+  const txid = await batchWithTxid(
     db
       .update(agentSessions)
       .set({ status: "archiving", lastError: null, updatedAt: new Date() })
@@ -512,7 +529,7 @@ export async function archiveAgentSession(sessionId: string) {
       type: "session.status",
       payload: { status: "archiving", message: "Archiving session" },
     }),
-  ]);
+  );
 
   try {
     await callRunner(`/internal/sessions/${sessionId}/archive`);
@@ -532,7 +549,7 @@ export async function archiveAgentSession(sessionId: string) {
     return { ok: false, error: message } as const;
   }
 
-  return { ok: true } as const;
+  return { ok: true, txid } as const;
 }
 
 export async function setSessionStar(sessionId: string, starred: boolean) {
@@ -559,20 +576,24 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
 
   if (starred) {
     const starredAt = new Date();
-    await db
-      .insert(sessionStars)
-      .values({ userId: user.id, sessionId, starredAt })
-      .onConflictDoUpdate({
-        target: [sessionStars.userId, sessionStars.sessionId],
-        set: { starredAt },
-      });
-    return { ok: true, starredAt: starredAt.toISOString() } as const;
+    const txid = await batchWithTxid(
+      db
+        .insert(sessionStars)
+        .values({ userId: user.id, sessionId, starredAt })
+        .onConflictDoUpdate({
+          target: [sessionStars.userId, sessionStars.sessionId],
+          set: { starredAt },
+        }),
+    );
+    return { ok: true, txid, starredAt: starredAt.toISOString() } as const;
   }
 
-  await db
-    .delete(sessionStars)
-    .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId)));
-  return { ok: true, starredAt: null } as const;
+  const txid = await batchWithTxid(
+    db
+      .delete(sessionStars)
+      .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId))),
+  );
+  return { ok: true, txid, starredAt: null } as const;
 }
 
 async function loadCreatedSessionResult(sessionId: string, userId: string, workspaceId: string) {
@@ -584,11 +605,17 @@ async function loadCreatedSessionResult(sessionId: string, userId: string, works
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {
+// Returns the Postgres txid of the archive write so an optimistic sidebar delete
+// can reconcile against the row leaving the agent_sessions shape (archived_at is
+// set here, which removes it from the shape).
+async function archiveSessionLocally(
+  sessionId: string,
+  previousSandboxId: string | null,
+): Promise<number> {
   const db = getDb();
   const now = new Date();
 
-  await db.batch([
+  const txid = await batchWithTxid(
     db
       .update(agentSessions)
       .set({
@@ -619,7 +646,14 @@ async function archiveSessionLocally(sessionId: string, previousSandboxId: strin
         sandboxAlreadyStopped: previousSandboxId === null,
       },
     }),
-  ]);
+  );
+
+  // The session is permanently archived — the one provably-safe point to close the
+  // Durable Stream (EOF). Best-effort; never blocks the archive (Postgres is the
+  // system of record).
+  await closeSessionStream(sessionId);
+
+  return txid;
 }
 
 async function loadAgentForSession(idOrPath: string, workspaceId: string) {
@@ -671,8 +705,9 @@ async function insertAgentSession(input: {
 async function insertUserMessage(sessionId: string, content: string) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
+  const payload = { messageId, role: "user", content, status: "completed" };
 
-  await db.batch([
+  const results = await db.batch([
     db.insert(agentSessionMessages).values({
       id: messageId,
       sessionId,
@@ -682,13 +717,25 @@ async function insertUserMessage(sessionId: string, content: string) {
       modelMessage: { role: "user", content },
       completedAt: new Date(),
     }),
-    db.insert(agentSessionEvents).values({
-      sessionId,
-      messageId,
-      type: "message.created",
-      payload: { messageId, role: "user", content, status: "completed" },
-    }),
+    db
+      .insert(agentSessionEvents)
+      .values({ sessionId, messageId, type: "message.created", payload })
+      .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt }),
   ]);
+
+  // Mirror the user message onto the session's Durable Stream so it appears in a
+  // stream-sourced transcript (the runner never re-emits web-written events).
+  // Best-effort.
+  const eventRow = (results[1] as Array<{ id: number; createdAt: Date }>)[0];
+  if (eventRow) {
+    await appendSessionStreamEvent(sessionId, {
+      id: eventRow.id,
+      type: "message.created",
+      messageId,
+      payload,
+      createdAt: eventRow.createdAt.toISOString(),
+    });
+  }
 
   return messageId;
 }

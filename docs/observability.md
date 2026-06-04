@@ -199,9 +199,12 @@ Prefer these correlation fields in all handled captures:
 - `opencompany.runner_session_completed`: runner completed a user message.
 - `opencompany.runner_session_aborted`: runner stopped a message after an abort.
 - `opencompany.runner_session_failed`: runner failed a message run.
-- `opencompany.runner_sse_connected`: browser connected to runner SSE; check `replayed_events`.
-- `opencompany.runner_sse_closed`: browser disconnected from runner SSE.
-- `opencompany.runner_sse_rejected`: runner rejected an SSE connection.
+- `opencompany.durable_stream_publish_failed`: runner could not append a runtime event to the
+  session Durable Stream.
+- `opencompany.durable_stream_proxy_read`: web proxy read from a session Durable Stream; check
+  `status` and `retried_after_create`.
+- `opencompany.durable_stream_proxy_create_failed`: web proxy could not create a missing stream
+  before retrying a read.
 - `opencompany.agent_sync_job_queued`: the app wrote or updated an `agent_sync_jobs` row after an
   agent edit. Check `agent_id`, `workspace_id`, `path`, `desired_version`, and `next_run_at`.
 - `opencompany.agent_sync_dispatch_succeeded`: the app sent `agent.sync_requested` to Inngest.

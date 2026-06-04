@@ -32,7 +32,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useId,
@@ -48,7 +47,7 @@ import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
-import { useSessionEventStream } from "@/components/useSessionEventStream";
+import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
@@ -61,16 +60,9 @@ import {
 } from "@/lib/agent-sessions/actions";
 import {
   type AgentSessionDetailPayload,
-  addUserMessageToSessionDetail,
-  applyRuntimeEventToSessionDetail,
   fetchAgentSession,
-  fetchSessionStreamCredential,
-  invalidateRelatedCachesForSessionEvent,
-  mergeAgentSessionDetail,
   SESSIONS_QUERY_STALE_TIME_MS,
-  seedSessionQueries,
   sessionQueryKeys,
-  updateSessionStatusInDetail,
 } from "@/lib/agent-sessions/payload";
 import {
   type AssistantTurnPart,
@@ -78,6 +70,8 @@ import {
   buildBackgroundActivityParts,
   isInspectableRuntimeEvent,
   isReasoningInProgress,
+  mergeEvents,
+  mergeMessages,
   type RuntimeEvent,
   type RuntimeQuestionItem,
   type RuntimeToolCall,
@@ -94,9 +88,17 @@ import {
   type SlashCommand,
 } from "@/lib/slash-commands/registry";
 
+// A turn has settled (no more streaming) — trigger an aggregates refresh.
+const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
+
+// A turn is actively generating tokens right now — the transcript must replay from
+// offset "-1" to reconstruct the in-flight assistant text. Every other status (settled,
+// paused, or brand-new) seeds the live read from the stream's current end instead, since
+// the durable transcript is already painted from the server snapshot.
+const ACTIVE_STREAMING_STATUSES = new Set(["running", "aborting"]);
+
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
-const STREAM_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 // How far from the bottom (in px) before we consider the user "pinned".
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
@@ -111,6 +113,13 @@ const LAST_TURN_MIN_HEIGHT_FACTOR = 0.5;
 type SessionViewContentProps = {
   detail: AgentSessionDetailPayload;
   workspaceId: string;
+};
+
+type OptimisticUserMessage = SessionMessage & {
+  optimisticId: string;
+  submittedAtMs: number;
+  confirmedMessageId: string | null;
+  existingMessageIds: string[];
 };
 
 const MARKDOWN_COMPONENTS: Components = {
@@ -132,7 +141,6 @@ const ToolApprovalContext = createContext<{ sessionId: string } | null>(null);
 
 export default function SessionView({ sessionId }: { sessionId: string }) {
   const { workspaceId } = useWorkspaceContext();
-  const queryClient = useQueryClient();
   const detailKey = sessionQueryKeys.detail(workspaceId, sessionId);
   const {
     data: detail,
@@ -142,14 +150,10 @@ export default function SessionView({ sessionId }: { sessionId: string }) {
     isRefetching,
   } = useQuery({
     queryKey: detailKey,
-    queryFn: async () => {
-      const incoming = await fetchAgentSession(sessionId);
-      if (incoming === null) return null;
-      return mergeAgentSessionDetail(
-        queryClient.getQueryData<AgentSessionDetailPayload>(detailKey) ?? undefined,
-        incoming,
-      );
-    },
+    // The transcript (messages/events/status) is live from the Durable Stream; this
+    // query supplies session meta, related sessions, and the usage/cost aggregates,
+    // and is refetched on turn completion to refresh those aggregates.
+    queryFn: () => fetchAgentSession(sessionId),
     staleTime: SESSIONS_QUERY_STALE_TIME_MS,
   });
 
@@ -212,22 +216,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const queryClient = useQueryClient();
   const router = useRouter();
   const detailKey = sessionQueryKeys.detail(workspaceId, detail.session.id);
-  const streamCredentialKey = sessionQueryKeys.streamCredential(workspaceId, detail.session.id);
   const { showError, showToast } = useToast();
   const session = detail.session;
-  const { data: streamCredential } = useQuery({
-    queryKey: streamCredentialKey,
-    queryFn: () => fetchSessionStreamCredential(session.id),
-    enabled: Boolean(detail.runnerUrl),
-    staleTime: 55 * 60 * 1000,
-  });
-  const runnerUrl = streamCredential?.runnerUrl ?? detail.runnerUrl;
-  const streamToken = streamCredential?.streamToken ?? null;
   const relatedSessionCount = relatedCount(detail.related);
   const previousRelatedSessionCountRef = useRef(relatedSessionCount);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
   const [input, setInput] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
@@ -260,22 +256,89 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // view. (Keyboard scrolling of this non-focusable container stays a known minor edge.)
   const userScrollIntentRef = useRef(false);
   const userScrollIntentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const runtime = useMemo(
-    () => ({
-      events: detail.events,
-      messages: detail.messages,
-      usage: detail.usage,
-      toolUsage: detail.toolUsage,
-      cost: detail.cost,
-      currentStatus: detail.session.status,
-      lastError: detail.session.lastError,
-    }),
-    [detail],
-  );
-  const knownEventIds = useMemo(
-    () => runtime.events.flatMap((event) => (typeof event.id === "number" ? [event.id] : [])),
-    [runtime.events],
-  );
+  // Felt time-to-first-token: stamped at the Send click, resolved when the first
+  // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
+  const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
+  // Plane B: the live transcript is materialized from the session's Durable Stream
+  // (durable rows + transient token deltas) through the shared reducer. `onEvent`
+  // resolves the felt-TTFT timer on the first streamed assistant activity.
+  const { state: streamState, status: streamStatus } = useSessionStream(session.id, {
+    // Seed from the stream's current end unless a turn is actively generating at open
+    // time (then replay from "-1" to rebuild in-flight text). Read from the server
+    // snapshot status, which is stable for this session load; captured at subscribe
+    // time inside the hook, so the later terminal-status flip doesn't re-open the stream.
+    seedFromEnd: !ACTIVE_STREAMING_STATUSES.has(detail.session.status),
+    onEvent: (event) => {
+      const pending = pendingTtftRef.current;
+      if (
+        pending &&
+        (event.type === "message.delta" ||
+          event.type === "message.reasoning_delta" ||
+          event.type === "message.reasoning_started")
+      ) {
+        if (pending.messageId) {
+          captureEvent("session_first_token", {
+            workspace_id: workspaceId,
+            agent_id: session.agentId,
+            session_id: session.id,
+            message_id: pending.messageId,
+            model_provider: session.modelProvider,
+            model_name: session.modelName,
+            ttft_ms: Math.round(performance.now() - pending.startedAt),
+            first_token_kind: event.type === "message.delta" ? "text" : "reasoning",
+          });
+        }
+        pendingTtftRef.current = null;
+      } else if (pending && event.type === "message.completed") {
+        // Turn ended without ever streaming a delta — drop the stuck timer.
+        pendingTtftRef.current = null;
+      }
+    },
+  });
+  const baseRuntime = useMemo(() => {
+    // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
+    // session-tree rollup isn't reproduced client-side (D2); refreshed on
+    // completion via the effect below.
+    const aggregates = { usage: detail.usage, toolUsage: detail.toolUsage, cost: detail.cost };
+    // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
+    // Stream (`streamState`) is the live overlay. Union-merge the two so the
+    // transcript paints instantly from the snapshot AND never drops a durable
+    // message/event the stream happens to be missing (e.g. a user message that only
+    // the best-effort web append publishes, or pre-stream history) — while live
+    // deltas still flow. Status/error prefer the live stream once it has produced
+    // any event, else the snapshot.
+    const hasStreamData = streamState.events.length > 0 || streamState.messages.length > 0;
+    return {
+      events: mergeEvents(detail.events, streamState.events),
+      messages: mergeMessages(detail.messages, streamState.messages),
+      ...aggregates,
+      currentStatus: hasStreamData ? streamState.currentStatus : detail.session.status,
+      lastError: hasStreamData ? streamState.lastError : detail.session.lastError,
+    };
+  }, [detail, streamState]);
+  const runtime = useMemo(() => {
+    const pendingOptimisticMessages = optimisticUserMessages.filter(
+      (message) => !hasDurableUserMessage(baseRuntime.messages, message),
+    );
+    if (pendingOptimisticMessages.length === 0) return baseRuntime;
+    return {
+      ...baseRuntime,
+      messages: mergeMessages(baseRuntime.messages, pendingOptimisticMessages),
+      currentStatus: "running",
+      lastError: null,
+    };
+  }, [baseRuntime, optimisticUserMessages]);
+  // Refresh the server aggregates once a turn reaches a terminal state (the stream
+  // drives the transcript, but usage/cost come from the detail query).
+  const lastSettledStatusRef = useRef(runtime.currentStatus);
+  useEffect(() => {
+    const previous = lastSettledStatusRef.current;
+    const current = runtime.currentStatus;
+    lastSettledStatusRef.current = current;
+    if (previous !== current && TERMINAL_SESSION_STATUSES.has(current)) {
+      void queryClient.invalidateQueries({ queryKey: detailKey });
+    }
+  }, [runtime.currentStatus, detailKey, queryClient]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -304,7 +367,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   }, [runtime.events, runtime.messages]);
   // The single ask_user_question awaiting an answer (the run suspends, so at most one exists). It
   // drives the stepped QuestionComposer that takes over the composer slot. Derived from the same
-  // parts that render the transcript, so it stays reactive to SSE.
+  // parts that render the transcript, so it stays reactive to the session stream.
   const pendingQuestion = useMemo(() => {
     const findPending = (parts: AssistantTurnPart[]) =>
       parts.find(
@@ -411,9 +474,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   };
 
   const waitStartedAtRef = useRef<number | null>(null);
-  // Felt time-to-first-token: stamped at the Send click, resolved when the first
-  // streamed delta paints. `isBusy` blocks concurrent turns, so a single timer is safe.
-  const pendingTtftRef = useRef<{ startedAt: number; messageId: string | null } | null>(null);
   const [stoppedElapsedSeconds, setStoppedElapsedSeconds] = useState<number | null>(null);
   useEffect(() => {
     const waiting = showWaitingForAssistant || hasRunningAssistantMessage;
@@ -439,102 +499,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       const result = await abortAgentSession(session.id);
       if (!result.ok) {
         showError(result.error, "Could not abort session");
-        return;
       }
-      queryClient.setQueryData<AgentSessionDetailPayload>(detailKey, (current) =>
-        current ? updateSessionStatusInDetail(current, "aborting") : current,
-      );
+      // The "aborting" status arrives via the stream (the action appends it), so
+      // there is no optimistic cache write here.
     });
   };
-
-  const applyRuntimeEvent = useCallback(
-    (event: RuntimeEvent) => {
-      // Felt TTFT: the first visible assistant activity (text or reasoning) ends the timer.
-      const pending = pendingTtftRef.current;
-      if (
-        pending &&
-        (event.type === "message.delta" ||
-          event.type === "message.reasoning_delta" ||
-          event.type === "message.reasoning_started")
-      ) {
-        if (pending.messageId) {
-          captureEvent("session_first_token", {
-            workspace_id: workspaceId,
-            agent_id: session.agentId,
-            session_id: session.id,
-            message_id: pending.messageId,
-            model_provider: session.modelProvider,
-            model_name: session.modelName,
-            ttft_ms: Math.round(performance.now() - pending.startedAt),
-            first_token_kind: event.type === "message.delta" ? "text" : "reasoning",
-          });
-        }
-        pendingTtftRef.current = null;
-      } else if (pendingTtftRef.current && event.type === "message.completed") {
-        // Turn ended without ever streaming a delta — drop the stuck timer.
-        pendingTtftRef.current = null;
-      }
-
-      const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
-      if (!current) return;
-      const next = applyRuntimeEventToSessionDetail(current, event);
-      seedSessionQueries(queryClient, workspaceId, next);
-      invalidateRelatedCachesForSessionEvent(queryClient, workspaceId, session.agentId, event, {
-        sessionId: session.id,
-      });
-      if (
-        event.type === "message.completed" ||
-        event.type === "tool.completed" ||
-        event.type === "tool.failed"
-      ) {
-        void queryClient.invalidateQueries({ queryKey: detailKey });
-      }
-    },
-    [
-      detailKey,
-      queryClient,
-      workspaceId,
-      session.agentId,
-      session.id,
-      session.modelProvider,
-      session.modelName,
-    ],
-  );
-
-  const refetchSessionDetail = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: detailKey });
-  }, [detailKey, queryClient]);
-
-  const stream = useSessionEventStream({
-    runnerUrl,
-    streamToken,
-    sessionId: session.id,
-    knownEventIds,
-    onEvent: applyRuntimeEvent,
-    onOpen: refetchSessionDetail,
-  });
-
-  // Data-freshness staleness detection: derive the timestamp of the last runtime event
-  // from runtime.events and compare against a ticked `now` so the stale banner triggers
-  // even when SSE reconnects keep flipping stream.status away from "stale".
-  const STALE_THRESHOLD_MS = 45_000;
-  const [now, setNow] = useState<number>(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(id);
-  }, []);
-  const lastRuntimeActivityMs = useMemo(() => {
-    const last = runtime.events.at(-1);
-    if (last?.createdAt) return Date.parse(last.createdAt);
-    return Date.parse(detail.session.updatedAt);
-  }, [runtime.events, detail.session.updatedAt]);
-  const awaitingAssistantWork = hasRunningAssistantMessage || showWaitingForAssistant;
-  const sessionFeedsLooksStale =
-    awaitingAssistantWork && now - lastRuntimeActivityMs > STALE_THRESHOLD_MS;
-  // Used only to gate silent background recovery and to surface status in the inspector's
-  // Runtime section — there is intentionally no user-facing banner for this in the chat UX.
-  const connectionLooksStale =
-    awaitingAssistantWork && (stream.status === "stale" || sessionFeedsLooksStale);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -560,85 +529,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
 
-  // Stale stream/data means the browser may have missed durable events while the tab was
-  // backgrounded or connected to a runner that did not own the active job. Refresh the canonical
-  // detail so persisted completions appear without a manual page reload.
-  const lastRecoveryRefetchAtRef = useRef(0);
-  const refetchSessionProgress = useCallback(
-    ({
-      refreshStreamCredential = false,
-      ignoreRecoveryThrottle = false,
-    }: {
-      refreshStreamCredential?: boolean;
-      ignoreRecoveryThrottle?: boolean;
-    } = {}) => {
-      if (!awaitingAssistantWork) return;
-      const currentTime = Date.now();
-      if (
-        !ignoreRecoveryThrottle &&
-        currentTime - lastRecoveryRefetchAtRef.current < SESSIONS_QUERY_STALE_TIME_MS
-      ) {
-        return;
-      }
-      lastRecoveryRefetchAtRef.current = currentTime;
-      if (refreshStreamCredential) {
-        void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-      }
-      void queryClient.invalidateQueries({ queryKey: detailKey });
-    },
-    [awaitingAssistantWork, detailKey, queryClient, streamCredentialKey],
-  );
-
-  useEffect(() => {
-    if (!connectionLooksStale) return;
-    refetchSessionProgress({
-      refreshStreamCredential: stream.status === "stale",
-      ignoreRecoveryThrottle: stream.status === "stale",
-    });
-  }, [refetchSessionProgress, connectionLooksStale, stream.status]);
-
-  useEffect(() => {
-    // Keep credentials fresh whenever the SSE stream stays live: both while the assistant
-    // is actively working AND while the run is durably paused at a tool gate
-    // (`awaiting_approval`). A paused session keeps its stream open, so without this its
-    // token would silently expire and reconnects would retry expired URLs.
-    if ((!awaitingAssistantWork && !sessionIsPaused) || !streamCredential?.streamTokenExpiresAt)
-      return;
-    const refreshInMs = Math.max(
-      streamCredential.streamTokenExpiresAt - Date.now() - STREAM_TOKEN_REFRESH_BUFFER_MS,
-      0,
-    );
-    const timer = window.setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: streamCredentialKey });
-    }, refreshInMs);
-    return () => window.clearTimeout(timer);
-  }, [
-    awaitingAssistantWork,
-    sessionIsPaused,
-    queryClient,
-    streamCredential?.streamTokenExpiresAt,
-    streamCredentialKey,
-  ]);
-
-  useEffect(() => {
-    if (!awaitingAssistantWork) return;
-
-    const refetchOnVisible = () => {
-      if (document.visibilityState !== "hidden") {
-        refetchSessionProgress();
-      }
-    };
-    const refetchOnOnline = () => {
-      refetchSessionProgress();
-    };
-
-    document.addEventListener("visibilitychange", refetchOnVisible);
-    window.addEventListener("online", refetchOnOnline);
-    return () => {
-      document.removeEventListener("visibilitychange", refetchOnVisible);
-      window.removeEventListener("online", refetchOnOnline);
-    };
-  }, [awaitingAssistantWork, refetchSessionProgress]);
+  // The Durable Stream self-recovers (the client reconnects + resumes from its
+  // offset) and refresh/visibility recovery is no longer needed — a refresh
+  // replays the whole transcript from the stream.
 
   useEffect(() => {
     if (!attachMenuOpen) return;
@@ -835,6 +728,23 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     const content = input.trim();
     if (!content) return;
     setFormError(null);
+    const optimisticId = newOptimisticMessageId();
+    const submittedAtMs = Date.now();
+    const optimisticMessage: OptimisticUserMessage = {
+      optimisticId,
+      submittedAtMs,
+      confirmedMessageId: null,
+      existingMessageIds: baseRuntime.messages.map((message) => message.id),
+      id: optimisticId,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: new Date(submittedAtMs).toISOString(),
+      completedAt: new Date(submittedAtMs).toISOString(),
+    };
+    setOptimisticUserMessages((current) => [...current, optimisticMessage]);
+    setInput("");
+    setPendingScrollMessageId(optimisticId);
     // Start the felt-TTFT clock at the click, before the server round-trip, so
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
@@ -842,22 +752,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       const result = await submitAgentSessionMessage(session.id, content);
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
-        // Only clear the textarea once the server acknowledged the message —
-        // a failed submit should keep the user's draft so they don't lose it.
-        setInput("");
-        const current = queryClient.getQueryData<AgentSessionDetailPayload>(detailKey);
-        if (current) {
-          const next = updateSessionStatusInDetail(
-            addUserMessageToSessionDetail(current, { messageId: result.messageId, content }),
-            "running",
-          );
-          seedSessionQueries(queryClient, workspaceId, next);
-        }
-        // Schedule a scroll so the just-sent message snaps to the top of the viewport.
-        setPendingScrollMessageId(result.messageId);
+        setOptimisticUserMessages((current) =>
+          current.map((message) =>
+            message.optimisticId === optimisticId
+              ? { ...message, confirmedMessageId: result.messageId }
+              : message,
+          ),
+        );
         return;
       }
       pendingTtftRef.current = null; // failed send — drop the timer
+      setOptimisticUserMessages((current) =>
+        current.filter((message) => message.optimisticId !== optimisticId),
+      );
+      setInput((current) => (current.trim() ? current : content));
       setFormError(result.error);
     });
   };
@@ -1267,10 +1175,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           related={detail.related}
           currentStatus={runtime.currentStatus}
           lastError={runtime.lastError}
-          streamStatus={stream.status}
-          streamErrorMessage={stream.errorMessage}
-          connectionStale={connectionLooksStale}
-          runnerConfigured={Boolean(runnerUrl && streamToken)}
+          streamStatus={streamStatus}
+          streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
+          connectionStale={false}
+          runnerConfigured={true}
           eventCount={inspectorEvents.length}
           usage={runtime.usage}
           toolUsage={runtime.toolUsage}
@@ -1799,7 +1707,7 @@ function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
   const { showError } = useToast();
   const [isResolving, startResolve] = useTransition();
   // Optimistic overlay: reflect the click immediately, before the runner's durable
-  // tool.approval_resolved event arrives over SSE and converges the derived state.
+  // tool.approval_resolved event arrives over the stream and converges the derived state.
   const [optimisticDecision, setOptimisticDecision] = useState<"approved" | "denied" | null>(null);
 
   const isCompleted = toolCall.status === "completed";
@@ -1977,7 +1885,7 @@ function QuestionComposer({
   const { showError } = useToast();
   const [isResolving, startResolve] = useTransition();
   // Optimistic overlay so the surface stays put until the runner's durable question.answered event
-  // arrives over SSE and the composer swaps back to its text form.
+  // arrives over the stream and the composer swaps back to its text form.
   const [optimistic, setOptimistic] = useState<"submitting" | "cancelling" | null>(null);
   const [step, setStep] = useState(0);
   const stepRef = useRef<HTMLDivElement | null>(null);
@@ -2819,6 +2727,25 @@ function relatedCount(related: AgentSessionDetailPayload["related"]) {
   return count;
 }
 
+function hasDurableUserMessage(messages: SessionMessage[], optimistic: OptimisticUserMessage) {
+  return messages.some((message) => {
+    if (message.role !== "user" || message.internal) return false;
+    if (optimistic.existingMessageIds.includes(message.id)) return false;
+    if (optimistic.confirmedMessageId && message.id === optimistic.confirmedMessageId) return true;
+    if (message.content !== optimistic.content) return false;
+    if (!message.createdAt) return false;
+    const createdAtMs = new Date(message.createdAt).getTime();
+    return Number.isFinite(createdAtMs) && createdAtMs >= optimistic.submittedAtMs - 5000;
+  });
+}
+
+function newOptimisticMessageId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `optimistic_${crypto.randomUUID()}`;
+  }
+  return `optimistic_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
 function InspectorLink({
   label,
   href,
@@ -2861,9 +2788,8 @@ function statusLabel(status: string) {
 }
 
 function streamStatusLabel(status: string) {
-  if (status === "open") return "live";
+  if (status === "live" || status === "open") return "live";
   if (status === "connecting") return "connecting";
-  if (status === "stale") return "stale";
   if (status === "error") return "error";
   return "idle";
 }

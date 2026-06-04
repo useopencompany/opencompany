@@ -1,26 +1,12 @@
 /**
- * Phase B tests for AssistantMessageContent live-part rendering.
- * Phase C tests for stale-connection handling in SessionViewContent.
- * Phase C2 tests for the data-freshness stale detection (PRO-91 fix).
- *
- * Phase B verifies that tool-call and reasoning parts show up immediately in
- * the message body while the message is still running (status === "running"),
- * and that WorkingIndicator stays visible as a footer for the entire duration
- * of a running message — regardless of whether parts are already present.
- *
- * Phase C verifies that a stale connection never surfaces a banner in the chat
- * composer (that was found to be noisy during normal streaming), and instead is
- * surfaced quietly in the inspector's Runtime section.
- *
- * Phase C2 verifies data-freshness detection: a stale connection is also
- * detected when stream.status is "open" but no new runtime event has arrived
- * within STALE_THRESHOLD_MS (45s) — matching the real-world dead-session
- * scenario where SSE reconnects keep flipping stream.status away from "stale".
- * In all cases recovery still refetches silently and the inspector reflects the
- * stale state, but no composer banner is rendered.
+ * Tests for SessionView rendering: AssistantMessageContent live-part rendering
+ * (tool calls + reasoning show immediately while a message is running, with the
+ * WorkingIndicator footer), tool approvals/questions, the active-turn timer, and
+ * the snap-to-top-on-send scroll behaviour. The transcript is materialized from
+ * the Durable Stream (`useSessionStream`, mocked); the full-component tests drive
+ * the transcript via the `detail` fallback.
  */
 
-import { captureEvent } from "@opencompany/analytics/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -31,13 +17,13 @@ import {
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
-import { addUserMessageToSessionDetail } from "@/lib/agent-sessions/payload";
 import type {
   AssistantTurnPart,
-  RuntimeEvent,
   RuntimeToolCall,
   SessionMessage,
+  SessionRuntimeState,
 } from "@/lib/agent-sessions/runtime-events";
+import type { SessionStreamStatus } from "@/lib/agent-sessions/session-stream";
 import { AssistantMessageContent, SessionViewContent } from "./SessionView";
 
 // ── Module mocks ────────────────────────────────────────────────────────────
@@ -72,21 +58,26 @@ vi.mock("@opencompany/analytics/client", () => ({
   captureEvent: vi.fn(),
 }));
 
-// Phase C: useSessionEventStream mock — controlled per-test via streamMock.
+// The transcript is materialized from the Durable Stream via useSessionStream. The
+// full-component tests pass `detail` (used as the pre-catch-up fallback), so the
+// mock returns an empty stream state + a controllable status per test.
 const streamMock = vi.hoisted(() => ({
-  status: "idle" as string,
-  input: null as null | { onEvent: (event: RuntimeEvent) => void },
+  status: "live" as SessionStreamStatus,
+  state: {
+    events: [],
+    messages: [],
+    usage: {},
+    toolUsage: {},
+    cost: {},
+    currentStatus: "",
+    lastError: null,
+  } as unknown as SessionRuntimeState,
 }));
-// The composer banner was removed — this text must never appear in the chat UX.
-const STALE_BANNER_TEXT = "Connection idle — reconnecting and refreshing progress…";
-// Stale connection is now surfaced only here, in the inspector's Runtime section.
-const INSPECTOR_STALE_TEXT =
-  "The live session stream is not responding. Reconnecting and refreshing persisted progress.";
-vi.mock("@/components/useSessionEventStream", () => ({
-  useSessionEventStream: (input: { onEvent: (event: RuntimeEvent) => void }) => {
-    streamMock.input = input;
-    return { status: streamMock.status, errorMessage: null };
-  },
+vi.mock("@/components/useSessionStream", () => ({
+  useSessionStream: () => ({
+    state: streamMock.state,
+    status: streamMock.status,
+  }),
 }));
 
 const actionMocks = vi.hoisted(() => ({
@@ -107,17 +98,9 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
 
 vi.mock("@/lib/agent-sessions/payload", () => ({
   fetchAgentSession: vi.fn(async () => null),
-  fetchSessionStreamCredential: vi.fn(async () => null),
-  addUserMessageToSessionDetail: vi.fn(),
-  applyRuntimeEventToSessionDetail: vi.fn(),
-  invalidateRelatedCachesForSessionEvent: vi.fn(),
-  mergeAgentSessionDetail: vi.fn(),
-  seedSessionQueries: vi.fn(),
   sessionQueryKeys: {
     detail: (workspaceId: string, id: string) => ["session-detail", workspaceId, id],
-    streamCredential: (workspaceId: string, id: string) => ["stream-credential", workspaceId, id],
   },
-  updateSessionStatusInDetail: vi.fn(),
   SESSIONS_QUERY_STALE_TIME_MS: 30_000,
 }));
 
@@ -125,6 +108,9 @@ afterEach(() => {
   actionMocks.cancelAgentSessionQuestion.mockReset();
   actionMocks.resolveToolApproval.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
+  actionMocks.submitAgentSessionMessage.mockReset();
+  streamMock.status = "live";
+  streamMock.state = emptyStreamState();
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -379,7 +365,6 @@ describe("AssistantMessageContent — tool approvals", () => {
           },
         },
       ],
-      runnerUrl: null,
     });
 
     renderSessionViewContent(detail);
@@ -415,7 +400,6 @@ describe("AssistantMessageContent — tool approvals", () => {
           },
         },
       ],
-      runnerUrl: null,
     });
 
     renderSessionViewContent(detail);
@@ -646,12 +630,27 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       providerCostUsdMicros: 0,
       platformFeeUsdMicros: 0,
     },
-    runnerUrl: "https://runner.example.com",
     ...overrides,
   };
 }
 
-function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatus = "idle") {
+function emptyStreamState(overrides: Partial<SessionRuntimeState> = {}): SessionRuntimeState {
+  return {
+    events: [],
+    messages: [],
+    usage: makeDetail().usage,
+    toolUsage: makeDetail().toolUsage,
+    cost: makeDetail().cost,
+    currentStatus: "",
+    lastError: null,
+    ...overrides,
+  };
+}
+
+function renderSessionViewContent(
+  detail: AgentSessionDetailPayload,
+  streamStatus: SessionStreamStatus = "live",
+) {
   streamMock.status = streamStatus;
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -660,6 +659,98 @@ function renderSessionViewContent(detail: AgentSessionDetailPayload, streamStatu
     </QueryClientProvider>,
   );
 }
+
+describe("SessionViewContent — stream-sourced pending turn", () => {
+  it("shows waiting state, not the previous terminal error, after a new user message starts a turn", () => {
+    const detail = makeDetail({
+      session: makeSession({
+        id: "sess_retry",
+        status: "failed",
+        lastError: "Gateway down",
+      }),
+      messages: [
+        {
+          id: "msg_old_user",
+          role: "user",
+          content: "First try",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    streamMock.state = emptyStreamState({
+      events: [
+        {
+          id: 1,
+          type: "message.created",
+          messageId: "msg_new_user",
+          createdAt: "2026-06-04T10:01:00.000Z",
+          payload: {
+            messageId: "msg_new_user",
+            role: "user",
+            content: "Try again",
+            status: "completed",
+          },
+        },
+      ],
+      messages: [
+        {
+          id: "msg_old_user",
+          role: "user",
+          content: "First try",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        {
+          id: "msg_new_user",
+          role: "user",
+          content: "Try again",
+          status: "completed",
+          createdAt: "2026-06-04T10:01:00.000Z",
+        },
+      ],
+      currentStatus: "running",
+      lastError: null,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.getByText("Try again")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gateway down")).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionViewContent — optimistic send", () => {
+  it("clears the composer and paints the user message immediately on Enter", async () => {
+    const user = userEvent.setup();
+    let resolveSubmit!: (value: Awaited<ReturnType<typeof submitAgentSessionMessage>>) => void;
+    const submitPromise = new Promise<Awaited<ReturnType<typeof submitAgentSessionMessage>>>(
+      (resolve) => {
+        resolveSubmit = resolve;
+      },
+    );
+    vi.mocked(submitAgentSessionMessage).mockReturnValue(submitPromise);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "ready" }) }));
+
+    const composer = screen.getByPlaceholderText("Ask this agent to do something");
+    await user.type(composer, "Fast replay");
+    await user.keyboard("{Enter}");
+
+    expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "Fast replay");
+    expect(composer).toHaveValue("");
+    expect(screen.getByText("Fast replay")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop generating" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveSubmit({ ok: true, messageId: "msg_real" });
+      await submitPromise;
+    });
+  });
+});
 
 describe("SessionViewContent — ask tool questions", () => {
   it("turns the selected Other option into the custom answer input", async () => {
@@ -762,7 +853,7 @@ describe("SessionViewContent — active turn timer", () => {
       ],
     });
 
-    renderSessionViewContent(detail, "open");
+    renderSessionViewContent(detail, "live");
 
     expect(screen.getByText("5s")).toBeInTheDocument();
     expect(screen.queryByText("0s")).not.toBeInTheDocument();
@@ -784,7 +875,7 @@ describe("SessionViewContent — live reasoning rendering", () => {
       ],
     });
 
-    renderSessionViewContent(detail, "open");
+    renderSessionViewContent(detail, "live");
 
     await user.click(screen.getByRole("button", { name: /Thought/ }));
 
@@ -820,7 +911,7 @@ describe("SessionViewContent — live reasoning rendering", () => {
         ],
       });
 
-      renderSessionViewContent(detail, "open");
+      renderSessionViewContent(detail, "live");
 
       await user.click(screen.getByRole("button", { name: "Copy message" }));
 
@@ -831,534 +922,6 @@ describe("SessionViewContent — live reasoning rendering", () => {
         value: originalClipboard,
       });
     }
-  });
-});
-
-describe("SessionViewContent — felt TTFT", () => {
-  beforeEach(() => {
-    streamMock.status = "idle";
-    streamMock.input = null;
-    vi.mocked(captureEvent).mockReset();
-    vi.mocked(submitAgentSessionMessage).mockReset();
-  });
-
-  it("records reasoning as the first visible assistant activity", async () => {
-    const user = userEvent.setup();
-    let now = 1_000;
-    const performanceNowSpy = vi.spyOn(performance, "now").mockImplementation(() => now);
-    vi.mocked(submitAgentSessionMessage).mockResolvedValue({
-      ok: true,
-      messageId: "msg_user_new",
-    });
-
-    try {
-      const detail = makeDetail({
-        session: makeSession({
-          status: "ready",
-          modelProvider: "openrouter",
-          modelName: "moonshotai/kimi-k2.6",
-        }),
-      });
-      renderSessionViewContent(detail, "open");
-
-      await user.type(screen.getByPlaceholderText("Ask this agent to do something"), "continue");
-      await user.click(screen.getByRole("button", { name: "Send message" }));
-
-      await waitFor(() =>
-        expect(submitAgentSessionMessage).toHaveBeenCalledWith("sess_001", "continue"),
-      );
-      await waitFor(() =>
-        expect(screen.getByPlaceholderText("Ask this agent to do something")).toHaveValue(""),
-      );
-
-      now = 1_240;
-      act(() => {
-        streamMock.input?.onEvent({
-          id: null,
-          type: "message.reasoning_delta",
-          messageId: "msg_assistant",
-          payload: { messageId: "msg_assistant", delta: "Considering the next step." },
-        });
-      });
-
-      expect(captureEvent).toHaveBeenCalledWith(
-        "session_first_token",
-        expect.objectContaining({
-          workspace_id: "wks_test",
-          agent_id: "agent_001",
-          session_id: "sess_001",
-          message_id: "msg_user_new",
-          model_provider: "openrouter",
-          model_name: "moonshotai/kimi-k2.6",
-          ttft_ms: 240,
-          first_token_kind: "reasoning",
-        }),
-      );
-    } finally {
-      performanceNowSpy.mockRestore();
-    }
-  });
-});
-
-describe("SessionViewContent — Phase C: no composer connection banner", () => {
-  it("does NOT render a composer banner when stream is stale with a running message", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "stale");
-
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
-  });
-
-  it("surfaces a stale stream in the inspector Runtime section instead", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "stale");
-
-    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
-  });
-
-  it("does NOT render a composer banner when stream is healthy (open)", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "open");
-
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
-  });
-
-  it("does NOT render a composer banner when stream is idle", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "idle");
-
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
-  });
-
-  it("does NOT render a composer banner when stream is errored (error has its own UX)", () => {
-    const detail = makeDetail({ messages: [makeRunningAssistantMessage()] });
-    renderSessionViewContent(detail, "error");
-
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
-  });
-});
-
-// ── Phase C2: Data-freshness stale detection ───────────────────────────────
-//
-// These tests verify that the banner triggers from data freshness (no new
-// runtime event for > STALE_THRESHOLD_MS) regardless of SSE stream.status.
-// Uses vi.useFakeTimers() so setInterval ticks and Date.now() are controllable.
-
-function makeEventFixture(id: number): RuntimeEvent {
-  return { id, type: "message.delta", messageId: "msg_running", payload: {} };
-}
-
-describe("SessionViewContent — Phase C2: data-freshness stale detection", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    setVisibility("visible");
-    vi.useRealTimers();
-  });
-
-  it("does NOT show banner when stream is open and a recent event landed (< STALE_THRESHOLD_MS ago)", () => {
-    // Set the fake clock so "now" is 2000-01-01T00:00:30Z.
-    // updatedAt is set to 5s before now — within the 45s threshold from the last event.
-    const now = new Date("2000-01-01T00:00:30.000Z").getTime();
-    vi.setSystemTime(now);
-
-    // An event exists, initialized 5s ago relative to now.
-    const recentUpdatedAt = new Date(now - 5_000).toISOString();
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: recentUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(1)],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    // Advance 1s to trigger the setInterval tick.
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-
-    // Still within threshold (5s + 1s = 6s < 45s) — nothing stale anywhere.
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
-  });
-
-  it("flags the inspector (not a composer banner) when stream is open but no event for > STALE_THRESHOLD_MS", () => {
-    // Set the fake clock so "now" is 2000-01-01T00:01:00Z.
-    const now = new Date("2000-01-01T00:01:00.000Z").getTime();
-    vi.setSystemTime(now);
-
-    // updatedAt is 50s in the past — stale by the time the first tick fires.
-    const staleUpdatedAt = new Date(now - 50_000).toISOString();
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: staleUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [], // No events yet; component falls back to session.updatedAt.
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    // Advance 1s to trigger the setInterval tick.
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-
-    // 50s + 1s tick = 51s > 45s threshold: inspector reflects it, composer stays clean.
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
-  });
-
-  it("refetches session detail automatically when active work has stale data", () => {
-    const now = new Date("2000-01-01T00:01:30.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const staleUpdatedAt = new Date(now - 50_000).toISOString();
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: staleUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
-    expect(invalidateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-  });
-
-  it("clears the inspector stale flag once a new event arrives after being shown", () => {
-    const now = new Date("2000-01-01T00:02:00.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const staleUpdatedAt = new Date(now - 50_000).toISOString();
-    const detailStale = makeDetail({
-      session: makeSession({ updatedAt: staleUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detailStale} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    // Trigger tick → inspector flags stale (no composer banner).
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
-
-    // A new event arrives: rerender with a new event in the list.
-    // The component sees lastEventId change → resets lastRuntimeActivityMs to now.
-    const freshDetail = makeDetail({
-      session: makeSession({ updatedAt: new Date(now - 19_000).toISOString() }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(42)],
-    });
-
-    act(() => {
-      rerender(
-        <QueryClientProvider client={queryClient}>
-          <SessionViewContent detail={freshDetail} workspaceId="wks_test" />
-        </QueryClientProvider>,
-      );
-    });
-
-    // Inspector flag should clear — event just landed (and never a composer banner).
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.queryByText(INSPECTOR_STALE_TEXT)).not.toBeInTheDocument();
-  });
-
-  it("still flags the inspector when stream.status is stale (regression of original Phase C behaviour)", () => {
-    // stream.status = "stale" path still works independently of data freshness.
-    const now = new Date("2000-01-01T00:03:00.000Z").getTime();
-    vi.setSystemTime(now);
-
-    // updatedAt is recent (1s ago) so data-freshness path alone would NOT fire.
-    const recentUpdatedAt = new Date(now - 1_000).toISOString();
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: recentUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(99)],
-    });
-
-    // Force status to stale (SSE path).
-    streamMock.status = "stale";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    // Inspector reflects it immediately (stream.status === "stale") without a tick,
-    // and the composer never shows a banner.
-    expect(screen.queryByText(STALE_BANNER_TEXT)).not.toBeInTheDocument();
-    expect(screen.getByText(INSPECTOR_STALE_TEXT)).toBeInTheDocument();
-  });
-
-  it("refetches session detail and stream credential when stream status is stale", () => {
-    const now = new Date("2000-01-01T00:03:30.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const recentUpdatedAt = new Date(now - 1_000).toISOString();
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: recentUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(100)],
-    });
-
-    streamMock.status = "stale";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-  });
-
-  it("refreshes stream credential when stream becomes stale during the recovery throttle window", () => {
-    const now = new Date("2000-01-01T00:03:45.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const staleUpdatedAt = new Date(now - 50_000).toISOString();
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: staleUpdatedAt }),
-      messages: [makeRunningAssistantMessage()],
-      events: [],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    const { rerender } = render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(1_000);
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
-    expect(invalidateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-
-    invalidateSpy.mockClear();
-    streamMock.status = "stale";
-
-    act(() => {
-      rerender(
-        <QueryClientProvider client={queryClient}>
-          <SessionViewContent detail={detail} workspaceId="wks_test" />
-        </QueryClientProvider>,
-      );
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-  });
-
-  it("refreshes the stream credential before an active session token expires", () => {
-    const now = new Date("2000-01-01T00:03:50.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: new Date(now - 1_000).toISOString() }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(101)],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const streamCredentialKey = ["stream-credential", "wks_test", detail.session.id];
-    queryClient.setQueryData(streamCredentialKey, {
-      runnerUrl: "https://runner.example.com",
-      streamToken: "token_123",
-      streamTokenExpiresAt: now + 5 * 60 * 1000 + 1_000,
-    });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(999);
-    });
-
-    expect(invalidateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: streamCredentialKey }),
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: streamCredentialKey }),
-    );
-  });
-
-  it("refreshes the stream credential before a paused (awaiting_approval) session token expires", () => {
-    // Regression: a durably paused run keeps its SSE stream open, so its token must keep
-    // refreshing even though the assistant is not actively working (awaitingAssistantWork
-    // is false while `awaiting_approval`). Without this the token silently expires and
-    // reconnects retry expired URLs.
-    const now = new Date("2000-01-01T00:03:50.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const detail = makeDetail({
-      session: makeSession({
-        status: "awaiting_approval",
-        updatedAt: new Date(now - 1_000).toISOString(),
-      }),
-      messages: [makeRunningAssistantMessage({ status: "completed" })],
-      events: [makeEventFixture(101)],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const streamCredentialKey = ["stream-credential", "wks_test", detail.session.id];
-    queryClient.setQueryData(streamCredentialKey, {
-      runnerUrl: "https://runner.example.com",
-      streamToken: "token_123",
-      streamTokenExpiresAt: now + 5 * 60 * 1000 + 1_000,
-    });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(999);
-    });
-
-    expect(invalidateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: streamCredentialKey }),
-    );
-
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: streamCredentialKey }),
-    );
-  });
-
-  it("refetches session detail when an active session returns to the foreground", () => {
-    const now = new Date("2000-01-01T00:04:00.000Z").getTime();
-    vi.setSystemTime(now);
-    setVisibility("hidden");
-
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: new Date(now - 5_000).toISOString() }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(101)],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    act(() => {
-      setVisibility("visible");
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
-    expect(invalidateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
-  });
-
-  it("refetches session detail when an active session comes back online", () => {
-    const now = new Date("2000-01-01T00:04:30.000Z").getTime();
-    vi.setSystemTime(now);
-
-    const detail = makeDetail({
-      session: makeSession({ updatedAt: new Date(now - 5_000).toISOString() }),
-      messages: [makeRunningAssistantMessage()],
-      events: [makeEventFixture(102)],
-    });
-
-    streamMock.status = "open";
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    render(
-      <QueryClientProvider client={queryClient}>
-        <SessionViewContent detail={detail} workspaceId="wks_test" />
-      </QueryClientProvider>,
-    );
-
-    act(() => {
-      window.dispatchEvent(new Event("online"));
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["session-detail"]) }),
-    );
-    expect(invalidateSpy).not.toHaveBeenCalledWith(
-      expect.objectContaining({ queryKey: expect.arrayContaining(["stream-credential"]) }),
-    );
   });
 });
 
@@ -1431,8 +994,6 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       ok: true,
       messageId: "msg_user_snap",
     } as Awaited<ReturnType<typeof submitAgentSessionMessage>>);
-    // Keep the query cache untouched so visibleMessages stays driven by props.
-    vi.mocked(addUserMessageToSessionDetail).mockImplementation((detail) => detail);
 
     // A completed assistant turn follows the user message so the composer shows the
     // "Send message" button initially (not the waiting/abort state), while the user
@@ -1449,7 +1010,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       ],
     });
 
-    streamMock.status = "open";
+    streamMock.status = "live";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>
@@ -1514,7 +1075,6 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       ok: true,
       messageId: "msg_user_snap",
     } as Awaited<ReturnType<typeof submitAgentSessionMessage>>);
-    vi.mocked(addUserMessageToSessionDetail).mockImplementation((detail) => detail);
 
     const baseMessages: SessionMessage[] = [
       userMessage,
@@ -1526,7 +1086,7 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
       },
     ];
     const detail = makeDetail({ messages: baseMessages });
-    streamMock.status = "open";
+    streamMock.status = "live";
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = render(
       <QueryClientProvider client={queryClient}>

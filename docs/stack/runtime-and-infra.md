@@ -106,8 +106,9 @@ API-triggered deploys controlled by GitHub Actions.
 - Infisical `/runner` sync target.
 
 **Why we use it:** The runner is a live data plane for agent sessions, sandbox state, token streams,
-abort state, and SSE. It fits a long-lived service better than a short web request lifecycle. We use
-a Docker image for this service because it gives Render a reproducible runner artifact.
+abort state, and Durable Stream appends. It fits a long-lived service better than a short web
+request lifecycle. We use a Docker image for this service because it gives Render a reproducible
+runner artifact.
 
 **Owner:** Platform.
 

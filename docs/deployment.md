@@ -9,7 +9,7 @@ Render for the long-lived agent runner.
 - Vercel hosts `apps/web`, serves the Next.js UI, WorkOS callback routes, server actions, and the
   Inngest endpoint at `/api/inngest`.
 - Render hosts `apps/runner`, the Bun/Fastify service that owns live agent runs, E2B sandboxes,
-  model/tool streams, abort state, and browser SSE from `/sessions/:id/events`.
+  model/tool streams, abort state, and Durable Stream transcript appends.
 - Neon Postgres is shared by web, Inngest functions, and the runner.
 - Inngest coordinates background functions, but it does not host live token streams.
 
@@ -99,7 +99,8 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `INNGEST_SIGNING_KEY`
 - `RUNNER_PUBLIC_URL`
 - `RUNNER_INTERNAL_TOKEN`
-- `RUNNER_STREAM_TOKEN_SECRET`
+- `DURABLE_STREAMS_URL`
+- `DURABLE_STREAMS_TOKEN`
 - optional analytics, feedback, and observability env vars
 
 Forward production web logs to the Better Stack source `opencompany-web-production` using the
@@ -122,6 +123,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `RUNNER_INTERNAL_TOKEN`
 - `RUNNER_STREAM_TOKEN_SECRET`
 - `RUNNER_ALLOWED_ORIGINS`
+- `DURABLE_STREAMS_URL`
+- `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `GITHUB_APP_ID`

@@ -1,8 +1,8 @@
-import { EventEmitter } from "node:events";
 import type { AgentRuntimeEvent, AgentRuntimeEventPayload } from "@opencompany/agent-runtime";
 import { agentSessionEvents } from "@opencompany/db/schema";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { getDb } from "./db";
+import { publishToDurableStream } from "./durable-streams";
 import { rowsFromExecute } from "./sql-exec";
 
 type Db = ReturnType<typeof getDb>;
@@ -26,9 +26,6 @@ export type TransientRuntimeEvent = {
   transient: true;
 };
 export type RuntimeEventForStream = PersistedRuntimeEvent | TransientRuntimeEvent;
-
-const sessionEventBroker = new EventEmitter();
-sessionEventBroker.setMaxListeners(0);
 
 export async function appendRuntimeEvent(
   db: Db,
@@ -137,23 +134,13 @@ export async function listSessionEvents(input: {
     .limit(input.limit ?? 100);
 }
 
-export function subscribeSessionEvents(
-  sessionId: string,
-  listener: (event: RuntimeEventForStream) => void,
-) {
-  const eventName = brokerEventName(sessionId);
-  sessionEventBroker.on(eventName, listener);
-  return () => {
-    sessionEventBroker.off(eventName, listener);
-  };
-}
-
 export function publishRuntimeEvent(sessionId: string, event: RuntimeEventForStream) {
-  sessionEventBroker.emit(brokerEventName(sessionId), event);
-}
-
-function brokerEventName(sessionId: string) {
-  return `session:${sessionId}`;
+  // Single fan-out point for durable (appendRuntimeEvent) and transient
+  // (publishTransientRuntimeEvent) events → the session's Durable Stream, the sole
+  // live transport; the in-process-broker SSE path was removed. Fire-and-forget:
+  // a streaming failure never breaks the run
+  // (Postgres remains the system of record).
+  publishToDurableStream(sessionId, event);
 }
 
 // Raw `db.execute` rows skip Drizzle's value mapping, so a timestamptz can arrive as a
