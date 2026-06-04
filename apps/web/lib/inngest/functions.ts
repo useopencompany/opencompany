@@ -30,6 +30,8 @@ import { BRAIN_SYNC_REQUESTED_EVENT } from "@/lib/brain/sync-events";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
+import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
+import { SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT } from "@/lib/slack/events";
 import {
   sweepAgentFileSyncOutbox as runAgentFileSyncOutboxSweep,
   sweepAgentSyncOutbox as runAgentSyncOutboxSweep,
@@ -499,6 +501,26 @@ export const sendSignupWelcome = inngest.createFunction(
   },
 );
 
+export const provisionSlackSupportChannel = inngest.createFunction(
+  {
+    id: "provision-slack-support-channel",
+    name: "Provision Slack support channel",
+    retries: 3,
+    idempotency: "event.data.workspaceId",
+    concurrency: {
+      limit: 1,
+      key: "event.data.workspaceId",
+    },
+    triggers: { event: SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT },
+  },
+  // Cast at the Inngest adapter boundary: the runtime event/step are structurally
+  // compatible with the handler's narrow types (which keep it unit-testable).
+  async ({ event, step }) =>
+    runProvisionSlackSupport({ event, step } as unknown as Parameters<
+      typeof runProvisionSlackSupport
+    >[0]),
+);
+
 export const inngestFunctions = [
   syncAgentToGitHub,
   syncBrainToGitHub,
@@ -516,4 +538,5 @@ export const inngestFunctions = [
   runAgentQuestionResume,
   sweepExpiredSessionQuestions,
   sendSignupWelcome,
+  provisionSlackSupportChannel,
 ];
