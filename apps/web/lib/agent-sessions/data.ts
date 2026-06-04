@@ -1,4 +1,3 @@
-import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
@@ -11,12 +10,11 @@ import {
 import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
-  type SessionStreamCredentialPayload,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
 } from "@/lib/agent-sessions/payload";
-import { getRunnerPublicUrl, getRunnerStreamTokenSecret } from "@/lib/agent-sessions/runner";
+import { getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
 
 const SIDEBAR_RECENCY_LIMIT = 50;
@@ -338,48 +336,6 @@ export async function loadAgentSessionDetailForWorkspace(
   });
 }
 
-export async function loadAgentSessionStreamCredentialForWorkspace(
-  sessionId: string,
-  userId: string,
-  workspaceId: string,
-): Promise<SessionStreamCredentialPayload | null> {
-  const db = getDb();
-  const [session] = await db
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.id, sessionId),
-        eq(agentSessions.workspaceId, workspaceId),
-        eq(agentSessions.userId, userId),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .limit(1);
-
-  if (!session) return null;
-
-  const runnerUrl = getRunnerPublicUrl();
-  const streamTokenSecret = getRunnerStreamTokenSecret();
-  const streamTokenExpiresAt = Date.now() + 60 * 60 * 1000;
-  const streamToken =
-    runnerUrl && streamTokenSecret
-      ? createSessionStreamToken(
-          {
-            sessionId,
-            userId,
-            expiresAt: streamTokenExpiresAt,
-          },
-          streamTokenSecret,
-        )
-      : null;
-
-  return {
-    runnerUrl,
-    streamToken,
-    streamTokenExpiresAt: streamToken ? streamTokenExpiresAt : null,
-  };
-}
 
 function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {
   return {

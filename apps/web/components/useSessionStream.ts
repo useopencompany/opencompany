@@ -31,7 +31,9 @@ export function useSessionStream(
   const [status, setStatus] = useState<SessionStreamStatus>("connecting");
 
   const onEventRef = useRef(options?.onEvent);
-  onEventRef.current = options?.onEvent;
+  useEffect(() => {
+    onEventRef.current = options?.onEvent;
+  });
 
   // Reset to an empty transcript when the session changes, adjusting state during
   // render (the React-endorsed pattern) rather than in the effect — the new

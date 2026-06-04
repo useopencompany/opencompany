@@ -1,15 +1,11 @@
 import type { QueryClient } from "@tanstack/react-query";
 import {
-  applyRuntimeEventToState,
   type RuntimeEvent,
-  readString,
   type SessionCostSummary,
   type SessionMessage,
-  type SessionRuntimeState,
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
-import { agentQueryKeys } from "@/lib/agents/payload";
 
 export const SESSIONS_QUERY_STALE_TIME_MS = 30_000;
 const SIDEBAR_SESSION_LIMIT = 50;
@@ -60,12 +56,6 @@ export type RelatedSessionPayload = {
   updatedAt: string;
 };
 
-const LIVE_SESSION_FIELDS = [
-  "title",
-  "status",
-  "abortRequestedAt",
-  "lastError",
-] as const satisfies ReadonlyArray<keyof AgentSessionPayload>;
 
 export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
@@ -79,12 +69,6 @@ export type AgentSessionDetailPayload = {
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
   runnerUrl: string | null;
-};
-
-export type SessionStreamCredentialPayload = {
-  runnerUrl: string | null;
-  streamToken: string | null;
-  streamTokenExpiresAt: number | null;
 };
 
 export type SidebarSessionSerializable = Omit<
@@ -131,8 +115,6 @@ export type RelatedSessionSerializable = Omit<RelatedSessionPayload, "createdAt"
 export const sessionQueryKeys = {
   list: (workspaceId: string) => ["sessions", workspaceId] as const,
   detail: (workspaceId: string, sessionId: string) => ["session", workspaceId, sessionId] as const,
-  streamCredential: (workspaceId: string, sessionId: string) =>
-    ["session-stream-credential", workspaceId, sessionId] as const,
 };
 
 export function serializeSidebarSession(
@@ -232,19 +214,6 @@ export async function fetchAgentSession(
   return parseAgentSessionDetailResponse(body).detail;
 }
 
-export async function fetchSessionStreamCredential(
-  sessionId: string,
-): Promise<SessionStreamCredentialPayload | null> {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/stream-token`, {
-    cache: "no-store",
-    method: "POST",
-    credentials: "same-origin",
-  });
-  if (response.status === 404) return null;
-  const body = await readJson(response);
-  return parseSessionStreamCredentialResponse(body);
-}
-
 export function upsertSidebarSession(
   sessions: SidebarSessionPayload[] | undefined,
   session: SidebarSessionPayload,
@@ -327,152 +296,6 @@ export async function archiveSidebarSessionOptimistically({
   return result;
 }
 
-export function mergeAgentSessionDetail(
-  current: AgentSessionDetailPayload | undefined,
-  incoming: AgentSessionDetailPayload,
-): AgentSessionDetailPayload {
-  if (!current || current.session.id !== incoming.session.id) {
-    return normalizeAgentSessionDetail(incoming);
-  }
-
-  const replayed = replayMissingCurrentEvents(current, incoming);
-
-  return normalizeAgentSessionDetail({
-    ...replayed,
-    session: mergeSession(current.session, replayed.session),
-    messages: mergeMessages(current.messages, replayed.messages),
-    events: mergeEvents(current.events, replayed.events),
-  });
-}
-
-export function applyRuntimeEventToSessionDetail(
-  detail: AgentSessionDetailPayload,
-  event: RuntimeEvent,
-  updatedAt = new Date().toISOString(),
-): AgentSessionDetailPayload {
-  const stampedEvent: RuntimeEvent = event.createdAt
-    ? event
-    : { ...event, createdAt: new Date().toISOString() };
-  const nextRuntime = applyRuntimeEventToState(toRuntimeState(detail), stampedEvent);
-  let session: AgentSessionPayload = detail.session;
-
-  if (event.type === "session.status") {
-    const status = readString(event.payload.status);
-    if (status) {
-      session = {
-        ...session,
-        status,
-        lastError: status === "failed" ? session.lastError : null,
-        updatedAt,
-      };
-    }
-  }
-
-  if (event.type === "session.error") {
-    const message = readString(event.payload.message) || "The session failed.";
-    session = { ...session, status: "failed", lastError: message, updatedAt };
-  }
-
-  if (event.type === "session.title_updated") {
-    const title = readString(event.payload.title);
-    if (title) session = { ...session, title, updatedAt };
-  }
-
-  return normalizeAgentSessionDetail({
-    ...detail,
-    session,
-    events: nextRuntime.events,
-    messages: nextRuntime.messages,
-    usage: nextRuntime.usage,
-    toolUsage: nextRuntime.toolUsage,
-    cost: nextRuntime.cost,
-  });
-}
-
-export function addUserMessageToSessionDetail(
-  detail: AgentSessionDetailPayload,
-  input: { messageId: string; content: string; createdAt?: string },
-): AgentSessionDetailPayload {
-  const existing = detail.messages.find((message) => message.id === input.messageId);
-  if (existing) {
-    const nextMessage: SessionMessage = {
-      ...existing,
-      role: "user",
-      content: input.content,
-      status: "completed",
-      createdAt: existing.createdAt ?? input.createdAt ?? new Date().toISOString(),
-    };
-    if (
-      existing.role === nextMessage.role &&
-      existing.content === nextMessage.content &&
-      existing.status === nextMessage.status &&
-      existing.createdAt === nextMessage.createdAt
-    ) {
-      return detail;
-    }
-
-    return {
-      ...detail,
-      messages: detail.messages.map((message) =>
-        message.id === input.messageId ? nextMessage : message,
-      ),
-    };
-  }
-
-  return {
-    ...detail,
-    messages: [
-      ...detail.messages,
-      {
-        id: input.messageId,
-        role: "user",
-        content: input.content,
-        status: "completed",
-        createdAt: input.createdAt ?? new Date().toISOString(),
-      },
-    ],
-  };
-}
-
-export function updateSessionStatusInDetail(
-  detail: AgentSessionDetailPayload,
-  status: string,
-): AgentSessionDetailPayload {
-  const updatedAt = new Date().toISOString();
-  return {
-    ...detail,
-    session: {
-      ...detail.session,
-      status,
-      abortRequestedAt: status === "aborting" ? updatedAt : detail.session.abortRequestedAt,
-      updatedAt,
-    },
-  };
-}
-
-export function invalidateRelatedCachesForSessionEvent(
-  queryClient: QueryClient,
-  workspaceId: string,
-  agentId: string,
-  event: RuntimeEvent,
-  options: { sessionId?: string } = {},
-) {
-  if (event.type.startsWith("brain.")) {
-    void queryClient.invalidateQueries({ queryKey: agentQueryKeys.list(workspaceId) });
-    void queryClient.invalidateQueries({ queryKey: agentQueryKeys.detail(workspaceId, agentId) });
-  }
-
-  if (
-    options.sessionId &&
-    (event.type === "session.delegated_usage" ||
-      (event.type === "tool.completed" && readString(event.payload.name) === "delegate_to_agent"))
-  ) {
-    void queryClient.invalidateQueries({
-      queryKey: sessionQueryKeys.detail(workspaceId, options.sessionId),
-    });
-  }
-}
-
 export function seedSessionQueries(
   queryClient: QueryClient,
   workspaceId: string,
@@ -509,129 +332,6 @@ function sidebarSessionEquals(left: SidebarSessionPayload, right: SidebarSession
   );
 }
 
-// Server payload wins for every field except LIVE_SESSION_FIELDS while the local copy is newer.
-// New fields default to "server is authority."
-function mergeSession(current: AgentSessionPayload, incoming: AgentSessionPayload) {
-  const currentUpdatedAt = Date.parse(current.updatedAt);
-  const incomingUpdatedAt = Date.parse(incoming.updatedAt);
-  if (Number.isFinite(currentUpdatedAt) && Number.isFinite(incomingUpdatedAt)) {
-    if (currentUpdatedAt > incomingUpdatedAt) {
-      const next = { ...incoming, updatedAt: current.updatedAt };
-      for (const field of LIVE_SESSION_FIELDS) {
-        switch (field) {
-          case "title":
-            next.title = current.title;
-            break;
-          case "status":
-            next.status = current.status;
-            break;
-          case "abortRequestedAt":
-            next.abortRequestedAt = current.abortRequestedAt ?? incoming.abortRequestedAt;
-            break;
-          case "lastError":
-            next.lastError = current.lastError;
-            break;
-        }
-      }
-      return next;
-    }
-    return incoming;
-  }
-  return incoming;
-}
-
-// Server detail's usage/cost/toolUsage aggregates already include every event the server has
-// persisted, even those past the events-list cap. Only replay events strictly newer than the
-// highest id the server returned — those are the ones the server's aggregates haven't seen yet.
-function replayMissingCurrentEvents(
-  current: AgentSessionDetailPayload,
-  incoming: AgentSessionDetailPayload,
-) {
-  const maxIncomingEventId = incoming.events.reduce(
-    (max, event) => Math.max(max, event.id ?? 0),
-    0,
-  );
-  return current.events
-    .filter((event) => typeof event.id === "number" && event.id > maxIncomingEventId)
-    .toSorted((left, right) => (left.id ?? 0) - (right.id ?? 0))
-    .reduce(
-      (detail, event) => applyRuntimeEventToSessionDetail(detail, event, current.session.updatedAt),
-      incoming,
-    );
-}
-
-function mergeEvents(current: RuntimeEvent[], incoming: RuntimeEvent[]) {
-  const events = new Map<number, RuntimeEvent>();
-  for (const event of incoming) {
-    if (typeof event.id === "number") events.set(event.id, event);
-  }
-
-  const result: RuntimeEvent[] = [];
-  const seen = new Set<number>();
-  for (const event of current) {
-    if (typeof event.id !== "number") {
-      result.push(event);
-      continue;
-    }
-    const replacement = events.get(event.id) ?? event;
-    result.push(replacement);
-    seen.add(event.id);
-  }
-
-  for (const event of incoming) {
-    if (typeof event.id !== "number" || seen.has(event.id)) continue;
-    result.push(event);
-    seen.add(event.id);
-  }
-
-  return result;
-}
-
-function mergeMessages(current: SessionMessage[], incoming: SessionMessage[]) {
-  const messages = new Map<string, SessionMessage>();
-  for (const message of current) messages.set(message.id, message);
-  for (const message of incoming) {
-    const existing = messages.get(message.id);
-    messages.set(message.id, existing ? mergeMessage(existing, message) : message);
-  }
-  return Array.from(messages.values()).toSorted(
-    (left, right) => Date.parse(left.createdAt ?? "") - Date.parse(right.createdAt ?? ""),
-  );
-}
-
-function mergeMessage(current: SessionMessage, incoming: SessionMessage): SessionMessage {
-  const keepCurrentContent =
-    current.status === "running" &&
-    incoming.status !== "completed" &&
-    current.content.length > incoming.content.length;
-  const keepCurrentCompletion = current.status === "completed" && incoming.status !== "completed";
-  const incomingIsAuthoritative = incoming.status === "completed";
-
-  return {
-    ...current,
-    ...incoming,
-    content: keepCurrentContent ? current.content : incoming.content,
-    status: keepCurrentCompletion ? current.status : incoming.status,
-    completedAt: keepCurrentCompletion ? current.completedAt : incoming.completedAt,
-    outputReasoningTokens: incomingIsAuthoritative
-      ? (incoming.outputReasoningTokens ?? current.outputReasoningTokens ?? 0)
-      : Math.max(current.outputReasoningTokens ?? 0, incoming.outputReasoningTokens ?? 0),
-    thinkingDurationSeconds: incoming.thinkingDurationSeconds ?? current.thinkingDurationSeconds,
-  };
-}
-
-function toRuntimeState(detail: AgentSessionDetailPayload): SessionRuntimeState {
-  return {
-    events: detail.events,
-    messages: detail.messages,
-    usage: detail.usage,
-    toolUsage: detail.toolUsage,
-    cost: detail.cost,
-    currentStatus: detail.session.status,
-    lastError: detail.session.lastError,
-  };
-}
-
 export function parseSidebarSessionsResponse(value: unknown): {
   sessions: SidebarSessionPayload[];
 } {
@@ -645,17 +345,6 @@ export function parseAgentSessionDetailResponse(value: unknown): {
 } {
   const record = assertRecord(value, "session detail response");
   return { detail: parseAgentSessionDetailPayload(record.detail) };
-}
-
-export function parseSessionStreamCredentialResponse(
-  value: unknown,
-): SessionStreamCredentialPayload {
-  const record = assertRecord(value, "session stream credential response");
-  return {
-    runnerUrl: readNullableStringField(record, "runnerUrl"),
-    streamToken: readNullableStringField(record, "streamToken"),
-    streamTokenExpiresAt: readNullableNumberField(record, "streamTokenExpiresAt"),
-  };
 }
 
 export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayload {
@@ -919,12 +608,6 @@ function readOptionalNumberField(record: Record<string, unknown>, field: string)
   return value;
 }
 
-function readNullableNumberField(record: Record<string, unknown>, field: string) {
-  const value = record[field];
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Invalid ${field}.`);
-  return value;
-}
 
 function readNullableRecord(value: unknown) {
   if (value === null || value === undefined) return null;
