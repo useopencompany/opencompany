@@ -6,6 +6,10 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { exit } from "node:process";
 import {
+  DURABLE_STREAMS_DEV_URL,
+  startDurableStreamsDevServer,
+} from "./lib/durable-streams-dev.mjs";
+import {
   envForTunnel,
   ngrokConfigState,
   requestedNgrokUrl,
@@ -16,15 +20,22 @@ import {
 
 const turboArgs = process.argv.slice(2);
 const port = valueFor(turboArgs, "--port") ?? process.env.PORT ?? "3000";
-const tunnelDisabled =
-  process.env.OPENCOMPANY_NGROK_DISABLED === "1" ||
-  process.env.CI === "true" ||
-  process.env.CI === "1";
+const isCI = process.env.CI === "true" || process.env.CI === "1";
+const tunnelDisabled = process.env.OPENCOMPANY_NGROK_DISABLED === "1" || isCI;
 let ngrok;
 let tunnelEnv = {};
 
 if (!tunnelDisabled) {
   ngrok = await startDefaultTunnel(port);
+}
+
+// Local session-transcript streaming. The web proxy and runner read
+// DURABLE_STREAMS_URL; without it they 503 / no-op. Start the in-memory
+// reference server and inject the URL so transcripts stream with no extra setup.
+let durableStreams = null;
+let durableEnv = {};
+if (!isCI) {
+  durableStreams = await startDurableStreams();
 }
 
 const turboBin = existsSync("node_modules/.bin/turbo") ? "node_modules/.bin/turbo" : "turbo";
@@ -33,22 +44,32 @@ const dev = spawn(turboBin, ["dev", ...turboArgs], {
   env: {
     ...process.env,
     ...tunnelEnv,
+    ...durableEnv,
     INNGEST_DEV: process.env.INNGEST_DEV ?? "1",
   },
 });
 
 let shuttingDown = false;
 
+function stopDurableStreams() {
+  if (durableStreams) {
+    durableStreams.stop().catch(() => {});
+    durableStreams = null;
+  }
+}
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     shuttingDown = true;
     if (ngrok && !ngrok.killed) ngrok.kill(signal);
+    stopDurableStreams();
     if (!dev.killed) dev.kill(signal);
   });
 }
 
 dev.on("exit", (code, signal) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
+  stopDurableStreams();
   if (shuttingDown) exit(0);
   if (signal) exit(1);
   exit(code ?? 0);
@@ -56,9 +77,43 @@ dev.on("exit", (code, signal) => {
 
 dev.on("error", (error) => {
   if (ngrok && !ngrok.killed) ngrok.kill("SIGTERM");
+  stopDurableStreams();
   console.error(`\nFailed to start turbo dev: ${error.message}\n`);
   exit(1);
 });
+
+// Start the local Durable Streams server and set `durableEnv` so the URL reaches
+// the web + runner dev processes. Respects an explicitly configured
+// DURABLE_STREAMS_URL (e.g. Electric Cloud), reuses an already-running local
+// server, and degrades to a warning (transcripts just won't stream) on failure.
+async function startDurableStreams() {
+  const configured = process.env.DURABLE_STREAMS_URL?.trim();
+  if (configured && !configured.includes("...")) {
+    console.log(`\nUsing configured Durable Streams: ${configured}\n`);
+    return null;
+  }
+
+  try {
+    const { url, server } = await startDurableStreamsDevServer();
+    durableEnv = { DURABLE_STREAMS_URL: url };
+    console.log(`\nDurable Streams (local) ready: ${url}`);
+    console.log(
+      "Injected DURABLE_STREAMS_URL into the dev process — session transcripts stream.\n",
+    );
+    return server;
+  } catch (error) {
+    if (error?.code === "EADDRINUSE") {
+      durableEnv = { DURABLE_STREAMS_URL: DURABLE_STREAMS_DEV_URL };
+      console.log(`\nDurable Streams already running at ${DURABLE_STREAMS_DEV_URL}; reusing it.\n`);
+      return null;
+    }
+    console.warn(
+      `\nCould not start local Durable Streams: ${error.message}\n` +
+        "  Session transcripts won't live-stream (the proxy returns 503). Continuing.\n",
+    );
+    return null;
+  }
+}
 
 async function startDefaultTunnel(targetPort) {
   const url = requestedNgrokUrl(turboArgs);

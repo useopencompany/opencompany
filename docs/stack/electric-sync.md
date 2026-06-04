@@ -59,19 +59,48 @@ component -> collection.update()   Neon --logical repl-->         runner/web app
 
 1. **Neon logical replication.** Enable `wal_level = logical` on the Neon project and
    give Electric the **direct, non-pooled** connection string. Electric creates
-   `electric_publication_default` and `electric_slot_default`.
+   `electric_publication_default` and `electric_slot_default`. This is project-level,
+   so it applies to every branch (including ephemeral local branches).
 2. **Run Electric shape sync.** Self-host Electric or use Electric Cloud pointed at the
    Neon direct connection.
-3. **Run Durable Streams.** Local dev can use `bun scripts/durable-streams-dev.mjs`.
-   Hosted environments should use the Electric Cloud Durable Streams base URL and token.
+
+   **Local dev (automatic):** `bun run setup` starts a local `electricsql/electric`
+   container in insecure mode, pointed at your Neon direct connection (derived from
+   `DATABASE_URL` by stripping the `-pooler` label, same as the runner), and writes
+   `ELECTRIC_URL=http://localhost:3010` to `.env.local`. A container runtime is
+   required — install [OrbStack](https://orbstack.dev) (`brew install orbstack`) or
+   Docker Desktop; setup fails fast with install instructions if it's missing or not
+   running. The container is detached (`--restart unless-stopped`), so it
+   survives dev restarts and reboots. Remove it with
+   `docker rm -f opencompany-electric`. `bun run electric:dev` runs it in the
+   foreground to tail logs / restart against a freshly rebranched database. Leave
+   `ELECTRIC_SOURCE_ID`/`ELECTRIC_SOURCE_SECRET`/`ELECTRIC_TOKEN` empty — the dev
+   service is unauthenticated and the proxy adds no upstream credentials.
+
+   Port (`3010`) and container name (`opencompany-electric`) are overridable via
+   `ELECTRIC_DEV_PORT` / `ELECTRIC_CONTAINER_NAME` if you run more than one workspace's
+   Electric at once.
+3. **Run Durable Streams.** No Docker needed — it's a pure-JS reference server.
+   `bun run dev` starts a local Durable Streams server automatically (in-memory,
+   `@durable-streams/server`) and injects `DURABLE_STREAMS_URL` into the web + runner
+   dev processes, so transcripts stream with no extra setup. It reuses an
+   already-running server on the port and steps aside if you set `DURABLE_STREAMS_URL`
+   yourself. Run `bun scripts/durable-streams-dev.mjs` standalone only when running the
+   apps outside `bun run dev`. Override host/port with `DURABLE_STREAMS_DEV_HOST` /
+   `DURABLE_STREAMS_DEV_PORT` (default `127.0.0.1:4150`). Hosted environments should use
+   the Electric Cloud Durable Streams base URL and token.
 4. **Env** (`.env.example`):
    - `ELECTRIC_URL`, plus `ELECTRIC_SOURCE_ID` / `ELECTRIC_SOURCE_SECRET` for Electric
      Cloud, or `ELECTRIC_TOKEN` for a protected self-hosted service.
    - `DURABLE_STREAMS_URL` and `DURABLE_STREAMS_TOKEN` for the session transcript stream.
 
-With `ELECTRIC_URL` empty, the shape proxy returns 503. With `DURABLE_STREAMS_URL`
-empty, stream publishing is a no-op and the transcript proxy returns 503. The app
-still boots, but live sync/streaming will not work.
+With `ELECTRIC_URL` empty, the shape proxy returns 503 and the agents/sessions UI has
+no data source — the read layer is fully Electric-backed, so it does not degrade to a
+usable state. Set `ELECTRIC_URL` (locally via `bun run electric:dev`) to use the app.
+With `DURABLE_STREAMS_URL` empty, stream publishing is a no-op and the transcript proxy
+returns 503; the rest of the app still works, only the live transcript stops updating.
+`bun run dev` sets it automatically for local dev, so you only hit this when running the
+apps outside `bun run dev` without starting `bun scripts/durable-streams-dev.mjs`.
 
 **Owner:** Platform.
 

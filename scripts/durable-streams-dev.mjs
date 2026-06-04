@@ -1,6 +1,7 @@
-// Local Durable Streams server for dev (no Electric Cloud needed). Starts the
-// @durable-streams/server reference server on a fixed port and prints the URL to
-// export as DURABLE_STREAMS_URL.
+// Standalone local Durable Streams server for dev (no Electric Cloud needed).
+// `bun run dev` already starts this automatically and injects DURABLE_STREAMS_URL;
+// run it directly only when you want a standalone server (e.g. running the web and
+// runner apps separately).
 //
 // Usage:
 //   bun scripts/durable-streams-dev.mjs
@@ -10,12 +11,9 @@
 // The runner appends session events here; the web read proxy
 // (/api/streams/v1/session/[id]) forwards browser reads to it.
 
-import { DurableStreamTestServer } from "@durable-streams/server";
+import { startDurableStreamsDevServer } from "./lib/durable-streams-dev.mjs";
 
-const PORT = Number(process.env.DURABLE_STREAMS_DEV_PORT ?? "4150");
-
-const server = new DurableStreamTestServer({ port: PORT, host: "127.0.0.1" });
-const url = await server.start();
+const { url, server } = await startDurableStreamsDevServer();
 
 console.log(`\n  Durable Streams dev server listening at ${url}`);
 console.log(`  → export DURABLE_STREAMS_URL="${url}" (runner + web)`);

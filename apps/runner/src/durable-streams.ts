@@ -53,13 +53,24 @@ function authHeaders(token: string | undefined): Record<string, string> {
 // How long the producer holds appends to coalesce them into one batch (one HTTP
 // POST). The client default is 5ms — far below the model's inter-token gap
 // (~25-33ms), so each token delta would flush alone and pay its own network
-// round-trip to the (remote, in prod) Durable Streams service. With maxInFlight
-// capped at 5 and the server enforcing strict per-batch sequence ordering, that
+// round-trip to the (remote, in prod) Durable Streams service. With limited
+// maxInFlight and the server enforcing strict per-batch sequence ordering, that
 // serializes delivery toward ~1 append/RTT and makes the live transcript trail
 // inference in prod (invisible locally, where the stream server is in-process).
 // A wider window batches several tokens per POST so throughput scales with batch
-// size rather than RTT; 100ms is imperceptible for streaming text.
-const PRODUCER_LINGER_MS = 100;
+// size rather than RTT. 50ms coalesces ~2 tokens/batch — enough to stay off the
+// per-token-flush cliff while keeping the transcript visibly smoother than a
+// coarser 100ms window.
+const PRODUCER_LINGER_MS = 50;
+
+// Concurrent batches the producer keeps in flight (client default is 5). Raising
+// this lifts the throughput ceiling (~maxInFlight/RTT) so a smaller linger window
+// still keeps pace with inference. It is per-producer and we run one producer per
+// session, so the real ceiling is the shared HTTP connection pool to the (remote)
+// Durable Streams origin and the 409 retry churn from out-of-order arrivals — both
+// of which grow with concurrent sessions. 10 is a modest bump that stays well
+// inside those limits.
+const PRODUCER_MAX_IN_FLIGHT = 10;
 
 // One idempotent producer per session, created lazily on first publish. The
 // producer batches appends, preserves order, and gives exactly-once delivery via
@@ -100,6 +111,7 @@ async function ensureProducer(sessionId: string): Promise<IdempotentProducer | n
           new IdempotentProducer(handle, `runner-${sessionId}-${randomUUID()}`, {
             headers,
             lingerMs: PRODUCER_LINGER_MS,
+            maxInFlight: PRODUCER_MAX_IN_FLIGHT,
             onError: (error) =>
               logger.warn("Durable stream producer error", {
                 event: "opencompany.durable_stream_producer_error",

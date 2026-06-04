@@ -47,7 +47,8 @@
     "db:migrate": "bun --filter @opencompany/db db:migrate",
     "db:seed": "node scripts/seed.mjs",
     "db:branch:create": "node scripts/neon-branch.mjs create",
-    "db:branch:delete": "node scripts/neon-branch.mjs delete"
+    "db:branch:delete": "node scripts/neon-branch.mjs delete",
+    "electric:dev": "node scripts/electric-dev.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
