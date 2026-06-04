@@ -439,7 +439,7 @@ async function executeRuntimeToolWithTracing(input: {
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
           : null;
       const shellGitHubAuth =
-        input.definition.name === "shell" || input.definition.name === "gh"
+        input.definition.name === "gh"
           ? await resolveShellGitHubAuth({
               workspaceId: input.workspaceId,
               agentConfig: input.agentConfig,
@@ -721,8 +721,8 @@ function toolTraceMetadata(input: {
   };
 }
 
-// Inject repo-scoped git + gh credentials into shell/gh whenever the agent has at
-// least one attached GitHub repository — independent of amp. A broken integration
+// Inject repo-scoped git + gh credentials into the explicit gh tool whenever the
+// agent has at least one attached GitHub repository. A broken integration
 // (e.g. needs-reauth) propagates and surfaces as a recoverable tool error. A single
 // installation token cannot span installations, so we scope the token to the repos
 // of the first attached repository's installation; cross-installation sessions get

@@ -243,7 +243,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When one or more GitHub repositories are attached to the agent, shell commands get repo-scoped git and gh auth automatically; clone on demand into ./work/<repo> and run repository commands there.",
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible. Use the gh tool, not shell, for authenticated GitHub operations.",
     parameters: {
       type: "object",
       properties: {
@@ -275,7 +275,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Run gh subcommands against the attached repositories; authentication is pre-injected.",
       "When exactly one repository is attached, commands default to it even before it is cloned. When multiple repositories are attached, pass --repo owner/repo for repository-scoped commands.",
       "Commands run from ./work. Clone a repository first (git clone or gh repo clone <owner>/<repo> work/<repo>) when you need its code or files.",
-      "Use gh pr create / gh pr view / gh issue list / gh api as needed.",
+      "Use this tool for gh pr create / gh pr view / gh issue list / gh api as needed.",
       "Never push to or open a PR against a repository's default branch directly; always use a feature branch.",
     ].join("\n"),
   },

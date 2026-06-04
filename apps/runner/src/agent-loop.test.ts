@@ -630,7 +630,7 @@ describe("runtime tool dispatch", () => {
     );
   });
 
-  it("injects repo-scoped GitHub auth into bound shell commands and redacts it", async () => {
+  it("injects repo-scoped GitHub auth into gh commands and redacts it", async () => {
     githubMocks.getGitHubWorkInstallationToken.mockResolvedValue("github_token_123");
     const db = createLeaseDb({
       runLeaseId: "run_123",
@@ -716,18 +716,18 @@ describe("runtime tool dispatch", () => {
       workspaceId: "wsp_123",
       agentConfig: config,
       toolCallId: "toolu/with spaces",
-      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
-      args: { command: "cd work && gh pr list" },
+      definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("gh") as RuntimeToolDefinition,
+      args: { args: "pr list" },
       getSandbox: getSandbox as never,
       workdir: "/home/user/workspace",
       env: env(),
-      enabledTools: ["shell"],
+      enabledTools: ["gh"],
       signal: new AbortController().signal,
       checkAbort: async () => {},
     });
 
     const shellRun = (await getSandbox.mock.results[0]?.value).commands.run.mock.calls.find(
-      ([command]: [string, unknown]) => command === "cd work && gh pr list",
+      ([command]: [string, unknown]) => command === "gh pr list",
     );
     expect(shellRun?.[1]).toMatchObject({
       envs: {
@@ -768,7 +768,7 @@ describe("runtime tool dispatch", () => {
     );
   });
 
-  it("leaves shell unauthenticated when no explicit repository binding exists", async () => {
+  it("leaves shell unauthenticated even when an explicit repository binding exists", async () => {
     const db = createLeaseDb({ runLeaseId: "run_123" });
     dbMocks.getDb.mockReturnValue(db);
     const commands = {
@@ -783,13 +783,39 @@ describe("runtime tool dispatch", () => {
     };
     const getSandbox = vi.fn(async () => ({ sandboxId: "sbx_123", commands }));
 
+    const config = agentConfig({
+      integrations: {
+        github: {
+          repositories: [
+            {
+              id: "opencompany-web",
+              fullName: "opencompany/web",
+              defaultBranch: "main",
+              binding: {
+                provider: "github",
+                externalId: "repo_123",
+                resourceType: "repository",
+                displayName: "opencompany/web",
+                connection: {
+                  externalId: "install_123",
+                  label: "opencompany",
+                  accountName: "opencompany",
+                  accountType: "Organization",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+
     await executeRuntimeTool({
       sessionId: "ses_123",
       assistantMessageId: "msg_assistant",
       runLeaseId: "run_123",
       runLeaseOwner: "runner-test",
       workspaceId: "wsp_123",
-      agentConfig: agentConfig(),
+      agentConfig: config,
       toolCallId: "call_shell",
       definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
       args: { command: "env" },
@@ -810,7 +836,7 @@ describe("runtime tool dispatch", () => {
     });
   });
 
-  it("returns GitHub integration failures as recoverable shell results", async () => {
+  it("returns GitHub integration failures as recoverable gh results", async () => {
     const db = createLeaseDb({
       runLeaseId: "run_123",
       githubRows: [
@@ -861,13 +887,13 @@ describe("runtime tool dispatch", () => {
         runLeaseOwner: "runner-test",
         workspaceId: "wsp_123",
         agentConfig: config,
-        toolCallId: "call_shell",
-        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("shell") as RuntimeToolDefinition,
-        args: { command: "gh pr list" },
+        toolCallId: "call_gh",
+        definition: RUNTIME_TOOL_DEFINITION_BY_NAME.get("gh") as RuntimeToolDefinition,
+        args: { args: "pr list" },
         getSandbox: getSandbox as never,
         workdir: "/home/user/workspace",
         env: env(),
-        enabledTools: ["shell"],
+        enabledTools: ["gh"],
         signal: new AbortController().signal,
         checkAbort: async () => {},
       }),
@@ -884,8 +910,8 @@ describe("runtime tool dispatch", () => {
     expect(commands.run.mock.calls.some(([command]) => command === "gh pr list")).toBe(false);
     expect(db.state.messages.at(-1)).toMatchObject({
       role: "tool",
-      toolName: "shell",
-      toolCallId: "call_shell",
+      toolName: "gh",
+      toolCallId: "call_gh",
     });
   });
 
