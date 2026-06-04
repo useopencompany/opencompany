@@ -1,10 +1,5 @@
-import type { ModelMessage, SystemModelMessage, TextStreamPart, ToolSet } from "ai";
+import type { TextStreamPart, ToolSet } from "ai";
 import { RunAbortError } from "./run-control";
-
-const ANTHROPIC_ONE_HOUR_CACHE_CONTROL = {
-  type: "ephemeral",
-  ttl: "1h",
-} as const;
 
 export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
   if (part.type === "abort") {
@@ -37,43 +32,6 @@ export function normalizeReasoningSummary(summary: string) {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return normalized.length > 0 ? normalized : "";
-}
-
-export function buildCacheableSystemPrompt(
-  systemPrompt: string,
-  modelName: string,
-): string | SystemModelMessage {
-  if (!modelName.startsWith("anthropic/")) return systemPrompt;
-
-  return {
-    role: "system",
-    content: systemPrompt,
-    providerOptions: {
-      anthropic: { cacheControl: ANTHROPIC_ONE_HOUR_CACHE_CONTROL },
-    },
-  };
-}
-
-export function addAnthropicCacheControlToLastMessage(
-  messages: ModelMessage[],
-  modelName: string,
-): ModelMessage[] {
-  if (!modelName.startsWith("anthropic/") || messages.length === 0) return messages;
-
-  return messages.map((message, index) => {
-    if (index !== messages.length - 1) return message;
-
-    return {
-      ...message,
-      providerOptions: {
-        ...message.providerOptions,
-        anthropic: {
-          ...message.providerOptions?.anthropic,
-          cacheControl: ANTHROPIC_ONE_HOUR_CACHE_CONTROL,
-        },
-      },
-    };
-  });
 }
 
 function toStreamError(error: unknown, fallback: string) {
