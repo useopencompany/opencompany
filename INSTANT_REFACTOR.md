@@ -157,9 +157,8 @@ handles deltas, tool calls, reasoning, questions, approvals, usage). That keeps 
   straddles synced data (the base row) and **server-only domains intentionally out of scope** (MCP
   settings, GitHub integration repo catalogs). Promotion would fight decision #2. `AgentDetail`
   already feels optimistic locally (`saveState`, `optimisticGitHubSync`, local field state).
-- ⬜ Phase 4 cleanup: `updateAgentQueries`' `agentQueryKeys.list` seeding + the back-link list
-  prefetch are now vestigial (AgentsView/MainPanel read the collection, not that cache). Harmless;
-  remove with the other dead React-Query plumbing in Phase 4.
+- ✅ Phase 4: removed `updateAgentQueries`' vestigial `agentQueryKeys.list` seeding + the back-link
+  list prefetch + the `agentQueryKeys.list` key (AgentsView/MainPanel read the collection).
 
 ### Phase 2 — Sidebar sessions + stars ✅ (helper deletion deferred to Phase 4)
 - ✅ `agentSessions` + `sessionStars` Electric collections wired with write handlers
@@ -174,11 +173,9 @@ handles deltas, tool calls, reasoning, questions, approvals, usage). That keeps 
   holds until Electric streams *that* transaction, after which the status-excluding selector keeps the
   row hidden until `archived_at` finally lands. `WorkspaceContext` now also carries `userId` (needed to
   build optimistic `session_stars` rows).
-- ⬜ **Deferred to Phase 4**: delete legacy helpers `upsertSidebarSession`, `removeSidebarSession`,
-  `setSidebarSessionStar`, `archiveSidebarSessionOptimistically`, `fetchSidebarSessions`,
-  `sessionQueryKeys.list`, and the sidebar branch of `seedSessionQueries`. They're dead (the sidebar no
-  longer reads React Query) but harmless, and unwinding `seedSessionQueries` is entangled with Phase 3's
-  session-detail rewrite + the large `payload.test.ts`. Clean up wholesale in Phase 3/4.
+- ✅ **Phase 4**: deleted the legacy sidebar helpers (`upsertSidebarSession`, `removeSidebarSession`,
+  `setSidebarSessionStar`, `archiveSidebarSessionOptimistically`, `fetchSidebarSessions`),
+  `sessionQueryKeys.list`, and the sidebar branch of `seedSessionQueries` (its detail-seeding stays).
 
 ### Phase 3 — Session detail + streaming (Durable Streams refactor) 🚧 (flag-gated, awaiting live verification)
 
@@ -255,10 +252,12 @@ new path is correct, not just working):
 - ⬜ Still pending (Phase 4): the **Phase-2-deferred** sidebar helpers + the **Phase-1** vestigial
   `agentQueryKeys.list` (`seedSessionQueries` is kept — still used for instant session-open seeding).
 
-### Phase 4 — Cleanup + tests ⬜
-- ⬜ Delete dead fetchers / query keys / `payload.ts` serializers no longer referenced
-- ⬜ Update component tests (`Sidebar`, `SessionView`, `AgentDetail`) to drive collections
-- ⬜ `bun run typecheck` + `bun run lint` + `bun run test` green
+### Phase 4 — Cleanup + tests ✅ (`07ed5db`)
+- ✅ Deleted dead fetchers / query keys / serializers: the sidebar React-Query helpers +
+  `sessionQueryKeys.list` + `seedSessionQueries`' sidebar branch, and `agentQueryKeys.list`
+  seeding/prefetch. (The session-detail SSE helpers were removed in Phase 3.4.)
+- ✅ Component tests (`Sidebar`, `SessionView`, `AgentDetail`) drive collections / a mocked stream.
+- ✅ `bun run typecheck` + `bun run lint` + full web suite (413) green.
 
 ---
 
@@ -292,22 +291,24 @@ Phases 1–2 done. Phase 3 (Durable Streams) is **built and live-verified for st
 publishes, the web materializes via the reducer, and token streaming works end-to-end against the real
 Electric Cloud service (behind `NEXT_PUBLIC_DURABLE_STREAMS`, off by default; SSE still primary).
 
-Phase 3 is **done**: the session transcript streams over Durable Streams end-to-end (live-verified),
-`SessionView` is single-path, the flag is gone, and the legacy SSE path + its dead code are deleted.
-typecheck + lint + full suites green.
+**Phases 0–4 are done.** The instant-app refactor is complete and the tree is dead-code-free:
+- Agents (list + detail) and the sidebar (sessions + stars) read TanStack DB collections with
+  optimistic, txid-reconciled writes.
+- The session transcript streams over a resumable **Durable Stream** end-to-end (live-verified);
+  `SessionView` is single-path, the flag is gone, and the legacy SSE path + all its dead code are
+  deleted. typecheck + lint + full suites green.
+- Phase 4 housekeeping done (`07ed5db`): deleted the vestigial sidebar React-Query helpers +
+  `sessionQueryKeys.list` + `seedSessionQueries`' sidebar branch (kept detail-seeding), and the
+  `agentQueryKeys.list` seeding/prefetch.
 
-**What's left for a fully clean tree (Phase 4 housekeeping, low-risk):**
-
-1. Delete the **Phase-2-deferred** sidebar React-Query helpers (`upsertSidebarSession`,
-   `removeSidebarSession`, `setSidebarSessionStar`, `archiveSidebarSessionOptimistically`,
-   `fetchSidebarSessions`, `sessionQueryKeys.list`) + their tests — the sidebar reads collections now.
-2. Delete the **Phase-1** vestigial `agentQueryKeys.list` seeding in `updateAgentQueries` + the
-   back-link list prefetch (AgentsView/MainPanel read the collection).
-3. Unwind `seedSessionQueries`' sidebar branch (keep its detail-seeding for instant session-open).
-
-**Post-clean polish (non-blocking):** client optimistic-echo overlay for the user bubble; persist the
-stream offset / seed from the durable snapshot so long sessions don't replay every token delta on load;
-wire `flushSessionStream`/`closeSessionStream` into the runner session lifecycle.
+**Post-clean polish (non-blocking, optional):**
+- Client optimistic-echo overlay for the user bubble (the append→SSE round-trip is fast, but an
+  overlay would make it feel instant).
+- Persist the stream offset / seed from the durable snapshot so long sessions don't replay every
+  token delta from offset `-1` on load.
+- Wire `flushSessionStream`/`closeSessionStream` into the runner's session lifecycle.
+- Consider StreamDB (`@durable-streams/state`) to materialize the transcript collections directly
+  (deferred originally for maturity; the reducer approach works today).
 
 **Standing security item:** rotate the Durable Streams token (pasted in chat during setup).
 
