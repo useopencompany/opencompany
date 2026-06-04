@@ -424,9 +424,7 @@ const GH_GLOBAL_OPTIONS_WITH_VALUE = new Set(["--config", "--hostname", "--repo"
 const GH_GLOBAL_OPTIONS_WITH_OPTIONAL_VALUE = new Set(["--help", "-h", "--version"]);
 
 export function classifyGitHubCliArgs(args: unknown): PermissionGroup {
-  if (typeof args !== "string") return "admin";
-
-  const argv = parseShellArgs(args);
+  const argv = parseGitHubCliArgs(args);
   if (!argv || argv.length === 0) return "admin";
 
   const command = readGhCommand(argv);
@@ -465,12 +463,28 @@ function readGhCommand(argv: string[]): [string, string | undefined] | null {
 
 function classifyGhApi(argv: string[]): PermissionGroup {
   const method = readGhApiMethod(argv);
-  if (!method || method === "GET") return "read";
+  if (!method) return hasGhApiRequestBody(argv) ? "modify" : "read";
+  if (method === "GET") return "read";
   if (method === "POST" || method === "PUT" || method === "PATCH") return "modify";
   return "admin";
 }
 
-function readGhApiMethod(argv: string[]) {
+function hasGhApiRequestBody(argv: string[]) {
+  return argv.some((arg) => {
+    return (
+      arg === "-f" ||
+      arg === "-F" ||
+      arg === "--field" ||
+      arg === "--raw-field" ||
+      arg === "--input" ||
+      arg.startsWith("--field=") ||
+      arg.startsWith("--raw-field=") ||
+      arg.startsWith("--input=")
+    );
+  });
+}
+
+function readGhApiMethod(argv: string[]): string | undefined {
   for (let index = 1; index < argv.length; index++) {
     const arg = argv[index]!;
     if (arg === "--method" || arg === "-X") {
@@ -481,16 +495,18 @@ function readGhApiMethod(argv: string[]) {
       return arg.slice("--method=".length).toUpperCase();
     }
   }
-  return "GET";
+  return undefined;
 }
 
-function parseShellArgs(input: string): string[] | null {
+export function parseGitHubCliArgs(args: unknown): string[] | null {
+  if (typeof args !== "string") return null;
+
   const argv: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
   let escaping = false;
 
-  for (const char of input) {
+  for (const char of args) {
     if (escaping) {
       current += char;
       escaping = false;

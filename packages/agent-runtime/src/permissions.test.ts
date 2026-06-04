@@ -152,6 +152,7 @@ describe("classifyGitHubCliArgs", () => {
       "repo list opencompany",
       "api repos/opencompany/web/pulls/301",
       "api --method GET repos/opencompany/web/pulls/301",
+      "api --method GET repos/opencompany/web/issues -f title=bug",
       "--repo opencompany/web pr diff 301",
     ]) {
       expect(classifyGitHubCliArgs(args)).toBe("read");
@@ -180,6 +181,15 @@ describe("classifyGitHubCliArgs", () => {
       "api --method POST repos/opencompany/web/issues",
       "api --method PUT repos/opencompany/web/pulls/301/merge",
       "api --method PATCH repos/opencompany/web/issues/123",
+      "api repos/opencompany/web/issues -f title=bug",
+      "api repos/opencompany/web/issues -F title=bug",
+      "api repos/opencompany/web/issues --field title=bug",
+      "api repos/opencompany/web/issues --raw-field title=bug",
+      "api repos/opencompany/web/issues --input body.json",
+      "api repos/opencompany/web/issues --field=title=bug",
+      "api repos/opencompany/web/issues --raw-field=title=bug",
+      "api repos/opencompany/web/issues --input=body.json",
+      "api graphql -f query='mutation { __typename }'",
     ]) {
       expect(classifyGitHubCliArgs(args)).toBe("modify");
     }

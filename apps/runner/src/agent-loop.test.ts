@@ -727,7 +727,7 @@ describe("runtime tool dispatch", () => {
     });
 
     const shellRun = (await getSandbox.mock.results[0]?.value).commands.run.mock.calls.find(
-      ([command]: [string, unknown]) => command === "gh pr list",
+      ([command]: [string, unknown]) => command === "gh 'pr' 'list'",
     );
     expect(shellRun?.[1]).toMatchObject({
       envs: {
@@ -907,7 +907,7 @@ describe("runtime tool dispatch", () => {
       }),
     });
 
-    expect(commands.run.mock.calls.some(([command]) => command === "gh pr list")).toBe(false);
+    expect(commands.run.mock.calls.some(([command]) => command === "gh 'pr' 'list'")).toBe(false);
     expect(db.state.messages.at(-1)).toMatchObject({
       role: "tool",
       toolName: "gh",

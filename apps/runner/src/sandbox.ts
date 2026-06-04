@@ -1,5 +1,5 @@
 import path from "node:path";
-import { resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
+import { parseGitHubCliArgs, resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
 import { Sandbox } from "e2b";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
@@ -312,9 +312,13 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "gh") {
-    const ghArgs = readString(args, "args");
+    const ghArgv = parseGitHubCliArgs(readString(args, "args"));
+    if (!ghArgv || ghArgv.length === 0) {
+      throw new Error("GitHub CLI arguments are empty or malformed.");
+    }
     const layout = sandboxLayout(input.workdir);
-    const result = await runCommandWithExitResult(input.sandbox, `gh ${ghArgs}`, {
+    const command = ["gh", ...ghArgv.map(shellQuote)].join(" ");
+    const result = await runCommandWithExitResult(input.sandbox, command, {
       cwd: layout.workRoot,
       ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
