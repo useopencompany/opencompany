@@ -30,6 +30,7 @@ import { and, asc, eq, isNotNull, notInArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
+import { batchWithTxid } from "@/lib/db/txid";
 import { serializeAgentBundleFiles } from "@/lib/agents/bundle-files";
 import {
   derivePreviewConfigFromTiptapDoc,
@@ -536,7 +537,7 @@ export async function updateAgent(
 
 export async function deleteAgent(
   idOrPath: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; txid: number } | { ok: false; error: string }> {
   // Require admin for destructive operations (matches codebase convention).
   // Route the requireAdmin error through the result shape so Next.js production
   // server-action error masking doesn't replace the message with a generic
@@ -743,8 +744,13 @@ export async function deleteAgent(
     }
   }
 
-  await timeAsync(trace, "db.deleteAgent", () =>
-    db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+  // Run the delete + pg_current_xact_id in one batch so the returned txid is the
+  // transaction Electric will observe removing the row — the client awaits it
+  // (awaitTxId) to drop the optimistic delete. The FK cascade removes sessions.
+  const txid = await timeAsync(trace, "db.deleteAgent", () =>
+    batchWithTxid(
+      db.delete(agents).where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id))),
+    ),
   );
 
   await captureServerEvent("agent_deleted", user.id, {
@@ -757,7 +763,7 @@ export async function deleteAgent(
   if (agent.path) revalidatePath(`/agents/${agent.path}`);
   revalidatePath(`/agents/${agent.id}`);
   endTimingTrace(trace, { found: true, path: agent.path });
-  return { ok: true };
+  return { ok: true, txid };
 }
 
 function warnOnBodyTiptapMismatch(input: { agentId: string; body?: string; tiptapBody?: string }) {

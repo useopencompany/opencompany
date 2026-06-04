@@ -67,12 +67,13 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useCollections } from "@/components/CollectionsProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { deleteAgent, updateAgent } from "@/lib/agents/actions";
+import { updateAgent } from "@/lib/agents/actions";
 import type { AgentBundleFilePayload as AgentFolderFilePayload } from "@/lib/agents/bundle-files";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
@@ -204,6 +205,7 @@ function AgentDetailContent({
   workspaceId: string;
 }) {
   const queryClient = useQueryClient();
+  const { agents: agentsCollection } = useCollections();
   const { showError } = useToast();
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
@@ -711,29 +713,17 @@ function AgentDetailContent({
         onClose={() => setShowDeleteDialog(false)}
         onConfirm={() => {
           startDeleteTransition(async () => {
+            // Optimistic delete: the row vanishes from the agents collection
+            // immediately (so the list and this view update at once) and we
+            // navigate away. The onDelete handler runs deleteAgent and the
+            // collection reconciles via txid; a failure rolls the row back.
+            const tx = agentsCollection.delete(agent.id);
+            setShowDeleteDialog(false);
+            router.push("/agents");
             try {
-              const result = await deleteAgent(agent.id);
-              if (!result.ok) {
-                setShowDeleteDialog(false);
-                showError(result.error, "Could not delete agent");
-                return;
-              }
-              // Close the dialog before navigating so it doesn't stay open on
-              // the success path (mirrors the error branch above).
-              setShowDeleteDialog(false);
-              queryClient.setQueryData<AgentListItemPayload[]>(
-                agentQueryKeys.list(workspaceId),
-                (current) => (current ?? []).filter((item) => item.id !== agent.id),
-              );
-              router.push("/agents");
+              await tx.isPersisted.promise;
             } catch (err) {
-              // Let Next.js redirect digests bubble — currentWorkspace() throws
-              // NEXT_REDIRECT for unauthenticated / incomplete-onboarding users
-              // and the framework needs to see it to navigate.
               if (isNextRedirectError(err)) throw err;
-              // Server actions can throw (e.g. non-admin requireAdmin guard);
-              // surface as a toast instead of bubbling to the error boundary.
-              setShowDeleteDialog(false);
               showError(
                 err instanceof Error ? err.message : "Could not delete agent",
                 "Could not delete agent",
