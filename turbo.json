@@ -3,6 +3,9 @@
   "globalDependencies": [".env", ".env.local", ".env.*.local"],
   "globalEnv": [
     "DATABASE_URL",
+    "DURABLE_STREAMS_URL",
+    "DURABLE_STREAMS_TOKEN",
+    "NEXT_PUBLIC_DURABLE_STREAMS",
     "BETTER_STACK_ERRORS_DSN",
     "NEXT_PUBLIC_ANALYTICS_DEBUG",
     "NEXT_PUBLIC_APP_URL",
