@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,
@@ -170,7 +170,13 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   );
 }
 
-export default function MainPanel({ agents: initialAgents }: { agents: AgentOption[] }) {
+export default function MainPanel({
+  agents: initialAgents,
+  slackCard,
+}: {
+  agents: AgentOption[];
+  slackCard?: ReactNode;
+}) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const cachedAgents = queryClient.getQueryData<AgentListItemPayload[]>(
@@ -188,6 +194,7 @@ export default function MainPanel({ agents: initialAgents }: { agents: AgentOpti
     <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
       <div className="w-full max-w-[680px]">
         <Prompt agents={agentOptions} />
+        {slackCard}
       </div>
     </main>
   );
