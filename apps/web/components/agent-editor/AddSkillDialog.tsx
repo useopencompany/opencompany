@@ -29,6 +29,10 @@ type Props = {
   onAdded: (skill: AddedSkill) => void;
 };
 
+function sourceTypeLabel(type: PreviewSkill["source"]["type"]) {
+  return type === "skills.sh" ? "skills.sh via GitHub" : "GitHub";
+}
+
 export function AddSkillDialog({ onClose, onAdded }: Props) {
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<"idle" | "resolving" | "adding">("idle");
@@ -117,7 +121,7 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-skill-title"
-        className="w-full max-w-[480px] rounded-lg border border-black/[0.1] bg-surface-raised shadow-[0_24px_64px_rgba(0,0,0,0.22),0_4px_14px_rgba(0,0,0,0.12)]"
+        className="flex max-h-[calc(100vh-48px)] w-full max-w-[560px] flex-col overflow-hidden rounded-lg border border-black/[0.1] bg-surface-raised shadow-[0_24px_64px_rgba(0,0,0,0.22),0_4px_14px_rgba(0,0,0,0.12)]"
       >
         <div className="border-b border-black/[0.08] px-4 py-3">
           <h2
@@ -125,11 +129,11 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
             className="flex items-center gap-1.5 text-[14px] font-semibold text-ink"
           >
             <Sparkles size={14} strokeWidth={1.9} className="text-ink-muted" />
-            Add skill from GitHub URL
+            Add skill from GitHub or skills.sh
           </h2>
         </div>
 
-        <div className="space-y-3 px-4 py-4">
+        <div className="space-y-3 overflow-y-auto px-4 py-4">
           <div>
             <input
               ref={inputRef}
@@ -139,12 +143,13 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && url.trim() && !busy) resolve();
               }}
-              placeholder="https://github.com/owner/repo or a skills.sh URL"
+              placeholder="https://github.com/owner/repo or https://skills.sh/owner/repo/skill"
               disabled={busy}
               className="h-9 w-full rounded-md border border-border bg-surface px-2.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle/70 focus:border-ink/30 disabled:opacity-65"
             />
             <p className="mt-1.5 text-[11.5px] leading-4 text-ink-subtle">
-              Public GitHub repositories only. The skill is snapshotted and tracks its branch.
+              Paste a public GitHub repository URL or a skills.sh skill page. The skill is
+              snapshotted and tracks its branch.
             </p>
           </div>
 
@@ -186,7 +191,9 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
               </div>
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11.5px]">
                 <dt className="text-ink-subtle">Source</dt>
-                <dd className="truncate text-ink-muted">
+                <dd className="min-w-0 truncate text-ink-muted">
+                  <span className="text-ink">{sourceTypeLabel(preview.source.type)}</span>
+                  <span className="text-ink-subtle"> · </span>
                   {preview.source.url}
                   {preview.source.path ? `/${preview.source.path}` : ""}
                 </dd>
@@ -202,6 +209,20 @@ export function AddSkillDialog({ onClose, onAdded }: Props) {
                   KB
                 </dd>
               </dl>
+              <div className="border-t border-border-subtle pt-2">
+                <div className="mb-1 text-[11.5px] font-medium text-ink-subtle">Included files</div>
+                <ul className="max-h-[128px] space-y-0.5 overflow-y-auto rounded-md bg-surface-muted px-2 py-1.5">
+                  {preview.files.map((file) => (
+                    <li
+                      key={file.path}
+                      className="truncate font-mono text-[11px] leading-4 text-ink-muted"
+                      title={file.path}
+                    >
+                      {file.path}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
         </div>

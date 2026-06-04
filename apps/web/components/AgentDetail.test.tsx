@@ -104,6 +104,18 @@ const config: AgentConfig = {
   triggers: [],
 };
 
+const externalSkill = {
+  id: "frontend-design",
+  name: "Frontend Design",
+  description: "Create distinctive, production-grade frontend interfaces.",
+  source: {
+    type: "skills.sh" as const,
+    url: "https://github.com/anthropics/skills",
+    ref: "main",
+    path: "skills/frontend-design",
+  },
+};
+
 const listAgent: AgentListItemPayload = {
   id: "agt_123",
   workspaceId: "wks_123",
@@ -254,6 +266,44 @@ describe("AgentDetail", () => {
 
     expect(await screen.findByText("@opencompany/web")).toBeInTheDocument();
     expect(container.querySelector(".agent-mention[data-kind='integration']")).toBeInTheDocument();
+  });
+
+  it("mounts saved skill mentions before the workspace skill catalog loads", async () => {
+    const user = userEvent.setup();
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(["workspace-skills", "wks_123"], []);
+    const skillAgent: AgentDetailPayload = {
+      ...detailAgent,
+      config: {
+        ...detailAgent.config,
+        instructions: "Use @skill/frontend-design for UI work.",
+        skills: [externalSkill],
+      },
+      body: "Use @skill/frontend-design for UI work.",
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Use @skill/frontend-design for UI work." }],
+          },
+        ],
+      },
+    };
+
+    const { container } = renderWithProviders(
+      <AgentDetail idOrPath="agents/leo/leo.agent" initialAgent={skillAgent} />,
+      queryClient,
+    );
+
+    expect(await screen.findByText("@skill/frontend-design")).toBeInTheDocument();
+    expect(container.querySelector(".agent-mention[data-kind='skill']")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+    const fullConfig = container.querySelector("pre code")?.textContent ?? "";
+    expect(fullConfig).toContain("skills:");
+    expect(fullConfig).toContain("frontend-design");
+    expect(fullConfig).toContain("skills/frontend-design");
   });
 
   it("shows the agent folder in the detail inspector", async () => {

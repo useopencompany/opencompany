@@ -4,6 +4,7 @@ import {
   agentBundleDir,
   agentDefinitionFileNameForPath,
   cronForSchedulePreset,
+  isExternalSkillReference,
   normalizeScheduleTimezone,
   schedulePresetFromCron,
   scheduleSummary,
@@ -11,6 +12,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
+  AgentExternalSkillReference,
   AgentModelId,
   AgentReference,
   AgentScheduleTriggerConfig,
@@ -50,6 +52,7 @@ import {
   AGENT_MODELS,
   type AgentMentionItem,
   type AgentModel,
+  type AgentSkillCatalogEntry,
   type AgentTool,
   buildAgentMentionItems,
   findModel,
@@ -221,6 +224,14 @@ function AgentDetailContent({
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
   );
+  const availableSkills = useMemo(
+    () => mergeSkillCatalog(agent.config.skills ?? [], workspaceSkills ?? []),
+    [agent.config.skills, workspaceSkills],
+  );
+  const derivationSkills = useMemo(
+    () => availableSkills.flatMap((skill) => skillCatalogEntryToExternalReference(skill)),
+    [availableSkills],
+  );
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -254,6 +265,7 @@ function AgentDetailContent({
         selectedModelId,
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
+        skills: derivationSkills,
         triggers,
         mcp: agent.mcp,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
@@ -263,6 +275,7 @@ function AgentDetailContent({
       agent.githubIntegrationRepositories,
       agent.workspaceAgents,
       agent.mcp,
+      derivationSkills,
       content,
       hasEditorDraft,
       name,
@@ -314,7 +327,7 @@ function AgentDetailContent({
       enabledMcpToolIds,
       mcpEnabled: agent.mcp.mcpEnabled,
       agents: agent.workspaceAgents,
-      skills: workspaceSkills ?? [],
+      skills: availableSkills,
     });
   }, [
     agent.brainPaths,
@@ -323,7 +336,7 @@ function AgentDetailContent({
     agent.mcp.slackConfigured,
     agent.usableGitHubIntegrationRepositories,
     agent.workspaceAgents,
-    workspaceSkills,
+    availableSkills,
   ]);
 
   useEffect(() => {
@@ -1768,6 +1781,50 @@ function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"
   };
 }
 
+function mergeSkillCatalog(
+  configSkills: AgentConfig["skills"],
+  workspaceSkills: AgentSkillCatalogEntry[],
+): AgentSkillCatalogEntry[] {
+  const byId = new Map<string, AgentSkillCatalogEntry>();
+
+  for (const skill of configSkills ?? []) {
+    if (!isExternalSkillReference(skill)) continue;
+    byId.set(skill.id, {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    });
+  }
+
+  for (const skill of workspaceSkills) {
+    const existing = byId.get(skill.id);
+    const source = skill.source ?? existing?.source;
+    byId.set(skill.id, {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(source ? { source } : {}),
+    });
+  }
+
+  return Array.from(byId.values());
+}
+
+function skillCatalogEntryToExternalReference(
+  skill: AgentSkillCatalogEntry,
+): AgentExternalSkillReference[] {
+  if (!skill.source) return [];
+  return [
+    {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    },
+  ];
+}
+
 function buildConfigPreview({
   title,
   content,
@@ -1775,6 +1832,7 @@ function buildConfigPreview({
   selectedModelId,
   repositories,
   agents,
+  skills,
   triggers,
   mcp,
   useDerivedConfig,
@@ -1785,6 +1843,7 @@ function buildConfigPreview({
   selectedModelId: AgentModelId;
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
   agents: AgentReference[];
+  skills: AgentExternalSkillReference[];
   triggers: AgentConfig["triggers"];
   mcp: AgentDetailPayload["mcp"];
   useDerivedConfig: boolean;
@@ -1796,6 +1855,7 @@ function buildConfigPreview({
         model: selectedModelId,
         repositories,
         agents,
+        skills,
         preferredRepositories: fallback.integrations.github.repositories.filter(
           (repository) => repository.binding,
         ),
@@ -1831,6 +1891,7 @@ function buildConfigPreview({
       tools: config.tools,
       brain: config.brain,
       agents: config.agents ?? [],
+      skills: config.skills ?? [],
       integrations: config.integrations,
       triggers: config.triggers,
     }),

@@ -136,7 +136,17 @@ export type AgentMentionItem =
   | AgentScheduleMention
   | AgentSkillMention;
 
-export type AgentSkillCatalogEntry = { id: string; name: string; description: string };
+export type AgentSkillCatalogEntry = {
+  id: string;
+  name: string;
+  description: string;
+  source?: {
+    type: "github" | "skills.sh";
+    url: string;
+    ref: string;
+    path: string;
+  };
+};
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
