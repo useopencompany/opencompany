@@ -3,12 +3,32 @@ import { parseAgentFile, serializeAgentFile } from "./agent-file";
 import { resolveAgentRuntimeConfig } from "./config";
 import {
   AGENT_SELF_EDIT_SKILL_ID,
+  computeSkillFolderIntegrity,
   isKnownAgentSkillId,
   normalizeAgentSkills,
+  normalizeExternalSkillReference,
   OPENCOMPANY_SETUP_SKILL_ID,
-  resolveEnabledSkills,
+  resolveEnabledBuiltinSkillFiles,
+  resolveEnabledSkillMetadata,
 } from "./skills";
-import type { AgentConfig } from "./types";
+import type { AgentConfig, AgentExternalSkillReference } from "./types";
+
+function externalSkill(
+  overrides: Partial<AgentExternalSkillReference> = {},
+): AgentExternalSkillReference {
+  return {
+    id: "improve-codebase-architecture",
+    name: "Improve Codebase Architecture",
+    description: "Analyze codebases for architectural friction.",
+    source: {
+      type: "github",
+      url: "https://github.com/mattpocock/skills",
+      ref: "main",
+      path: "skills/improve-codebase-architecture",
+    },
+    ...overrides,
+  };
+}
 
 function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
@@ -28,27 +48,27 @@ function baseConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 describe("skill catalog", () => {
   test("the self-edit skill is known and ships a SKILL.md", () => {
     expect(isKnownAgentSkillId(AGENT_SELF_EDIT_SKILL_ID)).toBe(true);
-    const [skill] = resolveEnabledSkills(baseConfig());
+    const [skill] = resolveEnabledBuiltinSkillFiles(baseConfig());
     expect(skill?.id).toBe(AGENT_SELF_EDIT_SKILL_ID);
     expect(skill?.files.some((file) => file.path === "SKILL.md")).toBe(true);
   });
 
-  test("resolveEnabledSkills always includes defaultEnabled skills", () => {
-    expect(resolveEnabledSkills(baseConfig()).map((skill) => skill.id)).toContain(
+  test("resolveEnabledBuiltinSkillFiles always includes defaultEnabled skills", () => {
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((skill) => skill.id)).toContain(
       AGENT_SELF_EDIT_SKILL_ID,
     );
   });
 
   test("the opencompany-setup skill is default-enabled and ships a SKILL.md", () => {
     expect(isKnownAgentSkillId(OPENCOMPANY_SETUP_SKILL_ID)).toBe(true);
-    const setup = resolveEnabledSkills(baseConfig()).find(
+    const setup = resolveEnabledBuiltinSkillFiles(baseConfig()).find(
       (skill) => skill.id === OPENCOMPANY_SETUP_SKILL_ID,
     );
     expect(setup?.files.some((file) => file.path === "SKILL.md")).toBe(true);
   });
 
   test("the opencompany-setup SKILL.md teaches Brain setup and hands off to self-edit", () => {
-    const setup = resolveEnabledSkills(baseConfig()).find(
+    const setup = resolveEnabledBuiltinSkillFiles(baseConfig()).find(
       (skill) => skill.id === OPENCOMPANY_SETUP_SKILL_ID,
     );
     const skillMd = setup?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
@@ -63,7 +83,7 @@ describe("skill catalog", () => {
   });
 
   test("the self-edit SKILL.md enumerates addable tool mentions with prerequisites", () => {
-    const [skill] = resolveEnabledSkills(baseConfig());
+    const [skill] = resolveEnabledBuiltinSkillFiles(baseConfig());
     const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
     // Tools the agent can @mention to add to itself.
     expect(skillMd).toContain("`@exa`");
@@ -73,7 +93,7 @@ describe("skill catalog", () => {
   });
 
   test("the self-edit SKILL.md documents the read-before-edit gate", () => {
-    const [skill] = resolveEnabledSkills(baseConfig());
+    const [skill] = resolveEnabledBuiltinSkillFiles(baseConfig());
     const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
 
     expect(skillMd).toMatch(/requires that you have read this skill/i);
@@ -109,6 +129,104 @@ describe("skills frontmatter round-trip", () => {
     const source = serializeAgentFile({ title: "Agent", body: "Help out." });
     expect(source).not.toContain("skills:");
     expect(parseAgentFile(source).config.skills).toBeUndefined();
+  });
+});
+
+describe("external skills", () => {
+  test("normalizeExternalSkillReference accepts a well-formed object", () => {
+    expect(normalizeExternalSkillReference(externalSkill())).toEqual(externalSkill());
+  });
+
+  test("normalizeExternalSkillReference rejects malformed objects", () => {
+    expect(normalizeExternalSkillReference(externalSkill({ id: "Bad Id" }))).toBeNull();
+    expect(normalizeExternalSkillReference(externalSkill({ id: "has--double" }))).toBeNull();
+    expect(normalizeExternalSkillReference(externalSkill({ name: "" }))).toBeNull();
+    expect(
+      normalizeExternalSkillReference({ ...externalSkill(), source: { type: "ftp", url: "x" } }),
+    ).toBeNull();
+    expect(
+      normalizeExternalSkillReference({
+        ...externalSkill(),
+        source: { ...externalSkill().source, url: "http://insecure" },
+      }),
+    ).toBeNull();
+    expect(
+      normalizeExternalSkillReference({
+        ...externalSkill(),
+        source: { ...externalSkill().source, path: "../escape" },
+      }),
+    ).toBeNull();
+  });
+
+  test("normalizeExternalSkillReference rejects external skills colliding with a built-in id", () => {
+    expect(
+      normalizeExternalSkillReference(externalSkill({ id: AGENT_SELF_EDIT_SKILL_ID })),
+    ).toBeNull();
+  });
+
+  test("normalizeAgentSkills keeps external objects alongside built-in ids", () => {
+    const skill = externalSkill();
+    expect(normalizeAgentSkills([AGENT_SELF_EDIT_SKILL_ID, skill, "made-up"])).toEqual([
+      { id: AGENT_SELF_EDIT_SKILL_ID },
+      skill,
+    ]);
+  });
+
+  test("normalizeAgentSkills dedupes external skills by id", () => {
+    const skill = externalSkill();
+    expect(normalizeAgentSkills([skill, externalSkill({ name: "Other" })])).toEqual([skill]);
+  });
+
+  test("external skills round-trip through serialize/parse as objects", () => {
+    const skill = externalSkill();
+    const source = serializeAgentFile({ title: "Agent", body: "Help out.", skills: [skill] });
+    expect(source).toContain("skills:");
+    const parsed = parseAgentFile(source);
+    expect(parsed.config.skills).toEqual([skill]);
+    // Idempotent: re-serializing the parsed result is byte-stable.
+    expect(
+      serializeAgentFile({
+        title: parsed.title,
+        body: parsed.body,
+        model: parsed.config.model.name,
+        skills: parsed.config.skills ?? [],
+      }),
+    ).toEqual(source);
+  });
+
+  test("resolveEnabledSkillMetadata lists built-ins plus external skills", () => {
+    const skill = externalSkill();
+    const metadata = resolveEnabledSkillMetadata(baseConfig({ skills: [skill] }));
+    expect(metadata.find((m) => m.id === AGENT_SELF_EDIT_SKILL_ID)?.origin).toBe("builtin");
+    const external = metadata.find((m) => m.id === skill.id);
+    expect(external?.origin).toBe("external");
+    expect(external?.source?.url).toBe(skill.source.url);
+  });
+
+  test("resolveEnabledBuiltinSkillFiles excludes external skills (no files in code)", () => {
+    const ids = resolveEnabledBuiltinSkillFiles(baseConfig({ skills: [externalSkill()] })).map(
+      (s) => s.id,
+    );
+    expect(ids).not.toContain("improve-codebase-architecture");
+    expect(ids).toContain(AGENT_SELF_EDIT_SKILL_ID);
+  });
+
+  test("computeSkillFolderIntegrity is order-independent and content-sensitive", async () => {
+    const a = await computeSkillFolderIntegrity([
+      { path: "SKILL.md", content: "one" },
+      { path: "LANGUAGE.md", content: "two" },
+    ]);
+    const reordered = await computeSkillFolderIntegrity([
+      { path: "LANGUAGE.md", content: "two" },
+      { path: "SKILL.md", content: "one" },
+    ]);
+    const changed = await computeSkillFolderIntegrity([
+      { path: "SKILL.md", content: "one!" },
+      { path: "LANGUAGE.md", content: "two" },
+    ]);
+    expect(a).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(reordered).toBe(a);
+    expect(changed).not.toBe(a);
   });
 });
 

@@ -60,6 +60,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
         model: agentConfig.model.name,
         tools: agentConfig.tools,
         brain: agentConfig.brain,
+        skills: agentConfig.skills ?? [],
         integrations: agentConfig.integrations,
         triggers: agentConfig.triggers,
       }),
@@ -81,6 +82,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     await materializeSkillsForSession({
       sandbox,
       workdir: row.session.workdir,
+      workspaceId: row.workspace.id,
       config: agentConfig,
     });
     return sandbox;

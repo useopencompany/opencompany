@@ -64,6 +64,7 @@ import {
 } from "@/lib/integrations/service";
 import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { endTimingTrace, startTimingTrace, timeAsync } from "@/lib/observability/timing";
+import { listWorkspaceSkillSnapshots, toExternalSkillReference } from "@/lib/skills/snapshots";
 import {
   ensureWorkspaceRepository,
   listWorkspaceAgentFiles,
@@ -258,6 +259,11 @@ export async function updateAgent(
     if (!row.path || row.path === agent.path) return [];
     return [{ path: row.path, name: row.name }];
   });
+  const workspaceSkillReferences = (
+    await timeAsync(trace, "db.selectSkillSnapshots", () =>
+      listWorkspaceSkillSnapshots(workspace.id),
+    )
+  ).map(toExternalSkillReference);
   const savedRepositories = currentConfig.integrations.github.repositories;
   const { derivationRepositories, usableRepositories } = buildGitHubRepositoryCatalogs({
     repositories: githubRepositories,
@@ -278,6 +284,7 @@ export async function updateAgent(
         model: patch.model ?? currentConfig.model.name,
         repositories: derivationRepositories,
         agents: workspaceAgentReferences,
+        skills: workspaceSkillReferences,
         preferredRepositories: savedPreferredRepositories,
         triggers: requestedTriggers,
       })
@@ -293,6 +300,7 @@ export async function updateAgent(
           model: patch.model ?? currentConfig.model.name,
           repositories: derivationRepositories,
           agents: workspaceAgentReferences,
+          skills: workspaceSkillReferences,
           preferredRepositories,
           triggers: requestedTriggers,
         })
@@ -310,6 +318,12 @@ export async function updateAgent(
   const nextBrain = derived?.config.brain ?? patch.config?.brain ?? currentConfig.brain;
   const nextAgents = derived?.config.agents ?? patch.config?.agents ?? currentConfig.agents;
   const nextTriggers = derived?.config.triggers ?? patch.config?.triggers ?? currentConfig.triggers;
+  // When a derivation ran, the body is authoritative for skills (like tools/brain): an
+  // omitted `skills` means "none", not "keep the old ones". Only fall back to the stored
+  // config when nothing was derived (no body or tiptap content to derive from).
+  const nextSkills = derived
+    ? (derived.config.skills ?? [])
+    : (patch.config?.skills ?? currentConfig.skills ?? []);
   const source = serializeAgentFile({
     title,
     body,
@@ -317,6 +331,7 @@ export async function updateAgent(
     tools: nextTools,
     brain: nextBrain,
     agents: nextAgents ?? [],
+    skills: nextSkills ?? [],
     integrations: nextIntegrations,
     triggers: nextTriggers,
   });
@@ -778,6 +793,7 @@ export async function syncAgentsFromWorkspaceRepository() {
         model: parsed.config.model.name,
         tools: parsed.config.tools,
         brain: parsed.config.brain,
+        skills: parsed.config.skills ?? [],
         integrations: parsed.config.integrations,
         triggers: parsed.config.triggers,
       }),

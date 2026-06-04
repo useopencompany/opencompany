@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   AgentSessionQuestionAnswer,
   AgentSessionQuestionPrompt,
+  AgentSkillFile,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
@@ -173,6 +174,48 @@ export const agents = pgTable(
   (table) => ({
     workspaceIdx: index("agents_workspace_idx").on(table.workspaceId),
     workspacePathIdx: uniqueIndex("agents_workspace_path_idx").on(table.workspaceId, table.path),
+  }),
+);
+
+// External skills snapshotted from a web source (GitHub / skills.sh), reusable across all
+// agents in a workspace. A refreshable cache: re-resolved to branch HEAD on each run, so
+// `resolvedCommit` / `integrity` / `files` move over time. One row per (source, ref, skill);
+// `integrity` lets the runner skip rewrites when content is unchanged.
+export const workspaceSkillSnapshots = pgTable(
+  "workspace_skill_snapshots",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    skillId: text("skill_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    sourceType: text("source_type").notNull().default("github"),
+    sourceUrl: text("source_url").notNull(),
+    requestedRef: text("requested_ref").notNull(),
+    skillPath: text("skill_path").notNull().default(""),
+    resolvedCommit: text("resolved_commit").notNull(),
+    integrity: text("integrity").notNull(),
+    files: jsonb("files").$type<AgentSkillFile[]>().notNull(),
+    fileCount: integer("file_count").notNull(),
+    totalBytes: integer("total_bytes").notNull(),
+    lastResolvedAt: timestamp("last_resolved_at", { withTimezone: true }).notNull().defaultNow(),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceIdx: uniqueIndex("workspace_skill_snapshots_source_idx").on(
+      table.workspaceId,
+      table.sourceUrl,
+      table.requestedRef,
+      table.skillPath,
+    ),
+    skillIdIdx: index("workspace_skill_snapshots_skill_id_idx").on(
+      table.workspaceId,
+      table.skillId,
+    ),
   }),
 );
 

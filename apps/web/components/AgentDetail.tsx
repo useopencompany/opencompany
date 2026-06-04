@@ -4,6 +4,7 @@ import {
   agentBundleDir,
   agentDefinitionFileNameForPath,
   cronForSchedulePreset,
+  isExternalSkillReference,
   normalizeScheduleTimezone,
   schedulePresetFromCron,
   scheduleSummary,
@@ -11,6 +12,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
+  AgentExternalSkillReference,
   AgentModelId,
   AgentReference,
   AgentScheduleTriggerConfig,
@@ -42,12 +44,15 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { AddSkillDialog } from "@/components/agent-editor/AddSkillDialog";
+import { AgentEditor, type AgentEditorHandle } from "@/components/agent-editor/AgentEditor";
 import { ModelRatingMeters, modelRatingsTitle } from "@/components/agent-editor/ModelRatingMeters";
 import {
+  ADD_SKILL_MENTION_ID,
   AGENT_MODELS,
   type AgentMentionItem,
   type AgentModel,
+  type AgentSkillCatalogEntry,
   type AgentTool,
   buildAgentMentionItems,
   findModel,
@@ -82,6 +87,7 @@ import {
   agentQueryKeys,
   fetchAgent,
 } from "@/lib/agents/payload";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -181,6 +187,11 @@ function AgentDetailContent({
   const queryClient = useQueryClient();
   const { agents: agentsCollection } = useCollections();
   const { showError } = useToast();
+  const { data: workspaceSkills } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+    staleTime: AGENTS_QUERY_STALE_TIME_MS,
+  });
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
   const [content, setContent] = useState<TiptapDoc>(agent.content);
@@ -188,6 +199,14 @@ function AgentDetailContent({
   const [triggers, setTriggers] = useState<AgentConfig["triggers"]>(agent.config.triggers);
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
+  );
+  const availableSkills = useMemo(
+    () => mergeSkillCatalog(agent.config.skills ?? [], workspaceSkills ?? []),
+    [agent.config.skills, workspaceSkills],
+  );
+  const derivationSkills = useMemo(
+    () => availableSkills.flatMap((skill) => skillCatalogEntryToExternalReference(skill)),
+    [availableSkills],
   );
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
@@ -198,6 +217,8 @@ function AgentDetailContent({
   const [editingSchedule, setEditingSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [showAddSkillDialog, setShowAddSkillDialog] = useState(false);
+  const editorRef = useRef<AgentEditorHandle>(null);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -219,6 +240,7 @@ function AgentDetailContent({
         selectedModelId,
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
+        skills: derivationSkills,
         triggers,
         mcp: agent.mcp,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
@@ -228,6 +250,7 @@ function AgentDetailContent({
       agent.githubIntegrationRepositories,
       agent.workspaceAgents,
       agent.mcp,
+      derivationSkills,
       content,
       hasEditorDraft,
       name,
@@ -279,6 +302,7 @@ function AgentDetailContent({
       enabledMcpToolIds,
       mcpEnabled: agent.mcp.mcpEnabled,
       agents: agent.workspaceAgents,
+      skills: availableSkills,
     });
   }, [
     agent.brainPaths,
@@ -287,6 +311,7 @@ function AgentDetailContent({
     agent.mcp.slackConfigured,
     agent.usableGitHubIntegrationRepositories,
     agent.workspaceAgents,
+    availableSkills,
   ]);
 
   useEffect(() => {
@@ -575,10 +600,15 @@ function AgentDetailContent({
           <div className="mt-6">
             <AgentEditor
               key={agent.id}
+              ref={editorRef}
               initialBody={initialBody}
               initialContent={agent.content}
               mentionItems={mentionItems}
               onMentionSelect={(item) => {
+                if (item.kind === "skill" && item.id === ADD_SKILL_MENTION_ID) {
+                  setShowAddSkillDialog(true);
+                  return;
+                }
                 if (item.kind !== "schedule") return;
                 setEditingSchedule(null);
                 setShowScheduleDialog(true);
@@ -665,6 +695,19 @@ function AgentDetailContent({
           {...(editingSchedule
             ? { onRemove: () => removeScheduleTrigger(editingSchedule.id) }
             : {})}
+        />
+      ) : null}
+
+      {showAddSkillDialog ? (
+        <AddSkillDialog
+          onClose={() => setShowAddSkillDialog(false)}
+          onAdded={(skill) => {
+            setShowAddSkillDialog(false);
+            // Make the new skill available to the mention catalog (and the next save's
+            // derivation), then drop the @skill/<id> pill into the editor.
+            queryClient.invalidateQueries({ queryKey: ["workspace-skills", workspaceId] });
+            editorRef.current?.insertSkillMention({ id: skill.id });
+          }}
         />
       ) : null}
 
@@ -1691,6 +1734,50 @@ function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"
   };
 }
 
+function mergeSkillCatalog(
+  configSkills: AgentConfig["skills"],
+  workspaceSkills: AgentSkillCatalogEntry[],
+): AgentSkillCatalogEntry[] {
+  const byId = new Map<string, AgentSkillCatalogEntry>();
+
+  for (const skill of configSkills ?? []) {
+    if (!isExternalSkillReference(skill)) continue;
+    byId.set(skill.id, {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    });
+  }
+
+  for (const skill of workspaceSkills) {
+    const existing = byId.get(skill.id);
+    const source = skill.source ?? existing?.source;
+    byId.set(skill.id, {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(source ? { source } : {}),
+    });
+  }
+
+  return Array.from(byId.values());
+}
+
+function skillCatalogEntryToExternalReference(
+  skill: AgentSkillCatalogEntry,
+): AgentExternalSkillReference[] {
+  if (!skill.source) return [];
+  return [
+    {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    },
+  ];
+}
+
 function buildConfigPreview({
   title,
   content,
@@ -1698,6 +1785,7 @@ function buildConfigPreview({
   selectedModelId,
   repositories,
   agents,
+  skills,
   triggers,
   mcp,
   useDerivedConfig,
@@ -1708,6 +1796,7 @@ function buildConfigPreview({
   selectedModelId: AgentModelId;
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
   agents: AgentReference[];
+  skills: AgentExternalSkillReference[];
   triggers: AgentConfig["triggers"];
   mcp: AgentDetailPayload["mcp"];
   useDerivedConfig: boolean;
@@ -1719,6 +1808,7 @@ function buildConfigPreview({
         model: selectedModelId,
         repositories,
         agents,
+        skills,
         preferredRepositories: fallback.integrations.github.repositories.filter(
           (repository) => repository.binding,
         ),
@@ -1754,6 +1844,7 @@ function buildConfigPreview({
       tools: config.tools,
       brain: config.brain,
       agents: config.agents ?? [],
+      skills: config.skills ?? [],
       integrations: config.integrations,
       triggers: config.triggers,
     }),

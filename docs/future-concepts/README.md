@@ -13,3 +13,5 @@ the owning spec, architecture doc, migration plan, or code comments.
 - [Folder State Architecture](./folder-state-architecture.md) - future model for
   workspace file materialization across Postgres, object storage, GitHub, and
   runtime sandboxes.
+- [External Skills Support Research](./external-skills-support-research.md) -
+  research and implementation direction for user-configurable external skills.
