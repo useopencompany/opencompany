@@ -31,19 +31,22 @@ vi.mock("@/components/FeedbackDialog", () => ({
   default: () => null,
 }));
 
-vi.mock("@/lib/agent-sessions/actions", () => ({
-  archiveAgentSession: vi.fn(),
-  setSessionStar: vi.fn(),
+// The sidebar reads its sessions from TanStack DB live queries and writes
+// through the workspace collections. Stub both so this status-menu test renders
+// without mounting CollectionsProvider (which pulls the server-action import
+// chain into the test) or opening real Electric shape streams.
+vi.mock("@tanstack/react-db", () => ({
+  useLiveQuery: () => ({ data: [], isLoading: false }),
 }));
 
-vi.mock("@/lib/agent-sessions/payload", () => ({
-  archiveSidebarSessionOptimistically: vi.fn(),
-  fetchSidebarSessions: vi.fn().mockResolvedValue([]),
-  SESSIONS_QUERY_STALE_TIME_MS: 30_000,
-  sessionQueryKeys: {
-    list: (workspaceId: string) => ["sidebar-sessions", workspaceId],
-  },
-  setSidebarSessionStar: (entries: unknown) => entries,
+vi.mock("@/components/CollectionsProvider", () => ({
+  useCollections: () => ({
+    agentSessions: { delete: vi.fn(() => ({ isPersisted: { promise: Promise.resolve() } })) },
+    sessionStars: {
+      insert: vi.fn(() => ({ isPersisted: { promise: Promise.resolve() } })),
+      delete: vi.fn(() => ({ isPersisted: { promise: Promise.resolve() } })),
+    },
+  }),
 }));
 
 const statusPageUrl = "https://myopencompany.betteruptime.com";
@@ -99,7 +102,7 @@ function renderSidebar() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <WorkspaceProvider workspaceId="wks_test">
+      <WorkspaceProvider workspaceId="wks_test" userId="usr_test">
         <ToastProvider>
           <Sidebar
             userName="Ada Lovelace"

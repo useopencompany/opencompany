@@ -144,9 +144,13 @@ function dbWithAgent(agent: ReturnType<typeof fakeAgent> | null) {
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
   const select = vi.fn(() => ({ from }));
-  const values = vi.fn().mockResolvedValue(undefined);
+  // insertUserMessage reads the message.created event row back from .returning().
+  const returning = vi.fn(() => ({}));
+  const values = vi.fn(() => ({ returning }));
   const insert = vi.fn(() => ({ values }));
-  const batch = vi.fn().mockResolvedValue(undefined);
+  const batch = vi
+    .fn()
+    .mockResolvedValue([undefined, [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }]]);
   return { select, insert, batch } as never;
 }
 
@@ -343,13 +347,16 @@ describe("setSessionStar", () => {
     const selectWhere = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where: selectWhere }));
     const select = vi.fn(() => ({ from }));
-    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const onConflictDoUpdate = vi.fn(() => ({}));
     const values = vi.fn(() => ({ onConflictDoUpdate }));
     const insert = vi.fn(() => ({ values }));
-    const deleteWhere = vi.fn().mockResolvedValue(undefined);
+    const deleteWhere = vi.fn(() => ({}));
     const del = vi.fn(() => ({ where: deleteWhere }));
+    // batchWithTxid runs the write + a pg_current_xact_id() SELECT in one batch.
+    const execute = vi.fn(() => ({}));
+    const batch = vi.fn().mockResolvedValue([undefined, [{ txid: "4242" }]]);
     return {
-      db: { select, insert, delete: del } as never,
+      db: { select, insert, delete: del, execute, batch } as never,
       values,
       onConflictDoUpdate,
       del,
@@ -386,7 +393,7 @@ describe("setSessionStar", () => {
 
     const result = await setSessionStar("ses_123", false);
 
-    expect(result).toEqual({ ok: true, starredAt: null });
+    expect(result).toEqual({ ok: true, txid: 4242, starredAt: null });
     expect(del).toHaveBeenCalled();
     expect(deleteWhere).toHaveBeenCalled();
     expect(values).not.toHaveBeenCalled();
@@ -416,9 +423,13 @@ describe("submitAgentSessionMessage", () => {
     const where = vi.fn(() => ({ limit }));
     const from = vi.fn(() => ({ where }));
     const select = vi.fn(() => ({ from }));
-    const values = vi.fn().mockResolvedValue(undefined);
+    // insertUserMessage reads the message.created event row back from .returning().
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn(() => ({ returning }));
     const insert = vi.fn(() => ({ values }));
-    const batch = vi.fn().mockResolvedValue(undefined);
+    const batch = vi
+      .fn()
+      .mockResolvedValue([undefined, [{ id: 1, createdAt: new Date("2026-06-04T10:00:00.000Z") }]]);
     // submitAgentSessionMessage supersedes any pending ask_user_question via an UPDATE.
     const update = vi.fn(() => ({
       set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),

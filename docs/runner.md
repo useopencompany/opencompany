@@ -3,8 +3,8 @@
 The runner is the long-lived data plane for agent sessions. The web app remains the
 authenticated control plane: it creates session/message rows, emits Inngest events, and renders
 the session UI. The runner receives internal start/message/abort calls, owns the model loop, uses
-E2B for sandbox execution, writes durable turn boundaries to Postgres, and publishes live-only
-deltas to active SSE clients.
+E2B for sandbox execution, writes durable turn boundaries to Postgres, and publishes runtime
+events to per-session Durable Streams.
 
 This page is the quickest orientation point for resuming runner work.
 
@@ -14,7 +14,7 @@ The product needs agent sessions that can run longer than a serverless request, 
 latency, execute tools against a real filesystem, and survive page refreshes. The runner is a
 small dedicated service for that live loop. Next.js stays responsible for auth, workspace access,
 and user-facing mutations. Inngest coordinates lifecycle events and retries, but it does not host
-the token stream.
+the transcript stream.
 
 The V1 loop is intentionally custom and narrow:
 
@@ -22,23 +22,23 @@ The V1 loop is intentionally custom and narrow:
 - Start or reconnect an E2B sandbox for the session.
 - Stream model output through Vercel AI Gateway with AI SDK Core.
 - Execute only the approved local tools inside the session workdir.
-- Persist durable state changes to Postgres while keeping high-frequency stream deltas live-only.
+- Persist durable state changes to Postgres while publishing high-frequency deltas to Durable Streams.
 
 ## Package map
 
 - `apps/runner` is the Fastify/Bun service. It owns HTTP routes, sandbox provisioning, model
   streaming, tool execution, and event writes.
 - `packages/agent-runtime` is the shared contract package. It owns config resolution, runtime
-  event types, ids, signed stream tokens, path confinement helpers, and the core tool catalog.
+  event types, ids, path confinement helpers, and the core tool catalog.
 - `packages/db` owns the Drizzle schema, generated migrations, and the two DB clients:
   the default `neon-http` client (`@opencompany/db/client`, used by web) and the pooled
   `node-postgres` client (`@opencompany/db/pool`, used by the runner). The runner wires
   the pooled client through its own `apps/runner/src/db.ts` so the pooled driver can
   never leak into web code.
-- `apps/web/lib/agent-sessions` owns web-facing session creation, message submission, signed SSE
-  token creation, and server-to-server runner calls.
+- `apps/web/lib/agent-sessions` owns web-facing session creation, message submission,
+  web-authored stream appends, and server-to-server runner calls.
 - `apps/web/components/SessionView.tsx` renders persisted messages and applies streamed runtime
-  events from the runner.
+  events from the session Durable Stream.
 - `apps/web/lib/inngest/functions.ts` contains the lightweight lifecycle functions that call the
   runner after web actions emit events.
 
@@ -51,8 +51,8 @@ The V1 loop is intentionally custom and narrow:
 4. The runner marks the session `provisioning`, creates or reconnects the E2B sandbox, prepares
    the capability-scoped workspace layout, clones the selected connected GitHub repo into `work/`
    for AMP agents, and marks the session `ready`.
-5. The browser opens `GET /sessions/:id/events?token=...&after=...` directly against the runner.
-   The token is a short-lived HMAC token minted by the web app.
+5. The browser opens the web app's same-origin Durable Streams proxy at
+   `/api/streams/v1/session/:id`. The browser never receives the Durable Streams service token.
 6. When the user sends a message, the web app inserts `agent_session_messages(role = user)` and
    directly nudges `POST /internal/sessions/:id/messages/:messageId/run` when runner env is
    configured. If that direct nudge is unavailable or fails, it falls back to emitting
@@ -60,8 +60,9 @@ The V1 loop is intentionally custom and narrow:
 7. Inngest calls the same runner message endpoint on fallback/retry paths.
 8. The runner claims a local abort controller, creates a running assistant message, resolves the
    `.agent` config, calls Vercel AI Gateway through AI SDK `streamText`, lazily connects/prepares
-   E2B only if a tool executes, writes runtime events to Postgres, and completes or fails the
-   session. Assistant text chunks are accumulated in memory and persisted on message completion.
+   E2B only if a tool executes, writes durable runtime events to Postgres, appends durable and
+   transient events to the session stream, and completes or fails the session. Assistant text
+   chunks are accumulated in memory and persisted on message completion.
 
 ## Model and tool loop
 
@@ -154,13 +155,9 @@ workflow is delegated to `amp_coder`.
 
 `agent_session_events` stores durable session boundaries and audit-worthy runtime facts. Events are
 append-only and have monotonic numeric ids. High-frequency assistant text, reasoning, and command
-output deltas are transient SSE messages with `id: null`; they are not inserted into Postgres and
-are not replayed after reconnect. On reconnect/open, the browser refetches session detail from the
-web app to catch durable state it missed while disconnected.
-
-The SSE endpoint intentionally sends default `message` events with a JSON body that includes the
-runtime `type`. Do not send custom SSE event names unless the client is updated too; the current UI
-uses `EventSource.onmessage`.
+output deltas are transient Durable Stream messages with `id: null`; they are not inserted into
+Postgres. On reconnect/open, the browser reads the Postgres snapshot and resumes or replays the
+session Durable Stream to recover live transcript state.
 
 Common event types:
 
@@ -225,8 +222,10 @@ Required environment variables:
 - `RUNNER_PUBLIC_URL` (`http://localhost:3040` locally)
 - `RUNNER_INTERNAL_URL` (`http://localhost:3040` locally; optional when it matches `RUNNER_PUBLIC_URL`)
 - `RUNNER_INTERNAL_TOKEN`
-- `RUNNER_STREAM_TOKEN_SECRET`
+- `RUNNER_STREAM_TOKEN_SECRET` (hosted-tool polling job id signing)
 - `RUNNER_ALLOWED_ORIGINS` (`http://localhost:3000` locally)
+- `DURABLE_STREAMS_URL`
+- `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `EXA_API_KEY` (optional; required only for agents that enable the Exa hosted tool)
@@ -278,11 +277,9 @@ The runner exposes:
 - `POST /internal/sessions/:id/start`
 - `POST /internal/sessions/:id/messages/:messageId/run`
 - `POST /internal/sessions/:id/abort`
-- `GET /sessions/:id/events`
 
-Internal mutation endpoints require `Authorization: Bearer $RUNNER_INTERNAL_TOKEN`. Browser SSE
-uses a short-lived signed token minted by the web app with `RUNNER_STREAM_TOKEN_SECRET`; the same
-secret must be set on the runner.
+Internal mutation endpoints require `Authorization: Bearer $RUNNER_INTERNAL_TOKEN`. Browser
+transcript reads go through the web app's Durable Streams proxy, not directly to the runner.
 
 Useful checks:
 
@@ -304,11 +301,9 @@ If web logs show `ECONNREFUSED` from `callRunner()`, the runner is not listening
 `RUNNER_INTERNAL_URL` or `RUNNER_INTERNAL_URL` points at the wrong port. Local development falls back
 to `RUNNER_PUBLIC_URL` when `RUNNER_INTERNAL_URL` is unset.
 
-If the model response never appears after completion, first check that SSE frames are arriving as
-default `message` events and that the web UI is applying `message.completed` events. Browser console
-or network errors on `/sessions/:id/events` usually mean `RUNNER_PUBLIC_URL`,
-`RUNNER_ALLOWED_ORIGINS`, or `RUNNER_STREAM_TOKEN_SECRET` does not match between the web app and
-runner.
+If the model response never appears after completion, first check runner logs for Durable Stream
+publish failures and web logs for proxy reads on `/api/streams/v1/session/:id`. A 503 usually means
+`DURABLE_STREAMS_URL` or `DURABLE_STREAMS_TOKEN` is missing from web or runner env.
 
 If Vercel AI Gateway errors mention missing tool calls for function outputs, check the prompt
 history passed to the model. Tool-result messages need matching assistant tool-call messages in the
@@ -336,8 +331,8 @@ See [deployment.md](./deployment.md) for the release flow.
 The mature migration path is the same runner container on ECS/Fargate behind an ALB when queue
 depth, connection volume, or private networking needs justify the operational overhead.
 
-Avoid placing the live model/E2B stream inside a serverless function. The runner is deliberately a
-long-lived service so it can hold SSE, model streams, sandbox command streams, and abort state
+Avoid placing the live model/E2B loop inside a serverless function. The runner is deliberately a
+long-lived service so it can hold model streams, sandbox command streams, and abort state
 without fighting request-duration limits.
 
 ## Current limitations
@@ -354,7 +349,8 @@ without fighting request-duration limits.
   Local `activeRuns` is only a fast in-process guard on top of that.
 - Abort is process-local for active streams and persisted as a session flag, but deeper cooperative
   cancellation inside long sandbox commands is still minimal.
-- The UI is still a custom DB-event/SSE client, not AI SDK UI `useChat`. Live deltas are ephemeral;
-  final transcript state is recovered from persisted messages and durable boundary events.
+- The UI is still a custom DB-event/Durable Streams client, not AI SDK UI `useChat`. Live deltas are
+  stream-only; final transcript state is recovered from persisted messages and durable boundary
+  events.
 - E2B workspace hydration is capability-scoped. Full workspace repo cloning is intentionally not
   part of V1; add explicit file mounts later if agents need broader project access.

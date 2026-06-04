@@ -121,29 +121,32 @@ authenticated control plane, while `apps/runner` owns the long-lived data plane.
 
 The important files are:
 
-- `apps/web/lib/agent-sessions/actions.ts`: creates sessions, inserts user messages, signs stream
-  tokens, and dispatches Inngest events.
+- `apps/web/lib/agent-sessions/actions.ts`: creates sessions, inserts user messages, appends
+  web-authored transcript events, and dispatches Inngest events.
 - `apps/web/lib/agent-sessions/runner.ts`: server-to-server calls from web/Inngest to the runner.
-- `apps/web/components/SessionView.tsx`: reads persisted messages and applies SSE events.
-- `apps/runner/src/server.ts`: Fastify routes for health, internal mutations, and SSE.
+- `apps/web/components/SessionView.tsx`: renders persisted messages plus the Durable Stream
+  transcript overlay.
+- `apps/runner/src/server.ts`: Fastify routes for health and internal mutations.
 - `apps/runner/src/agent-loop.ts`: orchestrates a single message run — lease acquisition, assistant streaming, and step bookkeeping. Sandbox provisioning lives in `session-lifecycle.ts`, the model stream loop in `model-stream-runner.ts`, tool dispatch in `tool-dispatcher.ts`, AMP integration in `amp-tool.ts`, and event/usage writes in `lease-writes.ts` and `usage-recorder.ts`.
 - `packages/agent-runtime`: shared config resolution, tool catalog, runtime event types, ids,
-  signed stream tokens, and path helpers.
+  and path helpers.
 
 The session flow is:
 
 1. Web action creates `agent_sessions` after WorkOS workspace auth.
 2. Web emits `agent.session_started`; Inngest calls the runner start endpoint.
 3. Runner creates or reconnects an E2B sandbox and prepares `/home/user/workspace`.
-4. Browser opens the runner SSE endpoint with a short-lived signed token.
-5. Web action inserts a user message and emits `agent.message_submitted`.
+4. Browser opens the same-origin Durable Streams read proxy for the session transcript.
+5. Web action inserts a user message, appends that event to the session stream, and emits
+   `agent.message_submitted`.
 6. Inngest calls the runner message endpoint.
 7. Runner resolves the `.agent` config, streams the model through Vercel AI Gateway using AI SDK
    Core, runs allowed tools in E2B, and appends typed runtime events to Postgres. Assistant text
-   chunks are accumulated in memory and saved when the assistant message completes.
-8. Browser receives lifecycle, tool, command, file, completion, and error events. On refresh or
-   reconnect, it refetches canonical session detail; high-frequency text/reasoning/command deltas
-   are live-only and are not replayed from Postgres.
+   chunks are accumulated in memory and saved when the assistant message completes. Runner also
+   appends durable and transient runtime events to the session Durable Stream.
+8. Browser receives lifecycle, tool, command, file, completion, and error events through the
+   Durable Stream proxy. On refresh or reconnect, the stream can replay from an offset; high-frequency
+   text/reasoning/command deltas are live-streamed and are not replayed from Postgres.
 
 The runner endpoints are documented in [runner.md](./runner.md).
 
@@ -199,7 +202,8 @@ All app-owned data should stay scoped by `workspaceId` so tenancy remains enforc
   separate `GITHUB_INTEGRATION_APP_*` env vars.
 - Inngest uses `INNGEST_DEV` for local development; hosted environments should also set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
 - Runner env vars are `RUNNER_PUBLIC_URL`, optional `RUNNER_INTERNAL_URL`,
-  `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`, `E2B_API_KEY`,
+  `RUNNER_INTERNAL_TOKEN`, `RUNNER_STREAM_TOKEN_SECRET`, `RUNNER_ALLOWED_ORIGINS`,
+  `DURABLE_STREAMS_URL`, `DURABLE_STREAMS_TOKEN`, `E2B_API_KEY`,
   `VERCEL_AI_GATEWAY_API_KEY`, optional `OPENCOMPANY_E2B_TEMPLATE`,
   `AMP_API_KEY`, optional `OPENCOMPANY_AMP_E2B_TEMPLATE`, optional `GITHUB_INTEGRATION_APP_ID`
   / `GITHUB_INTEGRATION_APP_PRIVATE_KEY` for AMP work-repository cloning and PRs, and optional
