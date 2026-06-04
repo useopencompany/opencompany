@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-04
+
+### Added
+- Real-time session sync and durable token streaming powered by Electric and Durable Streams, so chat updates propagate live and survive interrupted connections (#283) — @louis.
+- New opencode coding agent tool, letting agents run coding tasks through opencode (#266) — @louis.
+- Official PostHog MCP support with OAuth / Dynamic Client Registration, so agents can connect to PostHog without manual token wiring (#269) — @louis.
+- E2B sandbox compute is now metered and billed as agent usage (#264) — @louis.
+- Upload a custom profile picture for your account (#257) — @jasper.
+- Credit top-up analytics to track balance refills (#279) — @louis.
+- OpenCompany icon assets (#284) — @louis.
+
+### Changed
+- Session detail now paints instantly from local TanStack DB collections instead of waiting on the server (#290) — @louis.
+- Improved AI SDK prompt caching for lower latency and cost on repeated context (#275, #285) — @louis.
+- The agent self-edit skill now asks before making changes, stays lightweight, and better equips coding agents (#281) — @louis.
+- Onboarding call step reworked so its actions fit on a single screen (#263) — @jasper.
+- Web functions now run in the Frankfurt region for lower latency to European users (#286) — @louis.
+
+### Fixed
+- Coalesced durable-stream token appends to fix streaming lag in production (#288) — @louis.
+- Electric and Durable Streams now work in local development (#291), with producer linger and in-flight limits tuned for throughput (#292) — @louis.
+- Tool output previews are now redacted of secrets before being persisted to the database (#273) — @louis.
+- Approval stream state no longer gets stuck out of sync (#272) — @louis.
+- opencode now resolves the correct attached repository (#271) — @louis.
+- Linear `save_*` MCP tools are no longer misclassified as Admin-only (#267) — @louis.
+- @mention pills no longer break after an agent edits itself (#268) — @louis.
+- A run is never replayed after its lease expires, and onboarding dedup is hardened against duplicate runs (#262) — @louis.
+- The Render deploy trigger is now resilient to empty API responses (#287) — @louis.
+
 ## [0.7.0] - 2026-06-03
 
 ### Added
