@@ -1,3 +1,4 @@
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { captureException } from "@opencompany/observability";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { currentWorkspace } from "@/lib/auth";
@@ -22,6 +23,16 @@ vi.mock("next/cache", () => ({
 
 vi.mock("@opencompany/observability", () => ({
   captureException: vi.fn(),
+}));
+
+vi.mock("@opencompany/analytics/server", () => ({
+  captureServerEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("next/server", () => ({
+  after: (callback: () => unknown) => {
+    void callback();
+  },
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -53,6 +64,7 @@ const markCheckoutRecordFailedMock = vi.mocked(markCheckoutRecordFailed);
 const markCheckoutRecordOpenMock = vi.mocked(markCheckoutRecordOpen);
 const newStripeCheckoutRecordIdMock = vi.mocked(newStripeCheckoutRecordId);
 const captureExceptionMock = vi.mocked(captureException);
+const captureServerEventMock = vi.mocked(captureServerEvent);
 
 describe("createCreditCheckoutSession", () => {
   beforeEach(() => {
@@ -78,6 +90,7 @@ describe("createCreditCheckoutSession", () => {
     });
     expect(getStripeMock).not.toHaveBeenCalled();
     expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).not.toHaveBeenCalled();
   });
 
   it("returns an auth error without starting checkout when the session is missing", async () => {
@@ -91,6 +104,7 @@ describe("createCreditCheckoutSession", () => {
     });
     expect(getStripeMock).not.toHaveBeenCalled();
     expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).not.toHaveBeenCalled();
   });
 
   it("creates a Stripe Checkout Session with attribution metadata", async () => {
@@ -151,6 +165,12 @@ describe("createCreditCheckoutSession", () => {
         stripeCheckoutSessionId: "cs_test_123",
       },
     });
+    expect(captureServerEventMock).toHaveBeenCalledWith("credit_top_up_started", "usr_123", {
+      user_id: "usr_123",
+      workspace_id: "wks_123",
+      checkout_record_id: "chk_123",
+      amount_cents: 2500,
+    });
   });
 
   it("creates a Stripe Checkout Session for a custom top-up amount", async () => {
@@ -196,6 +216,7 @@ describe("createCreditCheckoutSession", () => {
       id: "chk_123",
       error: "Stripe did not return a Checkout URL.",
     });
+    expect(captureServerEventMock).not.toHaveBeenCalled();
     expect(captureExceptionMock).not.toHaveBeenCalled();
   });
 
@@ -211,6 +232,7 @@ describe("createCreditCheckoutSession", () => {
       id: "chk_123",
       error: "Stripe unavailable",
     });
+    expect(captureServerEventMock).not.toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalledWith(error, {
       event: "opencompany.billing_checkout_failed",
       workspace_id: "wks_123",
@@ -235,6 +257,7 @@ describe("createCreditCheckoutSession", () => {
     });
     expect(createPendingCheckoutRecordMock).not.toHaveBeenCalled();
     expect(markCheckoutRecordFailedMock).not.toHaveBeenCalled();
+    expect(captureServerEventMock).not.toHaveBeenCalled();
     expect(captureExceptionMock).toHaveBeenCalledWith(
       error,
       expect.objectContaining({
