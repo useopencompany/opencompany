@@ -38,8 +38,27 @@ async function ownsSession(
   return rows.length > 0;
 }
 
-// Response headers that describe the upstream transfer encoding/length for the
-// Durable Streams origin; strip them so the browser decodes our re-emitted body.
+// Streaming proxy — never buffer/cache the response (the live SSE tail must flush
+// chunk-by-chunk, not collect until the connection closes).
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const fetchCache = "force-no-store";
+
+// Request headers we must NOT relay upstream: routing/transfer headers, our own
+// auth (we inject the service token), our session cookie (don't leak it to the
+// stream origin), and accept-encoding (force an uncompressed stream so there is
+// nothing to buffer-to-compress and no content-encoding to reconcile).
+const SKIP_REQUEST_HEADERS = new Set([
+  "host",
+  "connection",
+  "content-length",
+  "content-encoding",
+  "accept-encoding",
+  "authorization",
+  "cookie",
+]);
+
+// Upstream transfer headers that don't apply to our re-emitted body.
 const HOP_BY_HOP_HEADERS = ["content-encoding", "content-length", "transfer-encoding", "connection"];
 
 export async function GET(
@@ -69,19 +88,29 @@ export async function GET(
     upstreamUrl.searchParams.set(key, value);
   }
 
-  const headers = new Headers();
-  // Preserve the client's content negotiation (SSE long-poll vs sse).
-  const accept = request.headers.get("accept");
-  if (accept) headers.set("accept", accept);
-  if (config.token) headers.set("authorization", `Bearer ${config.token}`);
+  // Relay the client's request headers (the Durable Streams protocol negotiates
+  // live/SSE via Accept + its own headers) minus the denylist; inject the token.
+  const requestHeaders = new Headers();
+  for (const [key, value] of request.headers) {
+    if (!SKIP_REQUEST_HEADERS.has(key.toLowerCase())) requestHeaders.set(key, value);
+  }
+  requestHeaders.set("accept-encoding", "identity");
+  if (config.token) requestHeaders.set("authorization", `Bearer ${config.token}`);
 
-  const upstream = await fetch(upstreamUrl, { headers, signal: request.signal });
+  const upstream = await fetch(upstreamUrl, {
+    headers: requestHeaders,
+    signal: request.signal,
+    cache: "no-store",
+  });
 
-  // Pass the streaming body through unbuffered (SSE/long-poll), preserving the
-  // Durable Streams protocol headers (Stream-Next-Offset, Stream-Cursor, …) the
-  // client reads to track offsets, minus hop-by-hop transfer headers.
+  // Stream the body through unbuffered (SSE/long-poll), preserving the Durable
+  // Streams protocol headers (Stream-Next-Offset, Stream-Cursor, …) the client
+  // reads to track offsets, minus hop-by-hop transfer headers.
   const responseHeaders = new Headers(upstream.headers);
   for (const header of HOP_BY_HOP_HEADERS) responseHeaders.delete(header);
+  // Defeat any intermediary buffering of the live stream.
+  responseHeaders.set("Cache-Control", "no-cache, no-transform");
+  responseHeaders.set("X-Accel-Buffering", "no");
   // Cached reads must vary by auth so one user can't read another's transcript.
   responseHeaders.set("Vary", "Cookie");
 
