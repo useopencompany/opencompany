@@ -249,6 +249,7 @@ export async function materializeAgentToGitHub(
     model: config.model.name,
     tools: config.tools,
     brain: config.brain,
+    skills: config.skills ?? [],
     integrations: config.integrations,
     triggers: config.triggers,
   });

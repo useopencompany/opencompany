@@ -1,11 +1,14 @@
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
-import type { AgentConfig, AgentSkillReference } from "./types";
+import {
+  type AgentConfig,
+  type AgentExternalSkillReference,
+  type AgentSkillFile,
+  type AgentSkillReference,
+  type AgentSkillSource,
+  isExternalSkillReference,
+} from "./types";
 
-export type AgentSkillFile = {
-  // Path relative to the skill folder, e.g. "SKILL.md" or "references/format.md".
-  path: string;
-  content: string;
-};
+export type { AgentSkillFile };
 
 export type AgentSkillDefinition = {
   id: string;
@@ -378,25 +381,126 @@ export function isKnownAgentSkillId(id: string): boolean {
   return AGENT_SKILL_DEFINITION_BY_ID.has(id);
 }
 
-// The skills available to a session: every built-in `defaultEnabled` skill, plus any
-// additional known skills listed in the agent's `skills:` config. Deduplicated by id.
-export function resolveEnabledSkills(config: Pick<AgentConfig, "skills">): AgentSkillDefinition[] {
+// Mount-slug constraint, mirrored exactly from the runner's resolveSandboxSkillPath so an
+// external skill that normalizes here is guaranteed to mount and be readable via read_skill.
+const SKILL_MOUNT_ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+export function isValidSkillMountId(id: string): boolean {
+  return SKILL_MOUNT_ID_RE.test(id) && !id.includes("--");
+}
+
+// Metadata for an enabled skill (built-in or external), without file contents. Built-in
+// files live in code; external files live in the snapshot DB and are loaded by the runner.
+export type ResolvedSkillMetadata = {
+  id: string;
+  name: string;
+  description: string;
+  origin: "builtin" | "external";
+  source?: AgentSkillSource;
+};
+
+// The skills available to a session, as metadata only: every built-in `defaultEnabled`
+// skill, plus any known built-in or well-formed external skill listed in the agent's
+// `skills:` config. Deduplicated by id (built-in id wins). Pure — no DB, no files.
+export function resolveEnabledSkillMetadata(
+  config: Pick<AgentConfig, "skills">,
+): ResolvedSkillMetadata[] {
+  const out: ResolvedSkillMetadata[] = [];
+  const seen = new Set<string>();
+  for (const skill of AGENT_SKILL_CATALOG) {
+    if (!skill.defaultEnabled) continue;
+    out.push({ id: skill.id, name: skill.name, description: skill.description, origin: "builtin" });
+    seen.add(skill.id);
+  }
+  for (const reference of config.skills ?? []) {
+    if (seen.has(reference.id)) continue;
+    if (isExternalSkillReference(reference)) {
+      out.push({
+        id: reference.id,
+        name: reference.name,
+        description: reference.description,
+        origin: "external",
+        source: reference.source,
+      });
+      seen.add(reference.id);
+    } else if (isKnownAgentSkillId(reference.id)) {
+      const definition = AGENT_SKILL_DEFINITION_BY_ID.get(reference.id)!;
+      out.push({
+        id: definition.id,
+        name: definition.name,
+        description: definition.description,
+        origin: "builtin",
+      });
+      seen.add(reference.id);
+    }
+  }
+  return out;
+}
+
+// The built-in skills whose files (shipped in code) should be materialized for a session.
+// External skills are excluded here — the runner loads their files from the snapshot DB.
+export function resolveEnabledBuiltinSkillFiles(
+  config: Pick<AgentConfig, "skills">,
+): AgentSkillDefinition[] {
   const ids = new Set<string>();
   for (const skill of AGENT_SKILL_CATALOG) {
     if (skill.defaultEnabled) ids.add(skill.id);
   }
   for (const reference of config.skills ?? []) {
-    if (isKnownAgentSkillId(reference.id)) ids.add(reference.id);
+    if (!isExternalSkillReference(reference) && isKnownAgentSkillId(reference.id)) {
+      ids.add(reference.id);
+    }
   }
   return AGENT_SKILL_CATALOG.filter((skill) => ids.has(skill.id));
 }
 
-// Normalize an arbitrary frontmatter value into known skill references, dropping unknown
-// ids. Mirrors the lenient normalization used for tools.
+// Validate the *shape* of an external skill reference (no DB, no network). Returns a
+// normalized reference or null. A malformed external object is dropped entirely so it can
+// never half-mount. Integrity-vs-content checks happen at resolve/materialize time.
+export function normalizeExternalSkillReference(
+  value: unknown,
+): AgentExternalSkillReference | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const id = typeof record.id === "string" ? record.id.trim() : "";
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const description = typeof record.description === "string" ? record.description.trim() : "";
+  const source = record.source;
+  if (!id || !name || !description || !source || typeof source !== "object") return null;
+  if (!isValidSkillMountId(id) || isKnownAgentSkillId(id)) return null;
+
+  const sourceRecord = source as Record<string, unknown>;
+  const type = sourceRecord.type;
+  if (type !== "github" && type !== "skills.sh") return null;
+  const url = typeof sourceRecord.url === "string" ? sourceRecord.url.trim() : "";
+  if (!/^https:\/\//.test(url)) return null;
+  const ref = typeof sourceRecord.ref === "string" ? sourceRecord.ref.trim() : "";
+  if (!ref) return null;
+  const path = typeof sourceRecord.path === "string" ? sourceRecord.path.trim() : "";
+  if (path.split("/").includes("..")) return null;
+
+  return {
+    id,
+    name,
+    description,
+    source: { type, url, ref, path },
+  };
+}
+
+// Normalize an arbitrary frontmatter value into skill references. Keeps known built-in ids
+// (bare strings or `{id}` objects) and well-formed external objects; drops everything else.
+// Deduplicated by id, with built-in ids winning over an external of the same id.
 export function normalizeAgentSkills(value: unknown): AgentSkillReference[] {
   const references: AgentSkillReference[] = [];
   const seen = new Set<string>();
   for (const item of Array.isArray(value) ? value : []) {
+    const external = normalizeExternalSkillReference(item);
+    if (external) {
+      if (seen.has(external.id)) continue;
+      seen.add(external.id);
+      references.push(external);
+      continue;
+    }
     const id =
       typeof item === "string"
         ? item.trim()
@@ -408,4 +512,21 @@ export function normalizeAgentSkills(value: unknown): AgentSkillReference[] {
     references.push({ id });
   }
   return references;
+}
+
+// Canonical content hash for a skill folder. Order-independent (files are sorted by path),
+// content- and path-sensitive. Used by the resolver (to dedup/cache) and the runner (to
+// revalidate a snapshot before mounting). Uses Web Crypto so it stays isomorphic.
+export async function computeSkillFolderIntegrity(files: AgentSkillFile[]): Promise<string> {
+  const sorted = [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const parts: string[] = [];
+  for (const file of sorted) {
+    parts.push(file.path, "\0", file.content, "\0");
+  }
+  const data = new TextEncoder().encode(parts.join(""));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
+  const hex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `sha256:${hex}`;
 }

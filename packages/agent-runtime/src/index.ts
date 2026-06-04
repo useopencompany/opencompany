@@ -9,6 +9,7 @@ export * from "./models";
 export * from "./paths";
 export * from "./permissions";
 export * from "./schedules";
+export * from "./skill-resolver";
 export * from "./skills";
 export * from "./tiptap-builder";
 export * from "./tokens";

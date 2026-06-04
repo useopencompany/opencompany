@@ -23,6 +23,7 @@ import {
   MessageSquare,
   MessagesSquare,
   Music2,
+  Plus,
   Search,
   Sparkles,
   SquarePlay,
@@ -41,7 +42,19 @@ import {
 import { InstagramIcon } from "@/components/icons/social-icons";
 import { SUPPORTED_AGENT_MODELS, SUPPORTED_AGENT_TOOLS } from "@/lib/agents/config";
 
-type AgentMentionKind = "model" | "tool" | "integration" | "brain" | "hook" | "agent" | "schedule";
+type AgentMentionKind =
+  | "model"
+  | "tool"
+  | "integration"
+  | "brain"
+  | "hook"
+  | "agent"
+  | "schedule"
+  | "skill";
+
+// Sentinel mention item that opens the "Add skill from GitHub URL" dialog instead of
+// inserting a pill (handled like the schedule action: the range is deleted and onSelect fires).
+export const ADD_SKILL_MENTION_ID = "__add-skill__";
 
 type BaseAgentMentionItem = {
   id: AgentToolId | AgentModelId | string;
@@ -108,6 +121,11 @@ export type AgentScheduleMention = BaseAgentMentionItem & {
   kind: "schedule";
 };
 
+export type AgentSkillMention = BaseAgentMentionItem & {
+  id: string;
+  kind: "skill";
+};
+
 export type AgentMentionItem =
   | AgentModel
   | AgentTool
@@ -115,7 +133,10 @@ export type AgentMentionItem =
   | AgentBrainMention
   | AgentHookMention
   | AgentWorkspaceMention
-  | AgentScheduleMention;
+  | AgentScheduleMention
+  | AgentSkillMention;
+
+export type AgentSkillCatalogEntry = { id: string; name: string; description: string };
 
 const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   exa: Search,
@@ -239,6 +260,7 @@ export function buildAgentMentionItems(
     includeMcpTools?: boolean;
     mcpEnabled?: boolean;
     agents?: AgentReference[];
+    skills?: AgentSkillCatalogEntry[];
   } = {},
 ): AgentMentionItem[] {
   const githubItem: AgentIntegration = {
@@ -272,10 +294,36 @@ export function buildAgentMentionItems(
     ...AGENT_SCHEDULE_MENTION_ITEMS,
     ...buildToolMentionItems(options),
     ...buildWorkspaceAgentMentionItems(options.agents ?? []),
+    ...buildSkillMentionItems(options.skills ?? []),
     githubItem,
     ...repositoryItems,
     ...buildBrainMentionItems(brainPaths),
   ];
+}
+
+// Workspace external skills as @skill/<id> mentions, plus an "Add skill from GitHub URL"
+// action that opens the resolve dialog. The pill renders @skill/<id> in the body (so it
+// matches the runtime derivation); the dropdown shows the friendly skill name.
+export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentSkillMention[] {
+  const items: AgentSkillMention[] = skills.map((skill) => ({
+    id: `skill/${skill.id}`,
+    mentionId: `skill/${skill.id}`,
+    kind: "skill" as const,
+    label: `skill/${skill.id}`,
+    displayLabel: skill.name || `skill/${skill.id}`,
+    description: skill.description || `skills/${skill.id}/SKILL.md`,
+    icon: Sparkles,
+  }));
+  items.push({
+    id: ADD_SKILL_MENTION_ID,
+    mentionId: ADD_SKILL_MENTION_ID,
+    kind: "skill",
+    label: "Add skill",
+    displayLabel: "Add skill from GitHub URL…",
+    description: "Paste a GitHub or skills.sh URL",
+    icon: Plus,
+  });
+  return items;
 }
 
 // Non-MCP tools are always available. MCP-backed tools (Linear, Slack) are shown

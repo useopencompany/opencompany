@@ -132,9 +132,50 @@ export type AgentReference = {
   name: string;
 };
 
-export type AgentSkillReference = {
+export type AgentSkillFile = {
+  // Path relative to the skill folder, e.g. "SKILL.md" or "references/format.md".
+  path: string;
+  content: string;
+};
+
+export type AgentSkillSource = {
+  // `github`: a public GitHub repository. `skills.sh`: a skills.sh page, resolved through
+  // its backing GitHub repository. Both ultimately fetch from GitHub in V1.
+  type: "github" | "skills.sh";
+  // Canonical https repository url, e.g. https://github.com/owner/repo.
+  url: string;
+  // The branch or tag the user requested. We track its latest HEAD (not a pinned commit).
+  ref: string;
+  // Skill directory within the repository, "" = repository root.
+  path: string;
+};
+
+// A built-in skill shipped in code (serialized as a bare string id in YAML).
+export type AgentBuiltinSkillReference = {
   id: string;
 };
+
+// An external skill resolved from a web source. Serialized as a YAML object. The file
+// contents live in `workspace_skill_snapshots`; the frontmatter only carries provenance
+// plus a denormalized name/description for the pure prompt-advertisement path.
+export type AgentExternalSkillReference = {
+  id: string;
+  name: string;
+  description: string;
+  source: AgentSkillSource;
+};
+
+export type AgentSkillReference = AgentBuiltinSkillReference | AgentExternalSkillReference;
+
+export function isExternalSkillReference(
+  reference: AgentSkillReference,
+): reference is AgentExternalSkillReference {
+  return (
+    "source" in reference &&
+    !!(reference as AgentExternalSkillReference).source &&
+    typeof (reference as AgentExternalSkillReference).source === "object"
+  );
+}
 
 export type AgentAfterSessionConfig = {
   enabled: boolean;

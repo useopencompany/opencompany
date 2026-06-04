@@ -37,6 +37,7 @@ export type AgentEditorHandle = {
       defaultBranch: string;
     },
   ) => void;
+  insertSkillMention: (skill: { id: string }) => void;
 };
 
 const plainTextKeysExtension = Extension.create({
@@ -324,6 +325,27 @@ export const AgentEditor = forwardRef<AgentEditorHandle, Props>(function AgentEd
         editor.commands.setContent(nextDoc);
         setIsEmpty(false);
         onChange(tiptapDocToBody(nextDoc), nextDoc);
+      },
+      insertSkillMention(skill) {
+        if (!editor) return;
+        // Insert at the cursor (the "@skill" trigger text was already removed when the
+        // "Add skill" action ran). The mention renders as @skill/<id> in the body.
+        editor
+          .chain()
+          .focus()
+          .insertContent([
+            {
+              type: "mention",
+              attrs: {
+                id: `skill/${skill.id}`,
+                label: `skill/${skill.id}`,
+                mentionSuggestionChar: "@",
+              },
+            },
+            { type: "text", text: " " },
+          ])
+          .run();
+        setIsEmpty(false);
       },
     }),
     [editor, onChange],
@@ -619,6 +641,7 @@ function mentionIdDisplayText(id: string) {
   if (trimmed.startsWith("model:")) return trimmed.slice("model:".length);
   if (trimmed.startsWith("brain/")) return trimmed;
   if (trimmed.startsWith("agent/")) return trimmed;
+  if (trimmed.startsWith("skill/")) return trimmed;
   if (trimmed === "integration:github") return "github";
   if (trimmed === "after-session") return "after-session";
   return "";
@@ -642,5 +665,6 @@ function mentionKindFromId(id: string) {
   if (id.startsWith("integration:")) return "integration";
   if (id.startsWith("brain/")) return "brain";
   if (id.startsWith("agent/")) return "agent";
+  if (id.startsWith("skill/")) return "skill";
   return undefined;
 }

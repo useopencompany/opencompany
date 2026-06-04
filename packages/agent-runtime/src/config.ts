@@ -8,7 +8,7 @@ import {
   PROVIDER_PERMISSION_REGISTRY,
   type WorkspaceToolPolicyMap,
 } from "./permissions";
-import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkills } from "./skills";
+import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkillMetadata } from "./skills";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
 
@@ -48,7 +48,7 @@ export function resolveAgentRuntimeConfig(input: {
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
-  const skills = resolveEnabledSkills(input.agent);
+  const skills = resolveEnabledSkillMetadata(input.agent);
   const toolPolicyContext = input.toolPolicy
     ? formatWorkspaceToolPolicyContext({
         providerKeys: enabledGatedProviderKeys(input.agent, repositories),
@@ -85,7 +85,10 @@ export function resolveAgentRuntimeConfig(input: {
       : null,
     skills.length
       ? `Skills available this session — when a task matches one, read its SKILL.md first and follow it: ${skills
-          .map((skill) => `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`)
+          .map((skill) => {
+            const provenance = skill.source ? ` [from ${skill.source.url}]` : "";
+            return `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)${provenance}`;
+          })
           .join(
             "; ",
           )}. Skill files are mounted read-only under ./skills; read them with read_skill.`

@@ -42,9 +42,11 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { AddSkillDialog } from "@/components/agent-editor/AddSkillDialog";
+import { AgentEditor, type AgentEditorHandle } from "@/components/agent-editor/AgentEditor";
 import { ModelRatingMeters, modelRatingsTitle } from "@/components/agent-editor/ModelRatingMeters";
 import {
+  ADD_SKILL_MENTION_ID,
   AGENT_MODELS,
   type AgentMentionItem,
   type AgentModel,
@@ -84,6 +86,7 @@ import {
   fetchAgent,
   fetchAgents,
 } from "@/lib/agents/payload";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -205,6 +208,11 @@ function AgentDetailContent({
 }) {
   const queryClient = useQueryClient();
   const { showError } = useToast();
+  const { data: workspaceSkills } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+    staleTime: AGENTS_QUERY_STALE_TIME_MS,
+  });
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
   const [content, setContent] = useState<TiptapDoc>(agent.content);
@@ -223,6 +231,8 @@ function AgentDetailContent({
   const [editingSchedule, setEditingSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [showAddSkillDialog, setShowAddSkillDialog] = useState(false);
+  const editorRef = useRef<AgentEditorHandle>(null);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -304,6 +314,7 @@ function AgentDetailContent({
       enabledMcpToolIds,
       mcpEnabled: agent.mcp.mcpEnabled,
       agents: agent.workspaceAgents,
+      skills: workspaceSkills ?? [],
     });
   }, [
     agent.brainPaths,
@@ -312,6 +323,7 @@ function AgentDetailContent({
     agent.mcp.slackConfigured,
     agent.usableGitHubIntegrationRepositories,
     agent.workspaceAgents,
+    workspaceSkills,
   ]);
 
   useEffect(() => {
@@ -611,10 +623,15 @@ function AgentDetailContent({
           <div className="mt-6">
             <AgentEditor
               key={agent.id}
+              ref={editorRef}
               initialBody={initialBody}
               initialContent={agent.content}
               mentionItems={mentionItems}
               onMentionSelect={(item) => {
+                if (item.kind === "skill" && item.id === ADD_SKILL_MENTION_ID) {
+                  setShowAddSkillDialog(true);
+                  return;
+                }
                 if (item.kind !== "schedule") return;
                 setEditingSchedule(null);
                 setShowScheduleDialog(true);
@@ -701,6 +718,19 @@ function AgentDetailContent({
           {...(editingSchedule
             ? { onRemove: () => removeScheduleTrigger(editingSchedule.id) }
             : {})}
+        />
+      ) : null}
+
+      {showAddSkillDialog ? (
+        <AddSkillDialog
+          onClose={() => setShowAddSkillDialog(false)}
+          onAdded={(skill) => {
+            setShowAddSkillDialog(false);
+            // Make the new skill available to the mention catalog (and the next save's
+            // derivation), then drop the @skill/<id> pill into the editor.
+            queryClient.invalidateQueries({ queryKey: ["workspace-skills", workspaceId] });
+            editorRef.current?.insertSkillMention({ id: skill.id });
+          }}
         />
       ) : null}
 

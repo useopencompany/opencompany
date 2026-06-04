@@ -170,22 +170,54 @@ final answer plus `childSessionId` as a tool result. Later calls can pass that
 `childSessionId` as `sessionId` with a new prompt to continue the same delegated
 child session.
 
-### `skills` — list of skill ids
+### `skills` — built-in ids and external skill references
 
 Skills are agentskills.io-style folders of instructions that the runtime materializes
 read-only into `./skills/<id>/` inside the session sandbox. The agent reads a skill's
 `SKILL.md` on demand with `read_skill` (progressive disclosure); the system prompt only
 advertises each enabled skill's name and description.
 
+There are two kinds of entry. **Built-in skills** are bare string ids from the catalog
+(`packages/agent-runtime/src/skills.ts`); unknown ids are dropped. Built-in skills marked
+`defaultEnabled` are available in every session without being listed here, so the key is
+usually omitted and only appears once additional opt-in skills exist.
+
 ```yaml
 skills:
   - agent-self-edit
 ```
 
-Entries are skill ids from the built-in catalog
-(`packages/agent-runtime/src/skills.ts`); unknown ids are dropped. Built-in skills marked
-`defaultEnabled` are available in every session without being listed here, so the key is
-usually omitted and only appears once additional opt-in skills exist.
+**External skills** are brought in from a public GitHub repository (or a skills.sh page,
+resolved through its backing GitHub repo). They serialize as an object carrying provenance
+plus a denormalized name/description for the system-prompt advertisement:
+
+```yaml
+skills:
+  - agent-self-edit
+  - id: improve-codebase-architecture
+    name: Improve Codebase Architecture
+    description: Analyze codebases for architectural friction.
+    source:
+      type: github # or skills.sh
+      url: https://github.com/mattpocock/skills
+      ref: main # branch/tag the skill tracks
+      path: skills/improve-codebase-architecture
+```
+
+The `id` is the mount slug (`./skills/<id>/`). The file contents are **not** stored in the
+`.agent` file — they live in the workspace's `workspace_skill_snapshots` cache and are
+materialized from there at session start. External skills are added in the editor by typing
+`@skill` → "Add skill from GitHub URL", which resolves and snapshots the skill, then inserts
+an `@skill/<id>` mention into the body (the body mention is what enables the skill; the
+frontmatter object carries the resolved provenance).
+
+External skills **track their branch**: the runner re-resolves each one to the branch HEAD
+on session start (with a short freshness window), refreshing the snapshot in place. This
+happens in the trusted runner host, never inside the sandbox; files are always mounted
+root-owned and read-only. A malformed external object, or one whose snapshot can't be
+resolved and isn't cached, is skipped rather than mounted. The runner's `update_agent_file`
+self-edit path preserves existing external skills but cannot add new ones (it has no
+resolver).
 
 The first built-in skill, `agent-self-edit`, teaches the agent to evolve its own `.agent`
 definition. With it enabled, the runtime exposes an internal `update_agent_file` tool: the
