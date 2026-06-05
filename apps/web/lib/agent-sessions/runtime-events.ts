@@ -518,6 +518,41 @@ function addToolUsageRollup(
   };
 }
 
+// One consolidated entry per user / assistant / tool turn for the "Copy Debug JSON" export.
+// The raw event stream carries every token and tool-argument delta, which is noise when you
+// just want to read the conversation. Each message already holds its final content plus the
+// verbatim `modelMessage` (the AI SDK ModelMessage — the structured turn with text, reasoning,
+// and tool-call / tool-result parts), so we surface those directly and drop the deltas.
+export type SessionDebugTurn = {
+  id: string;
+  role: string;
+  status: string;
+  internal?: boolean;
+  toolName?: string | null;
+  toolCallId?: string | null;
+  createdAt?: string;
+  completedAt?: string | null;
+  // The verbatim model message, or null for a turn the runner never persisted one for (e.g. a
+  // still-streaming assistant turn) — `content` is the fallback in that case.
+  modelMessage: Record<string, unknown> | null;
+  content: string;
+};
+
+export function buildSessionDebugTurns(messages: SessionMessage[]): SessionDebugTurn[] {
+  return messages.map((message) => ({
+    id: message.id,
+    role: message.role,
+    status: message.status,
+    ...(message.internal ? { internal: true } : {}),
+    ...(message.toolName ? { toolName: message.toolName } : {}),
+    ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+    ...(message.completedAt ? { completedAt: message.completedAt } : {}),
+    modelMessage: message.modelMessage ?? null,
+    content: message.content,
+  }));
+}
+
 export function isInspectableRuntimeEvent(event: RuntimeEvent) {
   return (
     event.type !== "message.delta" &&

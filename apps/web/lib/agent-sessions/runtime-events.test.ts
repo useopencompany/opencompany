@@ -4,6 +4,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   buildRuntimeToolCallsForMessage,
+  buildSessionDebugTurns,
   computeThinkingDurationSeconds,
   describeToolCall,
   emptyCostSummary,
@@ -561,6 +562,59 @@ describe("applyRuntimeEventToState", () => {
     expect(
       state.messages.find((message) => message.id === "msg_assistant")?.outputReasoningTokens,
     ).toBeUndefined();
+  });
+});
+
+describe("buildSessionDebugTurns", () => {
+  it("collapses messages into one consolidated entry per turn, carrying modelMessage", () => {
+    const messages: SessionMessage[] = [
+      { id: "msg_user", role: "user", content: "Hi", status: "completed" },
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Hello",
+        status: "completed",
+        modelMessage: { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+      },
+      {
+        id: "msg_tool",
+        role: "tool",
+        content: "ok",
+        status: "completed",
+        toolName: "read_file",
+        toolCallId: "call_1",
+        modelMessage: { role: "tool", content: [{ type: "tool-result", toolCallId: "call_1" }] },
+      },
+    ];
+
+    expect(buildSessionDebugTurns(messages)).toEqual([
+      { id: "msg_user", role: "user", status: "completed", modelMessage: null, content: "Hi" },
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        status: "completed",
+        modelMessage: { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+        content: "Hello",
+      },
+      {
+        id: "msg_tool",
+        role: "tool",
+        status: "completed",
+        toolName: "read_file",
+        toolCallId: "call_1",
+        modelMessage: { role: "tool", content: [{ type: "tool-result", toolCallId: "call_1" }] },
+        content: "ok",
+      },
+    ]);
+  });
+
+  it("defaults modelMessage to null for a still-streaming turn", () => {
+    const turns = buildSessionDebugTurns([
+      { id: "msg_assistant", role: "assistant", content: "partial", status: "running" },
+    ]);
+    expect(turns).toEqual([
+      { id: "msg_assistant", role: "assistant", status: "running", modelMessage: null, content: "partial" },
+    ]);
   });
 });
 

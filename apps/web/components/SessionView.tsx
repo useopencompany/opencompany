@@ -71,6 +71,7 @@ import {
   type AssistantTurnPart,
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
+  buildSessionDebugTurns,
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
@@ -387,7 +388,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // are built in the runner at request time and are otherwise ephemeral; the runner persists
   // them per turn as a `debug.model_request` event (hidden from the inspector — see
   // isInspectableRuntimeEvent), so we hoist the latest one to top-level fields for
-  // convenience. The raw events still carry every turn's snapshot.
+  // convenience. The transcript is exported as one consolidated entry per user / assistant /
+  // tool turn (`buildSessionDebugTurns`) rather than the raw token/tool delta stream, which
+  // is far easier to read; each turn still carries its verbatim `modelMessage`.
   const buildSessionDebugSnapshot = () => {
     const latestModelRequest = [...runtime.events]
       .reverse()
@@ -408,8 +411,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       usage: runtime.usage,
       toolUsage: runtime.toolUsage,
       cost: runtime.cost,
-      messages: runtime.messages,
-      events: runtime.events,
+      turns: buildSessionDebugTurns(runtime.messages),
     };
   };
   // Refresh the server aggregates once a turn reaches a terminal state (the stream

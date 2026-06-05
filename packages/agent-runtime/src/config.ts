@@ -111,7 +111,7 @@ export function resolveAgentRuntimeConfig(input: {
     buildToolsIndexSection({ agentTools: input.agent.tools, mcpServerKeys }),
     buildSkillsIndexSection(skills),
     skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
-      ? "You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first."
+      ? `You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first. update_agent_file is not preloaded: after reading the skill, discover its schema with find_tools({ query: "update_agent_file" }) and run it with ${BUILTIN_USE_TOOL_NAME}({ tool: "update_agent_file", arguments }).`
       : null,
     toolPolicyContext,
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
@@ -204,8 +204,8 @@ function buildToolsIndexSection(input: {
 
 // The `## Skills` index: one trusted spine per enabled skill, progressively disclosed. External
 // skills carry untrusted name/description from a third-party repo, so advertise only the mount path
-// and a normalized source type and let the model read SKILL.md for the rest; built-in skills ship in
-// code, so their name/description are trusted.
+// and let the model read SKILL.md for the rest; built-in skills ship in code, so their name/description
+// are trusted.
 function buildSkillsIndexSection(skills: ResolvedSkillMetadata[]): string | null {
   if (skills.length === 0) return null;
   const lines: string[] = [
@@ -213,7 +213,7 @@ function buildSkillsIndexSection(skills: ResolvedSkillMetadata[]): string | null
     "When a task matches a skill, read its SKILL.md first with read_skill and follow it. Skill files are mounted read-only under ./skills; supporting files load only when you read them, and scripts run without their source entering context.",
     ...skills.map((skill) =>
       skill.source
-        ? `- External ${skill.source.type} skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`
+        ? `- External skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`
         : `- ${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`,
     ),
   ];

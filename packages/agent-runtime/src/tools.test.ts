@@ -355,29 +355,39 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
 });
 
 describe("partitionRuntimeToolNames", () => {
-  it("defers capability tools and keeps the core/conditional tools direct", () => {
+  it("defers capability tools and update_agent_file, keeps the core/conditional tools direct", () => {
     const enabled: RuntimeToolName[] = [
       "read_file",
       "edit_file",
       "shell",
       "find_tools",
+      "update_agent_file",
       "exa_search",
       "instagram_get_profile",
       "amp_coder",
     ];
     const { direct, deferred } = partitionRuntimeToolNames(enabled);
     expect(direct).toEqual(["read_file", "edit_file", "shell", "find_tools"]);
-    expect(deferred).toEqual(["exa_search", "instagram_get_profile", "amp_coder"]);
+    expect(deferred).toEqual([
+      "update_agent_file",
+      "exa_search",
+      "instagram_get_profile",
+      "amp_coder",
+    ]);
   });
 
-  it("classifies hosted tools and coding agents as deferrable, core tools as not", () => {
+  it("classifies hosted tools, coding agents and update_agent_file as deferrable, core tools as not", () => {
     expect(isDeferrableRuntimeTool("exa_search")).toBe(true);
     expect(isDeferrableRuntimeTool("amp_coder")).toBe(true);
     expect(isDeferrableRuntimeTool("web_fetch")).toBe(true);
+    expect(isDeferrableRuntimeTool("update_agent_file")).toBe(true);
     expect(isDeferrableRuntimeTool("read_file")).toBe(false);
     expect(isDeferrableRuntimeTool("shell")).toBe(false);
     expect(isDeferrableRuntimeTool("gh")).toBe(false);
     expect(isDeferrableRuntimeTool("find_tools")).toBe(false);
+    // ask_user_question stays direct so its durable turn-suspend (keyed on the literal call name)
+    // is not wrapped behind use_tool.
+    expect(isDeferrableRuntimeTool("ask_user_question")).toBe(false);
   });
 });
 
@@ -424,5 +434,13 @@ describe("searchRuntimeTools", () => {
     expect(names.every((name) => isDeferrableRuntimeTool(name) && enabled.includes(name))).toBe(
       true,
     );
+  });
+
+  it("discovers update_agent_file by query when self-edit is enabled", () => {
+    const selfEditEnabled: RuntimeToolName[] = ["find_tools", "update_agent_file"];
+    const results = searchRuntimeTools({ query: "update_agent_file" }, selfEditEnabled);
+    const match = results.find((result) => result.name === "update_agent_file");
+    expect(match).toBeDefined();
+    expect(match?.parameters.type).toBe("object");
   });
 });

@@ -1844,8 +1844,9 @@ export const BUILTIN_USE_TOOL_NAME = "use_tool";
 // Tools whose full schema is registered eagerly (always directly callable). These are the
 // core file/shell/ask tools used constantly and always relevant — deferring them behind a
 // `find_tools` round-trip would add latency with no token win — plus the conditional core
-// tools (gh, delegation, self-edit) that are not capability-catalog entries and are advertised
-// by their own system-prompt guidance. Everything else (capability tools) is deferred.
+// tools (gh, delegation) that are not capability-catalog entries and are advertised by their
+// own system-prompt guidance. Everything else (capability tools, plus standalone deferrables
+// like update_agent_file) is deferred.
 export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "read_file",
   "write_file",
@@ -1857,20 +1858,29 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "gh",
   "ask_user_question",
   "delegate_to_agent",
-  "update_agent_file",
   "tool_help",
   "find_tools",
 ];
 
-// Runtime tools that belong to a deferrable capability (hosted tools + coding agents). Their
-// schemas are loaded on demand via `find_tools` and executed via `use_tool`, rather than being
-// registered eagerly in the model's tool set. Derived from the capability catalog so the index
-// and the deferral stay in sync.
-export const DEFERRABLE_RUNTIME_TOOL_NAMES: ReadonlySet<RuntimeToolName> = new Set(
-  AGENT_TOOL_CATALOG.filter(
+// Deferrable runtime tools that are not capability-catalog entries but are still loaded on demand
+// rather than registered eagerly. `update_agent_file` carries a heavy agent-definition schema yet is
+// almost never called, and is already gated behind a mandatory read of the agent-self-edit skill —
+// so the `find_tools`/`use_tool` round-trip adds no latency the gate did not already impose, while
+// the schema leaves the eager tool set. ask_user_question is intentionally NOT here: its durable
+// turn-suspend is keyed on the literal tool-call name in the model stream runner, so wrapping it in
+// `use_tool` would stop it from suspending.
+const STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES: readonly RuntimeToolName[] = ["update_agent_file"];
+
+// Runtime tools whose full schema is loaded on demand via `find_tools` and executed via `use_tool`,
+// rather than being registered eagerly in the model's tool set. Capability tools (hosted tools +
+// coding agents) are derived from the catalog so the index and the deferral stay in sync; a few
+// standalone tools (see STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES) are deferred individually.
+export const DEFERRABLE_RUNTIME_TOOL_NAMES: ReadonlySet<RuntimeToolName> = new Set([
+  ...AGENT_TOOL_CATALOG.filter(
     (capability) => capability.type === "hosted_tool" || capability.type === "coding_agent",
   ).flatMap((capability) => capability.runtimeTools),
-);
+  ...STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES,
+]);
 
 export function isDeferrableRuntimeTool(name: string): name is RuntimeToolName {
   return DEFERRABLE_RUNTIME_TOOL_NAMES.has(name as RuntimeToolName);

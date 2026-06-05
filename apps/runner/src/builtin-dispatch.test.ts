@@ -158,4 +158,21 @@ describe("dispatchBuiltinUseTool", () => {
     expect(output.ok).toBe(false);
     expect(output.error.code).toBe("unknown_runtime_tool");
   });
+
+  it("routes the deferred update_agent_file through use_tool and enforces the self-edit gate", async () => {
+    // update_agent_file is a standalone deferrable: dispatched via use_tool, it must reach the
+    // internal handler (not be rejected as unknown) and still hit the read-skill gate, since the
+    // skill was never read in this session.
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "update_agent_file", arguments: { instructions: "new" } }),
+      enabledTools: ["update_agent_file"],
+    })) as { ok: boolean; errors?: string[] };
+
+    expect(hostedTools.executeHostedTool).not.toHaveBeenCalled();
+    expect(output.ok).toBe(false);
+    expect(output.errors?.[0]).toContain("Read the agent-self-edit skill first");
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "use_tool", toolCallId: "call_use" }),
+    );
+  });
 });

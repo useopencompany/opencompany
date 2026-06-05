@@ -135,6 +135,10 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("You can evolve your own definition.");
     expect(resolved.systemPrompt).toContain("skills/agent-self-edit/SKILL.md");
     expect(resolved.systemPrompt).toContain("before calling update_agent_file");
+    // update_agent_file is deferred: the guidance must point at the find_tools/use_tool discovery
+    // flow rather than implying a directly preloaded tool.
+    expect(resolved.systemPrompt).toContain('find_tools({ query: "update_agent_file" })');
+    expect(resolved.systemPrompt).toContain('use_tool({ tool: "update_agent_file", arguments })');
     expect(resolved.tools).toContain("update_agent_file");
   });
 
