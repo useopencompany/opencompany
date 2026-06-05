@@ -75,6 +75,9 @@ Set these in Vercel Production.
 | `MCP_OAUTH_STATE_SECRET` | MCP only | Dedicated secret used to sign MCP OAuth setup state. Generate a separate 32+ character value with `openssl rand -base64 32`. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Callback URL: `${NEXT_PUBLIC_APP_URL}/api/mcp/slack/callback`. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Stored only in env, not in Neon. |
+| `SLACK_SUPPORT_BOT_TOKEN` | Slack Connect only | `xoxb-…` bot token for OC's own support Slack app. The Inngest provisioning function runs on the web deployment, so this lives here (not the runner). Server-only, never `NEXT_PUBLIC`. Empty = feature disabled (no-ops to `failed`, onboarding never crashes). Distinct from `SLACK_MCP_*`. |
+| `SLACK_SUPPORT_TEAM_ID` | Slack Connect only | OC Slack workspace/team id (`T…`), denormalized for link building. |
+| `SLACK_SUPPORT_MEMBER_IDS` | Slack Connect only | Comma-separated `U…` ids of OC support members auto-invited to each channel. |
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |

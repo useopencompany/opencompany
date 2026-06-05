@@ -1999,61 +1999,74 @@ function ToolCallCardDefault({
 
   return (
     <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
-      >
-        <ChevronRight
-          size={11}
-          strokeWidth={1.9}
-          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
-        />
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-          <Wrench size={11} strokeWidth={1.75} />
-        </span>
-        <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
-          {toolCall.label || formatToolName(toolCall.name)}
-        </span>
-        {toolCall.brainPath ? (
-          <span
-            title={`Updated brain/${toolCall.brainPath}`}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
-          >
-            <Brain size={9} strokeWidth={1.9} />
-            Brain updated
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+            <Wrench size={11} strokeWidth={1.75} />
           </span>
+          <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
+            {toolCall.label || formatToolName(toolCall.name)}
+          </span>
+          {toolCall.brainPath ? (
+            <span
+              title={`Updated brain/${toolCall.brainPath}`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
+            >
+              <Brain size={9} strokeWidth={1.9} />
+              Brain updated
+            </span>
+          ) : null}
+          {approvalStatusLabel ? (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+                approvalStatusLabel.tone === "danger"
+                  ? "text-danger"
+                  : approvalStatusLabel.tone === "success"
+                    ? "text-success"
+                    : "text-warning"
+              }`}
+            >
+              <ShieldAlert size={9} strokeWidth={1.9} />
+              {approvalStatusLabel.label}
+            </span>
+          ) : isFailed ? (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+                interrupted ? "text-warning" : "text-danger"
+              }`}
+            >
+              <AlertCircle size={9} strokeWidth={1.9} />
+              {interrupted ? "interrupted" : "failed"}
+            </span>
+          ) : !isCompleted ? (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
+              <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
+              running
+            </span>
+          ) : null}
+        </button>
+        {toolCall.issueUrl ? (
+          <a
+            href={toolCall.issueUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="In Linear öffnen"
+            className="inline-flex shrink-0 items-center rounded-md p-0.5 text-ink-subtle transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
+          >
+            <ExternalLink size={11} strokeWidth={1.9} />
+          </a>
         ) : null}
-        {approvalStatusLabel ? (
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
-              approvalStatusLabel.tone === "danger"
-                ? "text-danger"
-                : approvalStatusLabel.tone === "success"
-                  ? "text-success"
-                  : "text-warning"
-            }`}
-          >
-            <ShieldAlert size={9} strokeWidth={1.9} />
-            {approvalStatusLabel.label}
-          </span>
-        ) : isFailed ? (
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
-              interrupted ? "text-warning" : "text-danger"
-            }`}
-          >
-            <AlertCircle size={9} strokeWidth={1.9} />
-            {interrupted ? "interrupted" : "failed"}
-          </span>
-        ) : !isCompleted ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
-            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
-            running
-          </span>
-        ) : null}
-      </button>
+      </div>
       {awaitingApproval || resolvingApproval ? (
         <ToolApprovalPrompt
           approval={toolCall.approval}
