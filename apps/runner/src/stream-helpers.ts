@@ -1,6 +1,8 @@
 import type { TextStreamPart, ToolSet } from "ai";
 import { RunAbortError } from "./run-control";
 
+const INVALID_TOOL_INPUT_PREFIX = "Invalid input for tool ";
+
 export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
   if (part.type === "abort") {
     throw new RunAbortError(part.reason || "Run aborted.");
@@ -13,6 +15,31 @@ export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
   if (part.type === "tool-error") {
     throw toStreamError(part.error, `Tool ${part.toolName} failed.`);
   }
+}
+
+type ToolErrorPart = Extract<TextStreamPart<ToolSet>, { type: "tool-error" }>;
+
+export function isRecoverableToolInputStreamError(
+  part: TextStreamPart<ToolSet>,
+): part is ToolErrorPart {
+  if (part.type !== "tool-error") return false;
+  const message = readStreamErrorMessage(part.error);
+  return message.startsWith(INVALID_TOOL_INPUT_PREFIX);
+}
+
+export function buildRecoverableToolInputOutput(part: ToolErrorPart) {
+  const message = readStreamErrorMessage(part.error);
+  const detail = message.includes("JSON parsing failed")
+    ? "The arguments were not complete valid JSON."
+    : "The arguments did not match the tool schema.";
+  return {
+    ok: false,
+    error: {
+      message: `${part.toolName} could not run because its input was invalid. ${detail} Recreate the tool call with complete, valid JSON arguments.`,
+      code: "invalid_tool_input",
+      recoverable: true,
+    },
+  };
 }
 
 export function readReasoningTextDelta(part: TextStreamPart<ToolSet> | Record<string, unknown>) {
@@ -47,6 +74,11 @@ function toStreamError(error: unknown, fallback: string) {
   }
 
   return new Error(fallback);
+}
+
+function readStreamErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" ? error : "";
 }
 
 function readRawReasoningContent(value: unknown): string {
