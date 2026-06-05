@@ -1171,6 +1171,7 @@ bun run test
 bun run lint
 bunx biome check .
 ```
+
 Expected: all three green.
 
 - [ ] **Step 3: Confirm the migration is applied to the dev DB**
@@ -1196,6 +1197,7 @@ git push -u origin spec/slack-connect
 ```bash
 gh pr create --draft --title "[PRO-NN] Slack Connect after onboarding" --body "<summary + the three QA screenshots + Phase-2 Slack-review note>"
 ```
+
 Then hand the PR URL to Jasper. **Do not run `gh pr ready` or `gh pr merge`.**
 
 ---

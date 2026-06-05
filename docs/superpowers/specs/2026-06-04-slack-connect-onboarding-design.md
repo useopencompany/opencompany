@@ -77,7 +77,7 @@ Documented here so it is not forgotten; it blocks the feature working in any env
 
 New env vars (add to `.env.example` + `docs/env-vars.md`):
 
-```
+```bash
 SLACK_SUPPORT_BOT_TOKEN=""        # xoxb-… OC support app bot token
 SLACK_SUPPORT_TEAM_ID=""          # OC Slack workspace/team id (T…)
 SLACK_SUPPORT_MEMBER_IDS=""       # comma-separated U… ids of OC support members to invite

@@ -10,7 +10,9 @@ const BOOK_CALL_URL = "https://cal.com/team/opencompany/intro-call?overlayCalend
 // - failed row → booking fallback only.
 // max-2-buttons: one real button at most, the booking is a quiet link.
 export default async function SlackSupportCard({ workspaceId }: { workspaceId: string }) {
-  const channel = await getWorkspaceSlackChannel(workspaceId);
+  // Read defensively: a transient DB error on this non-critical card degrades to
+  // "no card" instead of crashing the whole workspace home.
+  const channel = await getWorkspaceSlackChannel(workspaceId).catch(() => null);
   if (!channel) return null;
 
   if (channel.status === "active" && channel.inviteUrl) {
