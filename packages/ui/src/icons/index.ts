@@ -64,13 +64,12 @@ import {
   IconZap,
 } from "@central-icons-react/round-outlined-radius-2-stroke-2";
 
-// Shared icon types (`IconProps` / `LucideProps` / `LucideIcon`).
-export type { IconProps, LucideIcon, LucideProps } from "./types";
-
 export * from "./brand-icons";
 // Project-owned icons (model providers, social, brand) — same currentColor +
 // LucideIcon contract, so they compose with Central icons and the same utilities.
 export * from "./provider-icons";
+// Shared icon types (`IconProps` / `LucideProps` / `LucideIcon`).
+export type { IconProps, LucideIcon, LucideProps } from "./types";
 export {
   IconArrowBoxRight as LogOut,
   IconArrowRight as ArrowRight,

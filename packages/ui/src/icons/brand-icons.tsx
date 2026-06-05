@@ -1,5 +1,5 @@
-import type { LucideIcon, LucideProps } from "./types";
 import { forwardRef } from "react";
+import type { LucideIcon, LucideProps } from "./types";
 
 // OpenCompany product mark. Typed as LucideIcon for drop-in compatibility, and
 // filled with `currentColor` so it adopts the surrounding text color (use

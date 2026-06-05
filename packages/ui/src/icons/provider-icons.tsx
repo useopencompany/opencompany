@@ -1,5 +1,5 @@
-import type { LucideIcon, LucideProps } from "./types";
 import { forwardRef } from "react";
+import type { LucideIcon, LucideProps } from "./types";
 
 // Brand logos for model providers and social platforms. Typed as LucideIcon so
 // they are drop-in compatible with the generic icon slots used across the app —
