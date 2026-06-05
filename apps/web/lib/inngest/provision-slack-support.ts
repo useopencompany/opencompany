@@ -93,7 +93,21 @@ export async function runProvisionSlackSupport(args: {
       inviteCustomerToChannel(channelId, customerEmail),
     );
 
-    await step.run("post-intro", () => postIntroMessage(channelId));
+    // Best-effort: a failed intro message must not fail provisioning — the channel and
+    // invite already succeeded. Swallow + log instead of throwing.
+    await step.run("post-intro", async () => {
+      try {
+        await postIntroMessage(channelId);
+        return { posted: true };
+      } catch (error) {
+        logger.warn("Slack intro message failed (non-fatal)", {
+          event: "opencompany.slack_support_intro_failed",
+          workspace_id: workspaceId,
+          ...(error instanceof Error ? { error: error.message } : {}),
+        });
+        return { posted: false };
+      }
+    });
 
     await step.run("mark-active", () =>
       markActive({

@@ -426,7 +426,10 @@ export const provisionSlackSupportChannel = inngest.createFunction(
     id: "provision-slack-support-channel",
     name: "Provision Slack support channel",
     retries: 3,
-    idempotency: "event.data.workspaceId",
+    // No `idempotency` key: it would dedupe re-dispatches within Inngest's window and
+    // permanently block recovery of a `failed` workspace. Single-channel safety comes
+    // from the per-workspace concurrency lock + the DB unique index + the active
+    // short-circuit + per-step channel-id resume in runProvisionSlackSupport.
     concurrency: {
       limit: 1,
       key: "event.data.workspaceId",

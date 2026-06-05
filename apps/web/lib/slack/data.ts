@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
 import { type SlackChannelStatus, workspaceSlackChannels } from "@opencompany/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 export type WorkspaceSlackChannel = {
   status: SlackChannelStatus;
@@ -28,13 +28,25 @@ export async function getWorkspaceSlackChannel(
 }
 
 // Idempotent: the unique workspaceId index means a concurrent/retried insert is a
-// no-op, so there is never a second channel row for a workspace.
+// no-op, so there is never a second channel row for a workspace. A previously `failed`
+// row is reset to `pending` so a re-dispatch can recover (e.g. Slack was configured
+// after the first attempt); `active` and `pending` rows are left untouched so a working
+// channel is never downgraded.
 export async function upsertPending(workspaceId: string): Promise<WorkspaceSlackChannel> {
   const db = getDb();
   await db
     .insert(workspaceSlackChannels)
     .values({ id: `wsc_${randomUUID()}`, workspaceId, status: "pending" })
     .onConflictDoNothing({ target: workspaceSlackChannels.workspaceId });
+  await db
+    .update(workspaceSlackChannels)
+    .set({ status: "pending", error: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(workspaceSlackChannels.workspaceId, workspaceId),
+        eq(workspaceSlackChannels.status, "failed"),
+      ),
+    );
   const row = await getWorkspaceSlackChannel(workspaceId);
   if (!row) {
     // The row is missing right after an idempotent insert — a genuine DB/FK fault
@@ -85,8 +97,15 @@ export async function markActive(input: {
 
 export async function markFailed(workspaceId: string, error: string): Promise<void> {
   const db = getDb();
+  // Never downgrade an already-active channel: a late/duplicate failure path must not
+  // clobber a working row (belt-and-suspenders alongside per-workspace concurrency).
   await db
     .update(workspaceSlackChannels)
     .set({ status: "failed", error: error.slice(0, 500), updatedAt: new Date() })
-    .where(eq(workspaceSlackChannels.workspaceId, workspaceId));
+    .where(
+      and(
+        eq(workspaceSlackChannels.workspaceId, workspaceId),
+        ne(workspaceSlackChannels.status, "active"),
+      ),
+    );
 }

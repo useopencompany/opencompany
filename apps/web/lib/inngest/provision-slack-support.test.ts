@@ -106,29 +106,43 @@ describe("runProvisionSlackSupport", () => {
     await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
 
     expect(mocks.createSupportChannel).not.toHaveBeenCalled();
+    // The resumed channel id must not be re-persisted (no orphan / no second write).
+    expect(mocks.setSlackChannelId).not.toHaveBeenCalled();
     expect(mocks.inviteCustomerToChannel).toHaveBeenCalledWith("C-existing", "c@acme.com");
     expect(mocks.markActive).toHaveBeenCalledWith(
       expect.objectContaining({ slackChannelId: "C-existing" }),
     );
   });
 
+  it("treats a failed intro message as non-fatal (still marks active)", async () => {
+    mocks.postIntroMessage.mockRejectedValue(new Error("post boom"));
+
+    const result = await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
+
+    expect(mocks.markActive).toHaveBeenCalled();
+    expect(mocks.markFailed).not.toHaveBeenCalled();
+    expect(result.status).toBe("active");
+  });
+
   it("short-circuits when the row is already active (no second channel)", async () => {
     row = { status: "active", inviteUrl: "https://x", slackChannelId: "C1", error: null };
 
-    await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
+    const result = await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
 
     expect(mocks.createSupportChannel).not.toHaveBeenCalled();
+    expect(mocks.inviteCustomerToChannel).not.toHaveBeenCalled();
+    expect(mocks.markActive).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "active", shortCircuited: true });
   });
 
   it("no-ops to failed when Slack is not configured (does not throw)", async () => {
     mocks.isSlackSupportConfigured.mockReturnValue(false);
 
-    await expect(
-      runProvisionSlackSupport({ event, step: fakeStep(), workspace }),
-    ).resolves.not.toThrow();
+    const result = await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
 
-    expect(mocks.markFailed).toHaveBeenCalled();
+    expect(mocks.markFailed).toHaveBeenCalledWith("w1", expect.stringContaining("not configured"));
     expect(mocks.createSupportChannel).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "failed", reason: "not_configured" });
   });
 
   it("marks failed and rethrows on a Slack error (so Inngest retries)", async () => {
@@ -139,5 +153,6 @@ describe("runProvisionSlackSupport", () => {
     );
 
     expect(mocks.markFailed).toHaveBeenCalled();
+    expect(mocks.markActive).not.toHaveBeenCalled();
   });
 });

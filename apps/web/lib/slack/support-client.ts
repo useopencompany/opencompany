@@ -70,7 +70,15 @@ function slackErrorCode(error: unknown): string | undefined {
 // who is already in the channel, etc. Treat them as success.
 function isBenign(error: unknown): boolean {
   const code = slackErrorCode(error);
-  return code === "already_in_channel" || code === "is_archived" || code === "cant_invite_self";
+  return code === "already_in_channel" || code === "cant_invite_self";
+}
+
+// A retry can re-invite a customer whose invite already landed (the first call reached
+// Slack but its response was lost). Slack then reports "already invited / in channel" —
+// success for our idempotent model: no fresh url, but the invite exists, so don't fail.
+function isCustomerInviteBenign(error: unknown): boolean {
+  const code = slackErrorCode(error);
+  return code === "already_in_channel" || code === "already_invited" || code === "already_shared";
 }
 
 // Step 1 of provisioning: create the private channel. Each call is its own Inngest
@@ -155,6 +163,7 @@ export async function inviteCustomerToChannel(
     // than a broken email.
     return typeof shared.url === "string" ? shared.url : null;
   } catch (error) {
+    if (isCustomerInviteBenign(error)) return null;
     throw new SlackProvisionError("conversations.inviteShared failed", slackErrorCode(error));
   }
 }

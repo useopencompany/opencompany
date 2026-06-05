@@ -91,6 +91,15 @@ describe("inviteSupportMembers", () => {
       .mockRejectedValue({ data: { error: "already_in_channel" } });
     await expect(inviteSupportMembers("C123", { client })).resolves.toBeUndefined();
   });
+
+  it("does NOT treat is_archived as benign — surfaces it as an error", async () => {
+    const client = makeClient();
+    client.conversations.invite = vi.fn().mockRejectedValue({ data: { error: "is_archived" } });
+    await expect(inviteSupportMembers("C123", { client })).rejects.toMatchObject({
+      name: "SlackProvisionError",
+      slackError: "is_archived",
+    });
+  });
 });
 
 describe("inviteCustomerToChannel", () => {
@@ -109,6 +118,25 @@ describe("inviteCustomerToChannel", () => {
     client.conversations.inviteShared = vi.fn(async () => ({ ok: true }));
     expect(await inviteCustomerToChannel("C123", "c@acme.com", { client })).toBeNull();
   });
+
+  it("returns null (benign) when the customer is already invited on retry", async () => {
+    const client = makeClient();
+    client.conversations.inviteShared = vi
+      .fn()
+      .mockRejectedValue({ data: { error: "already_in_channel" } });
+    expect(await inviteCustomerToChannel("C123", "c@acme.com", { client })).toBeNull();
+  });
+
+  it("throws SlackProvisionError on a non-benign Slack error", async () => {
+    const client = makeClient();
+    client.conversations.inviteShared = vi
+      .fn()
+      .mockRejectedValue({ data: { error: "channel_not_found" } });
+    await expect(inviteCustomerToChannel("C123", "c@acme.com", { client })).rejects.toMatchObject({
+      name: "SlackProvisionError",
+      slackError: "channel_not_found",
+    });
+  });
 });
 
 describe("postIntroMessage", () => {
@@ -118,5 +146,11 @@ describe("postIntroMessage", () => {
     expect(client.chat.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ channel: "C123" }),
     );
+  });
+
+  it("propagates a Slack error (the orchestrator decides best-effort handling)", async () => {
+    const client = makeClient();
+    client.chat.postMessage = vi.fn().mockRejectedValue({ data: { error: "rate_limited" } });
+    await expect(postIntroMessage("C123", { client })).rejects.toBeTruthy();
   });
 });
