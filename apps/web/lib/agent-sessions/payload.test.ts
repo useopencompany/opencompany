@@ -79,6 +79,7 @@ describe("session payload cache helpers", () => {
       usage: base.usage,
       toolUsage: base.toolUsage,
       cost: base.cost,
+      currentContextTokens: base.currentContextTokens,
       related: { parent: null, children: [] },
       session: {
         ...base.session,
@@ -102,6 +103,36 @@ describe("session payload cache helpers", () => {
       id: 1,
       createdAt: "2026-05-24T10:00:01.000Z",
     });
+  });
+
+  it("round-trips currentContextTokens through serialize and parse", () => {
+    const base = detail();
+    const serialized = serializeAgentSessionDetail({
+      usage: base.usage,
+      toolUsage: base.toolUsage,
+      cost: base.cost,
+      currentContextTokens: 14_200,
+      related: { parent: null, children: [] },
+      session: {
+        ...base.session,
+        abortRequestedAt: null,
+        createdAt: new Date("2026-05-24T10:00:00.000Z"),
+        updatedAt: new Date("2026-05-24T10:00:02.000Z"),
+      },
+      messages: [],
+      events: [],
+    });
+
+    expect(serialized.currentContextTokens).toBe(14_200);
+    expect(
+      parseAgentSessionDetailResponse({ detail: serialized }).detail.currentContextTokens,
+    ).toBe(14_200);
+  });
+
+  it("defaults currentContextTokens to 0 for payloads cached before the field shipped", () => {
+    const { currentContextTokens: _omitted, ...legacy } = detail();
+
+    expect(parseAgentSessionDetailResponse({ detail: legacy }).detail.currentContextTokens).toBe(0);
   });
 
   it("rejects invalid session detail payloads", () => {
@@ -268,5 +299,6 @@ function detail(
       toolCostUsdMicros: 0,
       sandboxCostUsdMicros: 0,
     },
+    currentContextTokens: 0,
   };
 }

@@ -70,6 +70,8 @@ type BaseAgentMentionItem = {
   supportsReasoning?: boolean;
   // Capability / Speed / Cost tiers shown in the model picker (models only).
   ratings?: ModelRatings;
+  // Max context window in tokens (models only) — used to show how full the window is.
+  contextWindowTokens?: number;
   // Set on integrations that are enabled on the agent but not yet set up in the
   // workspace. The mention stays selectable; the UI shows a "Needs setup" badge
   // linking to `connectUrl` (Settings → Integrations connect flow).
@@ -221,6 +223,7 @@ export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => 
   category: model.category,
   supportsReasoning: model.supportsReasoning,
   ratings: model.ratings,
+  contextWindowTokens: model.contextWindowTokens,
   icon: modelIconFor(model.id),
 }));
 
