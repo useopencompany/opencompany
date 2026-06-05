@@ -281,6 +281,13 @@
       "when": 1780596846247,
       "tag": "0039_fuzzy_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780650465613,
+      "tag": "0040_clumsy_corsair",
+      "breakpoints": true
     }
   ]
 }
