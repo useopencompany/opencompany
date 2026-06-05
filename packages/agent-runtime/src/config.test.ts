@@ -160,7 +160,8 @@ describe("resolveAgentRuntimeConfig", () => {
 
     expect(resolved.tools).toContain("gh");
     expect(resolved.systemPrompt).toContain("Attached GitHub repositories: opencompany/web.");
-    expect(resolved.systemPrompt).toContain("git and gh (GitHub CLI) access");
+    expect(resolved.systemPrompt).toContain("gh (GitHub CLI) access");
+    expect(resolved.systemPrompt).toContain("Use shell for local sandbox commands");
     expect(resolved.systemPrompt).toContain("gh commands default to the attached repository");
     expect(resolved.systemPrompt).toContain(
       "--repo is not needed when targeting this attached repository",
