@@ -50,6 +50,11 @@ services:
         sync: false
       - key: SUPADATA_API_KEY
         sync: false
+      # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false
       - key: RUNNER_E2B_IDLE_TIMEOUT_MS

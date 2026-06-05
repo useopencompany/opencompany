@@ -50,6 +50,19 @@ export type RuntimeToolName =
   | "instagram_get_metadata"
   | "instagram_get_transcript"
   | "social_get_job"
+  | "gmail_list_messages"
+  | "gmail_get_message"
+  | "gmail_search"
+  | "gmail_list_threads"
+  | "gmail_get_thread"
+  | "gmail_list_labels"
+  | "calendar_list_calendars"
+  | "calendar_list_events"
+  | "calendar_get_event"
+  | "calendar_get_freebusy"
+  | "calendar_create_event"
+  | "calendar_update_event"
+  | "calendar_delete_event"
   | "web_fetch"
   | "tool_help";
 
@@ -231,6 +244,43 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     runtimeTools: [],
     defaultEnabled: true,
     credentialSource: "workspace",
+  },
+  {
+    id: "gmail",
+    type: "hosted_tool",
+    label: "gmail",
+    description:
+      "Read mail from workspace-connected Google accounts (read-only): list, search, and read messages, threads, and labels.",
+    runtimeTools: [
+      "gmail_list_messages",
+      "gmail_get_message",
+      "gmail_search",
+      "gmail_list_threads",
+      "gmail_get_thread",
+      "gmail_list_labels",
+    ],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+    requiredPlatformEnvVars: ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"],
+  },
+  {
+    id: "google_calendar",
+    type: "hosted_tool",
+    label: "google_calendar",
+    description:
+      "Read and manage events on workspace-connected Google Calendars: list calendars/events, check free/busy, and create, update, or delete events.",
+    runtimeTools: [
+      "calendar_list_calendars",
+      "calendar_list_events",
+      "calendar_get_event",
+      "calendar_get_freebusy",
+      "calendar_create_event",
+      "calendar_update_event",
+      "calendar_delete_event",
+    ],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+    requiredPlatformEnvVars: ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"],
   },
 ];
 
@@ -700,6 +750,38 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     ].join("\n"),
   },
 ];
+
+// Shared parameter fragments for the Google (Gmail + Calendar) hosted tools.
+const GOOGLE_ACCOUNT_PARAMETER = {
+  type: "string",
+  description:
+    "Email of the connected Google account to act as. Omit when only one account is connected; required to disambiguate when several are connected.",
+} as const;
+
+const GOOGLE_CALENDAR_ID_PARAMETER = {
+  type: "string",
+  description: 'Calendar id. Defaults to "primary". Must be a workspace-selected calendar.',
+  default: "primary",
+} as const;
+
+const GOOGLE_EVENT_TIME_PARAMETER = {
+  type: "object",
+  description:
+    "Event time. Provide either dateTime (RFC3339, for timed events) or date (YYYY-MM-DD, for all-day events).",
+  properties: {
+    dateTime: { type: "string", description: "RFC3339 timestamp, e.g. 2026-06-05T15:00:00-07:00." },
+    date: { type: "string", description: "All-day date in YYYY-MM-DD." },
+    timeZone: { type: "string", description: "IANA time zone, e.g. America/Los_Angeles." },
+  },
+  additionalProperties: false,
+} as const;
+
+const GOOGLE_SEND_UPDATES_PARAMETER = {
+  type: "string",
+  enum: ["all", "externalOnly", "none"],
+  description: "Who gets email notifications about the change. Defaults to none.",
+  default: "none",
+} as const;
 
 export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
@@ -1708,6 +1790,267 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Use it for articles, docs pages, company pages, and other mostly-readable pages. It may not work for JavaScript-rendered apps, PDFs, login-gated pages, or pages that block automated HTTP clients.",
       "Keep maxCharacters modest unless you need more context. The default is designed to avoid flooding the model context.",
     ].join("\n"),
+  },
+  {
+    name: "gmail_list_messages",
+    kind: "hosted",
+    configToolId: "gmail",
+    description:
+      "List recent Gmail messages (id + snippet) from a connected Google account. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        maxResults: {
+          type: "number",
+          description: "How many messages to return. Defaults to 20. Maximum 100.",
+          default: 20,
+        },
+        labelIds: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Only include messages with these Gmail label ids (e.g. "INBOX", "UNREAD").',
+        },
+        query: {
+          type: "string",
+          description: 'Optional Gmail search query (same syntax as the Gmail search box).',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "gmail_search",
+    kind: "hosted",
+    configToolId: "gmail",
+    description:
+      "Search Gmail with the standard Gmail query syntax (e.g. 'from:jane after:2026/01/01 invoice'). Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        query: { type: "string", description: "Gmail search query string." },
+        maxResults: {
+          type: "number",
+          description: "How many messages to return. Defaults to 20. Maximum 100.",
+          default: 20,
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "gmail_get_message",
+    kind: "hosted",
+    configToolId: "gmail",
+    description:
+      "Fetch a single Gmail message by id, returning headers, snippet, and decoded plain-text body. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        messageId: { type: "string", description: "Gmail message id." },
+        format: {
+          type: "string",
+          enum: ["full", "metadata"],
+          description: "full returns the body; metadata returns only headers. Defaults to full.",
+          default: "full",
+        },
+      },
+      required: ["messageId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "gmail_list_threads",
+    kind: "hosted",
+    configToolId: "gmail",
+    description: "List Gmail threads (id + snippet), optionally filtered by a query. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        query: { type: "string", description: "Optional Gmail search query." },
+        maxResults: {
+          type: "number",
+          description: "How many threads to return. Defaults to 20. Maximum 100.",
+          default: 20,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "gmail_get_thread",
+    kind: "hosted",
+    configToolId: "gmail",
+    description: "Fetch a Gmail thread by id, returning each message's headers and body. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        threadId: { type: "string", description: "Gmail thread id." },
+      },
+      required: ["threadId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "gmail_list_labels",
+    kind: "hosted",
+    configToolId: "gmail",
+    description: "List the Gmail labels available on the connected account. Read-only.",
+    parameters: {
+      type: "object",
+      properties: { account: GOOGLE_ACCOUNT_PARAMETER },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_list_calendars",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description:
+      "List the calendars agents may use on the connected Google account (only workspace-selected calendars are accessible).",
+    parameters: {
+      type: "object",
+      properties: { account: GOOGLE_ACCOUNT_PARAMETER },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_list_events",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description: "List events on a calendar within an optional time window.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        calendarId: GOOGLE_CALENDAR_ID_PARAMETER,
+        timeMin: {
+          type: "string",
+          description: "RFC3339 lower bound for event start (e.g. 2026-06-01T00:00:00Z).",
+        },
+        timeMax: { type: "string", description: "RFC3339 upper bound for event start." },
+        query: { type: "string", description: "Free-text search over event fields." },
+        maxResults: {
+          type: "number",
+          description: "How many events to return. Defaults to 25. Maximum 250.",
+          default: 25,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_get_event",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description: "Fetch a single calendar event by id.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        calendarId: GOOGLE_CALENDAR_ID_PARAMETER,
+        eventId: { type: "string", description: "Calendar event id." },
+      },
+      required: ["eventId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_get_freebusy",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description: "Return busy time ranges for one or more calendars within a window.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        timeMin: { type: "string", description: "RFC3339 start of the window." },
+        timeMax: { type: "string", description: "RFC3339 end of the window." },
+        calendarIds: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Calendar ids to query. Defaults to ["primary"].',
+        },
+      },
+      required: ["timeMin", "timeMax"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_create_event",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description: "Create a calendar event. Writes to the connected Google account.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        calendarId: GOOGLE_CALENDAR_ID_PARAMETER,
+        summary: { type: "string", description: "Event title." },
+        description: { type: "string", description: "Event description / notes." },
+        location: { type: "string", description: "Event location." },
+        start: GOOGLE_EVENT_TIME_PARAMETER,
+        end: GOOGLE_EVENT_TIME_PARAMETER,
+        attendees: {
+          type: "array",
+          items: { type: "string" },
+          description: "Attendee email addresses to invite.",
+        },
+        sendUpdates: GOOGLE_SEND_UPDATES_PARAMETER,
+      },
+      required: ["summary", "start", "end"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_update_event",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description:
+      "Update fields on an existing calendar event (only provided fields change). Writes to the connected account.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        calendarId: GOOGLE_CALENDAR_ID_PARAMETER,
+        eventId: { type: "string", description: "Calendar event id to update." },
+        summary: { type: "string", description: "New event title." },
+        description: { type: "string", description: "New description." },
+        location: { type: "string", description: "New location." },
+        start: GOOGLE_EVENT_TIME_PARAMETER,
+        end: GOOGLE_EVENT_TIME_PARAMETER,
+        attendees: {
+          type: "array",
+          items: { type: "string" },
+          description: "Replacement attendee email addresses.",
+        },
+        sendUpdates: GOOGLE_SEND_UPDATES_PARAMETER,
+      },
+      required: ["eventId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "calendar_delete_event",
+    kind: "hosted",
+    configToolId: "google_calendar",
+    description: "Delete a calendar event by id. Writes to the connected account.",
+    parameters: {
+      type: "object",
+      properties: {
+        account: GOOGLE_ACCOUNT_PARAMETER,
+        calendarId: GOOGLE_CALENDAR_ID_PARAMETER,
+        eventId: { type: "string", description: "Calendar event id to delete." },
+        sendUpdates: GOOGLE_SEND_UPDATES_PARAMETER,
+      },
+      required: ["eventId"],
+      additionalProperties: false,
+    },
   },
   {
     name: "tool_help",

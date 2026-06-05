@@ -14,6 +14,10 @@ export type RunnerEnv = {
   apifyApiToken?: string | undefined;
   supadataApiKey: string | undefined;
   ampApiKey: string | undefined;
+  // Google OAuth client, shared by the Gmail and Google Calendar integrations. The runner
+  // needs it to refresh per-account access tokens against Google's token endpoint.
+  googleOAuthClientId?: string | undefined;
+  googleOAuthClientSecret?: string | undefined;
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
@@ -36,6 +40,8 @@ export function loadEnv(): RunnerEnv {
     apifyApiToken: optionalEnv("APIFY_API_TOKEN"),
     supadataApiKey: optionalEnv("SUPADATA_API_KEY"),
     ampApiKey: optionalEnv("AMP_API_KEY"),
+    googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
+    googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
