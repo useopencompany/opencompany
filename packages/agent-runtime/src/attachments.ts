@@ -1,3 +1,5 @@
+import { AGENT_MODEL_CATALOG } from "./models";
+
 export type AttachmentKind = "image" | "pdf";
 
 export const ATTACHMENT_IMAGE_MIME_TYPES = [
@@ -41,4 +43,9 @@ export function validateAttachmentCandidate(input: {
     return { ok: false, reason: "size" };
   }
   return { ok: true, kind };
+}
+
+export function modelSupportsAttachments(modelId: string): { images: boolean; pdf: boolean } {
+  const model = AGENT_MODEL_CATALOG.find((entry) => entry.id === modelId);
+  return { images: Boolean(model?.supportsImages), pdf: Boolean(model?.supportsPdf) };
 }

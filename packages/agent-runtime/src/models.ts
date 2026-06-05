@@ -20,6 +20,8 @@ export type AgentModelDefinition = {
   description: string;
   category: "Fast" | "Deep";
   supportsReasoning: boolean;
+  supportsImages?: boolean;
+  supportsPdf?: boolean;
   ratings: ModelRatings;
   reasoning?: {
     providerOptions: ModelProviderOptions;
@@ -49,6 +51,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Fast GPT model with light thinking for everyday agent work.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 2, speed: 3, cost: 2 },
     reasoning: {
       providerOptions: {
@@ -67,6 +71,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Lowest-cost GPT model for high-volume lightweight agent turns.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 1, speed: 3, cost: 1 },
     reasoning: {
       providerOptions: {
@@ -85,6 +91,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Deep thinking GPT model for complex reasoning and long workflows.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 3, speed: 2, cost: 3 },
     reasoning: {
       providerOptions: {
@@ -103,6 +111,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "OpenAI coding model optimized for long-horizon agentic engineering tasks.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 3, speed: 2, cost: 3 },
     reasoning: {
       providerOptions: {
@@ -121,6 +131,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Fast Claude model for lightweight agent workloads.",
     category: "Fast",
     supportsReasoning: false,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 2, speed: 2, cost: 2 },
   },
   {
@@ -130,6 +142,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Deep Claude model for coding and professional work.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 3, speed: 1, cost: 3 },
     reasoning: {
       providerOptions: {
@@ -147,6 +161,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Highest-capability Claude model for demanding agent workflows.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 3, speed: 1, cost: 3 },
     reasoning: {
       providerOptions: {
@@ -164,6 +180,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Latest highest-capability Claude model for demanding agent workflows.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 3, speed: 2, cost: 3 },
     reasoning: {
       providerOptions: {
@@ -181,6 +199,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Popular Gemini model with strong speed and long-context capacity.",
     category: "Fast",
     supportsReasoning: false,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 2, speed: 3, cost: 2 },
   },
   {
@@ -190,6 +210,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Very fast, low-cost Gemini model for simple high-volume tasks.",
     category: "Fast",
     supportsReasoning: false,
+    supportsImages: true,
+    supportsPdf: true,
     ratings: { capability: 1, speed: 3, cost: 1 },
   },
   {
@@ -199,6 +221,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "High-throughput DeepSeek model for cost-sensitive agent work.",
     category: "Fast",
     supportsReasoning: false,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 1 },
   },
   {
@@ -208,6 +232,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Popular Mistral model balancing quality, latency, and cost.",
     category: "Deep",
     supportsReasoning: false,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 2 },
   },
   {
@@ -218,6 +244,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
       "Latest MiniMax model with 1M context, multimodality, and agentic coding strength.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
     ratings: { capability: 3, speed: 3, cost: 1 },
   },
   {
@@ -227,6 +255,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "High-capability MiniMax model for end-to-end software engineering agents.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -236,6 +266,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Throughput-optimized MiniMax M2.7 variant for latency-sensitive agent work.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -245,6 +277,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "MiniMax agentic model for full-stack development and multi-file code work.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -254,6 +288,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Fast MiniMax M2.5 variant for responsive coding and agent workflows.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -263,6 +299,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "MiniMax model for reliable agentic coding with interleaved thinking.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -272,6 +310,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Speed-optimized MiniMax M2.1 variant for fast coding assistance.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -281,6 +321,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Open-weight MiniMax MoE model built for coding and agentic tasks.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 1, speed: 2, cost: 1 },
   },
   {
@@ -290,6 +332,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Latest Kimi model for long-horizon coding and agent workflows.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 3, speed: 1, cost: 2 },
     reasoning: {
       providerOptions: {},
@@ -303,6 +347,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Kimi multimodal model for agent tasks, coding, and visual understanding.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 1, cost: 1 },
     reasoning: {
       providerOptions: {},
@@ -316,6 +362,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Kimi reasoning model for long tool-call chains and explicit deliberation.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 3, speed: 1, cost: 2 },
     reasoning: {
       providerOptions: {},
@@ -329,6 +377,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Faster Kimi reasoning variant for interactive agent workflows.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 3, speed: 2, cost: 2 },
     reasoning: {
       providerOptions: {},
@@ -342,6 +392,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Speed-optimized Kimi K2 variant for latency-sensitive tool use.",
     category: "Fast",
     supportsReasoning: false,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 3 },
   },
   {
@@ -351,6 +403,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Kimi K2 instruct model for broad coding and agentic pipelines.",
     category: "Deep",
     supportsReasoning: false,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 1, cost: 1 },
   },
   {
@@ -360,6 +414,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "xAI reasoning model with 1M context, tool use, vision, and web search support.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
     ratings: { capability: 3, speed: 2, cost: 1 },
   },
   {
@@ -369,6 +425,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Long-context Grok reasoning model for agentic workflows and research.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -378,6 +436,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Long-context Grok model optimized for direct answers and tool calling.",
     category: "Deep",
     supportsReasoning: false,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -387,6 +447,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Fast, low-cost Grok reasoning model with 1M context.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 1 },
   },
   {
@@ -396,6 +458,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Fast, low-cost Grok model for direct tool-using agent turns.",
     category: "Fast",
     supportsReasoning: false,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 1, speed: 3, cost: 1 },
   },
   {
@@ -405,6 +469,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "xAI coding model trained for fast agentic software development.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 3, cost: 1 },
   },
   {
@@ -414,6 +480,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Latest GLM model for coding-heavy and agentic engineering tasks.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 2 },
   },
   {
@@ -423,6 +491,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Faster GLM 5 variant for production agent workflows.",
     category: "Fast",
     supportsReasoning: true,
+    supportsImages: false,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 2 },
   },
   {
@@ -432,6 +502,8 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     description: "Multimodal GLM 5 model tuned for visual coding and GUI tasks.",
     category: "Deep",
     supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
     ratings: { capability: 2, speed: 2, cost: 2 },
   },
 ];
