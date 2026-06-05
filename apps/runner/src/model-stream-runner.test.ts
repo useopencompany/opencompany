@@ -29,6 +29,7 @@ const leaseWrites = vi.hoisted(() => ({
     await eventMocks.appendRuntimeEvent(undefined, event);
     return true;
   }),
+  insertToolMessageForLease: vi.fn(async () => true),
   insertToolApprovalForLease: vi.fn(async () => "inserted"),
   requireLeaseWrite: vi.fn(async (value: unknown) => value),
 }));
@@ -311,6 +312,75 @@ describe("collectAssistantStream", () => {
 
     // Initial part read (1) plus the forced finish-step boundary read (2).
     expect(heartbeatAndLoadState).toHaveBeenCalledTimes(2);
+  });
+
+  it("persists invalid tool input stream errors as recoverable tool results", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const malformedInput = '{"path":"brain/report.md","content":"unterminated';
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_write",
+        toolName: "write_file",
+        input: malformedInput,
+        invalid: true,
+      }),
+      streamPart({
+        type: "tool-error",
+        toolCallId: "call_write",
+        toolName: "write_file",
+        input: malformedInput,
+        error:
+          "Invalid input for tool write_file: JSON parsing failed. Error message: JSON Parse error: Unterminated string",
+      }),
+      streamPart({
+        type: "finish-step",
+        finishReason: "tool-calls",
+        rawFinishReason: "tool_use",
+      }),
+    ]);
+
+    await expect(collect(stream, { toolStartCoordinator: coordinator })).resolves.toMatchObject({
+      assistantReplayParts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_write",
+          toolName: "write_file",
+          input: malformedInput,
+        },
+      ],
+      lastStepEndedWithToolCalls: true,
+    });
+
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "ses_123",
+        toolName: "write_file",
+        toolCallId: "call_write",
+        content: expect.stringContaining('"code":"invalid_tool_input"'),
+      }),
+    );
+    const insertCalls = vi.mocked(leaseWrites.insertToolMessageForLease).mock.calls as unknown[][];
+    const insertedToolMessage = insertCalls[0]?.[0] as { content?: unknown } | undefined;
+    expect(String(insertedToolMessage?.content)).not.toContain("unterminated");
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          toolCallId: "call_write",
+          name: "write_file",
+          error: expect.objectContaining({
+            code: "invalid_tool_input",
+            recoverable: true,
+          }),
+        }),
+      }),
+    );
+    expect(leaseWrites.appendRuntimeEventForLease).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tool.started" }),
+    );
   });
 
   it("stops within one stream part when the local controller is aborted, without a DB read", async () => {
