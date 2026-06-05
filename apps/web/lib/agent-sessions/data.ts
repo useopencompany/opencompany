@@ -123,92 +123,100 @@ export async function loadAgentSessionDetailForWorkspace(
 
   if (!session) return null;
 
-  const [parentRows, children, messages, events, usageRows, rollupRows, latestModelRequestRows] =
-    await Promise.all([
-      session.parentSessionId
-        ? db
-            .select({
-              id: agentSessions.id,
-              title: agentSessions.title,
-              status: agentSessions.status,
-              agentName: agents.name,
-              agentPath: agents.path,
-              parentMessageId: agentSessions.parentMessageId,
-              parentToolCallId: agentSessions.parentToolCallId,
-              createdAt: agentSessions.createdAt,
-              updatedAt: agentSessions.updatedAt,
-            })
-            .from(agentSessions)
-            .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-            .where(
-              and(
-                eq(agentSessions.id, session.parentSessionId),
-                eq(agentSessions.workspaceId, workspaceId),
-                eq(agentSessions.userId, userId),
-                isNull(agentSessions.archivedAt),
-              ),
-            )
-            .limit(1)
-        : Promise.resolve([]),
-      db
-        .select({
-          id: agentSessions.id,
-          title: agentSessions.title,
-          status: agentSessions.status,
-          agentName: agents.name,
-          agentPath: agents.path,
-          parentMessageId: agentSessions.parentMessageId,
-          parentToolCallId: agentSessions.parentToolCallId,
-          createdAt: agentSessions.createdAt,
-          updatedAt: agentSessions.updatedAt,
-        })
-        .from(agentSessions)
-        .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-        .where(
-          and(
-            eq(agentSessions.parentSessionId, sessionId),
-            eq(agentSessions.workspaceId, workspaceId),
-            eq(agentSessions.userId, userId),
-            eq(agentSessions.source, "agent"),
-            isNull(agentSessions.archivedAt),
-          ),
-        )
-        .orderBy(desc(agentSessions.updatedAt))
-        .limit(25),
-      db
-        .select()
-        .from(agentSessionMessages)
-        .where(eq(agentSessionMessages.sessionId, sessionId))
-        .orderBy(asc(agentSessionMessages.createdAt)),
-      db
-        .select()
-        .from(agentSessionEvents)
-        // Exclude the per-turn `debug.model_request` snapshots from the windowed event list: they are
-        // large, hidden from the inspector, and would otherwise consume the 300-row budget (and ship
-        // to the browser repeatedly). The latest one is fetched separately below.
-        .where(
-          and(
-            eq(agentSessionEvents.sessionId, sessionId),
-            ne(agentSessionEvents.type, "debug.model_request"),
-          ),
-        )
-        .orderBy(asc(agentSessionEvents.id))
-        .limit(300),
-      db
-        .select({
-          messageId: agentSessionUsage.messageId,
-          inputTokens: agentSessionUsage.inputTokens,
-          inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
-          inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
-          inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
-          outputTokens: agentSessionUsage.outputTokens,
-          outputTextTokens: agentSessionUsage.outputTextTokens,
-          outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
-          totalTokens: agentSessionUsage.totalTokens,
-        })
-        .from(agentSessionUsage)
-        .where(eq(agentSessionUsage.sessionId, sessionId)),
-      db.execute(sql`
+  const [
+    parentRows,
+    children,
+    messages,
+    events,
+    usageRows,
+    rollupRows,
+    latestModelRequestRows,
+    latestUsageRows,
+  ] = await Promise.all([
+    session.parentSessionId
+      ? db
+          .select({
+            id: agentSessions.id,
+            title: agentSessions.title,
+            status: agentSessions.status,
+            agentName: agents.name,
+            agentPath: agents.path,
+            parentMessageId: agentSessions.parentMessageId,
+            parentToolCallId: agentSessions.parentToolCallId,
+            createdAt: agentSessions.createdAt,
+            updatedAt: agentSessions.updatedAt,
+          })
+          .from(agentSessions)
+          .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+          .where(
+            and(
+              eq(agentSessions.id, session.parentSessionId),
+              eq(agentSessions.workspaceId, workspaceId),
+              eq(agentSessions.userId, userId),
+              isNull(agentSessions.archivedAt),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
+    db
+      .select({
+        id: agentSessions.id,
+        title: agentSessions.title,
+        status: agentSessions.status,
+        agentName: agents.name,
+        agentPath: agents.path,
+        parentMessageId: agentSessions.parentMessageId,
+        parentToolCallId: agentSessions.parentToolCallId,
+        createdAt: agentSessions.createdAt,
+        updatedAt: agentSessions.updatedAt,
+      })
+      .from(agentSessions)
+      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+      .where(
+        and(
+          eq(agentSessions.parentSessionId, sessionId),
+          eq(agentSessions.workspaceId, workspaceId),
+          eq(agentSessions.userId, userId),
+          eq(agentSessions.source, "agent"),
+          isNull(agentSessions.archivedAt),
+        ),
+      )
+      .orderBy(desc(agentSessions.updatedAt))
+      .limit(25),
+    db
+      .select()
+      .from(agentSessionMessages)
+      .where(eq(agentSessionMessages.sessionId, sessionId))
+      .orderBy(asc(agentSessionMessages.createdAt)),
+    db
+      .select()
+      .from(agentSessionEvents)
+      // Exclude the per-turn `debug.model_request` snapshots from the windowed event list: they are
+      // large, hidden from the inspector, and would otherwise consume the 300-row budget (and ship
+      // to the browser repeatedly). The latest one is fetched separately below.
+      .where(
+        and(
+          eq(agentSessionEvents.sessionId, sessionId),
+          ne(agentSessionEvents.type, "debug.model_request"),
+        ),
+      )
+      .orderBy(asc(agentSessionEvents.id))
+      .limit(300),
+    db
+      .select({
+        messageId: agentSessionUsage.messageId,
+        inputTokens: agentSessionUsage.inputTokens,
+        inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
+        inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
+        inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
+        outputTokens: agentSessionUsage.outputTokens,
+        outputTextTokens: agentSessionUsage.outputTextTokens,
+        outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
+        totalTokens: agentSessionUsage.totalTokens,
+      })
+      .from(agentSessionUsage)
+      .where(eq(agentSessionUsage.sessionId, sessionId)),
+    db.execute(sql`
       WITH RECURSIVE session_tree(id, path) AS (
         SELECT id, ARRAY[id]::text[]
         FROM agent_sessions
@@ -298,23 +306,38 @@ export async function loadAgentSessionDetailForWorkspace(
       CROSS JOIN cost_totals
       CROSS JOIN tool_totals
     `),
-      // The single most-recent model-request debug snapshot. Surfaced as a top-level detail field
-      // (not via the windowed `events` above) so the "Copy Debug JSON" export still finds it on long
-      // sessions whose latest turn falls outside the 300-event window.
-      db
-        .select({ payload: agentSessionEvents.payload })
-        .from(agentSessionEvents)
-        .where(
-          and(
-            eq(agentSessionEvents.sessionId, sessionId),
-            eq(agentSessionEvents.type, "debug.model_request"),
-          ),
-        )
-        .orderBy(desc(agentSessionEvents.id))
-        .limit(1),
-    ]);
+    // The single most-recent model-request debug snapshot. Surfaced as a top-level detail field
+    // (not via the windowed `events` above) so the "Copy Debug JSON" export still finds it on long
+    // sessions whose latest turn falls outside the 300-event window.
+    db
+      .select({ payload: agentSessionEvents.payload })
+      .from(agentSessionEvents)
+      .where(
+        and(
+          eq(agentSessionEvents.sessionId, sessionId),
+          eq(agentSessionEvents.type, "debug.model_request"),
+        ),
+      )
+      .orderBy(desc(agentSessionEvents.id))
+      .limit(1),
+    // The most recent model step for THIS session only (not the recursive tree). Its
+    // input + output tokens approximate how full the model's context window currently is —
+    // the prompt just sent plus what was generated and carried into the next turn. This is the
+    // "context now" figure, distinct from the cumulative `usage` rollup which only grows.
+    db
+      .select({
+        inputTokens: agentSessionUsage.inputTokens,
+        outputTokens: agentSessionUsage.outputTokens,
+      })
+      .from(agentSessionUsage)
+      .where(eq(agentSessionUsage.sessionId, sessionId))
+      .orderBy(desc(agentSessionUsage.createdAt))
+      .limit(1),
+  ]);
   const rollup = parseSessionTreeRollup(rowsFromExecute<Record<string, unknown>>(rollupRows)[0]);
   const usage = rollup.usage;
+  const latestUsage = latestUsageRows[0];
+  const currentContextTokens = latestUsage ? latestUsage.inputTokens + latestUsage.outputTokens : 0;
   const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
   for (const row of usageRows) {
     if (!row.messageId) continue;
@@ -358,6 +381,7 @@ export async function loadAgentSessionDetailForWorkspace(
     usage,
     toolUsage,
     cost,
+    currentContextTokens,
     latestModelRequest: latestModelRequestRows[0]?.payload ?? null,
   });
 }
@@ -459,6 +483,8 @@ export function buildCreatedSessionDetail(input: {
     usage: EMPTY_USAGE,
     toolUsage: EMPTY_TOOL_USAGE,
     cost: EMPTY_COST,
+    // A just-created session has no model steps yet, so the context window is empty.
+    currentContextTokens: 0,
   });
 }
 

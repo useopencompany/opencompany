@@ -73,6 +73,9 @@ export type AgentSessionDetailPayload = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
+  // How full the model's context window currently is, in tokens: the latest model step's
+  // input + output for this session (NOT the cumulative `usage` rollup, which only grows).
+  currentContextTokens: number;
   latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
@@ -105,6 +108,7 @@ export type AgentSessionDetailSerializable = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
+  currentContextTokens: number;
   latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
@@ -155,6 +159,7 @@ export function serializeAgentSessionDetail(
     usage: detail.usage,
     toolUsage: detail.toolUsage,
     cost: detail.cost,
+    currentContextTokens: detail.currentContextTokens,
     // Omit the key entirely when absent so the parse round-trip stays exact for sessions with no
     // recorded model-request snapshot.
     ...(detail.latestModelRequest ? { latestModelRequest: detail.latestModelRequest } : {}),
@@ -259,6 +264,8 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     usage: parseUsageSummary(record.usage),
     toolUsage: parseToolUsageSummary(record.toolUsage),
     cost: parseCostSummary(record.cost),
+    // Tolerant of absence so payloads cached before this field shipped still parse.
+    currentContextTokens: readOptionalNumberField(record, "currentContextTokens") ?? 0,
     // Conditionally included so payloads without a snapshot stay byte-for-byte equal across the
     // serialize/parse round trip (and so older cached payloads parse unchanged).
     ...(latestModelRequest ? { latestModelRequest } : {}),

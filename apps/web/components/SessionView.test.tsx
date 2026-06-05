@@ -687,6 +687,7 @@ function makeDetail(overrides: Partial<AgentSessionDetailPayload> = {}): AgentSe
       providerCostUsdMicros: 0,
       platformFeeUsdMicros: 0,
     },
+    currentContextTokens: 0,
     ...overrides,
   };
 }

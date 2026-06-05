@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
@@ -26,6 +27,7 @@ import {
   Play,
   Plus,
   ShieldAlert,
+  Sparkles,
   TerminalSquare,
   Upload,
   Wrench,
@@ -47,12 +49,14 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
+import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -91,7 +95,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
-import { deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import {
   getSlashContext,
   matchSlashCommands,
@@ -366,7 +370,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
     // session-tree rollup isn't reproduced client-side (D2); refreshed on
     // completion via the effect below.
-    const aggregates = { usage: detail.usage, toolUsage: detail.toolUsage, cost: detail.cost };
+    const aggregates = {
+      usage: detail.usage,
+      toolUsage: detail.toolUsage,
+      cost: detail.cost,
+      // Server-sourced like the other aggregates (refreshed on turn completion); the context
+      // gauge in the top bar reads this rather than the cumulative `usage` total.
+      currentContextTokens: detail.currentContextTokens,
+    };
     // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
     // Stream (`streamState`) is the live overlay. Union-merge the two so the
     // transcript paints instantly from the snapshot AND never drops a durable
@@ -961,20 +972,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="border-b border-border-subtle bg-canvas/90 px-6 py-3">
-          <div className="mx-auto flex w-full max-w-[960px] items-center gap-3">
-            <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
-            <div className="min-w-0 pr-10">
-              <div className="truncate text-[13px] font-medium tracking-[-0.005em] text-ink">
-                {session.agentName}
-              </div>
-            </div>
-          </div>
-        </div>
+        <SessionTopBar
+          session={session}
+          currentContextTokens={runtime.currentContextTokens}
+          inspectorCollapsed={inspectorCollapsed}
+          onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
+        />
 
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-8 lg:px-12 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {
@@ -1102,7 +1109,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             there's a single input surface. Falls back to the text composer if the pending question
             can't be located (status race), so the user is never stuck. */}
         {sessionIsAwaitingInput && pendingQuestion ? (
-          <div className="bg-canvas px-8 lg:px-12 py-4">
+          <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
               <QuestionComposer
                 key={pendingQuestion.id}
@@ -1112,7 +1119,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             </div>
           </div>
         ) : (
-          <div className="bg-canvas px-8 lg:px-12 py-4">
+          <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
               <Composer
                 variant="compact"
@@ -1398,17 +1405,137 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           onAbort={requestAbort}
         />
       </aside>
-
-      <button
-        type="button"
-        aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
-        aria-expanded={!inspectorCollapsed}
-        onClick={() => updateInspectorCollapsed(!inspectorCollapsed)}
-        className="fixed right-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <PanelRight size={15} strokeWidth={1.75} />
-      </button>
     </main>
+  );
+}
+
+// Slim session header: agent name, the model (with its provider icon), the count of enabled
+// capabilities (tools + MCP + skills), and the runtime-sidebar toggle. The agent config — and
+// thus the capability count — is read live from the synced `agents` collection so it stays
+// reactive without threading extra fields through the session payload.
+function SessionTopBar({
+  session,
+  currentContextTokens,
+  inspectorCollapsed,
+  onToggleInspector,
+}: {
+  session: AgentSessionDetailPayload["session"];
+  currentContextTokens: number;
+  inspectorCollapsed: boolean;
+  onToggleInspector: () => void;
+}) {
+  const { agents } = useCollections();
+  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const capabilityCount = useMemo(() => {
+    const row = agentRows?.find((agent) => agent.id === session.agentId);
+    if (!row) return null;
+    const config = agentRowToListItem(row).config;
+    // `config.tools` already folds MCP servers in (entries with type "mcp"), so tools + MCP is
+    // its length; skills are tracked separately.
+    return config.tools.length + (config.skills?.length ?? 0);
+  }, [agentRows, session.agentId]);
+
+  const model = findModel(session.modelName);
+  const ModelIcon = model?.icon ?? Sparkles;
+  const modelLabel = model?.label ?? session.modelName.split("/").at(-1) ?? session.modelName;
+  const contextMax = model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+
+  return (
+    <header className="flex items-center justify-between gap-3 px-6 py-2">
+      <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
+        <span className="truncate font-medium text-ink">{session.agentName}</span>
+        <span className="shrink-0 text-ink-subtle/60" aria-hidden>
+          ·
+        </span>
+        <span className="flex min-w-0 shrink items-center gap-1.5">
+          <ModelIcon size={12} className="shrink-0 text-ink-muted" />
+          <span className="truncate">{modelLabel}</span>
+        </span>
+        {capabilityCount && capabilityCount > 0 ? (
+          <>
+            <span className="shrink-0 text-ink-subtle/60" aria-hidden>
+              ·
+            </span>
+            <span className="shrink-0">
+              {capabilityCount} {capabilityCount === 1 ? "capability" : "capabilities"}
+            </span>
+          </>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {currentContextTokens > 0 ? (
+          <ContextWindowMeter used={currentContextTokens} max={contextMax} />
+        ) : null}
+        <button
+          type="button"
+          aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
+          aria-expanded={!inspectorCollapsed}
+          onClick={onToggleInspector}
+          className="shrink-0 rounded-md p-1.5 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <PanelRight size={15} strokeWidth={1.75} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// Compact token formatter for the context gauge tooltip: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
+function formatCompactTokens(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return `${value}`;
+}
+
+// A small ring that fills to the share of the model's context window in use. The exact
+// "used / max" figure stays out of the chrome and is surfaced only on hover (native title),
+// keeping the top bar quiet.
+function ContextWindowMeter({ used, max }: { used: number; max: number }) {
+  const fraction = max > 0 ? Math.min(1, used / max) : 0;
+  const size = 14;
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+    fraction * 100,
+  )}%`;
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger
+          aria-label={`Context window usage: ${detail}`}
+          className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              strokeWidth={strokeWidth}
+              stroke="currentColor"
+              className="text-ink/15"
+            />
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              strokeWidth={strokeWidth}
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - fraction)}
+              className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+            />
+          </svg>
+        </TooltipTrigger>
+        <TooltipContent>{detail}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
