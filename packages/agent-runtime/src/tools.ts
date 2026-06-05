@@ -1813,7 +1813,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
         },
         query: {
           type: "string",
-          description: 'Optional Gmail search query (same syntax as the Gmail search box).',
+          description: "Optional Gmail search query (same syntax as the Gmail search box).",
         },
       },
       additionalProperties: false,
@@ -1885,7 +1885,8 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "gmail_get_thread",
     kind: "hosted",
     configToolId: "gmail",
-    description: "Fetch a Gmail thread by id, returning each message's headers and body. Read-only.",
+    description:
+      "Fetch a Gmail thread by id, returning each message's headers and body. Read-only.",
     parameters: {
       type: "object",
       properties: {
