@@ -193,5 +193,8 @@ export function deriveSessionDetailPlaceholder(
     usage: EMPTY_USAGE,
     toolUsage: EMPTY_TOOL_USAGE,
     cost: EMPTY_COST,
+    // This projection has no per-step usage rows to read; the live detail query supplies the
+    // real context figure once it loads.
+    currentContextTokens: 0,
   };
 }
