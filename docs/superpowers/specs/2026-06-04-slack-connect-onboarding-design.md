@@ -66,7 +66,9 @@ Documented here so it is not forgotten; it blocks the feature working in any env
 
 1. Create an OpenCompany Slack app in the OC Slack workspace.
 2. Bot token scopes:
-   - `channels:manage` / `groups:write` — create private channels.
+   - `groups:write` — create private channels + invite the support members.
+   - `groups:read` — look up a private channel by name to adopt the one a crashed
+     provisioning attempt left behind (no duplicate channel on retry).
    - `chat:write` — post a welcome message.
    - `conversations.connect:write` (a.k.a. the Slack Connect write capability) — send
      external shared-channel invites. **Note:** Slack may require app review / org approval

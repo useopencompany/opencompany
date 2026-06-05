@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { WebClient } from "@slack/web-api";
 import { channelName, workspaceChannelSlug } from "./slugify";
 
@@ -28,6 +29,15 @@ type SlackProvisionClient = {
     }) => Promise<{ channel?: { id?: string } }>;
     invite: (args: { channel: string; users: string }) => Promise<unknown>;
     inviteShared: (args: { channel: string; emails: string[] }) => Promise<{ url?: string }>;
+    list: (args: {
+      types?: string;
+      exclude_archived?: boolean;
+      limit?: number;
+      cursor?: string | undefined;
+    }) => Promise<{
+      channels?: Array<{ id?: string; name?: string }>;
+      response_metadata?: { next_cursor?: string };
+    }>;
   };
   chat: { postMessage: (args: { channel: string; text: string }) => Promise<unknown> };
 };
@@ -81,21 +91,56 @@ function isCustomerInviteBenign(error: unknown): boolean {
   return code === "already_in_channel" || code === "already_invited" || code === "already_shared";
 }
 
-// Step 1 of provisioning: create the private channel. Each call is its own Inngest
-// step in the orchestrator, and the channel id is persisted immediately after, so a
-// retry never re-creates (no orphaned channels).
+// A per-workspace channel-name suffix derived deterministically from the workspace id.
+// Baking it into the name from the start makes the name unique per workspace (no
+// cross-workspace collisions) AND makes a `name_taken` on retry unambiguous: it can only
+// be THIS workspace's own channel from an earlier attempt, so adopting it is safe.
+// sha256 (not the raw id tail) gives uniform distribution regardless of id format.
+function channelSuffix(workspaceId: string): string {
+  return createHash("sha256").update(workspaceId).digest("hex").slice(0, 6);
+}
+
+// The deterministic Slack channel name for a workspace's support channel.
+export function supportChannelName(workspace: { id: string; name: string }): string {
+  return channelName(workspaceChannelSlug(workspace.name), channelSuffix(workspace.id));
+}
+
+// Find a private channel by exact name (paginated). Used to ADOPT the channel a prior
+// provisioning attempt created but never persisted (process died between Slack's create
+// response and setSlackChannelId). Requires the `groups:read` bot scope.
+async function findChannelIdByName(
+  client: SlackProvisionClient,
+  name: string,
+): Promise<string | null> {
+  let cursor: string | undefined;
+  do {
+    const res = await client.conversations.list({
+      types: "private_channel",
+      exclude_archived: false,
+      limit: 200,
+      cursor,
+    });
+    const match = res.channels?.find((channel) => channel.name === name);
+    if (match?.id) return match.id;
+    cursor = res.response_metadata?.next_cursor || undefined;
+  } while (cursor);
+  return null;
+}
+
+// Step 1 of provisioning: create the workspace's private support channel. The name is
+// unique per workspace (slug + id-derived suffix), so a `name_taken` can only mean a
+// prior attempt already created it (its id wasn't persisted before a crash). In that
+// case we ADOPT the existing channel instead of minting a second (orphaned) one — this
+// is what keeps "exactly one channel per workspace" true even across a mid-create crash.
 export async function createSupportChannel(
   workspace: { id: string; name: string },
   deps?: SupportClientDeps,
 ): Promise<string> {
   const client = resolveClient(deps);
-  const slug = workspaceChannelSlug(workspace.name);
+  const name = supportChannelName(workspace);
 
   try {
-    const created = await client.conversations.create({
-      name: channelName(slug),
-      is_private: true,
-    });
+    const created = await client.conversations.create({ name, is_private: true });
     const id = created.channel?.id;
     if (!id) throw new SlackProvisionError("conversations.create returned no channel id");
     return id;
@@ -104,27 +149,15 @@ export async function createSupportChannel(
     if (slackErrorCode(error) !== "name_taken") {
       throw new SlackProvisionError("conversations.create failed", slackErrorCode(error));
     }
-    // Genuine cross-workspace name collision: retry once with an id-derived suffix
-    // (unique per workspace, so this never re-collides for the same workspace).
-    const suffix = workspace.id
-      .replace(/[^a-z0-9]/gi, "")
-      .slice(-6)
-      .toLowerCase();
-    try {
-      const retry = await client.conversations.create({
-        name: channelName(slug, suffix),
-        is_private: true,
-      });
-      const id = retry.channel?.id;
-      if (!id) throw new SlackProvisionError("conversations.create returned no channel id");
-      return id;
-    } catch (retryError) {
-      if (retryError instanceof SlackProvisionError) throw retryError;
+    // name_taken on our workspace-unique name → adopt the channel a prior attempt left.
+    const existingId = await findChannelIdByName(client, name);
+    if (!existingId) {
       throw new SlackProvisionError(
-        "conversations.create failed on collision retry",
-        slackErrorCode(retryError),
+        "conversations.create reported name_taken but the channel was not found",
+        "name_taken",
       );
     }
+    return existingId;
   }
 }
 

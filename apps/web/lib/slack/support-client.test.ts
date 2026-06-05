@@ -5,6 +5,7 @@ import {
   inviteSupportMembers,
   postIntroMessage,
   SlackNotConfiguredError,
+  supportChannelName,
 } from "./support-client";
 
 const originalEnv = { ...process.env };
@@ -15,6 +16,7 @@ function makeClient() {
       create: vi.fn(async () => ({ ok: true, channel: { id: "C123" } })),
       invite: vi.fn(async () => ({ ok: true })),
       inviteShared: vi.fn(async () => ({ ok: true, url: "https://join.slack.com/share/x" })),
+      list: vi.fn(async () => ({ ok: true, channels: [] })),
     },
     chat: { postMessage: vi.fn(async () => ({ ok: true })) },
   };
@@ -30,28 +32,61 @@ beforeEach(() => {
 });
 
 describe("createSupportChannel", () => {
-  it("creates a private oc-<slug> channel and returns its id", async () => {
+  it("creates a private oc-<slug>-<suffix> channel and returns its id", async () => {
     const client = makeClient();
     const id = await createSupportChannel(workspace, { client });
-    expect(client.conversations.create).toHaveBeenCalledWith({
-      name: "oc-acme-corp",
-      is_private: true,
-    });
+    expect(client.conversations.create).toHaveBeenCalledWith(
+      expect.objectContaining({ name: supportChannelName(workspace), is_private: true }),
+    );
+    expect(supportChannelName(workspace)).toMatch(/^oc-acme-corp-[0-9a-f]{6}$/);
     expect(id).toBe("C123");
   });
 
-  it("retries once with an id-derived suffix on name_taken", async () => {
+  it("adopts the existing channel on name_taken instead of creating a second one", async () => {
     const client = makeClient();
-    client.conversations.create = vi
-      .fn()
-      .mockRejectedValueOnce({ data: { error: "name_taken" } })
-      .mockResolvedValueOnce({ ok: true, channel: { id: "C999" } });
+    client.conversations.create = vi.fn().mockRejectedValue({ data: { error: "name_taken" } });
+    client.conversations.list = vi.fn(async () => ({
+      ok: true,
+      channels: [{ id: "C-existing", name: supportChannelName(workspace) }],
+    }));
 
     const id = await createSupportChannel(workspace, { client });
 
-    expect(client.conversations.create).toHaveBeenCalledTimes(2);
-    expect(client.conversations.create.mock.calls[1][0].name).toBe("oc-acme-corp-aaaaaa");
-    expect(id).toBe("C999");
+    expect(id).toBe("C-existing");
+    expect(client.conversations.create).toHaveBeenCalledTimes(1);
+    expect(client.conversations.list).toHaveBeenCalled();
+  });
+
+  it("paginates conversations.list to find the adopted channel", async () => {
+    const client = makeClient();
+    client.conversations.create = vi.fn().mockRejectedValue({ data: { error: "name_taken" } });
+    client.conversations.list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        channels: [{ id: "C-other", name: "oc-something-else" }],
+        response_metadata: { next_cursor: "page2" },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        channels: [{ id: "C-existing", name: supportChannelName(workspace) }],
+      });
+
+    const id = await createSupportChannel(workspace, { client });
+
+    expect(id).toBe("C-existing");
+    expect(client.conversations.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws when name_taken but the channel can't be found", async () => {
+    const client = makeClient();
+    client.conversations.create = vi.fn().mockRejectedValue({ data: { error: "name_taken" } });
+    client.conversations.list = vi.fn(async () => ({ ok: true, channels: [] }));
+
+    await expect(createSupportChannel(workspace, { client })).rejects.toMatchObject({
+      name: "SlackProvisionError",
+      slackError: "name_taken",
+    });
   });
 
   it("throws SlackNotConfiguredError when the bot token is missing and no client is injected", async () => {
