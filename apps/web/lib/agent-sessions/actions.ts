@@ -243,6 +243,79 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   return { ok: true, messageId } as const;
 }
 
+export async function continueInterruptedSession(sessionId: string) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+  const [hasBalance, sessionRows] = await Promise.all([
+    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+    db
+      .select({
+        id: agentSessions.id,
+        agentId: agentSessions.agentId,
+        status: agentSessions.status,
+        runLeaseId: agentSessions.runLeaseId,
+        modelProvider: agentSessions.modelProvider,
+        modelName: agentSessions.modelName,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      )
+      .limit(1),
+  ]);
+
+  if (!hasBalance) {
+    return { ok: false, error: "Add workspace credits to continue this session." } as const;
+  }
+  const session = sessionRows[0];
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.status !== "interrupted") {
+    return { ok: false, error: "This session is not interrupted." } as const;
+  }
+  if (session.runLeaseId) {
+    return { ok: false, error: "This session is still running. Try again shortly." } as const;
+  }
+
+  const { message } = await insertUserMessage(
+    sessionId,
+    "Continue",
+    [
+      "Continue from the interrupted turn.",
+      "The prior runner process was stopped while this session was active.",
+      "Inspect the current workspace and sandbox state before deciding what to do next.",
+      "Do not repeat completed work or duplicate side effects if the interrupted tool already made progress.",
+    ].join(" "),
+  );
+  const messageId = message.id;
+
+  after(() =>
+    Promise.all([
+      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
+      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      captureServerEvent("session_message_sent", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: session.agentId,
+        session_id: sessionId,
+        message_id: messageId,
+        model_provider: session.modelProvider,
+        model_name: session.modelName,
+        is_initial_message: false,
+        message_length: "Continue".length,
+      }),
+    ]),
+  );
+
+  return { ok: true, messageId } as const;
+}
+
 export async function abortAgentSession(sessionId: string) {
   const { user, workspace } = await currentWorkspace();
   const db = getDb();
@@ -730,7 +803,7 @@ async function insertAgentSession(input: {
   return { session, statusEvent };
 }
 
-async function insertUserMessage(sessionId: string, content: string) {
+async function insertUserMessage(sessionId: string, content: string, modelContent = content) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
   const payload = { messageId, role: "user", content, status: "completed" };
@@ -744,7 +817,7 @@ async function insertUserMessage(sessionId: string, content: string) {
         role: "user",
         status: "completed",
         content,
-        modelMessage: { role: "user", content },
+        modelMessage: { role: "user", content: modelContent },
         completedAt: new Date(),
       })
       .returning(),
