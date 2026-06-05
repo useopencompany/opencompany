@@ -1,6 +1,6 @@
 import { resolveAgentRuntimeConfig, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
-import type { LogFields } from "@opencompany/observability";
-import { logBraintrustCurrentSpan, logBraintrustSpan } from "@opencompany/observability/braintrust";
+import { timeAsync } from "@opencompany/observability";
+import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import type { ModelMessage, StopCondition, ToolSet } from "ai";
 import * as ai from "ai";
 import {
@@ -15,11 +15,7 @@ import { observeRunStep, type RunContext } from "./run-context";
 import type { RunControlCheck } from "./run-control";
 import { ToolStepLimitExceededError } from "./runner-errors";
 import type { LoadedSession } from "./session-lifecycle";
-import {
-  addAnthropicCacheControlToLastMessage,
-  buildCacheableSystemPrompt,
-  normalizeReasoningSummary,
-} from "./stream-helpers";
+import { normalizeReasoningSummary } from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -69,55 +65,43 @@ export async function streamAssistantResponse(input: {
       suspendable: input.suspendable,
     }),
   );
-  const modelSystem = buildCacheableSystemPrompt(input.system, input.runtime.model.name);
   const selectedTools = {
     ...pickRuntimeTools(input.tools, input.runtime.tools),
     ...mcpToolSet.tools,
   };
-  // Instrument the model call as an `llm` span manually rather than via Braintrust's `wrapAISDK`.
-  // wrapAISDK closes the streaming span only when its patched result stream drains to completion
-  // (there is no error/cancel handler on that path), so any abort, tool/stream error, or early
-  // exit while we consume `result.fullStream` ourselves leaves the span stuck "in progress" with
-  // no usage logged. `observeRunStep` -> `traceBraintrustStep` always calls `span.end()` in a
-  // finally, so the span closes deterministically and we log usage/cost from data we collect.
-  const modelInput = [
-    ...(modelSystem ? [{ role: "system", content: modelSystem }] : []),
-    ...input.messages,
-  ];
+  // The model call is traced by Braintrust's `wrapAISDK` (via `getBraintrustAISDK`): it opens the
+  // `streamText` / `doStream` LLM spans, capturing input, output, per-step tool calls, usage, and
+  // derived cost, and nests them under the current per-turn root span. We keep only the Better Stack
+  // timing trace here via `timeAsync`. Tradeoff: `wrapAISDK` closes its streaming span when the
+  // stream drains, so on a mid-stream abort/suspend the LLM span can stay "in progress" with no
+  // usage — an accepted limitation of the default integration (see docs/observability.md). When
+  // Braintrust is disabled, `getBraintrustAISDK` returns the unwrapped `ai`, so this is a no-op.
+  const { streamText } = getBraintrustAISDK(ai);
   try {
-    const streamStartedAt = Date.now();
-    let firstStreamPartAt: number | undefined;
-    return await observeRunStep(
-      input.ctx,
+    return await timeAsync(
+      input.ctx.trace,
       "model_stream_total",
-      async (span) => {
-        const result = ai.streamText({
+      async () => {
+        const result = streamText({
           model: gateway(input.runtime.model.name),
-          system: modelSystem,
+          system: input.system,
           messages: input.messages,
           tools: selectedTools,
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
           abortSignal: input.ctx.controller.signal,
           includeRawChunks: input.runtime.model.reasoningExposure === "raw",
-          prepareStep: ({ messages }) => ({
-            messages: addAnthropicCacheControlToLastMessage(messages, input.runtime.model.name),
-          }),
           ...(input.runtime.model.providerOptions
             ? { providerOptions: input.runtime.model.providerOptions }
             : {}),
         });
 
-        const collected = await collectAssistantStream({
+        return collectAssistantStream({
           stream: result.fullStream,
-          readFirstPart: async (iterator) => {
-            return observeRunStep(input.ctx, "model_first_stream_part", () => iterator.next(), {
+          readFirstPart: (iterator) =>
+            timeAsync(input.ctx.trace, "model_first_stream_part", () => iterator.next(), {
               model_provider: input.runtime.model.provider,
               model_name: input.runtime.model.name,
-            });
-          },
-          onFirstOutputPart: () => {
-            firstStreamPartAt ??= Date.now();
-          },
+            }),
           sessionId: input.ctx.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.ctx.leaseId,
@@ -131,40 +115,12 @@ export async function streamAssistantResponse(input: {
           policy: input.policy,
           suspendable: input.suspendable,
         });
-        // Log on the explicit span object (not `currentSpan()`): the AI SDK stream consumption can
-        // run outside this span's async-context, which would silently drop a `currentSpan()` log
-        // to a no-op span — leaving the span with no output/usage and stuck "in progress".
-        logBraintrustSpan(span, {
-          output: collected.reasoningSummary
-            ? {
-                role: "assistant",
-                content: collected.assistantContent,
-                reasoning: collected.reasoningSummary,
-              }
-            : collected.reasoningContent
-              ? {
-                  role: "assistant",
-                  content: collected.assistantContent,
-                  reasoning: collected.reasoningContent,
-                }
-              : { role: "assistant", content: collected.assistantContent },
-          metrics: modelStreamMetrics(collected.modelSteps, streamStartedAt, firstStreamPartAt),
-          metadata: {
-            // Braintrust derives estimated cost from `metadata.model` + token metrics.
-            model: input.runtime.model.name,
-            assistant_message_id: input.assistantMessageId,
-            model_provider: input.runtime.model.provider,
-            model_name: input.runtime.model.name,
-          },
-        });
-        return collected;
       },
       {
         model_provider: input.runtime.model.provider,
         model_name: input.runtime.model.name,
         assistant_message_id: input.assistantMessageId,
       },
-      { type: "llm", input: modelInput },
     );
   } finally {
     await mcpToolSet.close();
@@ -200,18 +156,6 @@ export async function persistAssistantCompletion(input: {
   );
   const normalizedReasoningSummary = normalizeReasoningSummary(input.reasoningSummary);
   const normalizedReasoningContent = normalizeReasoningSummary(input.reasoningContent);
-  logBraintrustCurrentSpan({
-    output: {
-      content: input.assistantContent,
-      replayParts: input.assistantReplayParts,
-      ...(normalizedReasoningSummary ? { reasoningSummary: normalizedReasoningSummary } : {}),
-      ...(normalizedReasoningContent ? { reasoningContent: normalizedReasoningContent } : {}),
-    },
-    metadata: {
-      assistant_message_id: input.assistantMessageId,
-      internal: input.internal,
-    },
-  });
   if (normalizedReasoningSummary) {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -261,7 +205,12 @@ export function assertTurnComplete(
     "assistantContent" | "assistantReplayParts" | "lastStepEndedWithToolCalls" | "stepCount"
   >,
 ) {
-  if (!streamResult.assistantContent && streamResult.assistantReplayParts.length === 0) {
+  // Check the final step, not whether any step touched a tool: a turn that ends
+  // on a `stop` after an earlier tool call but with no text delivered nothing to
+  // the user. `lastStepEndedWithToolCalls` is the "final step produced tools"
+  // signal — true only when the loop ended on tool calls (step limit / custom
+  // stop), which is the legitimate tool-only case we keep valid.
+  if (!streamResult.assistantContent && !streamResult.lastStepEndedWithToolCalls) {
     throw new Error("Model stream completed without text or tool calls.");
   }
 
@@ -307,48 +256,4 @@ export function detectIncompleteTurn(
     reason: INCOMPLETE_TURN_REASON,
     reasonDetail: INCOMPLETE_TURN_REASON_DETAIL,
   };
-}
-
-function modelStreamMetrics(
-  modelSteps: Awaited<ReturnType<typeof collectAssistantStream>>["modelSteps"],
-  streamStartedAt: number,
-  firstStreamPartAt: number | undefined,
-): LogFields {
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let totalTokens = 0;
-  let cachedTokens = 0;
-  let reasoningTokens = 0;
-
-  for (const step of modelSteps) {
-    const usage = isRecord(step.usage) ? step.usage : {};
-    inputTokens += readMetricNumber(usage.inputTokens) ?? readMetricNumber(usage.promptTokens) ?? 0;
-    outputTokens +=
-      readMetricNumber(usage.outputTokens) ?? readMetricNumber(usage.completionTokens) ?? 0;
-    totalTokens += readMetricNumber(usage.totalTokens) ?? 0;
-    cachedTokens += readMetricNumber(usage.cachedInputTokens) ?? 0;
-    reasoningTokens += readMetricNumber(usage.reasoningTokens) ?? 0;
-  }
-
-  if (totalTokens === 0) totalTokens = inputTokens + outputTokens;
-
-  return {
-    ...(firstStreamPartAt
-      ? { time_to_first_token: (firstStreamPartAt - streamStartedAt) / 1000 }
-      : {}),
-    ...(totalTokens ? { tokens: totalTokens } : {}),
-    ...(inputTokens ? { prompt_tokens: inputTokens } : {}),
-    ...(outputTokens ? { completion_tokens: outputTokens } : {}),
-    ...(cachedTokens ? { prompt_cached_tokens: cachedTokens } : {}),
-    ...(reasoningTokens ? { completion_reasoning_tokens: reasoningTokens } : {}),
-    steps: modelSteps.length,
-  };
-}
-
-function readMetricNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object");
 }

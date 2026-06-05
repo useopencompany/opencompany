@@ -4,9 +4,11 @@ import { getWorkspaceSlackChannel } from "@/lib/slack/data";
 const BOOK_CALL_URL = "https://cal.com/team/opencompany/intro-call?overlayCalendar=true";
 
 // Server component: reads the workspace's Slack support channel and shows a single
-// state-appropriate card. It NEVER renders a dead "Connect on Slack" button — failed
-// or missing rows degrade to the booking fallback only (max-2-buttons: one real
-// button, the booking is a quiet link).
+// state-appropriate card. It NEVER renders a dead "Connect on Slack" button.
+// - missing row → render nothing (workspace predates the feature / provisioning was
+//   never dispatched — don't nag every existing workspace home with a fallback card).
+// - failed row → booking fallback only.
+// max-2-buttons: one real button at most, the booking is a quiet link.
 export default async function SlackSupportCard({ workspaceId }: { workspaceId: string }) {
   const channel = await getWorkspaceSlackChannel(workspaceId);
   if (!channel) return null;

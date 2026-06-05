@@ -637,4 +637,27 @@ describe("validateAgentFileSource", () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  test("round-trips an external skill through the self-edit guard", () => {
+    const skill = {
+      id: "improve-codebase-architecture",
+      name: "Improve Codebase Architecture",
+      description: "Analyze codebases for architectural friction.",
+      source: {
+        type: "github" as const,
+        url: "https://github.com/mattpocock/skills",
+        ref: "main",
+        path: "skills/improve-codebase-architecture",
+      },
+    };
+    const source = serializeAgentFile({
+      title: "Agent",
+      body: "Use @skill/improve-codebase-architecture.",
+      model: "openai/gpt-5.4",
+      skills: [skill],
+    });
+    const result = validateAgentFileSource(source);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.parsed.config.skills).toEqual([skill]);
+  });
 });

@@ -14,7 +14,6 @@ import {
   type AgentListItemPayload,
   agentQueryKeys,
   fetchAgent,
-  fetchAgents,
 } from "@/lib/agents/payload";
 import AgentDetail from "./AgentDetail";
 
@@ -56,8 +55,23 @@ vi.mock("@/lib/agent-schedules/actions", () => ({
   runAgentScheduleNow: vi.fn(),
 }));
 
+// The editor's "Add skill" dialog imports this server action; stub it so the test doesn't
+// pull the real auth/server import chain into the client render.
+vi.mock("@/lib/skills/actions", () => ({
+  saveSkill: vi.fn(),
+}));
+
 vi.mock("@/lib/agent-sessions/payload", () => ({
   seedSessionQueries: vi.fn(),
+}));
+
+// Stub the collections so AgentDetail's optimistic delete works without mounting
+// CollectionsProvider (which would pull the server-action import chain into the
+// test). The delete returns a resolved tx so the detached reconcile is a no-op.
+vi.mock("@/components/CollectionsProvider", () => ({
+  useCollections: () => ({
+    agents: { delete: vi.fn(() => ({ isPersisted: { promise: Promise.resolve() } })) },
+  }),
 }));
 
 vi.mock("@/lib/agents/payload", async (importOriginal) => {
@@ -65,7 +79,6 @@ vi.mock("@/lib/agents/payload", async (importOriginal) => {
   return {
     ...actual,
     fetchAgent: vi.fn(),
-    fetchAgents: vi.fn(),
   };
 });
 
@@ -102,6 +115,18 @@ const config: AgentConfig = {
     },
   },
   triggers: [],
+};
+
+const externalSkill = {
+  id: "frontend-design",
+  name: "Frontend Design",
+  description: "Create distinctive, production-grade frontend interfaces.",
+  source: {
+    type: "skills.sh" as const,
+    url: "https://github.com/anthropics/skills",
+    ref: "main",
+    path: "skills/frontend-design",
+  },
 };
 
 const listAgent: AgentListItemPayload = {
@@ -184,29 +209,16 @@ const detailAgent: AgentDetailPayload = {
 };
 
 const fetchAgentMock = vi.mocked(fetchAgent);
-const fetchAgentsMock = vi.mocked(fetchAgents);
 const updateAgentMock = vi.mocked(updateAgent);
 const runAgentScheduleNowMock = vi.mocked(runAgentScheduleNow);
 const seedSessionQueriesMock = vi.mocked(seedSessionQueries);
-
-const existingListAgent: AgentListItemPayload = {
-  id: "agt_existing",
-  workspaceId: "wks_123",
-  path: "agents/research.agent",
-  name: "Research",
-  config,
-  githubSyncStatus: "synced",
-  githubSyncError: null,
-  createdAt: "2026-05-20T10:00:00.000Z",
-  updatedAt: "2026-05-20T10:10:00.000Z",
-};
 
 function renderWithProviders(ui: ReactNode, queryClient = createQueryClient()) {
   return {
     queryClient,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <WorkspaceProvider workspaceId="wks_123">
+        <WorkspaceProvider workspaceId="wks_123" userId="usr_123">
           <ToastProvider>{ui}</ToastProvider>
         </WorkspaceProvider>
       </QueryClientProvider>,
@@ -230,9 +242,8 @@ describe("AgentDetail", () => {
     window.localStorage.clear();
   });
 
-  it("does not mount the editor from list-cache data", async () => {
+  it("shows the loading skeleton until the detail query resolves", async () => {
     const queryClient = createQueryClient();
-    queryClient.setQueryData(agentQueryKeys.list("wks_123"), [listAgent]);
     fetchAgentMock.mockReturnValue(new Promise(() => {}) as Promise<AgentDetailPayload>);
 
     renderWithProviders(<AgentDetail idOrPath="agents/leo/leo.agent" />, queryClient);
@@ -254,6 +265,44 @@ describe("AgentDetail", () => {
 
     expect(await screen.findByText("@opencompany/web")).toBeInTheDocument();
     expect(container.querySelector(".agent-mention[data-kind='integration']")).toBeInTheDocument();
+  });
+
+  it("mounts saved skill mentions before the workspace skill catalog loads", async () => {
+    const user = userEvent.setup();
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(["workspace-skills", "wks_123"], []);
+    const skillAgent: AgentDetailPayload = {
+      ...detailAgent,
+      config: {
+        ...detailAgent.config,
+        instructions: "Use @skill/frontend-design for UI work.",
+        skills: [externalSkill],
+      },
+      body: "Use @skill/frontend-design for UI work.",
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Use @skill/frontend-design for UI work." }],
+          },
+        ],
+      },
+    };
+
+    const { container } = renderWithProviders(
+      <AgentDetail idOrPath="agents/leo/leo.agent" initialAgent={skillAgent} />,
+      queryClient,
+    );
+
+    expect(await screen.findByText("@skill/frontend-design")).toBeInTheDocument();
+    expect(container.querySelector(".agent-mention[data-kind='skill']")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /expand agent details/i }));
+    const fullConfig = container.querySelector("pre code")?.textContent ?? "";
+    expect(fullConfig).toContain("skills:");
+    expect(fullConfig).toContain("frontend-design");
+    expect(fullConfig).toContain("skills/frontend-design");
   });
 
   it("shows the agent folder in the detail inspector", async () => {
@@ -281,71 +330,6 @@ describe("AgentDetail", () => {
     await user.click(screen.getByRole("button", { name: /expand agent details/i }));
 
     expect(container.querySelector("pre code")?.textContent).toContain("externalId: repo_123");
-  });
-
-  it("keeps pre-existing agents in the list after saving a freshly created agent (PRO-94)", async () => {
-    // Reproduces PRO-94: after creating a new agent and editing it, the
-    // detail page's list-cache update must not clobber the agents the user
-    // hasn't loaded into the client cache yet. The new agent reaches the
-    // detail view via a server redirect, so the client list query has not
-    // been populated with it (and may not be populated at all). The server
-    // (fetchAgents) remains the source of truth and still has every agent.
-    const user = userEvent.setup();
-    const queryClient = createQueryClient();
-
-    // The server-side list always returns both the pre-existing agent and the
-    // freshly created one. AgentsView reads it through this query.
-    fetchAgentsMock.mockResolvedValue([detailAgent, existingListAgent]);
-
-    updateAgentMock.mockResolvedValue({
-      id: detailAgent.id,
-      workspaceId: detailAgent.workspaceId,
-      path: detailAgent.path ?? detailAgent.id,
-      pathChanged: false,
-      agent: { ...detailAgent, name: "Leo renamed" },
-    });
-
-    // Seed the list cache the way AgentsView would after loading it, so the
-    // test exercises the invalidate->refetch path. With an empty cache,
-    // ensureQueryData would fetch anyway — even if the fix were removed.
-    queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list("wks_123"), [
-      existingListAgent,
-    ]);
-
-    renderWithProviders(
-      <AgentDetail idOrPath="agents/leo.agent" initialAgent={detailAgent} />,
-      queryClient,
-    );
-
-    // Editing the freshly created agent's name and blurring triggers a save.
-    const nameInput = await screen.findByPlaceholderText(/untitled agent/i);
-    await user.clear(nameInput);
-    await user.type(nameInput, "Leo renamed");
-    await user.tab();
-
-    await waitFor(() => expect(updateAgentMock).toHaveBeenCalled());
-
-    // The fix must mark the seeded list query stale so a remount refetches the
-    // authoritative server list. Without it the seeded [existingListAgent]
-    // cache stays fresh and the freshly created agent / full list never reload.
-    await waitFor(() => {
-      expect(queryClient.getQueryState(agentQueryKeys.list("wks_123"))?.isInvalidated).toBe(true);
-    });
-
-    // Navigating back remounts AgentsView's useQuery, which revalidates the
-    // now-stale list and refetches via fetchAgents. Prove the stale mark
-    // actually triggers that refetch and that it surfaces every agent.
-    fetchAgentsMock.mockClear();
-    const list = await queryClient.ensureQueryData({
-      queryKey: agentQueryKeys.list("wks_123"),
-      queryFn: fetchAgents,
-      staleTime: 30_000,
-      revalidateIfStale: true,
-    });
-
-    expect(fetchAgentsMock).toHaveBeenCalled();
-    expect(list.map((agent) => agent.id)).toContain(existingListAgent.id);
-    expect(list.map((agent) => agent.id)).toContain(detailAgent.id);
   });
 
   it("saves a preset schedule from the inspector", async () => {

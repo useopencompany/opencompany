@@ -4,6 +4,7 @@ import {
   agentBundleDir,
   agentDefinitionFileNameForPath,
   cronForSchedulePreset,
+  isExternalSkillReference,
   normalizeScheduleTimezone,
   schedulePresetFromCron,
   scheduleSummary,
@@ -11,6 +12,7 @@ import {
 } from "@opencompany/agent-runtime";
 import type {
   AgentConfig,
+  AgentExternalSkillReference,
   AgentModelId,
   AgentReference,
   AgentScheduleTriggerConfig,
@@ -42,12 +44,15 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AgentEditor } from "@/components/agent-editor/AgentEditor";
+import { AddSkillDialog } from "@/components/agent-editor/AddSkillDialog";
+import { AgentEditor, type AgentEditorHandle } from "@/components/agent-editor/AgentEditor";
 import { ModelRatingMeters, modelRatingsTitle } from "@/components/agent-editor/ModelRatingMeters";
 import {
+  ADD_SKILL_MENTION_ID,
   AGENT_MODELS,
   type AgentMentionItem,
   type AgentModel,
+  type AgentSkillCatalogEntry,
   type AgentTool,
   buildAgentMentionItems,
   findModel,
@@ -57,6 +62,7 @@ import {
   modelProviderLabel,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
+import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import {
   Command,
@@ -72,18 +78,16 @@ import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
 import { createAgentSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { deleteAgent, updateAgent } from "@/lib/agents/actions";
+import { updateAgent } from "@/lib/agents/actions";
 import type { AgentBundleFilePayload as AgentFolderFilePayload } from "@/lib/agents/bundle-files";
 import { derivePreviewConfigFromTiptapDoc } from "@/lib/agents/config";
 import {
   AGENTS_QUERY_STALE_TIME_MS,
   type AgentDetailPayload,
-  type AgentListItemPayload,
-  agentDetailToListItem,
   agentQueryKeys,
   fetchAgent,
-  fetchAgents,
 } from "@/lib/agents/payload";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -144,29 +148,6 @@ function updateAgentQueries(
   if (agent.path) {
     queryClient.setQueryData(agentQueryKeys.detail(workspaceId, agent.path), agent);
   }
-  const listItem = agentDetailToListItem(agent);
-  queryClient.setQueryData<AgentListItemPayload[]>(agentQueryKeys.list(workspaceId), (agents) => {
-    // The list cache may be empty here when the agent was reached through the
-    // create→redirect flow (the client never fetched the list with this agent
-    // in it) or after the unobserved list query was garbage-collected. Seeding
-    // it with only this agent would hide every other agent until a manual
-    // refresh (PRO-94), so leave the cache untouched and let the invalidation
-    // below trigger an authoritative refetch when the list is next viewed.
-    if (!agents) return agents;
-
-    const next = agents.map((item) => (item.id === agent.id ? listItem : item));
-    if (!next.some((item) => item.id === agent.id)) next.unshift(listItem);
-    return next.toSorted(
-      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
-    );
-  });
-  // Mark the list stale regardless of the optimistic update so a remount of the
-  // agents list (e.g. navigating back after editing a new agent) refetches the
-  // full server-side list rather than trusting a partial client cache.
-  void queryClient.invalidateQueries({
-    queryKey: agentQueryKeys.list(workspaceId),
-    refetchType: "none",
-  });
 }
 
 export default function AgentDetail({ initialAgent, idOrPath }: Props) {
@@ -204,7 +185,13 @@ function AgentDetailContent({
   workspaceId: string;
 }) {
   const queryClient = useQueryClient();
+  const { agents: agentsCollection } = useCollections();
   const { showError } = useToast();
+  const { data: workspaceSkills } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+    staleTime: AGENTS_QUERY_STALE_TIME_MS,
+  });
   const initialBody = agent.body || agent.config.instructions;
   const [name, setName] = useState(agent.name);
   const [content, setContent] = useState<TiptapDoc>(agent.content);
@@ -213,16 +200,25 @@ function AgentDetailContent({
   const [selectedModelId, setSelectedModelId] = useState<AgentModelId>(
     findModel(agent.config.model.name)?.id ?? DEFAULT_MODEL_ID,
   );
+  const availableSkills = useMemo(
+    () => mergeSkillCatalog(agent.config.skills ?? [], workspaceSkills ?? []),
+    [agent.config.skills, workspaceSkills],
+  );
+  const derivationSkills = useMemo(
+    () => availableSkills.flatMap((skill) => skillCatalogEntryToExternalReference(skill)),
+    [availableSkills],
+  );
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const [isDeleting, startDeleteTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(getStoredInspectorCollapsed);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState<AgentScheduleTriggerConfig | null>(null);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [showAddSkillDialog, setShowAddSkillDialog] = useState(false);
+  const editorRef = useRef<AgentEditorHandle>(null);
   const [optimisticGitHubSync, setOptimisticGitHubSync] = useState<OptimisticGitHubSync | null>(
     null,
   );
@@ -244,6 +240,7 @@ function AgentDetailContent({
         selectedModelId,
         repositories: agent.githubIntegrationRepositories,
         agents: agent.workspaceAgents,
+        skills: derivationSkills,
         triggers,
         mcp: agent.mcp,
         useDerivedConfig: hasEditorDraft || hasUsableMentionNodes(content),
@@ -253,6 +250,7 @@ function AgentDetailContent({
       agent.githubIntegrationRepositories,
       agent.workspaceAgents,
       agent.mcp,
+      derivationSkills,
       content,
       hasEditorDraft,
       name,
@@ -304,6 +302,7 @@ function AgentDetailContent({
       enabledMcpToolIds,
       mcpEnabled: agent.mcp.mcpEnabled,
       agents: agent.workspaceAgents,
+      skills: availableSkills,
     });
   }, [
     agent.brainPaths,
@@ -312,6 +311,7 @@ function AgentDetailContent({
     agent.mcp.slackConfigured,
     agent.usableGitHubIntegrationRepositories,
     agent.workspaceAgents,
+    availableSkills,
   ]);
 
   useEffect(() => {
@@ -378,7 +378,6 @@ function AgentDetailContent({
     startTransition(async () => {
       try {
         await Promise.all([
-          queryClient.cancelQueries({ queryKey: agentQueryKeys.list(workspaceId) }),
           queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, idOrPath) }),
           queryClient.cancelQueries({ queryKey: agentQueryKeys.detail(workspaceId, agent.id) }),
           agent.path
@@ -472,19 +471,9 @@ function AgentDetailContent({
               prefetch
               onMouseEnter={() => {
                 router.prefetch("/agents");
-                void queryClient.prefetchQuery({
-                  queryKey: agentQueryKeys.list(workspaceId),
-                  queryFn: fetchAgents,
-                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
-                });
               }}
               onFocus={() => {
                 router.prefetch("/agents");
-                void queryClient.prefetchQuery({
-                  queryKey: agentQueryKeys.list(workspaceId),
-                  queryFn: fetchAgents,
-                  staleTime: AGENTS_QUERY_STALE_TIME_MS,
-                });
               }}
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-surface-subtle/70"
             >
@@ -611,10 +600,15 @@ function AgentDetailContent({
           <div className="mt-6">
             <AgentEditor
               key={agent.id}
+              ref={editorRef}
               initialBody={initialBody}
               initialContent={agent.content}
               mentionItems={mentionItems}
               onMentionSelect={(item) => {
+                if (item.kind === "skill" && item.id === ADD_SKILL_MENTION_ID) {
+                  setShowAddSkillDialog(true);
+                  return;
+                }
                 if (item.kind !== "schedule") return;
                 setEditingSchedule(null);
                 setShowScheduleDialog(true);
@@ -704,41 +698,43 @@ function AgentDetailContent({
         />
       ) : null}
 
+      {showAddSkillDialog ? (
+        <AddSkillDialog
+          onClose={() => setShowAddSkillDialog(false)}
+          onAdded={(skill) => {
+            setShowAddSkillDialog(false);
+            // Make the new skill available to the mention catalog (and the next save's
+            // derivation), then drop the @skill/<id> pill into the editor.
+            queryClient.invalidateQueries({ queryKey: ["workspace-skills", workspaceId] });
+            editorRef.current?.insertSkillMention({ id: skill.id });
+          }}
+        />
+      ) : null}
+
       <DeleteAgentDialog
         agentName={agent.name}
         isOpen={showDeleteDialog}
-        isPending={isDeleting}
+        isPending={false}
         onClose={() => setShowDeleteDialog(false)}
         onConfirm={() => {
-          startDeleteTransition(async () => {
-            try {
-              const result = await deleteAgent(agent.id);
-              if (!result.ok) {
-                setShowDeleteDialog(false);
-                showError(result.error, "Could not delete agent");
-                return;
-              }
-              // Close the dialog before navigating so it doesn't stay open on
-              // the success path (mirrors the error branch above).
-              setShowDeleteDialog(false);
-              queryClient.setQueryData<AgentListItemPayload[]>(
-                agentQueryKeys.list(workspaceId),
-                (current) => (current ?? []).filter((item) => item.id !== agent.id),
-              );
-              router.push("/agents");
-            } catch (err) {
-              // Let Next.js redirect digests bubble — currentWorkspace() throws
-              // NEXT_REDIRECT for unauthenticated / incomplete-onboarding users
-              // and the framework needs to see it to navigate.
-              if (isNextRedirectError(err)) throw err;
-              // Server actions can throw (e.g. non-admin requireAdmin guard);
-              // surface as a toast instead of bubbling to the error boundary.
-              setShowDeleteDialog(false);
-              showError(
-                err instanceof Error ? err.message : "Could not delete agent",
-                "Could not delete agent",
-              );
-            }
+          // Optimistic delete: the row leaves the agents collection immediately
+          // (the list and this view update at once) and we navigate away
+          // synchronously. Reconciliation — the deleteAgent server action plus
+          // the txid match Electric observes — runs in the background, so the
+          // navigation is never blocked behind the ~1s GitHub/sandbox/db
+          // round-trip (the prior code awaited tx.isPersisted inside the same
+          // transition as router.push, which deferred the navigation commit and
+          // left a lingering spinner). A failed delete auto-rolls back the
+          // optimistic removal; we only surface why.
+          const tx = agentsCollection.delete(agent.id);
+          setShowDeleteDialog(false);
+          router.push("/agents");
+          void tx.isPersisted.promise.catch((err) => {
+            if (isNextRedirectError(err)) return;
+            showError(
+              err instanceof Error ? err.message : "Could not delete agent",
+              "Could not delete agent",
+            );
           });
         }}
       />
@@ -1738,6 +1734,50 @@ function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"
   };
 }
 
+function mergeSkillCatalog(
+  configSkills: AgentConfig["skills"],
+  workspaceSkills: AgentSkillCatalogEntry[],
+): AgentSkillCatalogEntry[] {
+  const byId = new Map<string, AgentSkillCatalogEntry>();
+
+  for (const skill of configSkills ?? []) {
+    if (!isExternalSkillReference(skill)) continue;
+    byId.set(skill.id, {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    });
+  }
+
+  for (const skill of workspaceSkills) {
+    const existing = byId.get(skill.id);
+    const source = skill.source ?? existing?.source;
+    byId.set(skill.id, {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      ...(source ? { source } : {}),
+    });
+  }
+
+  return Array.from(byId.values());
+}
+
+function skillCatalogEntryToExternalReference(
+  skill: AgentSkillCatalogEntry,
+): AgentExternalSkillReference[] {
+  if (!skill.source) return [];
+  return [
+    {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      source: skill.source,
+    },
+  ];
+}
+
 function buildConfigPreview({
   title,
   content,
@@ -1745,6 +1785,7 @@ function buildConfigPreview({
   selectedModelId,
   repositories,
   agents,
+  skills,
   triggers,
   mcp,
   useDerivedConfig,
@@ -1755,6 +1796,7 @@ function buildConfigPreview({
   selectedModelId: AgentModelId;
   repositories: AgentDetailPayload["githubIntegrationRepositories"];
   agents: AgentReference[];
+  skills: AgentExternalSkillReference[];
   triggers: AgentConfig["triggers"];
   mcp: AgentDetailPayload["mcp"];
   useDerivedConfig: boolean;
@@ -1766,6 +1808,7 @@ function buildConfigPreview({
         model: selectedModelId,
         repositories,
         agents,
+        skills,
         preferredRepositories: fallback.integrations.github.repositories.filter(
           (repository) => repository.binding,
         ),
@@ -1801,6 +1844,7 @@ function buildConfigPreview({
       tools: config.tools,
       brain: config.brain,
       agents: config.agents ?? [],
+      skills: config.skills ?? [],
       integrations: config.integrations,
       triggers: config.triggers,
     }),

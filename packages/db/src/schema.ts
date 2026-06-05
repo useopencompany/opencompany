@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   AgentSessionQuestionAnswer,
   AgentSessionQuestionPrompt,
+  AgentSkillFile,
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
@@ -176,30 +177,45 @@ export const agents = pgTable(
   }),
 );
 
-export const agentSyncJobs = pgTable(
-  "agent_sync_jobs",
+// External skills snapshotted from a web source (GitHub / skills.sh), reusable across all
+// agents in a workspace. A refreshable cache: re-resolved to branch HEAD on each run, so
+// `resolvedCommit` / `integrity` / `files` move over time. One row per (source, ref, skill);
+// `integrity` lets the runner skip rewrites when content is unchanged.
+export const workspaceSkillSnapshots = pgTable(
+  "workspace_skill_snapshots",
   {
-    agentId: text("agent_id")
-      .primaryKey()
-      .references(() => agents.id, { onDelete: "cascade" }),
+    id: text("id").primaryKey(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
-    desiredHash: text("desired_hash").notNull(),
-    desiredVersion: integer("desired_version").notNull(),
-    previousPath: text("previous_path"),
-    previousBlobSha: text("previous_blob_sha"),
-    status: text("status").notNull().default("pending"),
-    attempts: integer("attempts").notNull().default(0),
-    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
-    lastError: text("last_error"),
+    skillId: text("skill_id").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    sourceType: text("source_type").notNull().default("github"),
+    sourceUrl: text("source_url").notNull(),
+    requestedRef: text("requested_ref").notNull(),
+    skillPath: text("skill_path").notNull().default(""),
+    resolvedCommit: text("resolved_commit").notNull(),
+    integrity: text("integrity").notNull(),
+    files: jsonb("files").$type<AgentSkillFile[]>().notNull(),
+    fileCount: integer("file_count").notNull(),
+    totalBytes: integer("total_bytes").notNull(),
+    lastResolvedAt: timestamp("last_resolved_at", { withTimezone: true }).notNull().defaultNow(),
+    schemaVersion: integer("schema_version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceIdx: index("agent_sync_jobs_workspace_idx").on(table.workspaceId),
-    nextRunAtIdx: index("agent_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+    sourceIdx: uniqueIndex("workspace_skill_snapshots_source_idx").on(
+      table.workspaceId,
+      table.sourceUrl,
+      table.requestedRef,
+      table.skillPath,
+    ),
+    skillIdIdx: index("workspace_skill_snapshots_skill_id_idx").on(
+      table.workspaceId,
+      table.skillId,
+    ),
   }),
 );
 
@@ -265,14 +281,36 @@ export const agentFiles = pgTable(
   }),
 );
 
-export const brainSyncJobs = pgTable(
-  "brain_sync_jobs",
+// Unified, workspace-scoped projection outbox. Producers (web brain/agent
+// edits, runner writeback, agent self-edit) write canonical content to their
+// own tables and enqueue one row here per dirty repo path. A single projector
+// (`projectWorkspaceToGitHub`) drains all due rows for a workspace and commits
+// them to GitHub in one Git Data API commit. This is the consolidation target
+// that replaces brain_sync_jobs / agent_sync_jobs / agent_file_sync_jobs.
+//
+// Those three legacy tables are no longer modelled here, but migration 0038
+// only backfills their in-flight rows into this outbox — it deliberately does
+// NOT drop them. The DROP is deferred to a follow-up migration that should run
+// only after this projector-only release has fully deployed, so the previous
+// web/runner binaries (which still write those tables) keep working during the
+// rollout window.
+//
+// `sourceKind` + `sourceRef` tell the projector where to read desired content:
+//   - "brain"      -> brainFiles row keyed by (workspaceId, logical brain path)
+//   - "agent_file" -> agentFiles row keyed by (workspaceId, repoPath)
+//   - "agent"      -> agents row keyed by sourceRef (agentId); re-serialized
+// `repoPath` is always the full repo-relative path (e.g. "brain/spec.md",
+// "agents/leo.agent", "agents/leo/memory.md").
+export const workspaceSyncJobs = pgTable(
+  "workspace_sync_jobs",
   {
     id: serial("id").primaryKey(),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
+    repoPath: text("repo_path").notNull(),
+    sourceKind: text("source_kind").notNull(),
+    sourceRef: text("source_ref"),
     operation: text("operation").notNull().default("upsert"),
     desiredHash: text("desired_hash"),
     previousPath: text("previous_path"),
@@ -285,46 +323,24 @@ export const brainSyncJobs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceIdx: index("brain_sync_jobs_workspace_idx").on(table.workspaceId),
-    workspacePathIdx: uniqueIndex("brain_sync_jobs_workspace_path_idx").on(
+    workspaceIdx: index("workspace_sync_jobs_workspace_idx").on(table.workspaceId),
+    workspaceRepoPathIdx: uniqueIndex("workspace_sync_jobs_workspace_repo_path_idx").on(
       table.workspaceId,
-      table.path,
+      table.repoPath,
     ),
-    nextRunAtIdx: index("brain_sync_jobs_next_run_at_idx").on(table.nextRunAt),
-  }),
-);
-
-// Mirrors brainSyncJobs: keyed on (workspaceId, path) with no per-agent FK.
-// Deleting an agent does not cascade-delete its pending file sync jobs; any
-// orphaned job self-cleans on its next run via the "missing-file" path in
-// materializeAgentFileToGitHub. This keeps the sync-job design uniform with
-// brainSyncJobs rather than coupling jobs to the agents table.
-export const agentFileSyncJobs = pgTable(
-  "agent_file_sync_jobs",
-  {
-    id: serial("id").primaryKey(),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    path: text("path").notNull(),
-    operation: text("operation").notNull().default("upsert"),
-    desiredHash: text("desired_hash"),
-    previousPath: text("previous_path"),
-    previousBlobSha: text("previous_blob_sha"),
-    status: text("status").notNull().default("pending"),
-    attempts: integer("attempts").notNull().default(0),
-    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull(),
-    lastError: text("last_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    workspaceIdx: index("agent_file_sync_jobs_workspace_idx").on(table.workspaceId),
-    workspacePathIdx: uniqueIndex("agent_file_sync_jobs_workspace_path_idx").on(
-      table.workspaceId,
-      table.path,
+    nextRunAtIdx: index("workspace_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+    sourceKindCheck: check(
+      "workspace_sync_jobs_source_kind_check",
+      sql`${table.sourceKind} IN ('brain', 'agent_file', 'agent')`,
     ),
-    nextRunAtIdx: index("agent_file_sync_jobs_next_run_at_idx").on(table.nextRunAt),
+    operationCheck: check(
+      "workspace_sync_jobs_operation_check",
+      sql`${table.operation} IN ('upsert', 'delete')`,
+    ),
+    statusCheck: check(
+      "workspace_sync_jobs_status_check",
+      sql`${table.status} IN ('pending', 'syncing', 'failed')`,
+    ),
   }),
 );
 
@@ -1374,6 +1390,10 @@ export const workspaceSlackChannels = pgTable(
   },
   (table) => ({
     workspaceIdx: uniqueIndex("workspace_slack_channels_workspace_idx").on(table.workspaceId),
+    statusCheck: check(
+      "workspace_slack_channels_status_check",
+      sql`${table.status} IN ('pending', 'active', 'failed')`,
+    ),
   }),
 );
 
@@ -1395,11 +1415,8 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   }),
   memberships: many(workspaceMemberships),
   agents: many(agents),
-  agentSyncJobs: many(agentSyncJobs),
   brainFiles: many(brainFiles),
-  brainSyncJobs: many(brainSyncJobs),
   agentFiles: many(agentFiles),
-  agentFileSyncJobs: many(agentFileSyncJobs),
   agentSessions: many(agentSessions),
   onboardingResponses: many(onboardingResponses),
   creditBalance: one(workspaceCreditBalances, {
@@ -1426,10 +1443,6 @@ export const agentsRelations = relations(agents, ({ one, many }) => ({
     fields: [agents.workspaceId],
     references: [workspaces.id],
   }),
-  syncJob: one(agentSyncJobs, {
-    fields: [agents.id],
-    references: [agentSyncJobs.agentId],
-  }),
   files: many(agentFiles),
   sessions: many(agentSessions),
 }));
@@ -1449,20 +1462,6 @@ export const agentFilesRelations = relations(agentFiles, ({ one }) => ({
   agent: one(agents, {
     fields: [agentFiles.agentId],
     references: [agents.id],
-  }),
-}));
-
-export const brainSyncJobsRelations = relations(brainSyncJobs, ({ one }) => ({
-  workspace: one(workspaces, {
-    fields: [brainSyncJobs.workspaceId],
-    references: [workspaces.id],
-  }),
-}));
-
-export const agentFileSyncJobsRelations = relations(agentFileSyncJobs, ({ one }) => ({
-  workspace: one(workspaces, {
-    fields: [agentFileSyncJobs.workspaceId],
-    references: [workspaces.id],
   }),
 }));
 
@@ -1656,17 +1655,6 @@ export const workspaceCreditLedgerRelations = relations(workspaceCreditLedger, (
   }),
 }));
 
-export const agentSyncJobsRelations = relations(agentSyncJobs, ({ one }) => ({
-  agent: one(agents, {
-    fields: [agentSyncJobs.agentId],
-    references: [agents.id],
-  }),
-  workspace: one(workspaces, {
-    fields: [agentSyncJobs.workspaceId],
-    references: [workspaces.id],
-  }),
-}));
-
 export const workspaceRepositoriesRelations = relations(workspaceRepositories, ({ one }) => ({
   workspace: one(workspaces, {
     fields: [workspaceRepositories.workspaceId],
@@ -1785,12 +1773,10 @@ export type WorkspaceCreditLedgerEntry = typeof workspaceCreditLedger.$inferSele
 export type StripeCheckoutSession = typeof stripeCheckoutSessions.$inferSelect;
 export type CreditCode = typeof creditCodes.$inferSelect;
 export type CreditCodeRedemption = typeof creditCodeRedemptions.$inferSelect;
-export type AgentSyncJob = typeof agentSyncJobs.$inferSelect;
 export type AgentScheduleRun = typeof agentScheduleRuns.$inferSelect;
 export type BrainFile = typeof brainFiles.$inferSelect;
-export type BrainSyncJob = typeof brainSyncJobs.$inferSelect;
 export type AgentFile = typeof agentFiles.$inferSelect;
-export type AgentFileSyncJob = typeof agentFileSyncJobs.$inferSelect;
+export type WorkspaceSyncJob = typeof workspaceSyncJobs.$inferSelect;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type SessionStar = typeof sessionStars.$inferSelect;
 export type AgentSessionBrainMount = typeof agentSessionBrainMounts.$inferSelect;

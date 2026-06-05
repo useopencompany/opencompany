@@ -1,9 +1,12 @@
 "use client";
 
 import {
+  AlertTriangle,
   BarChart3,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Clock,
   CreditCard,
   ExternalLink,
   FlaskConical,
@@ -64,9 +67,12 @@ type Props = {
   workspace: {
     name: string;
     createdAt: string;
-    repository: {
-      updatedAt: string;
-    } | null;
+    sync: {
+      hasRepo: boolean;
+      lastSyncedAt: string | null;
+      pendingCount: number;
+      failedCount: number;
+    };
   };
   billing: {
     balanceUsdMicros: number;
@@ -594,22 +600,54 @@ function BillingSection({ billing }: { billing: Props["billing"] }) {
   );
 }
 
-function WorkspaceState({ repository }: { repository: Props["workspace"]["repository"] }) {
+function WorkspaceState({ sync }: { sync: Props["workspace"]["sync"] }) {
+  const failed = sync.failedCount > 0;
+  const pending = sync.pendingCount > 0;
+
   return (
     <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
       <div className="flex items-start gap-3">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
           <GitBranch size={15} strokeWidth={1.8} />
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
             Managed by opencompany through Git
           </div>
           <p className="mt-1 text-[12px] leading-5 text-ink-muted">
             Your workspace files are versioned automatically in a private Git-backed repository.
           </p>
+
+          <div className="mt-3 flex items-center gap-1.5 text-[12px]">
+            {failed ? (
+              <>
+                <AlertTriangle size={13} strokeWidth={1.8} className="shrink-0 text-danger" />
+                <span className="font-medium text-danger">
+                  {sync.failedCount} change{sync.failedCount === 1 ? "" : "s"} failed to sync —
+                  retrying
+                </span>
+              </>
+            ) : pending ? (
+              <>
+                <Clock size={13} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
+                <span className="text-ink-muted">
+                  {sync.pendingCount} change{sync.pendingCount === 1 ? "" : "s"} waiting to sync
+                </span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={13} strokeWidth={1.8} className="shrink-0 text-success" />
+                <span className="text-ink-muted">In sync</span>
+              </>
+            )}
+          </div>
+
           <div className="mt-3 text-[11.5px] text-ink-subtle">
-            {repository ? `Last updated ${repository.updatedAt}` : "Git storage is being set up"}
+            {sync.hasRepo
+              ? sync.lastSyncedAt
+                ? `Last synced ${sync.lastSyncedAt}`
+                : "Not synced yet"
+              : "Git storage is being set up"}
           </div>
         </div>
       </div>
@@ -1439,7 +1477,7 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
             title="Workspace state"
             description="How this workspace is stored and versioned."
           >
-            <WorkspaceState repository={workspace.repository} />
+            <WorkspaceState sync={workspace.sync} />
           </Section>
 
           <Section

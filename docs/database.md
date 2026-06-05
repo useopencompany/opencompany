@@ -106,7 +106,7 @@ Current tables (see `packages/db/src/schema.ts` for the source of truth):
 - `workspaces` — internal tenant boundary; each new workspace maps to a WorkOS Organization through `workos_organization_id`.
 - `workspace_memberships` — local mirror of user↔workspace membership with a `role`; WorkOS is the source of truth.
 - `agents` — latest editable agent state: path, title/body, parsed config, content hash, version, and GitHub sync status.
-- `agent_sync_jobs` — desired GitHub materialization state for an agent edit. Repeated edits coalesce by updating the same row.
+- `workspace_sync_jobs` — unified GitHub materialization outbox for all synced resources (agents, brain files, agent bundle files). Each row records desired state (`repoPath`, `sourceKind`, `sourceRef`, `operation`, `desiredHash`, rename/delete metadata) plus retry bookkeeping. Repeated edits to the same path coalesce on the unique `(workspaceId, repoPath)` index. Drained by `projectWorkspaceToGitHub()`.
 - `workspace_repositories` — one managed private GitHub repo per workspace, including repo id, full name, default branch, and latest head SHA.
 - `onboarding_responses` — user's onboarding answers for a workspace.
 
@@ -145,7 +145,16 @@ The runner resolves its connection string as `RUNNER_DATABASE_URL`, falling back
 ### Runner pool sizing
 
 `RUNNER_DB_POOL_MAX` (default `10`) bounds the runner's pool. Size it as worker
-concurrency plus headroom for HTTP routes, the job poller, and lease heartbeats — the
-default comfortably covers the current worker concurrency of 2. The hard ceiling is
-Neon's per-project connection limit: keep `instances × RUNNER_DB_POOL_MAX` under it
-(e.g. 2 instances × 10 = 20).
+concurrency (`RUNNER_WORKER_CONCURRENCY`) plus headroom for HTTP routes, the job poller,
+and lease heartbeats. Connections are held only transiently (heartbeats are sub-second
+writes every 5s; tool/message persistence is short-lived), so the pool needs to cover a
+*burst* — roughly one connection per concurrent session at a step boundary — not one
+permanently-held connection per session.
+
+The hard ceiling is Neon's `max_connections`, which on the current compute is **~901**
+(7 reserved), shared with the web app (`neon-http`, transient) and Inngest. Keep
+`instances × RUNNER_DB_POOL_MAX` comfortably under it. In practice the pool is nowhere
+near the binding constraint: at the current prod sizing (`RUNNER_WORKER_CONCURRENCY=40`,
+`RUNNER_DB_POOL_MAX=60`, 1 instance) the runner uses <7% of Neon's connections, leaving
+the rest for the web app. The session ceiling is set by the single event loop, the E2B
+concurrent-sandbox quota, and model-gateway rate limits long before Neon is.

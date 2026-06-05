@@ -20,7 +20,8 @@ import {
 } from "@opencompany/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
-import { loadAgentSessionDetailForWorkspace } from "@/lib/agent-sessions/data";
+import { buildCreatedSessionDetail } from "@/lib/agent-sessions/data";
+import { appendSessionStreamEvent, closeSessionStream } from "@/lib/agent-sessions/durable-streams";
 import {
   dispatchAgentAfterSessionCheck,
   dispatchAgentSessionAbortRequested,
@@ -35,6 +36,7 @@ import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validation";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
+import { batchWithTxid } from "@/lib/db/txid";
 import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {
@@ -52,12 +54,13 @@ export async function createAgentSession(idOrPath: string) {
     return { ok: false, error: "Agent not found." } as const;
   }
 
-  const sessionId = await insertAgentSession({
+  const { session, statusEvent } = await insertAgentSession({
     agent,
     title: agent.name,
     userId: user.id,
     workspaceId: workspace.id,
   });
+  const sessionId = session.id;
 
   // Analytics is a network flush (PostHog) that must not sit on the critical path, so it
   // runs concurrently with the session-start dispatch inside `after()`.
@@ -76,7 +79,13 @@ export async function createAgentSession(idOrPath: string) {
     ]),
   );
 
-  return loadCreatedSessionResult(sessionId, user.id, workspace.id);
+  const detail = buildCreatedSessionDetail({
+    agent,
+    session,
+    messages: [],
+    events: [statusEvent],
+  });
+  return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
 export async function createAgentSessionFromPrompt(agentId: string, content: string) {
@@ -98,13 +107,15 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     return { ok: false, error: "Agent not found." } as const;
   }
 
-  const sessionId = await insertAgentSession({
+  const { session, statusEvent } = await insertAgentSession({
     agent,
     title: titleFromPrompt(trimmed),
     userId: user.id,
     workspaceId: workspace.id,
   });
-  const messageId = await insertUserMessage(sessionId, trimmed);
+  const sessionId = session.id;
+  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed);
+  const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
   // and therefore the runner dispatch. Run dispatch and analytics concurrently in
@@ -136,7 +147,13 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     ]),
   );
 
-  return loadCreatedSessionResult(sessionId, user.id, workspace.id);
+  const detail = buildCreatedSessionDetail({
+    agent,
+    session,
+    messages: [message],
+    events: [statusEvent, createdEvent],
+  });
+  return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
 export async function submitAgentSessionMessage(sessionId: string, content: string) {
@@ -199,7 +216,8 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
       ),
     );
 
-  const messageId = await insertUserMessage(sessionId, trimmed);
+  const { message } = await insertUserMessage(sessionId, trimmed);
+  const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
   // and therefore the runner dispatch. Run dispatch and analytics concurrently in
@@ -253,6 +271,17 @@ export async function abortAgentSession(sessionId: string) {
       updatedAt: new Date(),
     })
     .where(eq(agentSessions.id, sessionId));
+
+  // Reflect the optimistic "aborting" status on the Durable Stream so a
+  // stream-sourced transcript shows it immediately; the runner's subsequent
+  // durable status events (aborting → aborted) reconcile. Best-effort.
+  await appendSessionStreamEvent(sessionId, {
+    id: null,
+    type: "session.status",
+    messageId: null,
+    payload: { status: "aborting" },
+    createdAt: new Date().toISOString(),
+  });
 
   after(async () => {
     await dispatchAgentSessionAbortRequested({ sessionId, workspaceId: workspace.id });
@@ -490,8 +519,8 @@ export async function archiveAgentSession(sessionId: string) {
   }
 
   if (!session.e2bSandboxId) {
-    await archiveSessionLocally(sessionId, null);
-    return { ok: true } as const;
+    const txid = await archiveSessionLocally(sessionId, null);
+    return { ok: true, txid } as const;
   }
 
   if (!getRunnerPublicUrl() || !process.env.RUNNER_INTERNAL_TOKEN) {
@@ -502,7 +531,11 @@ export async function archiveAgentSession(sessionId: string) {
     } as const;
   }
 
-  await db.batch([
+  // The runner sets archived_at later (out of band), so we reconcile the
+  // optimistic delete against THIS transaction — the status="archiving" write.
+  // Once it syncs the sidebar selector keeps the row hidden (it excludes the
+  // "archiving" status) until archived_at lands and removes it from the shape.
+  const txid = await batchWithTxid(
     db
       .update(agentSessions)
       .set({ status: "archiving", lastError: null, updatedAt: new Date() })
@@ -512,7 +545,7 @@ export async function archiveAgentSession(sessionId: string) {
       type: "session.status",
       payload: { status: "archiving", message: "Archiving session" },
     }),
-  ]);
+  );
 
   try {
     await callRunner(`/internal/sessions/${sessionId}/archive`);
@@ -532,7 +565,7 @@ export async function archiveAgentSession(sessionId: string) {
     return { ok: false, error: message } as const;
   }
 
-  return { ok: true } as const;
+  return { ok: true, txid } as const;
 }
 
 export async function setSessionStar(sessionId: string, starred: boolean) {
@@ -559,36 +592,37 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
 
   if (starred) {
     const starredAt = new Date();
-    await db
-      .insert(sessionStars)
-      .values({ userId: user.id, sessionId, starredAt })
-      .onConflictDoUpdate({
-        target: [sessionStars.userId, sessionStars.sessionId],
-        set: { starredAt },
-      });
-    return { ok: true, starredAt: starredAt.toISOString() } as const;
+    const txid = await batchWithTxid(
+      db
+        .insert(sessionStars)
+        .values({ userId: user.id, sessionId, starredAt })
+        .onConflictDoUpdate({
+          target: [sessionStars.userId, sessionStars.sessionId],
+          set: { starredAt },
+        }),
+    );
+    return { ok: true, txid, starredAt: starredAt.toISOString() } as const;
   }
 
-  await db
-    .delete(sessionStars)
-    .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId)));
-  return { ok: true, starredAt: null } as const;
+  const txid = await batchWithTxid(
+    db
+      .delete(sessionStars)
+      .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId))),
+  );
+  return { ok: true, txid, starredAt: null } as const;
 }
 
-async function loadCreatedSessionResult(sessionId: string, userId: string, workspaceId: string) {
-  const detail = await loadAgentSessionDetailForWorkspace(sessionId, userId, workspaceId);
-  if (!detail) {
-    return { ok: false, error: "Session was created but could not be loaded." } as const;
-  }
-
-  return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
-}
-
-async function archiveSessionLocally(sessionId: string, previousSandboxId: string | null) {
+// Returns the Postgres txid of the archive write so an optimistic sidebar delete
+// can reconcile against the row leaving the agent_sessions shape (archived_at is
+// set here, which removes it from the shape).
+async function archiveSessionLocally(
+  sessionId: string,
+  previousSandboxId: string | null,
+): Promise<number> {
   const db = getDb();
   const now = new Date();
 
-  await db.batch([
+  const txid = await batchWithTxid(
     db
       .update(agentSessions)
       .set({
@@ -619,7 +653,14 @@ async function archiveSessionLocally(sessionId: string, previousSandboxId: strin
         sandboxAlreadyStopped: previousSandboxId === null,
       },
     }),
-  ]);
+  );
+
+  // The session is permanently archived — the one provably-safe point to close the
+  // Durable Stream (EOF). Best-effort; never blocks the archive (Postgres is the
+  // system of record).
+  await closeSessionStream(sessionId);
+
+  return txid;
 }
 
 async function loadAgentForSession(idOrPath: string, workspaceId: string) {
@@ -648,49 +689,98 @@ async function insertAgentSession(input: {
   const db = getDb();
   const sessionId = newAgentSessionId();
 
-  await db.batch([
-    db.insert(agentSessions).values({
-      id: sessionId,
-      workspaceId: input.workspaceId,
-      userId: input.userId,
-      agentId: input.agent.id,
-      title: input.title,
-      modelProvider: input.agent.config.model.provider,
-      modelName: input.agent.config.model.name,
-    }),
-    db.insert(agentSessionEvents).values({
-      sessionId,
-      type: "session.status",
-      payload: { status: "created", message: "Session created" },
-    }),
+  // Return the canonical session row and status-event row so callers can synthesize the
+  // session detail payload in-memory (see buildCreatedSessionDetail) instead of issuing a
+  // follow-up read on the create path.
+  const [sessionRows, statusEventRows] = await db.batch([
+    db
+      .insert(agentSessions)
+      .values({
+        id: sessionId,
+        workspaceId: input.workspaceId,
+        userId: input.userId,
+        agentId: input.agent.id,
+        title: input.title,
+        modelProvider: input.agent.config.model.provider,
+        modelName: input.agent.config.model.name,
+      })
+      .returning(),
+    db
+      .insert(agentSessionEvents)
+      .values({
+        sessionId,
+        type: "session.status",
+        payload: { status: "created", message: "Session created" },
+      })
+      .returning({
+        id: agentSessionEvents.id,
+        type: agentSessionEvents.type,
+        messageId: agentSessionEvents.messageId,
+        payload: agentSessionEvents.payload,
+        createdAt: agentSessionEvents.createdAt,
+      }),
   ]);
 
-  return sessionId;
+  const session = sessionRows[0];
+  const statusEvent = statusEventRows[0];
+  if (!session || !statusEvent) {
+    throw new Error("Failed to create agent session.");
+  }
+
+  return { session, statusEvent };
 }
 
 async function insertUserMessage(sessionId: string, content: string) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
+  const payload = { messageId, role: "user", content, status: "completed" };
 
-  await db.batch([
-    db.insert(agentSessionMessages).values({
-      id: messageId,
-      sessionId,
-      role: "user",
-      status: "completed",
-      content,
-      modelMessage: { role: "user", content },
-      completedAt: new Date(),
-    }),
-    db.insert(agentSessionEvents).values({
-      sessionId,
-      messageId,
-      type: "message.created",
-      payload: { messageId, role: "user", content, status: "completed" },
-    }),
+  const [messageRows, eventRows] = await db.batch([
+    db
+      .insert(agentSessionMessages)
+      .values({
+        id: messageId,
+        sessionId,
+        role: "user",
+        status: "completed",
+        content,
+        modelMessage: { role: "user", content },
+        completedAt: new Date(),
+      })
+      .returning(),
+    db
+      .insert(agentSessionEvents)
+      .values({ sessionId, messageId, type: "message.created", payload })
+      .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt }),
   ]);
 
-  return messageId;
+  const message = messageRows[0];
+  const eventRow = eventRows[0];
+  if (!message || !eventRow) {
+    throw new Error("Failed to insert user message.");
+  }
+
+  // Mirror the user message onto the session's Durable Stream so it appears in a
+  // stream-sourced transcript (the runner never re-emits web-written events).
+  // Best-effort.
+  await appendSessionStreamEvent(sessionId, {
+    id: eventRow.id,
+    type: "message.created",
+    messageId,
+    payload,
+    createdAt: eventRow.createdAt.toISOString(),
+  });
+
+  return {
+    message,
+    createdEvent: {
+      id: eventRow.id,
+      type: "message.created" as const,
+      messageId,
+      payload,
+      createdAt: eventRow.createdAt,
+    },
+  };
 }
 
 function titleFromPrompt(content: string) {

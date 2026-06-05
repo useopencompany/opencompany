@@ -1,5 +1,5 @@
 {
-  "id": "96829f6a-fd11-4f53-99f2-9ed2d6273d46",
+  "id": "83586e29-f0ba-46d6-a9d4-cd379c8a3f5d",
   "prevId": "cf5e0dab-0cb3-4b1f-bcd6-6be64b2f6c24",
   "version": "7",
   "dialect": "postgresql",
@@ -6072,13 +6072,13 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.workspace_slack_channels": {
-      "name": "workspace_slack_channels",
+    "public.workspace_sync_jobs": {
+      "name": "workspace_sync_jobs",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "text",
+          "type": "serial",
           "primaryKey": true,
           "notNull": true
         },
@@ -6088,20 +6088,45 @@
           "primaryKey": false,
           "notNull": true
         },
-        "slack_channel_id": {
-          "name": "slack_channel_id",
+        "repo_path": {
+          "name": "repo_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_kind": {
+          "name": "source_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_ref": {
+          "name": "source_ref",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "slack_team_id": {
-          "name": "slack_team_id",
+        "operation": {
+          "name": "operation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'upsert'"
+        },
+        "desired_hash": {
+          "name": "desired_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "invite_url": {
-          "name": "invite_url",
+        "previous_path": {
+          "name": "previous_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previous_blob_sha": {
+          "name": "previous_blob_sha",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6113,8 +6138,21 @@
           "notNull": true,
           "default": "'pending'"
         },
-        "error": {
-          "name": "error",
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_run_at": {
+          "name": "next_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_error": {
+          "name": "last_error",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -6135,11 +6173,32 @@
         }
       },
       "indexes": {
-        "workspace_slack_channels_workspace_idx": {
-          "name": "workspace_slack_channels_workspace_idx",
+        "workspace_sync_jobs_workspace_idx": {
+          "name": "workspace_sync_jobs_workspace_idx",
           "columns": [
             {
               "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "workspace_sync_jobs_workspace_repo_path_idx": {
+          "name": "workspace_sync_jobs_workspace_repo_path_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "repo_path",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -6149,12 +6208,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "workspace_sync_jobs_next_run_at_idx": {
+          "name": "workspace_sync_jobs_next_run_at_idx",
+          "columns": [
+            {
+              "expression": "next_run_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
-        "workspace_slack_channels_workspace_id_workspaces_id_fk": {
-          "name": "workspace_slack_channels_workspace_id_workspaces_id_fk",
-          "tableFrom": "workspace_slack_channels",
+        "workspace_sync_jobs_workspace_id_workspaces_id_fk": {
+          "name": "workspace_sync_jobs_workspace_id_workspaces_id_fk",
+          "tableFrom": "workspace_sync_jobs",
           "tableTo": "workspaces",
           "columnsFrom": [
             "workspace_id"
@@ -6169,7 +6243,20 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "workspace_sync_jobs_source_kind_check": {
+          "name": "workspace_sync_jobs_source_kind_check",
+          "value": "\"workspace_sync_jobs\".\"source_kind\" IN ('brain', 'agent_file', 'agent')"
+        },
+        "workspace_sync_jobs_operation_check": {
+          "name": "workspace_sync_jobs_operation_check",
+          "value": "\"workspace_sync_jobs\".\"operation\" IN ('upsert', 'delete')"
+        },
+        "workspace_sync_jobs_status_check": {
+          "name": "workspace_sync_jobs_status_check",
+          "value": "\"workspace_sync_jobs\".\"status\" IN ('pending', 'syncing', 'failed')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.workspace_tool_policies": {

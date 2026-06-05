@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
 import {
   Archive,
@@ -24,20 +25,15 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCollections } from "@/components/CollectionsProvider";
 import FeedbackDialog from "@/components/FeedbackDialog";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
+import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
-import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
-import {
-  archiveSidebarSessionOptimistically,
-  fetchSidebarSessions,
-  SESSIONS_QUERY_STALE_TIME_MS,
-  type SidebarSessionPayload,
-  sessionQueryKeys,
-  setSidebarSessionStar,
-} from "@/lib/agent-sessions/payload";
+import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
+import { deriveSidebarSessions } from "@/lib/collections/selectors";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
 const SIDEBAR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -210,22 +206,20 @@ function NavItem({
 function SessionHistoryItem({
   session,
   active,
-  workspaceId,
   starred,
   onToggleStar,
+  onArchive,
 }: {
   session: SidebarSession;
   active?: boolean;
-  workspaceId: string;
   starred?: boolean;
-  onToggleStar?: (sessionId: string) => void;
+  onToggleStar: (sessionId: string, currentlyStarred: boolean) => void;
+  onArchive: (sessionId: string, active: boolean) => void;
 }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const { showError } = useToast();
-  const [isPending, startTransition] = useTransition();
   const [archiving, setArchiving] = useState(false);
   const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const archiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const schedulePrefetch = useCallback(() => {
     if (prefetchTimerRef.current) return;
@@ -244,6 +238,7 @@ function SessionHistoryItem({
   useEffect(() => {
     return () => {
       if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+      if (archiveTimerRef.current) clearTimeout(archiveTimerRef.current);
     };
   }, []);
 
@@ -251,7 +246,7 @@ function SessionHistoryItem({
     <div
       className={`group flex items-center rounded-md text-[13px] transition-all duration-150 ${
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-      } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : isPending ? "opacity-60" : ""}`}
+      } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : ""}`}
     >
       <Link
         href={`/session/${session.id}`}
@@ -271,59 +266,44 @@ function SessionHistoryItem({
         ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
-      {onToggleStar && (
-        <button
-          type="button"
-          title={starred ? "Unpin session" : "Pin session"}
-          aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
-          aria-pressed={starred}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onToggleStar(session.id);
-          }}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-            starred
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-          }`}
-        >
-          <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
-        </button>
-      )}
+      <button
+        type="button"
+        title={starred ? "Unpin session" : "Pin session"}
+        aria-label={starred ? `Unpin ${session.title}` : `Pin ${session.title}`}
+        aria-pressed={starred}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggleStar(session.id, Boolean(starred));
+        }}
+        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          starred
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+        }`}
+      >
+        <Pin size={11.5} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+      </button>
       <button
         type="button"
         title="Archive session"
         aria-label={`Archive ${session.title}`}
         aria-busy={archiving}
-        disabled={isPending}
+        disabled={archiving}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
 
-          // Brief red highlight as feedback before the session is optimistically removed.
+          // Brief red highlight as feedback before the optimistic delete removes
+          // the row from the sidebar (onArchive archives via the collection).
           setArchiving(true);
-
-          startTransition(async () => {
-            await new Promise((resolve) => setTimeout(resolve, ARCHIVE_HIGHLIGHT_DELAY_MS));
-            const result = await archiveSidebarSessionOptimistically({
-              queryClient,
-              workspaceId,
-              sessionId: session.id,
-              archive: archiveAgentSession,
-            });
-            if (!result.ok) {
-              setArchiving(false);
-              showError(result.error, "Could not archive session");
-              return;
-            }
-            if (active) {
-              router.replace("/");
-            }
-          });
+          archiveTimerRef.current = setTimeout(() => {
+            archiveTimerRef.current = null;
+            onArchive(session.id, Boolean(active));
+          }, ARCHIVE_HIGHLIGHT_DELAY_MS);
         }}
         className={`mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink-subtle transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-          isPending
+          archiving
             ? "opacity-100"
             : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
         }`}
@@ -512,6 +492,18 @@ function AccountMenu({
   );
 }
 
+type SidebarChromeProps = {
+  userName: string;
+  userEmail: string;
+  workspaceName: string;
+  initialCollapsed: boolean;
+};
+
+// Pre-hydration / Suspense-fallback renders have no live collection to mutate;
+// the buttons exist for markup parity but can't be clicked before hydration.
+const noopToggleStar = () => {};
+const noopArchive = () => {};
+
 export default function Sidebar({
   userName,
   userEmail,
@@ -519,95 +511,139 @@ export default function Sidebar({
   initialCollapsed,
   initialSessions,
   sessionsLoading = false,
-}: {
-  userName: string;
-  userEmail: string;
-  workspaceName: string;
-  initialCollapsed: boolean;
+}: SidebarChromeProps & {
   initialSessions: SidebarSession[];
   sessionsLoading?: boolean;
 }) {
+  const hydrated = useHydrated();
+  const chrome = { userName, userEmail, workspaceName, initialCollapsed };
+
+  // SSR + first client render (and the Suspense loading fallback) render from the
+  // server-provided list with no live query, so the hydrated markup matches the
+  // server HTML. `useLiveQuery` is client-only and must not run during SSR.
+  if (!hydrated || sessionsLoading) {
+    return (
+      <SidebarContent
+        {...chrome}
+        sessions={initialSessions}
+        showSessionsLoading={sessionsLoading}
+        onToggleStar={noopToggleStar}
+        onArchive={noopArchive}
+      />
+    );
+  }
+
+  return <SidebarLive {...chrome} initialSessions={initialSessions} />;
+}
+
+// Client-only: subscribes the agent_sessions + session_stars collections via
+// useLiveQuery and wires optimistic star/archive writes through them.
+function SidebarLive({
+  initialSessions,
+  ...chrome
+}: SidebarChromeProps & { initialSessions: SidebarSession[] }) {
+  const router = useRouter();
+  const { userId } = useWorkspaceContext();
+  const { agentSessions, sessionStars } = useCollections();
+  const { showError } = useToast();
+  // Sessions with an in-flight pin toggle. Guards rapid re-clicks from firing an
+  // insert against an already-optimistically-inserted star (duplicate key).
+  const pinTogglesInFlight = useRef<Set<string>>(new Set());
+
+  const { data: sessionRows, isLoading: sessionsBusy } = useLiveQuery((q) =>
+    q.from({ session: agentSessions }),
+  );
+  const { data: starRows } = useLiveQuery((q) => q.from({ star: sessionStars }));
+  const liveSessions = useMemo(
+    () => deriveSidebarSessions(sessionRows ?? [], starRows ?? []),
+    [sessionRows, starRows],
+  );
+  // Keep showing the server list until the collection has hydrated, so there is
+  // no skeleton flash on navigation.
+  const sessions = sessionsBusy ? initialSessions : liveSessions;
+
+  // Star state is server-truth (per user, persisted, cross-device). Toggling
+  // inserts/deletes a row in the session_stars collection optimistically; the
+  // collection's onInsert/onDelete persist via setSessionStar and reconcile by
+  // txid. A failure auto-rolls back the optimistic change.
+  const handleToggleStar = useCallback(
+    (sessionId: string, currentlyStarred: boolean) => {
+      if (pinTogglesInFlight.current.has(sessionId)) return;
+      pinTogglesInFlight.current.add(sessionId);
+
+      const tx = currentlyStarred
+        ? sessionStars.delete(sessionId)
+        : sessionStars.insert({
+            session_id: sessionId,
+            user_id: userId,
+            starred_at: new Date().toISOString(),
+          });
+
+      void tx.isPersisted.promise
+        .catch((error) => {
+          showError(
+            error instanceof Error ? error.message : "Could not reach the server.",
+            currentlyStarred ? "Could not unpin session" : "Could not pin session",
+          );
+        })
+        .finally(() => pinTogglesInFlight.current.delete(sessionId));
+    },
+    [sessionStars, userId, showError],
+  );
+
+  // Archive is the sidebar's soft delete: remove the row from the agent_sessions
+  // collection optimistically (it vanishes at once) and navigate home if the
+  // archived session is open. The collection's onDelete archives via the server
+  // action; a failure rolls the row back and surfaces the error.
+  const handleArchive = useCallback(
+    (sessionId: string, active: boolean) => {
+      const tx = agentSessions.delete(sessionId);
+      if (active) router.replace("/");
+      void tx.isPersisted.promise.catch((error) => {
+        showError(
+          error instanceof Error ? error.message : "Could not archive session.",
+          "Could not archive session",
+        );
+      });
+    },
+    [agentSessions, router, showError],
+  );
+
+  return (
+    <SidebarContent
+      {...chrome}
+      sessions={sessions}
+      showSessionsLoading={false}
+      onToggleStar={handleToggleStar}
+      onArchive={handleArchive}
+    />
+  );
+}
+
+function SidebarContent({
+  userName,
+  userEmail,
+  workspaceName,
+  initialCollapsed,
+  sessions,
+  showSessionsLoading,
+  onToggleStar,
+  onArchive,
+}: SidebarChromeProps & {
+  sessions: SidebarSession[];
+  showSessionsLoading: boolean;
+  onToggleStar: (sessionId: string, currentlyStarred: boolean) => void;
+  onArchive: (sessionId: string, active: boolean) => void;
+}) {
   const pathname = usePathname();
-  const { workspaceId } = useWorkspaceContext();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
-  const queryClient = useQueryClient();
-  const { showError } = useToast();
   const footerRef = useRef<HTMLDivElement>(null);
-  // Sessions with an in-flight pin toggle. Guards against rapid re-clicks firing
-  // overlapping setSessionStar requests that can race and leave the UI out of sync
-  // with the server (a slower earlier response overwriting a newer intent).
-  const pinTogglesInFlight = useRef<Set<string>>(new Set());
-  const { data: queriedSessions, isPending } = useQuery({
-    queryKey: sessionQueryKeys.list(workspaceId),
-    queryFn: fetchSidebarSessions,
-    initialData: sessionsLoading ? undefined : initialSessions,
-    enabled: !sessionsLoading,
-    staleTime: SESSIONS_QUERY_STALE_TIME_MS,
-  });
-  const sessions = queriedSessions ?? initialSessions;
-  const showSessionsLoading = sessionsLoading || (isPending && sessions.length === 0);
   const isHome = pathname === "/";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-
-  // Star state is server-truth (per user, persisted, cross-device) and lives on
-  // the session payload. Toggling writes through a server action with an
-  // optimistic cache update so the UI reflects the change immediately.
-  const handleToggleStar = useCallback(
-    (sessionId: string) => {
-      // Serialize toggles per session: ignore re-clicks until the current request
-      // settles, so overlapping requests can't race the UI out of sync.
-      if (pinTogglesInFlight.current.has(sessionId)) return;
-      pinTogglesInFlight.current.add(sessionId);
-
-      const queryKey = sessionQueryKeys.list(workspaceId);
-      const current = queryClient.getQueryData<SidebarSession[]>(queryKey);
-      const previousStarredAt =
-        current?.find((session) => session.id === sessionId)?.starredAt ?? null;
-      const nextStarred = previousStarredAt === null;
-      const optimisticStarredAt = nextStarred ? new Date().toISOString() : null;
-
-      queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
-        setSidebarSessionStar(entries, sessionId, optimisticStarredAt),
-      );
-
-      void (async () => {
-        try {
-          const result = await setSessionStar(sessionId, nextStarred);
-          if (!result.ok) {
-            // Roll back to the server-truth value we captured before the toggle.
-            queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
-              setSidebarSessionStar(entries, sessionId, previousStarredAt),
-            );
-            showError(
-              result.error,
-              nextStarred ? "Could not pin session" : "Could not unpin session",
-            );
-            return;
-          }
-          queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
-            setSidebarSessionStar(entries, sessionId, result.starredAt),
-          );
-        } catch (error) {
-          // Unexpected throw (network/server exception) — roll back and surface it.
-          queryClient.setQueryData<SidebarSession[]>(queryKey, (entries) =>
-            setSidebarSessionStar(entries, sessionId, previousStarredAt),
-          );
-          showError(
-            error instanceof Error ? error.message : "Could not reach the server.",
-            nextStarred ? "Could not pin session" : "Could not unpin session",
-          );
-        } finally {
-          // Allow the next toggle for this session once this request settles.
-          pinTogglesInFlight.current.delete(sessionId);
-        }
-      })();
-    },
-    [queryClient, showError, workspaceId],
-  );
 
   const filteredSessions = useMemo(
     () => filterSessions(sessions, sessionQuery),
@@ -759,10 +795,10 @@ export default function Sidebar({
                         <SessionHistoryItem
                           key={session.id}
                           session={session}
-                          workspaceId={workspaceId}
                           active={pathname === `/session/${session.id}`}
                           starred
-                          onToggleStar={handleToggleStar}
+                          onToggleStar={onToggleStar}
+                          onArchive={onArchive}
                         />
                       ))}
                     </div>
@@ -781,10 +817,10 @@ export default function Sidebar({
                         <SessionHistoryItem
                           key={session.id}
                           session={session}
-                          workspaceId={workspaceId}
                           active={pathname === `/session/${session.id}`}
                           starred={false}
-                          onToggleStar={handleToggleStar}
+                          onToggleStar={onToggleStar}
+                          onArchive={onArchive}
                         />
                       ))}
                     </div>

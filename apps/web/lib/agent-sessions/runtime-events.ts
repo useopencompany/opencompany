@@ -61,7 +61,69 @@ export type SessionRuntimeState = {
   cost: SessionCostSummary;
   currentStatus: string;
   lastError: string | null;
+  // True once the stream has reduced an event that establishes the session's
+  // status/error — a `session.status`, a `session.error`, or a non-internal user
+  // `message.created`. Until then `currentStatus`/`lastError` are still the empty
+  // seed and must NOT be trusted over the Postgres snapshot. The view reads this to
+  // decide when the live stream is authoritative for the scalar health signals (a
+  // token/usage delta alone leaves it false), so the displayed status/error can
+  // never momentarily regress to the seed and flicker. See the merge in SessionView.
+  statusObserved: boolean;
 };
+
+/**
+ * Union-merge a durable server snapshot (the Postgres system-of-record, complete
+ * but as-of fetch time) with the live Durable-Stream overlay. The snapshot is the
+ * floor: a message present only in the snapshot — e.g. a user message that only the
+ * web's best-effort stream append was meant to publish, or any history that predates
+ * the stream — is never dropped. The overlay's copy of a shared message wins (it
+ * carries live deltas/status); messages new since the snapshot are appended in
+ * stream order (they are chronologically newer). Keyed by message id.
+ */
+export function mergeMessages(
+  snapshot: SessionMessage[],
+  overlay: SessionMessage[],
+): SessionMessage[] {
+  const overlayById = new Map(overlay.map((message) => [message.id, message]));
+  const merged: SessionMessage[] = [];
+  const seen = new Set<string>();
+  for (const message of snapshot) {
+    merged.push(overlayById.get(message.id) ?? message);
+    seen.add(message.id);
+  }
+  for (const message of overlay) {
+    if (!seen.has(message.id)) merged.push(message);
+  }
+  return merged;
+}
+
+/**
+ * Union-merge snapshot events with the live overlay. Durable events (numeric id)
+ * are deduped by id with the overlay copy preferred; transient events (id `null`,
+ * token/reasoning deltas) exist only on the overlay and are appended in stream
+ * order. The snapshot prefix stays ordered; overlay-only events (newer durable +
+ * transient) follow, preserving chronology.
+ */
+export function mergeEvents(snapshot: RuntimeEvent[], overlay: RuntimeEvent[]): RuntimeEvent[] {
+  const overlayById = new Map<number, RuntimeEvent>();
+  for (const event of overlay) {
+    if (event.id !== null) overlayById.set(event.id, event);
+  }
+  const merged: RuntimeEvent[] = [];
+  const seenIds = new Set<number>();
+  for (const event of snapshot) {
+    if (event.id !== null) {
+      merged.push(overlayById.get(event.id) ?? event);
+      seenIds.add(event.id);
+    } else {
+      merged.push(event);
+    }
+  }
+  for (const event of overlay) {
+    if (event.id === null || !seenIds.has(event.id)) merged.push(event);
+  }
+  return merged;
+}
 
 export type RuntimeToolApprovalState = {
   status: "required" | "approved" | "denied";
@@ -144,6 +206,7 @@ export function applyRuntimeEventToState(
         ...next,
         currentStatus: status,
         lastError: status === "failed" ? next.lastError : null,
+        statusObserved: true,
         messages:
           status === "failed"
             ? stopRunningAssistantMessages(next.messages, next.events)
@@ -158,6 +221,7 @@ export function applyRuntimeEventToState(
       ...next,
       currentStatus: "failed",
       lastError: message || "The session failed.",
+      statusObserved: true,
       messages: stopRunningAssistantMessages(next.messages, next.events),
     };
   }
@@ -240,6 +304,7 @@ export function applyRuntimeEventToState(
   if (event.type === "message.created") {
     const messageId = readString(event.payload.messageId);
     const role = readString(event.payload.role);
+    const internal = readBoolean(event.payload.internal);
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
       const status =
         optionalString(event.payload.status) ?? (role === "user" ? "completed" : "running");
@@ -252,10 +317,18 @@ export function applyRuntimeEventToState(
             role,
             content: optionalString(event.payload.content) ?? "",
             status,
-            internal: readBoolean(event.payload.internal),
+            internal,
             createdAt: event.createdAt ?? new Date().toISOString(),
           },
         ],
+      };
+    }
+    if (role === "user" && !internal) {
+      next = {
+        ...next,
+        currentStatus: "running",
+        lastError: null,
+        statusObserved: true,
       };
     }
   }

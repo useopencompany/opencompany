@@ -1,17 +1,20 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
+import { useQueryClient } from "@tanstack/react-query";
 import { AtSign, Bot, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useMemo, useTransition } from "react";
 import {
   AGENT_MODELS,
   AGENT_TOOLS,
   type AgentMentionItem,
   findMentionItem,
 } from "@/components/agent-editor/tools";
+import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
+import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentsPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { createAgent } from "@/lib/agents/actions";
@@ -21,8 +24,8 @@ import {
   agentHref,
   agentQueryKeys,
   fetchAgent,
-  fetchAgents,
 } from "@/lib/agents/payload";
+import { agentRowToListItem, sortAgentsByUpdatedDesc } from "@/lib/collections/selectors";
 
 function collectMentions(agent: AgentListItemPayload): AgentMentionItem[] {
   const model = findMentionItem(`model:${agent.config.model.name}`);
@@ -163,22 +166,16 @@ function NewAgentButton({ label = "New agent" }: { label?: string }) {
   );
 }
 
-export default function AgentsView({ initialAgents }: { initialAgents?: AgentListItemPayload[] }) {
-  const { workspaceId } = useWorkspaceContext();
+function AgentsViewContent({
+  agents,
+  workspaceId,
+}: {
+  agents: AgentListItemPayload[];
+  workspaceId: string;
+}) {
   const toolCount = AGENT_TOOLS.length;
   const modelCount = AGENT_MODELS.length;
-  const { data: agents, isPending } = useQuery({
-    queryKey: agentQueryKeys.list(workspaceId),
-    queryFn: fetchAgents,
-    initialData: initialAgents,
-    staleTime: AGENTS_QUERY_STALE_TIME_MS,
-  });
-
-  if (!agents && isPending) {
-    return <AgentsPageSkeleton />;
-  }
-
-  const isEmpty = (agents ?? []).length === 0;
+  const isEmpty = agents.length === 0;
 
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
@@ -207,7 +204,7 @@ export default function AgentsView({ initialAgents }: { initialAgents?: AgentLis
           </div>
         ) : (
           <div className="mt-8 flex flex-col gap-0.5">
-            {(agents ?? []).map((agent) => (
+            {agents.map((agent) => (
               <AgentRow key={agent.id} agent={agent} workspaceId={workspaceId} />
             ))}
           </div>
@@ -215,4 +212,43 @@ export default function AgentsView({ initialAgents }: { initialAgents?: AgentLis
       </div>
     </main>
   );
+}
+
+// Client-only: useLiveQuery uses useSyncExternalStore without a server snapshot,
+// so it must not render during SSR. Gated behind useHydrated below.
+function AgentsViewLive({
+  initialAgents,
+  workspaceId,
+}: {
+  initialAgents: AgentListItemPayload[] | undefined;
+  workspaceId: string;
+}) {
+  const { agents: agentsCollection } = useCollections();
+  const { data: rows, isLoading } = useLiveQuery((q) => q.from({ agent: agentsCollection }));
+  const liveAgents = useMemo(
+    () => sortAgentsByUpdatedDesc((rows ?? []).map(agentRowToListItem)),
+    [rows],
+  );
+
+  // Keep showing the server-provided list until the collection has hydrated, so
+  // there is no skeleton flash on navigation.
+  if (isLoading && !initialAgents) {
+    return <AgentsPageSkeleton />;
+  }
+  const agents = isLoading && initialAgents ? initialAgents : liveAgents;
+
+  return <AgentsViewContent agents={agents} workspaceId={workspaceId} />;
+}
+
+export default function AgentsView({ initialAgents }: { initialAgents?: AgentListItemPayload[] }) {
+  const { workspaceId } = useWorkspaceContext();
+  const hydrated = useHydrated();
+
+  // SSR + first client render: render the server-provided list directly (no live
+  // query) so the hydrated markup matches the server HTML.
+  if (!hydrated) {
+    if (!initialAgents) return <AgentsPageSkeleton />;
+    return <AgentsViewContent agents={initialAgents} workspaceId={workspaceId} />;
+  }
+  return <AgentsViewLive initialAgents={initialAgents} workspaceId={workspaceId} />;
 }

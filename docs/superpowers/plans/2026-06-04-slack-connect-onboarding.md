@@ -48,7 +48,7 @@ Resolved during planning against the real repo (commit `2596e36`):
 - `apps/web/package.json` — add `@slack/web-api`
 - `.env.example` + `docs/env-vars.md` — three new env vars
 - `packages/db/src/schema.ts` — `workspaceSlackChannels` table + `SlackChannelStatus` type
-- `packages/db/drizzle/*` — generated migration (via `db:generate`)
+- `drizzle/*` — generated migration (via `db:generate`)
 - `apps/web/lib/email/events.ts` — `email.slack_invite_requested` event + dispatch helper
 - `apps/web/lib/inngest/functions.ts` — `provisionSlackSupportChannel` + `sendSlackInvite` fns, registered in `inngestFunctions`
 - `apps/web/lib/onboarding/actions.ts` — dispatch `slack.support_channel_requested` in the `scaffold.created` branch
@@ -99,7 +99,7 @@ git commit -m "chore: add Slack support SDK + env vars for Slack Connect onboard
 
 **Files:**
 - Modify: `packages/db/src/schema.ts`
-- Create (generated): `packages/db/drizzle/<NNNN>_*.sql`
+- Create (generated): `drizzle/<NNNN>_*.sql`
 
 - [ ] **Step 1: Add the table + status type** (append near the other workspace tables, after `onboardingResponses`, before the relations block)
 
@@ -130,7 +130,7 @@ export const workspaceSlackChannels = pgTable(
 - [ ] **Step 2: Generate the migration**
 
 Run: `bun run db:generate`
-Expected: a new `packages/db/drizzle/<NNNN>_*.sql` creating `workspace_slack_channels` with the unique index. Inspect it: it must contain `CREATE TABLE "workspace_slack_channels"` and `CREATE UNIQUE INDEX "workspace_slack_channels_workspace_idx"` and **no unrelated schema changes** (per the schema-drift convention).
+Expected: a new `drizzle/<NNNN>_*.sql` creating `workspace_slack_channels` with the unique index. Inspect it: it must contain `CREATE TABLE "workspace_slack_channels"` and `CREATE UNIQUE INDEX "workspace_slack_channels_workspace_idx"` and **no unrelated schema changes** (per the schema-drift convention).
 
 - [ ] **Step 3: Apply to the dev DB**
 
@@ -140,7 +140,7 @@ Expected: migration applies cleanly (authed pages would crash on QA otherwise).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/db/src/schema.ts packages/db/drizzle
+git add packages/db/src/schema.ts drizzle
 git commit -m "feat(db): add workspace_slack_channels table"
 ```
 

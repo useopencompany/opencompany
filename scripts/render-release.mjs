@@ -3,12 +3,14 @@
 // Called by: .github/workflows/release-production.yml and root `bun run release:render`.
 // Purpose: triggers and waits for the Render runner deploy for the release commit.
 
+import { appendFileSync } from "node:fs";
+
 const renderApiUrl = process.env.RENDER_API_URL ?? "https://api.render.com/v1";
 const serviceId = requiredEnv("RENDER_SERVICE_ID");
 const apiKey = requiredEnv("RENDER_API_KEY");
-const releaseSha = requiredEnv("RELEASE_SHA");
 const timeoutMs = positiveNumberEnv("RENDER_DEPLOY_TIMEOUT_MS", 900000);
 const pollMs = positiveNumberEnv("RENDER_DEPLOY_POLL_MS", 10000);
+const args = parseArgs(process.argv.slice(2));
 
 await main().catch((error) => {
   console.error(error.message);
@@ -16,23 +18,74 @@ await main().catch((error) => {
 });
 
 async function main() {
-  const deploy = await triggerDeploy();
-  console.log(`Triggered Render deploy ${deploy.id} for ${shortSha(releaseSha)}.`);
+  if (args.mode === "cancel") {
+    await cancelDeploy(args.deployId);
+    return;
+  }
 
-  await waitForDeploy(deploy.id);
+  const releaseSha = requiredEnv("RELEASE_SHA");
+
+  if (args.mode === "wait") {
+    await waitForDeploy(args.deployId, releaseSha);
+    return;
+  }
+
+  const deploy = await triggerDeploy(releaseSha);
+  console.log(`Triggered Render deploy ${deploy.id} for ${shortSha(releaseSha)}.`);
+  writeGithubOutput("deploy_id", deploy.id);
+
+  if (args.mode === "trigger-only") {
+    return;
+  }
+
+  await waitForDeploy(deploy.id, releaseSha);
 }
 
-async function triggerDeploy() {
-  const response = await renderRequest(`/services/${serviceId}/deploys`, {
-    method: "POST",
-    body: JSON.stringify({ commitId: releaseSha }),
-  });
+async function triggerDeploy(releaseSha) {
+  const response = await renderRequest(
+    `/services/${serviceId}/deploys`,
+    {
+      method: "POST",
+      body: JSON.stringify({ commitId: releaseSha }),
+    },
+    {
+      allowEmpty: true,
+    },
+  );
+
+  if (!response) {
+    return waitForTriggeredDeploy(releaseSha);
+  }
 
   assertDeployCommit(response, releaseSha);
   return response;
 }
 
-async function waitForDeploy(deployId) {
+async function waitForTriggeredDeploy(releaseSha) {
+  const deadline = Date.now() + 30000;
+
+  while (Date.now() < deadline) {
+    const deploy = await findDeployForRelease(releaseSha);
+    if (deploy) {
+      assertDeployCommit(deploy, releaseSha);
+      return deploy;
+    }
+    await sleep(2000);
+  }
+
+  throw new Error(
+    `Render accepted the deploy request but did not expose a deploy for ${releaseSha}.`,
+  );
+}
+
+async function findDeployForRelease(releaseSha) {
+  const response = await renderRequest(`/services/${serviceId}/deploys`);
+  const deploys = Array.isArray(response) ? response.map((item) => item.deploy ?? item) : [];
+
+  return deploys.find((deploy) => deployCommitMatches(deploy, releaseSha)) ?? null;
+}
+
+async function waitForDeploy(deployId, releaseSha) {
   const deadline = Date.now() + timeoutMs;
   let lastDeploy;
 
@@ -63,7 +116,24 @@ async function waitForDeploy(deployId) {
   );
 }
 
-async function renderRequest(path, init = {}) {
+async function cancelDeploy(deployId) {
+  try {
+    await renderRequest(
+      `/services/${serviceId}/deploys/${deployId}/cancel`,
+      {
+        method: "POST",
+      },
+      {
+        allowEmpty: true,
+      },
+    );
+    console.log(`Requested cancellation for Render deploy ${deployId}.`);
+  } catch (error) {
+    console.warn(`Could not cancel Render deploy ${deployId}: ${error.message}`);
+  }
+}
+
+async function renderRequest(path, init = {}, options = {}) {
   let response;
   try {
     response = await fetch(`${renderApiUrl}${path}`, {
@@ -86,6 +156,10 @@ async function renderRequest(path, init = {}) {
     throw new Error(`Render API ${response.status} ${response.statusText}: ${detail}`);
   }
 
+  if (!payload && options.allowEmpty) {
+    return null;
+  }
+
   if (!payload || typeof payload !== "object") {
     throw new Error(`Render API returned a non-JSON response: ${body.slice(0, 300)}`);
   }
@@ -93,17 +167,62 @@ async function renderRequest(path, init = {}) {
   return payload;
 }
 
+function parseArgs(argv) {
+  if (argv.length === 0) return { mode: "deploy" };
+
+  const [command, deployId, ...rest] = argv;
+  if (rest.length > 0) {
+    usage(`Unexpected argument: ${rest[0]}`);
+  }
+
+  if (command === "--trigger-only") {
+    if (deployId) usage("--trigger-only does not accept a deploy ID.");
+    return { mode: "trigger-only" };
+  }
+
+  if (command === "--wait") {
+    if (!deployId) usage("--wait requires a deploy ID.");
+    return { mode: "wait", deployId };
+  }
+
+  if (command === "--cancel") {
+    if (!deployId) usage("--cancel requires a deploy ID.");
+    return { mode: "cancel", deployId };
+  }
+
+  usage(`Unknown argument: ${command}`);
+}
+
+function usage(message) {
+  console.error(message);
+  console.error(
+    "Usage: render-release.mjs [--trigger-only | --wait <deploy_id> | --cancel <deploy_id>]",
+  );
+  process.exit(1);
+}
+
+function writeGithubOutput(name, value) {
+  const outputPath = process.env.GITHUB_OUTPUT;
+  if (!outputPath || !value) return;
+
+  appendFileSync(outputPath, `${name}=${value}\n`);
+}
+
 function assertDeployCommit(deploy, expectedSha) {
   const commitId = deploy.commit?.id;
-  if (
-    typeof commitId === "string" &&
-    !expectedSha.startsWith(commitId) &&
-    !commitId.startsWith(expectedSha)
-  ) {
+  if (typeof commitId === "string" && !deployCommitMatches(deploy, expectedSha)) {
     throw new Error(
       `Render deploy ${deploy.id ?? "(unknown)"} is for ${commitId}, expected ${expectedSha}.`,
     );
   }
+}
+
+function deployCommitMatches(deploy, expectedSha) {
+  const commitId = deploy?.commit?.id;
+  return (
+    typeof commitId === "string" &&
+    (expectedSha.startsWith(commitId) || commitId.startsWith(expectedSha))
+  );
 }
 
 function isFailedStatus(status) {

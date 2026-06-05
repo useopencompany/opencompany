@@ -1,11 +1,10 @@
 import { parseAgentFile, serializeAgentFile } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentFiles, agentSyncJobs, agents } from "@opencompany/db/schema";
-import { after } from "next/server";
+import { agentFiles, agents, workspaceSyncJobs } from "@opencompany/db/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { hashAgentSource } from "@/lib/agents/hash";
-import { dispatchAgentSyncRequested } from "@/lib/agents/sync-events";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-state/sync-dispatch";
 import { DEFAULT_SOUL_MD, DEFAULT_USER_AGENT_BODY, ensureUserOnboardingScaffold } from "./scaffold";
 
 vi.mock("@opencompany/analytics/server", () => ({
@@ -21,19 +20,13 @@ vi.mock("@opencompany/observability", () => ({
   createLogger: vi.fn(() => ({ error: vi.fn(), info: vi.fn() })),
 }));
 
-vi.mock("next/server", () => ({
-  after: vi.fn(),
-}));
-
-vi.mock("@/lib/agents/sync-events", () => ({
-  dispatchAgentSyncRequested: vi.fn(),
-  dispatchAgentFileSyncRequested: vi.fn(),
+vi.mock("@/lib/workspace-state/sync-dispatch", () => ({
+  scheduleWorkspaceSyncDispatch: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
 const captureServerEventMock = vi.mocked(captureServerEvent);
-const afterMock = vi.mocked(after);
-const dispatchAgentSyncRequestedMock = vi.mocked(dispatchAgentSyncRequested);
+const scheduleWorkspaceSyncDispatchMock = vi.mocked(scheduleWorkspaceSyncDispatch);
 
 function createDbMock(selectResults: unknown[][]) {
   const pendingSelectResults = [...selectResults];
@@ -63,7 +56,6 @@ function createDbMock(selectResults: unknown[][]) {
 describe("ensureUserOnboardingScaffold", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dispatchAgentSyncRequestedMock.mockResolvedValue({ ids: ["evt_123"] });
   });
 
   it("creates a pending leo agent and sync job", async () => {
@@ -101,18 +93,20 @@ describe("ensureUserOnboardingScaffold", () => {
       githubSyncStatus: string;
       config: unknown;
     };
-    const syncJobInsert = insertedValues.find((entry) => entry.table === agentSyncJobs)?.value as {
-      agentId: string;
+    const syncJobInsert = insertedValues.find(
+      (entry) =>
+        entry.table === workspaceSyncJobs &&
+        (entry.value as { sourceKind?: string }).sourceKind === "agent",
+    )?.value as {
       workspaceId: string;
-      path: string;
+      repoPath: string;
+      sourceKind: string;
+      sourceRef: string;
+      operation: string;
       desiredHash: string;
-      desiredVersion: number;
       previousPath: string | null;
       previousBlobSha: string | null;
-      status: string;
-      attempts: number;
       nextRunAt: Date;
-      lastError: string | null;
     };
 
     expect(result).toEqual({
@@ -132,16 +126,14 @@ describe("ensureUserOnboardingScaffold", () => {
       config: parsed.config,
     });
     expect(syncJobInsert).toMatchObject({
-      agentId: result.agentId,
       workspaceId: "wks_123",
-      path: "agents/leo/leo.agent",
+      repoPath: "agents/leo/leo.agent",
+      sourceKind: "agent",
+      sourceRef: result.agentId,
+      operation: "upsert",
       desiredHash: contentHash,
-      desiredVersion: 1,
       previousPath: null,
       previousBlobSha: null,
-      status: "pending",
-      attempts: 0,
-      lastError: null,
     });
     expect(syncJobInsert.nextRunAt).toBeInstanceOf(Date);
     // leo's private operating doc is seeded alongside the agent in the same batch.
@@ -165,16 +157,10 @@ describe("ensureUserOnboardingScaffold", () => {
       workspace_id: "wks_123",
       agent_id: result.agentId,
     });
-    // Two dispatches scheduled: the agent definition sync and the soul.md file sync.
-    expect(afterMock).toHaveBeenCalledTimes(2);
-
-    const callback = afterMock.mock.calls[0]?.[0];
-    expect(callback).toBeTypeOf("function");
-    await callback?.();
-    expect(dispatchAgentSyncRequestedMock).toHaveBeenCalledWith({
-      agentId: result.agentId,
-      workspaceId: "wks_123",
-    });
+    // Both the agent definition sync and the soul.md file sync dispatch through
+    // the unified workspace pipeline (one event per workspace).
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 
   it("skips creation when the leo agent already exists", async () => {
@@ -196,6 +182,6 @@ describe("ensureUserOnboardingScaffold", () => {
     expect(insert).not.toHaveBeenCalled();
     expect(batch).not.toHaveBeenCalled();
     expect(captureServerEventMock).not.toHaveBeenCalled();
-    expect(afterMock).not.toHaveBeenCalled();
+    expect(scheduleWorkspaceSyncDispatchMock).not.toHaveBeenCalled();
   });
 });

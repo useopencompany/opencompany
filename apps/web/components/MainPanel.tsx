@@ -1,9 +1,11 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,
@@ -12,15 +14,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import {
-  AGENTS_QUERY_STALE_TIME_MS,
-  type AgentListItemPayload,
-  agentQueryKeys,
-  fetchAgents,
-} from "@/lib/agents/payload";
+import { agentRowToListItem, sortAgentsByUpdatedDesc } from "@/lib/collections/selectors";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 
@@ -170,6 +168,40 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   );
 }
 
+function MainPanelContent({ agents, slackCard }: { agents: AgentOption[]; slackCard?: ReactNode }) {
+  return (
+    <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
+      <div className="w-full max-w-[680px]">
+        <Prompt agents={agents} />
+        {slackCard}
+      </div>
+    </main>
+  );
+}
+
+// Client-only: gated behind useHydrated in the default export because
+// useLiveQuery cannot render during SSR.
+function MainPanelLive({
+  initialAgents,
+  slackCard,
+}: {
+  initialAgents: AgentOption[];
+  slackCard?: ReactNode;
+}) {
+  const { agents: agentsCollection } = useCollections();
+  const { data: rows, isLoading } = useLiveQuery((q) => q.from({ agent: agentsCollection }));
+  const agentOptions = useMemo(() => {
+    // Fall back to the server-provided picker options until the collection hydrates.
+    if (isLoading && initialAgents.length > 0) return initialAgents;
+    return sortAgentsByUpdatedDesc((rows ?? []).map(agentRowToListItem)).map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+    }));
+  }, [isLoading, initialAgents, rows]);
+
+  return <MainPanelContent agents={agentOptions} slackCard={slackCard} />;
+}
+
 export default function MainPanel({
   agents: initialAgents,
   slackCard,
@@ -177,25 +209,7 @@ export default function MainPanel({
   agents: AgentOption[];
   slackCard?: ReactNode;
 }) {
-  const { workspaceId } = useWorkspaceContext();
-  const queryClient = useQueryClient();
-  const cachedAgents = queryClient.getQueryData<AgentListItemPayload[]>(
-    agentQueryKeys.list(workspaceId),
-  );
-  const { data: agents = cachedAgents } = useQuery({
-    queryKey: agentQueryKeys.list(workspaceId),
-    queryFn: fetchAgents,
-    staleTime: AGENTS_QUERY_STALE_TIME_MS,
-  });
-  const agentOptions =
-    agents?.map((agent) => ({ id: agent.id, name: agent.name })) ?? initialAgents;
-
-  return (
-    <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
-      <div className="w-full max-w-[680px]">
-        <Prompt agents={agentOptions} />
-        {slackCard}
-      </div>
-    </main>
-  );
+  const hydrated = useHydrated();
+  if (!hydrated) return <MainPanelContent agents={initialAgents} slackCard={slackCard} />;
+  return <MainPanelLive initialAgents={initialAgents} slackCard={slackCard} />;
 }

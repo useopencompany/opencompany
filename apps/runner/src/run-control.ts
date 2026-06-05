@@ -1,6 +1,7 @@
 import { agentSessions } from "@opencompany/db/schema";
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "./db";
+import { detachSessionStream } from "./durable-streams";
 
 export const RUN_LEASE_TTL_MS = 15 * 60 * 1000;
 export const RUN_HEARTBEAT_INTERVAL_MS = 5_000;
@@ -263,7 +264,16 @@ export async function finishRunLease(
   input: FinishRunLeaseInput,
   store: RunControlStore = createDbRunControlStore(),
 ) {
-  return store.finishLease(input, new Date());
+  const finished = await store.finishLease(input, new Date());
+  if (finished) {
+    // The run is over (terminal or paused). Flush + detach + evict this session's
+    // Durable Stream producer so the map stays bounded to currently-running turns in
+    // the long-lived runner; a later turn re-creates it. Fire-and-forget so a slow
+    // stream service never adds latency to lease completion — and a no-op when Durable
+    // Streams is unconfigured (the gate inside detach handles that via an empty cache).
+    void detachSessionStream(input.sessionId);
+  }
+  return finished;
 }
 
 export async function releaseRunLease(

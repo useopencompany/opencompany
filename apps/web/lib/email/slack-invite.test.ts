@@ -1,7 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderSlackInviteEmail, sendSlackInviteEmail } from "./slack-invite";
 
 const originalEnv = { ...process.env };
+
+// This suite reassigns process.env per test; restore it afterward so the mutated
+// env never leaks into other test files sharing the worker.
+afterAll(() => {
+  process.env = { ...originalEnv };
+});
 
 function success<T>(data: T) {
   return { data, error: null, headers: null };

@@ -54,11 +54,19 @@ describe("createSupportChannel", () => {
     expect(id).toBe("C999");
   });
 
-  it("throws SlackNotConfiguredError when the bot token is missing", async () => {
+  it("throws SlackNotConfiguredError when the bot token is missing and no client is injected", async () => {
     process.env.SLACK_SUPPORT_BOT_TOKEN = "";
-    await expect(createSupportChannel(workspace, { client: makeClient() })).rejects.toBeInstanceOf(
-      SlackNotConfiguredError,
-    );
+    await expect(createSupportChannel(workspace)).rejects.toBeInstanceOf(SlackNotConfiguredError);
+  });
+
+  it("uses an injected client without requiring the bot token", async () => {
+    // An injected client is honored before the env check, so tests (and any caller
+    // bringing their own client) never need SLACK_SUPPORT_BOT_TOKEN set.
+    process.env.SLACK_SUPPORT_BOT_TOKEN = "";
+    const client = makeClient();
+    const id = await createSupportChannel(workspace, { client });
+    expect(client.conversations.create).toHaveBeenCalled();
+    expect(id).toBe("C123");
   });
 });
 

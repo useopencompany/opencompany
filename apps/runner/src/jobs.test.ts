@@ -614,6 +614,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
+    workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],
     instanceId: "runner-a",

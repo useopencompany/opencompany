@@ -1,6 +1,7 @@
 import { AnalyticsProvider } from "@opencompany/analytics/client";
 import { cookies } from "next/headers";
 import { Suspense } from "react";
+import { CollectionsProvider } from "@/components/CollectionsProvider";
 import { ObservabilityContext } from "@/components/ObservabilityContext";
 import QueryProvider from "@/components/QueryProvider";
 import Sidebar from "@/components/Sidebar";
@@ -58,33 +59,35 @@ export default async function AppShell({ children }: { children: React.ReactNode
       }}
     >
       <QueryProvider>
-        <WorkspaceProvider workspaceId={workspace.id}>
-          <ToastProvider>
-            <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-            <div className="flex h-screen w-screen overflow-hidden bg-canvas">
-              <Suspense
-                fallback={
-                  <Sidebar
+        <WorkspaceProvider workspaceId={workspace.id} userId={user.id}>
+          <CollectionsProvider>
+            <ToastProvider>
+              <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
+              <div className="flex h-screen w-screen overflow-hidden bg-canvas">
+                <Suspense
+                  fallback={
+                    <Sidebar
+                      userName={userName}
+                      userEmail={authUser.email}
+                      workspaceName={workspace.name}
+                      initialCollapsed={initialSidebarCollapsed}
+                      initialSessions={[]}
+                      sessionsLoading
+                    />
+                  }
+                >
+                  <SidebarWithSessions
                     userName={userName}
                     userEmail={authUser.email}
                     workspaceName={workspace.name}
                     initialCollapsed={initialSidebarCollapsed}
-                    initialSessions={[]}
-                    sessionsLoading
+                    sessionsPromise={sessionsPromise}
                   />
-                }
-              >
-                <SidebarWithSessions
-                  userName={userName}
-                  userEmail={authUser.email}
-                  workspaceName={workspace.name}
-                  initialCollapsed={initialSidebarCollapsed}
-                  sessionsPromise={sessionsPromise}
-                />
-              </Suspense>
-              {children}
-            </div>
-          </ToastProvider>
+                </Suspense>
+                {children}
+              </div>
+            </ToastProvider>
+          </CollectionsProvider>
         </WorkspaceProvider>
       </QueryProvider>
     </AnalyticsProvider>

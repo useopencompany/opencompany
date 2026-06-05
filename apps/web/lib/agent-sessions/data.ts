@@ -1,4 +1,3 @@
-import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
@@ -11,13 +10,16 @@ import {
 import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
-  type SessionStreamCredentialPayload,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
 } from "@/lib/agent-sessions/payload";
-import { getRunnerPublicUrl, getRunnerStreamTokenSecret } from "@/lib/agent-sessions/runner";
-import { computeThinkingDurationSeconds } from "@/lib/agent-sessions/runtime-events";
+import {
+  computeThinkingDurationSeconds,
+  type SessionCostSummary,
+  type SessionToolUsageSummary,
+  type SessionUsageSummary,
+} from "@/lib/agent-sessions/runtime-events";
 
 const SIDEBAR_RECENCY_LIMIT = 50;
 
@@ -317,7 +319,6 @@ export async function loadAgentSessionDetailForWorkspace(
   });
   const toolUsage = rollup.toolUsage;
   const cost = rollup.cost;
-  const runnerUrl = getRunnerPublicUrl();
   const serializedSession = {
     ...session,
     source: session.source === "agent" ? ("agent" as const) : ("user" as const),
@@ -334,51 +335,107 @@ export async function loadAgentSessionDetailForWorkspace(
     usage,
     toolUsage,
     cost,
-    runnerUrl,
   });
 }
 
-export async function loadAgentSessionStreamCredentialForWorkspace(
-  sessionId: string,
-  userId: string,
-  workspaceId: string,
-): Promise<SessionStreamCredentialPayload | null> {
-  const db = getDb();
-  const [session] = await db
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.id, sessionId),
-        eq(agentSessions.workspaceId, workspaceId),
-        eq(agentSessions.userId, userId),
-        isNull(agentSessions.archivedAt),
-      ),
-    )
-    .limit(1);
+type CreatedSessionRow = typeof agentSessions.$inferSelect;
+type CreatedMessageRow = typeof agentSessionMessages.$inferSelect;
+type CreatedEventRow = {
+  id: number;
+  type: string;
+  messageId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: Date;
+};
 
-  if (!session) return null;
+const EMPTY_USAGE: SessionUsageSummary = {
+  inputTokens: 0,
+  inputNoCacheTokens: 0,
+  inputCacheReadTokens: 0,
+  inputCacheWriteTokens: 0,
+  outputTokens: 0,
+  outputTextTokens: 0,
+  outputReasoningTokens: 0,
+  totalTokens: 0,
+};
 
-  const runnerUrl = getRunnerPublicUrl();
-  const streamTokenSecret = getRunnerStreamTokenSecret();
-  const streamTokenExpiresAt = Date.now() + 60 * 60 * 1000;
-  const streamToken =
-    runnerUrl && streamTokenSecret
-      ? createSessionStreamToken(
-          {
-            sessionId,
-            userId,
-            expiresAt: streamTokenExpiresAt,
-          },
-          streamTokenSecret,
-        )
-      : null;
+const EMPTY_TOOL_USAGE: SessionToolUsageSummary = {
+  totalCostUsdMicros: 0,
+  byProviderOperation: [],
+};
 
-  return {
-    runnerUrl,
-    streamToken,
-    streamTokenExpiresAt: streamToken ? streamTokenExpiresAt : null,
-  };
+const EMPTY_COST: SessionCostSummary = {
+  providerCostUsdMicros: 0,
+  platformFeeUsdMicros: 0,
+  totalCostUsdMicros: 0,
+  modelCostUsdMicros: 0,
+  toolCostUsdMicros: 0,
+  sandboxCostUsdMicros: 0,
+};
+
+// Synthesize the detail payload for a freshly created session from the rows we just
+// wrote, instead of re-querying it via loadAgentSessionDetailForWorkspace (an initial
+// join plus six aggregate queries). A brand-new session has no children, no usage, no
+// cost, and exactly the messages/events created here — so every aggregate is a known
+// zero. This keeps the create-session server actions off the slow read path; the
+// detail query still refetches the canonical aggregates on the next turn completion.
+export function buildCreatedSessionDetail(input: {
+  agent: { name: string; path: string | null };
+  session: CreatedSessionRow;
+  messages: CreatedMessageRow[];
+  events: CreatedEventRow[];
+}): AgentSessionDetailPayload {
+  return serializeAgentSessionDetail({
+    session: {
+      id: input.session.id,
+      agentId: input.session.agentId,
+      agentName: input.agent.name,
+      agentPath: input.agent.path,
+      title: input.session.title,
+      status: input.session.status,
+      source: input.session.source,
+      modelProvider: input.session.modelProvider,
+      modelName: input.session.modelName,
+      parentSessionId: input.session.parentSessionId,
+      parentMessageId: input.session.parentMessageId,
+      parentToolCallId: input.session.parentToolCallId,
+      e2bSandboxId: input.session.e2bSandboxId,
+      workdir: input.session.workdir,
+      runLeaseId: input.session.runLeaseId,
+      abortRequestedAt: input.session.abortRequestedAt,
+      lastError: input.session.lastError,
+      createdAt: input.session.createdAt,
+      updatedAt: input.session.updatedAt,
+    },
+    related: { parent: null, children: [] },
+    messages: input.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      status: message.status,
+      internal: message.internal,
+      modelMessage: message.modelMessage ?? null,
+      toolName: message.toolName,
+      toolCallId: message.toolCallId,
+      responseToMessageId: message.responseToMessageId,
+      // A just-created session has no model usage yet, and a user message never has
+      // reasoning, so both are zero until the runner streams the assistant turn.
+      outputReasoningTokens: 0,
+      thinkingDurationSeconds: 0,
+      createdAt: message.createdAt,
+      completedAt: message.completedAt,
+    })),
+    events: input.events.map((event) => ({
+      id: event.id,
+      type: event.type,
+      messageId: event.messageId,
+      payload: event.payload,
+      createdAt: event.createdAt,
+    })),
+    usage: EMPTY_USAGE,
+    toolUsage: EMPTY_TOOL_USAGE,
+    cost: EMPTY_COST,
+  });
 }
 
 function parseSessionTreeRollup(row: Record<string, unknown> | undefined) {

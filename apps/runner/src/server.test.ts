@@ -1,14 +1,6 @@
-import { createSessionStreamToken } from "@opencompany/agent-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PersistedRuntimeEvent, RuntimeEventForStream } from "./events";
 import { enqueueRunnerJob } from "./jobs";
-import {
-  createServer,
-  createSseHeaders,
-  formatSseEvent,
-  formatStreamError,
-  redactStreamToken,
-} from "./server";
+import { createServer } from "./server";
 
 vi.mock("./agent-loop", () => ({
   abortSession: vi.fn(async () => undefined),
@@ -36,6 +28,7 @@ const env = {
   e2bTemplate: undefined,
   ampE2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
+  workerConcurrency: 2,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],
   instanceId: "runner-test",
@@ -77,51 +70,6 @@ describe("runner server CORS", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
-  });
-});
-
-describe("session event stream auth", () => {
-  it("rejects missing stream tokens with 401", async () => {
-    const server = createServer(env);
-    servers.push(server);
-
-    const response = await server.inject({
-      method: "GET",
-      url: "/sessions/ses_123/events",
-    });
-
-    expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: "Missing stream token." });
-  });
-
-  it("rejects invalid stream tokens with 401", async () => {
-    const server = createServer(env);
-    servers.push(server);
-
-    const response = await server.inject({
-      method: "GET",
-      url: "/sessions/ses_123/events?token=bad-token",
-    });
-
-    expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: "Invalid stream token." });
-  });
-
-  it("rejects tokens minted for a different session with 403", async () => {
-    const server = createServer(env);
-    servers.push(server);
-    const token = createSessionStreamToken(
-      { sessionId: "ses_other", userId: "usr_123", expiresAt: Date.now() + 60_000 },
-      env.streamTokenSecret,
-    );
-
-    const response = await server.inject({
-      method: "GET",
-      url: `/sessions/ses_123/events?token=${encodeURIComponent(token)}`,
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toEqual({ error: "Token does not match session." });
   });
 });
 
@@ -219,96 +167,5 @@ describe("internal after-session endpoint", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "messageId is required." });
-  });
-});
-
-describe("SSE formatting", () => {
-  it("formats runtime events as unnamed SSE messages", () => {
-    const event: PersistedRuntimeEvent = {
-      id: 42,
-      sessionId: "ses_123",
-      messageId: "msg_123",
-      type: "message.completed",
-      payload: { messageId: "msg_123", content: "hello" },
-      createdAt: new Date("2026-05-22T00:00:00.000Z"),
-    };
-
-    expect(formatSseEvent(event)).toBe(
-      'id: 42\ndata: {"id":42,"type":"message.completed","payload":{"messageId":"msg_123","content":"hello"},"messageId":"msg_123","createdAt":"2026-05-22T00:00:00.000Z"}\n\n',
-    );
-  });
-
-  it("includes createdAt as an ISO string in the SSE payload so web clients can compute thinking duration", () => {
-    const createdAt = new Date("2026-05-28T12:00:01.500Z");
-    const event: PersistedRuntimeEvent = {
-      id: 7,
-      sessionId: "ses_abc",
-      messageId: "msg_abc",
-      type: "tool.started",
-      payload: { toolCallId: "call_1", name: "read_file", input: {} },
-      createdAt,
-    };
-
-    const raw = formatSseEvent(event);
-    const dataLine = raw.split("\ndata: ")[1];
-    expect(dataLine).toBeDefined();
-    const data = JSON.parse(dataLine!.trim());
-    expect(data.createdAt).toBe(createdAt.toISOString());
-  });
-
-  it("formats events returned from raw SQL with string timestamps", () => {
-    const event: PersistedRuntimeEvent = {
-      id: 8,
-      sessionId: "ses_abc",
-      messageId: "msg_abc",
-      type: "message.created",
-      payload: { messageId: "msg_abc", role: "assistant", internal: false },
-      createdAt: "2026-05-28T12:00:01.500Z",
-    };
-
-    const raw = formatSseEvent(event);
-    const dataLine = raw.split("\ndata: ")[1];
-    expect(dataLine).toBeDefined();
-    const data = JSON.parse(dataLine!.trim());
-    expect(data.createdAt).toBe("2026-05-28T12:00:01.500Z");
-  });
-
-  it("formats transient runtime events without advancing Last-Event-ID", () => {
-    const event: RuntimeEventForStream = {
-      id: null,
-      sessionId: "ses_abc",
-      messageId: "msg_abc",
-      type: "message.delta",
-      payload: { messageId: "msg_abc", delta: "hello" },
-      createdAt: new Date("2026-05-28T12:00:01.500Z"),
-      transient: true,
-    };
-
-    expect(formatSseEvent(event)).toBe(
-      'data: {"id":null,"type":"message.delta","payload":{"messageId":"msg_abc","delta":"hello"},"messageId":"msg_abc","createdAt":"2026-05-28T12:00:01.500Z","transient":true}\n\n',
-    );
-  });
-
-  it("formats stream errors as named SSE events", () => {
-    expect(formatStreamError("Event stream failed.")).toBe(
-      'event: session.error\ndata: {"message":"Event stream failed."}\n\n',
-    );
-  });
-
-  it("includes CORS headers on hijacked SSE responses", () => {
-    expect(createSseHeaders(env, "https://app.example.com")).toMatchObject({
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Access-Control-Allow-Origin": "https://app.example.com",
-      Vary: "Origin",
-      "X-Accel-Buffering": "no",
-    });
-  });
-});
-
-describe("stream token redaction", () => {
-  it("redacts EventSource query tokens from request log URLs", () => {
-    expect(redactStreamToken("/sessions/ses_123/events?token=secret&after=4")).toBe(
-      "/sessions/ses_123/events?token=%5Bredacted%5D&after=4",
-    );
   });
 });

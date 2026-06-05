@@ -9,10 +9,11 @@ import {
   Cpu,
   MessagesSquare,
   Plug,
+  Sparkles,
   Wrench,
 } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import type { AgentMentionItem } from "./tools";
+import { ADD_SKILL_MENTION_ID, type AgentMentionItem } from "./tools";
 
 export type MentionListHandle = {
   onKeyDown: (event: KeyboardEvent) => boolean;
@@ -62,6 +63,13 @@ export const MentionList = forwardRef<MentionListHandle, Props>(function Mention
       label: "Work integrations",
       description: `${items.filter((item) => item.kind === "integration").length} available`,
       icon: Plug,
+    },
+    {
+      type: "category" as const,
+      kind: "skill" as const,
+      label: "Skills",
+      description: `${items.filter((item) => item.kind === "skill").length} available`,
+      icon: Sparkles,
     },
     {
       type: "category" as const,
@@ -236,12 +244,18 @@ function kindLabel(kind: AgentMentionItem["kind"]) {
   if (kind === "integration") return "Work integrations";
   if (kind === "schedule") return "Schedules";
   if (kind === "hook") return "Hooks";
+  if (kind === "skill") return "Skills";
   return "Brain";
 }
 
 function mentionCommandItem(item: AgentMentionItem) {
   if (item.kind === "schedule") {
     return { id: item.mentionId, label: item.label, action: "schedule" };
+  }
+
+  // The "add skill" sentinel opens a dialog instead of inserting a pill.
+  if (item.kind === "skill" && item.id === ADD_SKILL_MENTION_ID) {
+    return { id: item.mentionId, label: item.label, action: "add-skill" };
   }
 
   return {

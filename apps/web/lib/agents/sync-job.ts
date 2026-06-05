@@ -1,6 +1,5 @@
-import { BRAIN_SYNC_DELAY_MS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import { agentFileSyncJobs } from "@opencompany/db/schema";
+import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 
 type Db = ReturnType<typeof getDb>;
 
@@ -30,6 +29,8 @@ export function resolveAgentSyncRename(input: {
   };
 }
 
+// Enqueues an agent bundle file (memory.md, etc.) into the unified workspace
+// projection outbox. `path` is the full repo path (agents/<slug>/...).
 export function agentFileSyncJobUpsert(
   db: Db,
   input: {
@@ -41,34 +42,15 @@ export function agentFileSyncJobUpsert(
     previousBlobSha?: string | null;
   },
 ) {
-  const now = new Date();
-  const nextRunAt = new Date(now.getTime() + BRAIN_SYNC_DELAY_MS);
-  return db
-    .insert(agentFileSyncJobs)
-    .values({
-      workspaceId: input.workspaceId,
-      path: input.path,
-      operation: input.operation,
-      desiredHash: input.desiredHash,
-      previousPath: input.previousPath ?? null,
-      previousBlobSha: input.previousBlobSha ?? null,
-      nextRunAt,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [agentFileSyncJobs.workspaceId, agentFileSyncJobs.path],
-      set: {
-        operation: input.operation,
-        desiredHash: input.desiredHash,
-        previousPath: input.previousPath ?? null,
-        previousBlobSha: input.previousBlobSha ?? null,
-        status: "pending",
-        attempts: 0,
-        nextRunAt,
-        lastError: null,
-        updatedAt: now,
-      },
-    });
+  return enqueueWorkspaceSync(db, {
+    workspaceId: input.workspaceId,
+    repoPath: input.path,
+    sourceKind: "agent_file",
+    operation: input.operation,
+    desiredHash: input.desiredHash,
+    previousPath: input.previousPath ?? null,
+    previousBlobSha: input.previousBlobSha ?? null,
+  });
 }
 
 export function agentBundleConflictPath(path: string) {

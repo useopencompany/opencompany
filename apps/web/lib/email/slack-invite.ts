@@ -138,7 +138,9 @@ export async function sendSlackInviteEmail(
   options?: { client?: ResendEmailClient },
 ) {
   // A failed/pending provisioning has no shareable invite — never send a dead link.
-  if (!trimmed(input.inviteUrl)) {
+  // Normalize once here so the same trimmed value is used for the guard and the render.
+  const inviteUrl = trimmed(input.inviteUrl);
+  if (!inviteUrl) {
     logger.info("Skipped Slack invite email because there is no invite url", {
       event: "opencompany.slack_invite_email_skipped",
       user_id: input.userId,
@@ -163,7 +165,7 @@ export async function sendSlackInviteEmail(
   const client = options?.client ?? getResendClient(config.apiKey);
   const rendered = renderSlackInviteEmail({
     firstName: input.firstName,
-    inviteUrl: input.inviteUrl,
+    inviteUrl,
   });
 
   try {

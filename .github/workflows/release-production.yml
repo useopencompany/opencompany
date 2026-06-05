@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       deploy_runner:
-        description: "Trigger the Render runner deploy after the web deploy"
+        description: "Trigger the Render runner deploy alongside the web deploy"
         type: boolean
         default: true
       smoke:
@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   release:
-    name: Migrate, deploy web, deploy runner
+    name: Migrate and deploy production
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 35
@@ -191,6 +191,11 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'false' }}
         run: echo "This automatic release was superseded after build, so web and runner deploys were skipped."
 
+      - name: Trigger runner deploy
+        id: trigger-runner
+        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_runner) }}
+        run: bun run release:render -- --trigger-only
+
       - name: Deploy web
         id: deploy-web
         if: ${{ github.event_name == 'workflow_dispatch' || steps.deploy-release.outputs.should_release == 'true' }}
@@ -205,9 +210,13 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed web to $url"
 
-      - name: Deploy runner
-        if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.deploy_runner) }}
-        run: bun run release:render
+      - name: Cancel runner deploy after web failure
+        if: ${{ failure() && steps.trigger-runner.outputs.deploy_id != '' }}
+        run: bun run release:render -- --cancel "${{ steps.trigger-runner.outputs.deploy_id }}"
+
+      - name: Wait for runner deploy
+        if: ${{ steps.trigger-runner.outputs.deploy_id != '' }}
+        run: bun run release:render -- --wait "${{ steps.trigger-runner.outputs.deploy_id }}"
 
       - name: Smoke check release
         if: ${{ (github.event_name == 'workflow_run' && steps.deploy-release.outputs.should_release == 'true') || (github.event_name == 'workflow_dispatch' && inputs.smoke) }}

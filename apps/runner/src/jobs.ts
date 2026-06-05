@@ -27,6 +27,9 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "jobs" });
 export const RUNNER_JOB_LEASE_TTL_MS = 90 * 1000;
 export const RUNNER_JOB_HEARTBEAT_INTERVAL_MS = 5_000;
 export const RUNNER_JOB_MAX_ATTEMPTS = 5;
+// Fallback only for callers that construct the worker without options (e.g. tests).
+// Production sets concurrency via `RUNNER_WORKER_CONCURRENCY` (see env.ts), passed in
+// from index.ts.
 const DEFAULT_WORKER_CONCURRENCY = 2;
 const DEFAULT_WORKER_POLL_INTERVAL_MS = 1_000;
 

@@ -264,8 +264,29 @@
     {
       "idx": 37,
       "version": "7",
-      "when": 1780574542518,
-      "tag": "0037_spooky_jane_foster",
+      "when": 1780574313604,
+      "tag": "0037_open_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1780578332546,
+      "tag": "0038_tiny_the_anarchist",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1780596846247,
+      "tag": "0039_fuzzy_maelstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780650465613,
+      "tag": "0040_clumsy_corsair",
       "breakpoints": true
     }
   ]

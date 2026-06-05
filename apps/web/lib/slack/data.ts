@@ -36,7 +36,11 @@ export async function upsertPending(workspaceId: string): Promise<WorkspaceSlack
     .values({ id: `wsc_${randomUUID()}`, workspaceId, status: "pending" })
     .onConflictDoNothing({ target: workspaceSlackChannels.workspaceId });
   const row = await getWorkspaceSlackChannel(workspaceId);
-  if (!row) throw new Error("Failed to upsert workspace_slack_channels row");
+  if (!row) {
+    // The row is missing right after an idempotent insert — a genuine DB/FK fault
+    // (the workspaceId is included so callers can tell this from a benign race).
+    throw new Error(`Failed to upsert workspace_slack_channels row for workspace ${workspaceId}`);
+  }
   return row;
 }
 

@@ -9,7 +9,7 @@ Render for the long-lived agent runner.
 - Vercel hosts `apps/web`, serves the Next.js UI, WorkOS callback routes, server actions, and the
   Inngest endpoint at `/api/inngest`.
 - Render hosts `apps/runner`, the Bun/Fastify service that owns live agent runs, E2B sandboxes,
-  model/tool streams, abort state, and browser SSE from `/sessions/:id/events`.
+  model/tool streams, abort state, and Durable Stream transcript appends.
 - Neon Postgres is shared by web, Inngest functions, and the runner.
 - Inngest coordinates background functions, but it does not host live token streams.
 
@@ -18,13 +18,15 @@ runner is a dedicated live data plane rather than a short request handler.
 
 ## Release contract
 
-Production releases are intentionally serialized:
+Production releases are intentionally guarded:
 
 1. Run CI on `main`.
 2. Run Drizzle migrations against production Neon.
-3. Build and deploy the Vercel web app for the exact commit.
-4. Trigger and wait for the Render runner deploy for the exact commit.
-5. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
+3. Build the Vercel web app for the exact commit.
+4. Re-check that the release is still current.
+5. Trigger the Render runner deploy, then deploy the prebuilt Vercel web app while Render builds.
+6. Wait for the Render runner deploy for the exact commit.
+7. Smoke check the canonical production web `/api/healthz` and runner `/healthz`.
 
 The workflow lives in `.github/workflows/release-production.yml`. It runs automatically after the
 `CI` workflow succeeds for a push to `main`, and it can still be manually triggered from GitHub
@@ -33,6 +35,12 @@ overlap. GitHub Actions keeps only the newest queued production release in that 
 older queued releases are cancelled automatically. A release that has already started is not killed
 mid-flight, but automatic releases re-check `origin/main` before setup, before production changes,
 and before deploy so stale commits skip the remaining expensive or mutating work.
+
+After migrations and the final deploy freshness check, web and runner deployment wait time may
+overlap. This keeps release latency down without starting production deploys for stale commits. A
+failed Vercel deploy best-effort cancels the in-flight Render deploy, but cancellation is not a
+rollback guarantee; if Render has already gone live, treat the failed workflow as requiring operator
+follow-up.
 
 The `CI` workflow uses branch/PR concurrency with `cancel-in-progress: true`, so a newer push to the
 same PR or to `main` cancels superseded lint/typecheck/build/test work. This keeps rapid merge
@@ -59,7 +67,9 @@ not drive deployment.
 
 Vercel's build command no longer runs migrations. Migrations happen once, explicitly, before web and
 runner deployment. Keep schema changes backwards compatible with the previous web and runner version
-until the release has completed.
+until the release has completed. Because web and runner deploys can now finish in either order, keep
+web-runner contracts compatible in both directions for at least one release: new web must tolerate
+the previous runner, and previous web must tolerate the new runner during the deployment window.
 
 ## Platform setup
 
@@ -99,7 +109,8 @@ Set these in Infisical `prod` + `/web` and sync them into Vercel:
 - `INNGEST_SIGNING_KEY`
 - `RUNNER_PUBLIC_URL`
 - `RUNNER_INTERNAL_TOKEN`
-- `RUNNER_STREAM_TOKEN_SECRET`
+- `DURABLE_STREAMS_URL`
+- `DURABLE_STREAMS_TOKEN`
 - optional analytics, feedback, and observability env vars
 
 Forward production web logs to the Better Stack source `opencompany-web-production` using the
@@ -122,6 +133,8 @@ Set these in Infisical `prod` + `/runner` and sync them into Render:
 - `RUNNER_INTERNAL_TOKEN`
 - `RUNNER_STREAM_TOKEN_SECRET`
 - `RUNNER_ALLOWED_ORIGINS`
+- `DURABLE_STREAMS_URL`
+- `DURABLE_STREAMS_TOKEN`
 - `E2B_API_KEY`
 - `VERCEL_AI_GATEWAY_API_KEY`
 - `GITHUB_APP_ID`

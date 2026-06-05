@@ -54,9 +54,12 @@ export function getSupportTeamId(): string | null {
 }
 
 function resolveClient(deps?: SupportClientDeps): SlackProvisionClient {
+  // Honor an injected client before touching env: tests (and any caller that
+  // brings its own client) shouldn't need SLACK_SUPPORT_BOT_TOKEN set.
+  if (deps?.client) return deps.client;
   const { token } = getConfig();
   if (!token) throw new SlackNotConfiguredError();
-  return deps?.client ?? (new WebClient(token) as unknown as SlackProvisionClient);
+  return new WebClient(token) as unknown as SlackProvisionClient;
 }
 
 function slackErrorCode(error: unknown): string | undefined {
@@ -147,7 +150,10 @@ export async function inviteCustomerToChannel(
       channel: channelId,
       emails: [customerEmail],
     });
-    return shared.url ?? null;
+    // Guard the value at runtime — Slack's inviteShared only returns a `url` for
+    // email invites, so anything non-string degrades to "no invite link" rather
+    // than a broken email.
+    return typeof shared.url === "string" ? shared.url : null;
   } catch (error) {
     throw new SlackProvisionError("conversations.inviteShared failed", slackErrorCode(error));
   }

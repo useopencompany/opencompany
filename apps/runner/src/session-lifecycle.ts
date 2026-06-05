@@ -23,6 +23,7 @@ import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
+import { closeSessionStream } from "./durable-streams";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
 import {
@@ -59,6 +60,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
         model: agentConfig.model.name,
         tools: agentConfig.tools,
         brain: agentConfig.brain,
+        skills: agentConfig.skills ?? [],
         integrations: agentConfig.integrations,
         triggers: agentConfig.triggers,
       }),
@@ -80,6 +82,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     await materializeSkillsForSession({
       sandbox,
       workdir: row.session.workdir,
+      workspaceId: row.workspace.id,
       config: agentConfig,
     });
     return sandbox;
@@ -557,4 +560,9 @@ export async function archiveSession(sessionId: string) {
       },
     });
   });
+
+  // The session is permanently archived — no future turn can append, so this is the
+  // one provably-safe point to close the Durable Stream (EOF). Best-effort; Postgres
+  // remains the system of record.
+  await closeSessionStream(sessionId);
 }

@@ -8,7 +8,7 @@ import {
   PROVIDER_PERMISSION_REGISTRY,
   type WorkspaceToolPolicyMap,
 } from "./permissions";
-import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkills } from "./skills";
+import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkillMetadata } from "./skills";
 import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
 import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
 
@@ -48,7 +48,14 @@ export function resolveAgentRuntimeConfig(input: {
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
-  const skills = resolveEnabledSkills(input.agent);
+  const skills = resolveEnabledSkillMetadata(input.agent);
+  const mcpServerKeys = [
+    ...new Set(
+      input.agent.tools
+        .filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp")
+        .map((tool) => tool.server),
+    ),
+  ];
   const toolPolicyContext = input.toolPolicy
     ? formatWorkspaceToolPolicyContext({
         providerKeys: enabledGatedProviderKeys(input.agent, repositories),
@@ -85,13 +92,32 @@ export function resolveAgentRuntimeConfig(input: {
       : null,
     skills.length
       ? `Skills available this session — when a task matches one, read its SKILL.md first and follow it: ${skills
-          .map((skill) => `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`)
+          .map((skill) => {
+            // External skills carry untrusted name/description (and a url) sourced from a
+            // third-party repo. Keep those out of the prompt — advertise only the trusted
+            // mount path and a normalized source type, and let the model read SKILL.md for the
+            // rest. Built-in skills ship in code, so their name/description are trusted.
+            if (skill.source) {
+              return `External ${skill.source.type} skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`;
+            }
+            return `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`;
+          })
           .join(
             "; ",
           )}. Skill files are mounted read-only under ./skills; read them with read_skill.`
       : null,
     skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
       ? "You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first."
+      : null,
+    mcpServerKeys.length
+      ? `MCP integrations enabled this session: ${mcpServerKeys
+          .map((key) => {
+            const displayName = PROVIDER_PERMISSION_REGISTRY[key]?.displayName ?? key;
+            return `${displayName} (${key}__search_tools, ${key}__use_tool)`;
+          })
+          .join(
+            "; ",
+          )}. To save context their individual tools are not preloaded: call <server>__search_tools to list a server's tools and input schemas, then <server>__use_tool with the chosen tool name and its arguments to run one. Permissions are enforced per underlying tool, so a write tool may still require approval.`
       : null,
     toolPolicyContext,
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
@@ -192,7 +218,7 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
       : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
   return [
     `Attached GitHub repositories: ${fullNames}.`,
-    "You have repository-scoped git and gh (GitHub CLI) access to these repositories from the shell and gh tools. Authentication is injected automatically; never handle tokens yourself.",
+    "You have repository-scoped gh (GitHub CLI) access to these repositories through the gh tool. Authentication is injected automatically; never handle tokens yourself. Use shell for local sandbox commands, not authenticated GitHub operations.",
     ghRepoGuidance,
     "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
     "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",

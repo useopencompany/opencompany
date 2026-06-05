@@ -1,12 +1,7 @@
-import { verifySessionStreamToken } from "@opencompany/agent-runtime";
-import { agentSessions } from "@opencompany/db/schema";
 import { createLogger } from "@opencompany/observability";
-import { eq } from "drizzle-orm";
 import Fastify from "fastify";
 import { abortSession, archiveSession } from "./agent-loop";
-import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { type RuntimeEventForStream, subscribeSessionEvents } from "./events";
 import { enqueueRunnerJob } from "./jobs";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
@@ -178,178 +173,11 @@ export function createServer(env: RunnerEnv, options: { onJobEnqueued?: () => vo
     reply.send({ ok: true });
   });
 
-  app.get("/sessions/:id/events", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const query = request.query as { token?: string; after?: string };
-    const token = query.token ?? "";
-    const payload = verifyStreamToken(token, env.streamTokenSecret);
-    if (!payload.ok) {
-      logger.warn("Rejected session event stream", {
-        event: "opencompany.runner_sse_rejected",
-        session_id: id,
-        reason: payload.reason,
-      });
-      reply.status(401).send({ error: payload.message });
-      return;
-    }
-
-    if (payload.sessionId !== id) {
-      logger.warn("Rejected session event stream token for another session", {
-        event: "opencompany.runner_sse_rejected",
-        session_id: id,
-        reason: "session_mismatch",
-      });
-      reply.status(403).send({ error: "Token does not match session." });
-      return;
-    }
-
-    const [session] = await getDb()
-      .select({ id: agentSessions.id, userId: agentSessions.userId })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, id))
-      .limit(1);
-    if (!session || session.userId !== payload.userId) {
-      logger.warn("Rejected session event stream for missing session or user", {
-        event: "opencompany.runner_sse_rejected",
-        session_id: id,
-        user_id: payload.userId,
-        reason: "session_not_found_or_user_mismatch",
-      });
-      reply.status(404).send({ error: "Session not found." });
-      return;
-    }
-
-    const raw = reply.raw;
-    reply.hijack();
-    raw.writeHead(200, createSseHeaders(env, request.headers.origin));
-
-    const connectedAt = Date.now();
-    const requestedAfterId = readLastEventId(request.headers["last-event-id"], query.after);
-    let latestDurableEventId = requestedAfterId;
-    let closed = false;
-    request.raw.on("close", () => {
-      closed = true;
-    });
-
-    const writeEvent = (event: RuntimeEventForStream) => {
-      if (closed) return false;
-      if (typeof event.id === "number") {
-        latestDurableEventId = Math.max(latestDurableEventId, event.id);
-      }
-      raw.write(formatSseEvent(event));
-      return true;
-    };
-
-    logger.info("Runner SSE connected", {
-      event: "opencompany.runner_sse_connected",
-      session_id: id,
-      user_id: payload.userId,
-      after_id: requestedAfterId,
-      replayed_events: 0,
-    });
-    const unsubscribe = subscribeSessionEvents(id, (event) => {
-      writeEvent(event);
-    });
-    const heartbeat = setInterval(() => {
-      raw.write(": heartbeat\n\n");
-    }, 15000);
-
-    while (!closed) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    clearInterval(heartbeat);
-    unsubscribe();
-    logger.info("Runner SSE closed", {
-      event: "opencompany.runner_sse_closed",
-      session_id: id,
-      user_id: payload.userId,
-      latest_event_id: latestDurableEventId,
-      duration_ms: Date.now() - connectedAt,
-    });
-  });
-
   return app;
 }
 
 function requireInternalAuth(header: string | undefined, token: string) {
   if (header !== `Bearer ${token}`) {
     throw new Error("Unauthorized runner request.");
-  }
-}
-
-function readLastEventId(header: string | string[] | undefined, after: string | undefined) {
-  const value = Array.isArray(header) ? header[0] : header;
-  const parsed = Number(value ?? after ?? "0");
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-export function formatSseEvent(event: RuntimeEventForStream) {
-  const idLine = typeof event.id === "number" ? `id: ${event.id}\n` : "";
-  return `${idLine}data: ${JSON.stringify(toRuntimeEventPayload(event))}\n\n`;
-}
-
-export function formatStreamError(message: string) {
-  return `event: session.error\ndata: ${JSON.stringify({ message })}\n\n`;
-}
-
-export function createSseHeaders(env: RunnerEnv, origin: string | undefined) {
-  return {
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-    ...(origin && env.allowedOrigins.includes(origin)
-      ? {
-          "Access-Control-Allow-Origin": origin,
-          Vary: "Origin",
-          "Access-Control-Allow-Headers": "Authorization, Content-Type, Last-Event-ID",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        }
-      : {}),
-  };
-}
-
-function toRuntimeEventPayload(event: RuntimeEventForStream) {
-  return {
-    id: event.id,
-    type: event.type,
-    payload: event.payload,
-    messageId: event.messageId,
-    createdAt: serializeEventTimestamp(event.createdAt),
-    ...("transient" in event && event.transient ? { transient: true } : {}),
-  };
-}
-
-function serializeEventTimestamp(value: Date | string) {
-  return value instanceof Date ? value.toISOString() : value;
-}
-
-function verifyStreamToken(token: string, secret: string) {
-  if (!token) {
-    return { ok: false as const, reason: "missing", message: "Missing stream token." };
-  }
-
-  try {
-    return { ok: true as const, ...verifySessionStreamToken(token, secret) };
-  } catch (error) {
-    return {
-      ok: false as const,
-      reason: error instanceof Error ? error.message : "invalid",
-      message: "Invalid stream token.",
-    };
-  }
-}
-
-export function redactStreamToken(url: string | undefined) {
-  if (!url || !url.includes("token=")) return url;
-
-  try {
-    const parsed = new URL(url, "http://runner.local");
-    if (parsed.searchParams.has("token")) {
-      parsed.searchParams.set("token", "[redacted]");
-    }
-    return `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return url.replace(/([?&]token=)[^&]*/g, "$1[redacted]");
   }
 }

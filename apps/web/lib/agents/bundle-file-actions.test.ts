@@ -1,7 +1,7 @@
 import { getDb } from "@opencompany/db/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { scheduleAgentFileSyncDispatch } from "@/lib/agents/file-sync-dispatch";
 import { currentWorkspace } from "@/lib/auth";
+import { scheduleWorkspaceSyncDispatch } from "@/lib/workspace-state/sync-dispatch";
 import { updateAgentBundleFile } from "./bundle-file-actions";
 
 vi.mock("@opencompany/db/client", () => ({
@@ -16,13 +16,13 @@ vi.mock("@/lib/auth", () => ({
   currentWorkspace: vi.fn(),
 }));
 
-vi.mock("@/lib/agents/file-sync-dispatch", () => ({
-  scheduleAgentFileSyncDispatch: vi.fn(),
+vi.mock("@/lib/workspace-state/sync-dispatch", () => ({
+  scheduleWorkspaceSyncDispatch: vi.fn(),
 }));
 
 const getDbMock = vi.mocked(getDb);
 const currentWorkspaceMock = vi.mocked(currentWorkspace);
-const scheduleAgentFileSyncDispatchMock = vi.mocked(scheduleAgentFileSyncDispatch);
+const scheduleWorkspaceSyncDispatchMock = vi.mocked(scheduleWorkspaceSyncDispatch);
 
 function createDbMock(input: { selectResults: unknown[][] }) {
   const pendingSelectResults = [...input.selectResults];
@@ -129,17 +129,16 @@ describe("updateAgentBundleFile", () => {
       expect.arrayContaining([
         expect.objectContaining({
           workspaceId: "wks_123",
-          path: "agents/sales/playbooks/discovery.md",
+          repoPath: "agents/sales/playbooks/discovery.md",
+          sourceKind: "agent_file",
           operation: "upsert",
           desiredHash: expect.any(String),
         }),
       ]),
     );
     expect(batch).toHaveBeenCalledOnce();
-    expect(scheduleAgentFileSyncDispatchMock).toHaveBeenCalledWith({
-      workspaceId: "wks_123",
-      path: "agents/sales/playbooks/discovery.md",
-    });
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledOnce();
+    expect(scheduleWorkspaceSyncDispatchMock).toHaveBeenCalledWith({ workspaceId: "wks_123" });
   });
 
   it("rejects edits to the slug-matched agent definition file", async () => {
