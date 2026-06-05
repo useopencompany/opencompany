@@ -980,6 +980,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         <SessionTopBar
           session={session}
           currentContextTokens={runtime.currentContextTokens}
+          sessionIsActive={!TERMINAL_SESSION_STATUSES.has(runtime.currentStatus)}
           inspectorCollapsed={inspectorCollapsed}
           onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
         />
@@ -1421,11 +1422,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 function SessionTopBar({
   session,
   currentContextTokens,
+  sessionIsActive,
   inspectorCollapsed,
   onToggleInspector,
 }: {
   session: AgentSessionDetailPayload["session"];
   currentContextTokens: number;
+  // True when the session is not yet in a terminal state, so the context gauge is shown even
+  // before the first session.usage event arrives (e.g. during the first model step of a new
+  // session where currentContextTokens is still 0). Callers derive this from currentStatus.
+  sessionIsActive: boolean;
   inspectorCollapsed: boolean;
   onToggleInspector: () => void;
 }) {
@@ -1468,7 +1474,7 @@ function SessionTopBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {currentContextTokens > 0 ? (
+        {currentContextTokens > 0 || sessionIsActive ? (
           <ContextWindowMeter used={currentContextTokens} max={contextMax} />
         ) : null}
         <button

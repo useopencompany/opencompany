@@ -1537,4 +1537,39 @@ describe("SessionViewContent — context window gauge", () => {
       expect.stringContaining("50K"),
     );
   });
+
+  it("shows the gauge at 0% during a brand-new session before the first session.usage event", () => {
+    // Mirrors the first turn of a new session: no usage data yet, stream has not reduced
+    // any session.usage events. The gauge must appear immediately so it can animate to the
+    // real fill once the first session.usage arrives, rather than popping in mid-turn.
+    streamMock.state = emptyStreamState({ liveContextTokens: null });
+
+    const detail = makeDetail({
+      // Active (non-terminal) session with 0 context tokens — the brand-new-session case.
+      session: makeSession({ status: "running" }),
+      currentContextTokens: 0,
+    });
+
+    renderSessionViewContent(detail);
+
+    // Gauge must be present even with 0 tokens; aria-label encodes 0% fill.
+    expect(screen.getByRole("button", { name: /context window usage/i })).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("0%"),
+    );
+  });
+
+  it("hides the gauge for a completed session that never accumulated context tokens", () => {
+    // A terminal (completed) session with 0 tokens — nothing useful to show.
+    streamMock.state = emptyStreamState({ liveContextTokens: null });
+
+    const detail = makeDetail({
+      session: makeSession({ status: "completed" }),
+      currentContextTokens: 0,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByRole("button", { name: /context window usage/i })).not.toBeInTheDocument();
+  });
 });
