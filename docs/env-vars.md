@@ -118,6 +118,30 @@ Set these in Vercel Production.
 | `NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL` | No | Browser log level. |
 | `NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN` | No | Browser and fallback server error DSN. |
 
+## Slack support channel (Slack Connect)
+
+`SLACK_SUPPORT_*` power the post-onboarding Slack Connect channel (see the Vercel Web table
+above). They live in **Infisical `prod` + `/web`** (synced to Vercel `opencompany-web`
+Production — *not* `opencompany-dashboard`), because the Inngest provisioning function runs on
+the web deployment.
+
+Setup checklist:
+
+1. Create a Slack app for OC's own support workspace (api.slack.com/apps → From scratch).
+2. Bot Token Scopes: `groups:write` (create the private channel, invite members, stamp the
+   ownership purpose), `groups:read` (adopt this workspace's own channel on a `name_taken`
+   retry instead of duplicating), `chat:write` (intro message), `conversations.connect:write`
+   (the external customer invite).
+3. Install to the workspace → copy the Bot User OAuth Token (`xoxb-…`) → `SLACK_SUPPORT_BOT_TOKEN`.
+4. `SLACK_SUPPORT_TEAM_ID` = the host workspace team id (`T…`); derive via `auth.test`.
+5. `SLACK_SUPPORT_MEMBER_IDS` = comma-separated `U…` of the OC support people to auto-add to
+   every customer channel (private channels are only visible to their members).
+6. The host Slack workspace must be on a **paid plan** (Pro or a Pro trial). Slack Connect
+   shared channels are unavailable on Free — `conversations.inviteShared` errors `not_paid`.
+
+If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
+and the workspace-home card degrades to the booking fallback (onboarding never breaks).
+
 ## Render Runner
 
 Set these in the Render `opencompany-runner` service.
