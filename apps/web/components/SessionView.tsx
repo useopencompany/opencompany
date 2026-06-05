@@ -87,6 +87,7 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
+import { markSessionSeen } from "@/lib/agent-sessions/session-seen-store";
 import { deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
 import {
   getSlashContext,
@@ -456,6 +457,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       void queryClient.invalidateQueries({ queryKey: detailKey });
     }
   }, [runtime.currentStatus, detailKey, queryClient]);
+  // Mark this session "seen" on open and whenever its status changes while open,
+  // so the sidebar's blue unseen-finished dot (PRO-142) clears live — including
+  // when the session finishes while you are watching it.
+  useEffect(() => {
+    markSessionSeen(detail.session.id);
+  }, [detail.session.id, runtime.currentStatus]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
