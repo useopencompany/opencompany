@@ -225,6 +225,10 @@ export async function prepareWorkspace(input: {
     ].join(" && "),
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
+  // Defensive: ensure ripgrep (rg) is available for coding sessions. rg should be
+  // baked into the coding E2B template (amp) long-term — file a template rebuild when
+  // this fallback is no longer needed. This step is a no-op when rg is already present.
+  await ensureRipgrep(input.sandbox);
   // The session starts with an empty work/ directory. Repositories are cloned on
   // demand by the agent (git/gh in the shell) or by amp; nothing is cloned here.
   await runSandboxPreparationCommand({
@@ -247,6 +251,29 @@ export async function prepareWorkspace(input: {
     commandName: "chmod_agent_file",
     command: `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
+  });
+}
+
+// Defensive ripgrep availability check. Runs `command -v rg` first; if rg is not found,
+// attempts installation via apt-get (Debian/Ubuntu images). This is intentionally cheap:
+// the check itself is a single fast shell built-in and the install path only runs when the
+// binary is genuinely missing.
+//
+// TODO: Remove this fallback once rg is baked into the coding E2B template (amp). Until the
+// template is rebuilt with ripgrep included, this keeps coding sessions functional without
+// requiring an immediate template rebuild.
+export async function ensureRipgrep(sandbox: SandboxHandle): Promise<void> {
+  await runSandboxPreparationCommand({
+    sandbox,
+    stage: "ensure_ripgrep",
+    commandName: "ensure_rg",
+    // command -v is a POSIX shell built-in — zero cost when rg is present.
+    // apt-get only runs on the slow path (binary genuinely missing).
+    command: [
+      "command -v rg > /dev/null 2>&1 ||",
+      "(apt-get update -qq && apt-get install -y -qq ripgrep)",
+    ].join(" "),
+    options: { user: SANDBOX_ROOT_USER, timeoutMs: 120_000 },
   });
 }
 
