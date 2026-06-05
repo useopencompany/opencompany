@@ -532,7 +532,11 @@ describe("continueInterruptedSession", () => {
         [{ id: "msg_continue" }],
         [{ id: 9, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
       ]);
-    return { db: { select, insert, batch } as never, values };
+    // continueInterruptedSession bumps updatedAt on the session row before inserting the message.
+    const update = vi.fn(() => ({
+      set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
+    }));
+    return { db: { select, insert, batch, update } as never, values };
   }
 
   const interruptedSession = {
@@ -631,6 +635,37 @@ describe("resolveToolApproval", () => {
     } as never);
   });
 
+  // Build a db stub for resolveToolApproval. The action calls update() twice when
+  // resolution.shouldResume is true: first for agentToolApprovals (needs .returning),
+  // then for agentSessions (bumps updatedAt). Use mockReturnValueOnce so each call
+  // gets its own chain.
+  function dbForApproval({
+    approvalRows,
+  }: {
+    approvalRows: Array<{ id: number }>;
+  }) {
+    const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
+    const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
+    const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
+    const select = vi.fn(() => ({ from: sessionFrom }));
+
+    // First update() call: agentToolApprovals — needs .returning
+    const returning = vi.fn().mockResolvedValue(approvalRows);
+    const approvalsUpdateWhere = vi.fn(() => ({ returning }));
+    const approvalsSet = vi.fn(() => ({ where: approvalsUpdateWhere }));
+
+    // Second update() call: agentSessions — updatedAt bump (no .returning needed)
+    const sessionsUpdateWhere = vi.fn().mockResolvedValue(undefined);
+    const sessionsSet = vi.fn(() => ({ where: sessionsUpdateWhere }));
+
+    const update = vi
+      .fn()
+      .mockReturnValueOnce({ set: approvalsSet })
+      .mockReturnValueOnce({ set: sessionsSet });
+
+    return { select, update, sessionsSet, sessionsUpdateWhere };
+  }
+
   it("waits for the approval resume dispatch after deciding the row", async () => {
     let finishResume!: () => void;
     triggerAgentApprovalResumeMock.mockReturnValue(
@@ -639,14 +674,7 @@ describe("resolveToolApproval", () => {
       }),
     );
 
-    const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
-    const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
-    const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
-    const select = vi.fn(() => ({ from: sessionFrom }));
-    const returning = vi.fn().mockResolvedValue([{ id: 7 }]);
-    const updateWhere = vi.fn(() => ({ returning }));
-    const set = vi.fn(() => ({ where: updateWhere }));
-    const update = vi.fn(() => ({ set }));
+    const { select, update } = dbForApproval({ approvalRows: [{ id: 7 }] });
     getDbMock.mockReturnValue({ select, update } as never);
 
     let settled = false;
@@ -674,7 +702,29 @@ describe("resolveToolApproval", () => {
     expect(settled).toBe(true);
   });
 
-  it("does not dispatch resume when the approval row was already decided", async () => {
+  it("bumps updatedAt on the session row when the approval row is decided", async () => {
+    const { select, update, sessionsSet, sessionsUpdateWhere } = dbForApproval({
+      approvalRows: [{ id: 7 }],
+    });
+    getDbMock.mockReturnValue({ select, update } as never);
+
+    const result = await resolveToolApproval({
+      sessionId: "ses_123",
+      toolCallId: "call_123",
+      decision: "approved",
+    });
+
+    expect(result).toEqual({ ok: true });
+    // update() should be called twice: once for the approval row, once for the session bump.
+    expect(update).toHaveBeenCalledTimes(2);
+    // The second update must carry a fresh updatedAt.
+    expect(sessionsSet).toHaveBeenCalledWith(
+      expect.objectContaining({ updatedAt: expect.any(Date) }),
+    );
+    expect(sessionsUpdateWhere).toHaveBeenCalled();
+  });
+
+  it("does not bump updatedAt or dispatch resume when the approval row was already decided", async () => {
     const sessionLimit = vi.fn().mockResolvedValue([{ id: "ses_123" }]);
     const sessionWhere = vi.fn(() => ({ limit: sessionLimit }));
     const sessionFrom = vi.fn(() => ({ where: sessionWhere }));
@@ -696,5 +746,7 @@ describe("resolveToolApproval", () => {
       error: "This request is no longer awaiting approval.",
     });
     expect(triggerAgentApprovalResumeMock).not.toHaveBeenCalled();
+    // Only one update call (the agentToolApprovals row); no session bump.
+    expect(update).toHaveBeenCalledTimes(1);
   });
 });

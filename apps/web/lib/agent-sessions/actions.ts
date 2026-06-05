@@ -226,6 +226,14 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
       ),
     );
 
+  // Bump updatedAt on the session row so the sidebar immediately re-orders by latest
+  // activity. Without this the session row is silent until the runner heartbeats (~5 s),
+  // causing recently-messaged sessions to appear below sessions that are actively running.
+  await db
+    .update(agentSessions)
+    .set({ updatedAt: new Date() })
+    .where(eq(agentSessions.id, sessionId));
+
   const { message } = await insertUserMessage(sessionId, trimmed);
   const messageId = message.id;
 
@@ -328,6 +336,13 @@ export async function continueInterruptedSession(sessionId: string) {
   if (session.runLeaseId) {
     return { ok: false, error: "This session is still running. Try again shortly." } as const;
   }
+
+  // Bump updatedAt so the sidebar immediately re-orders this session to the top on resume,
+  // matching the same treatment applied in submitAgentSessionMessage.
+  await db
+    .update(agentSessions)
+    .set({ updatedAt: new Date() })
+    .where(eq(agentSessions.id, sessionId));
 
   const { message } = await insertUserMessage(
     sessionId,
@@ -473,6 +488,15 @@ export async function resolveToolApproval(input: {
   // otherwise the UI can optimistically show "denying..." after the approval row was
   // decided, while no resume job/event was actually produced.
   if (resolution.shouldResume) {
+    // Bump updatedAt so the sidebar immediately re-orders this session to the top on resume,
+    // matching the same treatment applied in submitAgentSessionQuestionResponse and
+    // cancelAgentSessionQuestion. Without this the session row is silent until the runner
+    // heartbeats (~5 s) after the approval is decided.
+    await db
+      .update(agentSessions)
+      .set({ updatedAt: new Date() })
+      .where(eq(agentSessions.id, input.sessionId));
+
     await triggerAgentApprovalResume({
       sessionId: input.sessionId,
       toolCallId: input.toolCallId,
@@ -547,6 +571,12 @@ export async function submitAgentSessionQuestionResponse(input: {
     return { ok: false, error: "This question is no longer awaiting an answer." } as const;
   }
 
+  // Bump updatedAt so the sidebar immediately re-orders this session to the top on resume.
+  await db
+    .update(agentSessions)
+    .set({ updatedAt: new Date() })
+    .where(eq(agentSessions.id, input.sessionId));
+
   await triggerAgentQuestionResume({
     sessionId: input.sessionId,
     toolCallId: input.toolCallId,
@@ -603,6 +633,12 @@ export async function cancelAgentSessionQuestion(input: { sessionId: string; too
   if (updated.length === 0) {
     return { ok: false, error: "This question is no longer awaiting an answer." } as const;
   }
+
+  // Bump updatedAt so the sidebar immediately re-orders this session to the top on dismiss.
+  await db
+    .update(agentSessions)
+    .set({ updatedAt: new Date() })
+    .where(eq(agentSessions.id, input.sessionId));
 
   await triggerAgentQuestionResume({
     sessionId: input.sessionId,
