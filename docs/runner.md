@@ -356,6 +356,19 @@ Avoid placing the live model/E2B loop inside a serverless function. The runner i
 long-lived service so it can hold model streams, sandbox command streams, and abort state
 without fighting request-duration limits.
 
+## E2B template requirements
+
+The coding template (resolved to `OPENCOMPANY_AMP_E2B_TEMPLATE` or `"amp"`) must have the following
+tools installed at image-build time for coding sessions to work correctly:
+
+- `git`, `gh` (GitHub CLI)
+- `rg` (ripgrep) — **not yet baked into the template**; the runner installs it defensively at
+  workspace-preparation time via `apt-get` if it is missing (see `ensureRipgrep` in
+  `apps/runner/src/sandbox.ts`). This runtime fallback is intentionally cheap (a single
+  `command -v rg` check that is a no-op when rg is present) but adds latency on cold images.
+  Rebuild the coding template with `ripgrep` included and remove the `ensureRipgrep` call once the
+  new image is in use.
+
 ## Current limitations
 
 - Lease enforcement is in Postgres: a job-delivery lease (`jobs.ts`) guarantees one runner
