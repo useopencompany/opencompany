@@ -23,13 +23,17 @@ if (checkRunner && !runnerUrl) {
   process.exit(1);
 }
 
+const checks = [];
+
 if (checkWeb) {
-  await checkUntilReady("web", `${webUrl}/api/healthz`, webAttempts, delayMs);
+  checks.push(checkUntilReady("web", `${webUrl}/api/healthz`, webAttempts, delayMs));
 }
 
 if (checkRunner) {
-  await checkUntilReady("runner", `${runnerUrl}/healthz`, runnerAttempts, delayMs);
+  checks.push(checkUntilReady("runner", `${runnerUrl}/healthz`, runnerAttempts, delayMs));
 }
+
+await Promise.all(checks);
 
 console.log("Release smoke checks passed.");
 
