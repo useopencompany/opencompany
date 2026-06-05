@@ -1,4 +1,5 @@
 import {
+  BUILTIN_USE_TOOL_NAME,
   newAgentSessionMessageId,
   normalizeAgentConfig,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
@@ -69,7 +70,12 @@ import {
   recordSandboxUsageBestEffort,
   type SandboxBillingSnapshot,
 } from "./run-context";
-import { RunAbortError, type RunControlCheck, RunLeaseLostError } from "./run-control";
+import {
+  RunAbortError,
+  type RunControlCheck,
+  RunLeaseBusyError,
+  RunLeaseLostError,
+} from "./run-control";
 import { MessageTurnFailedError, RunSuspendedError } from "./runner-errors";
 import { killSandbox, type SandboxHandle } from "./sandbox";
 import {
@@ -98,6 +104,7 @@ import { loadToolApproval } from "./tool-approvals";
 import {
   createHostedToolBudget,
   createToolSet,
+  dispatchBuiltinUseTool,
   executeRuntimeTool,
   persistDeniedToolResult,
 } from "./tool-dispatcher";
@@ -300,11 +307,11 @@ async function runMessageWithContext(
     );
     if (!lease) {
       outcome = "skipped_lease_busy";
-      return;
+      throw new RunLeaseBusyError();
     }
 
     leaseAcquired = true;
-    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.leaseOwner, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
     await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
@@ -512,6 +519,14 @@ async function runMessageWithContext(
       }),
     );
   } catch (error) {
+    if (error instanceof RunLeaseBusyError) {
+      logBraintrustCurrentSpan({
+        error: braintrustError(error),
+        metadata: { outcome, assistant_message_id: assistantMessageId },
+      });
+      throw error;
+    }
+
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
       logBraintrustCurrentSpan({
@@ -947,35 +962,12 @@ async function runAfterSessionWithContext(
       return;
     }
 
-    const afterRun = await observeRunStep(ctx, "create_after_session_run", () =>
-      createAfterSessionRun({
-        sessionId: input.sessionId,
-        workspaceId: row.workspace.id,
-        agentId: row.agent.id,
-        lastUserMessageId: input.messageId,
-        agentVersion: row.agent.version,
-        runLeaseId: ctx.leaseId,
-      }),
-    );
-    if (!afterRun) {
-      outcome = "skipped_duplicate";
-      return;
-    }
-    afterSessionRunId = afterRun.id;
-    logBraintrustSpan(braintrustSpan, {
-      metadata: { after_session_run_id: afterSessionRunId },
-    });
-
     if (
       !(await observeRunStep(ctx, "check_workspace_credits", () =>
         hasPositiveWorkspaceBalance({ db: ctx.db, workspaceId: row.session.workspaceId }),
       ))
     ) {
       outcome = "skipped_no_credits";
-      await completeAfterSessionRun(afterSessionRunId, {
-        status: "skipped",
-        skippedReason: "no_credits",
-      });
       await appendAfterSessionSkipped({
         sessionId: input.sessionId,
         messageId: input.messageId,
@@ -1016,24 +1008,35 @@ async function runAfterSessionWithContext(
     );
     if (!lease) {
       outcome = "skipped_lease_busy";
-      await completeAfterSessionRun(afterSessionRunId, {
-        status: "skipped",
-        skippedReason: "active_run",
-      });
-      await appendAfterSessionSkipped({
-        sessionId: input.sessionId,
-        messageId: input.messageId,
-        reason: "active_run",
-      });
-      return;
+      throw new RunLeaseBusyError();
     }
 
     leaseAcquired = true;
-    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.leaseOwner, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
     await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
     validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
+
+    const afterRun = await observeRunStep(ctx, "create_after_session_run", () =>
+      createAfterSessionRun({
+        sessionId: input.sessionId,
+        workspaceId: row.workspace.id,
+        agentId: row.agent.id,
+        lastUserMessageId: input.messageId,
+        agentVersion: row.agent.version,
+        runLeaseId: ctx.leaseId,
+      }),
+    );
+    if (!afterRun) {
+      outcome = "skipped_duplicate";
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      return;
+    }
+    afterSessionRunId = afterRun.id;
+    logBraintrustSpan(braintrustSpan, {
+      metadata: { after_session_run_id: afterSessionRunId },
+    });
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({
@@ -1188,6 +1191,14 @@ async function runAfterSessionWithContext(
       model_name: modelName,
     });
   } catch (error) {
+    if (error instanceof RunLeaseBusyError) {
+      logBraintrustCurrentSpan({
+        error: braintrustError(error),
+        metadata: { outcome, assistant_message_id: assistantMessageId },
+      });
+      throw error;
+    }
+
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
       logBraintrustCurrentSpan({
@@ -1417,10 +1428,10 @@ async function resumeApprovalWithContext(
     );
     if (!lease) {
       outcome = "skipped_lease_busy";
-      return;
+      throw new RunLeaseBusyError();
     }
     leaseAcquired = true;
-    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.leaseOwner, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
     await checkAbort({ force: true });
@@ -1543,6 +1554,28 @@ async function resumeApprovalWithContext(
           } finally {
             await mcpToolSet.close();
           }
+        } else if (toolName === BUILTIN_USE_TOOL_NAME) {
+          // The suspended call was the built-in dispatcher. Re-dispatch the underlying tool with
+          // the same persistence tail as the in-stream path (result paired with `use_tool`).
+          await dispatchBuiltinUseTool({
+            sessionId: input.sessionId,
+            assistantMessageId: suspendedAssistantMessageId,
+            runLeaseId: ctx.leaseId,
+            runLeaseOwner: ctx.leaseOwner,
+            workspaceId: row.workspace.id,
+            agentConfig,
+            toolCallId: input.toolCallId,
+            args: toolArgs,
+            getSandbox: sandboxAcquirer.get,
+            workdir: row.session.workdir,
+            env: input.env,
+            enabledTools: runtime.tools,
+            repository: row.repository,
+            signal: ctx.controller.signal,
+            checkAbort,
+            observabilityContext,
+            toolBudget: createHostedToolBudget(),
+          });
         } else {
           const definition = RUNTIME_TOOL_DEFINITIONS.find(
             (candidate: RuntimeToolDefinition) => candidate.name === toolName,
@@ -1605,6 +1638,11 @@ async function resumeApprovalWithContext(
       sessionId: input.sessionId,
     });
   } catch (error) {
+    if (error instanceof RunLeaseBusyError) {
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      throw error;
+    }
+
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
       logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
@@ -1898,10 +1936,10 @@ async function resumeQuestionResponseWithContext(
     );
     if (!lease) {
       outcome = "skipped_lease_busy";
-      return;
+      throw new RunLeaseBusyError();
     }
     leaseAcquired = true;
-    setActiveRun(input.sessionId, ctx.leaseId, ctx.controller);
+    setActiveRun(input.sessionId, ctx.leaseId, ctx.leaseOwner, ctx.controller);
 
     const checkAbort = createLeaseAbortCheck(ctx);
     await checkAbort({ force: true });
@@ -2033,6 +2071,11 @@ async function resumeQuestionResponseWithContext(
       sessionId: input.sessionId,
     });
   } catch (error) {
+    if (error instanceof RunLeaseBusyError) {
+      logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });
+      throw error;
+    }
+
     if (error instanceof StaleRunLeaseError || error instanceof RunLeaseLostError) {
       outcome = "stale_lease";
       logBraintrustCurrentSpan({ error: braintrustError(error), metadata: { outcome } });

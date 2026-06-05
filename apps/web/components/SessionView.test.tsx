@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  continueInterruptedSession,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
@@ -84,17 +85,25 @@ const streamMock = vi.hoisted(() => ({
     currentStatus: "",
     lastError: null,
   } as unknown as SessionRuntimeState,
+  // Last `options` argument seen by useSessionStream — lets a test assert which
+  // seedFromEnd value SessionView derived from the snapshot status (regression
+  // surface for the #306 startup-race fix).
+  lastOptions: undefined as { seedFromEnd?: boolean } | undefined,
 }));
 vi.mock("@/components/useSessionStream", () => ({
-  useSessionStream: () => ({
-    state: streamMock.state,
-    status: streamMock.status,
-  }),
+  useSessionStream: (_sessionId: string, options?: { seedFromEnd?: boolean }) => {
+    streamMock.lastOptions = options;
+    return {
+      state: streamMock.state,
+      status: streamMock.status,
+    };
+  },
 }));
 
 const actionMocks = vi.hoisted(() => ({
   abortAgentSession: vi.fn(),
   cancelAgentSessionQuestion: vi.fn(),
+  continueInterruptedSession: vi.fn(),
   resolveToolApproval: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
   submitAgentSessionQuestionResponse: vi.fn(),
@@ -103,6 +112,7 @@ const actionMocks = vi.hoisted(() => ({
 vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
   cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
+  continueInterruptedSession: actionMocks.continueInterruptedSession,
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
@@ -118,11 +128,13 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
 
 afterEach(() => {
   actionMocks.cancelAgentSessionQuestion.mockReset();
+  actionMocks.continueInterruptedSession.mockReset();
   actionMocks.resolveToolApproval.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
   actionMocks.submitAgentSessionMessage.mockReset();
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
+  streamMock.lastOptions = undefined;
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -540,6 +552,21 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("shows the session error detail when a stopped assistant turn failed in the runner", () => {
+    const message = makeMessage({ status: "running" });
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={[]}
+        sessionCanGenerate={false}
+        stoppedError="Missing required parameter: 'input[5].arguments'."
+      />,
+    );
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+    expect(screen.getByText(/Missing required parameter/)).toBeInTheDocument();
+  });
+
   it("shows AssistantStoppedNotice when message is running but session cannot generate (has parts)", () => {
     const message = makeMessage({ status: "running" });
     const parts = [makeToolCallPart("running")];
@@ -548,6 +575,24 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
     expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
     // WorkingIndicator should NOT be shown — session cannot generate
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("marks still-running tools as interrupted for an interrupted session", async () => {
+    const user = userEvent.setup();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeToolCallPart("running")];
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={parts}
+        sessionCanGenerate={false}
+        sessionIsInterrupted
+      />,
+    );
+
+    expect(screen.getByText("interrupted")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /search files/i }));
+    expect(screen.getByText("Interrupted before this tool returned a result.")).toBeInTheDocument();
   });
 
   it("shows AssistantStoppedNotice for a failed message (no parts)", () => {
@@ -766,6 +811,150 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
     // Rendered in both the inline transcript banner and the inspector runtime panel.
     expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
   });
+
+  it("renders recoverable failed tools without a session-level stopped notice", async () => {
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_tool_failure", status: "completed", lastError: null }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Read a file",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        {
+          id: "msg_assistant",
+          role: "assistant",
+          content: "",
+          status: "completed",
+          responseToMessageId: "msg_user",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:00:02.000Z",
+          modelMessage: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call_read",
+                toolName: "read_file",
+                input: { path: "../secret.txt" },
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "tool.failed",
+          messageId: "msg_assistant",
+          createdAt: "2026-06-04T10:00:02.000Z",
+          payload: {
+            messageId: "msg_assistant",
+            toolCallId: "call_read",
+            name: "read_file",
+            error: {
+              message: "Path must be inside work/ or brain/ for this session.",
+              code: "invalid_sandbox_path",
+              recoverable: true,
+            },
+            outputPreview:
+              '{\n  "ok": false,\n  "error": {\n    "code": "invalid_sandbox_path"\n  }\n}',
+          },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /1 step/ }));
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Reading \.\./ }));
+    expect(screen.getByText(/invalid_sandbox_path/)).toBeInTheDocument();
+  });
+});
+
+// Regression for #306. On the first page load of a newly-started session, the
+// snapshot status is a startup value (`created`/`provisioning`/`ready`) while the
+// runner is starting up. The pre-fix predicate `!ACTIVE_STREAMING_STATUSES.has(...)`
+// returned `true` for those, so the stream tailed from HEAD — and if the runner had
+// already emitted `message.created(assistant)` by then, the overlay missed it and
+// the assistant message could never reach `completed`. When status later flipped to
+// `awaiting_approval`, the UI rendered "Stopped before finishing" until refresh.
+describe("SessionViewContent — #306: startup-status snapshot must not seedFromEnd", () => {
+  it.each([
+    "created",
+    "provisioning",
+    "ready",
+    "running",
+    "aborting",
+  ])("passes seedFromEnd=false to useSessionStream for snapshot status %s", (status) => {
+    const detail = makeDetail({ session: makeSession({ id: "sess_startup", status }) });
+    renderSessionViewContent(detail);
+    expect(streamMock.lastOptions?.seedFromEnd).toBe(false);
+  });
+
+  it.each([
+    "completed",
+    "failed",
+    "aborted",
+    "archived",
+    "awaiting_approval",
+    "awaiting_input",
+  ])("passes seedFromEnd=true to useSessionStream for settled/paused status %s", (status) => {
+    const detail = makeDetail({ session: makeSession({ id: "sess_settled", status }) });
+    renderSessionViewContent(detail);
+    expect(streamMock.lastOptions?.seedFromEnd).toBe(true);
+  });
+
+  it("does not flash 'Stopped before finishing' when the overlay carries the full assistant turn", () => {
+    // Post-fix runtime: snapshot is `ready` (the page loaded mid-startup) and only
+    // has the user message, but the stream replayed from "-1" so the overlay holds
+    // the complete assistant turn (created → deltas → completed) plus the
+    // `awaiting_approval` status flip. The merge must yield a completed assistant
+    // message and suppress the stopped-after-user notice.
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_new", status: "ready" }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    streamMock.state = emptyStreamState({
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        makeRunningAssistantMessage({
+          id: "msg_assistant",
+          content: "Here's what I'll do.",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:00:05.000Z",
+        }),
+      ],
+      currentStatus: "awaiting_approval",
+      statusObserved: true,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    expect(screen.getByText("Here's what I'll do.")).toBeInTheDocument();
+  });
 });
 
 describe("SessionViewContent — optimistic send", () => {
@@ -793,6 +982,52 @@ describe("SessionViewContent — optimistic send", () => {
     await act(async () => {
       resolveSubmit({ ok: true, messageId: "msg_real" });
       await submitPromise;
+    });
+  });
+});
+
+describe("SessionViewContent — interrupted continue", () => {
+  it("shows a compact Continue action only for interrupted sessions", () => {
+    const { rerender } = renderSessionViewContent(
+      makeDetail({ session: makeSession({ status: "interrupted" }) }),
+    );
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.getAllByText("Interrupted").length).toBeGreaterThan(0);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent
+          detail={makeDetail({ session: makeSession({ status: "completed" }) })}
+          workspaceId="wks_test"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  });
+
+  it("clicking Continue inserts an optimistic message and dispatches the action", async () => {
+    const user = userEvent.setup();
+    let resolveContinue!: (value: Awaited<ReturnType<typeof continueInterruptedSession>>) => void;
+    const continuePromise = new Promise<Awaited<ReturnType<typeof continueInterruptedSession>>>(
+      (resolve) => {
+        resolveContinue = resolve;
+      },
+    );
+    vi.mocked(continueInterruptedSession).mockReturnValue(continuePromise);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "interrupted" }) }));
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(continueInterruptedSession).toHaveBeenCalledWith("sess_001");
+    expect(screen.getAllByText("Continue").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveContinue({ ok: true, messageId: "msg_continue" });
+      await continuePromise;
     });
   });
 });

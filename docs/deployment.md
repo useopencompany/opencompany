@@ -124,6 +124,9 @@ Create the runner from `render.yaml`.
 - Service name: `opencompany-runner`
 - Runtime: Docker
 - Health check: `/healthz`
+- Shutdown delay: `300` seconds, Render's documented maximum. Render sends `SIGTERM` to the old
+  instance during deploys and follows with `SIGKILL` after this delay, so this is a mitigation for
+  long runner turns, not a guarantee that every Rana run can finish before a deploy cuts it off.
 - Auto deploy: off, so GitHub Actions controls release order
 - API deploys: store `RENDER_SERVICE_ID` and `RENDER_API_KEY` in Infisical `prod` + `/release`
 
