@@ -9,10 +9,6 @@ import {
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
-import {
-  logBraintrustCurrentSpan,
-  traceBraintrustStep,
-} from "@opencompany/observability/braintrust";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { applyAgentSelfUpdate } from "./agent-self-edit";
 import {
@@ -254,37 +250,10 @@ function formatRuntimeToolName(name: RuntimeToolName) {
   return name.replace(/_/g, " ");
 }
 
+// Tool execution is traced by Braintrust's `wrapAISDK` as a tool-call/tool-result pair nested under
+// the model's LLM span — no manual span is opened here. Errors are still reported via
+// `captureException` for Better Stack.
 export async function executeRuntimeTool(input: {
-  sessionId: string;
-  assistantMessageId: string;
-  runLeaseId: string;
-  runLeaseOwner: string;
-  internalMessages?: boolean;
-  workspaceId?: string;
-  agentConfig?: AgentConfig;
-  toolCallId: string;
-  definition: RuntimeToolDefinition;
-  args: unknown;
-  getSandbox: () => Promise<SandboxHandle>;
-  workdir: string;
-  env: RunnerEnv;
-  enabledTools: RuntimeToolName[];
-  repository?: WorkspaceRepository | null | undefined;
-  signal: AbortSignal;
-  checkAbort: RunControlCheck;
-  observabilityContext?: ToolObservabilityContext | undefined;
-  toolBudget?: ToolBudget | undefined;
-  delegateToAgent?: DelegateToAgent | undefined;
-}) {
-  return traceBraintrustStep(
-    `tool.${input.definition.name}`,
-    () => executeRuntimeToolWithTracing(input),
-    toolTraceMetadata(input),
-    { type: "tool", input: input.args },
-  );
-}
-
-async function executeRuntimeToolWithTracing(input: {
   sessionId: string;
   assistantMessageId: string;
   runLeaseId: string;
@@ -439,7 +408,7 @@ async function executeRuntimeToolWithTracing(input: {
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
           : null;
       const shellGitHubAuth =
-        input.definition.name === "shell" || input.definition.name === "gh"
+        input.definition.name === "gh"
           ? await resolveShellGitHubAuth({
               workspaceId: input.workspaceId,
               agentConfig: input.agentConfig,
@@ -479,19 +448,6 @@ async function executeRuntimeToolWithTracing(input: {
       throw error;
     }
 
-    logBraintrustCurrentSpan({
-      error: braintrustError(error),
-      metadata: {
-        session_id: input.sessionId,
-        message_id: input.assistantMessageId,
-        tool_call_id: input.toolCallId,
-        tool_name: input.definition.name,
-        tool_kind: input.definition.kind,
-        sandbox_id: sandboxIdForCapture,
-        model_provider: input.observabilityContext?.modelProvider,
-        model_name: input.observabilityContext?.modelName,
-      },
-    });
     captureException(error, {
       event: "opencompany.runner_tool_failed",
       workspace_id: input.observabilityContext?.workspaceId,
@@ -629,15 +585,6 @@ async function executeRuntimeToolWithTracing(input: {
     );
   }
 
-  logBraintrustCurrentSpan({
-    output,
-    metadata: {
-      ...toolTraceMetadata(input),
-      tool_message_id: toolMessageId,
-      failed: Boolean(failedOutput),
-    },
-  });
-
   return output;
 }
 
@@ -703,26 +650,8 @@ function createCommandOutputPublisher(input: {
   };
 }
 
-function toolTraceMetadata(input: {
-  sessionId: string;
-  assistantMessageId: string;
-  toolCallId: string;
-  definition: RuntimeToolDefinition;
-  observabilityContext?: ToolObservabilityContext | undefined;
-}) {
-  return {
-    session_id: input.sessionId,
-    message_id: input.assistantMessageId,
-    tool_call_id: input.toolCallId,
-    tool_name: input.definition.name,
-    tool_kind: input.definition.kind,
-    model_provider: input.observabilityContext?.modelProvider,
-    model_name: input.observabilityContext?.modelName,
-  };
-}
-
-// Inject repo-scoped git + gh credentials into shell/gh whenever the agent has at
-// least one attached GitHub repository — independent of amp. A broken integration
+// Inject repo-scoped git + gh credentials into the explicit gh tool whenever the
+// agent has at least one attached GitHub repository. A broken integration
 // (e.g. needs-reauth) propagates and surfaces as a recoverable tool error. A single
 // installation token cannot span installations, so we scope the token to the repos
 // of the first attached repository's installation; cross-installation sessions get
@@ -947,17 +876,6 @@ export function redactPreviewSecrets(value: string): string {
     .replace(/\b(ghp_[A-Za-z0-9]{36,})\b/g, "[redacted]")
     .replace(/\b(ghs_[A-Za-z0-9]{36,})\b/g, "[redacted]")
     .replace(/\b(github_pat_[A-Za-z0-9_]{36,})\b/g, "[redacted]");
-}
-
-function braintrustError(error: unknown) {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      ...(error.stack ? { stack: error.stack } : {}),
-    };
-  }
-  return { message: String(error) };
 }
 
 function readDelegateToAgentArgs(args: unknown) {

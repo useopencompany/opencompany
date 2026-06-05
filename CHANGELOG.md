@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upload a custom profile picture for your account (#257) — @jasper.
 - Credit top-up analytics to track balance refills (#279) — @louis.
 - OpenCompany icon assets (#284) — @louis.
+- External skills support (V1) — attach a public GitHub repo or skills.sh page to an agent via an `@skill` mention; the skill is snapshotted workspace-side and materialized read-only into the runner sandbox at session start alongside built-in skills (#296) — @louis.
 
 ### Changed
 - Session detail now paints instantly from local TanStack DB collections instead of waiting on the server (#290) — @louis.
@@ -24,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agent self-edit skill now asks before making changes, stays lightweight, and better equips coding agents (#281) — @louis.
 - Onboarding call step reworked so its actions fit on a single screen (#263) — @jasper.
 - Web functions now run in the Frankfurt region for lower latency to European users (#286) — @louis.
+- MCP server tools are now lazy-loaded via per-server `search_tools` / `use_tool` meta-tools, so raw tool schemas are only sent to the model on demand instead of being injected on every turn — eliminating the per-turn token cost of large MCP catalogs like Slack (#298) — @louis.
+- Starting a new session from the root-route prompt now navigates instantly; session detail is assembled in-memory from the just-inserted rows instead of waiting on seven follow-up database reads (#295) — @louis.
+- E2B sandbox warm-up now begins at the start of a turn so the ~10 s cold-start overlaps the model's initial token stream rather than blocking the first tool call (#297) — @louis.
+- Runner parallel-session concurrency is now configurable via `RUNNER_WORKER_CONCURRENCY` (default 8); production limit raised to 40 (#294) — @louis.
 
 ### Fixed
 - Coalesced durable-stream token appends to fix streaming lag in production (#288) — @louis.
@@ -35,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - @mention pills no longer break after an agent edits itself (#268) — @louis.
 - A run is never replayed after its lease expires, and onboarding dedup is hardened against duplicate runs (#262) — @louis.
 - The Render deploy trigger is now resilient to empty API responses (#287) — @louis.
+- Session status and error no longer flicker blank at the start of a session; the live stream only takes authority over the Postgres snapshot once it has received a status-bearing event (#299) — @louis.
 
 ## [0.7.0] - 2026-06-03
 

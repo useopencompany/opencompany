@@ -268,7 +268,8 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   edit_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // shell can run anything, so it is the most restrictive system group.
   shell: { providerKey: SYSTEM_PROVIDER_KEY, group: "admin" },
-  // GitHub-effecting tools. gh is an unbounded CLI → admin; amp_coder writes code → modify.
+  // GitHub-effecting tools. gh is conservatively admin unless resolveToolDecision
+  // can classify the concrete CLI args; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },
   amp_coder: { providerKey: "github", group: "modify" },
   opencode_coder: { providerKey: "github", group: "modify" },
@@ -403,6 +404,145 @@ export function classifyTool(toolName: string): ToolClassification {
   return isMcpToolName(toolName) ? classifyMcpTool(toolName) : classifyRuntimeTool(toolName);
 }
 
+const GH_READ_COMMANDS: Record<string, readonly string[]> = {
+  pr: ["view", "list", "diff", "status", "checks"],
+  issue: ["view", "list", "status"],
+  release: ["view", "list"],
+  repo: ["view", "list"],
+};
+
+const GH_MODIFY_COMMANDS: Record<string, readonly string[]> = {
+  pr: ["create", "edit", "comment", "close", "reopen", "merge", "review"],
+  issue: ["create", "edit", "comment", "close", "reopen"],
+  release: ["create", "edit", "upload"],
+  gist: ["create", "edit"],
+  repo: ["fork", "clone"],
+};
+
+const GH_GLOBAL_OPTIONS_WITH_VALUE = new Set(["--config", "--hostname", "--repo", "-R"]);
+
+const GH_GLOBAL_OPTIONS_WITH_OPTIONAL_VALUE = new Set(["--help", "-h", "--version"]);
+
+export function classifyGitHubCliArgs(args: unknown): PermissionGroup {
+  const argv = parseGitHubCliArgs(args);
+  if (!argv || argv.length === 0) return "admin";
+
+  const command = readGhCommand(argv);
+  if (!command) return "admin";
+
+  const [resource, action] = command;
+  if (resource === "api") return classifyGhApi(argv);
+  if (!action) return "admin";
+
+  const normalizedResource = resource.toLowerCase();
+  const normalizedAction = action.toLowerCase();
+  if (GH_READ_COMMANDS[normalizedResource]?.includes(normalizedAction)) return "read";
+  if (GH_MODIFY_COMMANDS[normalizedResource]?.includes(normalizedAction)) return "modify";
+  return "admin";
+}
+
+function readGhCommand(argv: string[]): [string, string | undefined] | null {
+  let index = 0;
+  while (index < argv.length) {
+    const arg = argv[index]!;
+    if (arg === "--") return null;
+    if (!arg.startsWith("-")) {
+      return [arg, argv[index + 1]];
+    }
+    const equalsIndex = arg.indexOf("=");
+    const optionName = equalsIndex >= 0 ? arg.slice(0, equalsIndex) : arg;
+    if (GH_GLOBAL_OPTIONS_WITH_VALUE.has(optionName)) {
+      index += equalsIndex >= 0 ? 1 : 2;
+      continue;
+    }
+    if (GH_GLOBAL_OPTIONS_WITH_OPTIONAL_VALUE.has(optionName)) return [arg, undefined];
+    return null;
+  }
+  return null;
+}
+
+function classifyGhApi(argv: string[]): PermissionGroup {
+  const method = readGhApiMethod(argv);
+  if (!method) return hasGhApiRequestBody(argv) ? "modify" : "read";
+  if (method === "GET") return "read";
+  if (method === "POST" || method === "PUT" || method === "PATCH") return "modify";
+  return "admin";
+}
+
+function hasGhApiRequestBody(argv: string[]) {
+  return argv.some((arg) => {
+    return (
+      arg === "-f" ||
+      arg === "-F" ||
+      arg === "--field" ||
+      arg === "--raw-field" ||
+      arg === "--input" ||
+      arg.startsWith("--field=") ||
+      arg.startsWith("--raw-field=") ||
+      arg.startsWith("--input=")
+    );
+  });
+}
+
+function readGhApiMethod(argv: string[]): string | undefined {
+  for (let index = 1; index < argv.length; index++) {
+    const arg = argv[index]!;
+    if (arg === "--method" || arg === "-X") {
+      const value = argv[index + 1];
+      return value ? value.toUpperCase() : "DELETE";
+    }
+    if (arg.startsWith("--method=")) {
+      return arg.slice("--method=".length).toUpperCase();
+    }
+  }
+  return undefined;
+}
+
+export function parseGitHubCliArgs(args: unknown): string[] | null {
+  if (typeof args !== "string") return null;
+
+  const argv: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  for (const char of args) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        argv.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaping || quote) return null;
+  if (current) argv.push(current);
+  return argv;
+}
+
 // Resolved workspace policy: a flat map keyed by `${providerKey}:${group}` so the
 // runner does a single O(1) lookup per tool call. A missing key falls back to the
 // default stance.
@@ -497,7 +637,19 @@ export function resolveToolDecision(input: {
   policy: WorkspaceToolPolicyMap;
   suspendable: boolean;
 }): ToolDecision {
-  const classification = classifyTool(mcpInvokeEffectiveToolName(input.toolName, input.toolInput));
+  const classification =
+    input.toolName === "gh"
+      ? {
+          providerKey: "github",
+          group: classifyGitHubCliArgs(
+            input.toolInput &&
+              typeof input.toolInput === "object" &&
+              !Array.isArray(input.toolInput)
+              ? (input.toolInput as Record<string, unknown>).args
+              : undefined,
+          ),
+        }
+      : classifyTool(mcpInvokeEffectiveToolName(input.toolName, input.toolInput));
   if (!classification) {
     return { decision: "allow", providerKey: SYSTEM_PROVIDER_KEY, group: "read" };
   }

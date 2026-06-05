@@ -51,23 +51,29 @@ tool and MCP calls, delegation, sandbox hydration, Brain sync, exposed reasoning
 outcomes. This intentionally captures prompt/model/tool content for debugging. Keep it disabled in
 environments where full AI content must not leave the platform.
 
-The model call is instrumented as an `llm` span manually (not via Braintrust's `wrapAISDK`). We open
-the span with `traceBraintrustStep`/`observeRunStep`, which always calls `span.end()` in a `finally`,
-then log the chat transcript (`input` as messages, `output` as the assistant message), token usage
-(prompt, completion, total, plus cached and reasoning tokens), time-to-first-token, and the model slug
-in `metadata.model`. Braintrust derives estimated cost from `metadata.model` plus those token metrics.
+The model call is traced by Braintrust's default `wrapAISDK` integration (via `getBraintrustAISDK`,
+which wraps the `ai` namespace and no-ops to the unwrapped SDK when Braintrust is disabled). `wrapAISDK`
+opens the `streamText` and per-step `doStream` LLM spans automatically, capturing the chat transcript,
+per-step tool calls and results, token usage, and the model slug — Braintrust derives estimated cost
+from the model plus those token metrics. The spans nest under the per-turn root span opened by
+`traceBraintrust`. Runtime and MCP tool execution is captured by `wrapAISDK` as the tool-call /
+tool-result pair on that trace; we no longer open manual `tool.*` spans. Tool failures are still
+reported to Better Stack via `captureException`.
 
-We deliberately avoid `wrapAISDK` for streaming here: it closes the `llm` span (and logs usage) only
-when its patched result stream drains to completion, with no error/cancel handler on that path. Since
-the runner consumes `result.fullStream` itself and can abort or hit tool/stream errors mid-stream,
-`wrapAISDK` would leave spans stuck "in progress" with no usage. Manual instrumentation closes the span
-deterministically on success, error, and abort.
+We lean on the defaults that the AI SDK and Braintrust expose rather than hand-rolled instrumentation.
+The Better Stack timing trace remains a separate concern: `model_stream_total` and
+`model_first_stream_part` are timed via `timeAsync`, and the surrounding non-LLM steps (session/message
+loads, lease, sandbox hydration, brain sync, delegation) still open Braintrust step spans via
+`observeRunStep` so a turn reads coherently.
 
-Two further reliability details for the long-lived runner: the model span's output/usage are logged on
-the explicit span object (not `currentSpan()`), so they can't be dropped to a no-op span if the AI SDK
-stream runs outside the span's async-context; and each run flushes Braintrust (`flushBraintrust()` in a
-`finally` around the root trace) so end-of-run spans are delivered promptly rather than lingering
-because the background async flush hadn't completed.
+Accepted tradeoff: `wrapAISDK` closes its streaming LLM span when the result stream drains, with no
+cancel handler. The runner consumes `result.fullStream` itself and cancels it (`iterator.return()`) on
+mid-stream abort or suspend (`ask_user_question`, tool-approval suspend, stream error), so on those
+paths the LLM span can remain "in progress" with no usage logged. This is a known limitation of every
+default AI-SDK integration and is accepted in exchange for using the defaults; the turn still completes
+or suspends correctly, billing is unaffected (usage is recorded to the DB independently), and the root
+span plus timing trace stay intact. Each run flushes Braintrust (`flushBraintrust()` in a `finally`
+around the root trace) so end-of-run spans are delivered promptly.
 
 Hosted releases get commit attribution automatically: Vercel/Render expose server commit metadata,
 and the production workflow injects the released SHA into the web build for browser captures. Use
@@ -137,12 +143,11 @@ Allowed log fields:
 Do not log prompts, model output, command output, command bodies, agent file text, repo file
 contents, tokens, secrets, emails, browser URLs with query strings, or other free-form user text.
 
-Braintrust traces are the exception to the prompt/output rule when `BRAINTRUST_ENABLED=true`.
-Braintrust masking still redacts secret-like keys and common inline credential patterns, but agents
-can surface sensitive data in free text. Treat Braintrust access as production data access. Masking
-only redacts secret-like *string* values: numeric/boolean values (e.g. the `tokens`, `prompt_tokens`,
-`completion_tokens`, and `time_to_first_token` metrics, which match the "token" key rule) are left
-intact, because Braintrust requires `metrics.*` to be numeric and rejects the whole row otherwise.
+Braintrust traces are the exception to the prompt/output rule when `BRAINTRUST_ENABLED=true`. We use
+the default `wrapAISDK` integration with no custom field-level masking, so prompts, model output, tool
+inputs, and tool results are captured verbatim. Input/output capture is governed only by the AI SDK /
+`wrapAISDK` defaults (`recordInputs`/`recordOutputs`). Treat Braintrust access as production data
+access, and keep Braintrust disabled in environments where full AI content must not leave the platform.
 
 ## Failed Agent Run Checklist
 

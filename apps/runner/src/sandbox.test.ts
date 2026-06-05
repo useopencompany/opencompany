@@ -484,7 +484,7 @@ describe("runSandboxTool", () => {
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
-      "gh pr create --fill",
+      "gh 'pr' 'create' '--fill'",
       expect.objectContaining({
         cwd: sandboxLayout("/home/user/workspace").workRoot,
         envs: { GH_TOKEN: "github_token_123" },
@@ -492,6 +492,44 @@ describe("runSandboxTool", () => {
     );
     expect(onOutput).toHaveBeenCalledWith("stderr", "using [redacted]\n");
     expect(result).toEqual({ stdout: "ok [redacted]", stderr: "", exitCode: 0 });
+  });
+
+  it("quotes parsed gh arguments before dispatching through the sandbox shell", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "pr list && rm -rf work" },
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "gh 'pr' 'list' '&&' 'rm' '-rf' 'work'",
+      expect.objectContaining({ cwd: sandboxLayout("/home/user/workspace").workRoot }),
+    );
+  });
+
+  it("rejects malformed gh arguments before dispatching", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "gh",
+        args: { args: "pr view 'unterminated" },
+      }),
+    ).rejects.toThrow(/empty or malformed/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
   });
 
   it("returns gh nonzero exit output instead of throwing", async () => {

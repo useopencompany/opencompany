@@ -218,7 +218,7 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
       : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
   return [
     `Attached GitHub repositories: ${fullNames}.`,
-    "You have repository-scoped git and gh (GitHub CLI) access to these repositories from the shell and gh tools. Authentication is injected automatically; never handle tokens yourself.",
+    "You have repository-scoped gh (GitHub CLI) access to these repositories through the gh tool. Authentication is injected automatically; never handle tokens yourself. Use shell for local sandbox commands, not authenticated GitHub operations.",
     ghRepoGuidance,
     "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
     "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",
