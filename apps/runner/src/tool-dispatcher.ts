@@ -215,11 +215,11 @@ export function createToolSet(input: {
   }
 
   // The generic built-in dispatcher. Deferred capability tools are not registered with their own
-  // schemas; the model lists them with tool_search and runs one through this single tool. Mirrors
+  // schemas; the model lists them with find_tools and runs one through this single tool. Mirrors
   // the per-server MCP `{server}__use_tool` meta-tool: same approval gate, same persistence tail.
   tools[BUILTIN_USE_TOOL_NAME] = tool({
     description:
-      "Run a tool that is not preloaded. Set `tool` to a name returned by tool_search and " +
+      "Run a tool that is not preloaded. Set `tool` to a name returned by find_tools and " +
       "`arguments` to that tool's input. Each underlying tool keeps its own permission, so a write " +
       "or destructive tool may require approval.",
     inputSchema: jsonSchema(BUILTIN_USE_TOOL_INPUT_SCHEMA as never),
@@ -283,7 +283,7 @@ const BUILTIN_USE_TOOL_INPUT_SCHEMA = {
   properties: {
     tool: {
       type: "string",
-      description: "Exact tool name returned by tool_search.",
+      description: "Exact tool name returned by find_tools.",
     },
     arguments: {
       type: "object",
@@ -305,7 +305,7 @@ function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } 
 
 // Resolve the named deferred tool and run it through the existing executeRuntimeTool tail, but
 // persist the result under `use_tool` so it pairs with the model's dispatcher call. An unknown or
-// non-deferred tool name is persisted as a recoverable error pointing back to tool_search.
+// non-deferred tool name is persisted as a recoverable error pointing back to find_tools.
 export async function dispatchBuiltinUseTool(input: {
   sessionId: string;
   assistantMessageId: string;
@@ -344,8 +344,8 @@ export async function dispatchBuiltinUseTool(input: {
       ...(input.internalMessages ? { internalMessages: true } : {}),
       toolCallId: input.toolCallId,
       message: rawName
-        ? `Unknown or unavailable tool "${rawName}". Call tool_search to list available tools, then pass an exact name as "tool".`
-        : 'Missing "tool" argument. Call tool_search to list available tools, then pass one as "tool".',
+        ? `Unknown or unavailable tool "${rawName}". Call find_tools to list available tools, then pass an exact name as "tool".`
+        : 'Missing "tool" argument. Call find_tools to list available tools, then pass one as "tool".',
     });
   }
   return executeRuntimeTool({

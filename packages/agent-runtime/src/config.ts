@@ -157,7 +157,7 @@ function formatUserContext(input: {
 
 // The `## Tools` index: a compact, cached spine of every capability the agent can reach this
 // session, grouped into built-in capabilities and workspace MCP servers. Full tool schemas are NOT
-// listed here — the model expands them on demand with tool_search / {server}__search_tools and runs
+// listed here — the model expands them on demand with find_tools / {server}__search_tools and runs
 // one with use_tool / {server}__use_tool. Keeping only one-liners caches cleanly (no system-prompt
 // mutation on discovery) and keeps the number of definitions visible at decision time small, which
 // is what tool-selection accuracy depends on.
@@ -183,7 +183,7 @@ function buildToolsIndexSection(input: {
   ];
   if (builtinCapabilities.length > 0) {
     lines.push(
-      `Other tools are not preloaded. To use a capability below, call tool_search({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
+      `Other tools are not preloaded. To use a capability below, call find_tools({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
       "Built-in capabilities:",
       ...builtinCapabilities.map((capability) => `- ${capability.id} — ${capability.description}`),
     );

@@ -228,7 +228,7 @@ const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> 
   tool_help: {
     execute: ({ args, enabledTools }) => executeToolHelp(args, enabledTools),
   },
-  tool_search: {
+  find_tools: {
     execute: ({ args, enabledTools }) => executeToolSearch(args, enabledTools),
   },
   exa_search: {

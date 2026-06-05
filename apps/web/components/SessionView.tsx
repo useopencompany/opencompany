@@ -392,7 +392,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     const latestModelRequest = [...runtime.events]
       .reverse()
       .find((event) => event.type === "debug.model_request")?.payload as
-      | { systemPrompt?: string; tools?: unknown }
+      | { systemPrompt?: string; tools?: unknown; deferredTools?: unknown }
       | undefined;
     return {
       exportedAt: new Date().toISOString(),
@@ -401,7 +401,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       status: runtime.currentStatus,
       lastError: runtime.lastError,
       systemPrompt: latestModelRequest?.systemPrompt ?? null,
+      // `tools` mirrors the tools actually registered in the latest model call; `deferredTools`
+      // are reachable only via `find_tools` + `use_tool` and are NOT sent to the model.
       tools: latestModelRequest?.tools ?? null,
+      deferredTools: latestModelRequest?.deferredTools ?? null,
       usage: runtime.usage,
       toolUsage: runtime.toolUsage,
       cost: runtime.cost,
@@ -1457,8 +1460,8 @@ function CopySessionJsonButton({ build }: { build: () => unknown }) {
     <button
       type="button"
       onClick={handleCopy}
-      aria-label={copied ? "Copied session JSON" : "Copy full session JSON"}
-      title={copied ? "Copied" : "Copy full session JSON for debugging"}
+      aria-label={copied ? "Copied debug JSON" : "Copy debug JSON"}
+      title={copied ? "Copied" : "Copy the full session debug JSON (system prompt + latest model-call tools)"}
       className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       {copied ? (
@@ -1466,7 +1469,7 @@ function CopySessionJsonButton({ build }: { build: () => unknown }) {
       ) : (
         <Copy size={11} strokeWidth={1.75} />
       )}
-      <span>{copied ? "Copied" : "Copy JSON"}</span>
+      <span>{copied ? "Copied" : "Copy Debug JSON"}</span>
     </button>
   );
 }

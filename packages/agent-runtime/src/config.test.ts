@@ -316,7 +316,7 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("## Tools");
     expect(resolved.systemPrompt).toContain("- exa —");
     expect(resolved.systemPrompt).toContain("- instagram —");
-    expect(resolved.systemPrompt).toContain("tool_search");
+    expect(resolved.systemPrompt).toContain("find_tools");
     expect(resolved.systemPrompt).toContain("use_tool");
     expect(resolved.systemPrompt).toContain("Linear");
     expect(resolved.systemPrompt).toContain("linear__search_tools");

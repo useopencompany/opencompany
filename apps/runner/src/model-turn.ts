@@ -74,7 +74,7 @@ export async function streamAssistantResponse(input: {
   );
   // Register full schemas only for the directly-callable tools (core file/shell/ask plus the
   // discovery + dispatcher tools). Deferred capability tools are reached through the single
-  // `use_tool` dispatcher after the model lists them with tool_search — their schemas never enter
+  // `use_tool` dispatcher after the model lists them with find_tools — their schemas never enter
   // the cached tool set. MCP servers already expose their own lazy search/use meta-tools.
   const { direct, deferred } = partitionRuntimeToolNames(input.runtime.tools);
   const dispatcher = input.tools[BUILTIN_USE_TOOL_NAME];
@@ -84,14 +84,23 @@ export async function streamAssistantResponse(input: {
     ...mcpToolSet.tools,
   };
   // Persist a debug-only snapshot of this turn's model inputs (system prompt + tool catalog)
-  // so the session's "Copy JSON" export can include them — they are otherwise ephemeral,
-  // built here and passed straight to the model. The tool list unions the full enabled catalog
-  // (`runtime.tools`, incl. deferred tools reached via `use_tool`) with the names actually
-  // registered this turn (`selectedTools`, incl. MCP tools + the dispatcher); schemas come from
-  // the static definitions, so MCP tools appear by name only. Best-effort: a failed write must
-  // never abort the turn, so this is deliberately NOT wrapped in `requireLeaseWrite`.
+  // so the session's "Copy Debug JSON" export can include them — they are otherwise ephemeral,
+  // built here and passed straight to the model. `tools` is exactly the set registered in the
+  // model call (`selectedTools`: direct core tools + the `use_tool` dispatcher + MCP tools), so
+  // the snapshot truthfully mirrors what the model received this turn. Deferred capability tools
+  // are NOT in the call — they are reachable only via `find_tools` + `use_tool` — so they are
+  // listed separately under `deferredTools` for debugging, never folded into `tools`. Schemas
+  // come from the static definitions, so MCP tools appear by name only. Best-effort: a failed
+  // write must never abort the turn, so this is deliberately NOT wrapped in `requireLeaseWrite`.
   try {
-    const toolNames = new Set<string>([...input.runtime.tools, ...Object.keys(selectedTools)]);
+    const toToolEntry = (name: string) => {
+      const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
+      return {
+        name,
+        description: definition?.description ?? "",
+        parameters: definition?.parameters ?? null,
+      };
+    };
     await appendRuntimeEventForLease({
       sessionId: input.ctx.sessionId,
       messageId: input.assistantMessageId,
@@ -101,14 +110,8 @@ export async function streamAssistantResponse(input: {
       payload: {
         messageId: input.assistantMessageId,
         systemPrompt: input.system,
-        tools: [...toolNames].map((name) => {
-          const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
-          return {
-            name,
-            description: definition?.description ?? "",
-            parameters: definition?.parameters ?? null,
-          };
-        }),
+        tools: Object.keys(selectedTools).map(toToolEntry),
+        deferredTools: deferred.map(toToolEntry),
       },
     });
   } catch {

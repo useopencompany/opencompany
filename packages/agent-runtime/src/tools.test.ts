@@ -360,13 +360,13 @@ describe("partitionRuntimeToolNames", () => {
       "read_file",
       "edit_file",
       "shell",
-      "tool_search",
+      "find_tools",
       "exa_search",
       "instagram_get_profile",
       "amp_coder",
     ];
     const { direct, deferred } = partitionRuntimeToolNames(enabled);
-    expect(direct).toEqual(["read_file", "edit_file", "shell", "tool_search"]);
+    expect(direct).toEqual(["read_file", "edit_file", "shell", "find_tools"]);
     expect(deferred).toEqual(["exa_search", "instagram_get_profile", "amp_coder"]);
   });
 
@@ -377,7 +377,7 @@ describe("partitionRuntimeToolNames", () => {
     expect(isDeferrableRuntimeTool("read_file")).toBe(false);
     expect(isDeferrableRuntimeTool("shell")).toBe(false);
     expect(isDeferrableRuntimeTool("gh")).toBe(false);
-    expect(isDeferrableRuntimeTool("tool_search")).toBe(false);
+    expect(isDeferrableRuntimeTool("find_tools")).toBe(false);
   });
 });
 
@@ -408,11 +408,19 @@ describe("searchRuntimeTools", () => {
     ).toBe(true);
   });
 
+  it("ignores the query filter when a capability is named so the capability is always listed", () => {
+    // The model often misuses `query` as a search topic (e.g. "Louis Morgner") alongside a
+    // capability; the filter must not strip every tool in that case.
+    const results = searchRuntimeTools({ capability: "exa", query: "Louis Morgner summary" }, enabled);
+    const names = results.map((result) => result.name);
+    expect(names).toContain("exa_search");
+  });
+
   it("never returns a tool that is not enabled or not deferrable", () => {
     const results = searchRuntimeTools({}, enabled);
     const names = results.map((result) => result.name);
     expect(names).not.toContain("read_file");
-    expect(names).not.toContain("tool_search");
+    expect(names).not.toContain("find_tools");
     expect(names.every((name) => isDeferrableRuntimeTool(name) && enabled.includes(name))).toBe(
       true,
     );

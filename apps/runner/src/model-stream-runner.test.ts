@@ -660,14 +660,14 @@ describe("stream error handling", () => {
     const toolStartCoordinator = createToolStartCoordinator();
     toolStartCoordinator.record({
       toolCallId: "call_search",
-      name: "tool_search",
+      name: "find_tools",
       input: { query: "", capability: "" },
     });
     const stream = createStream([
       streamPart({
         type: "tool-call",
         toolCallId: "call_search",
-        toolName: "tool_search",
+        toolName: "find_tools",
         input: undefined,
       }),
     ]);
@@ -678,7 +678,7 @@ describe("stream error handling", () => {
       {
         type: "tool-call",
         toolCallId: "call_search",
-        toolName: "tool_search",
+        toolName: "find_tools",
         input: { query: "", capability: "" },
       },
     ]);
