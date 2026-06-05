@@ -935,6 +935,76 @@ describe("buildRuntimeToolCallsForMessage", () => {
       },
     ]);
   });
+
+  it("links a Linear tool call to its issue from the output URL", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "get_issue",
+          input: { id: "PRO-114" },
+        }),
+        event(2, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "get_issue",
+          output: {
+            id: "PRO-114",
+            title: "Add a link-out icon",
+            url: "https://linear.app/actaso/issue/PRO-114/add-a-link-out-icon",
+          },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls[0]?.issueUrl).toBe("https://linear.app/actaso/issue/PRO-114/add-a-link-out-icon");
+  });
+
+  it("falls back to the input URL when the output omits it", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "create_comment",
+          input: { issueUrl: "https://linear.app/actaso/issue/PRO-9/some-issue", body: "hi" },
+        }),
+        event(2, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "create_comment",
+          output: { success: true },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls[0]?.issueUrl).toBe("https://linear.app/actaso/issue/PRO-9/some-issue");
+  });
+
+  it("leaves tool calls without a Linear issue URL unlinked", () => {
+    const calls = buildRuntimeToolCallsForMessage(
+      [
+        event(1, "tool.started", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "web_search",
+          input: { query: "linear app" },
+        }),
+        event(2, "tool.completed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "web_search",
+          output: { results: ["https://linear.app/homepage", "https://example.com"] },
+        }),
+      ],
+      "msg_assistant",
+    );
+
+    expect(calls[0]?.issueUrl).toBeUndefined();
+  });
 });
 
 describe("describeToolCall", () => {

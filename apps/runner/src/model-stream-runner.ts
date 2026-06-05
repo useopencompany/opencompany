@@ -24,8 +24,8 @@ import type { RunControlCheck } from "./run-control";
 import { RunSuspendedError } from "./runner-errors";
 import { normalizeQuestionsInput } from "./session-questions";
 import {
-  buildRecoverableToolInputOutput,
-  isRecoverableToolInputStreamError,
+  buildRecoverableToolStreamOutput,
+  isRecoverableToolStreamError,
   readReasoningTextDelta,
   throwIfStreamErrorPart,
 } from "./stream-helpers";
@@ -138,8 +138,8 @@ export async function collectAssistantStream(input: {
       const part = next.value;
       await input.checkAbort();
       throwIfAborted(input.signal);
-      if (isRecoverableToolInputStreamError(part)) {
-        await persistRecoverableToolInputError({
+      if (isRecoverableToolStreamError(part)) {
+        await persistRecoverableToolStreamError({
           sessionId: input.sessionId,
           assistantMessageId: input.assistantMessageId,
           runLeaseId: input.runLeaseId,
@@ -397,14 +397,14 @@ export async function collectAssistantStream(input: {
   };
 }
 
-async function persistRecoverableToolInputError(input: {
+async function persistRecoverableToolStreamError(input: {
   sessionId: string;
   assistantMessageId: string;
   runLeaseId: string;
   runLeaseOwner: string;
   part: Extract<TextStreamPart<ToolSet>, { type: "tool-error" }>;
 }) {
-  const output = buildRecoverableToolInputOutput(input.part);
+  const output = buildRecoverableToolStreamOutput(input.part);
   const toolMessageId = newAgentSessionMessageId();
   await requireLeaseWrite(
     insertToolMessageForLease({

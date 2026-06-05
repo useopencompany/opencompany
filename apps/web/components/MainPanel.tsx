@@ -4,7 +4,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import {
@@ -168,11 +168,12 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   );
 }
 
-function MainPanelContent({ agents }: { agents: AgentOption[] }) {
+function MainPanelContent({ agents, slackCard }: { agents: AgentOption[]; slackCard?: ReactNode }) {
   return (
     <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
       <div className="w-full max-w-[680px]">
         <Prompt agents={agents} />
+        {slackCard}
       </div>
     </main>
   );
@@ -180,7 +181,13 @@ function MainPanelContent({ agents }: { agents: AgentOption[] }) {
 
 // Client-only: gated behind useHydrated in the default export because
 // useLiveQuery cannot render during SSR.
-function MainPanelLive({ initialAgents }: { initialAgents: AgentOption[] }) {
+function MainPanelLive({
+  initialAgents,
+  slackCard,
+}: {
+  initialAgents: AgentOption[];
+  slackCard?: ReactNode;
+}) {
   const { agents: agentsCollection } = useCollections();
   const { data: rows, isLoading } = useLiveQuery((q) => q.from({ agent: agentsCollection }));
   const agentOptions = useMemo(() => {
@@ -192,11 +199,17 @@ function MainPanelLive({ initialAgents }: { initialAgents: AgentOption[] }) {
     }));
   }, [isLoading, initialAgents, rows]);
 
-  return <MainPanelContent agents={agentOptions} />;
+  return <MainPanelContent agents={agentOptions} slackCard={slackCard} />;
 }
 
-export default function MainPanel({ agents: initialAgents }: { agents: AgentOption[] }) {
+export default function MainPanel({
+  agents: initialAgents,
+  slackCard,
+}: {
+  agents: AgentOption[];
+  slackCard?: ReactNode;
+}) {
   const hydrated = useHydrated();
-  if (!hydrated) return <MainPanelContent agents={initialAgents} />;
-  return <MainPanelLive initialAgents={initialAgents} />;
+  if (!hydrated) return <MainPanelContent agents={initialAgents} slackCard={slackCard} />;
+  return <MainPanelLive initialAgents={initialAgents} slackCard={slackCard} />;
 }

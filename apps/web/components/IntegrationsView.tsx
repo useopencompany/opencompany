@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  CalendarDays,
   CheckCircle2,
   ExternalLink,
   GitBranch,
   type LucideIcon,
+  Mail,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -18,6 +20,11 @@ import {
   disconnectGitHubIntegrationAction,
   refreshGitHubRepositories,
 } from "@/lib/integrations/actions";
+import {
+  disconnectGoogleIntegrationAction,
+  setGoogleCalendarSelection,
+} from "@/lib/integrations/google-actions";
+import type { GoogleConnectionState, GoogleProviderState } from "@/lib/integrations/google-data";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 type IntegrationStatus =
@@ -28,7 +35,8 @@ type IntegrationStatus =
   | "sync_failed"
   | "error";
 type ResourceStatus = "available" | "permission_lost" | "archived" | "sync_failed";
-type IntegrationProviderId = "github";
+type IntegrationProviderId = "github" | "gmail" | "google_calendar";
+type IntegrationCategory = "Code" | "Communication" | "Productivity";
 
 type WorkspaceIntegrationState = {
   github: {
@@ -52,6 +60,8 @@ type WorkspaceIntegrationState = {
       }>;
     }>;
   };
+  gmail: GoogleProviderState;
+  google_calendar: GoogleProviderState;
 };
 type GitHubConnection = WorkspaceIntegrationState["github"]["connections"][number];
 type DisconnectFeedback = {
@@ -63,7 +73,7 @@ type DisconnectFeedback = {
 type IntegrationDefinition = {
   id: IntegrationProviderId;
   name: string;
-  category: "Code";
+  category: IntegrationCategory;
   description: string;
   icon: LucideIcon;
 };
@@ -83,6 +93,20 @@ const INTEGRATIONS: IntegrationDefinition[] = [
     category: "Code",
     description: "Connect repositories agents can clone, edit, and open pull requests against.",
     icon: GitBranch,
+  },
+  {
+    id: "gmail",
+    name: "Gmail",
+    category: "Communication",
+    description: "Let agents read mail from one or more connected Google accounts (read-only).",
+    icon: Mail,
+  },
+  {
+    id: "google_calendar",
+    name: "Google Calendar",
+    category: "Productivity",
+    description: "Let agents read and manage events on selected calendars (read & write).",
+    icon: CalendarDays,
   },
 ];
 
@@ -254,6 +278,12 @@ function IntegrationControls({
   switch (provider) {
     case "github":
       return <GitHubControls integration={integrations.github} />;
+    case "gmail":
+      return <GoogleControls provider="gmail" integration={integrations.gmail} />;
+    case "google_calendar":
+      return (
+        <GoogleControls provider="google_calendar" integration={integrations.google_calendar} />
+      );
   }
   return assertNever(provider);
 }
@@ -453,6 +483,237 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
   );
 }
 
+function GoogleControls({
+  provider,
+  integration,
+}: {
+  provider: "gmail" | "google_calendar";
+  integration: GoogleProviderState;
+}) {
+  const router = useRouter();
+  const [isDisconnecting, startDisconnectTransition] = useTransition();
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<DisconnectFeedback | null>(null);
+
+  const routeSegment = provider === "gmail" ? "gmail" : "google-calendar";
+  const name = provider === "gmail" ? "Gmail" : "Google Calendar";
+  const connected = integration.connections.length > 0;
+
+  function disconnect(connection: GoogleConnectionState) {
+    if (isDisconnecting) return;
+    setFeedback(null);
+    setDisconnectingId(connection.id);
+    startDisconnectTransition(async () => {
+      try {
+        const result = await disconnectGoogleIntegrationAction({
+          provider,
+          integrationId: connection.id,
+        });
+        setFeedback({
+          connectionId: connection.id,
+          type: result.ok ? "success" : "error",
+          message: result.message,
+        });
+        if (result.ok) router.refresh();
+      } finally {
+        setDisconnectingId(null);
+      }
+    });
+  }
+
+  return (
+    <div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <InfoField label="Connected accounts" value={String(integration.connections.length)} />
+        <InfoField label="Access" value={provider === "gmail" ? "Read-only" : "Read & write"} />
+        <InfoField
+          label="Last updated"
+          value={latestRefreshLabel(
+            integration.connections.map((connection) => connection.updatedAt),
+          )}
+        />
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {integration.configured ? (
+          <a
+            href={`/api/integrations/${routeSegment}/start?returnTo=${encodeURIComponent(
+              "/settings/integrations",
+            )}`}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {connected ? `Connect another ${name} account` : `Connect ${name}`}
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-surface-active px-3 text-[12.5px] font-medium text-ink-subtle"
+          >
+            <ShieldAlert size={13} strokeWidth={1.9} />
+            Not configured
+          </button>
+        )}
+      </div>
+      {connected ? (
+        <div className="mt-4 overflow-hidden rounded-md border border-border bg-surface/55">
+          {integration.connections.map((connection) => (
+            <div key={connection.id} className="border-t border-border-subtle p-3 first:border-t-0">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[12.5px] font-semibold text-ink">
+                    {connection.accountEmail ?? connection.connectionLabel}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-ink-subtle">
+                    Google account - {formatDateTime(connection.updatedAt)}
+                  </div>
+                  {connection.status !== "connected" ? (
+                    <p className="mt-1 text-[11.5px] leading-4 text-warning">
+                      {connection.statusReason ?? `Reconnect ${name} to restore access.`}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {connection.status !== "connected" ? (
+                    <a
+                      href={`/api/integrations/${routeSegment}/start?returnTo=${encodeURIComponent(
+                        "/settings/integrations",
+                      )}`}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-canvas"
+                    >
+                      <RefreshCw size={13} strokeWidth={1.9} />
+                      Reconnect
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => disconnect(connection)}
+                    disabled={isDisconnecting}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-danger-border bg-surface px-3 text-[12.5px] font-medium text-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-65"
+                  >
+                    <Trash2 size={13} strokeWidth={1.9} />
+                    {disconnectingId === connection.id ? "Disconnecting" : "Disconnect"}
+                  </button>
+                </div>
+              </div>
+              {feedback?.connectionId === connection.id ? (
+                <p
+                  className={`mt-2 text-[12px] leading-5 ${
+                    feedback.type === "success" ? "text-success" : "text-danger"
+                  }`}
+                >
+                  {feedback.message}
+                </p>
+              ) : null}
+              {provider === "google_calendar" ? (
+                <GoogleCalendarSelection connection={connection} />
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function calendarSelectionMap(connection: GoogleConnectionState): Record<string, boolean> {
+  return Object.fromEntries(
+    connection.calendars.map((calendar) => [calendar.externalId, calendar.selectedAt !== null]),
+  );
+}
+
+// A value signature of the server-side selection, used to detect when props actually changed (vs a
+// parent re-render with an equivalent connection object).
+function calendarSelectionSignature(connection: GoogleConnectionState): string {
+  return connection.calendars
+    .map((calendar) => `${calendar.externalId}:${calendar.selectedAt ?? ""}`)
+    .join("|");
+}
+
+function GoogleCalendarSelection({ connection }: { connection: GoogleConnectionState }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [selected, setSelected] = useState<Record<string, boolean>>(() =>
+    calendarSelectionMap(connection),
+  );
+
+  // Resync from server state after router.refresh (or any external update) by adjusting state during
+  // render — the React-recommended alternative to an effect. The local map is only the optimistic
+  // overlay; when the server's selection actually changes it must win over stale local state.
+  const [syncedSignature, setSyncedSignature] = useState(() =>
+    calendarSelectionSignature(connection),
+  );
+  const signature = calendarSelectionSignature(connection);
+  if (signature !== syncedSignature) {
+    setSyncedSignature(signature);
+    setSelected(calendarSelectionMap(connection));
+  }
+
+  if (connection.calendars.length === 0) return null;
+
+  function toggle(calendarExternalId: string, next: boolean) {
+    const previous = selected[calendarExternalId] ?? false;
+    setSelected((current) => ({ ...current, [calendarExternalId]: next }));
+    startTransition(async () => {
+      try {
+        const result = await setGoogleCalendarSelection({
+          integrationId: connection.id,
+          calendarExternalId,
+          selected: next,
+        });
+        if (!result.ok) {
+          setSelected((current) => ({ ...current, [calendarExternalId]: previous }));
+          return;
+        }
+        router.refresh();
+      } catch {
+        setSelected((current) => ({ ...current, [calendarExternalId]: previous }));
+      }
+    });
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border-subtle bg-surface/60">
+      <div className="border-b border-border-subtle px-3 py-2 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+        Calendars agents can use
+      </div>
+      <div className="max-h-[180px] overflow-y-auto">
+        {connection.calendars.map((calendar) => (
+          <label
+            key={calendar.externalId}
+            className="flex cursor-pointer items-center justify-between gap-3 border-t border-border-subtle px-3 py-2 first:border-t-0"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected[calendar.externalId] ?? false}
+                disabled={isPending || calendar.status !== "available"}
+                onChange={(event) => toggle(calendar.externalId, event.target.checked)}
+                className="h-3.5 w-3.5 accent-ink"
+              />
+              <span className="truncate text-[12.5px] font-medium text-ink">{calendar.name}</span>
+              {calendar.primary ? (
+                <span className="rounded-full border border-border bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-ink-subtle">
+                  Primary
+                </span>
+              ) : null}
+            </span>
+            {calendar.status !== "available" ? (
+              <span
+                className={`rounded border px-1.5 py-0.5 text-[10.5px] font-medium ${resourceStatusClass(
+                  calendar.status,
+                )}`}
+              >
+                {resourceStatusLabel(calendar.status)}
+              </span>
+            ) : null}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function RefreshRepositoriesButton() {
   const { pending } = useFormStatus();
 
@@ -565,8 +826,44 @@ function integrationState(
   switch (provider) {
     case "github":
       return githubIntegrationState(integrations.github.status);
+    case "gmail":
+      return googleIntegrationState(integrations.gmail.status, "Gmail");
+    case "google_calendar":
+      return googleIntegrationState(integrations.google_calendar.status, "Google Calendar");
   }
   return assertNever(provider);
+}
+
+function googleIntegrationState(status: IntegrationStatus, name: string): IntegrationCardState {
+  if (status === "connected") {
+    return { status: "connected", label: "Connected", description: `${name} is connected.` };
+  }
+  if (status === "needs_reauth") {
+    return {
+      status: "needs_reauth",
+      label: "Needs reauth",
+      description: `A ${name} account needs to be reconnected.`,
+    };
+  }
+  if (status === "sync_failed") {
+    return {
+      status: "sync_failed",
+      label: "Sync failed",
+      description: `${name} sync failed.`,
+    };
+  }
+  if (status === "error") {
+    return {
+      status: "error",
+      label: "Not configured",
+      description: `${name} OAuth client is not configured.`,
+    };
+  }
+  return {
+    status: "not_connected",
+    label: "Available",
+    description: `Connect ${name} to let agents use it.`,
+  };
 }
 
 function assertNever(value: never): never {

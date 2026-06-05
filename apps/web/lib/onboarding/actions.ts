@@ -15,6 +15,7 @@ import {
   type OnboardingValues,
   validateOnboardingValues,
 } from "@/lib/onboarding/validation";
+import { dispatchSlackSupportChannelRequested } from "@/lib/slack/events";
 
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
@@ -136,6 +137,30 @@ export async function completeOnboarding(
   // message so they land directly in a live setup conversation. Skip when leo already exists
   // (re-submits) so we never spawn duplicate onboarding sessions.
   if (scaffold.created) {
+    // First onboarding only: kick off Slack Connect support-channel provisioning.
+    // Fire-and-forget — Slack must never block or crash onboarding, and the
+    // Inngest function is idempotent per workspace.
+    try {
+      await dispatchSlackSupportChannelRequested({
+        workspaceId: workspace.id,
+        userId: user.id,
+        customerEmail: user.email,
+        firstName: user.firstName,
+      });
+    } catch (error) {
+      captureException(error, {
+        event: "opencompany.slack_support_dispatch_failed",
+        workspace_id: workspace.id,
+        user_id: user.id,
+      });
+      logger.error("Failed to dispatch Slack support provisioning", {
+        event: "opencompany.slack_support_dispatch_failed",
+        workspace_id: workspace.id,
+        user_id: user.id,
+        ...errorLogFields(error),
+      });
+    }
+
     let sessionId: string | null = null;
 
     try {

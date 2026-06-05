@@ -24,6 +24,20 @@ export function githubStatus(input: {
   return "needs_repository_access";
 }
 
+export function googleStatus(input: {
+  configured: boolean;
+  connectionStatuses: Array<"connected" | "needs_reauth" | "sync_failed" | "disconnected">;
+}): WorkspaceIntegrationStatus {
+  if (!input.configured) return "error";
+  const activeConnectionStatuses = input.connectionStatuses.filter(
+    (status) => status !== "disconnected",
+  );
+  if (activeConnectionStatuses.length === 0) return "not_connected";
+  if (activeConnectionStatuses.includes("needs_reauth")) return "needs_reauth";
+  if (activeConnectionStatuses.includes("sync_failed")) return "sync_failed";
+  return "connected";
+}
+
 export function sanitizeIntegrationStatusReason(reason: string, fallback: string | null = null) {
   const sanitized = reason
     .replace(/[\u0000-\u001f\u007f]/g, " ")
