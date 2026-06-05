@@ -282,9 +282,10 @@ export type CoerceToolArgsResult = {
 
 // Attempt lossless, intent-preserving fixes for the mistakes smaller models make most often, then
 // let the caller re-validate. Nothing here invents data: every transform is reversible in meaning
-// (parse a stringified payload, unwrap an extra nesting level, narrow a numeric/boolean string,
-// normalize an enum's case). Anything requiring intent (a missing required value, a renamed field)
-// is deliberately left to the model-based repair layer.
+// (parse a stringified payload, unwrap an extra nesting level, unwrap an object-wrapped array,
+// parse a stringified object/array field, narrow a numeric/boolean string, normalize an enum's
+// case). Anything requiring intent (a missing required value, a renamed field) is deliberately left
+// to the model-based repair layer.
 export function coerceToolArgs(schema: unknown, args: unknown): CoerceToolArgsResult {
   const coercions: string[] = [];
   let current = args;
@@ -354,8 +355,39 @@ function coerceScalar(value: unknown, propSchema: SchemaRecord): ScalarCoercion 
   }
 
   const type = schemaType(propSchema);
+
+  // Object-wrapped array: `{ item: [...] }` → `[...]` when an array is expected. Only unwrap when
+  // the wrapper has exactly one key whose value is an array, so the transform is unambiguous and
+  // lossless (the wrapper key name — item/items/values/… — is discarded but carries no intent).
+  if (type === "array" && isRecord(value)) {
+    const keys = Object.keys(value);
+    if (keys.length === 1 && Array.isArray(value[keys[0]!])) {
+      return {
+        changed: true,
+        value: value[keys[0]!],
+        note: `unwrapped object-wrapped array "{key}"`,
+      };
+    }
+  }
+
   if (typeof value !== "string") return NO_COERCION;
   const trimmed = value.trim();
+
+  // JSON-encoded structured field: the model stringified an object/array property. Parse only when
+  // the parsed shape matches the declared type, so a stray string is never silently restructured.
+  if (
+    (type === "object" || type === "array") &&
+    (trimmed.startsWith("{") || trimmed.startsWith("["))
+  ) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if ((type === "array" && Array.isArray(parsed)) || (type === "object" && isRecord(parsed))) {
+        return { changed: true, value: parsed, note: `parsed JSON "{key}"` };
+      }
+    } catch {
+      // Leave it as a string; validation will report the real mismatch (and repair may still fix it).
+    }
+  }
 
   if ((type === "number" || type === "integer") && trimmed !== "") {
     const num = Number(trimmed);

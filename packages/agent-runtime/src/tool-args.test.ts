@@ -127,6 +127,42 @@ describe("coerceToolArgs", () => {
     expect(coerceToolArgs(schema, { flag: "false" }).args).toEqual({ flag: false });
   });
 
+  it("unwraps an object-wrapped array when the schema expects an array", () => {
+    const schema = objectSchema({ labels: { type: "array", items: { type: "string" } } });
+    const { args, coercions } = coerceToolArgs(schema, { labels: { item: ["a", "b"] } });
+    expect(args).toEqual({ labels: ["a", "b"] });
+    expect(coercions).toContain('unwrapped object-wrapped array "labels"');
+  });
+
+  it("leaves a multi-key object untouched even when an array is expected", () => {
+    const schema = objectSchema({ labels: { type: "array", items: { type: "string" } } });
+    const value = { labels: { item: ["a"], extra: 1 } };
+    const { args, coercions } = coerceToolArgs(schema, value);
+    expect(args).toEqual(value);
+    expect(coercions).toEqual([]);
+  });
+
+  it("parses a stringified array field when the schema expects an array", () => {
+    const schema = objectSchema({ ids: { type: "array", items: { type: "number" } } });
+    const { args, coercions } = coerceToolArgs(schema, { ids: "[1, 2, 3]" });
+    expect(args).toEqual({ ids: [1, 2, 3] });
+    expect(coercions).toContain('parsed JSON "ids"');
+  });
+
+  it("parses a stringified object field when the schema expects an object", () => {
+    const schema = objectSchema({ filters: { type: "object", properties: {} } });
+    const { args } = coerceToolArgs(schema, { filters: '{"status":"open"}' });
+    expect(args).toEqual({ filters: { status: "open" } });
+  });
+
+  it("does not parse a stringified field into the wrong declared type", () => {
+    // schema wants an object but the string is a JSON array — leave it for validation/repair.
+    const schema = objectSchema({ filters: { type: "object", properties: {} } });
+    const { args, coercions } = coerceToolArgs(schema, { filters: "[1,2]" });
+    expect(args).toEqual({ filters: "[1,2]" });
+    expect(coercions).toEqual([]);
+  });
+
   it("normalizes an enum value's case to a unique allowed value", () => {
     const schema = objectSchema({ mode: { type: "string", enum: ["read", "write"] } });
     const { args } = coerceToolArgs(schema, { mode: "WRITE" });
