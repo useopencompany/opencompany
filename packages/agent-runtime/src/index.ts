@@ -12,5 +12,6 @@ export * from "./schedules";
 export * from "./skill-resolver";
 export * from "./skills";
 export * from "./tiptap-builder";
+export * from "./tool-args";
 export * from "./tools";
 export * from "./types";

@@ -1,4 +1,8 @@
-import { type AgentBrainReference, shellQuote } from "@opencompany/agent-runtime";
+import {
+  type AgentBrainReference,
+  matchesBrainReference,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { agentSessionBrainMounts, brainFiles } from "@opencompany/db/schema";
 import { enqueueWorkspaceSync } from "@opencompany/db/sync-outbox";
 import { and, eq } from "drizzle-orm";
@@ -282,7 +286,7 @@ async function expandBrainFiles(workspaceId: string, references: AgentBrainRefer
   let bytes = 0;
 
   for (const row of rows.sort((a, b) => a.path.localeCompare(b.path))) {
-    if (!references.some((reference) => matchesReference(row.path, reference))) continue;
+    if (!references.some((reference) => matchesBrainReference(row.path, reference))) continue;
     if (row.sizeBytes > MAX_BRAIN_FILE_BYTES) continue;
     if (files.length >= MAX_BRAIN_MOUNT_FILES) break;
     if (bytes + row.sizeBytes > MAX_BRAIN_MOUNT_BYTES) break;
@@ -293,13 +297,8 @@ async function expandBrainFiles(workspaceId: string, references: AgentBrainRefer
   return files;
 }
 
-function matchesReference(path: string, reference: AgentBrainReference) {
-  if (reference.type === "folder" && reference.path === "/") return true;
-  return reference.type === "folder" ? path.startsWith(reference.path) : path === reference.path;
-}
-
 function requestedPathFor(path: string, references: AgentBrainReference[]) {
-  return references.find((reference) => matchesReference(path, reference))?.path ?? path;
+  return references.find((reference) => matchesBrainReference(path, reference))?.path ?? path;
 }
 
 function isAllowed(

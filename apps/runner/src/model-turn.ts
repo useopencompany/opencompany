@@ -67,6 +67,10 @@ export async function streamAssistantResponse(input: {
       runLeaseOwner: input.ctx.leaseOwner,
       ...input.mcpContext,
       integrationCredentialEncryptionKey: input.ctx.env.integrationCredentialEncryptionKey,
+      toolArgRepair: {
+        apiKey: input.ctx.env.vercelAiGatewayApiKey,
+        enabled: input.ctx.env.toolArgRepairEnabled,
+      },
       toolStartCoordinator: input.toolStartCoordinator,
       policy: input.policy,
       suspendable: input.suspendable,

@@ -100,7 +100,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const sessionId = result.session.id;
       showToast({
         title: prompt ? "Working on it in a new session" : "New session started",
-        ...(prompt ? { description: prompt } : {}),
         action: {
           label: "Open",
           onClick: () => router.push(`/session/${sessionId}`),
