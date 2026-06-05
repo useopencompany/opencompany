@@ -82,6 +82,21 @@ export type AnalyticsEventPropertiesByName = {
     tool_cost_usd_micros: number;
     sandbox_cost_usd_micros: number;
   };
+  e2b_sandbox_latency: {
+    user_id: string;
+    workspace_id: string;
+    agent_id: string;
+    session_id: string;
+    phase: "e2b_request" | "sandbox_ready";
+    operation: "create" | "connect" | "hydrate";
+    outcome: "success" | "not_found" | "error";
+    latency_ms: number;
+    existing_sandbox: boolean;
+    template: string;
+    sandbox_id?: string;
+    requested_sandbox_id?: string;
+    error_name?: string;
+  };
   credit_top_up_started: {
     user_id: string;
     workspace_id: string;
@@ -219,6 +234,25 @@ export const analyticsEvents = {
       "model_cost_usd_micros",
       "tool_cost_usd_micros",
       "sandbox_cost_usd_micros",
+    ],
+  },
+  e2b_sandbox_latency: {
+    name: "e2b_sandbox_latency",
+    description: "An E2B sandbox request or full runner hydration completed or failed.",
+    safeProperties: [
+      "user_id",
+      "workspace_id",
+      "agent_id",
+      "session_id",
+      "phase",
+      "operation",
+      "outcome",
+      "latency_ms",
+      "existing_sandbox",
+      "template",
+      "sandbox_id",
+      "requested_sandbox_id",
+      "error_name",
     ],
   },
   credit_top_up_started: {

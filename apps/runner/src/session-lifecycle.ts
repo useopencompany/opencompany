@@ -3,6 +3,7 @@ import {
   normalizeAgentConfig,
   serializeAgentFile,
 } from "@opencompany/agent-runtime";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { DEFAULT_SANDBOX_RESOURCES, type SandboxResourceConfig } from "@opencompany/billing";
 import {
   agentSessionAfterSessionRuns,
@@ -41,15 +42,26 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
   const agentConfig = normalizeAgentConfig(row.agent.config);
+  const template = resolveSandboxTemplate(agentConfig, env);
+  const existingSandbox = Boolean(row.session.e2bSandboxId);
+  const readyStartedAt = performance.now();
   try {
     sandbox = await createOrConnectSandbox({
       sandboxId: row.session.e2bSandboxId,
-      template: resolveSandboxTemplate(agentConfig, env),
+      template,
       envs: {
         E2B_API_KEY: env.e2bApiKey,
         VERCEL_AI_GATEWAY_API_KEY: env.vercelAiGatewayApiKey,
       },
       idleTimeoutMs: env.e2bSandboxIdleTimeoutMs,
+      onLatency: (observation) =>
+        captureE2BSandboxLatency({
+          row,
+          template,
+          existingSandbox,
+          phase: "e2b_request",
+          ...observation,
+        }),
     });
     await prepareWorkspace({
       sandbox,
@@ -85,8 +97,32 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       workspaceId: row.workspace.id,
       config: agentConfig,
     });
+    captureE2BSandboxLatency({
+      row,
+      template,
+      existingSandbox,
+      phase: "sandbox_ready",
+      operation: "hydrate",
+      outcome: "success",
+      latencyMs: elapsedMs(readyStartedAt),
+      sandboxId: sandbox.sandboxId,
+      ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
+    });
     return sandbox;
   } catch (error) {
+    const name = errorName(error);
+    captureE2BSandboxLatency({
+      row,
+      template,
+      existingSandbox,
+      phase: "sandbox_ready",
+      operation: "hydrate",
+      outcome: "error",
+      latencyMs: elapsedMs(readyStartedAt),
+      ...(sandbox ? { sandboxId: sandbox.sandboxId } : {}),
+      ...(row.session.e2bSandboxId ? { requestedSandboxId: row.session.e2bSandboxId } : {}),
+      ...(name ? { errorName: name } : {}),
+    });
     captureException(error, {
       event: "opencompany.runner_sandbox_failed",
       workspace_id: row.workspace.id,
@@ -102,6 +138,47 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     }
     throw error;
   }
+}
+
+function captureE2BSandboxLatency(input: {
+  row: LoadedSession;
+  phase: "e2b_request" | "sandbox_ready";
+  operation: "create" | "connect" | "hydrate";
+  outcome: "success" | "not_found" | "error";
+  latencyMs: number;
+  template: string | null | undefined;
+  existingSandbox: boolean;
+  sandboxId?: string;
+  requestedSandboxId?: string;
+  errorName?: string;
+}) {
+  try {
+    void captureServerEvent("e2b_sandbox_latency", input.row.session.userId, {
+      user_id: input.row.session.userId,
+      workspace_id: input.row.workspace.id,
+      agent_id: input.row.agent.id,
+      session_id: input.row.session.id,
+      phase: input.phase,
+      operation: input.operation,
+      outcome: input.outcome,
+      latency_ms: input.latencyMs,
+      existing_sandbox: input.existingSandbox,
+      template: input.template ?? "default",
+      ...(input.sandboxId ? { sandbox_id: input.sandboxId } : {}),
+      ...(input.requestedSandboxId ? { requested_sandbox_id: input.requestedSandboxId } : {}),
+      ...(input.errorName ? { error_name: input.errorName } : {}),
+    }).catch(() => {});
+  } catch {
+    // Analytics must not affect sandbox provisioning.
+  }
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
+}
+
+function errorName(error: unknown) {
+  return error instanceof Error ? error.name : undefined;
 }
 
 // The richer sandbox template (with git, gh, and the coding-agent CLIs installed)
