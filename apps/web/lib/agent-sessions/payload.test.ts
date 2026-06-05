@@ -167,6 +167,32 @@ describe("session payload cache helpers", () => {
     expect(parsed.detail.related.children[0]?.parentToolCallId).toBe("call_delegate");
   });
 
+  it("round-trips the latest model-request debug snapshot", () => {
+    const sessionDetail: AgentSessionDetailPayload = {
+      ...detail(),
+      latestModelRequest: {
+        systemPrompt: "You are Leo.",
+        toolsSentToModel: [{ name: "read_file", description: "Read a file", parameters: {} }],
+        deferredToolsNotSent: [{ name: "exa_search", description: "Web search" }],
+      },
+    };
+
+    const parsed = parseAgentSessionDetailResponse({ detail: sessionDetail });
+
+    expect(parsed.detail.latestModelRequest).toEqual(sessionDetail.latestModelRequest);
+  });
+
+  it("drops a non-object model-request snapshot and omits the key when absent", () => {
+    expect(parseAgentSessionDetailResponse({ detail: detail() }).detail).not.toHaveProperty(
+      "latestModelRequest",
+    );
+    expect(
+      parseAgentSessionDetailResponse({
+        detail: { ...detail(), latestModelRequest: "nope" },
+      }).detail,
+    ).not.toHaveProperty("latestModelRequest");
+  });
+
   it("rejects malformed related sessions", () => {
     expect(() =>
       parseAgentSessionDetailResponse({

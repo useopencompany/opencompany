@@ -4,6 +4,7 @@ import {
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
   buildRuntimeToolCallsForMessage,
+  buildSessionDebugTurns,
   computeThinkingDurationSeconds,
   describeToolCall,
   emptyCostSummary,
@@ -13,6 +14,7 @@ import {
   mergeEvents,
   mergeMessages,
   type RuntimeEvent,
+  resolveToolDisplay,
   type SessionMessage,
   type SessionRuntimeState,
 } from "./runtime-events";
@@ -564,6 +566,65 @@ describe("applyRuntimeEventToState", () => {
   });
 });
 
+describe("buildSessionDebugTurns", () => {
+  it("collapses messages into one consolidated entry per turn, carrying modelMessage", () => {
+    const messages: SessionMessage[] = [
+      { id: "msg_user", role: "user", content: "Hi", status: "completed" },
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "Hello",
+        status: "completed",
+        modelMessage: { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+      },
+      {
+        id: "msg_tool",
+        role: "tool",
+        content: "ok",
+        status: "completed",
+        toolName: "read_file",
+        toolCallId: "call_1",
+        modelMessage: { role: "tool", content: [{ type: "tool-result", toolCallId: "call_1" }] },
+      },
+    ];
+
+    expect(buildSessionDebugTurns(messages)).toEqual([
+      { id: "msg_user", role: "user", status: "completed", modelMessage: null, content: "Hi" },
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        status: "completed",
+        modelMessage: { role: "assistant", content: [{ type: "text", text: "Hello" }] },
+        content: "Hello",
+      },
+      {
+        id: "msg_tool",
+        role: "tool",
+        status: "completed",
+        toolName: "read_file",
+        toolCallId: "call_1",
+        modelMessage: { role: "tool", content: [{ type: "tool-result", toolCallId: "call_1" }] },
+        content: "ok",
+      },
+    ]);
+  });
+
+  it("defaults modelMessage to null for a still-streaming turn", () => {
+    const turns = buildSessionDebugTurns([
+      { id: "msg_assistant", role: "assistant", content: "partial", status: "running" },
+    ]);
+    expect(turns).toEqual([
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        status: "running",
+        modelMessage: null,
+        content: "partial",
+      },
+    ]);
+  });
+});
+
 describe("isInspectableRuntimeEvent", () => {
   it("hides streamed message and reasoning deltas from inspector activity", () => {
     expect(
@@ -901,6 +962,44 @@ describe("describeToolCall", () => {
   it("returns undefined for unknown tools so the raw name is used", () => {
     expect(describeToolCall("some_custom_tool", { foo: "bar" })).toBeUndefined();
   });
+
+  it("derives a one-liner for the deferred search tools", () => {
+    expect(describeToolCall("youtube_search", { query: "transformers" })).toBe(
+      "Searching YouTube for “transformers”",
+    );
+    expect(describeToolCall("x_search_posts", { query: "AI agents" })).toBe(
+      "Searching X for “AI agents”",
+    );
+  });
+});
+
+describe("resolveToolDisplay", () => {
+  it("unwraps the use_tool dispatcher to its inner tool name, args, and label", () => {
+    const display = resolveToolDisplay("use_tool", {
+      tool: "exa_search",
+      arguments: { query: "competitors in fintech" },
+    });
+    expect(display.name).toBe("exa_search");
+    expect(display.input).toEqual({ query: "competitors in fintech" });
+    expect(display.label).toBe("Searching the web for “competitors in fintech”");
+  });
+
+  it("falls back to the registry title when no dynamic one-liner exists", () => {
+    // tiktok_get_video has no dynamic phrasing, so the static title is used instead of the raw name.
+    const display = resolveToolDisplay("use_tool", {
+      tool: "tiktok_get_video",
+      arguments: { id: "123" },
+    });
+    expect(display.name).toBe("tiktok_get_video");
+    expect(display.label).toBe("TikTok video");
+  });
+
+  it("passes non-wrapped calls through and still resolves a static title", () => {
+    const display = resolveToolDisplay("list_files", { path: "work" });
+    expect(display.name).toBe("list_files");
+    // list_files has a dynamic one-liner that wins over the static title.
+    expect(display.label).toBe("Listing work");
+  });
 });
 
 describe("buildAssistantTurnParts", () => {
@@ -955,6 +1054,43 @@ describe("buildAssistantTurnParts", () => {
     ]);
   });
 
+  it("preserves failed tool-call status when the failed event has an output preview", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "read_file",
+              input: { path: "../secret.txt" },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "tool.failed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "read_file",
+          outputPreview:
+            '{\n  "ok": false,\n  "error": {\n    "code": "invalid_sandbox_path"\n  }\n}',
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.status : null).toBe("failed");
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.outputPreview : "").toContain(
+      "invalid_sandbox_path",
+    );
+  });
+
   it("renders a tool-call card while a running turn is paused awaiting approval", () => {
     const parts = buildAssistantTurnParts(
       { id: "msg_assistant", role: "assistant", content: "", status: "running" },
@@ -983,6 +1119,38 @@ describe("buildAssistantTurnParts", () => {
       permissionGroup: "post",
       requestedAt: "2026-06-02T08:51:35.162Z",
     });
+  });
+
+  it("unwraps a use_tool envelope to its inner name + label on the approval card", () => {
+    const parts = buildAssistantTurnParts(
+      { id: "msg_assistant", role: "assistant", content: "", status: "running" },
+      [
+        event(1, "tool.approval_required", {
+          messageId: "msg_assistant",
+          toolCallId: "call_deferred",
+          // The model called the deferred tool through the generic use_tool dispatcher, so the
+          // event's top-level name is the envelope, not the action being approved.
+          name: "use_tool",
+          input: { tool: "linear__create_issue", arguments: { title: "Bug" } },
+          providerKey: "linear",
+          permissionGroup: "post",
+          inputPreview: '{\n  "tool": "linear__create_issue"\n}',
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    // Resolves to the inner tool — never the generic "Running a tool" envelope title.
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.name : undefined).toBe(
+      "linear__create_issue",
+    );
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.label : undefined).not.toBe(
+      "Running a tool",
+    );
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.approval?.status : undefined).toBe(
+      "required",
+    );
   });
 
   it("preserves pending approval state when persisted model parts include the tool call", () => {

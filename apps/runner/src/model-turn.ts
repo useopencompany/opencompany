@@ -1,4 +1,11 @@
-import { resolveAgentRuntimeConfig, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
+import {
+  BUILTIN_USE_TOOL_NAME,
+  partitionRuntimeToolNames,
+  RUNTIME_TOOL_DEFINITION_BY_NAME,
+  type RuntimeToolName,
+  resolveAgentRuntimeConfig,
+  type WorkspaceToolPolicyMap,
+} from "@opencompany/agent-runtime";
 import { timeAsync } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import type { ModelMessage, StopCondition, ToolSet } from "ai";
@@ -65,10 +72,58 @@ export async function streamAssistantResponse(input: {
       suspendable: input.suspendable,
     }),
   );
+  // Register full schemas only for the directly-callable tools (core file/shell/ask plus the
+  // discovery + dispatcher tools). Deferred capability tools are reached through the single
+  // `use_tool` dispatcher after the model lists them with find_tools — their schemas never enter
+  // the cached tool set. MCP servers already expose their own lazy search/use meta-tools.
+  const { direct, deferred } = partitionRuntimeToolNames(input.runtime.tools);
+  const dispatcher = input.tools[BUILTIN_USE_TOOL_NAME];
   const selectedTools = {
-    ...pickRuntimeTools(input.tools, input.runtime.tools),
+    ...pickRuntimeTools(input.tools, direct),
+    ...(deferred.length > 0 && dispatcher ? { [BUILTIN_USE_TOOL_NAME]: dispatcher } : {}),
     ...mcpToolSet.tools,
   };
+  // Persist a debug-only snapshot of this turn's model inputs (system prompt + tool catalog)
+  // so the session's "Copy Debug JSON" export can include them — they are otherwise ephemeral,
+  // built here and passed straight to the model. `toolsSentToModel` is exactly the set registered
+  // in the model call (`selectedTools`: direct core tools + the `use_tool` dispatcher + MCP tools),
+  // so the snapshot truthfully mirrors what the model received this turn. Deferred capability tools
+  // are NOT in the call — they are reachable only via `find_tools` + `use_tool` — so they are
+  // listed separately under `deferredToolsNotSent` for debugging, never folded into the sent set.
+  // Schemas come from the static definitions, so MCP tools appear by name only. Deferred tools were
+  // NOT sent, so they are recorded as name + description only — including their full schemas here
+  // would re-serialize the whole deferred catalog into every turn's snapshot for no debugging gain.
+  // Best-effort: a failed write must never abort the turn, so this is deliberately NOT wrapped in
+  // `requireLeaseWrite`.
+  try {
+    const toSentToolEntry = (name: string) => {
+      const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
+      return {
+        name,
+        description: definition?.description ?? "",
+        parameters: definition?.parameters ?? null,
+      };
+    };
+    const toDeferredToolEntry = (name: string) => ({
+      name,
+      description: RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName)?.description ?? "",
+    });
+    await appendRuntimeEventForLease({
+      sessionId: input.ctx.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.ctx.leaseId,
+      leaseOwner: input.ctx.leaseOwner,
+      type: "debug.model_request",
+      payload: {
+        messageId: input.assistantMessageId,
+        systemPrompt: input.system,
+        toolsSentToModel: Object.keys(selectedTools).map(toSentToolEntry),
+        deferredToolsNotSent: deferred.map(toDeferredToolEntry),
+      },
+    });
+  } catch {
+    // Debug-only event — swallow write failures (e.g. lost lease) so debugging never breaks a run.
+  }
   // The model call is traced by Braintrust's `wrapAISDK` (via `getBraintrustAISDK`): it opens the
   // `streamText` / `doStream` LLM spans, capturing input, output, per-step tool calls, usage, and
   // derived cost, and nests them under the current per-turn root span. We keep only the Better Stack

@@ -7,7 +7,7 @@ import {
   agents,
   sessionStars,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
   type SidebarSessionPayload,
@@ -123,83 +123,92 @@ export async function loadAgentSessionDetailForWorkspace(
 
   if (!session) return null;
 
-  const [parentRows, children, messages, events, usageRows, rollupRows] = await Promise.all([
-    session.parentSessionId
-      ? db
-          .select({
-            id: agentSessions.id,
-            title: agentSessions.title,
-            status: agentSessions.status,
-            agentName: agents.name,
-            agentPath: agents.path,
-            parentMessageId: agentSessions.parentMessageId,
-            parentToolCallId: agentSessions.parentToolCallId,
-            createdAt: agentSessions.createdAt,
-            updatedAt: agentSessions.updatedAt,
-          })
-          .from(agentSessions)
-          .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-          .where(
-            and(
-              eq(agentSessions.id, session.parentSessionId),
-              eq(agentSessions.workspaceId, workspaceId),
-              eq(agentSessions.userId, userId),
-              isNull(agentSessions.archivedAt),
-            ),
-          )
-          .limit(1)
-      : Promise.resolve([]),
-    db
-      .select({
-        id: agentSessions.id,
-        title: agentSessions.title,
-        status: agentSessions.status,
-        agentName: agents.name,
-        agentPath: agents.path,
-        parentMessageId: agentSessions.parentMessageId,
-        parentToolCallId: agentSessions.parentToolCallId,
-        createdAt: agentSessions.createdAt,
-        updatedAt: agentSessions.updatedAt,
-      })
-      .from(agentSessions)
-      .innerJoin(agents, eq(agentSessions.agentId, agents.id))
-      .where(
-        and(
-          eq(agentSessions.parentSessionId, sessionId),
-          eq(agentSessions.workspaceId, workspaceId),
-          eq(agentSessions.userId, userId),
-          eq(agentSessions.source, "agent"),
-          isNull(agentSessions.archivedAt),
-        ),
-      )
-      .orderBy(desc(agentSessions.updatedAt))
-      .limit(25),
-    db
-      .select()
-      .from(agentSessionMessages)
-      .where(eq(agentSessionMessages.sessionId, sessionId))
-      .orderBy(asc(agentSessionMessages.createdAt)),
-    db
-      .select()
-      .from(agentSessionEvents)
-      .where(eq(agentSessionEvents.sessionId, sessionId))
-      .orderBy(asc(agentSessionEvents.id))
-      .limit(300),
-    db
-      .select({
-        messageId: agentSessionUsage.messageId,
-        inputTokens: agentSessionUsage.inputTokens,
-        inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
-        inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
-        inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
-        outputTokens: agentSessionUsage.outputTokens,
-        outputTextTokens: agentSessionUsage.outputTextTokens,
-        outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
-        totalTokens: agentSessionUsage.totalTokens,
-      })
-      .from(agentSessionUsage)
-      .where(eq(agentSessionUsage.sessionId, sessionId)),
-    db.execute(sql`
+  const [parentRows, children, messages, events, usageRows, rollupRows, latestModelRequestRows] =
+    await Promise.all([
+      session.parentSessionId
+        ? db
+            .select({
+              id: agentSessions.id,
+              title: agentSessions.title,
+              status: agentSessions.status,
+              agentName: agents.name,
+              agentPath: agents.path,
+              parentMessageId: agentSessions.parentMessageId,
+              parentToolCallId: agentSessions.parentToolCallId,
+              createdAt: agentSessions.createdAt,
+              updatedAt: agentSessions.updatedAt,
+            })
+            .from(agentSessions)
+            .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+            .where(
+              and(
+                eq(agentSessions.id, session.parentSessionId),
+                eq(agentSessions.workspaceId, workspaceId),
+                eq(agentSessions.userId, userId),
+                isNull(agentSessions.archivedAt),
+              ),
+            )
+            .limit(1)
+        : Promise.resolve([]),
+      db
+        .select({
+          id: agentSessions.id,
+          title: agentSessions.title,
+          status: agentSessions.status,
+          agentName: agents.name,
+          agentPath: agents.path,
+          parentMessageId: agentSessions.parentMessageId,
+          parentToolCallId: agentSessions.parentToolCallId,
+          createdAt: agentSessions.createdAt,
+          updatedAt: agentSessions.updatedAt,
+        })
+        .from(agentSessions)
+        .innerJoin(agents, eq(agentSessions.agentId, agents.id))
+        .where(
+          and(
+            eq(agentSessions.parentSessionId, sessionId),
+            eq(agentSessions.workspaceId, workspaceId),
+            eq(agentSessions.userId, userId),
+            eq(agentSessions.source, "agent"),
+            isNull(agentSessions.archivedAt),
+          ),
+        )
+        .orderBy(desc(agentSessions.updatedAt))
+        .limit(25),
+      db
+        .select()
+        .from(agentSessionMessages)
+        .where(eq(agentSessionMessages.sessionId, sessionId))
+        .orderBy(asc(agentSessionMessages.createdAt)),
+      db
+        .select()
+        .from(agentSessionEvents)
+        // Exclude the per-turn `debug.model_request` snapshots from the windowed event list: they are
+        // large, hidden from the inspector, and would otherwise consume the 300-row budget (and ship
+        // to the browser repeatedly). The latest one is fetched separately below.
+        .where(
+          and(
+            eq(agentSessionEvents.sessionId, sessionId),
+            ne(agentSessionEvents.type, "debug.model_request"),
+          ),
+        )
+        .orderBy(asc(agentSessionEvents.id))
+        .limit(300),
+      db
+        .select({
+          messageId: agentSessionUsage.messageId,
+          inputTokens: agentSessionUsage.inputTokens,
+          inputNoCacheTokens: agentSessionUsage.inputNoCacheTokens,
+          inputCacheReadTokens: agentSessionUsage.inputCacheReadTokens,
+          inputCacheWriteTokens: agentSessionUsage.inputCacheWriteTokens,
+          outputTokens: agentSessionUsage.outputTokens,
+          outputTextTokens: agentSessionUsage.outputTextTokens,
+          outputReasoningTokens: agentSessionUsage.outputReasoningTokens,
+          totalTokens: agentSessionUsage.totalTokens,
+        })
+        .from(agentSessionUsage)
+        .where(eq(agentSessionUsage.sessionId, sessionId)),
+      db.execute(sql`
       WITH RECURSIVE session_tree(id, path) AS (
         SELECT id, ARRAY[id]::text[]
         FROM agent_sessions
@@ -289,7 +298,21 @@ export async function loadAgentSessionDetailForWorkspace(
       CROSS JOIN cost_totals
       CROSS JOIN tool_totals
     `),
-  ]);
+      // The single most-recent model-request debug snapshot. Surfaced as a top-level detail field
+      // (not via the windowed `events` above) so the "Copy Debug JSON" export still finds it on long
+      // sessions whose latest turn falls outside the 300-event window.
+      db
+        .select({ payload: agentSessionEvents.payload })
+        .from(agentSessionEvents)
+        .where(
+          and(
+            eq(agentSessionEvents.sessionId, sessionId),
+            eq(agentSessionEvents.type, "debug.model_request"),
+          ),
+        )
+        .orderBy(desc(agentSessionEvents.id))
+        .limit(1),
+    ]);
   const rollup = parseSessionTreeRollup(rowsFromExecute<Record<string, unknown>>(rollupRows)[0]);
   const usage = rollup.usage;
   const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
@@ -335,6 +358,7 @@ export async function loadAgentSessionDetailForWorkspace(
     usage,
     toolUsage,
     cost,
+    latestModelRequest: latestModelRequestRows[0]?.payload ?? null,
   });
 }
 

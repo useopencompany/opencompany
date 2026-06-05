@@ -84,12 +84,19 @@ const streamMock = vi.hoisted(() => ({
     currentStatus: "",
     lastError: null,
   } as unknown as SessionRuntimeState,
+  // Last `options` argument seen by useSessionStream — lets a test assert which
+  // seedFromEnd value SessionView derived from the snapshot status (regression
+  // surface for the #306 startup-race fix).
+  lastOptions: undefined as { seedFromEnd?: boolean } | undefined,
 }));
 vi.mock("@/components/useSessionStream", () => ({
-  useSessionStream: () => ({
-    state: streamMock.state,
-    status: streamMock.status,
-  }),
+  useSessionStream: (_sessionId: string, options?: { seedFromEnd?: boolean }) => {
+    streamMock.lastOptions = options;
+    return {
+      state: streamMock.state,
+      status: streamMock.status,
+    };
+  },
 }));
 
 const actionMocks = vi.hoisted(() => ({
@@ -123,6 +130,7 @@ afterEach(() => {
   actionMocks.submitAgentSessionMessage.mockReset();
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
+  streamMock.lastOptions = undefined;
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -540,6 +548,21 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("shows the session error detail when a stopped assistant turn failed in the runner", () => {
+    const message = makeMessage({ status: "running" });
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={[]}
+        sessionCanGenerate={false}
+        stoppedError="Missing required parameter: 'input[5].arguments'."
+      />,
+    );
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+    expect(screen.getByText(/Missing required parameter/)).toBeInTheDocument();
+  });
+
   it("shows AssistantStoppedNotice when message is running but session cannot generate (has parts)", () => {
     const message = makeMessage({ status: "running" });
     const parts = [makeToolCallPart("running")];
@@ -765,6 +788,150 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
 
     // Rendered in both the inline transcript banner and the inspector runtime panel.
     expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
+  });
+
+  it("renders recoverable failed tools without a session-level stopped notice", async () => {
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_tool_failure", status: "completed", lastError: null }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Read a file",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        {
+          id: "msg_assistant",
+          role: "assistant",
+          content: "",
+          status: "completed",
+          responseToMessageId: "msg_user",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:00:02.000Z",
+          modelMessage: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call_read",
+                toolName: "read_file",
+                input: { path: "../secret.txt" },
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "tool.failed",
+          messageId: "msg_assistant",
+          createdAt: "2026-06-04T10:00:02.000Z",
+          payload: {
+            messageId: "msg_assistant",
+            toolCallId: "call_read",
+            name: "read_file",
+            error: {
+              message: "Path must be inside work/ or brain/ for this session.",
+              code: "invalid_sandbox_path",
+              recoverable: true,
+            },
+            outputPreview:
+              '{\n  "ok": false,\n  "error": {\n    "code": "invalid_sandbox_path"\n  }\n}',
+          },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /1 step/ }));
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Reading \.\./ }));
+    expect(screen.getByText(/invalid_sandbox_path/)).toBeInTheDocument();
+  });
+});
+
+// Regression for #306. On the first page load of a newly-started session, the
+// snapshot status is a startup value (`created`/`provisioning`/`ready`) while the
+// runner is starting up. The pre-fix predicate `!ACTIVE_STREAMING_STATUSES.has(...)`
+// returned `true` for those, so the stream tailed from HEAD — and if the runner had
+// already emitted `message.created(assistant)` by then, the overlay missed it and
+// the assistant message could never reach `completed`. When status later flipped to
+// `awaiting_approval`, the UI rendered "Stopped before finishing" until refresh.
+describe("SessionViewContent — #306: startup-status snapshot must not seedFromEnd", () => {
+  it.each([
+    "created",
+    "provisioning",
+    "ready",
+    "running",
+    "aborting",
+  ])("passes seedFromEnd=false to useSessionStream for snapshot status %s", (status) => {
+    const detail = makeDetail({ session: makeSession({ id: "sess_startup", status }) });
+    renderSessionViewContent(detail);
+    expect(streamMock.lastOptions?.seedFromEnd).toBe(false);
+  });
+
+  it.each([
+    "completed",
+    "failed",
+    "aborted",
+    "archived",
+    "awaiting_approval",
+    "awaiting_input",
+  ])("passes seedFromEnd=true to useSessionStream for settled/paused status %s", (status) => {
+    const detail = makeDetail({ session: makeSession({ id: "sess_settled", status }) });
+    renderSessionViewContent(detail);
+    expect(streamMock.lastOptions?.seedFromEnd).toBe(true);
+  });
+
+  it("does not flash 'Stopped before finishing' when the overlay carries the full assistant turn", () => {
+    // Post-fix runtime: snapshot is `ready` (the page loaded mid-startup) and only
+    // has the user message, but the stream replayed from "-1" so the overlay holds
+    // the complete assistant turn (created → deltas → completed) plus the
+    // `awaiting_approval` status flip. The merge must yield a completed assistant
+    // message and suppress the stopped-after-user notice.
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_new", status: "ready" }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    streamMock.state = emptyStreamState({
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        makeRunningAssistantMessage({
+          id: "msg_assistant",
+          content: "Here's what I'll do.",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:00:05.000Z",
+        }),
+      ],
+      currentStatus: "awaiting_approval",
+      statusObserved: true,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    expect(screen.getByText("Here's what I'll do.")).toBeInTheDocument();
   });
 });
 
