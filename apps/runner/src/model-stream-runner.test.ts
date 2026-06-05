@@ -2,8 +2,8 @@ import { modelMessageSchema, type TextStreamPart, type ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
-import { collectAssistantStream } from "./model-stream-runner";
 import { buildAssistantModelMessage } from "./model-messages";
+import { collectAssistantStream } from "./model-stream-runner";
 import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
 import {
   createRunControlGate,
