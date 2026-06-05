@@ -379,6 +379,28 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
+  // Full-detail debug snapshot for the "Copy session JSON" affordance. Assembled lazily
+  // (only when the button is clicked) so we never stringify the whole transcript on
+  // every render. Pulls from the merged `runtime` so it includes live stream state, and
+  // carries the raw `modelMessage` per turn plus every runtime event payload verbatim —
+  // the highest-fidelity view the client has. NOTE: the assembled system prompt and tool
+  // definitions live only in the runner at request time (passed straight to the model and
+  // never persisted), so they are not present here; `systemPrompt`/`tools` are recorded as
+  // null to make that gap explicit rather than silently omitting them.
+  const buildSessionDebugSnapshot = () => ({
+    exportedAt: new Date().toISOString(),
+    session: detail.session,
+    related: detail.related,
+    status: runtime.currentStatus,
+    lastError: runtime.lastError,
+    systemPrompt: null,
+    tools: null,
+    usage: runtime.usage,
+    toolUsage: runtime.toolUsage,
+    cost: runtime.cost,
+    messages: runtime.messages,
+    events: runtime.events,
+  });
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
   // drives the transcript, but usage/cost come from the detail query).
   const lastSettledStatusRef = useRef(runtime.currentStatus);
@@ -1220,6 +1242,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       >
         <div className="mb-5 flex items-center justify-between pr-9 lg:mb-7">
           <div className="text-[12px] font-medium text-ink">Runtime</div>
+          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
         </div>
         <SessionInspector
           session={session}
@@ -1390,6 +1413,51 @@ function CopyMessageButton({ text }: { text: string }) {
       ) : (
         <Copy size={10} strokeWidth={1.75} />
       )}
+    </button>
+  );
+}
+
+// One-click "copy the whole session as JSON" for debugging. Builds the snapshot lazily on
+// click (large transcripts shouldn't be stringified on every render) and shows a brief
+// "Copied" confirmation, mirroring CopyMessageButton.
+function CopySessionJsonButton({ build }: { build: () => unknown }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { showError } = useToast();
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur();
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(build(), null, 2));
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showError("Couldn't copy the session JSON to the clipboard.");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Copied session JSON" : "Copy full session JSON"}
+      title={copied ? "Copied" : "Copy full session JSON for debugging"}
+      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      {copied ? (
+        <Check size={11} strokeWidth={2} className="text-success" />
+      ) : (
+        <Copy size={11} strokeWidth={1.75} />
+      )}
+      <span>{copied ? "Copied" : "Copy JSON"}</span>
     </button>
   );
 }

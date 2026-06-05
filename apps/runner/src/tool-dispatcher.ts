@@ -1,8 +1,11 @@
 import {
   AGENT_SELF_EDIT_SKILL_ID,
   type AgentConfig,
+  BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
+  isDeferrableRuntimeTool,
   newAgentSessionMessageId,
+  RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
@@ -211,7 +214,217 @@ export function createToolSet(input: {
     }) as ToolSet[string];
   }
 
+  // The generic built-in dispatcher. Deferred capability tools are not registered with their own
+  // schemas; the model lists them with tool_search and runs one through this single tool. Mirrors
+  // the per-server MCP `{server}__use_tool` meta-tool: same approval gate, same persistence tail.
+  tools[BUILTIN_USE_TOOL_NAME] = tool({
+    description:
+      "Run a tool that is not preloaded. Set `tool` to a name returned by tool_search and " +
+      "`arguments` to that tool's input. Each underlying tool keeps its own permission, so a write " +
+      "or destructive tool may require approval.",
+    inputSchema: jsonSchema(BUILTIN_USE_TOOL_INPUT_SCHEMA as never),
+    onInputAvailable: async ({ input: toolInput, toolCallId }) => {
+      await input.checkAbort();
+      input.toolStartCoordinator.record({
+        toolCallId,
+        name: BUILTIN_USE_TOOL_NAME,
+        input: toolInput,
+      });
+    },
+    execute: async (toolInput, options) => {
+      const verdict = await input.toolStartCoordinator.waitForStarted(
+        options.toolCallId,
+        input.signal,
+      );
+      if (verdict.decision === "suspend") {
+        return SUSPENDED_TOOL_OUTPUT;
+      }
+      if (verdict.decision === "deny") {
+        return persistDeniedToolResult({
+          sessionId: input.sessionId,
+          assistantMessageId: input.assistantMessageId,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          internalMessages: input.internalMessages,
+          toolCallId: options.toolCallId,
+          toolName: BUILTIN_USE_TOOL_NAME,
+          verdict,
+        });
+      }
+      return dispatchBuiltinUseTool({
+        sessionId: input.sessionId,
+        assistantMessageId: input.assistantMessageId,
+        runLeaseId: input.runLeaseId,
+        runLeaseOwner: input.runLeaseOwner,
+        ...(input.internalMessages ? { internalMessages: true } : {}),
+        workspaceId: input.workspaceId,
+        agentConfig: input.agentConfig,
+        toolCallId: options.toolCallId,
+        args: toolInput,
+        getSandbox: input.getSandbox,
+        workdir: input.workdir,
+        env: input.env,
+        enabledTools: input.enabledTools,
+        repository: input.repository,
+        signal: input.signal,
+        checkAbort: input.checkAbort,
+        observabilityContext: input.observabilityContext,
+        toolBudget: input.toolBudget,
+        delegateToAgent: input.delegateToAgent,
+      });
+    },
+  }) as ToolSet[string];
+
   return tools;
+}
+
+const BUILTIN_USE_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    tool: {
+      type: "string",
+      description: "Exact tool name returned by tool_search.",
+    },
+    arguments: {
+      type: "object",
+      description: "Arguments object for the chosen tool, matching its input schema.",
+      additionalProperties: true,
+    },
+  },
+  required: ["tool"],
+  additionalProperties: false,
+} as const;
+
+function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } {
+  if (isRecord(args)) {
+    const tool = typeof args.tool === "string" ? args.tool.trim() : "";
+    return { tool, arguments: args.arguments ?? {} };
+  }
+  return { tool: "", arguments: {} };
+}
+
+// Resolve the named deferred tool and run it through the existing executeRuntimeTool tail, but
+// persist the result under `use_tool` so it pairs with the model's dispatcher call. An unknown or
+// non-deferred tool name is persisted as a recoverable error pointing back to tool_search.
+export async function dispatchBuiltinUseTool(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean;
+  workspaceId: string;
+  agentConfig: AgentConfig;
+  toolCallId: string;
+  args: unknown;
+  getSandbox: () => Promise<SandboxHandle>;
+  workdir: string;
+  env: RunnerEnv;
+  enabledTools: RuntimeToolName[];
+  repository?: WorkspaceRepository | null | undefined;
+  signal: AbortSignal;
+  checkAbort: RunControlCheck;
+  observabilityContext?: ToolObservabilityContext | undefined;
+  toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
+}) {
+  const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
+  const definition = rawName
+    ? RUNTIME_TOOL_DEFINITION_BY_NAME.get(rawName as RuntimeToolName)
+    : undefined;
+  if (
+    !definition ||
+    !isDeferrableRuntimeTool(rawName) ||
+    !input.enabledTools.includes(rawName as RuntimeToolName)
+  ) {
+    return persistBuiltinUseToolError({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
+      ...(input.internalMessages ? { internalMessages: true } : {}),
+      toolCallId: input.toolCallId,
+      message: rawName
+        ? `Unknown or unavailable tool "${rawName}". Call tool_search to list available tools, then pass an exact name as "tool".`
+        : 'Missing "tool" argument. Call tool_search to list available tools, then pass one as "tool".',
+    });
+  }
+  return executeRuntimeTool({
+    sessionId: input.sessionId,
+    assistantMessageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    runLeaseOwner: input.runLeaseOwner,
+    ...(input.internalMessages ? { internalMessages: true } : {}),
+    workspaceId: input.workspaceId,
+    agentConfig: input.agentConfig,
+    toolCallId: input.toolCallId,
+    definition,
+    args: rawArgs,
+    persistAsToolName: BUILTIN_USE_TOOL_NAME,
+    getSandbox: input.getSandbox,
+    workdir: input.workdir,
+    env: input.env,
+    enabledTools: input.enabledTools,
+    repository: input.repository,
+    signal: input.signal,
+    checkAbort: input.checkAbort,
+    observabilityContext: input.observabilityContext,
+    toolBudget: input.toolBudget,
+    delegateToAgent: input.delegateToAgent,
+  });
+}
+
+// Persist a recoverable error tool-result for a `use_tool` call that named no/unknown tool. Mirrors
+// the failure tail of executeRuntimeTool so the model recovers turn-by-turn.
+async function persistBuiltinUseToolError(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean;
+  toolCallId: string;
+  message: string;
+}) {
+  const output: FailedToolOutput = {
+    ok: false,
+    error: { message: input.message, code: "unknown_runtime_tool", recoverable: true },
+  };
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: BUILTIN_USE_TOOL_NAME,
+          output,
+        }),
+      ),
+      toolName: BUILTIN_USE_TOOL_NAME,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: BUILTIN_USE_TOOL_NAME,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+      },
+    }),
+  );
+  return output;
 }
 
 export function pickRuntimeTools(tools: ToolSet, names: string[]) {
@@ -264,6 +477,11 @@ export async function executeRuntimeTool(input: {
   toolCallId: string;
   definition: RuntimeToolDefinition;
   args: unknown;
+  // When set, the persisted tool-result message and the tool.completed/failed event use this name
+  // instead of the runtime tool's own name. Used by the built-in `use_tool` dispatcher so the
+  // result pairs with the `use_tool` tool-call the model made (observability still records the real
+  // tool via captureException + usage attribution).
+  persistAsToolName?: string;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -275,6 +493,7 @@ export async function executeRuntimeTool(input: {
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
 }) {
+  const persistedToolName = input.persistAsToolName ?? input.definition.name;
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
   let usage: HostedToolUsage | undefined;
@@ -541,11 +760,11 @@ export async function executeRuntimeTool(input: {
       modelMessage: toPersistedModelMessage(
         buildToolModelMessage({
           toolCallId: input.toolCallId,
-          toolName: input.definition.name,
+          toolName: persistedToolName,
           output,
         }),
       ),
-      toolName: input.definition.name,
+      toolName: persistedToolName,
       toolCallId: input.toolCallId,
       internal: input.internalMessages ?? false,
     }),
@@ -561,7 +780,7 @@ export async function executeRuntimeTool(input: {
         payload: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
-          name: input.definition.name,
+          name: persistedToolName,
           error: failedOutput.error,
           outputPreview: formatRuntimePreview(output),
         },
@@ -578,7 +797,7 @@ export async function executeRuntimeTool(input: {
         payload: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
-          name: input.definition.name,
+          name: persistedToolName,
           outputPreview: formatRuntimePreview(output),
         },
       }),

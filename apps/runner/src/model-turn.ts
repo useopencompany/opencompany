@@ -1,4 +1,9 @@
-import { resolveAgentRuntimeConfig, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
+import {
+  BUILTIN_USE_TOOL_NAME,
+  partitionRuntimeToolNames,
+  resolveAgentRuntimeConfig,
+  type WorkspaceToolPolicyMap,
+} from "@opencompany/agent-runtime";
 import { timeAsync } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import type { ModelMessage, StopCondition, ToolSet } from "ai";
@@ -65,8 +70,15 @@ export async function streamAssistantResponse(input: {
       suspendable: input.suspendable,
     }),
   );
+  // Register full schemas only for the directly-callable tools (core file/shell/ask plus the
+  // discovery + dispatcher tools). Deferred capability tools are reached through the single
+  // `use_tool` dispatcher after the model lists them with tool_search — their schemas never enter
+  // the cached tool set. MCP servers already expose their own lazy search/use meta-tools.
+  const { direct, deferred } = partitionRuntimeToolNames(input.runtime.tools);
+  const dispatcher = input.tools[BUILTIN_USE_TOOL_NAME];
   const selectedTools = {
-    ...pickRuntimeTools(input.tools, input.runtime.tools),
+    ...pickRuntimeTools(input.tools, direct),
+    ...(deferred.length > 0 && dispatcher ? { [BUILTIN_USE_TOOL_NAME]: dispatcher } : {}),
     ...mcpToolSet.tools,
   };
   // The model call is traced by Braintrust's `wrapAISDK` (via `getBraintrustAISDK`): it opens the

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
+  isDeferrableRuntimeTool,
+  partitionRuntimeToolNames,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
+  type RuntimeToolName,
   resolveRuntimeToolNamesForConfigTools,
+  searchRuntimeTools,
 } from "./tools";
 
 describe("AGENT_TOOL_CATALOG", () => {
@@ -346,6 +350,71 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     );
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "tiktok" }] })).toEqual(
       expect.arrayContaining(["tiktok_get_profile", "social_get_job"]),
+    );
+  });
+});
+
+describe("partitionRuntimeToolNames", () => {
+  it("defers capability tools and keeps the core/conditional tools direct", () => {
+    const enabled: RuntimeToolName[] = [
+      "read_file",
+      "edit_file",
+      "shell",
+      "tool_search",
+      "exa_search",
+      "instagram_get_profile",
+      "amp_coder",
+    ];
+    const { direct, deferred } = partitionRuntimeToolNames(enabled);
+    expect(direct).toEqual(["read_file", "edit_file", "shell", "tool_search"]);
+    expect(deferred).toEqual(["exa_search", "instagram_get_profile", "amp_coder"]);
+  });
+
+  it("classifies hosted tools and coding agents as deferrable, core tools as not", () => {
+    expect(isDeferrableRuntimeTool("exa_search")).toBe(true);
+    expect(isDeferrableRuntimeTool("amp_coder")).toBe(true);
+    expect(isDeferrableRuntimeTool("web_fetch")).toBe(true);
+    expect(isDeferrableRuntimeTool("read_file")).toBe(false);
+    expect(isDeferrableRuntimeTool("shell")).toBe(false);
+    expect(isDeferrableRuntimeTool("gh")).toBe(false);
+    expect(isDeferrableRuntimeTool("tool_search")).toBe(false);
+  });
+});
+
+describe("searchRuntimeTools", () => {
+  const enabled = resolveRuntimeToolNamesForConfigTools({
+    tools: [{ id: "exa" }, { id: "instagram" }],
+  });
+
+  it("returns deferred enabled tools with their schemas for a capability", () => {
+    const results = searchRuntimeTools({ capability: "instagram" }, enabled);
+    const names = results.map((result) => result.name);
+    expect(names).toContain("instagram_get_profile");
+    expect(names).not.toContain("exa_search");
+    const profile = results.find((result) => result.name === "instagram_get_profile");
+    expect(profile?.parameters.type).toBe("object");
+    expect(typeof profile?.description).toBe("string");
+  });
+
+  it("filters by a case-insensitive query across name and description", () => {
+    const results = searchRuntimeTools({ query: "transcript" }, enabled);
+    expect(results.length).toBeGreaterThan(0);
+    expect(
+      results.every(
+        (result) =>
+          result.name.toLowerCase().includes("transcript") ||
+          result.description.toLowerCase().includes("transcript"),
+      ),
+    ).toBe(true);
+  });
+
+  it("never returns a tool that is not enabled or not deferrable", () => {
+    const results = searchRuntimeTools({}, enabled);
+    const names = results.map((result) => result.name);
+    expect(names).not.toContain("read_file");
+    expect(names).not.toContain("tool_search");
+    expect(names.every((name) => isDeferrableRuntimeTool(name) && enabled.includes(name))).toBe(
+      true,
     );
   });
 });

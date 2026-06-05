@@ -288,6 +288,46 @@ describe("resolveAgentRuntimeConfig", () => {
     );
   });
 
+  it("renders a Tools index of capabilities without leaking deferred tool schemas", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Research agent",
+      instructions: "Research things.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [
+        { id: "exa", type: "hosted_tool", label: "exa", description: "Web research." },
+        { id: "instagram", type: "hosted_tool", label: "instagram", description: "Read IG." },
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "linear",
+          description: "Use workspace-configured Linear MCP tools.",
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    // Capability-level spine, both surfaces present.
+    expect(resolved.systemPrompt).toContain("## Tools");
+    expect(resolved.systemPrompt).toContain("- exa —");
+    expect(resolved.systemPrompt).toContain("- instagram —");
+    expect(resolved.systemPrompt).toContain("tool_search");
+    expect(resolved.systemPrompt).toContain("use_tool");
+    expect(resolved.systemPrompt).toContain("Linear");
+    expect(resolved.systemPrompt).toContain("linear__search_tools");
+
+    // Deferred runtime tools are enabled, but their per-tool names/schemas are not in the prompt.
+    expect(resolved.tools).toContain("exa_search");
+    expect(resolved.tools).toContain("instagram_get_profile");
+    expect(resolved.systemPrompt).not.toContain("exa_search");
+    expect(resolved.systemPrompt).not.toContain("instagram_get_profile");
+  });
+
   it("keeps MCP tools separate from static runtime tools", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

@@ -1,5 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getRuntimeToolHelp, type RuntimeToolName } from "@opencompany/agent-runtime";
+import {
+  getRuntimeToolHelp,
+  type RuntimeToolName,
+  searchRuntimeTools,
+} from "@opencompany/agent-runtime";
 import type { RunnerEnv } from "./env";
 
 export type HostedToolUsage = {
@@ -223,6 +227,9 @@ export function validateHostedToolEnvironment(input: {
 const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> = {
   tool_help: {
     execute: ({ args, enabledTools }) => executeToolHelp(args, enabledTools),
+  },
+  tool_search: {
+    execute: ({ args, enabledTools }) => executeToolSearch(args, enabledTools),
   },
   exa_search: {
     execute: ({ args, env, signal }) => executeExaSearch(args, env, signal),
@@ -450,6 +457,26 @@ function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): Hosted
   }
 
   return { output: help };
+}
+
+function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
+  const record = asRecord(args);
+  const capability = readString(record, "capability");
+  const query = readString(record, "query");
+  const tools = searchRuntimeTools(
+    {
+      ...(capability ? { capability } : {}),
+      ...(query ? { query } : {}),
+    },
+    enabledTools,
+  );
+  return {
+    output: {
+      toolCount: tools.length,
+      useTool: "use_tool",
+      tools,
+    },
+  };
 }
 
 async function executeExaSearch(
