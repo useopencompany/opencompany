@@ -2,7 +2,6 @@ import { getDb } from "@opencompany/db/client";
 import { workspaces } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { eq } from "drizzle-orm";
-import { sendSlackInviteEmail } from "@/lib/email/slack-invite";
 import {
   getWorkspaceSlackChannel,
   markActive,
@@ -38,7 +37,7 @@ export async function runProvisionSlackSupport(args: {
   workspace?: { id: string; name: string };
 }) {
   const { event, step } = args;
-  const { workspaceId, userId, customerEmail, firstName } = event.data;
+  const { workspaceId, customerEmail } = event.data;
 
   const existing = await step.run("ensure-row", () => upsertPending(workspaceId));
   if (existing.status === "active") {
@@ -115,18 +114,8 @@ export async function runProvisionSlackSupport(args: {
     throw error; // let Inngest retry transient failures
   }
 
-  await step.run("dispatch-email", async () => {
-    const row = await getWorkspaceSlackChannel(workspaceId);
-    if (row?.status !== "active" || !row.inviteUrl) return { dispatched: false };
-    await sendSlackInviteEmail({
-      userId,
-      workspaceId,
-      email: customerEmail,
-      firstName: firstName ?? null,
-      inviteUrl: row.inviteUrl,
-    });
-    return { dispatched: true };
-  });
-
+  // Note: the customer's invite email is sent by Slack itself — conversations.inviteShared
+  // with an email recipient triggers Slack's transactional Connect invite. We persist the
+  // invite URL above only so the workspace-home "Connect on Slack" card can link to it.
   return { status: "active" as const, inviteUrl };
 }

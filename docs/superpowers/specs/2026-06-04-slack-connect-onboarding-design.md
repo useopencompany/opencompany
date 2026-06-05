@@ -163,6 +163,11 @@ Keep all Slack SDK calls behind this one module so the rest of the app never imp
 
 ### 4. Email — `apps/web/lib/email/slack-invite.ts`
 
+> **Superseded (2026-06-05):** the custom invite email was removed. `conversations.inviteShared`
+> with the customer's email already makes **Slack send its own transactional Connect invite**, so a
+> separate branded email would double up. The invite URL is still persisted for the workspace-home
+> card. The original design below is kept for context.
+
 Mirror `signup-welcome.ts`: an Inngest fn `sendSlackInvite` on
 `email.slack_invite_requested`, Resend send from the existing "Louis" sender,
 idempotency `slack-invite:{workspaceId}`. Body: one-paragraph "here's your direct line to

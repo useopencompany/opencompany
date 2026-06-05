@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   postIntroMessage: vi.fn(),
   getSupportTeamId: vi.fn(),
   isSlackSupportConfigured: vi.fn(),
-  sendSlackInviteEmail: vi.fn(),
   upsertPending: vi.fn(),
   setSlackChannelId: vi.fn(),
   markActive: vi.fn(),
@@ -24,7 +23,6 @@ vi.mock("@/lib/slack/support-client", () => ({
   isSlackSupportConfigured: mocks.isSlackSupportConfigured,
   SlackNotConfiguredError: class extends Error {},
 }));
-vi.mock("@/lib/email/slack-invite", () => ({ sendSlackInviteEmail: mocks.sendSlackInviteEmail }));
 vi.mock("@/lib/slack/data", () => ({
   upsertPending: mocks.upsertPending,
   setSlackChannelId: mocks.setSlackChannelId,
@@ -85,7 +83,7 @@ describe("runProvisionSlackSupport", () => {
     mocks.getWorkspaceSlackChannel.mockImplementation(async () => row);
   });
 
-  it("creates the channel, persists its id, invites, marks active, and emails", async () => {
+  it("creates the channel, persists its id, invites, and marks active", async () => {
     const result = await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
 
     expect(mocks.createSupportChannel).toHaveBeenCalledWith(workspace);
@@ -93,10 +91,10 @@ describe("runProvisionSlackSupport", () => {
       expect.objectContaining({ workspaceId: "w1", slackChannelId: "C1", slackTeamId: "T1" }),
     );
     expect(mocks.inviteSupportMembers).toHaveBeenCalledWith("C1");
+    // inviteShared with the customer email is what triggers Slack's own invite email.
     expect(mocks.inviteCustomerToChannel).toHaveBeenCalledWith("C1", "c@acme.com");
-    expect(mocks.markActive).toHaveBeenCalled();
-    expect(mocks.sendSlackInviteEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceId: "w1", inviteUrl: "https://join.slack.com/x" }),
+    expect(mocks.markActive).toHaveBeenCalledWith(
+      expect.objectContaining({ inviteUrl: "https://join.slack.com/x" }),
     );
     expect(result.status).toBe("active");
   });
@@ -120,7 +118,6 @@ describe("runProvisionSlackSupport", () => {
     await runProvisionSlackSupport({ event, step: fakeStep(), workspace });
 
     expect(mocks.createSupportChannel).not.toHaveBeenCalled();
-    expect(mocks.sendSlackInviteEmail).not.toHaveBeenCalled();
   });
 
   it("no-ops to failed when Slack is not configured (does not throw)", async () => {
@@ -132,7 +129,6 @@ describe("runProvisionSlackSupport", () => {
 
     expect(mocks.markFailed).toHaveBeenCalled();
     expect(mocks.createSupportChannel).not.toHaveBeenCalled();
-    expect(mocks.sendSlackInviteEmail).not.toHaveBeenCalled();
   });
 
   it("marks failed and rethrows on a Slack error (so Inngest retries)", async () => {
@@ -143,6 +139,5 @@ describe("runProvisionSlackSupport", () => {
     );
 
     expect(mocks.markFailed).toHaveBeenCalled();
-    expect(mocks.sendSlackInviteEmail).not.toHaveBeenCalled();
   });
 });
