@@ -6,7 +6,7 @@ services:
     autoDeployTrigger: off
     dockerfilePath: ./Dockerfile.runner
     healthCheckPath: /healthz
-    maxShutdownDelaySeconds: 120
+    maxShutdownDelaySeconds: 300
     # `sync: false` only tells Render not to generate these values. Secret values are populated by
     # the Infisical → Render integration, which syncs the prod `/runner` folder into this service.
     # Add new secrets to Infisical (`prod`, path `/runner`); no manual Render dashboard entry needed.

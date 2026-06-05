@@ -22,6 +22,7 @@ import {
   LoaderCircle,
   MessageCircleQuestion,
   PanelRight,
+  Play,
   Plus,
   ShieldAlert,
   TerminalSquare,
@@ -57,6 +58,7 @@ import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import {
   abortAgentSession,
   cancelAgentSessionQuestion,
+  continueInterruptedSession,
   resolveToolApproval,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
@@ -513,6 +515,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Paused specifically for an ask_user_question: the composer is hidden and the question card is
   // the only input surface (the card's X cancels back to the composer).
   const sessionIsAwaitingInput = runtime.currentStatus === "awaiting_input";
+  const sessionIsInterrupted = runtime.currentStatus === "interrupted";
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -561,6 +564,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               parts={assistantParts}
               sessionCanGenerate={sessionCanGenerate}
               sessionIsPaused={sessionIsPaused}
+              sessionIsInterrupted={sessionIsInterrupted}
               stoppedError={runtime.currentStatus === "failed" ? runtime.lastError : null}
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
@@ -886,6 +890,48 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  const handleContinueInterrupted = () => {
+    if (!sessionIsInterrupted || isPending) return;
+    const content = "Continue";
+    setFormError(null);
+    const optimisticId = newOptimisticMessageId();
+    const submittedAtMs = Date.now();
+    const optimisticMessage: OptimisticUserMessage = {
+      optimisticId,
+      submittedAtMs,
+      confirmedMessageId: null,
+      existingMessageIds: baseRuntime.messages.map((message) => message.id),
+      id: optimisticId,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: new Date(submittedAtMs).toISOString(),
+      completedAt: new Date(submittedAtMs).toISOString(),
+    };
+    setOptimisticUserMessages((current) => [...current, optimisticMessage]);
+    setPendingScrollMessageId(optimisticId);
+    pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
+    startTransition(async () => {
+      const result = await continueInterruptedSession(session.id);
+      if (result.ok) {
+        if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
+        setOptimisticUserMessages((current) =>
+          current.map((message) =>
+            message.optimisticId === optimisticId
+              ? { ...message, confirmedMessageId: result.messageId }
+              : message,
+          ),
+        );
+        return;
+      }
+      pendingTtftRef.current = null;
+      setOptimisticUserMessages((current) =>
+        current.filter((message) => message.optimisticId !== optimisticId),
+      );
+      setFormError(result.error);
+    });
+  };
+
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -1011,7 +1057,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     part.type === "tool-call" ? (
                       <div key={part.toolCall.id} className="flex justify-start">
                         <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
-                          <ToolCallCard toolCall={part.toolCall} />
+                          <ToolCallCard
+                            toolCall={part.toolCall}
+                            sessionIsInterrupted={sessionIsInterrupted}
+                          />
                         </div>
                       </div>
                     ) : null,
@@ -1040,6 +1089,23 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           <div className="bg-canvas px-8 lg:px-12 py-4">
             <div className="group/composer mx-auto max-w-[960px]">
               {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
+              {sessionIsInterrupted ? (
+                <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2">
+                  <div className="flex min-w-0 items-center gap-2 text-[12.5px] text-warning">
+                    <SessionStatusDot status="interrupted" />
+                    <span className="truncate">Interrupted</span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={handleContinueInterrupted}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Play size={12} strokeWidth={1.9} />
+                    Continue
+                  </button>
+                </div>
+              ) : null}
               <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
                 {slashMenuOpen ? (
                   <SlashCommandMenu
@@ -1492,6 +1558,7 @@ export function AssistantMessageContent({
   parts,
   sessionCanGenerate,
   sessionIsPaused = false,
+  sessionIsInterrupted = false,
   stoppedError = null,
   reasoningActive = false,
   activeStartedAt,
@@ -1500,6 +1567,7 @@ export function AssistantMessageContent({
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
   sessionIsPaused?: boolean;
+  sessionIsInterrupted?: boolean;
   stoppedError?: string | null;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
@@ -1540,7 +1608,11 @@ export function AssistantMessageContent({
           toolCall: {
             ...part.toolCall,
             status: "failed" as const,
-            outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+            outputPreview:
+              part.toolCall.outputPreview ||
+              (sessionIsInterrupted
+                ? "Interrupted before this tool returned a result."
+                : "Stopped before finishing."),
           },
         }
       : part,
@@ -1628,7 +1700,11 @@ export function AssistantMessageContent({
         return (
           <div key={group.key} className="space-y-1.5">
             {group.toolCalls.map((toolCall) => (
-              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+              <ToolCallCard
+                key={toolCall.id}
+                toolCall={toolCall}
+                sessionIsInterrupted={sessionIsInterrupted}
+              />
             ))}
           </div>
         );
@@ -1850,16 +1926,46 @@ function ReasoningCard({
   );
 }
 
-function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
+function ToolCallCard({
+  toolCall,
+  sessionIsInterrupted = false,
+}: {
+  toolCall: RuntimeToolCall;
+  sessionIsInterrupted?: boolean;
+}) {
   // ask_user_question renders a dedicated question card (interactive while pending, a read-only
   // summary once answered/cancelled) instead of the generic tool-call chrome.
   if (toolCall.question) {
     return <QuestionCard toolCall={toolCall} />;
   }
-  return <ToolCallCardDefault toolCall={toolCall} />;
+  const interrupted =
+    sessionIsInterrupted &&
+    (toolCall.status === "running" ||
+      toolCall.outputPreview === "Interrupted before this tool returned a result.");
+  return (
+    <ToolCallCardDefault
+      toolCall={
+        interrupted && toolCall.status === "running"
+          ? {
+              ...toolCall,
+              status: "failed" as const,
+              outputPreview:
+                toolCall.outputPreview || "Interrupted before this tool returned a result.",
+            }
+          : toolCall
+      }
+      interrupted={interrupted}
+    />
+  );
 }
 
-function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
+function ToolCallCardDefault({
+  toolCall,
+  interrupted = false,
+}: {
+  toolCall: RuntimeToolCall;
+  interrupted?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const approvalContext = useContext(ToolApprovalContext);
   const { showError } = useToast();
@@ -1933,9 +2039,13 @@ function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
             {approvalStatusLabel.label}
           </span>
         ) : isFailed ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-danger">
+          <span
+            className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+              interrupted ? "text-warning" : "text-danger"
+            }`}
+          >
             <AlertCircle size={9} strokeWidth={1.9} />
-            failed
+            {interrupted ? "interrupted" : "failed"}
           </span>
         ) : !isCompleted ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
@@ -2936,6 +3046,7 @@ function statusLabel(status: string) {
   if (status === "ready") return "Ready";
   if (status === "running") return "Running";
   if (status === "awaiting_approval" || status === "awaiting_input") return "Paused";
+  if (status === "interrupted") return "Interrupted";
   if (status === "completed") return "Done";
   if (status === "aborting") return "Aborting";
   if (status === "archiving") return "Archiving";
