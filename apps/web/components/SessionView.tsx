@@ -53,6 +53,7 @@ import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -1454,35 +1455,39 @@ function ContextWindowMeter({ used, max }: { used: number; max: number }) {
     fraction * 100,
   )}%`;
   return (
-    <span
-      className="flex shrink-0 items-center text-ink-muted"
-      title={detail}
-      aria-label={`Context window usage: ${detail}`}
-    >
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth={strokeWidth}
-          stroke="currentColor"
-          className="text-ink/15"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth={strokeWidth}
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - fraction)}
-          className="text-ink/70 transition-[stroke-dashoffset] duration-500"
-        />
-      </svg>
-    </span>
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger
+          aria-label={`Context window usage: ${detail}`}
+          className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              strokeWidth={strokeWidth}
+              stroke="currentColor"
+              className="text-ink/15"
+            />
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              strokeWidth={strokeWidth}
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - fraction)}
+              className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+            />
+          </svg>
+        </TooltipTrigger>
+        <TooltipContent>{detail}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
