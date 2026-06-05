@@ -92,6 +92,7 @@ function initialState(): SessionRuntimeState {
     currentStatus: "running",
     lastError: null,
     statusObserved: false,
+    liveContextTokens: null,
   };
 }
 
@@ -484,6 +485,47 @@ describe("applyRuntimeEventToState", () => {
     expect(state.messages.find((message) => message.id === "msg_assistant")).toMatchObject({
       outputReasoningTokens: 2,
     });
+  });
+
+  it("tracks liveContextTokens as the most recent step's inputTokens + outputTokens", () => {
+    let state = initialState();
+    // Initially null — no session.usage event has arrived yet.
+    expect(state.liveContextTokens).toBeNull();
+
+    // First model step (e.g. a tool call mid-turn).
+    state = applyRuntimeEventToState(
+      state,
+      event(1, "session.usage", {
+        inputTokens: 1000,
+        inputNoCacheTokens: 800,
+        inputCacheReadTokens: 200,
+        inputCacheWriteTokens: 0,
+        outputTokens: 50,
+        outputTextTokens: 50,
+        outputReasoningTokens: 0,
+        totalTokens: 1050,
+      }),
+    );
+    // liveContextTokens reflects the most recent step, not the cumulative total.
+    expect(state.liveContextTokens).toBe(1050); // 1000 + 50
+
+    // Second model step in the same turn — liveContextTokens is replaced, not accumulated.
+    state = applyRuntimeEventToState(
+      state,
+      event(2, "session.usage", {
+        inputTokens: 1100,
+        inputNoCacheTokens: 900,
+        inputCacheReadTokens: 200,
+        inputCacheWriteTokens: 0,
+        outputTokens: 60,
+        outputTextTokens: 60,
+        outputReasoningTokens: 0,
+        totalTokens: 1160,
+      }),
+    );
+    expect(state.liveContextTokens).toBe(1160); // 1100 + 60 — latest step only
+    // Cumulative usage still accumulates independently.
+    expect(state.usage.inputTokens).toBe(2100);
   });
 
   it("adds live hosted tool usage events to the cost summary", () => {

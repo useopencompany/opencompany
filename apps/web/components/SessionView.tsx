@@ -374,9 +374,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       usage: detail.usage,
       toolUsage: detail.toolUsage,
       cost: detail.cost,
-      // Server-sourced like the other aggregates (refreshed on turn completion); the context
-      // gauge in the top bar reads this rather than the cumulative `usage` total.
-      currentContextTokens: detail.currentContextTokens,
+      // Context tokens: prefer the live stream value (updated once per assistant turn via
+      // session.usage events) over the server-sourced snapshot. The stream tracks the most
+      // recent step's inputTokens + outputTokens — the same computation the DB does — so the
+      // gauge updates immediately after each turn instead of waiting for the session to reach
+      // a terminal state. Fall back to the server-sourced value until the first session.usage
+      // event arrives (liveContextTokens is null until then), so settled/replayed sessions
+      // always show a value and we never display 0 while waiting for the stream to catch up.
+      currentContextTokens: streamState.liveContextTokens ?? detail.currentContextTokens,
     };
     // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
     // Stream (`streamState`) is the live overlay. Union-merge the two so the

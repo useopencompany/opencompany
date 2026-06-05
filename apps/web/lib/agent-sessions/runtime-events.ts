@@ -75,6 +75,12 @@ export type SessionRuntimeState = {
   // token/usage delta alone leaves it false), so the displayed status/error can
   // never momentarily regress to the seed and flicker. See the merge in SessionView.
   statusObserved: boolean;
+  // Input + output tokens from the most recent model step observed in the live stream.
+  // Approximates how full the context window is right now (mirrors the DB computation
+  // in loadAgentSessionDetailForWorkspace). Set to null until the first session.usage
+  // event arrives so the view can fall back to the server-sourced value. Updated once
+  // per assistant turn (on each session.usage event), not on every token delta.
+  liveContextTokens: number | null;
 };
 
 /**
@@ -236,10 +242,18 @@ export function applyRuntimeEventToState(
   if (event.type === "session.usage") {
     const messageId = readString(event.payload.messageId);
     const outputReasoningTokens = readNumber(event.payload.outputReasoningTokens);
+    const inputTokens = readNumber(event.payload.inputTokens);
+    const outputTokens = readNumber(event.payload.outputTokens);
     next = {
       ...next,
       usage: addUsageSummary(next.usage, event.payload),
       cost: addCostSummary(next.cost, event.payload, "model"),
+      // Track the most recent step's token count as an approximation of how full the
+      // context window currently is. Mirrors the DB query in loadAgentSessionDetailForWorkspace
+      // (latest agent_session_usage row: inputTokens + outputTokens). This lets the context
+      // gauge update once per assistant turn rather than waiting for the session to reach a
+      // terminal state. The DB-sourced value remains the floor for older / replayed sessions.
+      liveContextTokens: inputTokens + outputTokens,
       messages: messageId
         ? next.messages.map((message) =>
             message.id === messageId

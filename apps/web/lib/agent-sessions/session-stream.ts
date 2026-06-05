@@ -95,6 +95,7 @@ export function createEmptySessionRuntimeState(status = "created"): SessionRunti
     currentStatus: status,
     lastError: null,
     statusObserved: false,
+    liveContextTokens: null,
   };
 }
 

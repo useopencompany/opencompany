@@ -702,6 +702,7 @@ function emptyStreamState(overrides: Partial<SessionRuntimeState> = {}): Session
     currentStatus: "",
     lastError: null,
     statusObserved: false,
+    liveContextTokens: null,
     ...overrides,
   };
 }
@@ -1490,5 +1491,50 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     await waitFor(() => {
       expect(scrollToSpy).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("SessionViewContent — context window gauge", () => {
+  it("falls back to the server-sourced token count when the stream has not yet seen a session.usage event", () => {
+    // liveContextTokens is null → gauge should read from detail.currentContextTokens.
+    streamMock.state = emptyStreamState({ liveContextTokens: null });
+
+    const detail = makeDetail({
+      session: makeSession({ status: "completed" }),
+      // Server-sourced: 50 000 tokens in a 200 000-token context window.
+      currentContextTokens: 50_000,
+    });
+
+    renderSessionViewContent(detail);
+
+    // The aria-label includes the formatted token count; 50k is formatted as "50K".
+    expect(screen.getByRole("button", { name: /context window usage/i })).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("50K"),
+    );
+  });
+
+  it("prefers live stream context tokens over the server snapshot once a session.usage event arrives", () => {
+    // liveContextTokens set — mirrors the stream having reduced a session.usage event.
+    streamMock.state = emptyStreamState({ liveContextTokens: 80_000 });
+
+    const detail = makeDetail({
+      session: makeSession({ status: "running" }),
+      // Server snapshot is stale; stream value should win.
+      currentContextTokens: 50_000,
+    });
+
+    renderSessionViewContent(detail);
+
+    // 80 000 tokens → formatted as "80K".
+    expect(screen.getByRole("button", { name: /context window usage/i })).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("80K"),
+    );
+    // The stale server value must not be shown.
+    expect(screen.getByRole("button", { name: /context window usage/i })).not.toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("50K"),
+    );
   });
 });
