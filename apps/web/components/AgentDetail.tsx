@@ -23,9 +23,7 @@ import type {
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
-  Check,
   CheckCircle2,
-  ChevronDown,
   ChevronLeft,
   CircleAlert,
   Clock3,
@@ -46,10 +44,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { AddSkillDialog } from "@/components/agent-editor/AddSkillDialog";
 import { AgentEditor, type AgentEditorHandle } from "@/components/agent-editor/AgentEditor";
-import { ModelRatingMeters, modelRatingsTitle } from "@/components/agent-editor/ModelRatingMeters";
+import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import {
   ADD_SKILL_MENTION_ID,
-  AGENT_MODELS,
   type AgentMentionItem,
   type AgentModel,
   type AgentSkillCatalogEntry,
@@ -58,21 +55,10 @@ import {
   findModel,
   findTool,
   mcpConnectUrl,
-  modelProviderId,
-  modelProviderLabel,
 } from "@/components/agent-editor/tools";
 import { DeleteAgentDialog } from "@/components/agents/DeleteAgentDialog";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { AgentDetailSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import { runAgentScheduleNow } from "@/lib/agent-schedules/actions";
@@ -88,7 +74,6 @@ import {
   fetchAgent,
 } from "@/lib/agents/payload";
 import { fetchWorkspaceSkills } from "@/lib/skills/client";
-import { cn } from "@/lib/utils";
 
 type Props = {
   idOrPath: string;
@@ -208,7 +193,6 @@ function AgentDetailContent({
     () => availableSkills.flatMap((skill) => skillCatalogEntryToExternalReference(skill)),
     [availableSkills],
   );
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -258,28 +242,6 @@ function AgentDetailContent({
       triggers,
     ],
   );
-  const selectedModel = findModel(selectedModelId) ?? findModel(DEFAULT_MODEL_ID)!;
-  const SelectedModelIcon = selectedModel.icon;
-  // Group models by provider (in catalog order) for the searchable picker.
-  const modelsByProvider = useMemo(() => {
-    const order: string[] = [];
-    const byProvider = new Map<string, AgentModel[]>();
-    for (const model of AGENT_MODELS) {
-      const provider = modelProviderId(model.id);
-      const bucket = byProvider.get(provider);
-      if (bucket) {
-        bucket.push(model);
-      } else {
-        byProvider.set(provider, [model]);
-        order.push(provider);
-      }
-    }
-    return order.map((provider) => ({
-      provider,
-      label: modelProviderLabel(provider),
-      models: byProvider.get(provider) ?? [],
-    }));
-  }, []);
   const showOptimisticGitHubSync =
     optimisticGitHubSync &&
     agent.githubSyncStatus === optimisticGitHubSync.baseStatus &&
@@ -524,77 +486,15 @@ function AgentDetailContent({
           />
 
           <div className="mt-2 flex items-center">
-            <Popover open={modelMenuOpen} onOpenChange={setModelMenuOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="flex h-6 w-auto items-center gap-1.5 rounded-md px-1.5 text-[11.5px] font-medium text-ink-muted outline-none transition-colors hover:bg-surface-subtle/70 focus-visible:bg-surface-subtle/70 data-[state=open]:bg-surface-subtle/70"
-                >
-                  <SelectedModelIcon size={12} strokeWidth={1.9} className="shrink-0" />
-                  <span className="truncate">{selectedModel.label}</span>
-                  <ChevronDown size={12} strokeWidth={1.9} className="ml-0.5 shrink-0" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-[360px] p-0">
-                <Command>
-                  <CommandInput placeholder="Search models or providers…" />
-                  <div className="flex items-center justify-end px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
-                    Capability · Speed · Cost
-                  </div>
-                  <CommandList>
-                    <CommandEmpty>No models found.</CommandEmpty>
-                    {modelsByProvider.map((group) => (
-                      <CommandGroup key={group.provider} heading={group.label}>
-                        {group.models.map((model) => {
-                          const ModelIcon = model.icon;
-                          const isSelected = model.id === selectedModelId;
-                          return (
-                            <CommandItem
-                              key={model.id}
-                              value={model.id}
-                              keywords={[model.label, group.label]}
-                              onSelect={() => {
-                                setSelectedModelId(model.id);
-                                pendingRef.current.model = model.id;
-                                schedule();
-                                setModelMenuOpen(false);
-                              }}
-                              title={
-                                model.ratings
-                                  ? modelRatingsTitle(model.label, model.description, model.ratings)
-                                  : model.description
-                              }
-                              className="gap-2 py-1.5"
-                            >
-                              <Check
-                                size={13}
-                                strokeWidth={2}
-                                className={cn(
-                                  "shrink-0 text-ink",
-                                  isSelected ? "opacity-100" : "opacity-0",
-                                )}
-                              />
-                              <ModelIcon
-                                size={13}
-                                strokeWidth={1.85}
-                                className="shrink-0 text-ink-muted"
-                              />
-                              <span className="min-w-0 flex-1 truncate">{model.label}</span>
-                              {model.ratings ? (
-                                <ModelRatingMeters
-                                  ratings={model.ratings}
-                                  className="shrink-0 text-ink-muted"
-                                />
-                              ) : null}
-                            </CommandItem>
-                          );
-                        })}
-                      </CommandGroup>
-                    ))}
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <ModelPicker
+              value={selectedModelId}
+              fallbackModelId={DEFAULT_MODEL_ID}
+              onChange={(modelId) => {
+                setSelectedModelId(modelId);
+                pendingRef.current.model = modelId;
+                schedule();
+              }}
+            />
           </div>
 
           <div className="mt-6">
