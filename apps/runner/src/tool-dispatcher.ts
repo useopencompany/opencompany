@@ -13,6 +13,7 @@ import {
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
+  type ToolArgResolution,
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
@@ -60,6 +61,7 @@ import {
   type SandboxHandle,
 } from "./sandbox";
 import { hasReadSkill, markSkillRead } from "./self-edit-gate";
+import { prepareToolArgs } from "./tool-arg-repair";
 import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
@@ -312,82 +314,6 @@ function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } 
   return { tool: "", arguments: {} };
 }
 
-// Shallow, top-level validation of `use_tool` arguments against the resolved tool's JSON Schema.
-// The provider cannot validate them — `use_tool.arguments` is a freeform object — so the common
-// model mistakes (missing a required field, misnaming a field, wrong primitive type) would
-// otherwise reach the tool body as vague failures. We check only the top level and skip enums /
-// nested schemas to stay low-risk; deeper constraints are still enforced by the tool body. Returns
-// a list of human-readable problems (empty when valid).
-export function validateUseToolArgs(
-  schema: RuntimeToolDefinition["parameters"],
-  args: unknown,
-): string[] {
-  const properties = isRecord(schema.properties) ? schema.properties : {};
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  // isRecord accepts arrays (typeof [] === "object"); exclude them so an array reaches the
-  // "arguments must be an object" path instead of being walked like a record.
-  const record = isRecord(args) && !Array.isArray(args) ? args : undefined;
-  const errors: string[] = [];
-
-  if (!record) {
-    // Only an object is acceptable; a non-object is a problem only when the tool expects fields.
-    if (required.length > 0 || Object.keys(properties).length > 0) {
-      if (args !== undefined && args !== null) {
-        errors.push("arguments must be an object");
-        return errors;
-      }
-    }
-  }
-
-  for (const name of required) {
-    if (!record || record[name] === undefined) {
-      errors.push(`missing required "${name}"`);
-    }
-  }
-
-  if (record) {
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(record)) {
-        if (!Object.prototype.hasOwnProperty.call(properties, key)) {
-          errors.push(`unexpected property "${key}"`);
-        }
-      }
-    }
-    for (const [key, value] of Object.entries(record)) {
-      if (value === undefined) continue;
-      const propSchema = properties[key];
-      const expected =
-        isRecord(propSchema) && typeof propSchema.type === "string" ? propSchema.type : undefined;
-      if (!expected) continue;
-      if (!matchesJsonType(value, expected)) {
-        errors.push(`"${key}" must be a ${expected}`);
-      }
-    }
-  }
-
-  return errors;
-}
-
-function matchesJsonType(value: unknown, expected: string): boolean {
-  switch (expected) {
-    case "string":
-      return typeof value === "string";
-    case "number":
-    case "integer":
-      return typeof value === "number";
-    case "boolean":
-      return typeof value === "boolean";
-    case "array":
-      return Array.isArray(value);
-    case "object":
-      // Arrays are their own JSON type; an "object"-typed field must not accept one.
-      return isRecord(value) && !Array.isArray(value);
-    default:
-      // Unknown/unsupported type keyword — don't second-guess it.
-      return true;
-  }
-}
-
 // Resolve the named deferred tool and run it through the existing executeRuntimeTool tail, but
 // persist the result under `use_tool` so it pairs with the model's dispatcher call. An unknown or
 // non-deferred tool name is persisted as a recoverable error pointing back to find_tools.
@@ -433,8 +359,32 @@ export async function dispatchBuiltinUseTool(input: {
         : 'Missing "tool" argument. Call find_tools to list available tools, then pass one as "tool".',
     });
   }
-  const argErrors = validateUseToolArgs(definition.parameters, rawArgs);
-  if (argErrors.length > 0) {
+  // Layers 1–3 (validate → coerce → repair). The repair fallback is gated on the gateway key +
+  // kill switch; when off (e.g. unit tests with an empty env) only the deterministic layers run.
+  const prepared = await prepareToolArgs({
+    surface: "builtin",
+    toolName: rawName,
+    schema: definition.parameters,
+    rawArgs,
+    repair: {
+      apiKey: input.env.vercelAiGatewayApiKey,
+      enabled: input.env.toolArgRepairEnabled,
+    },
+    signal: input.signal,
+    observability: {
+      sessionId: input.sessionId,
+      ...(input.observabilityContext?.workspaceId
+        ? { workspaceId: input.observabilityContext.workspaceId }
+        : {}),
+      ...(input.observabilityContext?.agentId
+        ? { agentId: input.observabilityContext.agentId }
+        : {}),
+      ...(input.observabilityContext?.modelName
+        ? { modelName: input.observabilityContext.modelName }
+        : {}),
+    },
+  });
+  if (!prepared.ok) {
     return persistBuiltinUseToolError({
       sessionId: input.sessionId,
       assistantMessageId: input.assistantMessageId,
@@ -442,8 +392,13 @@ export async function dispatchBuiltinUseTool(input: {
       runLeaseOwner: input.runLeaseOwner,
       ...(input.internalMessages ? { internalMessages: true } : {}),
       toolCallId: input.toolCallId,
-      message: `Invalid arguments for "${rawName}": ${argErrors.join("; ")}. Call tool_help({ tool: "${rawName}" }) for its schema, then retry use_tool with arguments that match it.`,
+      message: `Invalid arguments for "${rawName}": ${prepared.errors
+        .map((error) => error.message)
+        .join(
+          "; ",
+        )}. Call tool_help({ tool: "${rawName}" }) for its schema, then retry use_tool with arguments that match it.`,
       code: "invalid_tool_input",
+      argResolution: prepared.resolution,
     });
   }
   return executeRuntimeTool({
@@ -456,8 +411,9 @@ export async function dispatchBuiltinUseTool(input: {
     agentConfig: input.agentConfig,
     toolCallId: input.toolCallId,
     definition,
-    args: rawArgs,
+    args: prepared.args,
     persistAsToolName: BUILTIN_USE_TOOL_NAME,
+    argResolution: prepared.resolution,
     getSandbox: input.getSandbox,
     workdir: input.workdir,
     env: input.env,
@@ -484,6 +440,7 @@ async function persistBuiltinUseToolError(input: {
   toolCallId: string;
   message: string;
   code?: string;
+  argResolution?: ToolArgResolution | undefined;
 }) {
   const output: FailedToolOutput = {
     ok: false,
@@ -526,6 +483,7 @@ async function persistBuiltinUseToolError(input: {
         name: BUILTIN_USE_TOOL_NAME,
         error: output.error,
         outputPreview: formatRuntimePreview(output),
+        ...(input.argResolution ? { argResolution: input.argResolution } : {}),
       },
     }),
   );
@@ -587,6 +545,9 @@ export async function executeRuntimeTool(input: {
   // result pairs with the `use_tool` tool-call the model made (observability still records the real
   // tool via captureException + usage attribution).
   persistAsToolName?: string;
+  // How the deferred-tool arguments were resolved (valid/coerced/repaired) before this ran. Carried
+  // onto the tool.completed/failed event for telemetry. Only set on the use_tool dispatch path.
+  argResolution?: ToolArgResolution | undefined;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -897,6 +858,7 @@ export async function executeRuntimeTool(input: {
           name: persistedToolName,
           error: failedOutput.error,
           outputPreview: formatRuntimePreview(output),
+          ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );
@@ -913,6 +875,7 @@ export async function executeRuntimeTool(input: {
           toolCallId: input.toolCallId,
           name: persistedToolName,
           outputPreview: formatRuntimePreview(output),
+          ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );

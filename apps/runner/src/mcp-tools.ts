@@ -14,6 +14,7 @@ import {
   mcpSearchToolsName,
   mcpUseToolName,
   newAgentSessionMessageId,
+  type ToolArgResolution,
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import {
@@ -44,6 +45,7 @@ import {
   toPersistedModelMessage,
 } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
+import { prepareToolArgs, type ToolArgRepairConfig } from "./tool-arg-repair";
 import {
   formatRuntimePreview,
   persistDeniedToolResult,
@@ -138,6 +140,9 @@ type McpToolContext = {
   toolStartCoordinator: ToolStartCoordinator;
   policy: WorkspaceToolPolicyMap;
   suspendable: boolean;
+  // Config for the model-based argument repair fallback (Layer 3). Deterministic validation +
+  // coercion run regardless; this only gates the small-model call. Threaded from the runner env.
+  toolArgRepair?: ToolArgRepairConfig | undefined;
   observabilityContext?: {
     workspaceId?: string;
     userId?: string;
@@ -431,7 +436,12 @@ function buildMcpCatalogResult(connected: ConnectedMcpProvider, args: unknown) {
 // Resolve the named raw tool's body and run it through the shared execution tail. The
 // persisted tool-result keeps the invoke tool's name (so it pairs with the model's
 // `{server}__use_tool` call) while observability records the real raw tool name.
-function dispatchMcpUseTool(
+//
+// Before hitting the server, the arguments run through the shared validate → coerce → repair
+// pipeline using the tool's input schema from the discovery catalog. This closes the gap where a
+// schema-invalid payload would otherwise round-trip to the MCP server and come back as an opaque
+// `mcp_tool_execution_failed` — we catch it locally with an actionable, uniform error instead.
+async function dispatchMcpUseTool(
   input: McpToolContext & {
     connected: ConnectedMcpProvider;
     toolCallId: string;
@@ -440,15 +450,122 @@ function dispatchMcpUseTool(
 ) {
   const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
   const body = input.connected.bodyByRawName.get(rawName);
+  const toolName = mcpUseToolName(input.connected.provider.key);
+
+  // Only validate when we have both an executable body and a catalog schema. An unknown tool keeps
+  // the existing recoverable-failure path; a missing schema means we can't validate, so pass through.
+  const schema = input.connected.catalog.find((entry) => entry.name === rawName)?.inputSchema;
+  if (body && schema !== undefined) {
+    const prepared = await prepareToolArgs({
+      surface: "mcp",
+      toolName: rawName,
+      schema,
+      rawArgs,
+      ...(input.toolArgRepair ? { repair: input.toolArgRepair } : {}),
+      signal: input.signal,
+      observability: {
+        sessionId: input.sessionId,
+        ...(input.observabilityContext?.workspaceId
+          ? { workspaceId: input.observabilityContext.workspaceId }
+          : {}),
+        ...(input.observabilityContext?.agentId
+          ? { agentId: input.observabilityContext.agentId }
+          : {}),
+        ...(input.observabilityContext?.modelName
+          ? { modelName: input.observabilityContext.modelName }
+          : {}),
+      },
+    });
+    if (!prepared.ok) {
+      return persistMcpUseToolArgError({
+        ...input,
+        toolName,
+        toolCallId: input.toolCallId,
+        message: `Invalid arguments for "${rawName}": ${prepared.errors
+          .map((error) => error.message)
+          .join(
+            "; ",
+          )}. Call ${mcpSearchToolsName(input.connected.provider.key)} for its input schema, then retry with arguments that match it.`,
+        argResolution: prepared.resolution,
+      });
+    }
+    return executeMcpTool({
+      ...input,
+      mcpServer: input.connected.provider.key,
+      toolCallId: input.toolCallId,
+      toolName,
+      rawToolName: rawName || MCP_USE_TOOL_RAW_NAME,
+      execute: body,
+      args: prepared.args,
+      argResolution: prepared.resolution,
+    });
+  }
+
   return executeMcpTool({
     ...input,
     mcpServer: input.connected.provider.key,
     toolCallId: input.toolCallId,
-    toolName: mcpUseToolName(input.connected.provider.key),
+    toolName,
     rawToolName: rawName || MCP_USE_TOOL_RAW_NAME,
     execute: body ?? unknownMcpToolBody(input.connected.provider, rawName),
     args: rawArgs,
   });
+}
+
+// Persist a recoverable error tool-result for an MCP `use_tool` call whose arguments failed the
+// shared pipeline, without calling the server. Mirrors executeMcpTool's failure tail (and
+// persistBuiltinUseToolError) so the model recovers turn-by-turn — but skips captureException since
+// a schema-invalid argument payload is an expected recoverable input error, not an exception.
+async function persistMcpUseToolArgError(
+  input: McpToolContext & {
+    toolName: string;
+    toolCallId: string;
+    message: string;
+    argResolution: ToolArgResolution;
+  },
+) {
+  const output = {
+    ok: false as const,
+    error: { message: input.message, code: "invalid_tool_input", recoverable: true as const },
+  };
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          output,
+        }),
+      ),
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: input.toolName,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+        argResolution: input.argResolution,
+      },
+    }),
+  );
+  return output;
 }
 
 function requestedMcpProviders(agentConfig: AgentConfig) {
@@ -553,6 +670,9 @@ async function executeMcpTool(
       | ((input: unknown, options: { toolCallId: string }) => unknown | Promise<unknown>)
       | undefined;
     args: unknown;
+    // How the deferred-tool arguments were resolved (valid/coerced/repaired) before this ran.
+    // Carried onto the tool.completed/failed event for telemetry. Only set on the use_tool path.
+    argResolution?: ToolArgResolution | undefined;
   },
 ) {
   let output: unknown;
@@ -618,6 +738,7 @@ async function executeMcpTool(
             ? output.error
             : buildMcpFailedToolOutput(new Error("MCP tool failed.")).error,
           outputPreview: formatRuntimePreview(output),
+          ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );
@@ -634,6 +755,7 @@ async function executeMcpTool(
           toolCallId: input.toolCallId,
           name: input.toolName,
           outputPreview: formatRuntimePreview(output),
+          ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );
