@@ -1415,14 +1415,7 @@ function SessionTopBar({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {currentContextTokens > 0 ? (
-          <span
-            className="text-[12px] tabular-nums text-ink-muted"
-            title={`${currentContextTokens.toLocaleString()} / ${contextMax.toLocaleString()} tokens of context · ${Math.round(
-              (currentContextTokens / contextMax) * 100,
-            )}%`}
-          >
-            {formatCompactTokens(currentContextTokens)} / {formatCompactTokens(contextMax)}
-          </span>
+          <ContextWindowMeter used={currentContextTokens} max={contextMax} />
         ) : null}
         <button
           type="button"
@@ -1438,7 +1431,7 @@ function SessionTopBar({
   );
 }
 
-// Compact token formatter for the context gauge: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
+// Compact token formatter for the context gauge tooltip: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
 function formatCompactTokens(value: number): string {
   if (value >= 1_000_000) {
     const millions = value / 1_000_000;
@@ -1446,6 +1439,51 @@ function formatCompactTokens(value: number): string {
   }
   if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
   return `${value}`;
+}
+
+// A small ring that fills to the share of the model's context window in use. The exact
+// "used / max" figure stays out of the chrome and is surfaced only on hover (native title),
+// keeping the top bar quiet.
+function ContextWindowMeter({ used, max }: { used: number; max: number }) {
+  const fraction = max > 0 ? Math.min(1, used / max) : 0;
+  const size = 14;
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+    fraction * 100,
+  )}%`;
+  return (
+    <span
+      className="flex shrink-0 items-center text-ink-muted"
+      title={detail}
+      aria-label={`Context window usage: ${detail}`}
+    >
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          className="text-ink/15"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          strokeWidth={strokeWidth}
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - fraction)}
+          className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+        />
+      </svg>
+    </span>
+  );
 }
 
 function AssistantMarkdown({
