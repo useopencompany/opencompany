@@ -104,6 +104,11 @@ export async function handleGoogleOAuthCallback(
 
   const code = url.searchParams.get("code");
   if (!code) {
+    logger.warn("Google integration callback missing authorization code", {
+      event: "opencompany.google_integration_callback_failed",
+      reason: "missing_code",
+      provider,
+    });
     return errorRedirect(state.returnTo);
   }
 

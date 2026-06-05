@@ -76,26 +76,48 @@ export async function connectGoogleIntegration(input: ConnectGoogleIntegrationIn
     throw new Error("Could not persist Google integration.");
   }
 
-  await saveIntegrationCredential({
-    workspaceId: input.workspaceId,
-    integrationId: integration.id,
-    provider: input.provider,
-    kind: "oauth_token",
-    payload: { ...input.tokens },
-    expiresAt: input.expiresAt,
-    db,
-    now,
-  });
-
-  if (input.calendars) {
-    await syncCalendarResources({
+  // The integration row is upserted as "connected" above, but the connection is only usable once
+  // its encrypted tokens (and, for Calendar, its calendar list) are persisted. If either write
+  // fails, demote the row to "sync_failed" so the UI doesn't advertise a broken connection, then
+  // rethrow so the caller can surface the error.
+  try {
+    await saveIntegrationCredential({
+      workspaceId: input.workspaceId,
+      integrationId: integration.id,
+      provider: input.provider,
+      kind: "oauth_token",
+      payload: { ...input.tokens },
+      expiresAt: input.expiresAt,
       db,
       now,
-      workspaceId: input.workspaceId,
-      provider: input.provider,
-      integrationId: integration.id,
-      calendars: input.calendars,
     });
+
+    if (input.calendars) {
+      await syncCalendarResources({
+        db,
+        now,
+        workspaceId: input.workspaceId,
+        provider: input.provider,
+        integrationId: integration.id,
+        calendars: input.calendars,
+      });
+    }
+  } catch (error) {
+    await db
+      .update(workspaceIntegrations)
+      .set({
+        status: "sync_failed",
+        statusReason: "Failed to persist Google integration credentials.",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(workspaceIntegrations.id, integration.id),
+          eq(workspaceIntegrations.workspaceId, input.workspaceId),
+          eq(workspaceIntegrations.provider, input.provider),
+        ),
+      );
+    throw error;
   }
 
   return { integrationId: integration.id };

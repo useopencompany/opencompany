@@ -616,14 +616,38 @@ function GoogleControls({
   );
 }
 
+function calendarSelectionMap(connection: GoogleConnectionState): Record<string, boolean> {
+  return Object.fromEntries(
+    connection.calendars.map((calendar) => [calendar.externalId, calendar.selectedAt !== null]),
+  );
+}
+
+// A value signature of the server-side selection, used to detect when props actually changed (vs a
+// parent re-render with an equivalent connection object).
+function calendarSelectionSignature(connection: GoogleConnectionState): string {
+  return connection.calendars
+    .map((calendar) => `${calendar.externalId}:${calendar.selectedAt ?? ""}`)
+    .join("|");
+}
+
 function GoogleCalendarSelection({ connection }: { connection: GoogleConnectionState }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(
-      connection.calendars.map((calendar) => [calendar.externalId, calendar.selectedAt !== null]),
-    ),
+    calendarSelectionMap(connection),
   );
+
+  // Resync from server state after router.refresh (or any external update) by adjusting state during
+  // render — the React-recommended alternative to an effect. The local map is only the optimistic
+  // overlay; when the server's selection actually changes it must win over stale local state.
+  const [syncedSignature, setSyncedSignature] = useState(() =>
+    calendarSelectionSignature(connection),
+  );
+  const signature = calendarSelectionSignature(connection);
+  if (signature !== syncedSignature) {
+    setSyncedSignature(signature);
+    setSelected(calendarSelectionMap(connection));
+  }
 
   if (connection.calendars.length === 0) return null;
 
@@ -632,11 +656,15 @@ function GoogleCalendarSelection({ connection }: { connection: GoogleConnectionS
     setSelected((current) => ({ ...current, [calendarExternalId]: next }));
     startTransition(async () => {
       try {
-        await setGoogleCalendarSelection({
+        const result = await setGoogleCalendarSelection({
           integrationId: connection.id,
           calendarExternalId,
           selected: next,
         });
+        if (!result.ok) {
+          setSelected((current) => ({ ...current, [calendarExternalId]: previous }));
+          return;
+        }
         router.refresh();
       } catch {
         setSelected((current) => ({ ...current, [calendarExternalId]: previous }));

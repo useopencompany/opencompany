@@ -5,7 +5,7 @@ import {
   workspaceIntegrationResources,
   workspaceIntegrations,
 } from "@opencompany/db/schema";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import type { HostedToolResult } from "./hosted-tools";
 
 // First-party Gmail (read-only) and Google Calendar (read/write) tools. Each call resolves a
@@ -142,7 +142,7 @@ type StoredGoogleTokens = {
 async function getAccessToken(
   context: GoogleToolContext,
   account: ResolvedAccount,
-  options: { forceRefresh?: boolean } = {},
+  options: { forceRefresh?: boolean; signal?: AbortSignal } = {},
 ): Promise<string> {
   const db = getDb();
   const [row] = await db
@@ -185,13 +185,14 @@ async function getAccessToken(
       `${displayName(account.provider)} needs to be reconnected (no refresh token). Reconnect it in Settings → Integrations.`,
     );
   }
-  return refreshAccessToken(context, account, tokens);
+  return refreshAccessToken(context, account, tokens, options.signal);
 }
 
 async function refreshAccessToken(
   context: GoogleToolContext,
   account: ResolvedAccount,
   tokens: StoredGoogleTokens,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (!context.clientId || !context.clientSecret) {
     throw new Error(
@@ -202,6 +203,7 @@ async function refreshAccessToken(
   const response = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    signal: signal ?? null,
     body: new URLSearchParams({
       client_id: context.clientId,
       client_secret: context.clientSecret,
@@ -282,7 +284,8 @@ async function persistRefreshedTokens(
       ),
     );
 
-  // A successful refresh clears any prior needs_reauth flag on the connection.
+  // A successful refresh clears any prior needs_reauth flag on the connection. Guard against a
+  // concurrent user-triggered disconnect: never resurrect a row the user just disconnected.
   await db
     .update(workspaceIntegrations)
     .set({ status: "connected", statusReason: null, updatedAt: now })
@@ -291,6 +294,7 @@ async function persistRefreshedTokens(
         eq(workspaceIntegrations.workspaceId, context.workspaceId),
         eq(workspaceIntegrations.provider, account.provider),
         eq(workspaceIntegrations.id, account.integrationId),
+        ne(workspaceIntegrations.status, "disconnected"),
       ),
     );
 }
@@ -308,6 +312,8 @@ async function markNeedsReauth(
         eq(workspaceIntegrations.workspaceId, context.workspaceId),
         eq(workspaceIntegrations.provider, account.provider),
         eq(workspaceIntegrations.id, account.integrationId),
+        // Don't flip a row the user disconnected mid-refresh back into an active state.
+        ne(workspaceIntegrations.status, "disconnected"),
       ),
     );
 }
@@ -377,11 +383,14 @@ async function googleApiCall(input: {
     return fetch(input.url, init);
   };
 
-  let token = await getAccessToken(input.context, input.account);
+  let token = await getAccessToken(input.context, input.account, { signal: input.signal });
   let response = await run(token);
   if (response.status === 401) {
     // Token rejected mid-flight (e.g. revoked just now); force one refresh and retry.
-    token = await getAccessToken(input.context, input.account, { forceRefresh: true });
+    token = await getAccessToken(input.context, input.account, {
+      forceRefresh: true,
+      signal: input.signal,
+    });
     response = await run(token);
   }
 
@@ -656,6 +665,11 @@ async function calendarUpdateEvent(input: {
   );
   applySendUpdates(url, input.args);
   const body = buildEventBody(input.args, { requireTimes: false });
+  if (Object.keys(body).length === 0) {
+    throw new Error(
+      "Provide at least one field to change (summary, description, location, start, end, or attendees).",
+    );
+  }
   const data = await input.call("PATCH", url.toString(), body);
   return summarizeEvent(asRecord(data));
 }
@@ -778,6 +792,11 @@ function readEventTime(value: unknown): Record<string, string> | null {
   if (typeof value.dateTime === "string") result.dateTime = value.dateTime;
   if (typeof value.date === "string") result.date = value.date;
   if (typeof value.timeZone === "string") result.timeZone = value.timeZone;
+  // Google rejects events that carry both a timed (dateTime) and an all-day (date) value; reject it
+  // up front with a clear message instead of surfacing an opaque API 400.
+  if (result.dateTime && result.date) {
+    throw new Error("Event time must use either dateTime (timed) or date (all-day), not both.");
+  }
   return result.dateTime || result.date ? result : null;
 }
 

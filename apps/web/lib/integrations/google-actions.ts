@@ -59,11 +59,16 @@ export async function disconnectGoogleIntegrationAction(input: {
   return { ok: true, status: "disconnected", message: "Disconnected the Google account." };
 }
 
+export type SetGoogleCalendarSelectionResult = {
+  ok: boolean;
+  status: "updated" | "not_found" | "forbidden";
+};
+
 export async function setGoogleCalendarSelection(input: {
   integrationId: string;
   calendarExternalId: string;
   selected: boolean;
-}) {
+}): Promise<SetGoogleCalendarSelectionResult> {
   const { workspace, user, role } = await currentWorkspace();
   const db = getDb();
 
@@ -79,11 +84,15 @@ export async function setGoogleCalendarSelection(input: {
     )
     .limit(1);
 
-  if (!existing || (existing.connectedByUserId !== user.id && role !== "admin")) {
-    return;
+  if (!existing) {
+    return { ok: false, status: "not_found" };
+  }
+  // Per-user integrations: only the connecting member or an admin can change calendar selection.
+  if (existing.connectedByUserId !== user.id && role !== "admin") {
+    return { ok: false, status: "forbidden" };
   }
 
-  await db
+  const updated = await db
     .update(workspaceIntegrationResources)
     .set({ selectedAt: input.selected ? new Date() : null, updatedAt: new Date() })
     .where(
@@ -94,9 +103,15 @@ export async function setGoogleCalendarSelection(input: {
         eq(workspaceIntegrationResources.resourceType, GOOGLE_CALENDAR_RESOURCE_TYPE),
         eq(workspaceIntegrationResources.externalId, input.calendarExternalId),
       ),
-    );
+    )
+    .returning({ id: workspaceIntegrationResources.id });
+
+  if (updated.length === 0) {
+    return { ok: false, status: "not_found" };
+  }
 
   revalidateIntegrationPaths();
+  return { ok: true, status: "updated" };
 }
 
 function revalidateIntegrationPaths() {
