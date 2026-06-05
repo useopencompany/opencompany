@@ -613,6 +613,14 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          googleContext: input.workspaceId
+            ? {
+                workspaceId: input.workspaceId,
+                encryptionKey: input.env.integrationCredentialEncryptionKey,
+                clientId: input.env.googleOAuthClientId,
+                clientSecret: input.env.googleOAuthClientSecret,
+              }
+            : undefined,
         });
         usage = result.usage;
         return result.output;
