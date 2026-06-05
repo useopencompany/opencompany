@@ -84,12 +84,19 @@ const streamMock = vi.hoisted(() => ({
     currentStatus: "",
     lastError: null,
   } as unknown as SessionRuntimeState,
+  // Last `options` argument seen by useSessionStream — lets a test assert which
+  // seedFromEnd value SessionView derived from the snapshot status (regression
+  // surface for the #306 startup-race fix).
+  lastOptions: undefined as { seedFromEnd?: boolean } | undefined,
 }));
 vi.mock("@/components/useSessionStream", () => ({
-  useSessionStream: () => ({
-    state: streamMock.state,
-    status: streamMock.status,
-  }),
+  useSessionStream: (_sessionId: string, options?: { seedFromEnd?: boolean }) => {
+    streamMock.lastOptions = options;
+    return {
+      state: streamMock.state,
+      status: streamMock.status,
+    };
+  },
 }));
 
 const actionMocks = vi.hoisted(() => ({
@@ -123,6 +130,7 @@ afterEach(() => {
   actionMocks.submitAgentSessionMessage.mockReset();
   streamMock.status = "live";
   streamMock.state = emptyStreamState();
+  streamMock.lastOptions = undefined;
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -765,6 +773,79 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
 
     // Rendered in both the inline transcript banner and the inspector runtime panel.
     expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
+  });
+});
+
+// Regression for #306. On the first page load of a newly-started session, the
+// snapshot status is a startup value (`created`/`provisioning`/`ready`) while the
+// runner is starting up. The pre-fix predicate `!ACTIVE_STREAMING_STATUSES.has(...)`
+// returned `true` for those, so the stream tailed from HEAD — and if the runner had
+// already emitted `message.created(assistant)` by then, the overlay missed it and
+// the assistant message could never reach `completed`. When status later flipped to
+// `awaiting_approval`, the UI rendered "Stopped before finishing" until refresh.
+describe("SessionViewContent — #306: startup-status snapshot must not seedFromEnd", () => {
+  it.each(["created", "provisioning", "ready", "running", "aborting"])(
+    "passes seedFromEnd=false to useSessionStream for snapshot status %s",
+    (status) => {
+      const detail = makeDetail({ session: makeSession({ id: "sess_startup", status }) });
+      renderSessionViewContent(detail);
+      expect(streamMock.lastOptions?.seedFromEnd).toBe(false);
+    },
+  );
+
+  it.each(["completed", "failed", "aborted", "archived", "awaiting_approval", "awaiting_input"])(
+    "passes seedFromEnd=true to useSessionStream for settled/paused status %s",
+    (status) => {
+      const detail = makeDetail({ session: makeSession({ id: "sess_settled", status }) });
+      renderSessionViewContent(detail);
+      expect(streamMock.lastOptions?.seedFromEnd).toBe(true);
+    },
+  );
+
+  it("does not flash 'Stopped before finishing' when the overlay carries the full assistant turn", () => {
+    // Post-fix runtime: snapshot is `ready` (the page loaded mid-startup) and only
+    // has the user message, but the stream replayed from "-1" so the overlay holds
+    // the complete assistant turn (created → deltas → completed) plus the
+    // `awaiting_approval` status flip. The merge must yield a completed assistant
+    // message and suppress the stopped-after-user notice.
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_new", status: "ready" }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+      ],
+    });
+
+    streamMock.state = emptyStreamState({
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "do the thing",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        makeRunningAssistantMessage({
+          id: "msg_assistant",
+          content: "Here's what I'll do.",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:00:05.000Z",
+        }),
+      ],
+      currentStatus: "awaiting_approval",
+      statusObserved: true,
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    expect(screen.getByText("Here's what I'll do.")).toBeInTheDocument();
   });
 });
 
