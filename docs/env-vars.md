@@ -142,6 +142,35 @@ Setup checklist:
 If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
 and the workspace-home card degrades to the booking fallback (onboarding never breaks).
 
+Channel naming: each customer channel is `<customer-slug>-x-opencompany` (matching the existing
+partner channels, e.g. `aurelio-x-opencompany`). Names aren't globally unique; ownership is
+enforced via the channel purpose (`opencompany-support:<workspaceId>`), so a same-named
+other-workspace channel is never adopted — it fails safe to the booking card.
+
+Recovery: an hourly Inngest cron (`sweep-failed-slack-support-channels`) re-dispatches
+provisioning for workspaces stuck in `failed` or `pending` >1h, so a transient failure — or a
+workspace onboarded *before* `SLACK_SUPPORT_*` was configured — self-heals on the next sweep
+(no manual backfill needed).
+
+### Testing & operations
+
+- **Delivery:** `conversations.inviteShared` returns no shareable `url`, so Slack delivers the
+  invite itself — by **email** to recipients without a Slack account, **in-app** (under "Slack
+  Connect" invitations) to those who have one. The card therefore says "check your email"; both
+  paths reach the customer. The invitee chooses which of *their* Slack orgs to file the shared
+  channel into.
+- **Visibility:** the channel is private — only its members see it. `SLACK_SUPPORT_MEMBER_IDS`
+  must list the OC support people, or no human (only the bot) will see the channels. Being a
+  workspace member is not enough.
+- **Testing a fresh onboarding:** a Google-Workspace **plus-alias** (`you+test@domain`) receives
+  mail but is **not** a Google account, so it can't complete Google SSO login. To re-test with a
+  real account, reset the user (full delete is blocked by an FK): `delete from
+  workspace_slack_channels where workspace_id=:ws; delete from onboarding_responses where
+  user_id=:u; delete from agents where workspace_id=:ws and path='agents/leo/leo.agent';` then
+  re-onboard.
+- **Sandbox:** don't test against the real customer-facing Slack in a way that spams colleagues —
+  use a Pro-trial workspace and set `SLACK_SUPPORT_MEMBER_IDS` to just yourself.
+
 ## Render Runner
 
 Set these in the Render `opencompany-runner` service.
