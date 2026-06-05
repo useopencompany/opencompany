@@ -9,22 +9,20 @@ export type ComposerVariant = "expanded" | "compact";
 // "compact" is the in-session follow-up composer. Only padding/typography differ — the
 // structure (input region on top, a toolbar tray below) is identical so the two stay
 // visually consistent.
-const VARIANT_STYLES: Record<
-  ComposerVariant,
-  { card: string; inputRegion: string; bar: string }
-> = {
-  expanded: {
-    card: "rounded-2xl",
-    // Symmetric vertical padding so the items-end action centers on a single line.
-    inputRegion: "px-4 py-3",
-    bar: "rounded-b-2xl px-2.5 py-2",
-  },
-  compact: {
-    card: "rounded-xl",
-    inputRegion: "px-3.5 py-2.5",
-    bar: "rounded-b-xl px-2 py-1.5",
-  },
-};
+const VARIANT_STYLES: Record<ComposerVariant, { card: string; inputRegion: string; bar: string }> =
+  {
+    expanded: {
+      card: "rounded-2xl",
+      // Symmetric vertical padding so the items-end action centers on a single line.
+      inputRegion: "px-4 py-3",
+      bar: "rounded-b-2xl px-2.5 py-2",
+    },
+    compact: {
+      card: "rounded-xl",
+      inputRegion: "px-3.5 py-2.5",
+      bar: "rounded-b-xl px-2 py-1.5",
+    },
+  };
 
 type ComposerProps = {
   variant?: ComposerVariant;

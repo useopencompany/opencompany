@@ -7,8 +7,8 @@ import { ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
-import { Composer } from "@/components/Composer";
 import { useCollections } from "@/components/CollectionsProvider";
+import { Composer } from "@/components/Composer";
 import { useToast } from "@/components/ToastProvider";
 import {
   Select,

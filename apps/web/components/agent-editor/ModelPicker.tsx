@@ -126,7 +126,10 @@ export function ModelPicker({
                       <Check
                         size={13}
                         strokeWidth={2}
-                        className={cn("shrink-0 text-ink", isSelected ? "opacity-100" : "opacity-0")}
+                        className={cn(
+                          "shrink-0 text-ink",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
                       />
                       <ModelIcon size={13} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
                       <span className="min-w-0 flex-1 truncate">{model.label}</span>

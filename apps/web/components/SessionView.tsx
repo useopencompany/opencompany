@@ -47,8 +47,8 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
-import { Composer } from "@/components/Composer";
 import { useCollections } from "@/components/CollectionsProvider";
+import { Composer } from "@/components/Composer";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";

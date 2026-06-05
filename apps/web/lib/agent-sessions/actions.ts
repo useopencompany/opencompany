@@ -114,8 +114,7 @@ export async function createAgentSessionFromPrompt(
 
   // A valid catalog model picked in the composer overrides the agent's default for this
   // session only; an unknown/stale id is ignored in favor of the agent default.
-  const modelName =
-    modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
+  const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
 
   const { session, statusEvent } = await insertAgentSession({
     agent,
