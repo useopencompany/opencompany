@@ -22,6 +22,7 @@ import {
   CircleStop,
   Copy,
   ExternalLink,
+  FileText,
   LoaderCircle,
   MessageCircleQuestion,
   PanelRight,
@@ -592,7 +593,41 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
           ) : (
-            message.content
+            <div className="flex flex-col gap-2">
+              {message.content ? <div>{message.content}</div> : null}
+              {message.attachments && message.attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {message.attachments.map((att) =>
+                    att.kind === "image" ? (
+                      <a
+                        key={att.id}
+                        href={`/api/attachments/${att.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/attachments/${att.id}`}
+                          alt={att.filename}
+                          className="max-h-48 max-w-xs rounded-md border border-ink-subtle/30 object-cover"
+                        />
+                      </a>
+                    ) : (
+                      <a
+                        key={att.id}
+                        href={`/api/attachments/${att.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-2 rounded-md border border-ink-subtle/40 bg-surface px-2 py-1.5 text-[12px] text-ink"
+                      >
+                        <FileText size={16} strokeWidth={1.75} className="text-ink-muted" />
+                        <span className="max-w-[160px] truncate">{att.filename}</span>
+                      </a>
+                    ),
+                  )}
+                </div>
+              ) : null}
+            </div>
           )}
           {canCopy && message.status !== "running" && !awaitingInput ? (
             <div

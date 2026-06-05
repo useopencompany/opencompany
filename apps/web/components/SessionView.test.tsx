@@ -768,6 +768,49 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
   });
 });
 
+describe("SessionViewContent — user message attachments", () => {
+  it("renders an <img> and a pdf chip for a user message's attachments", () => {
+    const detail = makeDetail({
+      messages: [
+        {
+          id: "msg_with_attachments",
+          role: "user",
+          content: "Have a look at these",
+          status: "completed",
+          createdAt: "2026-06-05T10:00:00.000Z",
+          attachments: [
+            {
+              id: "att_img",
+              kind: "image",
+              mediaType: "image/png",
+              filename: "screenshot.png",
+            },
+            {
+              id: "att_pdf",
+              kind: "pdf",
+              mediaType: "application/pdf",
+              filename: "report.pdf",
+            },
+          ],
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    // The text body still renders.
+    expect(screen.getByText("Have a look at these")).toBeInTheDocument();
+
+    // The image attachment renders an <img> served through the auth-scoped byte route.
+    const image = screen.getByAltText("screenshot.png");
+    expect(image).toHaveAttribute("src", "/api/attachments/att_img");
+
+    // The pdf attachment renders a chip/link with the filename, also through the route.
+    const pdfLink = screen.getByText("report.pdf").closest("a");
+    expect(pdfLink).toHaveAttribute("href", "/api/attachments/att_pdf");
+  });
+});
+
 describe("SessionViewContent — optimistic send", () => {
   it("clears the composer and paints the user message immediately on Enter", async () => {
     const user = userEvent.setup();
