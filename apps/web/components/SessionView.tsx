@@ -96,11 +96,23 @@ import {
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
 
-// A turn is actively generating tokens right now — the transcript must replay from
-// offset "-1" to reconstruct the in-flight assistant text. Every other status (settled,
-// paused, or brand-new) seeds the live read from the stream's current end instead, since
-// the durable transcript is already painted from the server snapshot.
-const ACTIVE_STREAMING_STATUSES = new Set(["running", "aborting"]);
+// Snapshot statuses where the server snapshot is the authoritative transcript AND no
+// turn can still be racing into the Durable Stream — the lease has been released
+// (terminal) or the run is durably parked (paused). Safe to tail from the stream's
+// current end. Every other status (active OR startup) must replay from "-1": during
+// `created`/`provisioning`/`ready` the runner can claim the lease and emit
+// `message.created` between when the snapshot was read and when we resolve HEAD, and
+// the reducer's `message.completed` is a silent no-op without the matching
+// `message.created` in the overlay — the assistant turn would never reach `completed`
+// and we'd misrender "Stopped before finishing" once status flips to `awaiting_approval`.
+const SETTLED_SNAPSHOT_STATUSES = new Set([
+  "completed",
+  "failed",
+  "aborted",
+  "archived",
+  "awaiting_approval",
+  "awaiting_input",
+]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
@@ -305,11 +317,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // (durable rows + transient token deltas) through the shared reducer. `onEvent`
   // resolves the felt-TTFT timer on the first streamed assistant activity.
   const { state: streamState, status: streamStatus } = useSessionStream(session.id, {
-    // Seed from the stream's current end unless a turn is actively generating at open
-    // time (then replay from "-1" to rebuild in-flight text). Read from the server
-    // snapshot status, which is stable for this session load; captured at subscribe
+    // Seed from the stream's current end only when the snapshot is settled or paused
+    // (no in-flight turn AND no startup race window). For active or startup statuses
+    // we replay from "-1" — see SETTLED_SNAPSHOT_STATUSES above. Captured at subscribe
     // time inside the hook, so the later terminal-status flip doesn't re-open the stream.
-    seedFromEnd: !ACTIVE_STREAMING_STATUSES.has(detail.session.status),
+    seedFromEnd: SETTLED_SNAPSHOT_STATUSES.has(detail.session.status),
     onEvent: (event) => {
       const pending = pendingTtftRef.current;
       if (
@@ -959,29 +971,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
-                <p className="mt-1 text-[12.5px] text-ink-muted">
-                  Start with one of these, or write your own.
-                </p>
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  {[
-                    "Set up the dev environment",
-                    "Run the test suite",
-                    "Open a PR for current changes",
-                    "Explain the codebase",
-                  ].map((chip) => (
-                    <button
-                      key={chip}
-                      type="button"
-                      onClick={() => {
-                        setInput(chip);
-                        textareaRef.current?.focus();
-                      }}
-                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-surface-muted"
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                </div>
+                <p className="mt-1 text-[12.5px] text-ink-muted">Write a message to get started.</p>
               </div>
             ) : null}
 

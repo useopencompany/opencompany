@@ -209,4 +209,67 @@ describe("subscribeSessionStream", () => {
 
     unsubscribe();
   });
+
+  // Regression for #306: when a `message.created` lands before HEAD (e.g. a brand-new
+  // session whose runner already emitted the assistant turn into the stream by the
+  // time the page resolves HEAD), seeding from the end means the overlay never sees
+  // the creation. The reducer's `message.completed` is then a silent no-op — it only
+  // updates an existing message — so the assistant turn would never reach `completed`
+  // in the overlay. The caller (SessionView) must NOT pick seedFromEnd for any status
+  // where this race can occur (active OR startup states).
+  it("seedFromEnd silently drops message.completed when message.created was pre-HEAD", async () => {
+    const sessionId = "seedfromend-missing-created";
+    const stream = await producer(sessionId);
+    // Simulate the runner having already emitted the assistant's `message.created`
+    // BEFORE the client resolves HEAD.
+    await stream.append({
+      type: "message.created",
+      messageId: "msg_assistant",
+      payload: { messageId: "msg_assistant", role: "assistant", status: "running" },
+    });
+
+    let latest: SessionRuntimeState | null = null;
+    let resolveLive: () => void = () => {};
+    const liveReady = new Promise<void>((resolve) => (resolveLive = resolve));
+    const unsubscribe = subscribeSessionStream(
+      streamUrl(sessionId),
+      {
+        onState: (state) => (latest = state),
+        onStatus: (status) => {
+          if (status === "live") resolveLive();
+        },
+      },
+      { seedFromEnd: true },
+    );
+    await liveReady;
+
+    // Now stream the rest of the turn — the deltas + completion + the status flip
+    // that follows in production (`awaiting_approval` after the model parks at a
+    // tool gate). All of this lands AFTER the HEAD seek.
+    await stream.append({
+      type: "message.delta",
+      messageId: "msg_assistant",
+      transient: true,
+      payload: { messageId: "msg_assistant", delta: "Hello" },
+    });
+    await stream.append({
+      type: "message.completed",
+      messageId: "msg_assistant",
+      payload: { messageId: "msg_assistant", content: "Hello" },
+    });
+    await stream.append({
+      type: "session.status",
+      payload: { status: "awaiting_approval", message: "Awaiting tool approval" },
+    });
+
+    await expect.poll(() => latest?.currentStatus, { timeout: 15000 }).toBe("awaiting_approval");
+    // The bug: the overlay has no `msg_assistant` because `message.created` was
+    // before HEAD and `message.completed` is a no-op without it. This is the silent
+    // failure mode the SessionView predicate must avoid — captured here so the
+    // reducer contract stays explicit.
+    expect(findMessage(latest, "msg_assistant")).toBeUndefined();
+    expect(latest?.statusObserved).toBe(true);
+
+    unsubscribe();
+  });
 });
