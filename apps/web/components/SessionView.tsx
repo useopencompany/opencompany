@@ -282,7 +282,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Latest-attachments ref so the unmount cleanup can revoke all outstanding object URLs
   // with an empty-dep effect (fires on unmount only) instead of re-running on every change.
   const attachmentsRef = useRef(attachments);
-  attachmentsRef.current = attachments;
+  // Sync the ref in an effect (not during render — that trips the react-compiler lint
+  // rule) so the empty-dep unmount cleanup below can revoke outstanding object URLs.
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentCapability = modelSupportsAttachments(session.modelName);
   const attachmentsEnabled = attachmentCapability.images || attachmentCapability.pdf;
