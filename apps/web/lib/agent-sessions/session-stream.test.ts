@@ -262,9 +262,7 @@ describe("subscribeSessionStream", () => {
       payload: { status: "awaiting_approval", message: "Awaiting tool approval" },
     });
 
-    await expect
-      .poll(() => latest?.currentStatus, { timeout: 15000 })
-      .toBe("awaiting_approval");
+    await expect.poll(() => latest?.currentStatus, { timeout: 15000 }).toBe("awaiting_approval");
     // The bug: the overlay has no `msg_assistant` because `message.created` was
     // before HEAD and `message.completed` is a no-op without it. This is the silent
     // failure mode the SessionView predicate must avoid — captured here so the

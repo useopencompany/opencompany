@@ -784,23 +784,30 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
 // the assistant message could never reach `completed`. When status later flipped to
 // `awaiting_approval`, the UI rendered "Stopped before finishing" until refresh.
 describe("SessionViewContent — #306: startup-status snapshot must not seedFromEnd", () => {
-  it.each(["created", "provisioning", "ready", "running", "aborting"])(
-    "passes seedFromEnd=false to useSessionStream for snapshot status %s",
-    (status) => {
-      const detail = makeDetail({ session: makeSession({ id: "sess_startup", status }) });
-      renderSessionViewContent(detail);
-      expect(streamMock.lastOptions?.seedFromEnd).toBe(false);
-    },
-  );
+  it.each([
+    "created",
+    "provisioning",
+    "ready",
+    "running",
+    "aborting",
+  ])("passes seedFromEnd=false to useSessionStream for snapshot status %s", (status) => {
+    const detail = makeDetail({ session: makeSession({ id: "sess_startup", status }) });
+    renderSessionViewContent(detail);
+    expect(streamMock.lastOptions?.seedFromEnd).toBe(false);
+  });
 
-  it.each(["completed", "failed", "aborted", "archived", "awaiting_approval", "awaiting_input"])(
-    "passes seedFromEnd=true to useSessionStream for settled/paused status %s",
-    (status) => {
-      const detail = makeDetail({ session: makeSession({ id: "sess_settled", status }) });
-      renderSessionViewContent(detail);
-      expect(streamMock.lastOptions?.seedFromEnd).toBe(true);
-    },
-  );
+  it.each([
+    "completed",
+    "failed",
+    "aborted",
+    "archived",
+    "awaiting_approval",
+    "awaiting_input",
+  ])("passes seedFromEnd=true to useSessionStream for settled/paused status %s", (status) => {
+    const detail = makeDetail({ session: makeSession({ id: "sess_settled", status }) });
+    renderSessionViewContent(detail);
+    expect(streamMock.lastOptions?.seedFromEnd).toBe(true);
+  });
 
   it("does not flash 'Stopped before finishing' when the overlay carries the full assistant turn", () => {
     // Post-fix runtime: snapshot is `ready` (the page loaded mid-startup) and only
