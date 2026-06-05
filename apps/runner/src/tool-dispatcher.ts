@@ -1,8 +1,12 @@
 import {
   AGENT_SELF_EDIT_SKILL_ID,
+  type AgentBrainReference,
   type AgentConfig,
   BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
+  formatBrainReferenceDisplay,
+  isBrainListingAllowed,
+  isBrainPathAllowed,
   isDeferrableRuntimeTool,
   newAgentSessionMessageId,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
@@ -49,7 +53,12 @@ import {
   RunLeaseLostError,
   withRunControlChecks,
 } from "./run-control";
-import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
+import {
+  resolveSandboxBrainRelativePath,
+  resolveSandboxToolPath,
+  runSandboxTool,
+  type SandboxHandle,
+} from "./sandbox";
 import { hasReadSkill, markSkillRead } from "./self-edit-gate";
 import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
@@ -671,6 +680,7 @@ export async function executeRuntimeTool(input: {
         name: input.definition.name,
         args: input.args,
         workdir: input.workdir,
+        brainReferences: input.agentConfig?.brain ?? [],
       });
       const activeSandbox = await input.getSandbox();
       sandboxIdForCapture = activeSandbox.sandboxId;
@@ -1027,10 +1037,11 @@ function throwIfAborted(signal: AbortSignal) {
   }
 }
 
-function preflightSandboxToolArgs(input: {
+export function preflightSandboxToolArgs(input: {
   name: RuntimeToolName;
   args: unknown;
   workdir: string;
+  brainReferences: AgentBrainReference[];
 }) {
   if (
     input.name !== "read_file" &&
@@ -1050,8 +1061,11 @@ function preflightSandboxToolArgs(input: {
     throw new RecoverableToolError("Tool argument path must be a string.", "invalid_tool_input");
   }
 
+  const requestedPath = typeof pathValue === "string" ? pathValue : undefined;
+
+  let brainRelativePath: string | null;
   try {
-    resolveSandboxToolPath(input.workdir, typeof pathValue === "string" ? pathValue : undefined);
+    brainRelativePath = resolveSandboxBrainRelativePath(input.workdir, requestedPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     throw new RecoverableToolError(
@@ -1059,6 +1073,37 @@ function preflightSandboxToolArgs(input: {
       "invalid_sandbox_path",
     );
   }
+
+  // Enforce the agent's true Brain access scope. The root check above only
+  // verifies the path is under brain/; here we reject Brain paths the agent's
+  // @brain/... references do not mount, so out-of-scope writes fail loudly
+  // instead of succeeding in the sandbox and being silently dropped at sync.
+  if (brainRelativePath === null) return;
+
+  const allowed =
+    input.name === "list_files"
+      ? isBrainListingAllowed(brainRelativePath, input.brainReferences)
+      : isBrainPathAllowed(brainRelativePath, input.brainReferences);
+  if (allowed) return;
+
+  throw new RecoverableToolError(
+    brainAccessDeniedMessage(brainRelativePath, input.brainReferences),
+    "brain_path_not_mounted",
+  );
+}
+
+function brainAccessDeniedMessage(
+  brainRelativePath: string,
+  references: AgentBrainReference[],
+): string {
+  const target = `brain/${brainRelativePath}`;
+  if (references.length === 0) {
+    return `${target} is outside this agent's Brain access — this agent has no mounted Brain paths. Add @brain/... references to the agent definition (via self-edit) before reading or writing Brain files, or ask the user to grant access.`;
+  }
+  const allowed = references
+    .map((reference) => formatBrainReferenceDisplay(reference.path))
+    .join(", ");
+  return `${target} is outside this agent's mounted Brain access. This agent can only read or write Brain files under: ${allowed}. To work elsewhere in the Brain, add the path to this agent's brain refs (e.g. @brain/${brainRelativePath}) via self-edit, or ask the user to grant access.`;
 }
 
 function isFatalToolError(
