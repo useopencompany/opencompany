@@ -17,6 +17,7 @@ export type RunnerEnv = {
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
+  blobReadWriteToken?: string | undefined;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -39,6 +40,7 @@ export function loadEnv(): RunnerEnv {
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
+    blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

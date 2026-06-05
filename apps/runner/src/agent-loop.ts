@@ -27,6 +27,7 @@ import type { ModelMessage } from "ai";
 import { asc, eq } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { syncAgentBundleFromSandbox } from "./agent-bundle";
+import { hydrateMessageAttachments } from "./attachment-hydration";
 import { syncBrainFromSandbox } from "./brain";
 import { createAgentDelegationHandler } from "./delegation";
 import type { RunnerEnv } from "./env";
@@ -355,9 +356,11 @@ async function runMessageWithContext(
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
     );
-    const messages = buildModelMessages(
+    const visibleStoredMessages = await hydrateMessageAttachments(
       storedMessages.filter((message) => message.id !== assistantMessageId && !message.internal),
+      { db: ctx.db, blobToken: ctx.env.blobReadWriteToken },
     );
+    const messages = buildModelMessages(visibleStoredMessages);
 
     sandboxAcquirer = createSandboxAcquirer({
       row,
@@ -1082,8 +1085,9 @@ async function runAfterSessionWithContext(
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
     );
-    const visibleStoredMessages = storedMessages.filter(
-      (message) => message.id !== assistantMessageId && !message.internal,
+    const visibleStoredMessages = await hydrateMessageAttachments(
+      storedMessages.filter((message) => message.id !== assistantMessageId && !message.internal),
+      { db: ctx.db, blobToken: ctx.env.blobReadWriteToken },
     );
     const messages: ModelMessage[] = buildModelMessages(visibleStoredMessages);
     messages.push({
@@ -1691,14 +1695,18 @@ async function continueTurnAfterToolResult(input: {
     return "skipped_assistant_exists";
   }
 
+  const continuationStoredMessages = (
+    await ctx.db
+      .select()
+      .from(agentSessionMessages)
+      .where(eq(agentSessionMessages.sessionId, input.sessionId))
+      .orderBy(asc(agentSessionMessages.createdAt))
+  ).filter((message) => message.id !== continuationAssistantMessageId && !message.internal);
   const continuationMessages = buildModelMessages(
-    (
-      await ctx.db
-        .select()
-        .from(agentSessionMessages)
-        .where(eq(agentSessionMessages.sessionId, input.sessionId))
-        .orderBy(asc(agentSessionMessages.createdAt))
-    ).filter((message) => message.id !== continuationAssistantMessageId && !message.internal),
+    await hydrateMessageAttachments(continuationStoredMessages, {
+      db: ctx.db,
+      blobToken: ctx.env.blobReadWriteToken,
+    }),
   );
 
   const toolStartCoordinator = createToolStartCoordinator();
