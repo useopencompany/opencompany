@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import { type SlackChannelStatus, workspaceSlackChannels } from "@opencompany/db/schema";
-import { and, eq, ne } from "drizzle-orm";
+import {
+  type SlackChannelStatus,
+  users,
+  workspaceSlackChannels,
+  workspaces,
+} from "@opencompany/db/schema";
+import { and, eq, lt, ne, or } from "drizzle-orm";
 
 export type WorkspaceSlackChannel = {
   status: SlackChannelStatus;
@@ -108,4 +113,41 @@ export async function markFailed(workspaceId: string, error: string): Promise<vo
         ne(workspaceSlackChannels.status, "active"),
       ),
     );
+}
+
+export type RecoverableSlackChannel = {
+  workspaceId: string;
+  userId: string;
+  customerEmail: string;
+  firstName: string | null;
+};
+
+// Channels that should be re-provisioned by the recovery sweep: terminal `failed`, or
+// `pending` stuck past `stalePendingBefore` (a crashed/lost worker). Joined with the
+// workspace owner so the provisioning event can be reconstructed. Capped to bound a sweep.
+export async function listRecoverableSlackChannels(
+  stalePendingBefore: Date,
+  limit = 50,
+): Promise<RecoverableSlackChannel[]> {
+  const db = getDb();
+  return db
+    .select({
+      workspaceId: workspaceSlackChannels.workspaceId,
+      userId: users.id,
+      customerEmail: users.email,
+      firstName: users.firstName,
+    })
+    .from(workspaceSlackChannels)
+    .innerJoin(workspaces, eq(workspaces.id, workspaceSlackChannels.workspaceId))
+    .innerJoin(users, eq(users.id, workspaces.createdByUserId))
+    .where(
+      or(
+        eq(workspaceSlackChannels.status, "failed"),
+        and(
+          eq(workspaceSlackChannels.status, "pending"),
+          lt(workspaceSlackChannels.updatedAt, stalePendingBefore),
+        ),
+      ),
+    )
+    .limit(limit);
 }
