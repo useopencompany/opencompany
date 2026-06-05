@@ -1,9 +1,12 @@
 "use client";
 
 import {
+  ATTACHMENT_MAX_PER_MESSAGE,
+  modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
@@ -33,6 +36,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -45,6 +49,11 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useCollections } from "@/components/CollectionsProvider";
+import {
+  ComposerAttachments,
+  type PendingAttachment,
+  uploadAttachment,
+} from "@/components/composer-attachments";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -268,6 +277,75 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [isPending, startTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentCapability = modelSupportsAttachments(session.modelName);
+  const attachmentsEnabled = attachmentCapability.images || attachmentCapability.pdf;
+
+  const acceptFiles = useCallback(
+    (files: File[]) => {
+      if (!attachmentsEnabled) return;
+      setAttachments((prev) => {
+        const next = [...prev];
+        for (const file of files) {
+          if (next.length >= ATTACHMENT_MAX_PER_MESSAGE) {
+            showToast({
+              title: "Limit reached",
+              description: `Max ${ATTACHMENT_MAX_PER_MESSAGE} files.`,
+              tone: "default",
+            });
+            break;
+          }
+          const validation = validateAttachmentCandidate({
+            mediaType: file.type,
+            sizeBytes: file.size,
+          });
+          if (!validation.ok) {
+            showToast({
+              title: validation.reason === "size" ? "File too large" : "Unsupported file",
+              description:
+                validation.reason === "size" ? "Max 25 MB per file." : "Only images and PDFs.",
+              tone: "default",
+            });
+            continue;
+          }
+          if (validation.kind === "pdf" && !attachmentCapability.pdf) continue;
+          if (validation.kind === "image" && !attachmentCapability.images) continue;
+          const id = crypto.randomUUID();
+          next.push({
+            id,
+            filename: file.name,
+            mediaType: file.type,
+            kind: validation.kind,
+            sizeBytes: file.size,
+            status: "uploading",
+            ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
+          });
+          void uploadAttachment({ id, file, workspaceId, sessionId: session.id })
+            .then((res) =>
+              setAttachments((cur) =>
+                cur.map((a) => (a.id === id ? { ...a, status: "ready", ...res } : a)),
+              ),
+            )
+            .catch((err) =>
+              setAttachments((cur) =>
+                cur.map((a) => (a.id === id ? { ...a, status: "error", error: String(err) } : a)),
+              ),
+            );
+        }
+        return next;
+      });
+    },
+    [attachmentsEnabled, attachmentCapability, session.id, workspaceId, showToast],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -853,16 +931,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
           }}
           onDragEnter={(event) => {
+            if (!attachmentsEnabled) return;
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
             dragCounterRef.current += 1;
             setIsDragActive(true);
           }}
           onDragOver={(event) => {
+            if (!attachmentsEnabled) return;
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
           }}
           onDragLeave={(event) => {
+            if (!attachmentsEnabled) return;
             event.preventDefault();
             dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
             if (dragCounterRef.current === 0) {
@@ -870,15 +951,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             }
           }}
           onDrop={(event) => {
+            if (!attachmentsEnabled) return;
             event.preventDefault();
             dragCounterRef.current = 0;
             setIsDragActive(false);
             if (event.dataTransfer.files.length > 0) {
-              showToast({
-                title: "Coming soon",
-                description: "File attachments will be available soon.",
-                tone: "default",
-              });
+              acceptFiles(Array.from(event.dataTransfer.files));
             }
           }}
         >
@@ -975,6 +1053,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           <div className="bg-canvas px-8 lg:px-12 py-4">
             <div className="group/composer mx-auto max-w-[960px]">
               {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
+              <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
               <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
                 {slashMenuOpen ? (
                   <SlashCommandMenu
@@ -989,13 +1068,31 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   />
                 ) : null}
                 <div ref={attachMenuRef} className="relative">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                    className="hidden"
+                    onChange={(event) => {
+                      acceptFiles(Array.from(event.target.files ?? []));
+                      event.target.value = "";
+                      setAttachMenuOpen(false);
+                    }}
+                  />
                   <button
                     type="button"
                     onClick={() => setAttachMenuOpen((prev) => !prev)}
+                    disabled={!attachmentsEnabled}
+                    title={
+                      attachmentsEnabled
+                        ? undefined
+                        : "This session's model can't accept image or PDF uploads."
+                    }
                     aria-label="Attach file"
                     aria-expanded={attachMenuOpen}
                     aria-haspopup="menu"
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
                   >
                     <Plus size={15} strokeWidth={1.75} />
                   </button>
@@ -1007,14 +1104,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       <button
                         type="button"
                         role="menuitem"
-                        onClick={() => {
-                          showToast({
-                            title: "Coming soon",
-                            description: "File attachments will be available soon.",
-                            tone: "default",
-                          });
-                          setAttachMenuOpen(false);
-                        }}
+                        onClick={() => fileInputRef.current?.click()}
                         className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
                       >
                         <Upload size={13} strokeWidth={1.75} />
@@ -1075,26 +1165,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     }
                   }}
                   onPaste={(event) => {
+                    if (!attachmentsEnabled) return;
                     const items = event.clipboardData?.items;
                     if (!items) return;
-                    const itemArray = Array.from(items);
-                    const hasImage = itemArray.some(
-                      (item) => item.kind === "file" && item.type.startsWith("image/"),
-                    );
-                    if (!hasImage) return;
-                    const hasText = itemArray.some((item) => item.kind === "string");
-                    // Pure-image paste: stop the browser default so nothing visible
-                    // changes in the textarea and the toast is the only signal.
-                    // Mixed text+image: let the browser paste the text portion
-                    // alongside the toast so the user keeps what they expected.
-                    if (!hasText) event.preventDefault();
-                    showToast({
-                      title: "Image upload coming soon",
-                      description: hasText
-                        ? "The text was pasted; the image was ignored."
-                        : "Image attachments aren't supported yet.",
-                      tone: "default",
-                    });
+                    const files: File[] = [];
+                    for (const item of Array.from(items)) {
+                      if (item.kind !== "file") continue;
+                      const file = item.getAsFile();
+                      if (file) files.push(file);
+                    }
+                    if (files.length === 0) return;
+                    // Files in the clipboard: take them as attachments and stop the
+                    // browser from also pasting them (e.g. an image) into the textarea.
+                    // Any text portion of a mixed paste still falls through normally.
+                    event.preventDefault();
+                    acceptFiles(files);
                   }}
                   placeholder="Ask this agent to do something"
                   role="combobox"
@@ -1120,7 +1205,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 ) : (
                   <button
                     type="button"
-                    disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
+                    disabled={
+                      isPending ||
+                      attachments.some((a) => a.status !== "ready") ||
+                      (!parseSlashCommand(input) && (isBusy || !input.trim()))
+                    }
                     onClick={handleSend}
                     aria-label="Send message"
                     className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
