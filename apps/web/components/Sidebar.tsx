@@ -31,8 +31,10 @@ import FeedbackDialog from "@/components/FeedbackDialog";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
+import { useSessionSeen } from "@/components/useSessionSeen";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
+import { sidebarDotKind } from "@/lib/agent-sessions/sidebar-status";
 import { deriveSidebarSessions } from "@/lib/collections/selectors";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-sidebar-collapsed";
@@ -207,12 +209,16 @@ function SessionHistoryItem({
   session,
   active,
   starred,
+  seenAt,
   onToggleStar,
   onArchive,
 }: {
   session: SidebarSession;
   active?: boolean;
   starred?: boolean;
+  // ISO timestamp this device last viewed the session, or null. Drives the blue
+  // unseen-finished dot (PRO-142).
+  seenAt?: string | null;
   onToggleStar: (sessionId: string, currentlyStarred: boolean) => void;
   onArchive: (sessionId: string, active: boolean) => void;
 }) {
@@ -258,13 +264,17 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {session.status === "running" ||
-        session.status === "provisioning" ||
-        session.status === "awaiting_approval" ||
-        session.status === "awaiting_input" ||
-        session.status === "interrupted" ? (
-          <SessionStatusDot status={session.status} pulse />
-        ) : null}
+        {(() => {
+          const dot = sidebarDotKind({
+            status: session.status,
+            updatedAt: session.updatedAt,
+            seenAt: seenAt ?? null,
+            isOpen: Boolean(active),
+          });
+          if (dot === "status") return <SessionStatusDot status={session.status} pulse />;
+          if (dot === "unseen") return <SessionStatusDot status={session.status} pulse unseen />;
+          return null;
+        })()}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
       </Link>
       <button
@@ -637,6 +647,7 @@ function SidebarContent({
   onArchive: (sessionId: string, active: boolean) => void;
 }) {
   const pathname = usePathname();
+  const { seenAt } = useSessionSeen();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
@@ -798,6 +809,7 @@ function SidebarContent({
                           session={session}
                           active={pathname === `/session/${session.id}`}
                           starred
+                          seenAt={seenAt(session.id)}
                           onToggleStar={onToggleStar}
                           onArchive={onArchive}
                         />
@@ -820,6 +832,7 @@ function SidebarContent({
                           session={session}
                           active={pathname === `/session/${session.id}`}
                           starred={false}
+                          seenAt={seenAt(session.id)}
                           onToggleStar={onToggleStar}
                           onArchive={onArchive}
                         />

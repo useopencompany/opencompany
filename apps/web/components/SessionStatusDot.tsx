@@ -1,8 +1,17 @@
-export function SessionStatusDot({ status, pulse = false }: { status: string; pulse?: boolean }) {
+export function SessionStatusDot({
+  status,
+  pulse = false,
+  unseen = false,
+}: {
+  status: string;
+  pulse?: boolean;
+  unseen?: boolean;
+}) {
   // For non-pulse (SessionView): keep existing span-based dot with halo
   if (!pulse) {
-    const tone =
-      status === "failed"
+    const tone = unseen
+      ? "bg-info shadow-[0_0_0_2px_rgba(43,85,127,0.12)]"
+      : status === "failed"
         ? "bg-danger shadow-[0_0_0_2px_rgba(220,38,38,0.1)]"
         : status === "running" || status === "provisioning"
           ? "bg-success shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
@@ -16,9 +25,12 @@ export function SessionStatusDot({ status, pulse = false }: { status: string; pu
     return <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} />;
   }
 
-  // For pulse (Sidebar): SVG circle stays perfectly round at small sizes
-  const fill =
-    status === "failed"
+  // For pulse (Sidebar): SVG circle stays perfectly round at small sizes. The
+  // blue "unseen-finished" dot (PRO-142) wins over the status colour and never
+  // pulses — it marks a result waiting to be looked at, not live activity.
+  const fill = unseen
+    ? "var(--color-info)"
+    : status === "failed"
       ? "var(--color-danger)"
       : status === "running" || status === "provisioning"
         ? "var(--color-success)"
@@ -30,7 +42,8 @@ export function SessionStatusDot({ status, pulse = false }: { status: string; pu
           ? "var(--color-warning)"
           : "var(--color-ink-subtle)";
 
-  const animation = status === "running" || status === "provisioning" ? "session-pulse" : "";
+  const animation =
+    !unseen && (status === "running" || status === "provisioning") ? "session-pulse" : "";
 
   return (
     <svg
