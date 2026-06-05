@@ -1,4 +1,5 @@
 export * from "./after-session";
+export * from "./attachments";
 export * from "./agent-file";
 export * from "./brain";
 export * from "./config";
