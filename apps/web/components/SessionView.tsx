@@ -278,6 +278,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // Latest-attachments ref so the unmount cleanup can revoke all outstanding object URLs
+  // with an empty-dep effect (fires on unmount only) instead of re-running on every change.
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentCapability = modelSupportsAttachments(session.modelName);
   const attachmentsEnabled = attachmentCapability.images || attachmentCapability.pdf;
@@ -345,6 +349,15 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
       return prev.filter((a) => a.id !== id);
     });
+  }, []);
+  // Revoke any still-live preview object URLs when the composer unmounts (e.g. navigating
+  // away with unsent attachments) so they don't leak.
+  useEffect(() => {
+    return () => {
+      for (const att of attachmentsRef.current) {
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      }
+    };
   }, []);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
@@ -855,7 +868,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
-    if (!content) return;
+    const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
+    if (!content && ready.length === 0) return;
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
     const submittedAtMs = Date.now();
@@ -878,9 +892,25 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
-      const result = await submitAgentSessionMessage(session.id, content);
+      const result = await submitAgentSessionMessage(
+        session.id,
+        content,
+        ready.map((a) => ({
+          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
+          blobPathname: a.blobPathname!,
+          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
+          blobUrl: a.blobUrl!,
+          mediaType: a.mediaType,
+          filename: a.filename,
+          sizeBytes: a.sizeBytes,
+        })),
+      );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
+        // Sent successfully — drop the previews and clear the tray. Revoke the object
+        // URLs so the not-yet-uploaded local-file previews don't leak.
+        attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+        setAttachments([]);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
             message.optimisticId === optimisticId
@@ -1208,7 +1238,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     disabled={
                       isPending ||
                       attachments.some((a) => a.status !== "ready") ||
-                      (!parseSlashCommand(input) && (isBusy || !input.trim()))
+                      (!parseSlashCommand(input) &&
+                        (isBusy || (!input.trim() && attachments.length === 0)))
                     }
                     onClick={handleSend}
                     aria-label="Send message"

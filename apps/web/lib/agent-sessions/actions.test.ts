@@ -20,10 +20,17 @@ import {
   submitAgentSessionMessage,
 } from "./actions";
 
-vi.mock("@opencompany/agent-runtime", () => ({
-  newAgentSessionId: vi.fn(),
-  newAgentSessionMessageId: vi.fn(),
-}));
+vi.mock(import("@opencompany/agent-runtime"), async (importOriginal) => {
+  const actual = await importOriginal();
+  // Keep the pure attachment helpers (catalog lookup, MIME/size validation, limit) real so
+  // server-side re-validation is exercised against the actual rules; only the id factories
+  // are stubbed so tests can assert on deterministic ids.
+  return {
+    ...actual,
+    newAgentSessionId: vi.fn(),
+    newAgentSessionMessageId: vi.fn(),
+  };
+});
 
 vi.mock("@opencompany/billing", () => ({
   hasPositiveWorkspaceBalance: vi.fn(),
