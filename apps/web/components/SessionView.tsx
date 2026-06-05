@@ -6,6 +6,7 @@ import {
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
 } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -47,8 +48,10 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
+import { Composer } from "@/components/Composer";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -64,6 +67,7 @@ import {
   cancelAgentSessionQuestion,
   continueInterruptedSession,
   resolveToolApproval,
+  setAgentSessionModel,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
@@ -121,6 +125,7 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 ]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 // How far from the bottom (in px) before we consider the user "pinned".
@@ -285,6 +290,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
+  // Optimistic per-session model override. The displayed model is this when set, else the
+  // persisted session model. Switching is sticky for the session and applies to the next
+  // turn — it never interrupts an in-flight run — so this uses its own transition rather
+  // than the send path's `isPending`.
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
+  const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
@@ -901,6 +912,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  // Switch the model for this session on the fly. Optimistic: reflect the pick immediately,
+  // persist it (sticky for the session, used on the next turn), and revert on failure.
+  const handleModelChange = (modelId: string) => {
+    const previous = modelOverride;
+    setModelOverride(modelId);
+    setFormError(null);
+    startModelTransition(async () => {
+      const result = await setAgentSessionModel(session.id, modelId);
+      if (!result.ok) {
+        setModelOverride(previous);
+        setFormError(result.error);
+      }
+    });
+  };
+
   const handleContinueInterrupted = () => {
     if (!sessionIsInterrupted || isPending) return;
     const content = "Continue";
@@ -1094,224 +1120,246 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           </div>
         ) : (
           <div className="bg-canvas px-6 py-4">
-            <div className="group/composer mx-auto max-w-[960px]">
-              {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
-              {sessionIsInterrupted ? (
-                <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-2 text-[12.5px] text-warning">
-                    <SessionStatusDot status="interrupted" />
-                    <span className="truncate">Interrupted</span>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={handleContinueInterrupted}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Play size={12} strokeWidth={1.9} />
-                    Continue
-                  </button>
-                </div>
-              ) : null}
-              <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
-                {slashMenuOpen ? (
-                  <SlashCommandMenu
-                    id={slashMenuId}
-                    commands={slashCommands}
-                    activeId={slashActiveId}
-                    onSelect={(command) => insertSlashCommand(command)}
-                    onHover={(id) => {
-                      const idx = slashCommands.findIndex((command) => command.id === id);
-                      if (idx >= 0) setSlashActiveIndex(idx);
-                    }}
-                  />
-                ) : null}
-                <div ref={attachMenuRef} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setAttachMenuOpen((prev) => !prev)}
-                    aria-label="Attach file"
-                    aria-expanded={attachMenuOpen}
-                    aria-haspopup="menu"
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
-                  >
-                    <Plus size={15} strokeWidth={1.75} />
-                  </button>
-                  {attachMenuOpen ? (
-                    <div
-                      role="menu"
-                      className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
-                    >
+            <div className="mx-auto max-w-[960px]">
+              <Composer
+                variant="compact"
+                error={formError}
+                banner={
+                  sessionIsInterrupted ? (
+                    <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2 text-[12.5px] text-warning">
+                        <SessionStatusDot status="interrupted" />
+                        <span className="truncate">Interrupted</span>
+                      </div>
                       <button
                         type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          showToast({
-                            title: "Coming soon",
-                            description: "File attachments will be available soon.",
-                            tone: "default",
-                          });
-                          setAttachMenuOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                        disabled={isPending}
+                        onClick={handleContinueInterrupted}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <Upload size={13} strokeWidth={1.75} />
-                        Upload file
+                        <Play size={12} strokeWidth={1.9} />
+                        Continue
                       </button>
                     </div>
-                  ) : null}
-                </div>
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(event) => {
-                    setInput(event.target.value);
-                    setCaret(event.target.selectionStart ?? event.target.value.length);
-                  }}
-                  onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
-                  onKeyDown={(event) => {
-                    // While the slash menu is open it owns navigation keys; focus
-                    // stays in the textarea so typing keeps filtering the list.
-                    if (slashMenuOpen && !event.nativeEvent.isComposing) {
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault();
-                        setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
-                        return;
-                      }
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setSlashActiveIndex(
-                          (i) => (i - 1 + slashCommands.length) % slashCommands.length,
-                        );
-                        return;
-                      }
-                      // Enter and Tab both insert the highlighted command into the input
-                      // (they do not run it) — the user runs it by then pressing Enter to send.
-                      if (event.key === "Enter" || event.key === "Tab") {
-                        if (event.key === "Enter" && event.shiftKey) {
-                          // shift+Enter falls through to a normal newline.
-                        } else {
+                  ) : null
+                }
+                overlay={
+                  slashMenuOpen ? (
+                    <SlashCommandMenu
+                      id={slashMenuId}
+                      commands={slashCommands}
+                      activeId={slashActiveId}
+                      onSelect={(command) => insertSlashCommand(command)}
+                      onHover={(id) => {
+                        const idx = slashCommands.findIndex((command) => command.id === id);
+                        if (idx >= 0) setSlashActiveIndex(idx);
+                      }}
+                    />
+                  ) : null
+                }
+                input={
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(event) => {
+                      setInput(event.target.value);
+                      setCaret(event.target.selectionStart ?? event.target.value.length);
+                    }}
+                    onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+                    onKeyDown={(event) => {
+                      // While the slash menu is open it owns navigation keys; focus
+                      // stays in the textarea so typing keeps filtering the list.
+                      if (slashMenuOpen && !event.nativeEvent.isComposing) {
+                        if (event.key === "ArrowDown") {
                           event.preventDefault();
-                          const command = slashCommands[slashActiveIndex];
-                          if (command) insertSlashCommand(command);
+                          setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
+                          return;
+                        }
+                        if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setSlashActiveIndex(
+                            (i) => (i - 1 + slashCommands.length) % slashCommands.length,
+                          );
+                          return;
+                        }
+                        // Enter and Tab both insert the highlighted command into the input
+                        // (they do not run it) — the user runs it by then pressing Enter to send.
+                        if (event.key === "Enter" || event.key === "Tab") {
+                          if (event.key === "Enter" && event.shiftKey) {
+                            // shift+Enter falls through to a normal newline.
+                          } else {
+                            event.preventDefault();
+                            const command = slashCommands[slashActiveIndex];
+                            if (command) insertSlashCommand(command);
+                            return;
+                          }
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setSlashDismissed(true);
                           return;
                         }
                       }
-                      if (event.key === "Escape") {
+                      if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
                         event.preventDefault();
-                        setSlashDismissed(true);
-                        return;
+                        handleSend();
                       }
-                    }
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  onPaste={(event) => {
-                    const items = event.clipboardData?.items;
-                    if (!items) return;
-                    const itemArray = Array.from(items);
-                    const hasImage = itemArray.some(
-                      (item) => item.kind === "file" && item.type.startsWith("image/"),
-                    );
-                    if (!hasImage) return;
-                    const hasText = itemArray.some((item) => item.kind === "string");
-                    // Pure-image paste: stop the browser default so nothing visible
-                    // changes in the textarea and the toast is the only signal.
-                    // Mixed text+image: let the browser paste the text portion
-                    // alongside the toast so the user keeps what they expected.
-                    if (!hasText) event.preventDefault();
-                    showToast({
-                      title: "Image upload coming soon",
-                      description: hasText
-                        ? "The text was pasted; the image was ignored."
-                        : "Image attachments aren't supported yet.",
-                      tone: "default",
-                    });
-                  }}
-                  placeholder="Ask this agent to do something"
-                  role="combobox"
-                  aria-expanded={slashMenuOpen}
-                  aria-controls={slashMenuOpen ? slashMenuId : undefined}
-                  aria-activedescendant={slashActiveOptionId}
-                  aria-haspopup="listbox"
-                  rows={1}
-                  className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                />
-                {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={requestAbort}
-                    aria-label="Stop generating"
-                    title="Stop generating"
-                    className="flex h-9 w-9 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    <CircleStop size={16} strokeWidth={1.9} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
-                    onClick={handleSend}
-                    aria-label="Send message"
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
-                  >
-                    <ArrowUp size={13} strokeWidth={2} />
-                  </button>
-                )}
-              </div>
-              <div
-                className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
-                  slashMenuOpen
-                    ? "opacity-100"
-                    : "opacity-0 group-focus-within/composer:opacity-100"
-                }`}
-              >
-                {slashMenuOpen ? (
+                    }}
+                    onPaste={(event) => {
+                      const items = event.clipboardData?.items;
+                      if (!items) return;
+                      const itemArray = Array.from(items);
+                      const hasImage = itemArray.some(
+                        (item) => item.kind === "file" && item.type.startsWith("image/"),
+                      );
+                      if (!hasImage) return;
+                      const hasText = itemArray.some((item) => item.kind === "string");
+                      // Pure-image paste: stop the browser default so nothing visible
+                      // changes in the textarea and the toast is the only signal.
+                      // Mixed text+image: let the browser paste the text portion
+                      // alongside the toast so the user keeps what they expected.
+                      if (!hasText) event.preventDefault();
+                      showToast({
+                        title: "Image upload coming soon",
+                        description: hasText
+                          ? "The text was pasted; the image was ignored."
+                          : "Image attachments aren't supported yet.",
+                        tone: "default",
+                      });
+                    }}
+                    placeholder="Ask this agent to do something"
+                    role="combobox"
+                    aria-expanded={slashMenuOpen}
+                    aria-controls={slashMenuOpen ? slashMenuId : undefined}
+                    aria-activedescendant={slashActiveOptionId}
+                    aria-haspopup="listbox"
+                    rows={1}
+                    className="min-h-9 w-full resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                    style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                  />
+                }
+                leftControls={
                   <>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↑↓
-                      </kbd>{" "}
-                      navigate
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↵
-                      </kbd>{" "}
-                      insert
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        esc
-                      </kbd>{" "}
-                      dismiss
-                    </span>
+                    <div ref={attachMenuRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setAttachMenuOpen((prev) => !prev)}
+                        aria-label="Attach file"
+                        aria-expanded={attachMenuOpen}
+                        aria-haspopup="menu"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+                      >
+                        <Plus size={15} strokeWidth={1.75} />
+                      </button>
+                      {attachMenuOpen ? (
+                        <div
+                          role="menu"
+                          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              showToast({
+                                title: "Coming soon",
+                                description: "File attachments will be available soon.",
+                                tone: "default",
+                              });
+                              setAttachMenuOpen(false);
+                            }}
+                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                          >
+                            <Upload size={13} strokeWidth={1.75} />
+                            Upload file
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <ModelPicker
+                      value={modelOverride ?? session.modelName}
+                      fallbackModelId={DEFAULT_MODEL_ID}
+                      onChange={handleModelChange}
+                    />
                   </>
-                ) : (
-                  <>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↵
-                      </kbd>{" "}
-                      send
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ⇧↵
-                      </kbd>{" "}
-                      new line
-                    </span>
-                  </>
-                )}
-              </div>
+                }
+                action={
+                  canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={requestAbort}
+                      aria-label="Stop generating"
+                      title="Stop generating"
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <CircleStop size={16} strokeWidth={1.9} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={
+                        isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))
+                      }
+                      onClick={handleSend}
+                      aria-label="Send message"
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
+                    >
+                      <ArrowUp size={13} strokeWidth={2} />
+                    </button>
+                  )
+                }
+                rightControls={
+                  <div
+                    className={`flex items-center gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
+                      slashMenuOpen
+                        ? "opacity-100"
+                        : "hidden opacity-0 group-focus-within/composer:opacity-100 sm:flex"
+                    }`}
+                  >
+                    {slashMenuOpen ? (
+                      <>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ↑↓
+                          </kbd>{" "}
+                          navigate
+                        </span>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ↵
+                          </kbd>{" "}
+                          insert
+                        </span>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            esc
+                          </kbd>{" "}
+                          dismiss
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ↵
+                          </kbd>{" "}
+                          send
+                        </span>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ⇧↵
+                          </kbd>{" "}
+                          new line
+                        </span>
+                      </>
+                    )}
+                  </div>
+                }
+              />
             </div>
           </div>
         )}

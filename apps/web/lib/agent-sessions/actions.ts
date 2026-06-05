@@ -2,6 +2,7 @@
 
 import {
   type AgentSessionQuestionAnswer,
+  getAgentModelDefinition,
   newAgentSessionId,
   newAgentSessionMessageId,
 } from "@opencompany/agent-runtime";
@@ -88,7 +89,11 @@ export async function createAgentSession(idOrPath: string) {
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-export async function createAgentSessionFromPrompt(agentId: string, content: string) {
+export async function createAgentSessionFromPrompt(
+  agentId: string,
+  content: string,
+  modelId?: string,
+) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
   if (!trimmed) {
@@ -107,11 +112,16 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     return { ok: false, error: "Agent not found." } as const;
   }
 
+  // A valid catalog model picked in the composer overrides the agent's default for this
+  // session only; an unknown/stale id is ignored in favor of the agent default.
+  const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
+
   const { session, statusEvent } = await insertAgentSession({
     agent,
     title: titleFromPrompt(trimmed),
     userId: user.id,
     workspaceId: workspace.id,
+    modelName,
   });
   const sessionId = session.id;
   const { message, createdEvent } = await insertUserMessage(sessionId, trimmed);
@@ -130,7 +140,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
         agent_id: agent.id,
         session_id: sessionId,
         model_provider: agent.config.model.provider,
-        model_name: agent.config.model.name,
+        model_name: modelName,
         source: "prompt",
       }),
       captureServerEvent("session_message_sent", user.id, {
@@ -140,7 +150,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
         session_id: sessionId,
         message_id: messageId,
         model_provider: agent.config.model.provider,
-        model_name: agent.config.model.name,
+        model_name: modelName,
         is_initial_message: true,
         message_length: trimmed.length,
       }),
@@ -241,6 +251,42 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
   );
 
   return { ok: true, messageId } as const;
+}
+
+// Switch the model a session runs with, on the fly. This is the session's own model override
+// (stored on agentSessions.modelName) — it is sticky for the session and applies to every
+// following turn until changed again. It does NOT touch the agent's saved default model. The
+// runner reads agentSessions.modelName as the model override on its next turn, so this takes
+// effect on the next message and never interrupts an in-flight run.
+export async function setAgentSessionModel(sessionId: string, modelId: string) {
+  const { user, workspace } = await currentWorkspace();
+  if (!getAgentModelDefinition(modelId)) {
+    return { ok: false, error: "Unknown model." } as const;
+  }
+
+  const db = getDb();
+  const updated = await db
+    .update(agentSessions)
+    .set({
+      modelProvider: "vercel-ai-gateway",
+      modelName: modelId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .returning({ id: agentSessions.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  return { ok: true } as const;
 }
 
 export async function continueInterruptedSession(sessionId: string) {
@@ -758,9 +804,13 @@ async function insertAgentSession(input: {
   title: string;
   userId: string;
   workspaceId: string;
+  // Per-session model override. Defaults to the agent's configured model when omitted.
+  // The agent's saved default (agent.config.model.name) is never changed by this.
+  modelName?: string;
 }) {
   const db = getDb();
   const sessionId = newAgentSessionId();
+  const modelName = input.modelName ?? input.agent.config.model.name;
 
   // Return the canonical session row and status-event row so callers can synthesize the
   // session detail payload in-memory (see buildCreatedSessionDetail) instead of issuing a
@@ -775,7 +825,7 @@ async function insertAgentSession(input: {
         agentId: input.agent.id,
         title: input.title,
         modelProvider: input.agent.config.model.provider,
-        modelName: input.agent.config.model.name,
+        modelName,
       })
       .returning(),
     db

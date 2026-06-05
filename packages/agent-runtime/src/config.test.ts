@@ -657,6 +657,54 @@ describe("resolveAgentRuntimeConfig", () => {
       reasoningExposure: "summary",
     });
   });
+
+  it("uses a valid modelOverride in place of the agent default", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Override agent",
+      instructions: "Do the work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      modelOverride: "anthropic/claude-opus-4.8",
+    });
+
+    expect(resolved.model.name).toBe("anthropic/claude-opus-4.8");
+    // The agent's saved default is never mutated by an override.
+    expect(config.model.name).toBe("openai/gpt-5.4-mini");
+  });
+
+  it("falls back to the agent default when modelOverride is unknown", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Override agent",
+      instructions: "Do the work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      modelOverride: "not-a-real/model",
+    });
+
+    expect(resolved.model.name).toBe("openai/gpt-5.4-mini");
+  });
 });
 
 describe("normalizeAgentConfig", () => {
