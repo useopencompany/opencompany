@@ -66,9 +66,12 @@ Documented here so it is not forgotten; it blocks the feature working in any env
 
 1. Create an OpenCompany Slack app in the OC Slack workspace.
 2. Bot token scopes:
-   - `groups:write` — create private channels + invite the support members.
-   - `groups:read` — look up a private channel by name to adopt the one a crashed
-     provisioning attempt left behind (no duplicate channel on retry).
+   - `groups:write` — create private channels, invite the support members, and stamp the
+     owning workspace into the channel purpose (`opencompany-support:<workspaceId>`).
+   - `groups:read` — on a `name_taken` retry, look up the channel by name AND verify its
+     purpose marks THIS workspace before adopting it. A channel marked for a different
+     workspace (a slug+suffix collision) is refused, so a crashed attempt's orphan is
+     recovered without ever hijacking another tenant's channel.
    - `chat:write` — post a welcome message.
    - `conversations.connect:write` (a.k.a. the Slack Connect write capability) — send
      external shared-channel invites. **Note:** Slack may require app review / org approval

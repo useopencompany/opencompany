@@ -6,6 +6,7 @@ import {
   postIntroMessage,
   SlackNotConfiguredError,
   supportChannelName,
+  supportChannelPurpose,
 } from "./support-client";
 
 const originalEnv = { ...process.env };
@@ -17,6 +18,7 @@ function makeClient() {
       invite: vi.fn(async () => ({ ok: true })),
       inviteShared: vi.fn(async () => ({ ok: true, url: "https://join.slack.com/share/x" })),
       list: vi.fn(async () => ({ ok: true, channels: [] })),
+      setPurpose: vi.fn(async () => ({ ok: true })),
     },
     chat: { postMessage: vi.fn(async () => ({ ok: true })) },
   };
@@ -39,15 +41,26 @@ describe("createSupportChannel", () => {
       expect.objectContaining({ name: supportChannelName(workspace), is_private: true }),
     );
     expect(supportChannelName(workspace)).toMatch(/^oc-acme-corp-[0-9a-f]{6}$/);
+    // ownership marker is stamped so a later name_taken retry can verify the channel is ours
+    expect(client.conversations.setPurpose).toHaveBeenCalledWith({
+      channel: "C123",
+      purpose: supportChannelPurpose(workspace.id),
+    });
     expect(id).toBe("C123");
   });
 
-  it("adopts the existing channel on name_taken instead of creating a second one", async () => {
+  it("adopts this workspace's own channel on name_taken (purpose matches)", async () => {
     const client = makeClient();
     client.conversations.create = vi.fn().mockRejectedValue({ data: { error: "name_taken" } });
     client.conversations.list = vi.fn(async () => ({
       ok: true,
-      channels: [{ id: "C-existing", name: supportChannelName(workspace) }],
+      channels: [
+        {
+          id: "C-existing",
+          name: supportChannelName(workspace),
+          purpose: { value: supportChannelPurpose(workspace.id) },
+        },
+      ],
     }));
 
     const id = await createSupportChannel(workspace, { client });
@@ -55,6 +68,43 @@ describe("createSupportChannel", () => {
     expect(id).toBe("C-existing");
     expect(client.conversations.create).toHaveBeenCalledTimes(1);
     expect(client.conversations.list).toHaveBeenCalled();
+  });
+
+  it("refuses to adopt a channel owned by a DIFFERENT workspace (no cross-tenant leak)", async () => {
+    const client = makeClient();
+    client.conversations.create = vi.fn().mockRejectedValue({ data: { error: "name_taken" } });
+    client.conversations.list = vi.fn(async () => ({
+      ok: true,
+      channels: [
+        {
+          id: "C-other-tenant",
+          name: supportChannelName(workspace),
+          purpose: { value: supportChannelPurpose("wks_someone_else") },
+        },
+      ],
+    }));
+
+    await expect(createSupportChannel(workspace, { client })).rejects.toMatchObject({
+      name: "SlackProvisionError",
+      slackError: "name_taken",
+    });
+  });
+
+  it("adopts an unmarked channel and (re)asserts ownership", async () => {
+    const client = makeClient();
+    client.conversations.create = vi.fn().mockRejectedValue({ data: { error: "name_taken" } });
+    client.conversations.list = vi.fn(async () => ({
+      ok: true,
+      channels: [{ id: "C-unmarked", name: supportChannelName(workspace) }],
+    }));
+
+    const id = await createSupportChannel(workspace, { client });
+
+    expect(id).toBe("C-unmarked");
+    expect(client.conversations.setPurpose).toHaveBeenCalledWith({
+      channel: "C-unmarked",
+      purpose: supportChannelPurpose(workspace.id),
+    });
   });
 
   it("paginates conversations.list to find the adopted channel", async () => {

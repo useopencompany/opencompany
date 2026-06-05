@@ -35,9 +35,10 @@ type SlackProvisionClient = {
       limit?: number;
       cursor?: string | undefined;
     }) => Promise<{
-      channels?: Array<{ id?: string; name?: string }>;
+      channels?: Array<{ id?: string; name?: string; purpose?: { value?: string } }>;
       response_metadata?: { next_cursor?: string };
     }>;
+    setPurpose: (args: { channel: string; purpose: string }) => Promise<unknown>;
   };
   chat: { postMessage: (args: { channel: string; text: string }) => Promise<unknown> };
 };
@@ -91,11 +92,9 @@ function isCustomerInviteBenign(error: unknown): boolean {
   return code === "already_in_channel" || code === "already_invited" || code === "already_shared";
 }
 
-// A per-workspace channel-name suffix derived deterministically from the workspace id.
-// Baking it into the name from the start makes the name unique per workspace (no
-// cross-workspace collisions) AND makes a `name_taken` on retry unambiguous: it can only
-// be THIS workspace's own channel from an earlier attempt, so adopting it is safe.
-// sha256 (not the raw id tail) gives uniform distribution regardless of id format.
+// A per-workspace channel-name suffix derived deterministically from the workspace id,
+// so the channel name is unique per workspace. sha256 (not the raw id tail) gives uniform
+// distribution regardless of id format.
 function channelSuffix(workspaceId: string): string {
   return createHash("sha256").update(workspaceId).digest("hex").slice(0, 6);
 }
@@ -105,23 +104,54 @@ export function supportChannelName(workspace: { id: string; name: string }): str
   return channelName(workspaceChannelSlug(workspace.name), channelSuffix(workspace.id));
 }
 
-// Find a private channel by exact name (paginated). Used to ADOPT the channel a prior
-// provisioning attempt created but never persisted (process died between Slack's create
-// response and setSlackChannelId). Requires the `groups:read` bot scope.
-async function findChannelIdByName(
+// Ownership marker stamped into the channel's purpose. It is the source of truth for
+// "this channel belongs to workspace X" when adopting on name_taken — names alone could
+// collide across workspaces, so the purpose is checked before adopting and a colliding
+// OTHER workspace's channel is never hijacked (no cross-tenant leak).
+const CHANNEL_PURPOSE_PREFIX = "opencompany-support:";
+export function supportChannelPurpose(workspaceId: string): string {
+  return `${CHANNEL_PURPOSE_PREFIX}${workspaceId}`;
+}
+
+// Best-effort: stamp the owning workspace into the channel purpose. The channel id is the
+// real source of truth; a missing marker only weakens the next retry's adopt check (it
+// can still adopt an unmarked channel), it never breaks provisioning — so don't throw.
+async function markChannelOwnership(
+  client: SlackProvisionClient,
+  channelId: string,
+  purpose: string,
+): Promise<void> {
+  try {
+    await client.conversations.setPurpose({ channel: channelId, purpose });
+  } catch {
+    // ignore — see note above
+  }
+}
+
+// Find the channel a prior attempt created but never persisted (process died between
+// Slack's create response and setSlackChannelId), and confirm it belongs to THIS
+// workspace. Adopts only a channel whose purpose marks this workspace, OR one with no
+// marker yet (a prior create whose setPurpose didn't land). A channel marked for a
+// DIFFERENT workspace (a slug+suffix collision) is refused → fail safe, never leaked.
+// Requires the `groups:read` bot scope. Archived channels are skipped (unusable anyway).
+async function findOwnedChannelId(
   client: SlackProvisionClient,
   name: string,
+  ownPurpose: string,
 ): Promise<string | null> {
   let cursor: string | undefined;
   do {
     const res = await client.conversations.list({
       types: "private_channel",
-      exclude_archived: false,
+      exclude_archived: true,
       limit: 200,
       cursor,
     });
     const match = res.channels?.find((channel) => channel.name === name);
-    if (match?.id) return match.id;
+    if (match?.id) {
+      const purpose = match.purpose?.value ?? "";
+      return purpose === "" || purpose === ownPurpose ? match.id : null;
+    }
     cursor = res.response_metadata?.next_cursor || undefined;
   } while (cursor);
   return null;
@@ -138,26 +168,32 @@ export async function createSupportChannel(
 ): Promise<string> {
   const client = resolveClient(deps);
   const name = supportChannelName(workspace);
+  const purpose = supportChannelPurpose(workspace.id);
 
   try {
     const created = await client.conversations.create({ name, is_private: true });
     const id = created.channel?.id;
     if (!id) throw new SlackProvisionError("conversations.create returned no channel id");
+    // Stamp ownership so a later name_taken retry can verify the channel is ours.
+    await markChannelOwnership(client, id, purpose);
     return id;
   } catch (error) {
     if (error instanceof SlackProvisionError) throw error;
     if (slackErrorCode(error) !== "name_taken") {
       throw new SlackProvisionError("conversations.create failed", slackErrorCode(error));
     }
-    // name_taken on our workspace-unique name → adopt the channel a prior attempt left.
-    const existingId = await findChannelIdByName(client, name);
-    if (!existingId) {
+    // name_taken: adopt ONLY if the existing channel belongs to this workspace (purpose
+    // check) or is unmarked — never adopt another workspace's colliding channel.
+    const ownedId = await findOwnedChannelId(client, name, purpose);
+    if (!ownedId) {
       throw new SlackProvisionError(
-        "conversations.create reported name_taken but the channel was not found",
+        "conversations.create reported name_taken but no channel owned by this workspace was found",
         "name_taken",
       );
     }
-    return existingId;
+    // (Re)assert ownership in case a prior create's setPurpose didn't land.
+    await markChannelOwnership(client, ownedId, purpose);
+    return ownedId;
   }
 }
 
