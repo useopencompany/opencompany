@@ -896,9 +896,12 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.approval_required") {
       const call = getCall(toolCallId);
-      // The approval event carries only a formatted inputPreview (no structured input), so a
-      // use_tool envelope cannot be unwrapped yet — the following tool.started corrects the name.
-      const display = resolveToolDisplay(readString(event.payload.name) || call.name, undefined);
+      // The approval event carries the structured input, so a use_tool envelope unwraps to its
+      // inner tool name + dynamic label here — the card matches the later tool.started rendering.
+      const display = resolveToolDisplay(
+        readString(event.payload.name) || call.name,
+        event.payload.input,
+      );
       call.name = display.name || call.name;
       call.label = display.label ?? call.label;
       call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;

@@ -1121,6 +1121,38 @@ describe("buildAssistantTurnParts", () => {
     });
   });
 
+  it("unwraps a use_tool envelope to its inner name + label on the approval card", () => {
+    const parts = buildAssistantTurnParts(
+      { id: "msg_assistant", role: "assistant", content: "", status: "running" },
+      [
+        event(1, "tool.approval_required", {
+          messageId: "msg_assistant",
+          toolCallId: "call_deferred",
+          // The model called the deferred tool through the generic use_tool dispatcher, so the
+          // event's top-level name is the envelope, not the action being approved.
+          name: "use_tool",
+          input: { tool: "linear__create_issue", arguments: { title: "Bug" } },
+          providerKey: "linear",
+          permissionGroup: "post",
+          inputPreview: '{\n  "tool": "linear__create_issue"\n}',
+          requestedAt: "2026-06-02T08:51:35.162Z",
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    // Resolves to the inner tool — never the generic "Running a tool" envelope title.
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.name : undefined).toBe(
+      "linear__create_issue",
+    );
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.label : undefined).not.toBe(
+      "Running a tool",
+    );
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.approval?.status : undefined).toBe(
+      "required",
+    );
+  });
+
   it("preserves pending approval state when persisted model parts include the tool call", () => {
     const parts = buildAssistantTurnParts(
       {

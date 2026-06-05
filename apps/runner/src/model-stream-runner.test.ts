@@ -150,9 +150,13 @@ describe("collectAssistantStream", () => {
       toolName: "slack__chat_postMessage",
       input: { text: "hi" },
     });
-    // The approval row + event are persisted, and parked siblings are released.
+    // The approval row + event are persisted, and parked siblings are released. The event
+    // carries the structured input so the approval card can unwrap a use_tool envelope.
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "tool.approval_required" }),
+      expect.objectContaining({
+        type: "tool.approval_required",
+        payload: expect.objectContaining({ input: { text: "hi" } }),
+      }),
     );
     expect(suspend).toHaveBeenCalledTimes(1);
     // The stream is torn down on the way out.

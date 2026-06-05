@@ -286,6 +286,7 @@ export async function collectAssistantStream(input: {
                 messageId: input.assistantMessageId,
                 toolCallId: part.toolCallId,
                 name: toolStart.name,
+                input: toolStart.input,
                 providerKey,
                 permissionGroup: group,
                 inputPreview: formatRuntimePreview(toolStart.input),

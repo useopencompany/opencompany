@@ -115,6 +115,10 @@ export type AgentRuntimeEvent =
         messageId: string;
         toolCallId: string;
         name: string;
+        // The structured tool input, carried so the approval card can unwrap a `use_tool`
+        // envelope to its inner tool name + dynamic label (mirrors `tool.started`). The
+        // formatted `inputPreview` remains for the persisted approval row.
+        input?: unknown;
         providerKey: string;
         permissionGroup: "read" | "post" | "modify" | "admin";
         inputPreview?: string;
