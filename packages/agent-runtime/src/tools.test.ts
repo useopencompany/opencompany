@@ -406,6 +406,15 @@ describe("searchRuntimeTools", () => {
     expect(typeof profile?.description).toBe("string");
   });
 
+  it("returns compact entries without the verbose per-tool help (that is tool_help's job)", () => {
+    const results = searchRuntimeTools({ capability: "instagram" }, enabled);
+    expect(results.length).toBeGreaterThan(0);
+    for (const result of results) {
+      expect(result).not.toHaveProperty("help");
+      expect(Object.keys(result).sort()).toEqual(["description", "name", "parameters"]);
+    }
+  });
+
   it("filters by a case-insensitive query across name and description", () => {
     const results = searchRuntimeTools({ query: "transcript" }, enabled);
     expect(results.length).toBeGreaterThan(0);

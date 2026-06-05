@@ -64,14 +64,16 @@ export type AgentRuntimeEvent =
       // prompt + the tool catalog). Not rendered in the UI — captured purely so the session's
       // "Copy Debug JSON" export can include the otherwise-ephemeral request inputs. See
       // isInspectableRuntimeEvent (web) which hides it from the inspector event list.
-      // `tools` is exactly the set registered in the model call this turn; `deferredTools` lists
-      // the capability tools reachable via `find_tools` + `use_tool` but NOT sent to the model.
+      // `toolsSentToModel` is exactly the set registered in the model call this turn;
+      // `deferredToolsNotSent` lists the capability tools reachable via `find_tools` + `use_tool`
+      // but deliberately withheld from the call. The explicit names exist so a reader of the export
+      // does not misread the withheld set as injected.
       type: "debug.model_request";
       payload: {
         messageId: string;
         systemPrompt: string;
-        tools: Array<{ name: string; description: string; parameters: unknown }>;
-        deferredTools?: Array<{ name: string; description: string; parameters: unknown }>;
+        toolsSentToModel: Array<{ name: string; description: string; parameters: unknown }>;
+        deferredToolsNotSent?: Array<{ name: string; description: string; parameters: unknown }>;
       };
     }
   | {

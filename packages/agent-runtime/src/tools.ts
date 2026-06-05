@@ -1731,7 +1731,7 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "find_tools",
     kind: "hosted",
     description:
-      "List the tools available for a capability — their names, descriptions, and input schemas — so you can then run one with use_tool. Tools beyond the core file/shell set are not preloaded; discover them here first. Read-only.",
+      "List the tools available for a capability — their names, descriptions, and input schemas — so you can then run one with use_tool. Tools beyond the core file/shell set are not preloaded; discover them here first. For a single tool's detailed usage instructions, call tool_help({ tool }) before invoking it. Read-only.",
     parameters: {
       type: "object",
       properties: {
@@ -1841,6 +1841,83 @@ export function getRuntimeToolHelp(toolName: string, enabledTools: readonly Runt
 // and arguments here. Mirrors the per-server MCP `{server}__use_tool` pattern for built-in tools.
 export const BUILTIN_USE_TOOL_NAME = "use_tool";
 
+// Human display name for each runtime tool — a terse noun phrase shown in the session UI in place
+// of the snake_case programmatic `name`. This is the static fallback; the UI may still derive a
+// richer one-liner from the call input (e.g. "Searching the web for …"). Typed as an exhaustive
+// Record so adding a RuntimeToolName fails the build until a title is supplied here — the title
+// lives with the registry, not in a separate frontend switch that drifts out of sync.
+export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
+  shell: "Run command",
+  gh: "GitHub CLI",
+  read_file: "Read file",
+  read_skill: "Read skill",
+  edit_file: "Edit file",
+  write_file: "Write file",
+  list_files: "List files",
+  git_diff: "Review changes",
+  delegate_to_agent: "Delegate to agent",
+  update_agent_file: "Update agent config",
+  ask_user_question: "Ask a question",
+  amp_coder: "Code with Amp",
+  opencode_coder: "Code with opencode",
+  exa_search: "Web search",
+  exa_contents: "Read web pages",
+  exa_answer: "Web answer",
+  x_search_posts: "Search X",
+  x_get_profile: "X profile",
+  x_get_user_posts: "X posts",
+  x_get_discussion: "X discussion",
+  x_get_trends: "X trends",
+  youtube_search: "Search YouTube",
+  youtube_get_video: "YouTube video",
+  youtube_get_transcript: "YouTube transcript",
+  youtube_get_channel: "YouTube channel",
+  youtube_list_channel_videos: "YouTube channel videos",
+  tiktok_get_profile: "TikTok profile",
+  tiktok_list_profile_posts: "TikTok posts",
+  tiktok_get_video: "TikTok video",
+  tiktok_get_comments: "TikTok comments",
+  tiktok_search: "Search TikTok",
+  tiktok_get_metadata: "TikTok metadata",
+  tiktok_get_transcript: "TikTok transcript",
+  instagram_get_profile: "Instagram profile",
+  instagram_list_profile_posts: "Instagram posts",
+  instagram_get_post: "Instagram post",
+  instagram_get_comments: "Instagram comments",
+  instagram_search_profiles: "Search Instagram",
+  instagram_get_metadata: "Instagram metadata",
+  instagram_get_transcript: "Instagram transcript",
+  social_get_job: "Social job status",
+  web_fetch: "Fetch web page",
+  tool_help: "Tool help",
+  find_tools: "Find tools",
+};
+
+// Resolve the display title for any tool name the UI may encounter. The `use_tool` dispatcher
+// envelope should normally be unwrapped to its inner tool before display (see effectiveToolCall);
+// the fallback here only shows if that unwrap could not find an inner tool name.
+export function toolDisplayTitle(name: string): string | undefined {
+  if (name === BUILTIN_USE_TOOL_NAME) return "Running a tool";
+  return RUNTIME_TOOL_TITLES[name as RuntimeToolName];
+}
+
+// Unwrap the `use_tool` dispatcher envelope to the inner tool it runs. A `use_tool` call carries
+// the real tool in `input.tool` and its arguments in `input.arguments`; for display we want the
+// inner tool, not the wrapper. Any other call passes through unchanged.
+export function effectiveToolCall(name: string, input: unknown): { name: string; input: unknown } {
+  if (
+    name === BUILTIN_USE_TOOL_NAME &&
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input)
+  ) {
+    const record = input as Record<string, unknown>;
+    const inner = typeof record.tool === "string" ? record.tool.trim() : "";
+    if (inner) return { name: inner, input: record.arguments };
+  }
+  return { name, input };
+}
+
 // Tools whose full schema is registered eagerly (always directly callable). These are the
 // core file/shell/ask tools used constantly and always relevant — deferring them behind a
 // `find_tools` round-trip would add latency with no token win — plus the conditional core
@@ -1905,12 +1982,13 @@ export type RuntimeToolSearchResult = {
   name: RuntimeToolName;
   description: string;
   parameters: JsonSchema;
-  help: string;
 };
 
 // Back the `find_tools` tool: return the deferred, enabled runtime tools matching an optional
 // capability id and/or substring query, with their full input schemas. This is the load-on-demand
-// expansion injected as a tool_result — the model's only path to a deferred tool's schema.
+// expansion injected as a tool_result — the model's only path to a deferred tool's schema. Results
+// are compact (name + description + schema); the verbose per-tool `help` is fetched separately via
+// `tool_help` so listing a multi-tool capability does not flood context.
 export function searchRuntimeTools(
   input: { capability?: string; query?: string },
   enabledTools: readonly RuntimeToolName[],
@@ -1944,13 +2022,13 @@ export function searchRuntimeTools(
       continue;
     }
     seen.add(name);
+    // Compact by design: name + description + input schema only. The verbose per-tool `help` is
+    // deliberately omitted so listing a multi-tool capability stays cheap — the model fetches a
+    // single tool's full help on demand via `tool_help` (getRuntimeToolHelp) instead.
     results.push({
       name: definition.name,
       description: definition.description,
       parameters: definition.parameters,
-      help:
-        definition.help ??
-        "No extended help is available. Use the schema and description for this tool.",
     });
   }
   return results;

@@ -183,7 +183,7 @@ function buildToolsIndexSection(input: {
   ];
   if (builtinCapabilities.length > 0) {
     lines.push(
-      `Other tools are not preloaded. To use a capability below, call find_tools({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
+      `Other tools are not preloaded. To use a capability below, call find_tools({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. find_tools returns compact entries (name, description, schema); when a tool is non-trivial or you are unsure how to call it, first call tool_help({ tool }) for its detailed usage instructions, then ${BUILTIN_USE_TOOL_NAME} with arguments matching its schema. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
       "Built-in capabilities:",
       ...builtinCapabilities.map((capability) => `- ${capability.id} — ${capability.description}`),
     );

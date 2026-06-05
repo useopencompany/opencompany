@@ -303,6 +303,79 @@ function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } 
   return { tool: "", arguments: {} };
 }
 
+// Shallow, top-level validation of `use_tool` arguments against the resolved tool's JSON Schema.
+// The provider cannot validate them — `use_tool.arguments` is a freeform object — so the common
+// model mistakes (missing a required field, misnaming a field, wrong primitive type) would
+// otherwise reach the tool body as vague failures. We check only the top level and skip enums /
+// nested schemas to stay low-risk; deeper constraints are still enforced by the tool body. Returns
+// a list of human-readable problems (empty when valid).
+export function validateUseToolArgs(
+  schema: RuntimeToolDefinition["parameters"],
+  args: unknown,
+): string[] {
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  const record = isRecord(args) ? args : undefined;
+  const errors: string[] = [];
+
+  if (!record) {
+    // Only an object is acceptable; a non-object is a problem only when the tool expects fields.
+    if (required.length > 0 || Object.keys(properties).length > 0) {
+      if (args !== undefined && args !== null) {
+        errors.push("arguments must be an object");
+        return errors;
+      }
+    }
+  }
+
+  for (const name of required) {
+    if (!record || record[name] === undefined) {
+      errors.push(`missing required "${name}"`);
+    }
+  }
+
+  if (record) {
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(record)) {
+        if (!Object.prototype.hasOwnProperty.call(properties, key)) {
+          errors.push(`unexpected property "${key}"`);
+        }
+      }
+    }
+    for (const [key, value] of Object.entries(record)) {
+      if (value === undefined) continue;
+      const propSchema = properties[key];
+      const expected =
+        isRecord(propSchema) && typeof propSchema.type === "string" ? propSchema.type : undefined;
+      if (!expected) continue;
+      if (!matchesJsonType(value, expected)) {
+        errors.push(`"${key}" must be a ${expected}`);
+      }
+    }
+  }
+
+  return errors;
+}
+
+function matchesJsonType(value: unknown, expected: string): boolean {
+  switch (expected) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+    case "integer":
+      return typeof value === "number";
+    case "boolean":
+      return typeof value === "boolean";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return isRecord(value);
+    default:
+      // Unknown/unsupported type keyword — don't second-guess it.
+      return true;
+  }
+}
+
 // Resolve the named deferred tool and run it through the existing executeRuntimeTool tail, but
 // persist the result under `use_tool` so it pairs with the model's dispatcher call. An unknown or
 // non-deferred tool name is persisted as a recoverable error pointing back to find_tools.
@@ -348,6 +421,19 @@ export async function dispatchBuiltinUseTool(input: {
         : 'Missing "tool" argument. Call find_tools to list available tools, then pass one as "tool".',
     });
   }
+  const argErrors = validateUseToolArgs(definition.parameters, rawArgs);
+  if (argErrors.length > 0) {
+    return persistBuiltinUseToolError({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
+      ...(input.internalMessages ? { internalMessages: true } : {}),
+      toolCallId: input.toolCallId,
+      message: `Invalid arguments for "${rawName}": ${argErrors.join("; ")}. Call tool_help({ tool: "${rawName}" }) for its schema, then retry use_tool with arguments that match it.`,
+      code: "invalid_tool_input",
+    });
+  }
   return executeRuntimeTool({
     sessionId: input.sessionId,
     assistantMessageId: input.assistantMessageId,
@@ -373,8 +459,10 @@ export async function dispatchBuiltinUseTool(input: {
   });
 }
 
-// Persist a recoverable error tool-result for a `use_tool` call that named no/unknown tool. Mirrors
-// the failure tail of executeRuntimeTool so the model recovers turn-by-turn.
+// Persist a recoverable error tool-result for a `use_tool` call that named no/unknown tool or passed
+// arguments that fail its schema. Mirrors the failure tail of executeRuntimeTool so the model
+// recovers turn-by-turn. `code` defaults to the unknown-tool case; arg-validation failures pass
+// "invalid_tool_input" to match the rest of the runtime's recoverable input errors.
 async function persistBuiltinUseToolError(input: {
   sessionId: string;
   assistantMessageId: string;
@@ -383,10 +471,11 @@ async function persistBuiltinUseToolError(input: {
   internalMessages?: boolean;
   toolCallId: string;
   message: string;
+  code?: string;
 }) {
   const output: FailedToolOutput = {
     ok: false,
-    error: { message: input.message, code: "unknown_runtime_tool", recoverable: true },
+    error: { message: input.message, code: input.code ?? "unknown_runtime_tool", recoverable: true },
   };
   const toolMessageId = newAgentSessionMessageId();
   await requireLeaseWrite(

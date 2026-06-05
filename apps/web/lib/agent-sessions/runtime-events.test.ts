@@ -14,6 +14,7 @@ import {
   mergeEvents,
   mergeMessages,
   type RuntimeEvent,
+  resolveToolDisplay,
   type SessionMessage,
   type SessionRuntimeState,
 } from "./runtime-events";
@@ -613,7 +614,13 @@ describe("buildSessionDebugTurns", () => {
       { id: "msg_assistant", role: "assistant", content: "partial", status: "running" },
     ]);
     expect(turns).toEqual([
-      { id: "msg_assistant", role: "assistant", status: "running", modelMessage: null, content: "partial" },
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        status: "running",
+        modelMessage: null,
+        content: "partial",
+      },
     ]);
   });
 });
@@ -954,6 +961,44 @@ describe("describeToolCall", () => {
 
   it("returns undefined for unknown tools so the raw name is used", () => {
     expect(describeToolCall("some_custom_tool", { foo: "bar" })).toBeUndefined();
+  });
+
+  it("derives a one-liner for the deferred search tools", () => {
+    expect(describeToolCall("youtube_search", { query: "transformers" })).toBe(
+      "Searching YouTube for “transformers”",
+    );
+    expect(describeToolCall("x_search_posts", { query: "AI agents" })).toBe(
+      "Searching X for “AI agents”",
+    );
+  });
+});
+
+describe("resolveToolDisplay", () => {
+  it("unwraps the use_tool dispatcher to its inner tool name, args, and label", () => {
+    const display = resolveToolDisplay("use_tool", {
+      tool: "exa_search",
+      arguments: { query: "competitors in fintech" },
+    });
+    expect(display.name).toBe("exa_search");
+    expect(display.input).toEqual({ query: "competitors in fintech" });
+    expect(display.label).toBe("Searching the web for “competitors in fintech”");
+  });
+
+  it("falls back to the registry title when no dynamic one-liner exists", () => {
+    // tiktok_get_video has no dynamic phrasing, so the static title is used instead of the raw name.
+    const display = resolveToolDisplay("use_tool", {
+      tool: "tiktok_get_video",
+      arguments: { id: "123" },
+    });
+    expect(display.name).toBe("tiktok_get_video");
+    expect(display.label).toBe("TikTok video");
+  });
+
+  it("passes non-wrapped calls through and still resolves a static title", () => {
+    const display = resolveToolDisplay("list_files", { path: "work" });
+    expect(display.name).toBe("list_files");
+    // list_files has a dynamic one-liner that wins over the static title.
+    expect(display.label).toBe("Listing work");
   });
 });
 

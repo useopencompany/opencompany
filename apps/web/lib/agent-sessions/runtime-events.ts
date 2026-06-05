@@ -1,3 +1,9 @@
+import {
+  BUILTIN_USE_TOOL_NAME,
+  effectiveToolCall,
+  toolDisplayTitle,
+} from "@opencompany/agent-runtime";
+
 export type SessionMessage = {
   id: string;
   role: string;
@@ -639,21 +645,20 @@ export function buildAssistantTurnParts(
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
       const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
-      const toolName = readString(part.toolName) || "Tool call";
-      const label = matchingToolCall?.label ?? describeToolCall(toolName, part.input ?? part.args);
+      const display = resolveToolDisplay(
+        readString(part.toolName) || "Tool call",
+        part.input ?? part.args,
+      );
+      const label = matchingToolCall?.label ?? display.label;
 
       turnParts.push({
         type: "tool-call",
         toolCall: {
           id: toolCallId,
-          name: toolName,
+          name: display.name,
           ...(label ? { label } : {}),
           status: matchingToolCall?.status ?? "completed",
-          inputPreview:
-            formatRuntimePreview(part.input) ||
-            formatRuntimePreview(part.args) ||
-            matchingToolCall?.inputPreview ||
-            "",
+          inputPreview: formatRuntimePreview(display.input) || matchingToolCall?.inputPreview || "",
           activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
@@ -891,8 +896,11 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.approval_required") {
       const call = getCall(toolCallId);
-      call.name = readString(event.payload.name) || call.name;
-      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
+      // The approval event carries only a formatted inputPreview (no structured input), so a
+      // use_tool envelope cannot be unwrapped yet — the following tool.started corrects the name.
+      const display = resolveToolDisplay(readString(event.payload.name) || call.name, undefined);
+      call.name = display.name || call.name;
+      call.label = display.label ?? call.label;
       call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;
       call.approval = {
         status: "required",
@@ -953,9 +961,13 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
-      call.name = readString(event.payload.name) || call.name;
-      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
-      call.inputPreview = formatRuntimePreview(event.payload.input) || call.inputPreview;
+      const display = resolveToolDisplay(
+        readString(event.payload.name) || call.name,
+        event.payload.input,
+      );
+      call.name = display.name || call.name;
+      call.label = display.label ?? call.label;
+      call.inputPreview = formatRuntimePreview(display.input) || call.inputPreview;
       if (call.approval?.status === "required") {
         call.approval = {
           ...call.approval,
@@ -963,7 +975,7 @@ export function buildRuntimeToolCallsForMessage(
           decisionSource: "user",
         };
       }
-      const brainPath = brainPathForToolPayload(call.name, event.payload.input);
+      const brainPath = brainPathForToolPayload(call.name, display.input);
       if (brainPath) {
         call.brainPath = brainPath;
       }
@@ -972,7 +984,10 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.completed" || event.type === "tool.failed") {
       const call = getCall(toolCallId);
-      call.name = readString(event.payload.name) || call.name;
+      // Completion events carry no input to unwrap, so keep the inner name resolved at tool.started
+      // rather than letting the raw use_tool envelope name overwrite it.
+      const rawName = readString(event.payload.name);
+      if (rawName && rawName !== BUILTIN_USE_TOOL_NAME) call.name = rawName;
       call.status = event.type === "tool.failed" ? "failed" : "completed";
       call.outputPreview =
         event.type === "tool.failed"
@@ -1376,6 +1391,24 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "exa_contents":
       return "Reading web sources";
+    case "x_search_posts": {
+      const query = field("query");
+      return query ? `Searching X for “${truncateLabelText(query)}”` : "Searching X";
+    }
+    case "youtube_search": {
+      const query = field("query");
+      return query ? `Searching YouTube for “${truncateLabelText(query)}”` : "Searching YouTube";
+    }
+    case "tiktok_search": {
+      const query = field("query");
+      return query ? `Searching TikTok for “${truncateLabelText(query)}”` : "Searching TikTok";
+    }
+    case "instagram_search_profiles": {
+      const query = field("query");
+      return query
+        ? `Searching Instagram for “${truncateLabelText(query)}”`
+        : "Searching Instagram";
+    }
     case "web_fetch": {
       const host = hostFromUrl(field("url"));
       return host ? `Fetching ${host}` : "Fetching a web page";
@@ -1419,6 +1452,19 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     default:
       return undefined;
   }
+}
+
+// Resolve the user-facing name + label for a (possibly use_tool-wrapped) call. `name` is the inner
+// tool's programmatic identifier (the dispatcher envelope is transparent here), `input` is its
+// unwrapped arguments, and `label` is the richest phrasing available: a dynamic one-liner when we
+// have one, otherwise the registry's static title. Never returns the raw `use_tool` wrapper.
+export function resolveToolDisplay(
+  rawName: string,
+  rawInput: unknown,
+): { name: string; input: unknown; label: string | undefined } {
+  const { name, input } = effectiveToolCall(rawName, rawInput);
+  const label = describeToolCall(name, input) ?? toolDisplayTitle(name);
+  return { name, input, label };
 }
 
 function truncateLabelText(value: string) {

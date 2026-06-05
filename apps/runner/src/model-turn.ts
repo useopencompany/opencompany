@@ -85,13 +85,14 @@ export async function streamAssistantResponse(input: {
   };
   // Persist a debug-only snapshot of this turn's model inputs (system prompt + tool catalog)
   // so the session's "Copy Debug JSON" export can include them — they are otherwise ephemeral,
-  // built here and passed straight to the model. `tools` is exactly the set registered in the
-  // model call (`selectedTools`: direct core tools + the `use_tool` dispatcher + MCP tools), so
-  // the snapshot truthfully mirrors what the model received this turn. Deferred capability tools
+  // built here and passed straight to the model. `toolsSentToModel` is exactly the set registered
+  // in the model call (`selectedTools`: direct core tools + the `use_tool` dispatcher + MCP tools),
+  // so the snapshot truthfully mirrors what the model received this turn. Deferred capability tools
   // are NOT in the call — they are reachable only via `find_tools` + `use_tool` — so they are
-  // listed separately under `deferredTools` for debugging, never folded into `tools`. Schemas
-  // come from the static definitions, so MCP tools appear by name only. Best-effort: a failed
-  // write must never abort the turn, so this is deliberately NOT wrapped in `requireLeaseWrite`.
+  // listed separately under `deferredToolsNotSent` for debugging, never folded into the sent set.
+  // Schemas come from the static definitions, so MCP tools appear by name only. Best-effort: a
+  // failed write must never abort the turn, so this is deliberately NOT wrapped in
+  // `requireLeaseWrite`.
   try {
     const toToolEntry = (name: string) => {
       const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
@@ -110,8 +111,8 @@ export async function streamAssistantResponse(input: {
       payload: {
         messageId: input.assistantMessageId,
         systemPrompt: input.system,
-        tools: Object.keys(selectedTools).map(toToolEntry),
-        deferredTools: deferred.map(toToolEntry),
+        toolsSentToModel: Object.keys(selectedTools).map(toToolEntry),
+        deferredToolsNotSent: deferred.map(toToolEntry),
       },
     });
   } catch {

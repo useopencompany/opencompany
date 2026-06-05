@@ -159,6 +159,48 @@ describe("dispatchBuiltinUseTool", () => {
     expect(output.error.code).toBe("unknown_runtime_tool");
   });
 
+  it("rejects missing required arguments before running the tool, recoverably", async () => {
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: {} }),
+      enabledTools: ["exa_search"],
+    })) as { ok: boolean; error: { code: string; message: string; recoverable: boolean } };
+
+    expect(hostedTools.executeHostedTool).not.toHaveBeenCalled();
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("invalid_tool_input");
+    expect(output.error.recoverable).toBe(true);
+    expect(output.error.message).toContain('missing required "query"');
+    expect(output.error.message).toContain('tool_help({ tool: "exa_search" })');
+    const failed = leaseWrites.appendRuntimeEventForLease.mock.calls
+      .map((call) => call[0] as { type: string; payload: { name: string } })
+      .find((event) => event.type === "tool.failed");
+    expect(failed?.payload.name).toBe("use_tool");
+  });
+
+  it("rejects an unknown top-level argument when the schema forbids extras", async () => {
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: { query: "vercel", bogus: 1 } }),
+      enabledTools: ["exa_search"],
+    })) as { ok: boolean; error: { code: string; message: string } };
+
+    expect(hostedTools.executeHostedTool).not.toHaveBeenCalled();
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("invalid_tool_input");
+    expect(output.error.message).toContain('unexpected property "bogus"');
+  });
+
+  it("rejects a top-level argument of the wrong primitive type", async () => {
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: { query: 123 } }),
+      enabledTools: ["exa_search"],
+    })) as { ok: boolean; error: { code: string; message: string } };
+
+    expect(hostedTools.executeHostedTool).not.toHaveBeenCalled();
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("invalid_tool_input");
+    expect(output.error.message).toContain('"query" must be a string');
+  });
+
   it("routes the deferred update_agent_file through use_tool and enforces the self-edit gate", async () => {
     // update_agent_file is a standalone deferrable: dispatched via use_tool, it must reach the
     // internal handler (not be rejected as unknown) and still hit the read-skill gate, since the

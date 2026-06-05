@@ -395,7 +395,15 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     const latestModelRequest = [...runtime.events]
       .reverse()
       .find((event) => event.type === "debug.model_request")?.payload as
-      | { systemPrompt?: string; tools?: unknown; deferredTools?: unknown }
+      | {
+          systemPrompt?: string;
+          toolsSentToModel?: unknown;
+          deferredToolsNotSent?: unknown;
+          // Legacy field names from events persisted before the rename — fall back so older
+          // sessions still export their tool snapshot.
+          tools?: unknown;
+          deferredTools?: unknown;
+        }
       | undefined;
     return {
       exportedAt: new Date().toISOString(),
@@ -404,10 +412,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       status: runtime.currentStatus,
       lastError: runtime.lastError,
       systemPrompt: latestModelRequest?.systemPrompt ?? null,
-      // `tools` mirrors the tools actually registered in the latest model call; `deferredTools`
-      // are reachable only via `find_tools` + `use_tool` and are NOT sent to the model.
-      tools: latestModelRequest?.tools ?? null,
-      deferredTools: latestModelRequest?.deferredTools ?? null,
+      // `toolsSentToModel` mirrors the tools actually registered in the latest model call;
+      // `deferredToolsNotSent` are reachable only via `find_tools` + `use_tool` and are NOT sent to
+      // the model. Named explicitly so the withheld set is never misread as injected.
+      toolsSentToModel: latestModelRequest?.toolsSentToModel ?? latestModelRequest?.tools ?? null,
+      deferredToolsNotSent:
+        latestModelRequest?.deferredToolsNotSent ?? latestModelRequest?.deferredTools ?? null,
       usage: runtime.usage,
       toolUsage: runtime.toolUsage,
       cost: runtime.cost,

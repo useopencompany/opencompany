@@ -474,6 +474,9 @@ function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): Host
     output: {
       toolCount: tools.length,
       useTool: "use_tool",
+      // Discovery results are compact (no per-tool help). Point the model at tool_help so it can
+      // pull a single tool's detailed usage instructions before invoking it via use_tool.
+      toolHelp: "tool_help",
       tools,
     },
   };
