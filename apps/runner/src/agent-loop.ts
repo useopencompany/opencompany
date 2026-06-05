@@ -1,4 +1,5 @@
 import {
+  BUILTIN_USE_TOOL_NAME,
   newAgentSessionMessageId,
   normalizeAgentConfig,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
@@ -103,6 +104,7 @@ import { loadToolApproval } from "./tool-approvals";
 import {
   createHostedToolBudget,
   createToolSet,
+  dispatchBuiltinUseTool,
   executeRuntimeTool,
   persistDeniedToolResult,
 } from "./tool-dispatcher";
@@ -1552,6 +1554,28 @@ async function resumeApprovalWithContext(
           } finally {
             await mcpToolSet.close();
           }
+        } else if (toolName === BUILTIN_USE_TOOL_NAME) {
+          // The suspended call was the built-in dispatcher. Re-dispatch the underlying tool with
+          // the same persistence tail as the in-stream path (result paired with `use_tool`).
+          await dispatchBuiltinUseTool({
+            sessionId: input.sessionId,
+            assistantMessageId: suspendedAssistantMessageId,
+            runLeaseId: ctx.leaseId,
+            runLeaseOwner: ctx.leaseOwner,
+            workspaceId: row.workspace.id,
+            agentConfig,
+            toolCallId: input.toolCallId,
+            args: toolArgs,
+            getSandbox: sandboxAcquirer.get,
+            workdir: row.session.workdir,
+            env: input.env,
+            enabledTools: runtime.tools,
+            repository: row.repository,
+            signal: ctx.controller.signal,
+            checkAbort,
+            observabilityContext,
+            toolBudget: createHostedToolBudget(),
+          });
         } else {
           const definition = RUNTIME_TOOL_DEFINITIONS.find(
             (candidate: RuntimeToolDefinition) => candidate.name === toolName,

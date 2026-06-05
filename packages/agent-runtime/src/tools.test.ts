@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
+  isDeferrableRuntimeTool,
+  partitionRuntimeToolNames,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
+  type RuntimeToolName,
   resolveRuntimeToolNamesForConfigTools,
+  searchRuntimeTools,
 } from "./tools";
 
 describe("AGENT_TOOL_CATALOG", () => {
@@ -347,5 +351,108 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [{ id: "tiktok" }] })).toEqual(
       expect.arrayContaining(["tiktok_get_profile", "social_get_job"]),
     );
+  });
+});
+
+describe("partitionRuntimeToolNames", () => {
+  it("defers capability tools and update_agent_file, keeps the core/conditional tools direct", () => {
+    const enabled: RuntimeToolName[] = [
+      "read_file",
+      "edit_file",
+      "shell",
+      "find_tools",
+      "update_agent_file",
+      "exa_search",
+      "instagram_get_profile",
+      "amp_coder",
+    ];
+    const { direct, deferred } = partitionRuntimeToolNames(enabled);
+    expect(direct).toEqual(["read_file", "edit_file", "shell", "find_tools"]);
+    expect(deferred).toEqual([
+      "update_agent_file",
+      "exa_search",
+      "instagram_get_profile",
+      "amp_coder",
+    ]);
+  });
+
+  it("classifies hosted tools, coding agents and update_agent_file as deferrable, core tools as not", () => {
+    expect(isDeferrableRuntimeTool("exa_search")).toBe(true);
+    expect(isDeferrableRuntimeTool("amp_coder")).toBe(true);
+    expect(isDeferrableRuntimeTool("web_fetch")).toBe(true);
+    expect(isDeferrableRuntimeTool("update_agent_file")).toBe(true);
+    expect(isDeferrableRuntimeTool("read_file")).toBe(false);
+    expect(isDeferrableRuntimeTool("shell")).toBe(false);
+    expect(isDeferrableRuntimeTool("gh")).toBe(false);
+    expect(isDeferrableRuntimeTool("find_tools")).toBe(false);
+    // ask_user_question stays direct so its durable turn-suspend (keyed on the literal call name)
+    // is not wrapped behind use_tool.
+    expect(isDeferrableRuntimeTool("ask_user_question")).toBe(false);
+  });
+});
+
+describe("searchRuntimeTools", () => {
+  const enabled = resolveRuntimeToolNamesForConfigTools({
+    tools: [{ id: "exa" }, { id: "instagram" }],
+  });
+
+  it("returns deferred enabled tools with their schemas for a capability", () => {
+    const results = searchRuntimeTools({ capability: "instagram" }, enabled);
+    const names = results.map((result) => result.name);
+    expect(names).toContain("instagram_get_profile");
+    expect(names).not.toContain("exa_search");
+    const profile = results.find((result) => result.name === "instagram_get_profile");
+    expect(profile?.parameters.type).toBe("object");
+    expect(typeof profile?.description).toBe("string");
+  });
+
+  it("returns compact entries without the verbose per-tool help (that is tool_help's job)", () => {
+    const results = searchRuntimeTools({ capability: "instagram" }, enabled);
+    expect(results.length).toBeGreaterThan(0);
+    for (const result of results) {
+      expect(result).not.toHaveProperty("help");
+      expect(Object.keys(result).sort()).toEqual(["description", "name", "parameters"]);
+    }
+  });
+
+  it("filters by a case-insensitive query across name and description", () => {
+    const results = searchRuntimeTools({ query: "transcript" }, enabled);
+    expect(results.length).toBeGreaterThan(0);
+    expect(
+      results.every(
+        (result) =>
+          result.name.toLowerCase().includes("transcript") ||
+          result.description.toLowerCase().includes("transcript"),
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores the query filter when a capability is named so the capability is always listed", () => {
+    // The model often misuses `query` as a search topic (e.g. "Louis Morgner") alongside a
+    // capability; the filter must not strip every tool in that case.
+    const results = searchRuntimeTools(
+      { capability: "exa", query: "Louis Morgner summary" },
+      enabled,
+    );
+    const names = results.map((result) => result.name);
+    expect(names).toContain("exa_search");
+  });
+
+  it("never returns a tool that is not enabled or not deferrable", () => {
+    const results = searchRuntimeTools({}, enabled);
+    const names = results.map((result) => result.name);
+    expect(names).not.toContain("read_file");
+    expect(names).not.toContain("find_tools");
+    expect(names.every((name) => isDeferrableRuntimeTool(name) && enabled.includes(name))).toBe(
+      true,
+    );
+  });
+
+  it("discovers update_agent_file by query when self-edit is enabled", () => {
+    const selfEditEnabled: RuntimeToolName[] = ["find_tools", "update_agent_file"];
+    const results = searchRuntimeTools({ query: "update_agent_file" }, selfEditEnabled);
+    const match = results.find((result) => result.name === "update_agent_file");
+    expect(match).toBeDefined();
+    expect(match?.parameters.type).toBe("object");
   });
 });

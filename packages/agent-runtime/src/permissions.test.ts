@@ -274,6 +274,49 @@ describe("resolveToolDecision", () => {
     ).toBe("ask");
   });
 
+  it("gates the built-in use_tool dispatcher by the underlying tool", () => {
+    // Ungated underlying tools resolve to allow regardless of the dispatcher wrapper.
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: { tool: "exa_search", arguments: { query: "x" } },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "exa", group: "read" });
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: { tool: "edit_file", arguments: {} },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "system", group: "modify" });
+
+    // A github-gated underlying tool (amp_coder → github/modify) follows the github policy.
+    const decision = resolveToolDecision({
+      toolName: "use_tool",
+      toolInput: { tool: "amp_coder", arguments: {} },
+      policy: new Map(),
+      suspendable: true,
+    });
+    expect(decision.providerKey).toBe("github");
+    expect(decision.group).toBe("modify");
+    expect(decision.decision).toBe("ask");
+
+    const allowModify: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "modify"), "allow"],
+    ]);
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: { tool: "amp_coder", arguments: {} },
+        policy: allowModify,
+        suspendable: true,
+      }).decision,
+    ).toBe("allow");
+  });
+
   it("uses gh args to apply GitHub read/modify/admin policies", () => {
     const allowModify: WorkspaceToolPolicyMap = new Map([
       [policyMapKey("github", "modify"), "allow"],

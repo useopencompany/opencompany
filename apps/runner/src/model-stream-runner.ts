@@ -1,23 +1,36 @@
-import { resolveToolDecision, type WorkspaceToolPolicyMap } from "@opencompany/agent-runtime";
+import {
+  newAgentSessionMessageId,
+  resolveToolDecision,
+  type WorkspaceToolPolicyMap,
+} from "@opencompany/agent-runtime";
 import type { FinishReason, TextStreamPart, ToolSet } from "ai";
 import { publishTransientRuntimeEvent } from "./events";
 import {
   appendRuntimeEventForLease,
   insertSessionQuestionForLease,
   insertToolApprovalForLease,
+  insertToolMessageForLease,
   requireLeaseWrite,
 } from "./lease-writes";
 import {
   type AssistantReplayPart,
   appendAssistantReasoningPart,
   appendAssistantTextPart,
+  buildToolModelMessage,
+  serializeToolOutputForStorage,
+  toPersistedModelMessage,
 } from "./model-messages";
 import type { RunControlCheck } from "./run-control";
 import { RunSuspendedError } from "./runner-errors";
 import { normalizeQuestionsInput } from "./session-questions";
-import { readReasoningTextDelta, throwIfStreamErrorPart } from "./stream-helpers";
+import {
+  buildRecoverableToolInputOutput,
+  isRecoverableToolInputStreamError,
+  readReasoningTextDelta,
+  throwIfStreamErrorPart,
+} from "./stream-helpers";
 import { formatRuntimePreview } from "./tool-dispatcher";
-import type { ToolStartCoordinator } from "./tool-start-coordinator";
+import type { ToolStartCoordinator, ToolStartMetadata } from "./tool-start-coordinator";
 import { recordStepUsage } from "./usage-recorder";
 
 // Live assistant text is transient-only, so publish model deltas as they arrive.
@@ -125,6 +138,17 @@ export async function collectAssistantStream(input: {
       const part = next.value;
       await input.checkAbort();
       throwIfAborted(input.signal);
+      if (isRecoverableToolInputStreamError(part)) {
+        await persistRecoverableToolInputError({
+          sessionId: input.sessionId,
+          assistantMessageId: input.assistantMessageId,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          part,
+        });
+        next = await iterator.next();
+        continue;
+      }
       throwIfStreamErrorPart(part);
 
       const reasoningDelta = readReasoningTextDelta(part);
@@ -227,12 +251,7 @@ export async function collectAssistantStream(input: {
             // Persist the assistant message ending in this pending tool-call so the resume run
             // can pair it with the synthesized tool-result. Release every parked tool call with a
             // no-op suspend verdict, then unwind to suspend the run for input.
-            assistantReplayParts.push({
-              type: "tool-call",
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              input: part.input,
-            });
+            assistantReplayParts.push(buildToolCallReplayPart(part, toolStart));
             input.toolStartCoordinator.suspend();
             throw new RunSuspendedError({
               reason: "question",
@@ -260,12 +279,13 @@ export async function collectAssistantStream(input: {
           suspendable: input.suspendable,
         });
 
-        const toolCallReplayPart: AssistantReplayPart = {
-          type: "tool-call",
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          input: part.input,
-        };
+        const toolCallReplayPart = buildToolCallReplayPart(part, toolStart);
+
+        if ("invalid" in part && part.invalid === true) {
+          assistantReplayParts.push(toolCallReplayPart);
+          next = await iterator.next();
+          continue;
+        }
 
         if (decision === "ask") {
           // Durably suspend the run for a human decision. Persist the approval row (the
@@ -296,6 +316,7 @@ export async function collectAssistantStream(input: {
                 messageId: input.assistantMessageId,
                 toolCallId: part.toolCallId,
                 name: toolStart.name,
+                input: toolStart.input,
                 providerKey,
                 permissionGroup: group,
                 inputPreview: formatRuntimePreview(toolStart.input),
@@ -376,8 +397,65 @@ export async function collectAssistantStream(input: {
   };
 }
 
+async function persistRecoverableToolInputError(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  part: Extract<TextStreamPart<ToolSet>, { type: "tool-error" }>;
+}) {
+  const output = buildRecoverableToolInputOutput(input.part);
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.part.toolCallId,
+          toolName: input.part.toolName,
+          output,
+        }),
+      ),
+      toolName: input.part.toolName,
+      toolCallId: input.part.toolCallId,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.part.toolCallId,
+        name: input.part.toolName,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+      },
+    }),
+  );
+}
+
 function isModelOutputPart(part: TextStreamPart<ToolSet>, reasoningDelta: string) {
   return part.type === "text-delta" || Boolean(reasoningDelta) || part.type === "tool-call";
+}
+
+function buildToolCallReplayPart(
+  part: Extract<TextStreamPart<ToolSet>, { type: "tool-call" }>,
+  toolStart: ToolStartMetadata,
+): AssistantReplayPart {
+  return {
+    type: "tool-call",
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    input: toolStart.input !== undefined ? toolStart.input : (part.input ?? {}),
+  };
 }
 
 function uniqueReasoningDelta(current: string, next: string) {

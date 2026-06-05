@@ -73,6 +73,7 @@ import {
   type AssistantTurnPart,
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
+  buildSessionDebugTurns,
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
@@ -97,11 +98,23 @@ import {
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
 
-// A turn is actively generating tokens right now — the transcript must replay from
-// offset "-1" to reconstruct the in-flight assistant text. Every other status (settled,
-// paused, or brand-new) seeds the live read from the stream's current end instead, since
-// the durable transcript is already painted from the server snapshot.
-const ACTIVE_STREAMING_STATUSES = new Set(["running", "aborting"]);
+// Snapshot statuses where the server snapshot is the authoritative transcript AND no
+// turn can still be racing into the Durable Stream — the lease has been released
+// (terminal) or the run is durably parked (paused). Safe to tail from the stream's
+// current end. Every other status (active OR startup) must replay from "-1": during
+// `created`/`provisioning`/`ready` the runner can claim the lease and emit
+// `message.created` between when the snapshot was read and when we resolve HEAD, and
+// the reducer's `message.completed` is a silent no-op without the matching
+// `message.created` in the overlay — the assistant turn would never reach `completed`
+// and we'd misrender "Stopped before finishing" once status flips to `awaiting_approval`.
+const SETTLED_SNAPSHOT_STATUSES = new Set([
+  "completed",
+  "failed",
+  "aborted",
+  "archived",
+  "awaiting_approval",
+  "awaiting_input",
+]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
@@ -306,11 +319,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // (durable rows + transient token deltas) through the shared reducer. `onEvent`
   // resolves the felt-TTFT timer on the first streamed assistant activity.
   const { state: streamState, status: streamStatus } = useSessionStream(session.id, {
-    // Seed from the stream's current end unless a turn is actively generating at open
-    // time (then replay from "-1" to rebuild in-flight text). Read from the server
-    // snapshot status, which is stable for this session load; captured at subscribe
+    // Seed from the stream's current end only when the snapshot is settled or paused
+    // (no in-flight turn AND no startup race window). For active or startup statuses
+    // we replay from "-1" — see SETTLED_SNAPSHOT_STATUSES above. Captured at subscribe
     // time inside the hook, so the later terminal-status flip doesn't re-open the stream.
-    seedFromEnd: !ACTIVE_STREAMING_STATUSES.has(detail.session.status),
+    seedFromEnd: SETTLED_SNAPSHOT_STATUSES.has(detail.session.status),
     onEvent: (event) => {
       const pending = pendingTtftRef.current;
       if (
@@ -381,6 +394,57 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
+  // Full-detail debug snapshot for the "Copy session JSON" affordance. Assembled lazily
+  // (only when the button is clicked) so we never stringify the whole transcript on
+  // every render. Pulls from the merged `runtime` so it includes live stream state, and
+  // carries the raw `modelMessage` per turn plus every runtime event payload verbatim —
+  // the highest-fidelity view the client has. The assembled system prompt and tool catalog
+  // are built in the runner at request time and are otherwise ephemeral; the runner persists
+  // them per turn as a `debug.model_request` event, and the loader surfaces the latest one as
+  // the top-level `detail.latestModelRequest` field (those events are kept out of the windowed
+  // `events` list — see loadAgentSessionDetailForWorkspace), so we hoist it to top-level fields
+  // here for convenience. The transcript is exported as one consolidated entry per user / assistant /
+  // tool turn (`buildSessionDebugTurns`) rather than the raw token/tool delta stream, which
+  // is far easier to read; each turn still carries its verbatim `modelMessage`.
+  const buildSessionDebugSnapshot = () => {
+    // Prefer a snapshot from the live event stream (freshest during an active turn); fall back to
+    // the dedicated `detail.latestModelRequest` field, which carries the most-recent snapshot even
+    // on long sessions whose latest turn falls outside the windowed `events` list (the loader
+    // excludes these large snapshots from that window — see loadAgentSessionDetailForWorkspace).
+    const latestModelRequest = ([...runtime.events]
+      .reverse()
+      .find((event) => event.type === "debug.model_request")?.payload ??
+      detail.latestModelRequest ??
+      undefined) as
+      | {
+          systemPrompt?: string;
+          toolsSentToModel?: unknown;
+          deferredToolsNotSent?: unknown;
+          // Legacy field names from events persisted before the rename — fall back so older
+          // sessions still export their tool snapshot.
+          tools?: unknown;
+          deferredTools?: unknown;
+        }
+      | undefined;
+    return {
+      exportedAt: new Date().toISOString(),
+      session: detail.session,
+      related: detail.related,
+      status: runtime.currentStatus,
+      lastError: runtime.lastError,
+      systemPrompt: latestModelRequest?.systemPrompt ?? null,
+      // `toolsSentToModel` mirrors the tools actually registered in the latest model call;
+      // `deferredToolsNotSent` are reachable only via `find_tools` + `use_tool` and are NOT sent to
+      // the model. Named explicitly so the withheld set is never misread as injected.
+      toolsSentToModel: latestModelRequest?.toolsSentToModel ?? latestModelRequest?.tools ?? null,
+      deferredToolsNotSent:
+        latestModelRequest?.deferredToolsNotSent ?? latestModelRequest?.deferredTools ?? null,
+      usage: runtime.usage,
+      toolUsage: runtime.toolUsage,
+      cost: runtime.cost,
+      turns: buildSessionDebugTurns(runtime.messages),
+    };
+  };
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
   // drives the transcript, but usage/cost come from the detail query).
   const lastSettledStatusRef = useRef(runtime.currentStatus);
@@ -501,6 +565,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               sessionCanGenerate={sessionCanGenerate}
               sessionIsPaused={sessionIsPaused}
               sessionIsInterrupted={sessionIsInterrupted}
+              stoppedError={runtime.currentStatus === "failed" ? runtime.lastError : null}
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
@@ -952,29 +1017,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
-                <p className="mt-1 text-[12.5px] text-ink-muted">
-                  Start with one of these, or write your own.
-                </p>
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  {[
-                    "Set up the dev environment",
-                    "Run the test suite",
-                    "Open a PR for current changes",
-                    "Explain the codebase",
-                  ].map((chip) => (
-                    <button
-                      key={chip}
-                      type="button"
-                      onClick={() => {
-                        setInput(chip);
-                        textareaRef.current?.focus();
-                      }}
-                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-surface-muted"
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                </div>
+                <p className="mt-1 text-[12.5px] text-ink-muted">Write a message to get started.</p>
               </div>
             ) : null}
 
@@ -1286,6 +1329,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       >
         <div className="mb-5 flex items-center justify-between pr-9 lg:mb-7">
           <div className="text-[12px] font-medium text-ink">Runtime</div>
+          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
         </div>
         <SessionInspector
           session={session}
@@ -1460,12 +1504,62 @@ function CopyMessageButton({ text }: { text: string }) {
   );
 }
 
+// One-click "copy the whole session as JSON" for debugging. Builds the snapshot lazily on
+// click (large transcripts shouldn't be stringified on every render) and shows a brief
+// "Copied" confirmation, mirroring CopyMessageButton.
+function CopySessionJsonButton({ build }: { build: () => unknown }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { showError } = useToast();
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur();
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(build(), null, 2));
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showError("Couldn't copy the session JSON to the clipboard.");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Copied debug JSON" : "Copy debug JSON"}
+      title={
+        copied
+          ? "Copied"
+          : "Copy the full session debug JSON (system prompt + latest model-call tools)"
+      }
+      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      {copied ? (
+        <Check size={11} strokeWidth={2} className="text-success" />
+      ) : (
+        <Copy size={11} strokeWidth={1.75} />
+      )}
+      <span>{copied ? "Copied" : "Copy Debug JSON"}</span>
+    </button>
+  );
+}
+
 export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
   sessionIsPaused = false,
   sessionIsInterrupted = false,
+  stoppedError = null,
   reasoningActive = false,
   activeStartedAt,
 }: {
@@ -1474,6 +1568,7 @@ export function AssistantMessageContent({
   sessionCanGenerate: boolean;
   sessionIsPaused?: boolean;
   sessionIsInterrupted?: boolean;
+  stoppedError?: string | null;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
 }) {
@@ -1625,7 +1720,7 @@ export function AssistantMessageContent({
             thinking={reasoningActive}
           />
         ) : isStopped ? (
-          <AssistantStoppedNotice />
+          <AssistantStoppedNotice errorMessage={stoppedError} />
         ) : (
           "..."
         )
@@ -1637,7 +1732,7 @@ export function AssistantMessageContent({
           thinking={reasoningActive}
         />
       ) : null}
-      {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
+      {hasParts && isStopped ? <AssistantStoppedNotice errorMessage={stoppedError} /> : null}
     </div>
   );
 }
@@ -1751,11 +1846,23 @@ function formatStepDuration(seconds: number) {
   return `${minutes} min`;
 }
 
-function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
+function AssistantStoppedNotice({
+  elapsedSeconds,
+  errorMessage,
+}: {
+  elapsedSeconds?: number | null;
+  errorMessage?: string | null;
+}) {
+  const detail = errorMessage?.trim();
   return (
-    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
+    <div className="inline-flex max-w-full items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
+      {detail ? (
+        <span className="min-w-0 break-words text-[12px] font-normal leading-5 text-danger/80">
+          : {detail}
+        </span>
+      ) : null}
       {typeof elapsedSeconds === "number" ? (
         <span className="text-[12px] font-normal tabular-nums text-danger/70">
           {formatElapsed(elapsedSeconds)}
