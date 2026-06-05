@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  continueInterruptedSession,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
@@ -95,6 +96,7 @@ vi.mock("@/components/useSessionStream", () => ({
 const actionMocks = vi.hoisted(() => ({
   abortAgentSession: vi.fn(),
   cancelAgentSessionQuestion: vi.fn(),
+  continueInterruptedSession: vi.fn(),
   resolveToolApproval: vi.fn(),
   submitAgentSessionMessage: vi.fn(),
   submitAgentSessionQuestionResponse: vi.fn(),
@@ -103,6 +105,7 @@ const actionMocks = vi.hoisted(() => ({
 vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
   cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
+  continueInterruptedSession: actionMocks.continueInterruptedSession,
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,
@@ -118,6 +121,7 @@ vi.mock("@/lib/agent-sessions/payload", () => ({
 
 afterEach(() => {
   actionMocks.cancelAgentSessionQuestion.mockReset();
+  actionMocks.continueInterruptedSession.mockReset();
   actionMocks.resolveToolApproval.mockReset();
   actionMocks.submitAgentSessionQuestionResponse.mockReset();
   actionMocks.submitAgentSessionMessage.mockReset();
@@ -550,6 +554,24 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("marks still-running tools as interrupted for an interrupted session", async () => {
+    const user = userEvent.setup();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeToolCallPart("running")];
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={parts}
+        sessionCanGenerate={false}
+        sessionIsInterrupted
+      />,
+    );
+
+    expect(screen.getByText("interrupted")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /search files/i }));
+    expect(screen.getByText("Interrupted before this tool returned a result.")).toBeInTheDocument();
+  });
+
   it("shows AssistantStoppedNotice for a failed message (no parts)", () => {
     const message = makeMessage({ status: "failed" });
     render(<AssistantMessageContent message={message} parts={[]} sessionCanGenerate={true} />);
@@ -793,6 +815,52 @@ describe("SessionViewContent — optimistic send", () => {
     await act(async () => {
       resolveSubmit({ ok: true, messageId: "msg_real" });
       await submitPromise;
+    });
+  });
+});
+
+describe("SessionViewContent — interrupted continue", () => {
+  it("shows a compact Continue action only for interrupted sessions", () => {
+    const { rerender } = renderSessionViewContent(
+      makeDetail({ session: makeSession({ status: "interrupted" }) }),
+    );
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.getAllByText("Interrupted").length).toBeGreaterThan(0);
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <SessionViewContent
+          detail={makeDetail({ session: makeSession({ status: "completed" }) })}
+          workspaceId="wks_test"
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  });
+
+  it("clicking Continue inserts an optimistic message and dispatches the action", async () => {
+    const user = userEvent.setup();
+    let resolveContinue!: (value: Awaited<ReturnType<typeof continueInterruptedSession>>) => void;
+    const continuePromise = new Promise<Awaited<ReturnType<typeof continueInterruptedSession>>>(
+      (resolve) => {
+        resolveContinue = resolve;
+      },
+    );
+    vi.mocked(continueInterruptedSession).mockReturnValue(continuePromise);
+
+    renderSessionViewContent(makeDetail({ session: makeSession({ status: "interrupted" }) }));
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(continueInterruptedSession).toHaveBeenCalledWith("sess_001");
+    expect(screen.getAllByText("Continue").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveContinue({ ok: true, messageId: "msg_continue" });
+      await continuePromise;
     });
   });
 });
