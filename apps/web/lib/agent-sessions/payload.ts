@@ -55,6 +55,13 @@ export type RelatedSessionPayload = {
   updatedAt: string;
 };
 
+// The latest `debug.model_request` snapshot for the session (system prompt + tool catalog),
+// carried as a top-level field rather than inside `events`. The runner emits one per turn, but
+// they are large and hidden from the inspector, so they are excluded from the windowed `events`
+// list (see loadAgentSessionDetailForWorkspace) and the single most-recent one is surfaced here for
+// the "Copy Debug JSON" export. Loosely typed: it is debug-only and tolerant of legacy field names.
+export type ModelRequestSnapshotPayload = Record<string, unknown>;
+
 export type AgentSessionDetailPayload = {
   session: AgentSessionPayload;
   related: {
@@ -66,6 +73,7 @@ export type AgentSessionDetailPayload = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
+  latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
 export type SidebarSessionSerializable = Omit<
@@ -97,6 +105,7 @@ export type AgentSessionDetailSerializable = {
   usage: SessionUsageSummary;
   toolUsage: SessionToolUsageSummary;
   cost: SessionCostSummary;
+  latestModelRequest?: ModelRequestSnapshotPayload | null;
 };
 
 type RuntimeEventSerializable = Omit<RuntimeEvent, "createdAt"> & {
@@ -146,6 +155,9 @@ export function serializeAgentSessionDetail(
     usage: detail.usage,
     toolUsage: detail.toolUsage,
     cost: detail.cost,
+    // Omit the key entirely when absent so the parse round-trip stays exact for sessions with no
+    // recorded model-request snapshot.
+    ...(detail.latestModelRequest ? { latestModelRequest: detail.latestModelRequest } : {}),
   });
 }
 
@@ -238,6 +250,7 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
 
 export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDetailPayload {
   const record = assertRecord(value, "session detail");
+  const latestModelRequest = parseLatestModelRequest(record.latestModelRequest);
   return normalizeAgentSessionDetail({
     session: parseAgentSessionPayload(record.session),
     related: parseRelatedSessions(record.related),
@@ -246,7 +259,17 @@ export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDeta
     usage: parseUsageSummary(record.usage),
     toolUsage: parseToolUsageSummary(record.toolUsage),
     cost: parseCostSummary(record.cost),
+    // Conditionally included so payloads without a snapshot stay byte-for-byte equal across the
+    // serialize/parse round trip (and so older cached payloads parse unchanged).
+    ...(latestModelRequest ? { latestModelRequest } : {}),
   });
+}
+
+// Debug-only snapshot — accept any object verbatim (tolerant of legacy field names), reject
+// anything that is not a plain object so the export never carries a malformed value.
+function parseLatestModelRequest(value: unknown): ModelRequestSnapshotPayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as ModelRequestSnapshotPayload;
 }
 
 function normalizeAgentSessionDetail(detail: AgentSessionDetailPayload): AgentSessionDetailPayload {

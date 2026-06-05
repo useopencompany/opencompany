@@ -386,15 +386,22 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // carries the raw `modelMessage` per turn plus every runtime event payload verbatim —
   // the highest-fidelity view the client has. The assembled system prompt and tool catalog
   // are built in the runner at request time and are otherwise ephemeral; the runner persists
-  // them per turn as a `debug.model_request` event (hidden from the inspector — see
-  // isInspectableRuntimeEvent), so we hoist the latest one to top-level fields for
-  // convenience. The transcript is exported as one consolidated entry per user / assistant /
+  // them per turn as a `debug.model_request` event, and the loader surfaces the latest one as
+  // the top-level `detail.latestModelRequest` field (those events are kept out of the windowed
+  // `events` list — see loadAgentSessionDetailForWorkspace), so we hoist it to top-level fields
+  // here for convenience. The transcript is exported as one consolidated entry per user / assistant /
   // tool turn (`buildSessionDebugTurns`) rather than the raw token/tool delta stream, which
   // is far easier to read; each turn still carries its verbatim `modelMessage`.
   const buildSessionDebugSnapshot = () => {
-    const latestModelRequest = [...runtime.events]
+    // Prefer a snapshot from the live event stream (freshest during an active turn); fall back to
+    // the dedicated `detail.latestModelRequest` field, which carries the most-recent snapshot even
+    // on long sessions whose latest turn falls outside the windowed `events` list (the loader
+    // excludes these large snapshots from that window — see loadAgentSessionDetailForWorkspace).
+    const latestModelRequest = ([...runtime.events]
       .reverse()
-      .find((event) => event.type === "debug.model_request")?.payload as
+      .find((event) => event.type === "debug.model_request")?.payload ??
+      detail.latestModelRequest ??
+      undefined) as
       | {
           systemPrompt?: string;
           toolsSentToModel?: unknown;

@@ -90,11 +90,13 @@ export async function streamAssistantResponse(input: {
   // so the snapshot truthfully mirrors what the model received this turn. Deferred capability tools
   // are NOT in the call — they are reachable only via `find_tools` + `use_tool` — so they are
   // listed separately under `deferredToolsNotSent` for debugging, never folded into the sent set.
-  // Schemas come from the static definitions, so MCP tools appear by name only. Best-effort: a
-  // failed write must never abort the turn, so this is deliberately NOT wrapped in
+  // Schemas come from the static definitions, so MCP tools appear by name only. Deferred tools were
+  // NOT sent, so they are recorded as name + description only — including their full schemas here
+  // would re-serialize the whole deferred catalog into every turn's snapshot for no debugging gain.
+  // Best-effort: a failed write must never abort the turn, so this is deliberately NOT wrapped in
   // `requireLeaseWrite`.
   try {
-    const toToolEntry = (name: string) => {
+    const toSentToolEntry = (name: string) => {
       const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
       return {
         name,
@@ -102,6 +104,10 @@ export async function streamAssistantResponse(input: {
         parameters: definition?.parameters ?? null,
       };
     };
+    const toDeferredToolEntry = (name: string) => ({
+      name,
+      description: RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName)?.description ?? "",
+    });
     await appendRuntimeEventForLease({
       sessionId: input.ctx.sessionId,
       messageId: input.assistantMessageId,
@@ -111,8 +117,8 @@ export async function streamAssistantResponse(input: {
       payload: {
         messageId: input.assistantMessageId,
         systemPrompt: input.system,
-        toolsSentToModel: Object.keys(selectedTools).map(toToolEntry),
-        deferredToolsNotSent: deferred.map(toToolEntry),
+        toolsSentToModel: Object.keys(selectedTools).map(toSentToolEntry),
+        deferredToolsNotSent: deferred.map(toDeferredToolEntry),
       },
     });
   } catch {
