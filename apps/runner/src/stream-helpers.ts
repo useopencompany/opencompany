@@ -2,6 +2,10 @@ import type { TextStreamPart, ToolSet } from "ai";
 import { RunAbortError } from "./run-control";
 
 const INVALID_TOOL_INPUT_PREFIX = "Invalid input for tool ";
+// AI SDK `NoSuchToolError.message`. When the model calls a tool whose schema was not registered
+// this turn — most often a deferred capability tool invoked by its real name instead of through the
+// `use_tool` dispatcher — the SDK surfaces a `tool-error` stream part carrying this message.
+const UNKNOWN_TOOL_PREFIX = "Model tried to call unavailable tool ";
 
 export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
   if (part.type === "abort") {
@@ -18,16 +22,42 @@ export function throwIfStreamErrorPart(part: TextStreamPart<ToolSet>) {
 }
 
 type ToolErrorPart = Extract<TextStreamPart<ToolSet>, { type: "tool-error" }>;
+type RecoverableToolErrorKind = "invalid_tool_input" | "unknown_tool";
 
-export function isRecoverableToolInputStreamError(
+function classifyRecoverableToolStreamError(
   part: TextStreamPart<ToolSet>,
-): part is ToolErrorPart {
-  if (part.type !== "tool-error") return false;
+): RecoverableToolErrorKind | null {
+  if (part.type !== "tool-error") return null;
   const message = readStreamErrorMessage(part.error);
-  return message.startsWith(INVALID_TOOL_INPUT_PREFIX);
+  if (message.startsWith(INVALID_TOOL_INPUT_PREFIX)) return "invalid_tool_input";
+  if (message.startsWith(UNKNOWN_TOOL_PREFIX)) return "unknown_tool";
+  return null;
 }
 
-export function buildRecoverableToolInputOutput(part: ToolErrorPart) {
+// Tool-error stream parts the model can recover from on its own: a bad-arguments call
+// (InvalidToolInputError) or a call to a tool whose schema was not registered this turn
+// (NoSuchToolError). Both must surface as a tool result the model can read and retry from —
+// never as a fatal `session.error` that kills the turn. Anything else (gateway/provider errors)
+// stays fatal via `throwIfStreamErrorPart`.
+export function isRecoverableToolStreamError(part: TextStreamPart<ToolSet>): part is ToolErrorPart {
+  return classifyRecoverableToolStreamError(part) !== null;
+}
+
+export function buildRecoverableToolStreamOutput(part: ToolErrorPart) {
+  const kind = classifyRecoverableToolStreamError(part);
+  if (kind === "unknown_tool") {
+    return {
+      ok: false,
+      error: {
+        // The model named a tool that is not directly callable — almost always a deferred
+        // capability tool it should reach through the dispatcher. Point it back at the discovery
+        // protocol instead of crashing the turn.
+        message: `${part.toolName} is not a directly callable tool. Tools beyond the core file/shell set are not preloaded — call find_tools to list available tools, then run this one with use_tool({ tool: "${part.toolName}", arguments }) using arguments that match its schema.`,
+        code: "unknown_tool",
+        recoverable: true,
+      },
+    };
+  }
   const message = readStreamErrorMessage(part.error);
   const detail = message.includes("JSON parsing failed")
     ? "The arguments were not complete valid JSON."
