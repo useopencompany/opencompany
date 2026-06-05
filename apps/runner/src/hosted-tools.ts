@@ -461,8 +461,11 @@ function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): Hosted
 
 function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
   const record = asRecord(args);
-  const capability = readString(record, "capability");
-  const query = readString(record, "query");
+  // Both are optional in the find_tools schema — omitting them lists every tool. readString throws
+  // on a missing key, so use readOptionalString to avoid rejecting a valid capability-only (or
+  // argument-less) discovery call.
+  const capability = readOptionalString(record, "capability");
+  const query = readOptionalString(record, "query");
   const tools = searchRuntimeTools(
     {
       ...(capability ? { capability } : {}),

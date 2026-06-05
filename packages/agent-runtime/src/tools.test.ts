@@ -430,7 +430,10 @@ describe("searchRuntimeTools", () => {
   it("ignores the query filter when a capability is named so the capability is always listed", () => {
     // The model often misuses `query` as a search topic (e.g. "Louis Morgner") alongside a
     // capability; the filter must not strip every tool in that case.
-    const results = searchRuntimeTools({ capability: "exa", query: "Louis Morgner summary" }, enabled);
+    const results = searchRuntimeTools(
+      { capability: "exa", query: "Louis Morgner summary" },
+      enabled,
+    );
     const names = results.map((result) => result.name);
     expect(names).toContain("exa_search");
   });

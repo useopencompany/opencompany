@@ -206,7 +206,9 @@ describe("dispatchBuiltinUseTool", () => {
     // internal handler (not be rejected as unknown) and still hit the read-skill gate, since the
     // skill was never read in this session.
     const output = (await dispatchBuiltinUseTool({
-      ...baseInput({ tool: "update_agent_file", arguments: { instructions: "new" } }),
+      // Pass schema-valid args (body is required) so the call clears top-level validation and the
+      // self-edit gate — not the validator — is what rejects it.
+      ...baseInput({ tool: "update_agent_file", arguments: { body: "new instructions" } }),
       enabledTools: ["update_agent_file"],
     })) as { ok: boolean; errors?: string[] };
 

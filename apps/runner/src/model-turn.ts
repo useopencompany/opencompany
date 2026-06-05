@@ -1,9 +1,9 @@
 import {
   BUILTIN_USE_TOOL_NAME,
   partitionRuntimeToolNames,
-  resolveAgentRuntimeConfig,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   type RuntimeToolName,
+  resolveAgentRuntimeConfig,
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import { timeAsync } from "@opencompany/observability";

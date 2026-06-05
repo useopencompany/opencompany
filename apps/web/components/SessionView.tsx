@@ -1473,7 +1473,11 @@ function CopySessionJsonButton({ build }: { build: () => unknown }) {
       type="button"
       onClick={handleCopy}
       aria-label={copied ? "Copied debug JSON" : "Copy debug JSON"}
-      title={copied ? "Copied" : "Copy the full session debug JSON (system prompt + latest model-call tools)"}
+      title={
+        copied
+          ? "Copied"
+          : "Copy the full session debug JSON (system prompt + latest model-call tools)"
+      }
       className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       {copied ? (

@@ -475,7 +475,11 @@ async function persistBuiltinUseToolError(input: {
 }) {
   const output: FailedToolOutput = {
     ok: false,
-    error: { message: input.message, code: input.code ?? "unknown_runtime_tool", recoverable: true },
+    error: {
+      message: input.message,
+      code: input.code ?? "unknown_runtime_tool",
+      recoverable: true,
+    },
   };
   const toolMessageId = newAgentSessionMessageId();
   await requireLeaseWrite(
