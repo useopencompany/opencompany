@@ -1,4 +1,5 @@
 import {
+  getAgentModelDefinition,
   getAgentModelRuntimeOptions,
   type ModelProviderOptions,
   type ReasoningExposure,
@@ -53,6 +54,11 @@ export type ResolvedAgentRuntimeConfig = {
 
 export function resolveAgentRuntimeConfig(input: {
   agent: AgentConfig;
+  // Per-session model override (the session's stored modelName). When set to a
+  // valid catalog model it wins over the agent's saved default for this run;
+  // anything unknown/stale falls back to the agent default. The agent's own
+  // configured default (agent.model.name) is never mutated by this.
+  modelOverride?: string;
   workspaceName?: string;
   sessionTitle?: string;
   userName?: string;
@@ -120,13 +126,17 @@ export function resolveAgentRuntimeConfig(input: {
     ...formatUserContext(input),
   ].filter(Boolean);
 
-  const modelRuntime = getAgentModelRuntimeOptions(input.agent.model.name);
+  const effectiveModelName =
+    input.modelOverride && getAgentModelDefinition(input.modelOverride)
+      ? input.modelOverride
+      : input.agent.model.name;
+  const modelRuntime = getAgentModelRuntimeOptions(effectiveModelName);
 
   return {
     systemPrompt: `${context.join("\n")}\n\nAgent instructions:\n${instructions}`,
     model: {
       provider: "vercel-ai-gateway",
-      name: input.agent.model.name,
+      name: effectiveModelName,
       supportsReasoning: modelRuntime.supportsReasoning,
       ...(modelRuntime.providerOptions ? { providerOptions: modelRuntime.providerOptions } : {}),
       reasoningExposure: modelRuntime.reasoningExposure,

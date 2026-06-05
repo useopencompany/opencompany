@@ -280,6 +280,7 @@ async function runMessageWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
@@ -981,6 +982,7 @@ async function runAfterSessionWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
@@ -1401,6 +1403,7 @@ async function resumeApprovalWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
@@ -1909,6 +1912,7 @@ async function resumeQuestionResponseWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),

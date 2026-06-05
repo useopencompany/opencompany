@@ -13,12 +13,22 @@ export default async function Home() {
     .select({
       id: agents.id,
       name: agents.name,
+      config: agents.config,
     })
     .from(agents)
     .where(eq(agents.workspaceId, context.workspace.id))
     .orderBy(desc(agents.updatedAt));
 
+  const agentOptions = rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    defaultModel: row.config.model.name,
+  }));
+
   return (
-    <MainPanel agents={rows} slackCard={<SlackSupportCard workspaceId={context.workspace.id} />} />
+    <MainPanel
+      agents={agentOptions}
+      slackCard={<SlackSupportCard workspaceId={context.workspace.id} />}
+    />
   );
 }

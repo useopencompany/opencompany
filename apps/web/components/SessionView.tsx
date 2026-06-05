@@ -5,6 +5,7 @@ import {
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
 } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -45,6 +46,7 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { useCollections } from "@/components/CollectionsProvider";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
@@ -60,6 +62,7 @@ import {
   cancelAgentSessionQuestion,
   continueInterruptedSession,
   resolveToolApproval,
+  setAgentSessionModel,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
@@ -117,6 +120,7 @@ const SETTLED_SNAPSHOT_STATUSES = new Set([
 ]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 // How far from the bottom (in px) before we consider the user "pinned".
@@ -281,6 +285,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
+  // Optimistic per-session model override. The displayed model is this when set, else the
+  // persisted session model. Switching is sticky for the session and applies to the next
+  // turn — it never interrupts an in-flight run — so this uses its own transition rather
+  // than the send path's `isPending`.
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
+  const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
@@ -890,6 +900,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  // Switch the model for this session on the fly. Optimistic: reflect the pick immediately,
+  // persist it (sticky for the session, used on the next turn), and revert on failure.
+  const handleModelChange = (modelId: string) => {
+    const previous = modelOverride;
+    setModelOverride(modelId);
+    setFormError(null);
+    startModelTransition(async () => {
+      const result = await setAgentSessionModel(session.id, modelId);
+      if (!result.ok) {
+        setModelOverride(previous);
+        setFormError(result.error);
+      }
+    });
+  };
+
   const handleContinueInterrupted = () => {
     if (!sessionIsInterrupted || isPending) return;
     const content = "Continue";
@@ -1260,50 +1285,58 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   </button>
                 )}
               </div>
-              <div
-                className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
-                  slashMenuOpen
-                    ? "opacity-100"
-                    : "opacity-0 group-focus-within/composer:opacity-100"
-                }`}
-              >
-                {slashMenuOpen ? (
-                  <>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↑↓
-                      </kbd>{" "}
-                      navigate
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↵
-                      </kbd>{" "}
-                      insert
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        esc
-                      </kbd>{" "}
-                      dismiss
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↵
-                      </kbd>{" "}
-                      send
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ⇧↵
-                      </kbd>{" "}
-                      new line
-                    </span>
-                  </>
-                )}
+              <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11px] text-ink-subtle">
+                <ModelPicker
+                  value={modelOverride ?? session.modelName}
+                  fallbackModelId={DEFAULT_MODEL_ID}
+                  onChange={handleModelChange}
+                  triggerClassName="-ml-1.5"
+                />
+                <div
+                  className={`flex items-center gap-3 transition-opacity duration-150 ${
+                    slashMenuOpen
+                      ? "opacity-100"
+                      : "opacity-0 group-focus-within/composer:opacity-100"
+                  }`}
+                >
+                  {slashMenuOpen ? (
+                    <>
+                      <span>
+                        <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                          ↑↓
+                        </kbd>{" "}
+                        navigate
+                      </span>
+                      <span>
+                        <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                          ↵
+                        </kbd>{" "}
+                        insert
+                      </span>
+                      <span>
+                        <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                          esc
+                        </kbd>{" "}
+                        dismiss
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                          ↵
+                        </kbd>{" "}
+                        send
+                      </span>
+                      <span>
+                        <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                          ⇧↵
+                        </kbd>{" "}
+                        new line
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </div>

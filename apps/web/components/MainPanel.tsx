@@ -1,10 +1,12 @@
 "use client";
 
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import {
@@ -21,10 +23,14 @@ import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { agentRowToListItem, sortAgentsByUpdatedDesc } from "@/lib/collections/selectors";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 
 type AgentOption = {
   id: string;
   name: string;
+  // The agent's saved default model. The composer's model selector starts here and
+  // re-syncs to it whenever the selected agent changes.
+  defaultModel: string;
 };
 
 function Prompt({ agents }: { agents: AgentOption[] }) {
@@ -34,10 +40,23 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   const { showToast } = useToast();
   const [input, setInput] = useState("");
   const [selectedAgentIdOverride, setSelectedAgentIdOverride] = useState("");
+  // An explicit model pick, scoped to the agent it was made for. Scoping it this way means a
+  // pick for agent A doesn't carry over when you switch to agent B — the selector falls back to
+  // B's default — without a state-resetting effect.
+  const [modelOverride, setModelOverride] = useState<{ agentId: string; modelId: string } | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
+  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents.at(0);
+  // The model used for the new session: an explicit pick for THIS agent wins, otherwise the
+  // selected agent's saved default. Picking a model here never changes the agent's default.
+  const selectedModel =
+    (modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null) ??
+    selectedAgent?.defaultModel ??
+    "";
   const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
 
   useEffect(() => {
@@ -61,7 +80,11 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
     setError(null);
     startTransition(async () => {
-      const result = await createAgentSessionFromPrompt(selectedAgentId, content);
+      const result = await createAgentSessionFromPrompt(
+        selectedAgentId,
+        content,
+        selectedModel || undefined,
+      );
       if (!result.ok) {
         if ("redirectTo" in result) {
           router.push(result.redirectTo);
@@ -136,6 +159,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
             ))}
           </SelectContent>
         </Select>
+        {selectedModel ? (
+          <ModelPicker
+            value={selectedModel}
+            fallbackModelId={DEFAULT_MODEL_ID}
+            onChange={(modelId) => setModelOverride({ agentId: selectedAgentId, modelId })}
+            triggerClassName="ml-0.5"
+          />
+        ) : null}
         {error ? <p className="ml-3 text-[12px] text-danger">{error}</p> : null}
         <button
           type="submit"
@@ -196,6 +227,7 @@ function MainPanelLive({
     return sortAgentsByUpdatedDesc((rows ?? []).map(agentRowToListItem)).map((agent) => ({
       id: agent.id,
       name: agent.name,
+      defaultModel: agent.config.model.name,
     }));
   }, [isLoading, initialAgents, rows]);
 
