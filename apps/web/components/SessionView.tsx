@@ -906,9 +906,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
-                <p className="mt-1 text-[12.5px] text-ink-muted">
-                  Write a message to get started.
-                </p>
+                <p className="mt-1 text-[12.5px] text-ink-muted">Write a message to get started.</p>
               </div>
             ) : null}
 
