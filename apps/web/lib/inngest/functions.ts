@@ -23,6 +23,8 @@ import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
+import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
+import { SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT } from "@/lib/slack/events";
 import {
   sweepWorkspaceSyncOutbox as runWorkspaceSyncOutboxSweep,
   SYNC_OUTBOX_SWEEP_CRON,
@@ -419,6 +421,29 @@ export const sendSignupWelcome = inngest.createFunction(
   },
 );
 
+export const provisionSlackSupportChannel = inngest.createFunction(
+  {
+    id: "provision-slack-support-channel",
+    name: "Provision Slack support channel",
+    retries: 3,
+    // No `idempotency` key: it would dedupe re-dispatches within Inngest's window and
+    // permanently block recovery of a `failed` workspace. Single-channel safety comes
+    // from the per-workspace concurrency lock + the DB unique index + the active
+    // short-circuit + per-step channel-id resume in runProvisionSlackSupport.
+    concurrency: {
+      limit: 1,
+      key: "event.data.workspaceId",
+    },
+    triggers: { event: SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT },
+  },
+  // Cast at the Inngest adapter boundary: the runtime event/step are structurally
+  // compatible with the handler's narrow types (which keep it unit-testable).
+  async ({ event, step }) =>
+    runProvisionSlackSupport({ event, step } as unknown as Parameters<
+      typeof runProvisionSlackSupport
+    >[0]),
+);
+
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
@@ -433,4 +458,5 @@ export const inngestFunctions = [
   runAgentQuestionResume,
   sweepExpiredSessionQuestions,
   sendSignupWelcome,
+  provisionSlackSupportChannel,
 ];

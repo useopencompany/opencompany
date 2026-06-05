@@ -177,6 +177,7 @@ export type RuntimeToolCall = {
   activityPreview: string;
   outputPreview: string;
   brainPath?: string | undefined;
+  issueUrl?: string | undefined;
   approval?: RuntimeToolApprovalState | undefined;
   question?: RuntimeQuestionState | undefined;
   startedEventId: number | null;
@@ -592,6 +593,7 @@ export function buildAssistantTurnParts(
   const toolResultsByCallId = buildToolResultsByCallId(messages);
   const toolCalls = buildRuntimeToolCallsForMessage(events, message.id).map((toolCall) => {
     const outputPreview = toolCall.outputPreview || toolResultsByCallId.get(toolCall.id) || "";
+    const issueUrl = toolCall.issueUrl ?? linearIssueUrlFromPayload(outputPreview);
     return {
       ...toolCall,
       status:
@@ -601,6 +603,7 @@ export function buildAssistantTurnParts(
             ? ("completed" as const)
             : toolCall.status,
       outputPreview,
+      ...(issueUrl ? { issueUrl } : {}),
     };
   });
   const toolCallsById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
@@ -645,6 +648,10 @@ export function buildAssistantTurnParts(
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
       const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
+      const issueUrl =
+        matchingToolCall?.issueUrl ??
+        linearIssueUrlFromToolCallPart(part) ??
+        linearIssueUrlFromPayload(toolResultsByCallId.get(toolCallId));
       const display = resolveToolDisplay(
         readString(part.toolName) || "Tool call",
         part.input ?? part.args,
@@ -663,6 +670,7 @@ export function buildAssistantTurnParts(
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
           ...(brainPath ? { brainPath } : {}),
+          ...(issueUrl ? { issueUrl } : {}),
           ...(matchingToolCall?.approval ? { approval: matchingToolCall.approval } : {}),
           ...(matchingToolCall?.question ? { question: matchingToolCall.question } : {}),
           startedEventId: matchingToolCall?.startedEventId ?? null,
@@ -988,6 +996,10 @@ export function buildRuntimeToolCallsForMessage(
       if (brainPath) {
         call.brainPath = brainPath;
       }
+      const issueUrl = linearIssueUrlFromPayload(event.payload.input);
+      if (issueUrl) {
+        call.issueUrl = issueUrl;
+      }
       call.startedEventId = event.id ?? null;
     }
 
@@ -1007,6 +1019,13 @@ export function buildRuntimeToolCallsForMessage(
       const brainPath = brainPathForToolPayload(call.name, event.payload.output);
       if (brainPath) {
         call.brainPath = brainPath;
+      }
+      // Output carries the canonical issue URL, so let it win over any input-derived value.
+      const issueUrl =
+        linearIssueUrlFromPayload(event.payload.output) ||
+        linearIssueUrlFromPayload(event.payload.outputPreview);
+      if (issueUrl) {
+        call.issueUrl = issueUrl;
       }
       call.completedEventId = event.id ?? null;
     }
@@ -1182,6 +1201,36 @@ function normalizeBrainWorkspacePath(value: unknown) {
   if (!path.startsWith("brain/")) return undefined;
   const brainPath = path.slice("brain/".length);
   return brainPath || undefined;
+}
+
+// Linear surfaces the canonical issue URL in tool output (and sometimes input). Pull it so the
+// transcript can link straight out to the issue, mirroring how brainPath drives the brain badge.
+const LINEAR_ISSUE_URL_RE =
+  /https?:\/\/linear\.app\/[^\s"'<>)\]]+\/issue\/[A-Za-z0-9]+-\d+[^\s"'<>)\]]*/;
+
+function safeStringifyForUrlScan(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function linearIssueUrlFromPayload(payload: unknown): string | undefined {
+  const text = safeStringifyForUrlScan(payload);
+  if (!text) return undefined;
+  return text.match(LINEAR_ISSUE_URL_RE)?.[0];
+}
+
+function linearIssueUrlFromToolCallPart(part: Record<string, unknown>) {
+  return (
+    linearIssueUrlFromPayload(part.output) ||
+    linearIssueUrlFromPayload(part.input) ||
+    linearIssueUrlFromPayload(part.args) ||
+    undefined
+  );
 }
 
 function readFirstToolResultPart(modelMessage: Record<string, unknown> | null | undefined) {

@@ -13,6 +13,7 @@ import type {
 import {
   AtSign,
   BarChart3,
+  CalendarDays,
   Clock3,
   Code2,
   FileText,
@@ -20,6 +21,7 @@ import {
   GitBranch,
   ListTodo,
   type LucideIcon,
+  Mail,
   MessageSquare,
   MessagesSquare,
   Music2,
@@ -159,6 +161,8 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,
+  gmail: Mail,
+  google_calendar: CalendarDays,
 };
 
 // Real brand logos keyed by the provider prefix of the model id (the part

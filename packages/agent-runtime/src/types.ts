@@ -58,7 +58,9 @@ export type AgentToolId =
   | "opencode"
   | "linear"
   | "slack"
-  | "posthog";
+  | "posthog"
+  | "gmail"
+  | "google_calendar";
 export type AgentModelId =
   | "openai/gpt-5.4-mini"
   | "openai/gpt-5.4"
@@ -97,7 +99,7 @@ export type AgentModelId =
   | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
-  id: "exa" | "x" | "youtube" | "tiktok" | "instagram";
+  id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "gmail" | "google_calendar";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;
