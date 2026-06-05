@@ -39,6 +39,7 @@
     "@tiptap/react": "^3.23.5",
     "@tiptap/starter-kit": "^3.23.5",
     "@tiptap/suggestion": "^3.23.5",
+    "@vercel/blob": "^2.4.0",
     "@workos-inc/authkit-nextjs": "^4.1.0",
     "@workos-inc/node": "^9.3.1",
     "clsx": "^2.1.1",
