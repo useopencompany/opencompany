@@ -1,8 +1,9 @@
-import type { TextStreamPart, ToolSet } from "ai";
+import { modelMessageSchema, type TextStreamPart, type ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { collectAssistantStream } from "./model-stream-runner";
+import { buildAssistantModelMessage } from "./model-messages";
 import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
 import {
   createRunControlGate,
@@ -653,6 +654,39 @@ describe("stream error handling", () => {
         input: { query: "YC agent discussion" },
       },
     });
+  });
+
+  it("replays tool calls with the parsed coordinator input when the stream part has no input", async () => {
+    const toolStartCoordinator = createToolStartCoordinator();
+    toolStartCoordinator.record({
+      toolCallId: "call_search",
+      name: "tool_search",
+      input: { query: "", capability: "" },
+    });
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "tool_search",
+        input: undefined,
+      }),
+    ]);
+
+    const result = await collect(stream, { toolStartCoordinator });
+
+    expect(result.assistantReplayParts).toEqual([
+      {
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "tool_search",
+        input: { query: "", capability: "" },
+      },
+    ]);
+    expect(
+      modelMessageSchema.safeParse(
+        buildAssistantModelMessage({ content: "", parts: result.assistantReplayParts }),
+      ).success,
+    ).toBe(true);
   });
 
   it("rejects turn completion when the model is still requesting tools at the step cap", () => {

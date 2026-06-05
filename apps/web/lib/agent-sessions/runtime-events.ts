@@ -519,7 +519,13 @@ function addToolUsageRollup(
 }
 
 export function isInspectableRuntimeEvent(event: RuntimeEvent) {
-  return event.type !== "message.delta" && event.type !== "message.reasoning_delta";
+  return (
+    event.type !== "message.delta" &&
+    event.type !== "message.reasoning_delta" &&
+    // Debug-only model-request snapshot — large and noisy; kept in detail.events for the
+    // "Copy JSON" export but hidden from the inspector's recent-events list.
+    event.type !== "debug.model_request"
+  );
 }
 
 // Reasoning is the model's current phase when the most recent event for a still-running
@@ -547,7 +553,12 @@ export function buildAssistantTurnParts(
     const outputPreview = toolCall.outputPreview || toolResultsByCallId.get(toolCall.id) || "";
     return {
       ...toolCall,
-      status: outputPreview ? ("completed" as const) : toolCall.status,
+      status:
+        toolCall.status === "failed"
+          ? ("failed" as const)
+          : outputPreview
+            ? ("completed" as const)
+            : toolCall.status,
       outputPreview,
     };
   });

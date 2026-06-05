@@ -116,6 +116,38 @@ describe("dispatchBuiltinUseTool", () => {
     expect(failed?.payload.name).toBe("use_tool");
   });
 
+  it("persists hosted tool failures as recoverable tool results instead of session errors", async () => {
+    hostedTools.executeHostedTool.mockRejectedValueOnce(new Error("Exa search failed"));
+
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: { query: "vercel" } }),
+      enabledTools: ["exa_search"],
+    })) as { ok: boolean; error: { message: string; code: string; recoverable: boolean } };
+
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message: "Exa search failed",
+        code: "tool_execution_failed",
+        recoverable: true,
+      },
+    });
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "use_tool", toolCallId: "call_use" }),
+    );
+    const events = leaseWrites.appendRuntimeEventForLease.mock.calls.map(
+      (call) => call[0] as { type: string; payload: { name?: string; error?: unknown } },
+    );
+    expect(events.some((event) => event.type === "session.error")).toBe(false);
+    const failed = events.find((event) => event.type === "tool.failed");
+    expect(failed).toMatchObject({
+      payload: {
+        name: "use_tool",
+        error: { code: "tool_execution_failed", recoverable: true },
+      },
+    });
+  });
+
   it("rejects a tool that exists but is not enabled for the session", async () => {
     const output = (await dispatchBuiltinUseTool({
       ...baseInput({ tool: "amp_coder", arguments: {} }),

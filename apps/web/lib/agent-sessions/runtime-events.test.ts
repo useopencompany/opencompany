@@ -955,6 +955,43 @@ describe("buildAssistantTurnParts", () => {
     ]);
   });
 
+  it("preserves failed tool-call status when the failed event has an output preview", () => {
+    const parts = buildAssistantTurnParts(
+      {
+        id: "msg_assistant",
+        role: "assistant",
+        content: "",
+        status: "completed",
+        modelMessage: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "call_1",
+              toolName: "read_file",
+              input: { path: "../secret.txt" },
+            },
+          ],
+        },
+      },
+      [
+        event(1, "tool.failed", {
+          messageId: "msg_assistant",
+          toolCallId: "call_1",
+          name: "read_file",
+          outputPreview:
+            '{\n  "ok": false,\n  "error": {\n    "code": "invalid_sandbox_path"\n  }\n}',
+        }),
+      ],
+    );
+
+    const toolPart = parts.find((part) => part.type === "tool-call");
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.status : null).toBe("failed");
+    expect(toolPart?.type === "tool-call" ? toolPart.toolCall.outputPreview : "").toContain(
+      "invalid_sandbox_path",
+    );
+  });
+
   it("renders a tool-call card while a running turn is paused awaiting approval", () => {
     const parts = buildAssistantTurnParts(
       { id: "msg_assistant", role: "assistant", content: "", status: "running" },

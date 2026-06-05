@@ -60,6 +60,18 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      // Debug-only snapshot of the inputs sent to the model for a turn (the assembled system
+      // prompt + the tool catalog). Not rendered in the UI — captured purely so the session's
+      // "Copy JSON" export can include the otherwise-ephemeral request inputs. See
+      // isInspectableRuntimeEvent (web) which hides it from the inspector event list.
+      type: "debug.model_request";
+      payload: {
+        messageId: string;
+        systemPrompt: string;
+        tools: Array<{ name: string; description: string; parameters: unknown }>;
+      };
+    }
+  | {
       type: "message.reasoning_summary";
       payload: { messageId: string; summary: string };
     }

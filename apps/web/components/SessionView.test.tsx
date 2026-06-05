@@ -540,6 +540,21 @@ describe("AssistantMessageContent — abort: stopped notice renders regardless o
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("shows the session error detail when a stopped assistant turn failed in the runner", () => {
+    const message = makeMessage({ status: "running" });
+    render(
+      <AssistantMessageContent
+        message={message}
+        parts={[]}
+        sessionCanGenerate={false}
+        stoppedError="Missing required parameter: 'input[5].arguments'."
+      />,
+    );
+
+    expect(screen.getByText("Stopped before finishing")).toBeInTheDocument();
+    expect(screen.getByText(/Missing required parameter/)).toBeInTheDocument();
+  });
+
   it("shows AssistantStoppedNotice when message is running but session cannot generate (has parts)", () => {
     const message = makeMessage({ status: "running" });
     const parts = [makeToolCallPart("running")];
@@ -765,6 +780,70 @@ describe("SessionViewContent — stream-sourced pending turn", () => {
 
     // Rendered in both the inline transcript banner and the inspector runtime panel.
     expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
+  });
+
+  it("renders recoverable failed tools without a session-level stopped notice", async () => {
+    const user = userEvent.setup();
+    const detail = makeDetail({
+      session: makeSession({ id: "sess_tool_failure", status: "completed", lastError: null }),
+      messages: [
+        {
+          id: "msg_user",
+          role: "user",
+          content: "Read a file",
+          status: "completed",
+          createdAt: "2026-06-04T10:00:00.000Z",
+        },
+        {
+          id: "msg_assistant",
+          role: "assistant",
+          content: "",
+          status: "completed",
+          responseToMessageId: "msg_user",
+          createdAt: "2026-06-04T10:00:01.000Z",
+          completedAt: "2026-06-04T10:00:02.000Z",
+          modelMessage: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call_read",
+                toolName: "read_file",
+                input: { path: "../secret.txt" },
+              },
+            ],
+          },
+        },
+      ],
+      events: [
+        {
+          id: 1,
+          type: "tool.failed",
+          messageId: "msg_assistant",
+          createdAt: "2026-06-04T10:00:02.000Z",
+          payload: {
+            messageId: "msg_assistant",
+            toolCallId: "call_read",
+            name: "read_file",
+            error: {
+              message: "Path must be inside work/ or brain/ for this session.",
+              code: "invalid_sandbox_path",
+              recoverable: true,
+            },
+            outputPreview:
+              '{\n  "ok": false,\n  "error": {\n    "code": "invalid_sandbox_path"\n  }\n}',
+          },
+        },
+      ],
+    });
+
+    renderSessionViewContent(detail);
+
+    expect(screen.queryByText("Stopped before finishing")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /1 step/ }));
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Reading \.\./ }));
+    expect(screen.getByText(/invalid_sandbox_path/)).toBeInTheDocument();
   });
 });
 

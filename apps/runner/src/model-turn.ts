@@ -2,6 +2,8 @@ import {
   BUILTIN_USE_TOOL_NAME,
   partitionRuntimeToolNames,
   resolveAgentRuntimeConfig,
+  RUNTIME_TOOL_DEFINITION_BY_NAME,
+  type RuntimeToolName,
   type WorkspaceToolPolicyMap,
 } from "@opencompany/agent-runtime";
 import { timeAsync } from "@opencompany/observability";
@@ -81,6 +83,37 @@ export async function streamAssistantResponse(input: {
     ...(deferred.length > 0 && dispatcher ? { [BUILTIN_USE_TOOL_NAME]: dispatcher } : {}),
     ...mcpToolSet.tools,
   };
+  // Persist a debug-only snapshot of this turn's model inputs (system prompt + tool catalog)
+  // so the session's "Copy JSON" export can include them — they are otherwise ephemeral,
+  // built here and passed straight to the model. The tool list unions the full enabled catalog
+  // (`runtime.tools`, incl. deferred tools reached via `use_tool`) with the names actually
+  // registered this turn (`selectedTools`, incl. MCP tools + the dispatcher); schemas come from
+  // the static definitions, so MCP tools appear by name only. Best-effort: a failed write must
+  // never abort the turn, so this is deliberately NOT wrapped in `requireLeaseWrite`.
+  try {
+    const toolNames = new Set<string>([...input.runtime.tools, ...Object.keys(selectedTools)]);
+    await appendRuntimeEventForLease({
+      sessionId: input.ctx.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.ctx.leaseId,
+      leaseOwner: input.ctx.leaseOwner,
+      type: "debug.model_request",
+      payload: {
+        messageId: input.assistantMessageId,
+        systemPrompt: input.system,
+        tools: [...toolNames].map((name) => {
+          const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name as RuntimeToolName);
+          return {
+            name,
+            description: definition?.description ?? "",
+            parameters: definition?.parameters ?? null,
+          };
+        }),
+      },
+    });
+  } catch {
+    // Debug-only event — swallow write failures (e.g. lost lease) so debugging never breaks a run.
+  }
   // The model call is traced by Braintrust's `wrapAISDK` (via `getBraintrustAISDK`): it opens the
   // `streamText` / `doStream` LLM spans, capturing input, output, per-step tool calls, usage, and
   // derived cost, and nests them under the current per-turn root span. We keep only the Better Stack

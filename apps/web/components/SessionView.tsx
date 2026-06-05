@@ -383,24 +383,32 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // (only when the button is clicked) so we never stringify the whole transcript on
   // every render. Pulls from the merged `runtime` so it includes live stream state, and
   // carries the raw `modelMessage` per turn plus every runtime event payload verbatim —
-  // the highest-fidelity view the client has. NOTE: the assembled system prompt and tool
-  // definitions live only in the runner at request time (passed straight to the model and
-  // never persisted), so they are not present here; `systemPrompt`/`tools` are recorded as
-  // null to make that gap explicit rather than silently omitting them.
-  const buildSessionDebugSnapshot = () => ({
-    exportedAt: new Date().toISOString(),
-    session: detail.session,
-    related: detail.related,
-    status: runtime.currentStatus,
-    lastError: runtime.lastError,
-    systemPrompt: null,
-    tools: null,
-    usage: runtime.usage,
-    toolUsage: runtime.toolUsage,
-    cost: runtime.cost,
-    messages: runtime.messages,
-    events: runtime.events,
-  });
+  // the highest-fidelity view the client has. The assembled system prompt and tool catalog
+  // are built in the runner at request time and are otherwise ephemeral; the runner persists
+  // them per turn as a `debug.model_request` event (hidden from the inspector — see
+  // isInspectableRuntimeEvent), so we hoist the latest one to top-level fields for
+  // convenience. The raw events still carry every turn's snapshot.
+  const buildSessionDebugSnapshot = () => {
+    const latestModelRequest = [...runtime.events]
+      .reverse()
+      .find((event) => event.type === "debug.model_request")?.payload as
+      | { systemPrompt?: string; tools?: unknown }
+      | undefined;
+    return {
+      exportedAt: new Date().toISOString(),
+      session: detail.session,
+      related: detail.related,
+      status: runtime.currentStatus,
+      lastError: runtime.lastError,
+      systemPrompt: latestModelRequest?.systemPrompt ?? null,
+      tools: latestModelRequest?.tools ?? null,
+      usage: runtime.usage,
+      toolUsage: runtime.toolUsage,
+      cost: runtime.cost,
+      messages: runtime.messages,
+      events: runtime.events,
+    };
+  };
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
   // drives the transcript, but usage/cost come from the detail query).
   const lastSettledStatusRef = useRef(runtime.currentStatus);
@@ -519,6 +527,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               parts={assistantParts}
               sessionCanGenerate={sessionCanGenerate}
               sessionIsPaused={sessionIsPaused}
+              stoppedError={runtime.currentStatus === "failed" ? runtime.lastError : null}
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
@@ -1467,6 +1476,7 @@ export function AssistantMessageContent({
   parts,
   sessionCanGenerate,
   sessionIsPaused = false,
+  stoppedError = null,
   reasoningActive = false,
   activeStartedAt,
 }: {
@@ -1474,6 +1484,7 @@ export function AssistantMessageContent({
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
   sessionIsPaused?: boolean;
+  stoppedError?: string | null;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
 }) {
@@ -1617,7 +1628,7 @@ export function AssistantMessageContent({
             thinking={reasoningActive}
           />
         ) : isStopped ? (
-          <AssistantStoppedNotice />
+          <AssistantStoppedNotice errorMessage={stoppedError} />
         ) : (
           "..."
         )
@@ -1629,7 +1640,7 @@ export function AssistantMessageContent({
           thinking={reasoningActive}
         />
       ) : null}
-      {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
+      {hasParts && isStopped ? <AssistantStoppedNotice errorMessage={stoppedError} /> : null}
     </div>
   );
 }
@@ -1743,11 +1754,23 @@ function formatStepDuration(seconds: number) {
   return `${minutes} min`;
 }
 
-function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
+function AssistantStoppedNotice({
+  elapsedSeconds,
+  errorMessage,
+}: {
+  elapsedSeconds?: number | null;
+  errorMessage?: string | null;
+}) {
+  const detail = errorMessage?.trim();
   return (
-    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
+    <div className="inline-flex max-w-full items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
+      {detail ? (
+        <span className="min-w-0 break-words text-[12px] font-normal leading-5 text-danger/80">
+          : {detail}
+        </span>
+      ) : null}
       {typeof elapsedSeconds === "number" ? (
         <span className="text-[12px] font-normal tabular-nums text-danger/70">
           {formatElapsed(elapsedSeconds)}
