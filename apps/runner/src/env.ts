@@ -17,6 +17,9 @@ export type RunnerEnv = {
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
+  // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
+  // validation + coercion always run; this only gates the small-model fallback. Default on.
+  toolArgRepairEnabled: boolean;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -39,6 +42,7 @@ export function loadEnv(): RunnerEnv {
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
+    toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not
@@ -69,6 +73,14 @@ function requiredEncryptionKey() {
 function optionalEnv(name: string) {
   const value = process.env[name]?.trim();
   return value || undefined;
+}
+
+function optionalBooleanEnv(name: string, fallback: boolean) {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  throw new Error(`${name} must be a boolean (true/false/1/0).`);
 }
 
 function optionalPositiveIntegerEnv(name: string, fallback: number) {

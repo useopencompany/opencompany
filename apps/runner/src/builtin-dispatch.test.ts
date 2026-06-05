@@ -215,6 +215,42 @@ describe("dispatchBuiltinUseTool", () => {
     expect(output.error.message).toContain("arguments must be an object");
   });
 
+  it("coerces a numeric string and runs the tool with the coerced value", async () => {
+    const output = await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: { query: "vercel", numResults: "3" } }),
+      enabledTools: ["exa_search"],
+    });
+
+    // The model sent numResults as a string; deterministic coercion narrows it before dispatch.
+    expect(hostedTools.executeHostedTool).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "exa_search", args: { query: "vercel", numResults: 3 } }),
+    );
+    expect(output).toEqual({ ok: true, hits: 1 });
+
+    const completed = leaseWrites.appendRuntimeEventForLease.mock.calls
+      .map(
+        (call) =>
+          call[0] as {
+            type: string;
+            payload: { argResolution?: { outcome: string; coercions?: string[] } };
+          },
+      )
+      .find((event) => event.type === "tool.completed");
+    expect(completed?.payload.argResolution?.outcome).toBe("coerced");
+    expect(completed?.payload.argResolution?.coercions?.length).toBeGreaterThan(0);
+  });
+
+  it("normalizes an enum value's case before running the tool", async () => {
+    await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: { query: "vercel", type: "FAST" } }),
+      enabledTools: ["exa_search"],
+    });
+
+    expect(hostedTools.executeHostedTool).toHaveBeenCalledWith(
+      expect.objectContaining({ args: { query: "vercel", type: "fast" } }),
+    );
+  });
+
   it("routes the deferred update_agent_file through use_tool and enforces the self-edit gate", async () => {
     // update_agent_file is a standalone deferrable: dispatched via use_tool, it must reach the
     // internal handler (not be rejected as unknown) and still hit the read-skill gate, since the

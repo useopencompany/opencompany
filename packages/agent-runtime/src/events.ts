@@ -1,3 +1,4 @@
+import type { ToolArgResolution } from "./tool-args";
 import type {
   AgentSessionQuestionAnswer,
   AgentSessionQuestionPrompt,
@@ -98,6 +99,9 @@ export type AgentRuntimeEvent =
         name: string;
         outputPreview?: string;
         output?: unknown;
+        // Present for deferred-tool dispatch (use_tool / {server}__use_tool) when the arguments
+        // were validated, coerced, or repaired before the tool ran. See ToolArgResolution.
+        argResolution?: ToolArgResolution;
       };
     }
   | {
@@ -109,6 +113,9 @@ export type AgentRuntimeEvent =
         outputPreview?: string;
         output?: unknown;
         error: { message: string; code: string; recoverable: boolean };
+        // Present when the failure was a deferred-tool argument problem that survived coercion and
+        // (optionally) repair. See ToolArgResolution.
+        argResolution?: ToolArgResolution;
       };
     }
   | {
