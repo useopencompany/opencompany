@@ -22,6 +22,7 @@ import {
   createOrConnectSandbox,
   githubRemoteMatches,
   prepareWorkspace,
+  resolveSandboxBrainRelativePath,
   resolveSandboxSkillPath,
   resolveSandboxToolPath,
   runSandboxTool,
@@ -355,6 +356,19 @@ describe("resolveSandboxToolPath", () => {
     );
     expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
       "/home/user/workspace/brain/foo.md",
+    );
+  });
+
+  it("resolves brain-relative paths and ignores non-brain roots", () => {
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain/wiki/page.md")).toBe(
+      "wiki/page.md",
+    );
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain")).toBe("");
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain/")).toBe("");
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "work/foo.txt")).toBeNull();
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "agent/memory.md")).toBeNull();
+    expect(() => resolveSandboxBrainRelativePath("/home/user/workspace", "notes.md")).toThrow(
+      /work\/, brain\/, or agent\//,
     );
   });
 

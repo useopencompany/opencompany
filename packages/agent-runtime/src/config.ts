@@ -99,7 +99,7 @@ export function resolveAgentRuntimeConfig(input: {
           .map((reference) => formatBrainReferencePath(reference.path))
           .join(
             ", ",
-          )}. Only edit files inside mounted brain paths when updating long-lived context.`
+          )}. You can only read or write Brain files under those mounted paths — attempts to access any other Brain path are rejected. To change scope, update this agent's brain refs via self-edit.`
       : null,
     input.agent.agents?.length
       ? `Delegatable workspace agents: ${input.agent.agents

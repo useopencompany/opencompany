@@ -1,5 +1,99 @@
+import type { AgentBrainReference } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
-import { formatRuntimePreview, redactPreviewSecrets } from "./tool-dispatcher";
+import {
+  formatRuntimePreview,
+  preflightSandboxToolArgs,
+  redactPreviewSecrets,
+} from "./tool-dispatcher";
+
+const WORKDIR = "/home/user/workspace";
+const WIKI_ONLY: AgentBrainReference[] = [{ path: "wiki/", type: "folder" }];
+
+describe("preflightSandboxToolArgs brain scope", () => {
+  it("allows writes inside a mounted brain folder, including new files", () => {
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "write_file",
+        args: { path: "brain/wiki/new.md", content: "hi" },
+        workdir: WORKDIR,
+        brainReferences: WIKI_ONLY,
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects writes outside the mounted brain scope with a guiding message", () => {
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "write_file",
+        args: { path: "brain/marketing/plan.md", content: "hi" },
+        workdir: WORKDIR,
+        brainReferences: WIKI_ONLY,
+      }),
+    ).toThrow(/outside this agent's mounted Brain access.*brain\/wiki\/.*self-edit/s);
+  });
+
+  it("rejects reads outside the mounted brain scope", () => {
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "read_file",
+        args: { path: "brain/marketing/plan.md" },
+        workdir: WORKDIR,
+        brainReferences: WIKI_ONLY,
+      }),
+    ).toThrow(/brain\/marketing\/plan\.md is outside/);
+  });
+
+  it("rejects edits when the agent has no brain access", () => {
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "edit_file",
+        args: { path: "brain/wiki/page.md" },
+        workdir: WORKDIR,
+        brainReferences: [],
+      }),
+    ).toThrow(/this agent has no mounted Brain paths/);
+  });
+
+  it("allows listing the brain root and ancestors but not out-of-scope folders", () => {
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "list_files",
+        args: { path: "brain" },
+        workdir: WORKDIR,
+        brainReferences: WIKI_ONLY,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "list_files",
+        args: { path: "brain/wiki" },
+        workdir: WORKDIR,
+        brainReferences: WIKI_ONLY,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      preflightSandboxToolArgs({
+        name: "list_files",
+        args: { path: "brain/marketing" },
+        workdir: WORKDIR,
+        brainReferences: WIKI_ONLY,
+      }),
+    ).toThrow(/outside this agent/);
+  });
+
+  it("does not constrain work/ and agent/ paths by brain scope", () => {
+    for (const path of ["work/foo.txt", "agent/memory.md"]) {
+      expect(() =>
+        preflightSandboxToolArgs({
+          name: "write_file",
+          args: { path, content: "x" },
+          workdir: WORKDIR,
+          brainReferences: [],
+        }),
+      ).not.toThrow();
+    }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // redactPreviewSecrets

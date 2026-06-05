@@ -562,6 +562,23 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
   throw new Error(allowedRootsMessage);
 }
 
+/**
+ * If a tool path resolves inside the Brain root, return its Brain-relative path
+ * (without the `brain/` prefix; `""` for the Brain root). Returns null when the
+ * path is valid but outside the Brain. Throws the same error as
+ * resolveSandboxToolPath when the path is not in an allowed root at all.
+ */
+export function resolveSandboxBrainRelativePath(
+  workdir: string,
+  inputPath?: string,
+): string | null {
+  const resolved = resolveSandboxToolPath(workdir, inputPath);
+  const relative = relativePath(workdir, resolved);
+  if (relative === "brain") return "";
+  if (relative.startsWith("brain/")) return relative.slice("brain/".length);
+  return null;
+}
+
 export function resolveSandboxSkillPath(workdir: string, skillId: string, inputPath = "SKILL.md") {
   const id = skillId.trim();
   if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(id) || id.includes("--")) {

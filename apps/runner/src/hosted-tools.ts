@@ -5,6 +5,11 @@ import {
   searchRuntimeTools,
 } from "@opencompany/agent-runtime";
 import type { RunnerEnv } from "./env";
+import {
+  executeGoogleHostedTool,
+  type GoogleToolContext,
+  isGoogleHostedTool,
+} from "./google-tools";
 
 export type HostedToolUsage = {
   provider: string;
@@ -209,7 +214,19 @@ export async function executeHostedTool(input: {
   env: RunnerEnv;
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
+  googleContext?: GoogleToolContext | undefined;
 }): Promise<HostedToolResult> {
+  // Google (Gmail + Calendar) tools resolve per-account workspace credentials rather than a
+  // platform env var, so they take a different path with the credential context attached.
+  if (isGoogleHostedTool(input.name)) {
+    return executeGoogleHostedTool({
+      name: input.name,
+      args: input.args,
+      context: input.googleContext,
+      signal: input.signal,
+    });
+  }
+
   const handler = HOSTED_TOOL_HANDLERS[input.name];
   if (!handler) throw new Error(`Unknown hosted tool: ${input.name}`);
   return handler.execute(input);
