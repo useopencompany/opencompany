@@ -201,6 +201,20 @@ describe("dispatchBuiltinUseTool", () => {
     expect(output.error.message).toContain('"query" must be a string');
   });
 
+  it("rejects an array passed as the arguments object", async () => {
+    // typeof [] === "object", so an array must not be walked like a record — it should reach the
+    // "arguments must be an object" path rather than producing confusing per-index errors.
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: ["vercel"] }),
+      enabledTools: ["exa_search"],
+    })) as { ok: boolean; error: { code: string; message: string } };
+
+    expect(hostedTools.executeHostedTool).not.toHaveBeenCalled();
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("invalid_tool_input");
+    expect(output.error.message).toContain("arguments must be an object");
+  });
+
   it("routes the deferred update_agent_file through use_tool and enforces the self-edit gate", async () => {
     // update_agent_file is a standalone deferrable: dispatched via use_tool, it must reach the
     // internal handler (not be rejected as unknown) and still hit the read-skill gate, since the

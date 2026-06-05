@@ -904,7 +904,13 @@ export function buildRuntimeToolCallsForMessage(
       );
       call.name = display.name || call.name;
       call.label = display.label ?? call.label;
-      call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;
+      // Prefer the unwrapped inner arguments so a deferred use_tool approval card shows what the
+      // user is actually approving, matching the tool.started rendering; fall back to the persisted
+      // wrapper preview, then whatever the call already had.
+      call.inputPreview =
+        formatRuntimePreview(display.input) ||
+        formatRuntimePreview(event.payload.inputPreview) ||
+        call.inputPreview;
       call.approval = {
         status: "required",
         providerKey: readString(event.payload.providerKey),

@@ -315,7 +315,9 @@ export function validateUseToolArgs(
 ): string[] {
   const properties = isRecord(schema.properties) ? schema.properties : {};
   const required = Array.isArray(schema.required) ? schema.required : [];
-  const record = isRecord(args) ? args : undefined;
+  // isRecord accepts arrays (typeof [] === "object"); exclude them so an array reaches the
+  // "arguments must be an object" path instead of being walked like a record.
+  const record = isRecord(args) && !Array.isArray(args) ? args : undefined;
   const errors: string[] = [];
 
   if (!record) {
@@ -369,7 +371,8 @@ function matchesJsonType(value: unknown, expected: string): boolean {
     case "array":
       return Array.isArray(value);
     case "object":
-      return isRecord(value);
+      // Arrays are their own JSON type; an "object"-typed field must not accept one.
+      return isRecord(value) && !Array.isArray(value);
     default:
       // Unknown/unsupported type keyword — don't second-guess it.
       return true;
