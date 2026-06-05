@@ -107,6 +107,30 @@ describe("run control", () => {
     expect(checkAbort).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps checking abort state while quiet guarded work is pending", async () => {
+    vi.useFakeTimers();
+    const checkAbort = vi.fn().mockResolvedValue(undefined);
+    const run = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          setTimeout(() => resolve("done"), 1_200);
+        }),
+    );
+
+    const guarded = withRunControlChecks(checkAbort, run, { intervalMs: 500 });
+    await Promise.resolve();
+
+    expect(checkAbort).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(checkAbort).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(checkAbort).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(200);
+
+    await expect(guarded).resolves.toBe("done");
+    expect(checkAbort).toHaveBeenCalledTimes(4);
+  });
+
   it("does not start guarded work when the first abort check fails", async () => {
     const checkAbort = vi.fn().mockRejectedValue(new RunAbortError());
     const run = vi.fn().mockResolvedValue("done");

@@ -10,6 +10,7 @@ import {
 } from "./agent-loop";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
+import { RunLeaseBusyError } from "./run-control";
 import { isNonRetryableRunnerError } from "./runner-errors";
 import { generateSessionTitleForMessage } from "./session-title";
 import { rowsFromExecute } from "./sql-exec";
@@ -353,14 +354,22 @@ export function startRunnerJobWorker(
     handlers?: RunnerJobHandlers;
     concurrency?: number;
     pollIntervalMs?: number;
+    staleRunSweep?: () => Promise<number>;
+    staleRunSweepIntervalMs?: number;
   } = {},
 ) {
   const store = options.store ?? createDbRunnerJobStore();
   const handlers = options.handlers ?? defaultRunnerJobHandlers;
   const concurrency = Math.max(1, options.concurrency ?? DEFAULT_WORKER_CONCURRENCY);
   const pollIntervalMs = Math.max(50, options.pollIntervalMs ?? DEFAULT_WORKER_POLL_INTERVAL_MS);
+  const staleRunSweep = options.staleRunSweep;
+  const staleRunSweepIntervalMs = Math.max(
+    RUNNER_JOB_HEARTBEAT_INTERVAL_MS,
+    options.staleRunSweepIntervalMs ?? 60_000,
+  );
   const active = new Set<Promise<void>>();
   let stopped = false;
+  let lastStaleRunSweepAt = 0;
 
   // `notify()` lets the in-process server nudge the loop the moment a job is enqueued
   // instead of waiting out the poll interval, which is the dominant source of dead time
@@ -399,11 +408,33 @@ export function startRunnerJobWorker(
   const runLoop = async () => {
     while (!stopped) {
       try {
+        const nowMs = Date.now();
+        if (staleRunSweep && nowMs - lastStaleRunSweepAt >= staleRunSweepIntervalMs) {
+          lastStaleRunSweepAt = nowMs;
+          void staleRunSweep().catch((error) => {
+            captureException(error, { event: "opencompany.runner_stale_sweep_failed" });
+            logger.warn("Runner stale sweep failed", {
+              event: "opencompany.runner_stale_sweep_failed",
+              error,
+            });
+          });
+        }
+
         while (!stopped && active.size < concurrency) {
           const job = await claimNextRunnerJob({ leaseOwner: env.instanceId, store });
           if (!job) break;
           const running = runClaimedRunnerJob({ job, env, store, handlers })
             .catch((error) => {
+              if (error instanceof RunLeaseBusyError) {
+                logger.info("Runner job deferred because run lease is busy", {
+                  event: "opencompany.runner_job_lease_busy",
+                  runner_job_id: job.id,
+                  runner_job_kind: job.kind,
+                  session_id: job.sessionId,
+                  message_id: job.messageId,
+                });
+                return;
+              }
               captureException(error, {
                 event: "opencompany.runner_job_failed",
                 runner_job_id: job.id,
@@ -438,13 +469,29 @@ export function startRunnerJobWorker(
   const loop = runLoop();
   return {
     notify,
-    stop: async () => {
+    activeCount: () => active.size,
+    stop: async (options?: {
+      interruptAfterMs?: number;
+      onInterrupt?: () => Promise<void> | void;
+    }) => {
       stopped = true;
       // Break out of any in-progress wait so shutdown does not stall a poll interval.
       notify();
       await loop;
-      while (active.size > 0) {
+      if (active.size === 0) return;
+
+      if (options?.interruptAfterMs === undefined) {
         await Promise.allSettled(Array.from(active));
+        return;
+      }
+
+      const drained = await Promise.race([
+        Promise.allSettled(Array.from(active)).then(() => true),
+        sleep(options.interruptAfterMs).then(() => false),
+      ]);
+
+      if (!drained) {
+        await options.onInterrupt?.();
       }
     },
   };
@@ -520,7 +567,8 @@ async function failRunnerJob(input: {
 }) {
   const now = new Date();
   const terminal =
-    input.job.attempts >= RUNNER_JOB_MAX_ATTEMPTS || isNonRetryableRunnerError(input.error);
+    !(input.error instanceof RunLeaseBusyError) &&
+    (input.job.attempts >= RUNNER_JOB_MAX_ATTEMPTS || isNonRetryableRunnerError(input.error));
   await input.store.fail({
     id: input.job.id,
     leaseId: input.leaseId,
@@ -529,6 +577,13 @@ async function failRunnerJob(input: {
     status: terminal ? "failed" : "pending",
     nextRunAt: terminal ? now : retryAfter(now, input.job.attempts),
     lastError: errorMessage(input.error),
+  });
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
   });
 }
 

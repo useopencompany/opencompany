@@ -21,6 +21,13 @@ export class RunLeaseLostError extends Error {
   }
 }
 
+export class RunLeaseBusyError extends Error {
+  constructor(message = "Run lease is busy.") {
+    super(message);
+    this.name = "RunLeaseBusyError";
+  }
+}
+
 export type RunLeaseIdentity = {
   sessionId: string;
   leaseId: string;
@@ -287,11 +294,28 @@ export async function releaseRunLease(
  * Tool execution is a natural run-control boundary, so both guard checks force a
  * fresh DB reconciliation rather than relying on the throttled cadence.
  */
-export async function withRunControlChecks<T>(checkAbort: RunControlCheck, run: () => Promise<T>) {
+export async function withRunControlChecks<T>(
+  checkAbort: RunControlCheck,
+  run: () => Promise<T>,
+  options: { intervalMs?: number } = {},
+) {
   await checkAbort({ force: true });
-  const result = await run();
-  await checkAbort({ force: true });
-  return result;
+  let periodicError: unknown = null;
+  const timer = setInterval(() => {
+    void checkAbort().catch((error) => {
+      periodicError ??= error;
+    });
+  }, options.intervalMs ?? RUN_HEARTBEAT_INTERVAL_MS);
+  timer.unref?.();
+
+  try {
+    const result = await run();
+    if (periodicError) throw periodicError;
+    await checkAbort({ force: true });
+    return result;
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 export function assertRunControlState(

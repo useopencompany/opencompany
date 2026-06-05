@@ -1,3 +1,9 @@
+import {
+  BUILTIN_USE_TOOL_NAME,
+  effectiveToolCall,
+  toolDisplayTitle,
+} from "@opencompany/agent-runtime";
+
 export type SessionMessage = {
   id: string;
   role: string;
@@ -518,8 +524,49 @@ function addToolUsageRollup(
   };
 }
 
+// One consolidated entry per user / assistant / tool turn for the "Copy Debug JSON" export.
+// The raw event stream carries every token and tool-argument delta, which is noise when you
+// just want to read the conversation. Each message already holds its final content plus the
+// verbatim `modelMessage` (the AI SDK ModelMessage — the structured turn with text, reasoning,
+// and tool-call / tool-result parts), so we surface those directly and drop the deltas.
+export type SessionDebugTurn = {
+  id: string;
+  role: string;
+  status: string;
+  internal?: boolean;
+  toolName?: string | null;
+  toolCallId?: string | null;
+  createdAt?: string;
+  completedAt?: string | null;
+  // The verbatim model message, or null for a turn the runner never persisted one for (e.g. a
+  // still-streaming assistant turn) — `content` is the fallback in that case.
+  modelMessage: Record<string, unknown> | null;
+  content: string;
+};
+
+export function buildSessionDebugTurns(messages: SessionMessage[]): SessionDebugTurn[] {
+  return messages.map((message) => ({
+    id: message.id,
+    role: message.role,
+    status: message.status,
+    ...(message.internal ? { internal: true } : {}),
+    ...(message.toolName ? { toolName: message.toolName } : {}),
+    ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    ...(message.createdAt ? { createdAt: message.createdAt } : {}),
+    ...(message.completedAt ? { completedAt: message.completedAt } : {}),
+    modelMessage: message.modelMessage ?? null,
+    content: message.content,
+  }));
+}
+
 export function isInspectableRuntimeEvent(event: RuntimeEvent) {
-  return event.type !== "message.delta" && event.type !== "message.reasoning_delta";
+  return (
+    event.type !== "message.delta" &&
+    event.type !== "message.reasoning_delta" &&
+    // Debug-only model-request snapshot — large and noisy; kept in detail.events for the
+    // "Copy Debug JSON" export but hidden from the inspector's recent-events list.
+    event.type !== "debug.model_request"
+  );
 }
 
 // Reasoning is the model's current phase when the most recent event for a still-running
@@ -547,7 +594,12 @@ export function buildAssistantTurnParts(
     const outputPreview = toolCall.outputPreview || toolResultsByCallId.get(toolCall.id) || "";
     return {
       ...toolCall,
-      status: outputPreview ? ("completed" as const) : toolCall.status,
+      status:
+        toolCall.status === "failed"
+          ? ("failed" as const)
+          : outputPreview
+            ? ("completed" as const)
+            : toolCall.status,
       outputPreview,
     };
   });
@@ -593,21 +645,20 @@ export function buildAssistantTurnParts(
       if (!toolCallId) continue;
       const matchingToolCall = toolCallsById.get(toolCallId);
       const brainPath = matchingToolCall?.brainPath ?? brainPathForToolCallPart(part);
-      const toolName = readString(part.toolName) || "Tool call";
-      const label = matchingToolCall?.label ?? describeToolCall(toolName, part.input ?? part.args);
+      const display = resolveToolDisplay(
+        readString(part.toolName) || "Tool call",
+        part.input ?? part.args,
+      );
+      const label = matchingToolCall?.label ?? display.label;
 
       turnParts.push({
         type: "tool-call",
         toolCall: {
           id: toolCallId,
-          name: toolName,
+          name: display.name,
           ...(label ? { label } : {}),
           status: matchingToolCall?.status ?? "completed",
-          inputPreview:
-            formatRuntimePreview(part.input) ||
-            formatRuntimePreview(part.args) ||
-            matchingToolCall?.inputPreview ||
-            "",
+          inputPreview: formatRuntimePreview(display.input) || matchingToolCall?.inputPreview || "",
           activityPreview: matchingToolCall?.activityPreview ?? "",
           outputPreview:
             matchingToolCall?.outputPreview || toolResultsByCallId.get(toolCallId) || "",
@@ -845,9 +896,21 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.approval_required") {
       const call = getCall(toolCallId);
-      call.name = readString(event.payload.name) || call.name;
-      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
-      call.inputPreview = formatRuntimePreview(event.payload.inputPreview) || call.inputPreview;
+      // The approval event carries the structured input, so a use_tool envelope unwraps to its
+      // inner tool name + dynamic label here — the card matches the later tool.started rendering.
+      const display = resolveToolDisplay(
+        readString(event.payload.name) || call.name,
+        event.payload.input,
+      );
+      call.name = display.name || call.name;
+      call.label = display.label ?? call.label;
+      // Prefer the unwrapped inner arguments so a deferred use_tool approval card shows what the
+      // user is actually approving, matching the tool.started rendering; fall back to the persisted
+      // wrapper preview, then whatever the call already had.
+      call.inputPreview =
+        formatRuntimePreview(display.input) ||
+        formatRuntimePreview(event.payload.inputPreview) ||
+        call.inputPreview;
       call.approval = {
         status: "required",
         providerKey: readString(event.payload.providerKey),
@@ -907,9 +970,13 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.started") {
       const call = getCall(toolCallId);
-      call.name = readString(event.payload.name) || call.name;
-      call.label = describeToolCall(call.name, event.payload.input) ?? call.label;
-      call.inputPreview = formatRuntimePreview(event.payload.input) || call.inputPreview;
+      const display = resolveToolDisplay(
+        readString(event.payload.name) || call.name,
+        event.payload.input,
+      );
+      call.name = display.name || call.name;
+      call.label = display.label ?? call.label;
+      call.inputPreview = formatRuntimePreview(display.input) || call.inputPreview;
       if (call.approval?.status === "required") {
         call.approval = {
           ...call.approval,
@@ -917,7 +984,7 @@ export function buildRuntimeToolCallsForMessage(
           decisionSource: "user",
         };
       }
-      const brainPath = brainPathForToolPayload(call.name, event.payload.input);
+      const brainPath = brainPathForToolPayload(call.name, display.input);
       if (brainPath) {
         call.brainPath = brainPath;
       }
@@ -926,7 +993,10 @@ export function buildRuntimeToolCallsForMessage(
 
     if (event.type === "tool.completed" || event.type === "tool.failed") {
       const call = getCall(toolCallId);
-      call.name = readString(event.payload.name) || call.name;
+      // Completion events carry no input to unwrap, so keep the inner name resolved at tool.started
+      // rather than letting the raw use_tool envelope name overwrite it.
+      const rawName = readString(event.payload.name);
+      if (rawName && rawName !== BUILTIN_USE_TOOL_NAME) call.name = rawName;
       call.status = event.type === "tool.failed" ? "failed" : "completed";
       call.outputPreview =
         event.type === "tool.failed"
@@ -1330,6 +1400,24 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "exa_contents":
       return "Reading web sources";
+    case "x_search_posts": {
+      const query = field("query");
+      return query ? `Searching X for “${truncateLabelText(query)}”` : "Searching X";
+    }
+    case "youtube_search": {
+      const query = field("query");
+      return query ? `Searching YouTube for “${truncateLabelText(query)}”` : "Searching YouTube";
+    }
+    case "tiktok_search": {
+      const query = field("query");
+      return query ? `Searching TikTok for “${truncateLabelText(query)}”` : "Searching TikTok";
+    }
+    case "instagram_search_profiles": {
+      const query = field("query");
+      return query
+        ? `Searching Instagram for “${truncateLabelText(query)}”`
+        : "Searching Instagram";
+    }
     case "web_fetch": {
       const host = hostFromUrl(field("url"));
       return host ? `Fetching ${host}` : "Fetching a web page";
@@ -1373,6 +1461,19 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     default:
       return undefined;
   }
+}
+
+// Resolve the user-facing name + label for a (possibly use_tool-wrapped) call. `name` is the inner
+// tool's programmatic identifier (the dispatcher envelope is transparent here), `input` is its
+// unwrapped arguments, and `label` is the richest phrasing available: a dynamic one-liner when we
+// have one, otherwise the registry's static title. Never returns the raw `use_tool` wrapper.
+export function resolveToolDisplay(
+  rawName: string,
+  rawInput: unknown,
+): { name: string; input: unknown; label: string | undefined } {
+  const { name, input } = effectiveToolCall(rawName, rawInput);
+  const label = describeToolCall(name, input) ?? toolDisplayTitle(name);
+  return { name, input, label };
 }
 
 function truncateLabelText(value: string) {

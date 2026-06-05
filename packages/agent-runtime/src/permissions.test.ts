@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeniedToolOutput,
   classifyByVerbHeuristic,
+  classifyGitHubCliArgs,
   classifyMcpTool,
   classifyRuntimeTool,
   classifyTool,
@@ -134,6 +135,81 @@ describe("classifyMcpTool", () => {
   });
 });
 
+describe("classifyGitHubCliArgs", () => {
+  it("classifies read-only gh commands as read", () => {
+    for (const args of [
+      "pr view 301 --json number,title,url",
+      "pr list --limit 10",
+      "pr diff 301 -- CHANGELOG.md",
+      "pr status",
+      "pr checks 301",
+      "issue view 123",
+      "issue list --state open",
+      "issue status",
+      "release view v1.0.0",
+      "release list --limit 10",
+      "repo view opencompany/web",
+      "repo list opencompany",
+      "api repos/opencompany/web/pulls/301",
+      "api --method GET repos/opencompany/web/pulls/301",
+      "api --method GET repos/opencompany/web/issues -f title=bug",
+      "--repo opencompany/web pr diff 301",
+    ]) {
+      expect(classifyGitHubCliArgs(args)).toBe("read");
+    }
+  });
+
+  it("classifies gh commands with external side effects as modify", () => {
+    for (const args of [
+      "pr create --fill",
+      "pr edit 301 --title updated",
+      "pr comment 301 --body hello",
+      "pr close 301",
+      "pr reopen 301",
+      "pr merge 301 --squash",
+      "pr review 301 --approve",
+      "issue create --title bug",
+      "issue edit 123 --title updated",
+      "issue comment 123 --body hello",
+      "release create v1.0.0",
+      "release edit v1.0.0 --notes updated",
+      "release upload v1.0.0 artifact.tgz",
+      "gist create notes.md",
+      "gist edit abc123 notes.md",
+      "repo fork opencompany/web",
+      "repo clone opencompany/web work/opencompany-web",
+      "api --method POST repos/opencompany/web/issues",
+      "api --method PUT repos/opencompany/web/pulls/301/merge",
+      "api --method PATCH repos/opencompany/web/issues/123",
+      "api repos/opencompany/web/issues -f title=bug",
+      "api repos/opencompany/web/issues -F title=bug",
+      "api repos/opencompany/web/issues --field title=bug",
+      "api repos/opencompany/web/issues --raw-field title=bug",
+      "api repos/opencompany/web/issues --input body.json",
+      "api repos/opencompany/web/issues --field=title=bug",
+      "api repos/opencompany/web/issues --raw-field=title=bug",
+      "api repos/opencompany/web/issues --input=body.json",
+      "api graphql -f query='mutation { __typename }'",
+    ]) {
+      expect(classifyGitHubCliArgs(args)).toBe("modify");
+    }
+  });
+
+  it("classifies destructive, unknown, empty, or malformed gh args as admin", () => {
+    for (const args of [
+      "repo delete opencompany/web --yes",
+      "api --method DELETE repos/opencompany/web/issues/comments/1",
+      "pr frobnicate 301",
+      "workflow run deploy.yml",
+      "",
+      "   ",
+      "pr view 'unterminated",
+    ]) {
+      expect(classifyGitHubCliArgs(args)).toBe("admin");
+    }
+  });
+});
+
 describe("resolveToolDecision", () => {
   const empty: WorkspaceToolPolicyMap = new Map();
 
@@ -196,6 +272,80 @@ describe("resolveToolDecision", () => {
         suspendable: true,
       }).decision,
     ).toBe("ask");
+  });
+
+  it("gates the built-in use_tool dispatcher by the underlying tool", () => {
+    // Ungated underlying tools resolve to allow regardless of the dispatcher wrapper.
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: { tool: "exa_search", arguments: { query: "x" } },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "exa", group: "read" });
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: { tool: "edit_file", arguments: {} },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "system", group: "modify" });
+
+    // A github-gated underlying tool (amp_coder → github/modify) follows the github policy.
+    const decision = resolveToolDecision({
+      toolName: "use_tool",
+      toolInput: { tool: "amp_coder", arguments: {} },
+      policy: new Map(),
+      suspendable: true,
+    });
+    expect(decision.providerKey).toBe("github");
+    expect(decision.group).toBe("modify");
+    expect(decision.decision).toBe("ask");
+
+    const allowModify: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "modify"), "allow"],
+    ]);
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: { tool: "amp_coder", arguments: {} },
+        policy: allowModify,
+        suspendable: true,
+      }).decision,
+    ).toBe("allow");
+  });
+
+  it("uses gh args to apply GitHub read/modify/admin policies", () => {
+    const allowModify: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("github", "modify"), "allow"],
+    ]);
+
+    expect(
+      resolveToolDecision({
+        toolName: "gh",
+        toolInput: { args: "pr diff 301" },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "github", group: "read" });
+    expect(
+      resolveToolDecision({
+        toolName: "gh",
+        toolInput: { args: "pr create --fill" },
+        policy: allowModify,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "github", group: "modify" });
+    expect(
+      resolveToolDecision({
+        toolName: "gh",
+        toolInput: { args: "repo delete opencompany/web --yes" },
+        policy: allowModify,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "ask", providerKey: "github", group: "admin" });
   });
 
   it("collapses ask to deny in non-suspendable runs", () => {

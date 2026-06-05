@@ -5,12 +5,30 @@ import {
 } from "./models";
 import {
   formatWorkspaceToolPolicyContext,
+  mcpSearchToolsName,
+  mcpUseToolName,
   PROVIDER_PERMISSION_REGISTRY,
   type WorkspaceToolPolicyMap,
 } from "./permissions";
-import { AGENT_SELF_EDIT_SKILL_ID, resolveEnabledSkillMetadata } from "./skills";
-import { type RuntimeToolName, resolveRuntimeToolNamesForConfigTools } from "./tools";
-import type { AgentConfig, AgentGitHubRepositoryConfig, AgentMcpToolConfig } from "./types";
+import {
+  AGENT_SELF_EDIT_SKILL_ID,
+  type ResolvedSkillMetadata,
+  resolveEnabledSkillMetadata,
+} from "./skills";
+import {
+  AGENT_TOOL_DEFINITION_BY_ID,
+  type AgentToolDefinition,
+  BUILTIN_USE_TOOL_NAME,
+  type RuntimeToolName,
+  resolveRuntimeToolNamesForConfigTools,
+} from "./tools";
+import type {
+  AgentConfig,
+  AgentConfigTool,
+  AgentGitHubRepositoryConfig,
+  AgentMcpToolConfig,
+  AgentToolId,
+} from "./types";
 
 type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & {
   integrations?: {
@@ -90,34 +108,10 @@ export function resolveAgentRuntimeConfig(input: {
             ", ",
           )}. Use delegate_to_agent for focused subtasks that should be handled by one of these agents. The tool returns a childSessionId; pass that id as sessionId in a later delegate_to_agent call to continue the same delegated session when continuity matters.`
       : null,
-    skills.length
-      ? `Skills available this session — when a task matches one, read its SKILL.md first and follow it: ${skills
-          .map((skill) => {
-            // External skills carry untrusted name/description (and a url) sourced from a
-            // third-party repo. Keep those out of the prompt — advertise only the trusted
-            // mount path and a normalized source type, and let the model read SKILL.md for the
-            // rest. Built-in skills ship in code, so their name/description are trusted.
-            if (skill.source) {
-              return `External ${skill.source.type} skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`;
-            }
-            return `${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`;
-          })
-          .join(
-            "; ",
-          )}. Skill files are mounted read-only under ./skills; read them with read_skill.`
-      : null,
+    buildToolsIndexSection({ agentTools: input.agent.tools, mcpServerKeys }),
+    buildSkillsIndexSection(skills),
     skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID)
-      ? "You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first."
-      : null,
-    mcpServerKeys.length
-      ? `MCP integrations enabled this session: ${mcpServerKeys
-          .map((key) => {
-            const displayName = PROVIDER_PERMISSION_REGISTRY[key]?.displayName ?? key;
-            return `${displayName} (${key}__search_tools, ${key}__use_tool)`;
-          })
-          .join(
-            "; ",
-          )}. To save context their individual tools are not preloaded: call <server>__search_tools to list a server's tools and input schemas, then <server>__use_tool with the chosen tool name and its arguments to run one. Permissions are enforced per underlying tool, so a write tool may still require approval.`
+      ? `You can evolve your own definition. The moment the user asks you to change how you work going forward (a standing preference, tone, workflow, default tool, or model), read skills/agent-self-edit/SKILL.md with read_skill before calling update_agent_file — the runner requires it and will reject an edit you make without reading the skill first. update_agent_file is not preloaded: after reading the skill, discover its schema with find_tools({ query: "update_agent_file" }) and run it with ${BUILTIN_USE_TOOL_NAME}({ tool: "update_agent_file", arguments }).`
       : null,
     toolPolicyContext,
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`,
@@ -159,6 +153,71 @@ function formatUserContext(input: {
     input.userFirstName?.trim() ? `User first name: ${input.userFirstName.trim()}` : null,
     input.userLastName?.trim() ? `User last name: ${input.userLastName.trim()}` : null,
   ].filter(Boolean);
+}
+
+// The `## Tools` index: a compact, cached spine of every capability the agent can reach this
+// session, grouped into built-in capabilities and workspace MCP servers. Full tool schemas are NOT
+// listed here — the model expands them on demand with find_tools / {server}__search_tools and runs
+// one with use_tool / {server}__use_tool. Keeping only one-liners caches cleanly (no system-prompt
+// mutation on discovery) and keeps the number of definitions visible at decision time small, which
+// is what tool-selection accuracy depends on.
+function buildToolsIndexSection(input: {
+  agentTools: AgentConfigTool[];
+  mcpServerKeys: string[];
+}): string | null {
+  const builtinCapabilities: AgentToolDefinition[] = [];
+  const seen = new Set<AgentToolId>();
+  for (const tool of input.agentTools) {
+    if (tool.type === "mcp" || typeof tool.id !== "string" || seen.has(tool.id)) continue;
+    const definition = AGENT_TOOL_DEFINITION_BY_ID.get(tool.id);
+    if (!definition || (definition.type !== "hosted_tool" && definition.type !== "coding_agent")) {
+      continue;
+    }
+    seen.add(tool.id);
+    builtinCapabilities.push(definition);
+  }
+
+  const lines: string[] = [
+    "## Tools",
+    "Core file and shell tools (read_file, write_file, edit_file, list_files, git_diff, shell, read_skill) are available directly.",
+  ];
+  if (builtinCapabilities.length > 0) {
+    lines.push(
+      `Other tools are not preloaded. To use a capability below, call find_tools({ capability }) to list its tools and input schemas, then ${BUILTIN_USE_TOOL_NAME}({ tool, arguments }) to run one. find_tools returns compact entries (name, description, schema); when a tool is non-trivial or you are unsure how to call it, first call tool_help({ tool }) for its detailed usage instructions, then ${BUILTIN_USE_TOOL_NAME} with arguments matching its schema. Permissions are enforced per underlying tool, so a write or destructive tool may still require approval.`,
+      "Built-in capabilities:",
+      ...builtinCapabilities.map((capability) => `- ${capability.id} — ${capability.description}`),
+    );
+  }
+  if (input.mcpServerKeys.length > 0) {
+    lines.push(
+      "MCP integrations (workspace-configured). Each server has its own discovery + run tools; their individual tools are not preloaded:",
+      ...input.mcpServerKeys.map((key) => {
+        const displayName = PROVIDER_PERMISSION_REGISTRY[key]?.displayName ?? key;
+        return `- ${displayName} — call ${mcpSearchToolsName(key)} to list its tools and input schemas, then ${mcpUseToolName(key)} to run one.`;
+      }),
+    );
+  }
+  // Only the always-present core line would remain when the agent has no capability tools or MCP
+  // servers — nothing to discover, so skip the section entirely.
+  return lines.length > 2 ? lines.join("\n") : null;
+}
+
+// The `## Skills` index: one trusted spine per enabled skill, progressively disclosed. External
+// skills carry untrusted name/description from a third-party repo, so advertise only the mount path
+// and let the model read SKILL.md for the rest; built-in skills ship in code, so their name/description
+// are trusted.
+function buildSkillsIndexSection(skills: ResolvedSkillMetadata[]): string | null {
+  if (skills.length === 0) return null;
+  const lines: string[] = [
+    "## Skills",
+    "When a task matches a skill, read its SKILL.md first with read_skill and follow it. Skill files are mounted read-only under ./skills; supporting files load only when you read them, and scripts run without their source entering context.",
+    ...skills.map((skill) =>
+      skill.source
+        ? `- External skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`
+        : `- ${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`,
+    ),
+  ];
+  return lines.join("\n");
 }
 
 export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
@@ -218,7 +277,7 @@ function githubRepositoryContext(repositories: AgentGitHubRepositoryConfig[]): s
       : "Use --repo owner/repo with gh commands so GitHub knows which attached repository to target.";
   return [
     `Attached GitHub repositories: ${fullNames}.`,
-    "You have repository-scoped git and gh (GitHub CLI) access to these repositories from the shell and gh tools. Authentication is injected automatically; never handle tokens yourself.",
+    "You have repository-scoped gh (GitHub CLI) access to these repositories through the gh tool. Authentication is injected automatically; never handle tokens yourself. Use shell for local sandbox commands, not authenticated GitHub operations.",
     ghRepoGuidance,
     "The sandbox starts with work/ as an empty scratch git repository. Clone a repository into work/<repo> on demand only when you need its code, for example: git clone https://github.com/<owner>/<repo>.git work/<repo>.",
     "All session work must happen under work/. Never push to a repository's default branch; use a feature branch and open a pull request.",

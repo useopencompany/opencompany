@@ -64,7 +64,8 @@ export type RuntimeToolName =
   | "calendar_update_event"
   | "calendar_delete_event"
   | "web_fetch"
-  | "tool_help";
+  | "tool_help"
+  | "find_tools";
 
 export type RuntimeToolDefinition = {
   name: RuntimeToolName;
@@ -293,7 +294,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     name: "shell",
     kind: "sandbox",
     description:
-      "Run a shell command from the session workspace root, where ./work and ./brain are visible. When one or more GitHub repositories are attached to the agent, shell commands get repo-scoped git and gh auth automatically; clone on demand into ./work/<repo> and run repository commands there.",
+      "Run a shell command from the session workspace root, where ./work and ./brain are visible. Use the gh tool, not shell, for authenticated GitHub operations.",
     parameters: {
       type: "object",
       properties: {
@@ -325,7 +326,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Run gh subcommands against the attached repositories; authentication is pre-injected.",
       "When exactly one repository is attached, commands default to it even before it is cloned. When multiple repositories are attached, pass --repo owner/repo for repository-scoped commands.",
       "Commands run from ./work. Clone a repository first (git clone or gh repo clone <owner>/<repo> work/<repo>) when you need its code or files.",
-      "Use gh pr create / gh pr view / gh issue list / gh api as needed.",
+      "Use this tool for gh pr create / gh pr view / gh issue list / gh api as needed.",
       "Never push to or open a PR against a repository's default branch directly; always use a feature branch.",
     ].join("\n"),
   },
@@ -2070,6 +2071,28 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "find_tools",
+    kind: "hosted",
+    description:
+      "List the tools available for a capability — their names, descriptions, and input schemas — so you can then run one with use_tool. Tools beyond the core file/shell set are not preloaded; discover them here first. For a single tool's detailed usage instructions, call tool_help({ tool }) before invoking it. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        capability: {
+          type: "string",
+          description:
+            'Optional capability id to list, as shown in the Tools index (e.g. "instagram", "exa", "amp"). Omit to list every available tool.',
+        },
+        query: {
+          type: "string",
+          description:
+            "Optional case-insensitive substring filter over tool names and descriptions — NOT a search topic. Ignored when `capability` is set (that already lists the capability's tools).",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 export const RUNTIME_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
@@ -2100,6 +2123,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     names.add(tool.name);
   }
   names.add("tool_help");
+  names.add("find_tools");
   if (input.selfEditEnabled) {
     names.add("update_agent_file");
   }
@@ -2154,4 +2178,202 @@ export function getRuntimeToolHelp(toolName: string, enabledTools: readonly Runt
       definition.help ??
       "No extended help is available. Use the schema and description for this tool.",
   };
+}
+
+// The generic built-in dispatcher tool. The model never sees deferred tool schemas in the
+// system prompt or tool set; it lists them with `find_tools` and runs one by passing its name
+// and arguments here. Mirrors the per-server MCP `{server}__use_tool` pattern for built-in tools.
+export const BUILTIN_USE_TOOL_NAME = "use_tool";
+
+// Human display name for each runtime tool — a terse noun phrase shown in the session UI in place
+// of the snake_case programmatic `name`. This is the static fallback; the UI may still derive a
+// richer one-liner from the call input (e.g. "Searching the web for …"). Typed as an exhaustive
+// Record so adding a RuntimeToolName fails the build until a title is supplied here — the title
+// lives with the registry, not in a separate frontend switch that drifts out of sync.
+export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
+  shell: "Run command",
+  gh: "GitHub CLI",
+  read_file: "Read file",
+  read_skill: "Read skill",
+  edit_file: "Edit file",
+  write_file: "Write file",
+  list_files: "List files",
+  git_diff: "Review changes",
+  delegate_to_agent: "Delegate to agent",
+  update_agent_file: "Update agent config",
+  ask_user_question: "Ask a question",
+  amp_coder: "Code with Amp",
+  opencode_coder: "Code with opencode",
+  exa_search: "Web search",
+  exa_contents: "Read web pages",
+  exa_answer: "Web answer",
+  x_search_posts: "Search X",
+  x_get_profile: "X profile",
+  x_get_user_posts: "X posts",
+  x_get_discussion: "X discussion",
+  x_get_trends: "X trends",
+  youtube_search: "Search YouTube",
+  youtube_get_video: "YouTube video",
+  youtube_get_transcript: "YouTube transcript",
+  youtube_get_channel: "YouTube channel",
+  youtube_list_channel_videos: "YouTube channel videos",
+  tiktok_get_profile: "TikTok profile",
+  tiktok_list_profile_posts: "TikTok posts",
+  tiktok_get_video: "TikTok video",
+  tiktok_get_comments: "TikTok comments",
+  tiktok_search: "Search TikTok",
+  tiktok_get_metadata: "TikTok metadata",
+  tiktok_get_transcript: "TikTok transcript",
+  instagram_get_profile: "Instagram profile",
+  instagram_list_profile_posts: "Instagram posts",
+  instagram_get_post: "Instagram post",
+  instagram_get_comments: "Instagram comments",
+  instagram_search_profiles: "Search Instagram",
+  instagram_get_metadata: "Instagram metadata",
+  instagram_get_transcript: "Instagram transcript",
+  social_get_job: "Social job status",
+  web_fetch: "Fetch web page",
+  tool_help: "Tool help",
+  find_tools: "Find tools",
+};
+
+// Resolve the display title for any tool name the UI may encounter. The `use_tool` dispatcher
+// envelope should normally be unwrapped to its inner tool before display (see effectiveToolCall);
+// the fallback here only shows if that unwrap could not find an inner tool name.
+export function toolDisplayTitle(name: string): string | undefined {
+  if (name === BUILTIN_USE_TOOL_NAME) return "Running a tool";
+  return RUNTIME_TOOL_TITLES[name as RuntimeToolName];
+}
+
+// Unwrap the `use_tool` dispatcher envelope to the inner tool it runs. A `use_tool` call carries
+// the real tool in `input.tool` and its arguments in `input.arguments`; for display we want the
+// inner tool, not the wrapper. Any other call passes through unchanged.
+export function effectiveToolCall(name: string, input: unknown): { name: string; input: unknown } {
+  if (
+    name === BUILTIN_USE_TOOL_NAME &&
+    input &&
+    typeof input === "object" &&
+    !Array.isArray(input)
+  ) {
+    const record = input as Record<string, unknown>;
+    const inner = typeof record.tool === "string" ? record.tool.trim() : "";
+    if (inner) return { name: inner, input: record.arguments };
+  }
+  return { name, input };
+}
+
+// Tools whose full schema is registered eagerly (always directly callable). These are the
+// core file/shell/ask tools used constantly and always relevant — deferring them behind a
+// `find_tools` round-trip would add latency with no token win — plus the conditional core
+// tools (gh, delegation) that are not capability-catalog entries and are advertised by their
+// own system-prompt guidance. Everything else (capability tools, plus standalone deferrables
+// like update_agent_file) is deferred.
+export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
+  "read_file",
+  "write_file",
+  "edit_file",
+  "list_files",
+  "git_diff",
+  "shell",
+  "read_skill",
+  "gh",
+  "ask_user_question",
+  "delegate_to_agent",
+  "tool_help",
+  "find_tools",
+];
+
+// Deferrable runtime tools that are not capability-catalog entries but are still loaded on demand
+// rather than registered eagerly. `update_agent_file` carries a heavy agent-definition schema yet is
+// almost never called, and is already gated behind a mandatory read of the agent-self-edit skill —
+// so the `find_tools`/`use_tool` round-trip adds no latency the gate did not already impose, while
+// the schema leaves the eager tool set. ask_user_question is intentionally NOT here: its durable
+// turn-suspend is keyed on the literal tool-call name in the model stream runner, so wrapping it in
+// `use_tool` would stop it from suspending.
+const STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES: readonly RuntimeToolName[] = ["update_agent_file"];
+
+// Runtime tools whose full schema is loaded on demand via `find_tools` and executed via `use_tool`,
+// rather than being registered eagerly in the model's tool set. Capability tools (hosted tools +
+// coding agents) are derived from the catalog so the index and the deferral stay in sync; a few
+// standalone tools (see STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES) are deferred individually.
+export const DEFERRABLE_RUNTIME_TOOL_NAMES: ReadonlySet<RuntimeToolName> = new Set([
+  ...AGENT_TOOL_CATALOG.filter(
+    (capability) => capability.type === "hosted_tool" || capability.type === "coding_agent",
+  ).flatMap((capability) => capability.runtimeTools),
+  ...STANDALONE_DEFERRABLE_RUNTIME_TOOL_NAMES,
+]);
+
+export function isDeferrableRuntimeTool(name: string): name is RuntimeToolName {
+  return DEFERRABLE_RUNTIME_TOOL_NAMES.has(name as RuntimeToolName);
+}
+
+// Split an agent's enabled runtime tools into the set registered directly (full schemas) and
+// the set deferred behind `find_tools` / `use_tool`.
+export function partitionRuntimeToolNames(enabledTools: readonly RuntimeToolName[]): {
+  direct: RuntimeToolName[];
+  deferred: RuntimeToolName[];
+} {
+  const direct: RuntimeToolName[] = [];
+  const deferred: RuntimeToolName[] = [];
+  for (const name of enabledTools) {
+    if (isDeferrableRuntimeTool(name)) deferred.push(name);
+    else direct.push(name);
+  }
+  return { direct, deferred };
+}
+
+export type RuntimeToolSearchResult = {
+  name: RuntimeToolName;
+  description: string;
+  parameters: JsonSchema;
+};
+
+// Back the `find_tools` tool: return the deferred, enabled runtime tools matching an optional
+// capability id and/or substring query, with their full input schemas. This is the load-on-demand
+// expansion injected as a tool_result — the model's only path to a deferred tool's schema. Results
+// are compact (name + description + schema); the verbose per-tool `help` is fetched separately via
+// `tool_help` so listing a multi-tool capability does not flood context.
+export function searchRuntimeTools(
+  input: { capability?: string; query?: string },
+  enabledTools: readonly RuntimeToolName[],
+): RuntimeToolSearchResult[] {
+  const enabledSet = new Set(enabledTools);
+  const capabilityId = typeof input.capability === "string" ? input.capability.trim() : undefined;
+  const candidateNames = capabilityId
+    ? (AGENT_TOOL_DEFINITION_BY_ID.get(capabilityId as AgentToolId)?.runtimeTools ?? [])
+    : RUNTIME_TOOL_DEFINITIONS.map((definition) => definition.name);
+
+  // The `query` is a name/description filter for browsing the whole catalog. When a capability is
+  // named, the model already narrowed the set, so a query (often misused as a search topic, e.g.
+  // "Louis Morgner") would wrongly filter out every tool — ignore it and list the capability.
+  const query = capabilityId
+    ? ""
+    : typeof input.query === "string"
+      ? input.query.trim().toLowerCase()
+      : "";
+  const results: RuntimeToolSearchResult[] = [];
+  const seen = new Set<RuntimeToolName>();
+  for (const name of candidateNames) {
+    if (seen.has(name)) continue;
+    if (!enabledSet.has(name) || !isDeferrableRuntimeTool(name)) continue;
+    const definition = RUNTIME_TOOL_DEFINITION_BY_NAME.get(name);
+    if (!definition) continue;
+    if (
+      query &&
+      !definition.name.toLowerCase().includes(query) &&
+      !definition.description.toLowerCase().includes(query)
+    ) {
+      continue;
+    }
+    seen.add(name);
+    // Compact by design: name + description + input schema only. The verbose per-tool `help` is
+    // deliberately omitted so listing a multi-tool capability stays cheap — the model fetches a
+    // single tool's full help on demand via `tool_help` (getRuntimeToolHelp) instead.
+    results.push({
+      name: definition.name,
+      description: definition.description,
+      parameters: definition.parameters,
+    });
+  }
+  return results;
 }
