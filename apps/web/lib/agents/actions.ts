@@ -327,6 +327,9 @@ export async function updateAgent(
   // Unwrap them so the stored body is clean and round-trips with the rebuilt
   // content below. The derived config's resolver ensures only real, resolvable
   // mentions are unwrapped — genuine inline code is left untouched.
+  // When `patch.body` is a string, `derived` is always the body-derived config
+  // (`deriveAgentConfigFromBody` never returns null); the `&& derived` guard is
+  // only here to narrow the type for the unwrap call.
   const body =
     typeof patch.body === "string" && derived
       ? unwrapBacktickWrappedMentions(derived.body, buildConfigMentionResolver(derived.config))

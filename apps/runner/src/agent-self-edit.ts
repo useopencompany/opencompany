@@ -205,6 +205,11 @@ export async function applyAgentSelfUpdate(input: {
     }),
   );
 
+  // `warnings` are advisory feedback for the model in this tool result only
+  // (e.g. "you wrapped a mention in backticks"). They are intentionally NOT in
+  // the persisted `agent.self_updated` event above — they describe authoring
+  // habits, not state changes. If a UI ever needs to surface them from history,
+  // add them to the event payload as well rather than relying on this return.
   return {
     ok: true,
     version: nextVersion,

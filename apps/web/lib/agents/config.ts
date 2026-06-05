@@ -123,6 +123,10 @@ export function enrichGitHubMentionAttrs(
             ...(attrs ?? {}),
             fullName: repository.fullName,
             defaultBranch: repository.defaultBranch,
+            // `AgentGitHubRepositoryBinding` is a plain JSON-serializable object
+            // (string fields only), so this cast is safe. If the type ever gains
+            // a non-serializable field (Date/Map/method), this assumption breaks
+            // and `sanitizeTiptapDoc` would silently strip the binding.
             ...(repository.binding ? { binding: repository.binding as unknown as JsonValue } : {}),
           },
         };

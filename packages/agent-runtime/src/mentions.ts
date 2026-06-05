@@ -82,6 +82,11 @@ export function agentMentionIdForPath(path: string) {
   return `agent/${slug}`;
 }
 
+// Trailing punctuation that is trimmed off a mention token (mirrors
+// `parseMentionText` in tiptap-builder) so "@exa." resolves as "@exa". Shared by
+// every tokenizer below so they agree on where a mention token ends.
+const MENTION_TRAILING_PUNCTUATION_RE = /[.,;:!?)}\]]+$/g;
+
 export function extractMentionIds(body: string) {
   const ids: string[] = [];
 
@@ -92,7 +97,7 @@ export function extractMentionIds(body: string) {
     let end = index + 1;
     while (end < body.length && isMentionChar(body[end] ?? "")) end += 1;
 
-    const id = body.slice(index + 1, end).replace(/[.,;:!?)}\]]+$/g, "");
+    const id = body.slice(index + 1, end).replace(MENTION_TRAILING_PUNCTUATION_RE, "");
     if (id) ids.push(id);
     index = end;
   }
@@ -598,10 +603,6 @@ export function buildConfigMentionResolver(config: AgentConfig): MentionResolver
   };
 }
 
-// Trailing punctuation that is trimmed off a mention token (mirrors
-// `parseMentionText` in tiptap-builder) so "@exa." resolves as "@exa".
-const MENTION_TRAILING_PUNCTUATION_RE = /[.,;:!?)}\]]+$/g;
-
 // A single-backtick-wrapped mention found at `index` (the opening backtick),
 // e.g. "`@opencode`". Returns the trigger, the bare token, and `closeIndex`
 // (the closing backtick position) — or null when the span isn't a clean,
@@ -616,6 +617,9 @@ function matchBacktickWrappedMention(
   if (body[index] !== "`") return null;
   // Reject double/triple fences and mid-word backticks; the opening backtick
   // must itself sit at a boundary (start, whitespace, or an opening bracket).
+  // This deliberately differs from `MENTION_BOUNDARY_CHARS_RE`, which also
+  // counts a backtick as a boundary: here a preceding backtick means a nested
+  // or double-fence span (e.g. "``@x`"), which we want to reject, not unwrap.
   if (index > 0 && !/[\s([{]/.test(body[index - 1] ?? "")) return null;
 
   const trigger = body[index + 1];
@@ -691,12 +695,14 @@ export function lintAgentBodyMentions(body: string, resolve: MentionResolver): s
     const match = matchBacktickWrappedMention(body, index);
     if (match && resolve(match.token, match.trigger)) {
       push(
-        `Mention "${match.trigger}${match.token}" is wrapped in backticks. Write it as ${match.trigger}${match.token} (no backticks) — backtick-wrapped mentions are not recognized.`,
+        `Mention "${match.trigger}${match.token}" is wrapped in backticks. Write it as ${match.trigger}${match.token} (no backticks) — backtick-wrapped mentions are normalized on save and should be authored without backticks.`,
       );
     }
   }
 
-  // Case 2: namespaced tokens that look like a mention but don't resolve.
+  // Case 2: namespaced tokens that look like a mention but don't resolve. Only
+  // `@` is inspected: every entry in `NAMESPACED_MENTION_PREFIXES` is an
+  // `@`-namespace (brain/skill/agent), so a `#` token can never be one of them.
   for (let index = 0; index < body.length; index += 1) {
     const trigger = body[index];
     if (trigger !== "@") continue;
