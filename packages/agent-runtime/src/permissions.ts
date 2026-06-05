@@ -1,4 +1,4 @@
-import type { RuntimeToolName } from "./tools";
+import { BUILTIN_USE_TOOL_NAME, type RuntimeToolName } from "./tools";
 
 // Human-readable permission groups exposed to users, ordered from least to most
 // dangerous. Every concrete tool/action a provider exposes maps to exactly one group.
@@ -372,6 +372,21 @@ export function mcpInvokeEffectiveToolName(toolName: string, toolInput: unknown)
   return `${providerKey}${MCP_TOOL_NAME_SEPARATOR}${requested.trim()}`;
 }
 
+// The generic built-in `use_tool` dispatcher carries the real action in its `tool` argument, so
+// the gate must classify by the underlying runtime tool — the dispatcher name has no verb and is
+// `system`/ungated. Returns the requested runtime tool name when present, else the name unchanged
+// so an unparseable invoke stays gated by the dispatcher (which returns a recoverable error with
+// no side effect).
+export function builtinInvokeEffectiveToolName(toolName: string, toolInput: unknown): string {
+  if (toolName !== BUILTIN_USE_TOOL_NAME) return toolName;
+  const requested =
+    toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
+      ? (toolInput as Record<string, unknown>).tool
+      : undefined;
+  if (typeof requested !== "string" || !requested.trim()) return toolName;
+  return requested.trim();
+}
+
 // MCP tool names are "{serverKey}__{rawTool}". Resolve the provider from the prefix
 // and classify the raw tool via the registry's static map, then the verb heuristic.
 export function classifyMcpTool(prefixedName: string): ToolClassification {
@@ -649,7 +664,12 @@ export function resolveToolDecision(input: {
               : undefined,
           ),
         }
-      : classifyTool(mcpInvokeEffectiveToolName(input.toolName, input.toolInput));
+      : classifyTool(
+          mcpInvokeEffectiveToolName(
+            builtinInvokeEffectiveToolName(input.toolName, input.toolInput),
+            input.toolInput,
+          ),
+        );
   if (!classification) {
     return { decision: "allow", providerKey: SYSTEM_PROVIDER_KEY, group: "read" };
   }

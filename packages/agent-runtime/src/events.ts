@@ -60,6 +60,25 @@ export type AgentRuntimeEvent =
       };
     }
   | {
+      // Debug-only snapshot of the inputs sent to the model for a turn (the assembled system
+      // prompt + the tool catalog). Not rendered in the UI — captured purely so the session's
+      // "Copy Debug JSON" export can include the otherwise-ephemeral request inputs. See
+      // isInspectableRuntimeEvent (web) which hides it from the inspector event list.
+      // `toolsSentToModel` is exactly the set registered in the model call this turn (with full
+      // schemas, since that is what the model received). `deferredToolsNotSent` lists the capability
+      // tools reachable via `find_tools` + `use_tool` but deliberately withheld from the call — kept
+      // to name + description only (no schemas) since they were NOT sent, so the snapshot does not
+      // duplicate the whole deferred catalog on every turn. The explicit names exist so a reader of
+      // the export does not misread the withheld set as injected.
+      type: "debug.model_request";
+      payload: {
+        messageId: string;
+        systemPrompt: string;
+        toolsSentToModel: Array<{ name: string; description: string; parameters: unknown }>;
+        deferredToolsNotSent?: Array<{ name: string; description: string }>;
+      };
+    }
+  | {
       type: "message.reasoning_summary";
       payload: { messageId: string; summary: string };
     }
@@ -98,6 +117,10 @@ export type AgentRuntimeEvent =
         messageId: string;
         toolCallId: string;
         name: string;
+        // The structured tool input, carried so the approval card can unwrap a `use_tool`
+        // envelope to its inner tool name + dynamic label (mirrors `tool.started`). The
+        // formatted `inputPreview` remains for the persisted approval row.
+        input?: unknown;
         providerKey: string;
         permissionGroup: "read" | "post" | "modify" | "admin";
         inputPreview?: string;
