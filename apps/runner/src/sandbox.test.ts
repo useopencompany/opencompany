@@ -20,6 +20,7 @@ import {
   armSandboxIdleTimeout,
   cloneGitHubRepositoryIntoWorkdir,
   createOrConnectSandbox,
+  ensureRipgrep,
   githubRemoteMatches,
   prepareWorkspace,
   resolveSandboxBrainRelativePath,
@@ -229,6 +230,73 @@ describe("prepareWorkspace", () => {
     expect(githubRemoteMatches("https://github.com/opencompany/other.git", "opencompany/app")).toBe(
       false,
     );
+  });
+});
+
+describe("ensureRipgrep", () => {
+  it("sends a single command containing the rg check and apt-get fallback", async () => {
+    // The shell one-liner handles the || branching at runtime in the sandbox.
+    // The runner always sends the same command string; whether apt-get executes
+    // depends on whether `command -v rg` succeeds inside the sandbox.
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "/usr/bin/rg\n", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await ensureRipgrep(sandbox as never);
+
+    expect(sandbox.commands.run).toHaveBeenCalledTimes(1);
+    const [command, options] = sandbox.commands.run.mock.calls[0] as [string, unknown];
+    expect(command).toContain("command -v rg");
+    // apt-get is present in the command string as the || fallback branch
+    expect(command).toContain("apt-get");
+    expect(command).toContain("ripgrep");
+    expect(options).toMatchObject({ user: "root", timeoutMs: 120_000 });
+  });
+
+  it("wraps failures in SandboxPreparationError with stage ensure_ripgrep", async () => {
+    const installError = new Error("apt-get failed");
+    installError.name = "CommandExitError";
+    const sandbox = {
+      commands: { run: vi.fn().mockRejectedValue(installError) },
+    };
+
+    let caught: unknown;
+    try {
+      await ensureRipgrep(sandbox as never);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(SandboxPreparationError);
+    expect(sandboxPreparationErrorFields(caught)).toMatchObject({
+      sandbox_stage: "ensure_ripgrep",
+      sandbox_command: "ensure_rg",
+      cause_name: "CommandExitError",
+    });
+  });
+
+  it("prepareWorkspace runs the rg check as part of workspace setup", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: '---\ntitle: "Agent"\n---\n\nInstructions',
+    });
+
+    const commands: string[] = sandbox.commands.run.mock.calls.map((call) =>
+      String((call as unknown[])[0]),
+    );
+    expect(commands.some((cmd) => cmd.includes("command -v rg"))).toBe(true);
   });
 });
 
