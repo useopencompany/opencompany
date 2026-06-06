@@ -18,7 +18,9 @@ export type AgentSessionStatus =
   | "completed"
   | "failed";
 
-export type AgentRuntimeIncompleteReason = "announced_unexecuted_next_action";
+export type AgentRuntimeIncompleteReason =
+  | "announced_unexecuted_next_action"
+  | "reached_tool_step_limit";
 
 export type AgentRuntimeEvent =
   | {

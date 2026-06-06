@@ -56,8 +56,12 @@ import {
 import {
   assertTurnComplete,
   detectIncompleteTurn,
+  type IncompleteTurnInfo,
+  isToolStepLimitReached,
   persistAssistantCompletion,
   streamAssistantResponse,
+  TOOL_STEP_LIMIT_FALLBACK_TEXT,
+  toolStepLimitIncomplete,
 } from "./model-turn";
 import {
   braintrustError,
@@ -804,10 +808,23 @@ async function executeStreamingTurn(input: {
 
   await input.checkAbort({ force: true });
 
-  let incompleteTurn: ReturnType<typeof detectIncompleteTurn> = null;
+  let incompleteTurn: IncompleteTurnInfo | null = null;
   if (input.emptyOutputFallback !== undefined) {
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = input.emptyOutputFallback;
+      appendAssistantTextPart(assistantReplayParts, assistantContent);
+    }
+  } else if (isToolStepLimitReached(streamResult)) {
+    // The turn ran out of its tool-step budget while still mid-task. Hard-failing here (the
+    // old `assertTurnComplete` → ToolStepLimitExceededError path) discarded the entire
+    // assistant turn — including a freshly-produced opencode diff/PR — and, because the job
+    // replays, re-ran those side effects and re-billed them. Instead, degrade gracefully:
+    // persist whatever the turn produced (tool outputs are already persisted as their own
+    // messages mid-stream), flag it as incomplete for observability, and complete cleanly so
+    // the partial work surfaces and the user can send one message to continue.
+    incompleteTurn = toolStepLimitIncomplete();
+    if (!assistantContent) {
+      assistantContent = TOOL_STEP_LIMIT_FALLBACK_TEXT;
       appendAssistantTextPart(assistantReplayParts, assistantContent);
     }
   } else {

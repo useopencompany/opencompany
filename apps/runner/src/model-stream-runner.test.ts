@@ -4,7 +4,13 @@ import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { buildAssistantModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
-import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
+import {
+  assertTurnComplete,
+  detectIncompleteTurn,
+  isToolStepLimitReached,
+  MAX_MODEL_STEPS,
+  toolStepLimitIncomplete,
+} from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
@@ -779,6 +785,26 @@ describe("stream error handling", () => {
         stepCount: MAX_MODEL_STEPS,
       }),
     ).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("detects the tool-step-limit condition only when the cap is reached with pending tools", () => {
+    expect(
+      isToolStepLimitReached({ lastStepEndedWithToolCalls: true, stepCount: MAX_MODEL_STEPS }),
+    ).toBe(true);
+    expect(
+      isToolStepLimitReached({ lastStepEndedWithToolCalls: true, stepCount: MAX_MODEL_STEPS + 1 }),
+    ).toBe(true);
+    // Below the cap, or no pending tools, is a normal completion — not a step-limit cutoff.
+    expect(
+      isToolStepLimitReached({ lastStepEndedWithToolCalls: true, stepCount: MAX_MODEL_STEPS - 1 }),
+    ).toBe(false);
+    expect(
+      isToolStepLimitReached({ lastStepEndedWithToolCalls: false, stepCount: MAX_MODEL_STEPS }),
+    ).toBe(false);
+  });
+
+  it("reports the step-limit cutoff as a distinct incomplete reason", () => {
+    expect(toolStepLimitIncomplete().reason).toBe("reached_tool_step_limit");
   });
 
   it("allows normal turns that end with final assistant text", () => {

@@ -26,10 +26,30 @@ import { normalizeReasoningSummary } from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
-export const MAX_MODEL_STEPS = 16;
+// Per-turn tool-step budget. Coding sessions in particular spend many steps on repo/brain
+// exploration and slow coder delegations (each deferred capability tool costs two steps —
+// one `find_tools`, one `use_tool`), so a low cap routinely cut turns off mid-task. Reaching
+// the cap is no longer a hard failure (see `executeStreamingTurn` / `isToolStepLimitReached`),
+// but a higher budget still lets most turns finish their answer in one pass.
+export const MAX_MODEL_STEPS = 32;
 const INCOMPLETE_TURN_REASON = "announced_unexecuted_next_action" as const;
 const INCOMPLETE_TURN_REASON_DETAIL =
   "Model stopped after announcing a next action it never took (trailing text ends mid-task).";
+const TOOL_STEP_LIMIT_REASON = "reached_tool_step_limit" as const;
+const TOOL_STEP_LIMIT_REASON_DETAIL =
+  "Model reached the per-turn tool-step limit before delivering a final answer; the partial work was preserved.";
+
+// Shape shared by both the abandoned-turn detector and the step-limit degradation path. The
+// reason is widened to the full set of values the `session.incomplete` event accepts.
+export type IncompleteTurnInfo = {
+  reason: typeof INCOMPLETE_TURN_REASON | typeof TOOL_STEP_LIMIT_REASON;
+  reasonDetail: string;
+};
+
+// Surfaced to the user when a turn is cut off at the tool-step limit with no final text of its
+// own, so the session shows an explanation instead of an empty assistant bubble.
+export const TOOL_STEP_LIMIT_FALLBACK_TEXT =
+  "I reached this turn's tool-step limit before finishing. The work completed so far is preserved above — send another message and I'll continue from here.";
 
 export async function streamAssistantResponse(input: {
   ctx: RunContext;
@@ -273,9 +293,27 @@ export function assertTurnComplete(
     throw new Error("Model stream completed without text or tool calls.");
   }
 
-  if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
+  if (isToolStepLimitReached(streamResult)) {
     throw new ToolStepLimitExceededError();
   }
+}
+
+// True when the turn ended because it ran out of its tool-step budget while still requesting
+// tools. `executeStreamingTurn` uses this to degrade gracefully (persist the partial turn and
+// complete) instead of hard-failing via `assertTurnComplete`, which would discard the whole
+// turn — including any side-effecting tool output already produced this turn — and re-run it on
+// job replay.
+export function isToolStepLimitReached(
+  streamResult: Pick<
+    Awaited<ReturnType<typeof collectAssistantStream>>,
+    "lastStepEndedWithToolCalls" | "stepCount"
+  >,
+): boolean {
+  return streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS;
+}
+
+export function toolStepLimitIncomplete(): IncompleteTurnInfo {
+  return { reason: TOOL_STEP_LIMIT_REASON, reasonDetail: TOOL_STEP_LIMIT_REASON_DETAIL };
 }
 
 // A healthy completed turn ends with `finishReason === "stop"` after the model
@@ -301,7 +339,7 @@ export function detectIncompleteTurn(
     Awaited<ReturnType<typeof collectAssistantStream>>,
     "assistantContent" | "assistantReplayParts" | "lastFinishReason" | "lastStepEndedWithToolCalls"
   >,
-): { reason: typeof INCOMPLETE_TURN_REASON; reasonDetail: string } | null {
+): IncompleteTurnInfo | null {
   if (streamResult.lastFinishReason !== "stop") return null;
   if (streamResult.lastStepEndedWithToolCalls) return null;
 
