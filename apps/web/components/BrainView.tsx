@@ -1627,11 +1627,7 @@ function BrainCopyButton({ text, className }: { text: string; className?: string
         copied ? "text-success" : ""
       } ${className ?? ""}`}
     >
-      {copied ? (
-        <Check size={15} strokeWidth={1.75} />
-      ) : (
-        <Copy size={15} strokeWidth={1.75} />
-      )}
+      {copied ? <Check size={15} strokeWidth={1.75} /> : <Copy size={15} strokeWidth={1.75} />}
     </button>
   );
 }
