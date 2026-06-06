@@ -77,22 +77,93 @@ type BrainViewSnapshot = {
 const AUTO_SAVE_DELAY_MS = 800;
 const BRAIN_TREE_DRAG_MIME = "application/x-opencompany-brain-tree-item";
 
-export default function BrainView({ files: serverFiles }: { files: BrainFile[] }) {
+type InitialBrainSelection = {
+  selectedPath: string;
+  contextPath: string;
+  expandedPaths: Set<string>;
+  draftContent: string;
+};
+
+// Resolves the file/folder the brain should open with based on the URL path
+// (`/brain/<initialPath>`). An exact file match opens that file; a folder prefix opens the
+// first file inside it (with the folder expanded); anything else falls back to the first file.
+function resolveInitialBrainSelection(
+  serverFiles: BrainFile[],
+  initialPath: string,
+): InitialBrainSelection {
+  const fallback = serverFiles[0];
+  const fallbackSelection: InitialBrainSelection = {
+    selectedPath: fallback?.path ?? "",
+    contextPath: fallback ? parentFolderPath(fallback.path) : "",
+    expandedPaths: new Set(fallback ? ancestorFolderPaths(fallback.path) : []),
+    draftContent: fallback?.content ?? "",
+  };
+  const normalized = initialPath.replace(/^\/+|\/+$/g, "");
+  if (!normalized) return fallbackSelection;
+
+  const exact = serverFiles.find((file) => file.path === normalized);
+  if (exact) {
+    return {
+      selectedPath: exact.path,
+      contextPath: parentFolderPath(exact.path),
+      expandedPaths: new Set(ancestorFolderPaths(exact.path)),
+      draftContent: exact.content,
+    };
+  }
+
+  const folderPrefix = `${normalized}/`;
+  const underFolder = serverFiles.find((file) => file.path.startsWith(folderPrefix));
+  if (underFolder) {
+    return {
+      selectedPath: underFolder.path,
+      contextPath: normalized,
+      expandedPaths: new Set(ancestorFolderPaths(underFolder.path)),
+      draftContent: underFolder.content,
+    };
+  }
+
+  return fallbackSelection;
+}
+
+// Builds the URL that reflects the currently open brain file/folder, mirroring how the
+// agent editor keeps `/agents/<path>` in sync. Segments are encoded so spaces/special
+// characters round-trip through the `[[...path]]` route (which decodes each segment).
+function brainUrlForPath(path: string): string {
+  const normalized = path.replace(/^\/+|\/+$/g, "");
+  if (!normalized) return "/brain";
+  return `/brain/${normalized.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+export default function BrainView({
+  files: serverFiles,
+  initialPath = "",
+}: {
+  files: BrainFile[];
+  initialPath?: string;
+}) {
   const router = useRouter();
+  // Resolve the initial file/folder from the URL exactly once; later prop changes (e.g. a
+  // background `router.refresh`) must not yank the user off whatever they have open.
+  const initialSelectionRef = useRef<InitialBrainSelection | null>(null);
+  if (initialSelectionRef.current === null) {
+    initialSelectionRef.current = resolveInitialBrainSelection(serverFiles, initialPath);
+  }
+  const initialSelection = initialSelectionRef.current;
   const [isPending, startTransition] = useTransition();
   const [files, setFiles] = useState(serverFiles);
   const [query, setQuery] = useState("");
-  const [selectedPath, setSelectedPath] = useState(serverFiles[0]?.path ?? "");
-  const [selectedContextPath, setSelectedContextPath] = useState(
-    serverFiles[0] ? parentFolderPath(serverFiles[0].path) : "",
-  );
+  const [selectedPath, setSelectedPath] = useState(initialSelection.selectedPath);
+  const [selectedContextPath, setSelectedContextPath] = useState(initialSelection.contextPath);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
-    () => new Set(serverFiles[0] ? ancestorFolderPaths(serverFiles[0].path) : []),
+    () => new Set(initialSelection.expandedPaths),
   );
-  const [focusedPath, setFocusedPath] = useState(serverFiles[0]?.path ?? "");
+  const [focusedPath, setFocusedPath] = useState(initialSelection.selectedPath);
   const [treeHasFocus, setTreeHasFocus] = useState(false);
   const treeScrollRef = useRef<HTMLDivElement>(null);
-  const [draftContent, setDraftContent] = useState(serverFiles[0]?.content ?? "");
+  const [draftContent, setDraftContent] = useState(initialSelection.draftContent);
+  // Tracks the URL we last reflected so selection mutators can skip redundant history writes.
+  // Seeded with the URL the server actually rendered (which may be a folder).
+  const lastSyncedUrlRef = useRef(brainUrlForPath(initialPath));
   const [renamingPath, setRenamingPath] = useState("");
   const [renamingName, setRenamingName] = useState("");
   const [renamingType, setRenamingType] = useState<"file" | "folder" | null>(null);
@@ -343,10 +414,21 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
     setDraftContent(content);
   }
 
+  // Reflects the open file/folder in the URL bar so it can be linked to (and restored on
+  // reload) like the agent editor. Uses history.replaceState rather than router.replace so a
+  // plain selection doesn't trigger a server roundtrip — every brain file is already loaded.
+  function syncBrainUrl(path: string) {
+    const next = brainUrlForPath(path);
+    if (lastSyncedUrlRef.current === next) return;
+    lastSyncedUrlRef.current = next;
+    window.history.replaceState(window.history.state, "", next);
+  }
+
   function updateSelectedPath(path: string) {
     selectedPathRef.current = path;
     setSelectedPath(path);
     if (path) setFocusedPath(path);
+    syncBrainUrl(path);
   }
 
   function beginOptimisticMutation() {
@@ -392,6 +474,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
 
   function toggleFolder(path: string) {
     setSelectedContextPath(path);
+    syncBrainUrl(path);
     setExpandedPaths((current) => {
       const next = new Set(current);
       if (next.has(path)) next.delete(path);

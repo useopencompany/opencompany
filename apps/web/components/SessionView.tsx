@@ -558,6 +558,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
 
   const renderMessage = (message: SessionMessage) => {
     const assistantParts = assistantPartsByMessageId.get(message.id) ?? [];
+    // Brain files this turn created or edited (write_file/edit_file set brainPath), deduped
+    // and kept in tool-call order so the footer can link straight to each one.
+    const brainFilePaths: string[] = [];
+    if (message.role === "assistant") {
+      const seenBrainPaths = new Set<string>();
+      for (const part of assistantParts) {
+        if (part.type !== "tool-call") continue;
+        const brainPath = part.toolCall.brainPath;
+        if (!brainPath || seenBrainPaths.has(brainPath)) continue;
+        seenBrainPaths.add(brainPath);
+        brainFilePaths.push(brainPath);
+      }
+    }
     const copyText =
       message.role === "assistant"
         ? extractAssistantText(assistantParts) || message.content
@@ -602,7 +615,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           )}
           {canCopy && message.status !== "running" && !awaitingInput ? (
             <div
-              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex items-center gap-1.5 transition-opacity ${
+              className={`absolute ${message.role === "user" ? "top-full right-0 mt-1" : "top-full left-0 mt-1"} z-10 flex max-w-[26rem] flex-wrap items-center gap-1.5 transition-opacity ${
                 message.role === "assistant"
                   ? "opacity-100"
                   : "opacity-0 group-hover/message:opacity-100 group-focus-within/message:opacity-100"
@@ -614,6 +627,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                   {formatElapsed(Math.round(duration))}
                 </span>
               ) : null}
+              {brainFilePaths.length > 0 ? <BrainAttachments paths={brainFilePaths} /> : null}
             </div>
           ) : null}
         </div>
@@ -1770,6 +1784,43 @@ function CopyMessageButton({ text }: { text: string }) {
         <Copy size={10} strokeWidth={1.75} />
       )}
     </button>
+  );
+}
+
+const BRAIN_ATTACHMENT_VISIBLE_LIMIT = 3;
+
+function brainFileHref(path: string) {
+  return `/brain/${path.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+// Mini attachments shown beneath an assistant turn that created/edited Brain files. Links
+// straight to each file in the (URL-addressable) Brain editor; collapses the tail past 3.
+function BrainAttachments({ paths }: { paths: string[] }) {
+  const visible = paths.slice(0, BRAIN_ATTACHMENT_VISIBLE_LIMIT);
+  const overflow = paths.length - visible.length;
+  return (
+    <>
+      {visible.map((path) => (
+        <Link
+          key={path}
+          href={brainFileHref(path)}
+          title={`brain/${path}`}
+          className="inline-flex max-w-[200px] shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
+        >
+          <Brain size={9} strokeWidth={1.9} className="shrink-0" />
+          <span className="truncate">{path}</span>
+        </Link>
+      ))}
+      {overflow > 0 ? (
+        <Link
+          href="/brain"
+          title={`${overflow} more brain ${overflow === 1 ? "file" : "files"}`}
+          className="inline-flex shrink-0 items-center rounded-full border border-border bg-surface px-1.5 py-px text-[10.5px] font-medium text-ink-muted transition-colors hover:bg-surface-hover/65 hover:text-ink"
+        >
+          +{overflow} others
+        </Link>
+      ) : null}
+    </>
   );
 }
 
