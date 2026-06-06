@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Copy,
   FileCode2,
   FilePlus2,
   FileText,
@@ -1025,7 +1027,11 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
                   {fileNameFromPath(selected.path)}
                 </span>
               </div>
-              <div ref={fileMenuRef} className="relative ml-auto shrink-0">
+              <BrainCopyButton
+                className="ml-auto shrink-0"
+                text={`${fileNameFromPath(selected.path)}\n\n${draftContent}`}
+              />
+              <div ref={fileMenuRef} className="relative shrink-0">
                 <button
                   type="button"
                   aria-label="Open file actions"
@@ -1586,6 +1592,43 @@ function RawBrainEditor({
       spellCheck={false}
       className="min-h-[560px] w-full resize-y rounded-md border border-border bg-surface px-4 py-3 font-mono text-[12.5px] leading-6 text-ink outline-none focus:border-border-strong"
     />
+  );
+}
+
+function BrainCopyButton({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore — clipboard may be blocked in insecure contexts
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Copied" : "Copy title and contents"}
+      title={copied ? "Copied" : "Copy title and contents"}
+      onClick={handleCopy}
+      className={`flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+        copied ? "text-success" : ""
+      } ${className ?? ""}`}
+    >
+      {copied ? <Check size={15} strokeWidth={1.75} /> : <Copy size={15} strokeWidth={1.75} />}
+    </button>
   );
 }
 
