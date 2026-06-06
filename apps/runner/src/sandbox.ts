@@ -1,6 +1,7 @@
 import path from "node:path";
 import { parseGitHubCliArgs, resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
 import { Sandbox } from "e2b";
+import { gitHubPermissionErrorHint } from "./github";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
 export type SandboxLatencyObservation = {
@@ -398,10 +399,17 @@ export async function runSandboxTool(input: {
         await input.onOutput?.("stderr", redact(data));
       },
     });
+    const stdout = redact(String(result.stdout ?? ""));
+    const stderr = redact(String(result.stderr ?? ""));
+    // Turn GitHub's opaque "Resource not accessible by integration" 403 into an actionable hint so
+    // the agent stops retrying a permanently-blocked call (e.g. `gh issue create` when the App lacks
+    // Issues:write) and an operator reading the result knows exactly which grant is missing.
+    const permissionHint = gitHubPermissionErrorHint(`${stdout}\n${stderr}`);
     return truncate({
-      stdout: redact(String(result.stdout ?? "")),
-      stderr: redact(String(result.stderr ?? "")),
+      stdout,
+      stderr,
       exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+      ...(permissionHint ? { permissionHint } : {}),
     });
   }
 
