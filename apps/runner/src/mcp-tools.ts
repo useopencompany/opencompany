@@ -9,6 +9,7 @@ import {
 } from "@ai-sdk/mcp";
 import {
   type AgentConfig,
+  EXPERIMENT_KEYS,
   MCP_SEARCH_TOOLS_RAW_NAME,
   MCP_USE_TOOL_RAW_NAME,
   mcpSearchToolsName,
@@ -53,7 +54,7 @@ import {
 } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
-const MCP_EXPERIMENT_KEY = "mcp";
+const MCP_EXPERIMENT_KEY = EXPERIMENT_KEYS.mcp;
 const LINEAR_MCP_SERVER_KEY = "linear";
 const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_MCP_SERVER_KEY = "slack";

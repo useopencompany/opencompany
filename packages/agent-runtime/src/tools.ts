@@ -2150,12 +2150,21 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   repositories?: ReadonlyArray<unknown> | undefined;
   // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on.
   selfEditEnabled?: boolean;
+  // Experiment-gated tools. `explore` is only exposed when the workspace has the explore
+  // experiment enabled (see EXPERIMENT_KEYS.explore).
+  exploreEnabled?: boolean;
 }) {
   const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
-    // Skill- and reference-gated tools are added below, not unconditionally.
-    if (tool.name === "delegate_to_agent" || tool.name === "update_agent_file") continue;
+    // Skill-, reference-, and experiment-gated tools are added below, not unconditionally.
+    if (
+      tool.name === "delegate_to_agent" ||
+      tool.name === "update_agent_file" ||
+      tool.name === "explore"
+    ) {
+      continue;
+    }
     // Unconditional core tools (no configToolId) are always available, except
     // those gated on an attached repository (e.g. gh).
     if (tool.configToolId) continue;
@@ -2166,6 +2175,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   names.add("find_tools");
   if (input.selfEditEnabled) {
     names.add("update_agent_file");
+  }
+  if (input.exploreEnabled) {
+    names.add("explore");
   }
 
   const selectedToolIds = new Set(
@@ -2240,7 +2252,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   list_files: "List files",
   git_diff: "Review changes",
   delegate_to_agent: "Delegate to agent",
-  explore: "Explore",
+  explore: "Exploring brain",
   update_agent_file: "Update agent config",
   ask_user_question: "Ask a question",
   amp_coder: "Code with Amp",

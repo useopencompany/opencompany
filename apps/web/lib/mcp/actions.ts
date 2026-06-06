@@ -1,5 +1,6 @@
 "use server";
 
+import { EXPERIMENT_KEYS, type ExperimentKey } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { workspaceExperiments, workspaceMcpServers } from "@opencompany/db/schema";
 import { revalidatePath } from "next/cache";
@@ -8,7 +9,6 @@ import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-sto
 import {
   LINEAR_MCP_ENDPOINT_URL,
   LINEAR_MCP_SERVER_KEY,
-  MCP_EXPERIMENT_KEY,
   type McpProviderKey,
   POSTHOG_MCP_ENDPOINT_URL,
   POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
@@ -19,7 +19,9 @@ import {
 } from "@/lib/mcp/data";
 import { linearMcpOAuthCredentialKind } from "@/lib/mcp/linear-oauth";
 
-export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
+// Toggle any workspace experiment flag. Admin-only. Adding a new experiment needs no migration and
+// no new action — register it in EXPERIMENT_DEFINITIONS and call this with its key.
+export async function setWorkspaceExperimentEnabled(key: ExperimentKey, enabled: boolean) {
   const { workspace } = await currentWorkspace({ requireAdmin: true });
   const now = new Date();
 
@@ -27,7 +29,7 @@ export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
     .insert(workspaceExperiments)
     .values({
       workspaceId: workspace.id,
-      key: MCP_EXPERIMENT_KEY,
+      key,
       enabled,
       updatedAt: now,
     })
@@ -37,7 +39,11 @@ export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
     });
 
   revalidateMcpPaths();
-  return { ok: true as const, enabled };
+  return { ok: true as const, key, enabled };
+}
+
+export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
+  return setWorkspaceExperimentEnabled(EXPERIMENT_KEYS.mcp, enabled);
 }
 
 export async function saveLinearMcpToken(token: string) {

@@ -3,6 +3,7 @@ export * from "./agent-file";
 export * from "./brain";
 export * from "./config";
 export * from "./events";
+export * from "./experiments";
 export * from "./ids";
 export * from "./mentions";
 export * from "./models";

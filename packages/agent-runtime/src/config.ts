@@ -1,3 +1,4 @@
+import { EXPERIMENT_KEYS, isExperimentEnabled, type WorkspaceExperiments } from "./experiments";
 import {
   getAgentModelDefinition,
   getAgentModelRuntimeOptions,
@@ -69,9 +70,13 @@ export function resolveAgentRuntimeConfig(input: {
     policy: WorkspaceToolPolicyMap;
     suspendable: boolean;
   };
+  // Per-workspace beta flags. Gates experiment-only behaviour (e.g. the explore sub-agent tool
+  // and its system-prompt guidance). Missing/undefined reads as every experiment off.
+  experiments?: WorkspaceExperiments;
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
+  const exploreEnabled = isExperimentEnabled(input.experiments, EXPERIMENT_KEYS.explore);
   const skills = resolveEnabledSkillMetadata(input.agent);
   const mcpServerKeys = [
     ...new Set(
@@ -105,7 +110,11 @@ export function resolveAgentRuntimeConfig(input: {
           .map((reference) => formatBrainReferencePath(reference.path))
           .join(
             ", ",
-          )}. You can only read or write Brain files under those mounted paths — attempts to access any other Brain path are rejected. To change scope, update this agent's brain refs via self-edit. When you need background or context from the Brain rather than one specific known file, prefer calling explore({ task, scope: "brain" }) — it researches the Brain in a separate context and returns a short summary, keeping your own context clean. Read Brain files directly only when you already know the exact file you need.`
+          )}. You can only read or write Brain files under those mounted paths — attempts to access any other Brain path are rejected. To change scope, update this agent's brain refs via self-edit.${
+          exploreEnabled
+            ? ' When you need background or context from the Brain rather than one specific known file, prefer calling explore({ task, scope: "brain" }) — it researches the Brain in a separate context and returns a short summary, keeping your own context clean. Read Brain files directly only when you already know the exact file you need.'
+            : ""
+        }`
       : null,
     input.agent.agents?.length
       ? `Delegatable workspace agents: ${input.agent.agents
@@ -146,6 +155,7 @@ export function resolveAgentRuntimeConfig(input: {
       agents: input.agent.agents,
       repositories,
       selfEditEnabled: skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID),
+      exploreEnabled,
     }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };

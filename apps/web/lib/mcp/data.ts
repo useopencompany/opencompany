@@ -1,3 +1,8 @@
+import {
+  EXPERIMENT_KEYS,
+  isExperimentKey,
+  type WorkspaceExperiments,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import {
   workspaceExperiments,
@@ -6,7 +11,7 @@ import {
 } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 
-export const MCP_EXPERIMENT_KEY = "mcp";
+export const MCP_EXPERIMENT_KEY = EXPERIMENT_KEYS.mcp;
 export const LINEAR_MCP_SERVER_KEY = "linear";
 export const LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
 export const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
@@ -118,4 +123,22 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
     slack: settingsFor(SLACK_MCP_SERVER_KEY),
     posthog: settingsFor(POSTHOG_MCP_SERVER_KEY),
   };
+}
+
+// Load every workspace experiment flag into the typed map the settings UI renders toggles from.
+// Unknown keys (e.g. rows for a removed experiment) are ignored; a workspace with no rows reads as
+// all experiments off. No migration is needed to add a flag — see EXPERIMENT_DEFINITIONS.
+export async function loadWorkspaceExperiments(workspaceId: string): Promise<WorkspaceExperiments> {
+  const rows = await getDb()
+    .select({ key: workspaceExperiments.key, enabled: workspaceExperiments.enabled })
+    .from(workspaceExperiments)
+    .where(eq(workspaceExperiments.workspaceId, workspaceId));
+
+  const experiments: WorkspaceExperiments = {};
+  for (const row of rows) {
+    if (isExperimentKey(row.key)) {
+      experiments[row.key] = row.enabled;
+    }
+  }
+  return experiments;
 }

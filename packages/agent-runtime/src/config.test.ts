@@ -142,6 +142,29 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.tools).toContain("update_agent_file");
   });
 
+  it("gates the explore tool and its Brain guidance behind the explore experiment", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Brain agent",
+      instructions: "Use the Brain.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [],
+      brain: [{ path: "/", type: "folder" }],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const off = resolveAgentRuntimeConfig({ agent: config });
+    expect(off.tools).not.toContain("explore");
+    // The Brain is still mounted; only the explore nudge is suppressed.
+    expect(off.systemPrompt).toContain("Brain files are mounted under ./brain");
+    expect(off.systemPrompt).not.toContain('explore({ task, scope: "brain" })');
+
+    const on = resolveAgentRuntimeConfig({ agent: config, experiments: { explore: true } });
+    expect(on.tools).toContain("explore");
+    expect(on.systemPrompt).toContain('explore({ task, scope: "brain" })');
+  });
+
   it("advertises attached GitHub repositories and exposes the gh tool", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

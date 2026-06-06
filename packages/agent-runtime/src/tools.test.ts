@@ -289,6 +289,16 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     );
   });
 
+  it("exposes the explore tool only when the explore experiment is enabled", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("explore");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], exploreEnabled: false }),
+    ).not.toContain("explore");
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [], exploreEnabled: true })).toContain(
+      "explore",
+    );
+  });
+
   it("gates the gh tool on an attached repository, independent of amp", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("gh");
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [], repositories: [repo] })).toContain(

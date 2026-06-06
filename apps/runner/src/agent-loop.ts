@@ -32,6 +32,7 @@ import { syncBrainFromSandbox } from "./brain";
 import { createAgentDelegationHandler } from "./delegation";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
+import { loadWorkspaceExperiments } from "./experiments";
 import { createExploreHandler } from "./explore";
 import { validateHostedToolEnvironment } from "./hosted-tools";
 import {
@@ -276,9 +277,12 @@ async function runMessageWithContext(
     });
 
     const suspendable = (input.delegationDepth ?? 0) === 0;
-    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
-      loadWorkspaceToolPolicy(row.workspace.id),
-    );
+    const [toolPolicy, experiments] = await Promise.all([
+      observeRunStep(ctx, "load_tool_policy", () => loadWorkspaceToolPolicy(row.workspace.id)),
+      observeRunStep(ctx, "load_workspace_experiments", () =>
+        loadWorkspaceExperiments(row.workspace.id),
+      ),
+    ]);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
@@ -286,6 +290,7 @@ async function runMessageWithContext(
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable },
+      experiments,
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -989,9 +994,12 @@ async function runAfterSessionWithContext(
       return;
     }
 
-    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
-      loadWorkspaceToolPolicy(row.workspace.id),
-    );
+    const [toolPolicy, experiments] = await Promise.all([
+      observeRunStep(ctx, "load_tool_policy", () => loadWorkspaceToolPolicy(row.workspace.id)),
+      observeRunStep(ctx, "load_workspace_experiments", () =>
+        loadWorkspaceExperiments(row.workspace.id),
+      ),
+    ]);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
@@ -999,6 +1007,7 @@ async function runAfterSessionWithContext(
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: false },
+      experiments,
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -1410,9 +1419,12 @@ async function resumeApprovalWithContext(
       return;
     }
 
-    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
-      loadWorkspaceToolPolicy(row.workspace.id),
-    );
+    const [toolPolicy, experiments] = await Promise.all([
+      observeRunStep(ctx, "load_tool_policy", () => loadWorkspaceToolPolicy(row.workspace.id)),
+      observeRunStep(ctx, "load_workspace_experiments", () =>
+        loadWorkspaceExperiments(row.workspace.id),
+      ),
+    ]);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
@@ -1420,6 +1432,7 @@ async function resumeApprovalWithContext(
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: true },
+      experiments,
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
@@ -1919,9 +1932,12 @@ async function resumeQuestionResponseWithContext(
       return;
     }
 
-    const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
-      loadWorkspaceToolPolicy(row.workspace.id),
-    );
+    const [toolPolicy, experiments] = await Promise.all([
+      observeRunStep(ctx, "load_tool_policy", () => loadWorkspaceToolPolicy(row.workspace.id)),
+      observeRunStep(ctx, "load_workspace_experiments", () =>
+        loadWorkspaceExperiments(row.workspace.id),
+      ),
+    ]);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
@@ -1929,6 +1945,7 @@ async function resumeQuestionResponseWithContext(
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
       toolPolicy: { policy: toolPolicy, suspendable: true },
+      experiments,
     });
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;

@@ -1,6 +1,13 @@
 "use client";
 
 import {
+  EXPERIMENT_DEFINITIONS,
+  EXPERIMENT_KEYS,
+  type ExperimentDefinition,
+  type ExperimentKey,
+  type WorkspaceExperiments,
+} from "@opencompany/agent-runtime";
+import {
   AlertTriangle,
   BarChart3,
   Check,
@@ -24,7 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useRef, useState, useTransition } from "react";
+import { Fragment, useRef, useState, useTransition } from "react";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { ToolPolicyEditor } from "@/components/ToolPolicyEditor";
 import { Toggle } from "@/components/ui/toggle";
@@ -40,7 +47,7 @@ import {
   removePostHogMcpConnection,
   removeSlackMcpConnection,
   saveLinearMcpToken,
-  setWorkspaceMcpExperimentEnabled,
+  setWorkspaceExperimentEnabled,
 } from "@/lib/mcp/actions";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { removeAvatar, updateAvatar } from "@/lib/users/actions";
@@ -125,6 +132,7 @@ type Props = {
     };
   };
   toolPolicies: WorkspaceToolPolicyOverrides;
+  experiments: WorkspaceExperiments;
 };
 
 function Section({
@@ -658,15 +666,25 @@ function WorkspaceState({ sync }: { sync: Props["workspace"]["sync"] }) {
 function ExperimentsSection({
   mcp,
   toolPolicies,
+  experiments,
 }: {
   mcp: Props["mcp"];
   toolPolicies: WorkspaceToolPolicyOverrides;
+  experiments: WorkspaceExperiments;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [enabled, setEnabled] = useState(mcp.mcpEnabled);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [isPending, startTransition] = useTransition();
+  // Optimistic per-experiment enabled state so toggles (and the MCP provider cards gated on the MCP
+  // flag) flip instantly, before the server action + router.refresh round-trips.
+  const [enabledByKey, setEnabledByKey] = useState<Record<ExperimentKey, boolean>>(
+    () =>
+      Object.fromEntries(
+        EXPERIMENT_DEFINITIONS.map((definition) => [
+          definition.key,
+          experiments[definition.key] === true,
+        ]),
+      ) as Record<ExperimentKey, boolean>,
+  );
   const linearSetupStatus = searchParams.get("mcp") === "linear" ? searchParams.get("setup") : null;
   const normalizedLinearSetupStatus =
     linearSetupStatus === "connected" || linearSetupStatus === "error" ? linearSetupStatus : null;
@@ -687,74 +705,105 @@ function ExperimentsSection({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
-              <FlaskConical size={15} strokeWidth={1.8} />
-            </span>
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">MCP beta</div>
-              <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-                Try workspace-scoped MCP servers in agent configs.
-              </p>
-            </div>
-          </div>
-          <Toggle
-            pressed={enabled}
-            disabled={isPending}
-            aria-label={`${enabled ? "Disable" : "Enable"} MCP beta`}
-            onPressedChange={(next) => {
-              setEnabled(next);
-              setMessage(null);
-              startTransition(async () => {
-                const result = await setWorkspaceMcpExperimentEnabled(next);
-                if (result.ok) {
-                  router.refresh();
-                  return;
-                }
-                setEnabled(!next);
-                setMessage({ type: "error", text: "Could not update MCP beta." });
-              });
-            }}
-            className="w-[74px]"
-          >
-            {enabled ? "On" : "Off"}
-          </Toggle>
-        </div>
-        {message && (
-          <div
-            className={`mt-3 text-[12px] ${
-              message.type === "success" ? "text-success" : "text-danger"
-            }`}
-          >
-            {message.text}
-          </div>
-        )}
-      </div>
+      {EXPERIMENT_DEFINITIONS.map((definition) => (
+        <Fragment key={definition.key}>
+          <ExperimentToggle
+            definition={definition}
+            enabled={enabledByKey[definition.key] ?? false}
+            onChange={(next) => setEnabledByKey((prev) => ({ ...prev, [definition.key]: next }))}
+            onSaved={() => router.refresh()}
+          />
+          {/* The MCP experiment has provider connection cards that only make sense once it is on. */}
+          {definition.key === EXPERIMENT_KEYS.mcp && enabledByKey[EXPERIMENT_KEYS.mcp] === true ? (
+            <>
+              <LinearMcpCard
+                linear={mcp.linear}
+                setupStatus={normalizedLinearSetupStatus}
+                setupReason={linearSetupReason}
+                policyOverrides={toolPolicies.linear}
+              />
+              <SlackMcpCard
+                slack={mcp.slack}
+                setupStatus={normalizedSlackSetupStatus}
+                setupReason={slackSetupReason}
+                policyOverrides={toolPolicies.slack}
+              />
+              <PostHogMcpCard
+                posthog={mcp.posthog}
+                setupStatus={normalizedPosthogSetupStatus}
+                setupReason={posthogSetupReason}
+                policyOverrides={toolPolicies.posthog}
+              />
+            </>
+          ) : null}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
 
-      {enabled ? (
-        <>
-          <LinearMcpCard
-            linear={mcp.linear}
-            setupStatus={normalizedLinearSetupStatus}
-            setupReason={linearSetupReason}
-            policyOverrides={toolPolicies.linear}
-          />
-          <SlackMcpCard
-            slack={mcp.slack}
-            setupStatus={normalizedSlackSetupStatus}
-            setupReason={slackSetupReason}
-            policyOverrides={toolPolicies.slack}
-          />
-          <PostHogMcpCard
-            posthog={mcp.posthog}
-            setupStatus={normalizedPosthogSetupStatus}
-            setupReason={posthogSetupReason}
-            policyOverrides={toolPolicies.posthog}
-          />
-        </>
-      ) : null}
+// A single workspace-experiment row: the flask card with its title/description and an On/Off toggle
+// wired to the generic setWorkspaceExperimentEnabled action. Optimistic enabled state is owned by
+// the parent so dependent UI (e.g. MCP provider cards) can react to it.
+function ExperimentToggle({
+  definition,
+  enabled,
+  onChange,
+  onSaved,
+}: {
+  definition: ExperimentDefinition;
+  enabled: boolean;
+  onChange: (next: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+            <FlaskConical size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">
+              {definition.title}
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">{definition.description}</p>
+          </div>
+        </div>
+        <Toggle
+          pressed={enabled}
+          disabled={isPending}
+          aria-label={`${enabled ? "Disable" : "Enable"} ${definition.title}`}
+          onPressedChange={(next) => {
+            onChange(next);
+            setMessage(null);
+            startTransition(async () => {
+              const result = await setWorkspaceExperimentEnabled(definition.key, next);
+              if (result.ok) {
+                onSaved();
+                return;
+              }
+              onChange(!next);
+              setMessage({ type: "error", text: `Could not update ${definition.title}.` });
+            });
+          }}
+          className="w-[74px]"
+        >
+          {enabled ? "On" : "Off"}
+        </Toggle>
+      </div>
+      {message && (
+        <div
+          className={`mt-3 text-[12px] ${
+            message.type === "success" ? "text-success" : "text-danger"
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
     </div>
   );
 }
@@ -1425,7 +1474,14 @@ function WorkspaceNameForm({ initial }: { initial: string }) {
   );
 }
 
-export default function SettingsView({ profile, workspace, billing, mcp, toolPolicies }: Props) {
+export default function SettingsView({
+  profile,
+  workspace,
+  billing,
+  mcp,
+  toolPolicies,
+  experiments,
+}: Props) {
   return (
     <main className="relative flex h-full flex-1 flex-col overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] px-8 pb-24 pt-10">
@@ -1508,7 +1564,7 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
           </Section>
 
           <Section title="Experiments" description="Beta capabilities for this workspace.">
-            <ExperimentsSection mcp={mcp} toolPolicies={toolPolicies} />
+            <ExperimentsSection mcp={mcp} toolPolicies={toolPolicies} experiments={experiments} />
           </Section>
         </div>
       </div>

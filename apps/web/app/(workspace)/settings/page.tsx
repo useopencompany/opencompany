@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import SettingsView from "@/components/SettingsView";
 import { currentWorkspace } from "@/lib/auth";
 import { loadBillingOverview } from "@/lib/billing/service";
-import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
+import { loadWorkspaceExperiments, loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadWorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 import { loadWorkspaceSyncStatus } from "@/lib/workspace-state/status";
 
@@ -33,7 +33,7 @@ function formatDate(date: Date) {
 export default async function SettingsPage() {
   const { authUser, user, workspace } = await currentWorkspace();
   const db = getDb();
-  const [syncStatus, [avatar], billing, mcp, toolPolicies] = await Promise.all([
+  const [syncStatus, [avatar], billing, mcp, toolPolicies, experiments] = await Promise.all([
     loadWorkspaceSyncStatus(db, workspace.id),
     db
       .select({ updatedAt: userAvatars.updatedAt })
@@ -43,6 +43,7 @@ export default async function SettingsPage() {
     loadBillingOverview(workspace.id),
     loadWorkspaceMcpSettingsForWorkspace(workspace.id),
     loadWorkspaceToolPolicyOverrides(workspace.id),
+    loadWorkspaceExperiments(workspace.id),
   ]);
   const customAvatarUrl = avatar
     ? `/api/avatar/${user.id}?v=${new Date(avatar.updatedAt).getTime()}`
@@ -88,6 +89,7 @@ export default async function SettingsPage() {
       }}
       mcp={mcp}
       toolPolicies={toolPolicies}
+      experiments={experiments}
     />
   );
 }
