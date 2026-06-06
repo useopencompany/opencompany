@@ -5,7 +5,9 @@ import PersonalSurface from "@/components/PersonalSurface";
 import QueryProvider from "@/components/QueryProvider";
 import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
+import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
 import { currentWorkspace } from "@/lib/auth";
+import { loadPersonalAgentContextFiles } from "@/lib/personal/context";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it
@@ -22,6 +24,13 @@ export default async function PersonalPage() {
     name: agentName,
   });
 
+  const [sessions, contextFiles] = await Promise.all([
+    loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
+    loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
+  ]);
+  const userName =
+    [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
+
   return (
     <AnalyticsProvider
       identity={{
@@ -37,9 +46,14 @@ export default async function PersonalPage() {
           <CollectionsProvider>
             <ToastProvider>
               <ObservabilityContext userId={user.id} workspaceId={workspace.id} />
-              <div className="flex h-screen w-screen flex-col overflow-hidden bg-canvas">
-                <PersonalSurface agent={agent} />
-              </div>
+              <PersonalSurface
+                agent={agent}
+                userName={userName}
+                userEmail={authUser.email}
+                workspaceName={workspace.name}
+                initialSessions={sessions}
+                contextFiles={contextFiles}
+              />
             </ToastProvider>
           </CollectionsProvider>
         </WorkspaceProvider>

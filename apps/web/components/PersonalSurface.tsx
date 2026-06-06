@@ -1,26 +1,56 @@
 "use client";
 
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import { agentBundleDir } from "@opencompany/agent-runtime";
+import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, LoaderCircle } from "lucide-react";
+import { ArrowUp, LoaderCircle, PanelLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { Composer } from "@/components/Composer";
+import PersonalSidebar, { type PersonalPanel } from "@/components/PersonalSidebar";
+import { PersonalBehaviorEditor } from "@/components/personal/PersonalBehaviorEditor";
+import { PersonalCapabilityPanel } from "@/components/personal/PersonalCapabilityPanel";
+import { PersonalContextFileEditor } from "@/components/personal/PersonalContextFileEditor";
 import SessionView from "@/components/SessionView";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
-import { seedSessionQueries } from "@/lib/agent-sessions/payload";
+import { type SidebarSessionPayload, seedSessionQueries } from "@/lib/agent-sessions/payload";
+import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
+const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
 
 type PersonalAgent = {
   id: string;
   name: string;
   defaultModel: string;
+  path: string | null;
+  config: AgentConfig;
+  body: string;
+  content: TiptapDoc;
+};
+
+// The main panel shows exactly one of: the composer (new chat), a live session, one of the
+// agent-config surfaces (behavior editor / capability lists), an open context file, or the
+// new-file editor for a chosen folder.
+type PersonalView =
+  | { kind: "inbox" }
+  | { kind: "session"; sessionId: string }
+  | { kind: "panel"; panel: PersonalPanel }
+  | { kind: "file"; relativePath: string }
+  | { kind: "newFile"; prefix: string };
+
+export type PersonalSurfaceProps = {
+  agent: PersonalAgent;
+  userName: string;
+  userEmail: string;
+  workspaceName: string;
+  initialSessions: SidebarSessionPayload[];
+  contextFiles: AgentBundleFilePayload[];
 };
 
 // Composer locked to the single personal agent (no agent picker). On submit it creates a
@@ -148,18 +178,182 @@ function PersonalComposer({
   );
 }
 
-export default function PersonalSurface({ agent }: { agent: PersonalAgent }) {
+export default function PersonalSurface({
+  agent,
+  userName,
+  userEmail,
+  workspaceName,
+  initialSessions,
+  contextFiles,
+}: PersonalSurfaceProps) {
   const hydrated = useHydrated();
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [view, setView] = useState<PersonalView>({ kind: "inbox" });
+  const [config, setConfig] = useState<AgentConfig>(agent.config);
+  const [files, setFiles] = useState<AgentBundleFilePayload[]>(contextFiles);
+  const [collapsed, setCollapsed] = useState(false);
 
-  // SessionView relies on useLiveQuery (client-only); keep the composer SSR-safe until hydrated.
-  if (!hydrated) {
-    return <PersonalComposer agent={agent} onSessionCreated={setSessionId} />;
-  }
+  const bundleDir = agent.path ? agentBundleDir(agent.path) : null;
 
-  if (sessionId) {
-    return <SessionView sessionId={sessionId} />;
-  }
+  // Merge a saved/created file back into the list so the sidebar (names, counts) and the
+  // open editor stay in sync without a server round-trip.
+  const upsertFile = (file: AgentBundleFilePayload) => {
+    setFiles((prev) => {
+      const next = prev.filter((existing) => existing.path !== file.path);
+      next.push(file);
+      return next.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+    });
+  };
 
-  return <PersonalComposer agent={agent} onSessionCreated={setSessionId} />;
+  // The editable behavior lives here, not just in the (immutable) `agent` prop the server
+  // rendered with. The behavior editor unmounts whenever you switch panels, so its seed must
+  // reflect the latest edit — otherwise remounting reseeds it from stale server props and the
+  // change appears lost until a full reload. A ref (not state) keeps this re-render-free: the
+  // editor owns its own DOM, and renderMain() reads the current draft when it remounts.
+  const draftRef = useRef<{ body: string; content: TiptapDoc }>({
+    body: agent.body,
+    content: agent.content,
+  });
+
+  // Restore the persisted collapse preference once on the client. SSR/first render stays
+  // expanded so the markup matches the server HTML, then snaps to the stored value.
+  useEffect(() => {
+    setCollapsed(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
+  }, []);
+
+  const updateCollapsed = (next: boolean) => {
+    setCollapsed(next);
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+  };
+
+  const sessionId = view.kind === "session" ? view.sessionId : null;
+  const activePanel = view.kind === "panel" ? view.panel : null;
+  const activeFilePath = view.kind === "file" ? view.relativePath : null;
+
+  const activeFile = useMemo(
+    () => (activeFilePath ? files.find((file) => file.relativePath === activeFilePath) : undefined),
+    [activeFilePath, files],
+  );
+
+  const renderMain = () => {
+    if (view.kind === "newFile") {
+      return (
+        <div className="h-full overflow-hidden">
+          <PersonalContextFileEditor
+            agentId={agent.id}
+            bundleDir={bundleDir}
+            newFilePrefix={view.prefix}
+            onSaved={upsertFile}
+            onCreated={(file) => {
+              upsertFile(file);
+              setView({ kind: "file", relativePath: file.relativePath });
+            }}
+          />
+        </div>
+      );
+    }
+    if (view.kind === "file") {
+      // The file may have been deleted out from under us; fall back to the inbox.
+      if (!activeFile) {
+        return (
+          <PersonalComposer
+            agent={agent}
+            onSessionCreated={(id) => setView({ kind: "session", sessionId: id })}
+          />
+        );
+      }
+      return (
+        <div className="h-full overflow-hidden">
+          <PersonalContextFileEditor
+            agentId={agent.id}
+            bundleDir={bundleDir}
+            file={activeFile}
+            onSaved={upsertFile}
+            onCreated={(file) => setView({ kind: "file", relativePath: file.relativePath })}
+          />
+        </div>
+      );
+    }
+    if (activePanel === "behavior") {
+      return (
+        <div className="h-full overflow-y-auto">
+          <PersonalBehaviorEditor
+            agentId={agent.id}
+            initialBody={draftRef.current.body || config.instructions}
+            initialContent={draftRef.current.content}
+            config={config}
+            onConfigChange={setConfig}
+            onDraftChange={(body, content) => {
+              draftRef.current = { body, content };
+            }}
+          />
+        </div>
+      );
+    }
+    if (activePanel) {
+      return (
+        <div className="h-full overflow-y-auto">
+          <PersonalCapabilityPanel section={activePanel} config={config} />
+        </div>
+      );
+    }
+    // SessionView relies on useLiveQuery (client-only); keep the composer SSR-safe until hydrated.
+    if (hydrated && sessionId) {
+      return <SessionView sessionId={sessionId} />;
+    }
+    return (
+      <PersonalComposer
+        agent={agent}
+        onSessionCreated={(id) => setView({ kind: "session", sessionId: id })}
+      />
+    );
+  };
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-sidebar">
+      <PersonalSidebar
+        agentId={agent.id}
+        agentName={agent.name}
+        agentPath={agent.path}
+        userName={userName}
+        userEmail={userEmail}
+        workspaceName={workspaceName}
+        initialSessions={initialSessions}
+        contextFiles={files}
+        config={config}
+        activeSessionId={sessionId}
+        activePanel={activePanel}
+        activeFilePath={activeFilePath}
+        collapsed={collapsed}
+        onToggleCollapsed={() => updateCollapsed(!collapsed)}
+        onNewSession={() => setView({ kind: "inbox" })}
+        onSelectSession={(id) => setView({ kind: "session", sessionId: id })}
+        onSelectPanel={(panel) => setView({ kind: "panel", panel })}
+        onSelectFile={(relativePath) => setView({ kind: "file", relativePath })}
+        onNewFile={(prefix) => setView({ kind: "newFile", prefix })}
+      />
+
+      {/* When the sidebar is expanded the main view floats as a rounded panel so the
+          sidebar canvas peeks around its edges; collapsed, it bleeds to full screen. */}
+      <div
+        className={`relative flex min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-[margin,border-radius] duration-200 ease-out ${
+          collapsed
+            ? "m-0 rounded-none border-0"
+            : "my-2 mr-2 rounded-xl border border-border shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+        }`}
+      >
+        {collapsed && (
+          <button
+            type="button"
+            aria-label="Expand sidebar"
+            aria-expanded={false}
+            onClick={() => updateCollapsed(false)}
+            className="fixed left-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          >
+            <PanelLeft size={15} strokeWidth={1.75} />
+          </button>
+        )}
+        {renderMain()}
+      </div>
+    </div>
+  );
 }

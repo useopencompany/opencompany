@@ -81,6 +81,43 @@ export async function loadSidebarSessionsForWorkspace(
     .map(serializeSidebarSession);
 }
 
+// Personal sessions are the user's sessions against their private default agent. Same
+// shape as the sidebar list, but scoped to a single agent and without star state (the
+// /personal experiment has no pinning yet). Ordered most-recently-updated first so the
+// sidebar can group them by recency the same way the main app does.
+export async function loadPersonalSessionsForAgent(
+  userId: string,
+  workspaceId: string,
+  agentId: string,
+): Promise<SidebarSessionPayload[]> {
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      id: agentSessions.id,
+      title: agentSessions.title,
+      status: agentSessions.status,
+      modelName: agentSessions.modelName,
+      lastError: agentSessions.lastError,
+      createdAt: agentSessions.createdAt,
+      updatedAt: agentSessions.updatedAt,
+    })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.workspaceId, workspaceId),
+        eq(agentSessions.userId, userId),
+        eq(agentSessions.agentId, agentId),
+        eq(agentSessions.source, "user"),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .orderBy(desc(agentSessions.updatedAt))
+    .limit(SIDEBAR_RECENCY_LIMIT);
+
+  return rows.map((row) => serializeSidebarSession({ ...row, starredAt: null }));
+}
+
 export async function loadAgentSessionDetailForWorkspace(
   sessionId: string,
   userId: string,

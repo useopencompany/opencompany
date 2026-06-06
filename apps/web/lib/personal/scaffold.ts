@@ -1,5 +1,5 @@
 import { agentPathForSlug } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
@@ -15,10 +15,18 @@ const PERSONAL_AGENT_BODY = `You are {{name}}'s personal agent.
 
 Be concise and bias to action. Research before you assert and cite what you find. Confirm before anything destructive or outward-facing.`;
 
+const EMPTY_TIPTAP_DOC: TiptapDoc = { type: "doc", content: [] };
+
 export type PersonalAgentRef = {
   id: string;
   name: string;
   defaultModel: string;
+  path: string | null;
+  // The full resolved `.agent` config (tools, skills, integrations, triggers) plus the
+  // editable behavior — surfaced by the /personal sidebar and the behavior editor.
+  config: AgentConfig;
+  body: string;
+  content: TiptapDoc;
 };
 
 /**
@@ -41,7 +49,14 @@ export async function ensurePersonalAgent(input: {
   const db = getDb();
 
   const [existing] = await db
-    .select({ id: agents.id, name: agents.name, config: agents.config })
+    .select({
+      id: agents.id,
+      name: agents.name,
+      path: agents.path,
+      body: agents.body,
+      content: agents.content,
+      config: agents.config,
+    })
     .from(agents)
     .where(
       and(
@@ -57,6 +72,10 @@ export async function ensurePersonalAgent(input: {
       id: existing.id,
       name: existing.name,
       defaultModel: existing.config.model.name,
+      path: existing.path,
+      config: existing.config,
+      body: existing.body,
+      content: existing.content ?? EMPTY_TIPTAP_DOC,
     };
   }
 
@@ -95,5 +114,9 @@ export async function ensurePersonalAgent(input: {
     id: pending.id,
     name: pending.agent.name,
     defaultModel: pending.agent.config.model.name,
+    path: pending.agent.path,
+    config: pending.agent.config,
+    body: pending.agent.body,
+    content: EMPTY_TIPTAP_DOC,
   };
 }
