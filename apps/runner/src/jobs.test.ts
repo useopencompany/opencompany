@@ -4,6 +4,7 @@ import {
   claimNextRunnerJob,
   type EnqueueRunnerJobInput,
   enqueueRunnerJob,
+  RUNNER_JOB_HARD_ATTEMPT_CAP,
   RUNNER_JOB_MAX_ATTEMPTS,
   type RunnerJob,
   type RunnerJobHandlers,
@@ -390,6 +391,34 @@ describe("runner job execution", () => {
     expect(firstJob(store).status).toBe("pending");
     expect(firstJob(store).leaseId).toBeNull();
     expect(firstJob(store).lastError).toBe("Run lease is busy.");
+  });
+
+  it("gives up a pathologically re-claimed lease-busy job at the hard attempt cap", async () => {
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "running",
+        attempts: RUNNER_JOB_HARD_ATTEMPT_CAP,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          runMessage: vi.fn(async () => {
+            throw new RunLeaseBusyError();
+          }),
+        }),
+      }),
+    ).rejects.toThrow(RunLeaseBusyError);
+
+    expect(firstJob(store).status).toBe("failed");
   });
 });
 

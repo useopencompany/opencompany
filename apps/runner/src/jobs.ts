@@ -20,14 +20,33 @@ import { rowsFromExecute } from "./sql-exec";
 //     runner instance owns the right to dispatch a job kind+session+message tuple.
 //   - The session run lease in `run-control.ts` is the *execution* lease. It guarantees one
 //     in-flight model/tool loop per session and is what session writes check via `lease-writes.ts`.
-// Both heartbeat at RUN_HEARTBEAT_INTERVAL_MS / RUNNER_JOB_HEARTBEAT_INTERVAL_MS. TTLs must
-// be > 2× the heartbeat interval to survive a hiccup but short enough that a crashed runner's
-// jobs/sessions get reclaimed quickly.
+// Both heartbeat at RUN_HEARTBEAT_INTERVAL_MS / RUNNER_JOB_HEARTBEAT_INTERVAL_MS.
+//
+// The delivery lease TTL MUST exceed the longest single blocking tool call a turn can make.
+// A coding turn blocks for up to 600s inside one `sandbox.commands.run` (opencode/amp). With a
+// 90s TTL, any heartbeat gap during that call (a deploy, instance recycle, GC pause, network
+// blip) let another instance reclaim the still-running job via the stale-lease branch of
+// `claimNext`, bump `attempts`, and replay the whole turn — re-running the brain crawl and a
+// second full opencode invocation (double model + opencode billing) and re-creating the PR
+// non-idempotently. One production job was re-claimed 17 times this way (#339). Keeping the TTL
+// comfortably above the in-tool ceiling (and below the 15-min run-lease TTL) means a live,
+// heartbeating run is never taken over; a genuinely crashed runner's job is still reclaimed
+// once its lease lapses.
 const logger = createLogger({ service: "opencompany-runner", runtime: "jobs" });
 
-export const RUNNER_JOB_LEASE_TTL_MS = 90 * 1000;
+// Longest blocking in-tool call (opencode/amp `sandbox.commands.run`). Kept here as the floor
+// the delivery-lease TTL must clear; see opencode-tool.ts / amp-tool.ts.
+const LONGEST_IN_TOOL_CALL_MS = 600 * 1000;
+export const RUNNER_JOB_LEASE_TTL_MS = LONGEST_IN_TOOL_CALL_MS + 120 * 1000; // 12 min
 export const RUNNER_JOB_HEARTBEAT_INTERVAL_MS = 5_000;
 export const RUNNER_JOB_MAX_ATTEMPTS = 5;
+// Absolute backstop on re-claims. A RunLeaseBusyError is normally non-terminal — the job is just
+// waiting for the session's in-flight run to finish — so it does not count toward
+// RUNNER_JOB_MAX_ATTEMPTS. But a job re-claimed this many times is pathological (the short-TTL
+// takeover loop that hit 17 attempts on one job in #339): past this cap we give up rather than
+// thrash and re-bill forever. Set far above any legitimate lease-busy retry window (a session
+// cannot stay legitimately busy this long — the 5-min stale-run sweep reclaims it first).
+export const RUNNER_JOB_HARD_ATTEMPT_CAP = 50;
 // Fallback only for callers that construct the worker without options (e.g. tests).
 // Production sets concurrency via `RUNNER_WORKER_CONCURRENCY` (see env.ts), passed in
 // from index.ts.
@@ -567,8 +586,11 @@ async function failRunnerJob(input: {
 }) {
   const now = new Date();
   const terminal =
-    !(input.error instanceof RunLeaseBusyError) &&
-    (input.job.attempts >= RUNNER_JOB_MAX_ATTEMPTS || isNonRetryableRunnerError(input.error));
+    // Hard backstop: even a (normally non-terminal) lease-busy job is given up once it has been
+    // re-claimed this many times, to bound a pathological takeover loop (#339).
+    input.job.attempts >= RUNNER_JOB_HARD_ATTEMPT_CAP ||
+    (!(input.error instanceof RunLeaseBusyError) &&
+      (input.job.attempts >= RUNNER_JOB_MAX_ATTEMPTS || isNonRetryableRunnerError(input.error)));
   await input.store.fail({
     id: input.job.id,
     leaseId: input.leaseId,
