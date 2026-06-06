@@ -29,6 +29,8 @@ const env = {
   ampE2bTemplate: undefined,
   e2bSandboxIdleTimeoutMs: 30_000,
   toolArgRepairEnabled: false,
+  jobLeaseTtlMs: 300_000,
+  jobMaxLeaseBusyAttempts: 10,
   workerConcurrency: 2,
   port: 3040,
   allowedOrigins: ["https://app.example.com"],

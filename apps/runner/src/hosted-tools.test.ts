@@ -1970,6 +1970,8 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
     toolArgRepairEnabled: false,
+    jobLeaseTtlMs: 300_000,
+    jobMaxLeaseBusyAttempts: 10,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],
