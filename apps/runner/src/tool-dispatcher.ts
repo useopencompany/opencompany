@@ -132,6 +132,13 @@ type DelegateToAgent = (input: {
   toolCallId: string;
 }) => Promise<unknown>;
 
+type Explore = (input: {
+  task: string;
+  scope?: "brain" | "work" | "all";
+  breadth?: "quick" | "thorough";
+  toolCallId: string;
+}) => Promise<unknown>;
+
 class RecoverableToolError extends Error {
   code: string;
 
@@ -161,6 +168,7 @@ export function createToolSet(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  explore?: Explore | undefined;
 }) {
   const tools: ToolSet = {};
 
@@ -220,6 +228,7 @@ export function createToolSet(input: {
           observabilityContext: input.observabilityContext,
           toolBudget: input.toolBudget,
           delegateToAgent: input.delegateToAgent,
+          explore: input.explore,
         });
       },
     }) as ToolSet[string];
@@ -558,6 +567,7 @@ export async function executeRuntimeTool(input: {
   observabilityContext?: ToolObservabilityContext | undefined;
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
+  explore?: Explore | undefined;
 }) {
   const persistedToolName = input.persistAsToolName ?? input.definition.name;
   let output: unknown;
@@ -623,6 +633,16 @@ export async function executeRuntimeTool(input: {
             reason:
               "You cannot ask the user a question in this context (no interactive session, or the questions were malformed). Proceed using your best judgment.",
           };
+        }
+        if (input.definition.name === "explore") {
+          const exploreArgs = readExploreArgs(input.args);
+          if (!input.explore) {
+            throw new RecoverableToolError(
+              "Explore is not available in this run.",
+              "explore_unavailable",
+            );
+          }
+          return input.explore({ ...exploreArgs, toolCallId: input.toolCallId });
         }
         if (input.definition.name !== "delegate_to_agent") {
           throw new RecoverableToolError("Unknown internal tool.", "unknown_internal_tool");
@@ -1233,6 +1253,21 @@ function readDelegateToAgentArgs(args: unknown) {
     ...(sessionId ? { sessionId } : {}),
     prompt,
   };
+}
+
+function readExploreArgs(args: unknown) {
+  const record = isRecord(args) ? args : {};
+  const task = typeof record.task === "string" ? record.task.trim() : "";
+  if (!task) {
+    throw new RecoverableToolError(
+      "Tool argument task must be a non-empty string.",
+      "invalid_tool_input",
+    );
+  }
+  const scope: "brain" | "work" | "all" =
+    record.scope === "work" || record.scope === "all" ? record.scope : "brain";
+  const breadth: "quick" | "thorough" = record.breadth === "thorough" ? "thorough" : "quick";
+  return { task, scope, breadth };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

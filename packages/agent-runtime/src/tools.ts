@@ -18,6 +18,7 @@ export type RuntimeToolName =
   | "list_files"
   | "git_diff"
   | "delegate_to_agent"
+  | "explore"
   | "update_agent_file"
   | "ask_user_question"
   | "amp_coder"
@@ -504,6 +505,45 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "The tool blocks until the child session completes or fails, then returns the child answer and session id.",
       "Resume a child session only when continuity matters; start a new delegated session for independent subtasks.",
       "Keep delegated prompts bounded; do not delegate recursively unless the user's task clearly requires it.",
+    ].join("\n"),
+  },
+  {
+    name: "explore",
+    kind: "internal",
+    description:
+      "Run a separate read-only research agent in its own context window — on the same sandbox as you — to navigate files (especially the Brain under ./brain) and return ONLY a concise summary. Use this instead of reading many files yourself when you need background or context, so your own context stays clean. It is read-only: it cannot edit, run mutating commands, or ask the user.",
+    parameters: {
+      type: "object",
+      properties: {
+        task: {
+          type: "string",
+          description:
+            "What to find or understand. Be specific about the question and the shape of summary you need back.",
+        },
+        scope: {
+          type: "string",
+          enum: ["brain", "work", "all"],
+          description:
+            "Where the explorer may read: brain (default, shared company knowledge), work (the session work tree), or all.",
+          default: "brain",
+        },
+        breadth: {
+          type: "string",
+          enum: ["quick", "thorough"],
+          description:
+            "How deep to dig: quick (default, fewer steps) or thorough (more steps for harder lookups).",
+          default: "quick",
+        },
+      },
+      required: ["task"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use explore to pull context — especially from the Brain — without flooding your own context window with file reads.",
+      "Give a self-contained task and the exact output you need; the explorer cannot see your conversation.",
+      "The tool blocks until the explorer finishes, then returns its distilled summary.",
+      "It is read-only and runs on your sandbox; prefer it over reading many Brain files yourself.",
+      "Read a Brain file directly only when you already know the exact small file you need.",
     ].join("\n"),
   },
   {
@@ -2200,6 +2240,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   list_files: "List files",
   git_diff: "Review changes",
   delegate_to_agent: "Delegate to agent",
+  explore: "Explore",
   update_agent_file: "Update agent config",
   ask_user_question: "Ask a question",
   amp_coder: "Code with Amp",
@@ -2292,6 +2333,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "gh",
   "ask_user_question",
   "delegate_to_agent",
+  "explore",
   "tool_help",
   "find_tools",
 ];

@@ -32,6 +32,7 @@ import { syncBrainFromSandbox } from "./brain";
 import { createAgentDelegationHandler } from "./delegation";
 import type { RunnerEnv } from "./env";
 import { appendRuntimeEvent } from "./events";
+import { createExploreHandler } from "./explore";
 import { validateHostedToolEnvironment } from "./hosted-tools";
 import {
   acquireRunLease,
@@ -418,6 +419,17 @@ async function runMessageWithContext(
         depth: input.delegationDepth ?? 0,
         agentReferences: agentConfig.agents ?? [],
         runChildMessage: runDelegatedChildMessage,
+      }),
+      explore: createExploreHandler({
+        parentSessionId: input.sessionId,
+        parentMessageId: assistantMessageId,
+        parentRunLeaseId: ctx.leaseId,
+        parentRunLeaseOwner: ctx.leaseOwner,
+        getSandbox: sandboxAcquirer.get,
+        workdir: row.session.workdir,
+        env: input.env,
+        signal: ctx.controller.signal,
+        checkAbort,
       }),
     });
 
