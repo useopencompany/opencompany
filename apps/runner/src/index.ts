@@ -13,7 +13,11 @@ import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { startRunnerJobWorker } from "./jobs";
 import { createServer } from "./server";
-import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
+import {
+  finalizeOrphanedAbortingSessions,
+  interruptActiveRuns,
+  interruptStaleActiveRuns,
+} from "./session-interruptions";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "index" });
 const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 270_000;
@@ -24,7 +28,15 @@ const env = loadEnv();
 assertRunnerDbConfig();
 const jobWorker = startRunnerJobWorker(env, {
   concurrency: env.workerConcurrency,
-  staleRunSweep: interruptStaleActiveRuns,
+  // Reconcile both orphaned-run shapes on the same cadence: runs whose heartbeat went stale, and
+  // sessions stuck in the transient `aborting` state with no live lease to finalize them.
+  staleRunSweep: async () => {
+    const [interrupted, finalized] = await Promise.all([
+      interruptStaleActiveRuns(),
+      finalizeOrphanedAbortingSessions(),
+    ]);
+    return interrupted + finalized;
+  },
 });
 const server = createServer(env, { onJobEnqueued: jobWorker.notify });
 

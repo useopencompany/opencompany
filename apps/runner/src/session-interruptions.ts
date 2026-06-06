@@ -38,6 +38,19 @@ export async function interruptStaleActiveRuns(now: Date = new Date()) {
   return countInterruptedSessions(events);
 }
 
+// Reconcile sessions stuck in the transient `aborting` state to the terminal `aborted` status.
+// `abortSession` sets `aborting` and signals the in-flight loop, which normally finalizes to
+// `aborted` itself. But when there is no live run to catch the signal — the session was idle/awaiting
+// when aborted, or the owning instance died mid-abort — nothing ever finalizes it and it freezes at
+// `aborting` forever. We only finalize when no run is actively holding the lease: the lease write
+// that finalizes a healthy abort flips status and clears the lease atomically, so `aborting` with a
+// null/expired lease means there is no loop still winding down.
+export async function finalizeOrphanedAbortingSessions(now: Date = new Date()) {
+  const events = await finalizeAbortingSessionsSql({ now });
+  publishEvents(events);
+  return countTerminalSessions(events);
+}
+
 async function interruptRunSql(input: ActiveRunSnapshot & { reason: SessionInterruptReason }) {
   const statusPayload = JSON.stringify({ status: "interrupted" });
   const auditPayload = JSON.stringify({
@@ -132,6 +145,60 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
   `);
 
   return normalizeRows(rowsFromExecute<PersistedRuntimeEventRow>(result));
+}
+
+async function finalizeAbortingSessionsSql(input: { now: Date }) {
+  const result = await getDb().execute(sql`
+    WITH candidates AS (
+      SELECT id, run_lease_id AS "leaseId", run_lease_owner AS "leaseOwner"
+      FROM agent_sessions
+      WHERE status = 'aborting'
+        AND archived_at IS NULL
+        AND (run_lease_id IS NULL OR run_lease_expires_at IS NULL OR run_lease_expires_at < ${input.now})
+    ),
+    updated AS (
+      UPDATE agent_sessions AS session
+      SET status = 'aborted',
+          run_lease_id = NULL,
+          run_lease_owner = NULL,
+          run_lease_message_id = NULL,
+          run_lease_expires_at = NULL,
+          run_heartbeat_at = NULL,
+          abort_requested_at = NULL,
+          last_error = 'Run aborted.',
+          updated_at = now()
+      FROM candidates
+      WHERE session.id = candidates.id
+      RETURNING candidates.id, candidates."leaseId", candidates."leaseOwner"
+    ),
+    status_events AS (
+      INSERT INTO agent_session_events (session_id, message_id, type, payload)
+      SELECT id, NULL, 'session.status', '{"status":"aborted"}'::jsonb
+      FROM updated
+      RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
+    ),
+    audit_events AS (
+      INSERT INTO agent_session_events (session_id, message_id, type, payload)
+      SELECT
+        id,
+        NULL,
+        'session.aborted',
+        jsonb_build_object('reason', 'orphaned_aborting', 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
+      FROM updated
+      RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
+    )
+    SELECT * FROM status_events
+    UNION ALL
+    SELECT * FROM audit_events
+  `);
+
+  return normalizeRows(rowsFromExecute<PersistedRuntimeEventRow>(result));
+}
+
+function countTerminalSessions(events: PersistedRuntimeEvent[]) {
+  return new Set(
+    events.filter((event) => event.type === "session.status").map((event) => event.sessionId),
+  ).size;
 }
 
 function publishEvents(events: PersistedRuntimeEvent[]) {

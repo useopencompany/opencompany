@@ -52,7 +52,7 @@ export type ClaimRunLeaseInput = RunLeaseIdentity & {
 };
 
 export type FinishRunLeaseInput = RunLeaseIdentity & {
-  status: "completed" | "aborting" | "failed" | "awaiting_approval" | "awaiting_input";
+  status: "completed" | "aborting" | "aborted" | "failed" | "awaiting_approval" | "awaiting_input";
   lastError?: string | null;
 };
 

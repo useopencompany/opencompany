@@ -548,7 +548,7 @@ async function runMessageWithContext(
           input.sessionId,
           ctx.leaseId,
           ctx.leaseOwner,
-          "aborting",
+          "aborted",
           "Run aborted.",
         );
       }
@@ -603,7 +603,7 @@ async function runMessageWithContext(
           input.sessionId,
           ctx.leaseId,
           ctx.leaseOwner,
-          ctx.controller.signal.aborted ? "aborting" : "failed",
+          ctx.controller.signal.aborted ? "aborted" : "failed",
           message,
         )
       : false;
@@ -1659,7 +1659,7 @@ async function resumeApprovalWithContext(
           input.sessionId,
           ctx.leaseId,
           ctx.leaseOwner,
-          "aborting",
+          "aborted",
           "Run aborted.",
         );
       }
@@ -2093,7 +2093,7 @@ async function resumeQuestionResponseWithContext(
           input.sessionId,
           ctx.leaseId,
           ctx.leaseOwner,
-          "aborting",
+          "aborted",
           "Run aborted.",
         );
       }

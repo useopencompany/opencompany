@@ -654,7 +654,7 @@ export async function failRunLease(
   sessionId: string,
   leaseId: string,
   leaseOwner: string,
-  status: "aborting" | "failed",
+  status: "aborting" | "aborted" | "failed",
   message: string,
 ) {
   return finishDbRunLease({ sessionId, leaseId, leaseOwner, status, lastError: message });
