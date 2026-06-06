@@ -1,6 +1,6 @@
 import { getDb } from "@opencompany/db/client";
 import { agents } from "@opencompany/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import MainPanel from "@/components/MainPanel";
 import SlackSupportCard from "@/components/SlackSupportCard";
 import { currentWorkspace } from "@/lib/auth";
@@ -16,7 +16,8 @@ export default async function Home() {
       config: agents.config,
     })
     .from(agents)
-    .where(eq(agents.workspaceId, context.workspace.id))
+    // Workspace-wide agents only; private/personal agents (userId set) are excluded.
+    .where(and(eq(agents.workspaceId, context.workspace.id), isNull(agents.userId)))
     .orderBy(desc(agents.updatedAt));
 
   const agentOptions = rows.map((row) => ({

@@ -146,6 +146,12 @@ export const agents = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    // null = workspace-wide agent (existing behaviour, incl. the onboarding "leo").
+    // set = private agent owned by this user (e.g. the /personal experiment agent).
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    // Marks a user's primary personal agent. Unique per (workspace, user) — see
+    // agentsWorkspaceUserDefaultIdx below.
+    isDefault: boolean("is_default").notNull().default(false),
     path: text("path"),
     name: text("name").notNull().default("Untitled agent"),
     body: text("body").notNull().default(""),
@@ -174,6 +180,11 @@ export const agents = pgTable(
   (table) => ({
     workspaceIdx: index("agents_workspace_idx").on(table.workspaceId),
     workspacePathIdx: uniqueIndex("agents_workspace_path_idx").on(table.workspaceId, table.path),
+    // At most one default agent per user per workspace. Scoped by workspace (not
+    // user alone) because a user can belong to multiple workspaces.
+    workspaceUserDefaultIdx: uniqueIndex("agents_workspace_user_default_idx")
+      .on(table.workspaceId, table.userId)
+      .where(sql`${table.isDefault} = true`),
   }),
 );
 
@@ -1442,6 +1453,10 @@ export const agentsRelations = relations(agents, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [agents.workspaceId],
     references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [agents.userId],
+    references: [users.id],
   }),
   files: many(agentFiles),
   sessions: many(agentSessions),

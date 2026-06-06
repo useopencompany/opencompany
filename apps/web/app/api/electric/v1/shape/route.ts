@@ -30,7 +30,13 @@ type ShapeScope = {
 const SHAPE_SCOPES: Record<string, ShapeScope> = {
   agents: {
     table: "agents",
-    where: ({ workspaceId }) => ({ clause: `"workspace_id" = $1`, params: [workspaceId] }),
+    // Workspace-wide agents only. Private/personal agents (user_id set, e.g. the /personal
+    // experiment agent) are deliberately excluded from the synced collection so they never
+    // surface in workspace agent pickers/lists. /personal loads its agent via server fetch.
+    where: ({ workspaceId }) => ({
+      clause: `"workspace_id" = $1 AND "user_id" IS NULL`,
+      params: [workspaceId],
+    }),
   },
   agent_sessions: {
     table: "agent_sessions",
