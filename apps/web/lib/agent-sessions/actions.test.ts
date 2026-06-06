@@ -339,6 +339,8 @@ describe("createAgentSessionFromPrompt", () => {
       model_name: "openai/gpt-5.4-mini",
       is_initial_message: true,
       message_length: "Ship it".length,
+      attachment_count: 0,
+      attachment_bytes: 0,
     });
   });
 });
@@ -472,6 +474,8 @@ describe("submitAgentSessionMessage", () => {
       message_id: "msg_456",
       is_initial_message: false,
       message_length: "Follow up".length,
+      attachment_count: 0,
+      attachment_bytes: 0,
     });
   });
 

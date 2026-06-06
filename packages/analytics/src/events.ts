@@ -55,6 +55,8 @@ export type AnalyticsEventPropertiesByName = {
     model_name: string;
     is_initial_message: boolean;
     message_length: number;
+    attachment_count?: number;
+    attachment_bytes?: number;
   };
   session_first_token: {
     workspace_id: string;
@@ -199,6 +201,8 @@ export const analyticsEvents = {
       "model_name",
       "is_initial_message",
       "message_length",
+      "attachment_count",
+      "attachment_bytes",
     ],
   },
   session_first_token: {

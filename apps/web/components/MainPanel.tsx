@@ -7,9 +7,11 @@ import { ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
+import { PromptAttachmentChips } from "@/components/AttachmentChips";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import { useToast } from "@/components/ToastProvider";
+import { usePromptAttachments } from "@/components/usePromptAttachments";
 import {
   Select,
   SelectContent,
@@ -49,6 +51,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
   );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const { attachments, addFromPaste, remove, reorder, clear } = usePromptAttachments();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectedAgentId = selectedAgentIdOverride || agents.at(0)?.id || "";
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId) ?? agents.at(0);
@@ -58,7 +61,9 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
     (modelOverride?.agentId === selectedAgentId ? modelOverride.modelId : null) ??
     selectedAgent?.defaultModel ??
     "";
-  const canSubmit = Boolean(input.trim() && selectedAgentId && !isPending);
+  const canSubmit = Boolean(
+    (input.trim() || attachments.length > 0) && selectedAgentId && !isPending,
+  );
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -73,18 +78,24 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
   const submit = () => {
     const content = input.trim();
-    if (!content || isPending) return;
+    if (isPending) return;
+    if (!content && attachments.length === 0) return;
     if (!selectedAgentId) {
       setError("Create an agent first before starting a session.");
       return;
     }
 
     setError(null);
+    const outgoingAttachments = attachments.map(({ label, content: text }) => ({
+      label,
+      content: text,
+    }));
     startTransition(async () => {
       const result = await createAgentSessionFromPrompt(
         selectedAgentId,
         content,
         selectedModel || undefined,
+        outgoingAttachments,
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
@@ -94,6 +105,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         setError(result.error);
         return;
       }
+      clear();
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(`/session/${result.session.id}`);
     });
@@ -109,6 +121,15 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
       <Composer
         variant="expanded"
         error={error}
+        attachments={
+          attachments.length > 0 ? (
+            <PromptAttachmentChips
+              attachments={attachments}
+              onRemove={remove}
+              onReorder={reorder}
+            />
+          ) : undefined
+        }
         input={
           <textarea
             ref={textareaRef}
@@ -121,6 +142,11 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
               }
             }}
             onPaste={(event) => {
+              // A large paste becomes a .txt attachment chip instead of flooding the input.
+              if (addFromPaste(event.clipboardData)) {
+                event.preventDefault();
+                return;
+              }
               const items = event.clipboardData?.items;
               if (!items) return;
               const itemArray = Array.from(items);

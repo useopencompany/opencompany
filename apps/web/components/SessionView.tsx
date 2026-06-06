@@ -50,6 +50,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { findModel } from "@/components/agent-editor/tools";
+import { MessageAttachmentChips, PromptAttachmentChips } from "@/components/AttachmentChips";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
@@ -58,6 +59,7 @@ import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnima
 import { useToast } from "@/components/ToastProvider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
+import { usePromptAttachments } from "@/components/usePromptAttachments";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -293,6 +295,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const previousRelatedSessionCountRef = useRef(relatedSessionCount);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(relatedSessionCount === 0);
   const [input, setInput] = useState("");
+  const {
+    attachments,
+    addFromPaste,
+    remove: removeAttachment,
+    reorder: reorderAttachment,
+    clear,
+    restore,
+  } = usePromptAttachments();
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
@@ -598,7 +608,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
           ) : (
-            message.content
+            <>
+              {message.content}
+              {message.attachments && message.attachments.length > 0 ? (
+                <div className={message.content ? "mt-2" : undefined}>
+                  <MessageAttachmentChips attachments={message.attachments} />
+                </div>
+              ) : null}
+            </>
           )}
           {canCopy && message.status !== "running" && !awaitingInput ? (
             <div
@@ -960,9 +977,23 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
-    if (!content) return;
+    if (!content && attachments.length === 0) return;
     setFormError(null);
+    const outgoingAttachments = attachments.map(({ label, content: text }) => ({
+      label,
+      content: text,
+    }));
+    // Snapshot for restore-on-failure and for the optimistic chips (metadata only — the
+    // deterministic filename is server-assigned, so use a placeholder for the chip key).
+    const restoreAttachments = attachments;
     const optimisticId = newOptimisticMessageId();
+    const optimisticAttachments = attachments.map((attachment, index) => ({
+      id: attachment.id,
+      filename: `pasted/${optimisticId}-${index}.txt`,
+      label: attachment.label,
+      bytes: attachment.bytes,
+      lineCount: attachment.lineCount,
+    }));
     const submittedAtMs = Date.now();
     const optimisticMessage: OptimisticUserMessage = {
       optimisticId,
@@ -973,17 +1004,19 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       role: "user",
       content,
       status: "completed",
+      ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
       createdAt: new Date(submittedAtMs).toISOString(),
       completedAt: new Date(submittedAtMs).toISOString(),
     };
     setOptimisticUserMessages((current) => [...current, optimisticMessage]);
     setInput("");
+    clear();
     setPendingScrollMessageId(optimisticId);
     // Start the felt-TTFT clock at the click, before the server round-trip, so
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
-      const result = await submitAgentSessionMessage(session.id, content);
+      const result = await submitAgentSessionMessage(session.id, content, outgoingAttachments);
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
         setOptimisticUserMessages((current) =>
@@ -1000,6 +1033,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         current.filter((message) => message.optimisticId !== optimisticId),
       );
       setInput((current) => (current.trim() ? current : content));
+      restore(restoreAttachments);
       setFormError(result.error);
     });
   };
@@ -1216,6 +1250,15 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <Composer
                 variant="compact"
                 error={formError}
+                attachments={
+                  attachments.length > 0 ? (
+                    <PromptAttachmentChips
+                      attachments={attachments}
+                      onRemove={removeAttachment}
+                      onReorder={reorderAttachment}
+                    />
+                  ) : undefined
+                }
                 banner={
                   sessionIsInterrupted ? (
                     <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2">
@@ -1303,6 +1346,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       }
                     }}
                     onPaste={(event) => {
+                      // A large paste becomes a .txt attachment chip instead of flooding the input.
+                      if (addFromPaste(event.clipboardData)) {
+                        event.preventDefault();
+                        return;
+                      }
                       const items = event.clipboardData?.items;
                       if (!items) return;
                       const itemArray = Array.from(items);
@@ -1396,7 +1444,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       type="button"
                       disabled={
                         isPending ||
-                        (!parseSlashCommand(input, allSlashCommands) && (isBusy || !input.trim()))
+                        (!parseSlashCommand(input, allSlashCommands) &&
+                          (isBusy || (!input.trim() && attachments.length === 0)))
                       }
                       onClick={handleSend}
                       aria-label="Send message"

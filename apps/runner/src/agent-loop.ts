@@ -141,6 +141,25 @@ export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
+// Message-replay loads pull every column EXCEPT `attachments`: the (potentially large)
+// pasted content is never needed to rebuild model messages (the file reference already
+// lives in `modelMessage`). Attachments are materialized into the sandbox separately, so
+// excluding the column here keeps long histories off the per-turn read path.
+const messageReplayColumns = {
+  id: agentSessionMessages.id,
+  sessionId: agentSessionMessages.sessionId,
+  role: agentSessionMessages.role,
+  status: agentSessionMessages.status,
+  content: agentSessionMessages.content,
+  internal: agentSessionMessages.internal,
+  modelMessage: agentSessionMessages.modelMessage,
+  toolName: agentSessionMessages.toolName,
+  toolCallId: agentSessionMessages.toolCallId,
+  responseToMessageId: agentSessionMessages.responseToMessageId,
+  createdAt: agentSessionMessages.createdAt,
+  completedAt: agentSessionMessages.completedAt,
+} as const;
+
 export async function runMessage(input: {
   sessionId: string;
   messageId: string;
@@ -358,7 +377,7 @@ async function runMessageWithContext(
 
     const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
-        .select()
+        .select(messageReplayColumns)
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
@@ -1082,7 +1101,7 @@ async function runAfterSessionWithContext(
 
     const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
-        .select()
+        .select(messageReplayColumns)
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
@@ -1456,7 +1475,7 @@ async function resumeApprovalWithContext(
     const suspendedAssistantMessageId = approval.messageId ?? "";
     const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
-        .select()
+        .select(messageReplayColumns)
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
@@ -1735,7 +1754,7 @@ async function continueTurnAfterToolResult(input: {
   const continuationMessages = buildModelMessages(
     (
       await ctx.db
-        .select()
+        .select(messageReplayColumns)
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt))
@@ -1969,7 +1988,7 @@ async function resumeQuestionResponseWithContext(
     const suspendedAssistantMessageId = question.messageId ?? "";
     const storedMessages = await observeRunStep(ctx, "load_model_messages", () =>
       ctx.db
-        .select()
+        .select(messageReplayColumns)
         .from(agentSessionMessages)
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),

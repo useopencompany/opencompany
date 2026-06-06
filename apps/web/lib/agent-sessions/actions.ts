@@ -21,6 +21,14 @@ import {
 } from "@opencompany/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
+import {
+  buildMessageAttachments,
+  buildModelMessageContent,
+  normalizePromptAttachments,
+  type PromptAttachmentInput,
+  toAttachmentMeta,
+  validatePromptAttachments,
+} from "@/lib/agent-sessions/attachments";
 import { buildCreatedSessionDetail } from "@/lib/agent-sessions/data";
 import { appendSessionStreamEvent, closeSessionStream } from "@/lib/agent-sessions/durable-streams";
 import {
@@ -93,11 +101,17 @@ export async function createAgentSessionFromPrompt(
   agentId: string,
   content: string,
   modelId?: string,
+  attachments?: PromptAttachmentInput[],
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
-  if (!trimmed) {
+  const attachmentInputs = normalizePromptAttachments(attachments);
+  if (!trimmed && attachmentInputs.length === 0) {
     return { ok: false, error: "Message is required." } as const;
+  }
+  const attachmentCheck = validatePromptAttachments(attachmentInputs);
+  if (!attachmentCheck.ok) {
+    return { ok: false, error: attachmentCheck.error } as const;
   }
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
     return {
@@ -118,13 +132,18 @@ export async function createAgentSessionFromPrompt(
 
   const { session, statusEvent } = await insertAgentSession({
     agent,
-    title: titleFromPrompt(trimmed),
+    title: titleFromPrompt(trimmed || attachmentInputs[0]?.label || ""),
     userId: user.id,
     workspaceId: workspace.id,
     modelName,
   });
   const sessionId = session.id;
-  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed);
+  const { message, createdEvent } = await insertUserMessage(
+    sessionId,
+    trimmed,
+    trimmed,
+    attachmentInputs,
+  );
   const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
@@ -153,6 +172,11 @@ export async function createAgentSessionFromPrompt(
         model_name: modelName,
         is_initial_message: true,
         message_length: trimmed.length,
+        attachment_count: attachmentInputs.length,
+        attachment_bytes: attachmentInputs.reduce(
+          (total, attachment) => total + Buffer.byteLength(attachment.content, "utf8"),
+          0,
+        ),
       }),
     ]),
   );
@@ -166,11 +190,20 @@ export async function createAgentSessionFromPrompt(
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-export async function submitAgentSessionMessage(sessionId: string, content: string) {
+export async function submitAgentSessionMessage(
+  sessionId: string,
+  content: string,
+  attachments?: PromptAttachmentInput[],
+) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
-  if (!trimmed) {
+  const attachmentInputs = normalizePromptAttachments(attachments);
+  if (!trimmed && attachmentInputs.length === 0) {
     return { ok: false, error: "Message is required." } as const;
+  }
+  const attachmentCheck = validatePromptAttachments(attachmentInputs);
+  if (!attachmentCheck.ok) {
+    return { ok: false, error: attachmentCheck.error } as const;
   }
 
   const db = getDb();
@@ -226,7 +259,7 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
       ),
     );
 
-  const { message } = await insertUserMessage(sessionId, trimmed);
+  const { message } = await insertUserMessage(sessionId, trimmed, trimmed, attachmentInputs);
   const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
@@ -246,6 +279,11 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
         model_name: session.modelName,
         is_initial_message: false,
         message_length: trimmed.length,
+        attachment_count: attachmentInputs.length,
+        attachment_bytes: attachmentInputs.reduce(
+          (total, attachment) => total + Buffer.byteLength(attachment.content, "utf8"),
+          0,
+        ),
       }),
     ]),
   );
@@ -853,10 +891,26 @@ async function insertAgentSession(input: {
   return { session, statusEvent };
 }
 
-async function insertUserMessage(sessionId: string, content: string, modelContent = content) {
+async function insertUserMessage(
+  sessionId: string,
+  content: string,
+  modelContent = content,
+  attachmentInputs: PromptAttachmentInput[] = [],
+) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
-  const payload = { messageId, role: "user", content, status: "completed" };
+  const attachments = buildMessageAttachments(messageId, attachmentInputs);
+  const attachmentMeta = toAttachmentMeta(attachments);
+  // The model never receives the pasted blob inline — only a reference to the file the
+  // runner writes into the workspace. The full text lives in the `attachments` column.
+  const modelMessage = { role: "user", content: buildModelMessageContent(modelContent, attachments) };
+  const payload = {
+    messageId,
+    role: "user",
+    content,
+    status: "completed",
+    ...(attachmentMeta.length > 0 ? { attachments: attachmentMeta } : {}),
+  };
 
   const [messageRows, eventRows] = await db.batch([
     db
@@ -867,7 +921,8 @@ async function insertUserMessage(sessionId: string, content: string, modelConten
         role: "user",
         status: "completed",
         content,
-        modelMessage: { role: "user", content: modelContent },
+        modelMessage,
+        attachments: attachments.length > 0 ? attachments : null,
         completedAt: new Date(),
       })
       .returning(),

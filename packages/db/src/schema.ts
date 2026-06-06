@@ -524,6 +524,24 @@ export const agentSessionBundleMounts = pgTable(
   }),
 );
 
+// A large paste captured in the composer as a ".txt attachment" instead of being
+// inlined into the message. `content` is the full pasted text (written to
+// `work/<filename>` in the sandbox by the runner); the model message references the
+// file path rather than the blob. `filename` is deterministic (`pasted/<messageId>-<i>.txt`)
+// so it can be re-materialized idempotently across sandbox recycles.
+export type MessagePastedAttachment = {
+  id: string;
+  filename: string;
+  label: string;
+  bytes: number;
+  lineCount: number;
+  content: string;
+};
+
+// Client/stream-facing attachment shape: everything except the (potentially large)
+// content. Chips render from this; the full text is only ever loaded by the runner.
+export type MessagePastedAttachmentMeta = Omit<MessagePastedAttachment, "content">;
+
 export const agentSessionMessages = pgTable(
   "agent_session_messages",
   {
@@ -536,6 +554,7 @@ export const agentSessionMessages = pgTable(
     content: text("content").notNull().default(""),
     internal: boolean("internal").notNull().default(false),
     modelMessage: jsonb("model_message").$type<Record<string, unknown>>(),
+    attachments: jsonb("attachments").$type<MessagePastedAttachment[]>(),
     toolName: text("tool_name"),
     toolCallId: text("tool_call_id"),
     responseToMessageId: text("response_to_message_id"),

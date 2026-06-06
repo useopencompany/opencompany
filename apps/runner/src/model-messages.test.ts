@@ -65,6 +65,24 @@ describe("buildModelMessages", () => {
     expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
   });
 
+  it("replays a user message whose content carries a pasted-attachment reference block", () => {
+    // The web layer bakes the attachment file reference into modelMessage.content as plain
+    // text (never as an extra key), so the strict replay schema must still accept it.
+    const content =
+      "please review\n\n[The user attached pasted text as files in the working directory. Read them as needed:\n- work/pasted/msg_1-0.txt (12 lines, 345 bytes)]";
+    const messages = buildModelMessages([
+      {
+        id: "msg_1",
+        role: "user",
+        content: "please review",
+        modelMessage: { role: "user", content },
+      },
+    ]);
+
+    expect(messages).toEqual([{ role: "user", content }]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
   it("splits assistant text after tool calls so tool results replay immediately after tool use", () => {
     const assistant = buildAssistantModelMessage({
       content: "Done.",

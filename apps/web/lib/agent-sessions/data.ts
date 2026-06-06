@@ -1,4 +1,5 @@
 import { getDb } from "@opencompany/db/client";
+import { toAttachmentMeta } from "@/lib/agent-sessions/attachments";
 import {
   agentSessionEvents,
   agentSessionMessages,
@@ -351,14 +352,18 @@ export async function loadAgentSessionDetailForWorkspace(
   }));
   const messagesWithUsage = messages.map((message) => {
     const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
+    // Strip the (potentially large) pasted content — the browser only needs chip metadata.
+    const attachments = toAttachmentMeta(message.attachments);
     const sessionMessage = {
       ...message,
+      attachments,
       outputReasoningTokens,
       createdAt: message.createdAt.toISOString(),
       completedAt: message.completedAt?.toISOString() ?? null,
     };
     return {
       ...message,
+      attachments,
       outputReasoningTokens,
       thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
     };
@@ -463,6 +468,7 @@ export function buildCreatedSessionDetail(input: {
       status: message.status,
       internal: message.internal,
       modelMessage: message.modelMessage ?? null,
+      attachments: toAttachmentMeta(message.attachments),
       toolName: message.toolName,
       toolCallId: message.toolCallId,
       responseToMessageId: message.responseToMessageId,

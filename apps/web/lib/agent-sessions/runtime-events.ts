@@ -3,6 +3,7 @@ import {
   effectiveToolCall,
   toolDisplayTitle,
 } from "@opencompany/agent-runtime";
+import type { MessagePastedAttachmentMeta } from "@opencompany/db/schema";
 
 export type SessionMessage = {
   id: string;
@@ -11,6 +12,9 @@ export type SessionMessage = {
   status: string;
   internal?: boolean;
   modelMessage?: Record<string, unknown> | null;
+  // Pasted-text attachments shown as chips. Metadata only — the full content lives
+  // server-side (DB column + the file the runner writes into the workspace).
+  attachments?: MessagePastedAttachmentMeta[];
   toolName?: string | null;
   toolCallId?: string | null;
   responseToMessageId?: string | null;
@@ -315,6 +319,7 @@ export function applyRuntimeEventToState(
     if (messageId && role && !next.messages.some((message) => message.id === messageId)) {
       const status =
         optionalString(event.payload.status) ?? (role === "user" ? "completed" : "running");
+      const attachments = readAttachmentsMeta(event.payload.attachments);
       next = {
         ...next,
         messages: [
@@ -325,6 +330,7 @@ export function applyRuntimeEventToState(
             content: optionalString(event.payload.content) ?? "",
             status,
             internal,
+            ...(attachments ? { attachments } : {}),
             createdAt: event.createdAt ?? new Date().toISOString(),
           },
         ],
@@ -406,6 +412,27 @@ function stopRunningAssistantMessages(messages: SessionMessage[], events: Runtim
 
 function readBoolean(value: unknown) {
   return value === true;
+}
+
+function readAttachmentsMeta(value: unknown): MessagePastedAttachmentMeta[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const meta = value.flatMap((entry) => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const record = entry as Record<string, unknown>;
+    const id = readString(record.id);
+    const filename = readString(record.filename);
+    if (!id || !filename) return [];
+    return [
+      {
+        id,
+        filename,
+        label: optionalString(record.label) ?? filename,
+        bytes: readNumber(record.bytes) ?? 0,
+        lineCount: readNumber(record.lineCount) ?? 0,
+      },
+    ];
+  });
+  return meta.length > 0 ? meta : undefined;
 }
 
 export function emptyUsageSummary(): SessionUsageSummary {

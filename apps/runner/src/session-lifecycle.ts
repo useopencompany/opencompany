@@ -22,6 +22,7 @@ import { and, asc, desc, eq, gt, isNull, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { abortActiveRun } from "./active-runs";
 import { materializeAgentBundleForSession } from "./agent-bundle";
+import { materializePastedAttachmentsForSession } from "./attachments";
 import { materializeBrainForSession } from "./brain";
 import { getDb } from "./db";
 import { closeSessionStream } from "./durable-streams";
@@ -83,6 +84,11 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       workspaceId: row.workspace.id,
       workdir: row.session.workdir,
       references: agentConfig.brain,
+    });
+    await materializePastedAttachmentsForSession({
+      sandbox,
+      sessionId: row.session.id,
+      workdir: row.session.workdir,
     });
     await materializeAgentBundleForSession({
       sandbox,

@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { MessagePastedAttachmentMeta } from "@opencompany/db/schema";
 import {
   type RuntimeEvent,
   type SessionCostSummary,
@@ -377,8 +378,24 @@ function parseSessionMessage(value: unknown): SessionMessage {
   if ("thinkingDurationSeconds" in record) {
     message.thinkingDurationSeconds = readOptionalNumberField(record, "thinkingDurationSeconds");
   }
+  if ("attachments" in record && record.attachments != null) {
+    message.attachments = parseAttachmentsMeta(record.attachments);
+  }
 
   return message;
+}
+
+function parseAttachmentsMeta(value: unknown): MessagePastedAttachmentMeta[] {
+  return assertArray(value, "attachments").map((entry) => {
+    const record = assertRecord(entry, "attachment");
+    return {
+      id: readStringField(record, "id"),
+      filename: readStringField(record, "filename"),
+      label: readStringField(record, "label"),
+      bytes: readNumberField(record, "bytes"),
+      lineCount: readNumberField(record, "lineCount"),
+    };
+  });
 }
 
 function parseRuntimeEventPayload(value: unknown): RuntimeEvent {

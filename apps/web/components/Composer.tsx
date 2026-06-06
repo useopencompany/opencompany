@@ -28,6 +28,8 @@ type ComposerProps = {
   variant?: ComposerVariant;
   /** The text-entry surface (a textarea). Owned by the caller, including all handlers. */
   input: ReactNode;
+  /** Attachment chips, shown above the input region (e.g. large pastes captured as files). */
+  attachments?: ReactNode;
   /** Pinned to the right of the input region — the send / stop button. */
   action?: ReactNode;
   /** Toolbar tray — left cluster (attach, agent/model selectors). */
@@ -52,6 +54,7 @@ type ComposerProps = {
 export function Composer({
   variant = "compact",
   input,
+  attachments,
   action,
   leftControls,
   rightControls,
@@ -73,6 +76,9 @@ export function Composer({
         )}
       >
         {overlay}
+        {attachments ? (
+          <div className={cn(styles.inputRegion, "pb-0 pt-2.5")}>{attachments}</div>
+        ) : null}
         <div className={cn("relative flex items-end gap-2", styles.inputRegion)}>
           <div className="min-w-0 flex-1">{input}</div>
           {/* min-h matches the single-line textarea so items-center vertically centers the

@@ -10,6 +10,10 @@ export function newRunLeaseId() {
   return `run_${randomSuffix()}`;
 }
 
+export function newPastedAttachmentId() {
+  return `att_${randomSuffix()}`;
+}
+
 function randomSuffix() {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 20);
 }
