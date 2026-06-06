@@ -1,0 +1,1 @@
+ALTER TABLE "workspace_skill_snapshots" ADD COLUMN "command" text;

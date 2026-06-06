@@ -59,12 +59,16 @@ export type SkillCandidate = {
   path: string;
   name: string;
   description: string;
+  // Optional slash-command slug declared in SKILL.md frontmatter (`command:`). When present,
+  // the composer surfaces a `/<command>` slash command for this skill on agents that enable it.
+  command?: string;
 };
 
 export type ResolvedSkill = {
   skillId: string;
   name: string;
   description: string;
+  command?: string;
   source: AgentSkillSource;
   resolvedCommit: string;
   integrity: string;
@@ -332,9 +336,26 @@ export function ensureSkillMountId(slug: string, integrity: string, reserved: Se
   return base;
 }
 
+// Normalize a declared `command:` into a slash-token slug ([a-z0-9_]). A leading slash is
+// tolerated (`/graphify` → `graphify`), internal spaces/hyphens become underscores
+// (`deep-research` → `deep_research`), and anything that strips to empty yields null so callers
+// can omit the field. Kept in sync with `toSlashSlug` (web) and the slash matcher (`/^\/(\w+)/`).
+export function normalizeSkillCommand(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const slug = raw
+    .trim()
+    .replace(/^\/+/, "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || null;
+}
+
 export function parseSkillFrontmatter(
   content: string,
-): { name: string; description: string } | null {
+): { name: string; description: string; command?: string } | null {
   const normalized = content.replace(/\r\n/g, "\n");
   if (!normalized.startsWith("---\n")) return null;
   const end = normalized.indexOf("\n---", 4);
@@ -350,7 +371,8 @@ export function parseSkillFrontmatter(
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const description = typeof record.description === "string" ? record.description.trim() : "";
   if (!name || !description) return null;
-  return { name, description };
+  const command = normalizeSkillCommand(record.command);
+  return { name, description, ...(command ? { command } : {}) };
 }
 
 // Directories (relative to repo root) that contain a SKILL.md. "" = repository root.
@@ -499,7 +521,7 @@ export async function resolveSkill(input: {
       const frontmatter = parseSkillFrontmatter(md);
       if (!frontmatter) continue;
       if (parsed.nameFilter && slugifySkillName(frontmatter.name) !== parsed.nameFilter) continue;
-      candidates.push({ path: dir, name: frontmatter.name, description: frontmatter.description });
+      candidates.push({ path: dir, ...frontmatter });
     }
     if (candidates.length === 0) {
       throw new SkillResolverError("No valid SKILL.md (with name and description) was found.");
@@ -576,6 +598,7 @@ async function finalizeSkill(input: {
       skillId,
       name: candidate.name,
       description: candidate.description,
+      ...(candidate.command ? { command: candidate.command } : {}),
       source: {
         type: parsed.sourceType,
         url: parsed.url,
