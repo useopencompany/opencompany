@@ -12,6 +12,7 @@ import PersonalSidebar, { type PersonalPanel } from "@/components/PersonalSideba
 import { PersonalBehaviorEditor } from "@/components/personal/PersonalBehaviorEditor";
 import { PersonalCapabilityPanel } from "@/components/personal/PersonalCapabilityPanel";
 import { PersonalContextFileEditor } from "@/components/personal/PersonalContextFileEditor";
+import { PersonalInbox } from "@/components/personal/PersonalInbox";
 import SessionView from "@/components/SessionView";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
@@ -55,12 +56,16 @@ export type PersonalSurfaceProps = {
 
 // Composer locked to the single personal agent (no agent picker). On submit it creates a
 // session and hands the id up so the surface can swap to the live chat without navigating.
+// With a `header` (the inbox attention cards) it switches to a stacked layout — cards scroll
+// above, the composer pins to the bottom; without one it stays the centered hero composer.
 function PersonalComposer({
   agent,
   onSessionCreated,
+  header,
 }: {
   agent: PersonalAgent;
   onSessionCreated: (sessionId: string) => void;
+  header?: React.ReactNode;
 }) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
@@ -103,16 +108,14 @@ function PersonalComposer({
     });
   };
 
-  return (
-    <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
-      <div className="w-full max-w-[680px]">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            submit();
-          }}
-        >
-          <Composer
+  const form = (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <Composer
             variant="expanded"
             error={error}
             input={
@@ -171,9 +174,26 @@ function PersonalComposer({
                 )}
               </button>
             }
-          />
-        </form>
-      </div>
+      />
+    </form>
+  );
+
+  // Inbox: attention cards sit directly above the composer, the whole group centered.
+  if (header) {
+    return (
+      <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
+        <div className="flex w-full max-w-[600px] flex-col gap-10">
+          {header}
+          {form}
+        </div>
+      </main>
+    );
+  }
+
+  // Bare hero composer (e.g. the deleted-file fallback): centered, no cards.
+  return (
+    <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
+      <div className="w-full max-w-[680px]">{form}</div>
     </main>
   );
 }
@@ -304,6 +324,13 @@ export default function PersonalSurface({
       <PersonalComposer
         agent={agent}
         onSessionCreated={(id) => setView({ kind: "session", sessionId: id })}
+        header={
+          <PersonalInbox
+            userName={userName}
+            sessionIds={initialSessions.map((session) => session.id)}
+            onOpenSession={(id) => setView({ kind: "session", sessionId: id })}
+          />
+        }
       />
     );
   };
