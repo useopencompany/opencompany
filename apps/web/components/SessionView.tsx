@@ -484,6 +484,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       void queryClient.invalidateQueries({ queryKey: detailKey });
     }
   }, [runtime.currentStatus, detailKey, queryClient]);
+  // Reflect the open session's title in the browser tab so it's easy to tell tabs
+  // apart. Restored to the default on unmount / navigation away.
+  useEffect(() => {
+    const previousTitle = document.title;
+    const name = session.title.trim();
+    document.title = name ? `${name} · opencompany` : "opencompany";
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [session.title]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
