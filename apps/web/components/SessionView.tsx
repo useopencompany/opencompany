@@ -96,12 +96,18 @@ import {
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import {
   getSlashContext,
   matchSlashCommands,
   parseSlashCommand,
+  SLASH_COMMANDS,
   type SlashCommand,
 } from "@/lib/slash-commands/registry";
+import {
+  buildSkillSlashCommands,
+  type SkillCommandSource,
+} from "@/lib/slash-commands/skill-commands";
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
@@ -786,13 +792,44 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     [],
   );
 
+  // Skills attached to this session's agent contribute `/<command>` entries alongside the
+  // built-ins — using each skill's declared `command:` when present, else a slug of its name.
+  // The attached set comes from the synced agent config; the command + metadata come from the
+  // workspace skill catalog.
+  const { agents } = useCollections();
+  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const { data: skillCatalog } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+    staleTime: 60_000,
+  });
+  const allSlashCommands = useMemo(() => {
+    const attached = agentRows?.find((agent) => agent.id === session.agentId);
+    const attachedIds = new Set(
+      (attached ? (agentRowToListItem(attached).config.skills ?? []) : []).map((skill) => skill.id),
+    );
+    const sources: SkillCommandSource[] = (skillCatalog ?? [])
+      .filter((skill) => attachedIds.has(skill.id))
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        ...(skill.command ? { command: skill.command } : {}),
+      }));
+    if (sources.length === 0) return SLASH_COMMANDS;
+    return [
+      ...SLASH_COMMANDS,
+      ...buildSkillSlashCommands(sources, new Set(SLASH_COMMANDS.map((c) => c.id))),
+    ];
+  }, [agentRows, session.agentId, skillCatalog]);
+
   // Command mode is active while the caret sits on a `/token` (at the start of the
   // input or after whitespace). The token after the slash is the live filter query.
   const slashContext = useMemo(() => getSlashContext(input, caret), [input, caret]);
   const slashQuery = slashContext?.query ?? null;
   const slashCommands = useMemo(
-    () => (slashQuery !== null ? matchSlashCommands(slashQuery) : []),
-    [slashQuery],
+    () => (slashQuery !== null ? matchSlashCommands(slashQuery, allSlashCommands) : []),
+    [slashQuery, allSlashCommands],
   );
   const slashMenuOpen = slashQuery !== null && !slashDismissed && slashCommands.length > 0;
   const slashActiveId = slashCommands[slashActiveIndex]?.id ?? null;
@@ -815,7 +852,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     slashCommandInFlightRef.current.add(commandKey);
     startTransition(async () => {
       try {
-        await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+        await command.run({
+          session,
+          workspaceId,
+          router,
+          queryClient,
+          setInput,
+          insertMention,
+          showToast,
+          args,
+        });
       } finally {
         slashCommandInFlightRef.current.delete(commandKey);
       }
@@ -842,6 +888,52 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  // Drop a literal token (e.g. `@skill/<id> `) into the composer and leave the caret after it.
+  // Used by skill-derived commands so invoking `/<command>` swaps in the skill's mention for the
+  // user to keep typing around. Targets the active slash token when the menu is open; otherwise
+  // (the run-on-send path, where the `/command ` token may carry a trailing space) it replaces
+  // the leading `/command` token, preserving any args the user typed after it.
+  const insertMention = (token: string) => {
+    let start: number;
+    let end: number;
+    if (slashContext) {
+      start = slashContext.start;
+      end = slashContext.end;
+    } else {
+      const leading = input.match(/^\s*\/\w+\s?/);
+      if (leading) {
+        start = 0;
+        end = leading[0].length;
+      } else {
+        start = caret;
+        end = caret;
+      }
+    }
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const next = `${before}${token}${after}`;
+    const nextCaret = before.length + token.length;
+    setInput(next);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
+    });
+  };
+
+  // Choosing a command from the menu: an `applyOnSelect` command (skill commands) runs straight
+  // away so the slash token becomes its mention in one step; everything else inserts its trigger
+  // and waits for the user to send (so `/clear <prompt>` etc. can take args).
+  const selectSlashCommand = (command: SlashCommand) => {
+    if (command.applyOnSelect) {
+      runSlashCommand(command);
+    } else {
+      insertSlashCommand(command);
+    }
+  };
+
   // Land the cursor in the composer when arriving at a fresh, empty session (e.g.
   // right after `/clear` navigates here), so the user can start typing immediately.
   const didAutofocusRef = useRef(false);
@@ -856,7 +948,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // may run even while busy (they navigate away).
   const handleSend = () => {
     if (isPending) return;
-    const parsed = parseSlashCommand(input);
+    const parsed = parseSlashCommand(input, allSlashCommands);
     if (parsed) {
       runSlashCommand(parsed.command, parsed.args);
       return;
@@ -1149,7 +1241,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       id={slashMenuId}
                       commands={slashCommands}
                       activeId={slashActiveId}
-                      onSelect={(command) => insertSlashCommand(command)}
+                      onSelect={(command) => selectSlashCommand(command)}
                       onHover={(id) => {
                         const idx = slashCommands.findIndex((command) => command.id === id);
                         if (idx >= 0) setSlashActiveIndex(idx);
@@ -1182,15 +1274,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                           );
                           return;
                         }
-                        // Enter and Tab both insert the highlighted command into the input
-                        // (they do not run it) — the user runs it by then pressing Enter to send.
+                        // Enter and Tab pick the highlighted command: built-ins insert their
+                        // trigger (the user then sends to run it), while skill commands
+                        // (`applyOnSelect`) apply immediately, swapping in the skill mention.
                         if (event.key === "Enter" || event.key === "Tab") {
                           if (event.key === "Enter" && event.shiftKey) {
                             // shift+Enter falls through to a normal newline.
                           } else {
                             event.preventDefault();
                             const command = slashCommands[slashActiveIndex];
-                            if (command) insertSlashCommand(command);
+                            if (command) selectSlashCommand(command);
                             return;
                           }
                         }
@@ -1302,7 +1395,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     <button
                       type="button"
                       disabled={
-                        isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))
+                        isPending ||
+                        (!parseSlashCommand(input, allSlashCommands) && (isBusy || !input.trim()))
                       }
                       onClick={handleSend}
                       aria-label="Send message"

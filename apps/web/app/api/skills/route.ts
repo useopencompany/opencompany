@@ -12,6 +12,7 @@ export async function GET() {
   return NextResponse.json({
     skills: snapshots.map((snapshot) => ({
       ...toExternalSkillReference(snapshot),
+      command: snapshot.command,
       fileCount: snapshot.fileCount,
       totalBytes: snapshot.totalBytes,
       resolvedCommit: snapshot.resolvedCommit,

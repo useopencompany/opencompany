@@ -1,5 +1,11 @@
+import { Sparkles } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { matchSlashCommands, parseSlashCommand } from "@/lib/slash-commands/registry";
+import {
+  matchSlashCommands,
+  parseSlashCommand,
+  SLASH_COMMANDS,
+  type SlashCommand,
+} from "@/lib/slash-commands/registry";
 
 // These dependencies are stubbed only to satisfy imports used by registry command definitions.
 vi.mock("@/lib/agent-sessions/actions", () => ({
@@ -78,5 +84,33 @@ describe("matchSlashCommands", () => {
     for (const query of ["btw", "side", "background", "by the way"]) {
       expect(matchSlashCommands(query).some((command) => command.id === "btw")).toBe(true);
     }
+  });
+});
+
+describe("with a runtime command list", () => {
+  const skillCommand: SlashCommand = {
+    id: "graphify",
+    trigger: "/graphify",
+    title: "Graphify",
+    description: "Turn input into a knowledge graph",
+    icon: Sparkles,
+    keywords: ["skill", "Graphify"],
+    run: () => {},
+  };
+  const combined = [...SLASH_COMMANDS, skillCommand];
+
+  it("parses a skill command from the combined list with its args", () => {
+    const parsed = parseSlashCommand("/graphify these notes", combined);
+    expect(parsed?.command.id).toBe("graphify");
+    expect(parsed?.args).toBe("these notes");
+  });
+
+  it("does not match a skill command absent from the default list", () => {
+    expect(parseSlashCommand("/graphify these notes")).toBeNull();
+  });
+
+  it("ranks built-ins before skill commands and surfaces the skill on a prefix match", () => {
+    expect(matchSlashCommands("", combined).map((c) => c.id)).toEqual(["clear", "btw", "graphify"]);
+    expect(matchSlashCommands("graph", combined).map((c) => c.id)).toEqual(["graphify"]);
   });
 });
