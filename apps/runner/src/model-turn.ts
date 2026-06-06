@@ -20,14 +20,16 @@ import { buildAssistantModelMessage, toPersistedModelMessage } from "./model-mes
 import { collectAssistantStream } from "./model-stream-runner";
 import { observeRunStep, type RunContext } from "./run-context";
 import type { RunControlCheck } from "./run-control";
-import { ToolStepLimitExceededError } from "./runner-errors";
 import type { LoadedSession } from "./session-lifecycle";
 import { normalizeReasoningSummary } from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
-export const MAX_MODEL_STEPS = 16;
+// Default per-turn step ceiling when the env override (RUNNER_MAX_MODEL_STEPS) is absent — e.g.
+// tests that build a context without going through loadEnv(). Production reads ctx.env.maxModelSteps.
+export const MAX_MODEL_STEPS = 32;
 const INCOMPLETE_TURN_REASON = "announced_unexecuted_next_action" as const;
+const TOOL_STEP_LIMIT_REASON = "tool_step_limit_reached" as const;
 const INCOMPLETE_TURN_REASON_DETAIL =
   "Model stopped after announcing a next action it never took (trailing text ends mid-task).";
 
@@ -146,7 +148,10 @@ export async function streamAssistantResponse(input: {
           system: input.system,
           messages: input.messages,
           tools: selectedTools,
-          stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
+          stopWhen: [
+            ai.stepCountIs(input.ctx.env.maxModelSteps),
+            ...(input.extraStopConditions ?? []),
+          ],
           abortSignal: input.ctx.controller.signal,
           includeRawChunks: input.runtime.model.reasoningExposure === "raw",
           ...(input.runtime.model.providerOptions
@@ -272,11 +277,28 @@ export function assertTurnComplete(
   if (!streamResult.assistantContent && !streamResult.lastStepEndedWithToolCalls) {
     throw new Error("Model stream completed without text or tool calls.");
   }
-
-  if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
-    throw new ToolStepLimitExceededError();
-  }
 }
+
+// The model loop stopped because it hit the per-turn step ceiling while still requesting tools —
+// it ran out of room before delivering a final answer. This used to throw and discard the entire
+// partial turn (non-retryable), so a long coding run that needed one more step surfaced as a
+// generic error with no work saved. We now treat it like `detectIncompleteTurn`: the caller
+// persists the partial assistant turn, marks it continuable, and completes cleanly so the user can
+// send one more message to resume (over a now-larger, env-tunable budget). Returns true only when
+// the final step ended on tool calls at/above the ceiling.
+export function detectToolStepLimitReached(
+  streamResult: Pick<
+    Awaited<ReturnType<typeof collectAssistantStream>>,
+    "lastStepEndedWithToolCalls" | "stepCount"
+  >,
+  maxModelSteps: number,
+): boolean {
+  return streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= maxModelSteps;
+}
+
+export const TOOL_STEP_LIMIT_INCOMPLETE_REASON = TOOL_STEP_LIMIT_REASON;
+export const TOOL_STEP_LIMIT_CONTINUE_NOTE =
+  "_Reached the step limit for this turn before finishing. Send another message to continue._";
 
 // A healthy completed turn ends with `finishReason === "stop"` after the model
 // has actually delivered its answer. A turn that *abandons* the task also ends

@@ -56,8 +56,11 @@ import {
 import {
   assertTurnComplete,
   detectIncompleteTurn,
+  detectToolStepLimitReached,
   persistAssistantCompletion,
   streamAssistantResponse,
+  TOOL_STEP_LIMIT_CONTINUE_NOTE,
+  TOOL_STEP_LIMIT_INCOMPLETE_REASON,
 } from "./model-turn";
 import {
   braintrustError,
@@ -805,6 +808,7 @@ async function executeStreamingTurn(input: {
   await input.checkAbort({ force: true });
 
   let incompleteTurn: ReturnType<typeof detectIncompleteTurn> = null;
+  let toolStepLimitReached = false;
   if (input.emptyOutputFallback !== undefined) {
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = input.emptyOutputFallback;
@@ -812,8 +816,19 @@ async function executeStreamingTurn(input: {
     }
   } else {
     assertTurnComplete(streamResult);
+    toolStepLimitReached = detectToolStepLimitReached(streamResult, ctx.env.maxModelSteps);
     // Only flag user-facing turns; internal after-session runs are exempt.
     if (!input.internal) incompleteTurn = detectIncompleteTurn(streamResult);
+  }
+
+  if (toolStepLimitReached) {
+    // The model ran out of steps mid-task. Persist what it produced and append a short,
+    // user-facing continue note instead of discarding the turn — the run completes cleanly so the
+    // user can send one more message to resume rather than getting a generic failure.
+    assistantContent = assistantContent
+      ? `${assistantContent}\n\n${TOOL_STEP_LIMIT_CONTINUE_NOTE}`
+      : TOOL_STEP_LIMIT_CONTINUE_NOTE;
+    appendAssistantTextPart(assistantReplayParts, TOOL_STEP_LIMIT_CONTINUE_NOTE);
   }
 
   await persistAssistantCompletion({
@@ -828,11 +843,16 @@ async function executeStreamingTurn(input: {
     internal: input.internal,
   });
 
-  if (incompleteTurn) {
-    // Surface the abandoned turn distinctly so unattended/scheduled runs don't
-    // look cleanly green. We still complete the turn (failing would lose the
-    // partial work and re-run side effects) — the distinct event + warning log
-    // are the signal for observability and in-session review.
+  // Surface a non-final turn distinctly so unattended/scheduled runs don't look cleanly green.
+  // Two cases, mutually exclusive (one ends on tool calls, the other on plain text):
+  //   - the model hit the step ceiling while still requesting tools (continuable), or
+  //   - it abandoned the task after announcing a next action it never took.
+  // Either way we still complete the turn — failing would lose the partial work and re-run side
+  // effects — and let the distinct event + warning log carry the signal.
+  const incompleteReason = toolStepLimitReached
+    ? TOOL_STEP_LIMIT_INCOMPLETE_REASON
+    : (incompleteTurn?.reason ?? null);
+  if (incompleteReason) {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: ctx.sessionId,
@@ -840,7 +860,7 @@ async function executeStreamingTurn(input: {
         leaseId: ctx.leaseId,
         leaseOwner: ctx.leaseOwner,
         type: "session.incomplete",
-        payload: { messageId: assistantMessageId, reason: incompleteTurn.reason },
+        payload: { messageId: assistantMessageId, reason: incompleteReason },
       }),
     );
     logger.warn("Runner turn stopped mid-task", {
@@ -852,8 +872,10 @@ async function executeStreamingTurn(input: {
       assistant_message_id: assistantMessageId,
       model_provider: input.runtime.model.provider,
       model_name: input.runtime.model.name,
-      reason: incompleteTurn.reason,
-      reason_detail: incompleteTurn.reasonDetail,
+      reason: incompleteReason,
+      reason_detail:
+        incompleteTurn?.reasonDetail ??
+        `Model reached the ${ctx.env.maxModelSteps}-step ceiling while still requesting tools.`,
     });
   }
 

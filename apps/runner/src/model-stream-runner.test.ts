@@ -4,14 +4,19 @@ import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { buildAssistantModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
-import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
+import {
+  assertTurnComplete,
+  detectIncompleteTurn,
+  detectToolStepLimitReached,
+  MAX_MODEL_STEPS,
+} from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
   type RunControlStore,
   type RunLeaseState,
 } from "./run-control";
-import { RunSuspendedError, ToolStepLimitExceededError } from "./runner-errors";
+import { RunSuspendedError } from "./runner-errors";
 import { throwIfStreamErrorPart } from "./stream-helpers";
 import { createToolStartCoordinator } from "./tool-start-coordinator";
 
@@ -763,7 +768,9 @@ describe("stream error handling", () => {
     ).toBe(true);
   });
 
-  it("rejects turn completion when the model is still requesting tools at the step cap", () => {
+  it("does not reject a turn that hit the step cap while still requesting tools", () => {
+    // The step cap is handled gracefully now (partial work persisted + continuable note);
+    // assertTurnComplete only guards the genuinely-empty case.
     expect(() =>
       assertTurnComplete({
         assistantContent: "Partial progress.",
@@ -778,7 +785,36 @@ describe("stream error handling", () => {
         lastStepEndedWithToolCalls: true,
         stepCount: MAX_MODEL_STEPS,
       }),
-    ).toThrow(ToolStepLimitExceededError);
+    ).not.toThrow();
+  });
+
+  it("detects the tool-step-limit case only when the final step ended on tool calls at the cap", () => {
+    expect(
+      detectToolStepLimitReached(
+        { lastStepEndedWithToolCalls: true, stepCount: MAX_MODEL_STEPS },
+        MAX_MODEL_STEPS,
+      ),
+    ).toBe(true);
+    expect(
+      detectToolStepLimitReached(
+        { lastStepEndedWithToolCalls: true, stepCount: MAX_MODEL_STEPS + 3 },
+        MAX_MODEL_STEPS,
+      ),
+    ).toBe(true);
+    // Ended on text at the cap → a real final answer, not a truncated turn.
+    expect(
+      detectToolStepLimitReached(
+        { lastStepEndedWithToolCalls: false, stepCount: MAX_MODEL_STEPS },
+        MAX_MODEL_STEPS,
+      ),
+    ).toBe(false);
+    // Below the cap → still has room.
+    expect(
+      detectToolStepLimitReached(
+        { lastStepEndedWithToolCalls: true, stepCount: MAX_MODEL_STEPS - 1 },
+        MAX_MODEL_STEPS,
+      ),
+    ).toBe(false);
   });
 
   it("allows normal turns that end with final assistant text", () => {

@@ -24,6 +24,11 @@ export type RunnerEnv = {
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
   // validation + coercion always run; this only gates the small-model fallback. Default on.
   toolArgRepairEnabled: boolean;
+  // Per-turn ceiling on model steps (tool-call rounds). Coding turns burn steps on repo/brain
+  // exploration plus slow coder delegations, so this is tunable in prod without a redeploy.
+  // Hitting it no longer hard-fails the turn — partial work is persisted and the turn is marked
+  // continuable (see model-turn.ts).
+  maxModelSteps: number;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -49,6 +54,7 @@ export function loadEnv(): RunnerEnv {
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
+    maxModelSteps: optionalPositiveIntegerEnv("RUNNER_MAX_MODEL_STEPS", 32),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

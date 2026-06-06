@@ -3300,6 +3300,9 @@ function summarizeEvent(event: RuntimeEvent) {
     if (reason === "announced_unexecuted_next_action") {
       return "Model stopped after announcing a next action";
     }
+    if (reason === "tool_step_limit_reached") {
+      return "Reached the step limit before finishing — send another message to continue";
+    }
     return reason ? `Incomplete: ${reason}` : "Incomplete turn";
   }
   if (event.type === "tool.started") return `${readString(event.payload.name)} started`;
