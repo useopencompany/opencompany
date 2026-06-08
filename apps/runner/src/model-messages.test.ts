@@ -407,6 +407,37 @@ describe("buildModelMessages with attachments", () => {
     expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
   });
 
+  it("inlines a text attachment as a text part carrying the filename and decoded contents", () => {
+    const textBase64 = Buffer.from("hello world").toString("base64");
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_text",
+        role: "user",
+        content: "Review these notes.",
+        modelMessage: { role: "user", content: "Review these notes." },
+        attachments: [
+          {
+            kind: "text",
+            mediaType: "text/markdown",
+            filename: "notes.md",
+            base64: textBase64,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Review these notes." },
+          { type: "text", text: '\n\nAttached file "notes.md":\n\nhello world' },
+        ],
+      },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
   it("keeps an attachment-free user message as plain text content", () => {
     const messages = buildModelMessages([
       {

@@ -20,7 +20,7 @@ export type SessionMessage = {
   thinkingDurationSeconds?: number | undefined;
   attachments?: Array<{
     id: string;
-    kind: "image" | "pdf";
+    kind: "image" | "pdf" | "text";
     mediaType: string;
     filename: string;
   }>;

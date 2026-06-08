@@ -325,11 +325,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   }, [attachments]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentCapability = modelSupportsAttachments(session.modelName);
-  const attachmentsEnabled = attachmentCapability.images || attachmentCapability.pdf;
+  // Attaching is always available: text/code files need no model capability (they are
+  // inlined as text). The per-file image/pdf capability gate happens in acceptFiles.
+  const attachmentsEnabled = true;
 
   const acceptFiles = useCallback(
     (files: File[]) => {
-      if (!attachmentsEnabled) return;
       setAttachments((prev) => {
         const next = [...prev];
         for (const file of files) {
@@ -344,18 +345,36 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           const validation = validateAttachmentCandidate({
             mediaType: file.type,
             sizeBytes: file.size,
+            filename: file.name,
           });
           if (!validation.ok) {
             showToast({
               title: validation.reason === "size" ? "File too large" : "Unsupported file",
               description:
-                validation.reason === "size" ? "Max 25 MB per file." : "Only images and PDFs.",
+                validation.reason === "size"
+                  ? "Max 25 MB (images/PDFs) or 2 MB (text files)."
+                  : "Images, PDFs, and common text/code files.",
               tone: "default",
             });
             continue;
           }
-          if (validation.kind === "pdf" && !attachmentCapability.pdf) continue;
-          if (validation.kind === "image" && !attachmentCapability.images) continue;
+          // Image/PDF need the model to support them; text is always allowed.
+          if (validation.kind === "pdf" && !attachmentCapability.pdf) {
+            showToast({
+              title: "Unsupported file",
+              description: "This session's model can't read PDFs.",
+              tone: "default",
+            });
+            continue;
+          }
+          if (validation.kind === "image" && !attachmentCapability.images) {
+            showToast({
+              title: "Unsupported file",
+              description: "This session's model can't read images.",
+              tone: "default",
+            });
+            continue;
+          }
           const id = crypto.randomUUID();
           next.push({
             id,
@@ -381,7 +400,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         return next;
       });
     },
-    [attachmentsEnabled, attachmentCapability, session.id, workspaceId, showToast],
+    [attachmentCapability, session.id, workspaceId, showToast],
   );
 
   const removeAttachment = useCallback((id: string) => {
@@ -1283,7 +1302,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
                 <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
                 <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
+                <p className="text-[11.5px] text-ink-subtle">
+                  Images, PDF, text &amp; code · or paste with ⌘V
+                </p>
               </div>
             </div>
           ) : null}
@@ -1495,7 +1516,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                         ref={fileInputRef}
                         type="file"
                         multiple
-                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                        // Text/code files often have no registered MIME, so listing extensions
+                        // keeps them pickable; the broad set plus `*` lets any file through and
+                        // validation rejects unsupported ones with a toast.
+                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less"
                         className="hidden"
                         onChange={(event) => {
                           acceptFiles(Array.from(event.target.files ?? []));
@@ -1506,12 +1530,6 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       <button
                         type="button"
                         onClick={() => setAttachMenuOpen((prev) => !prev)}
-                        disabled={!attachmentsEnabled}
-                        title={
-                          attachmentsEnabled
-                            ? undefined
-                            : "This session's model can't accept image or PDF uploads."
-                        }
                         aria-label="Attach file"
                         aria-expanded={attachMenuOpen}
                         aria-haspopup="menu"

@@ -1,4 +1,4 @@
-import { ALLOWED_ATTACHMENT_MIME_TYPES, ATTACHMENT_MAX_BYTES } from "@opencompany/agent-runtime";
+import { ATTACHMENT_MAX_BYTES, ATTACHMENT_UPLOAD_CONTENT_TYPES } from "@opencompany/agent-runtime";
 import { type HandleUploadBody, handleUpload } from "@vercel/blob/client";
 import { currentWorkspace } from "@/lib/auth";
 
@@ -21,7 +21,7 @@ export async function POST(request: Request): Promise<Response> {
         }
         return {
           addRandomSuffix: true,
-          allowedContentTypes: [...ALLOWED_ATTACHMENT_MIME_TYPES],
+          allowedContentTypes: [...ATTACHMENT_UPLOAD_CONTENT_TYPES],
           maximumSizeInBytes: ATTACHMENT_MAX_BYTES,
         };
       },

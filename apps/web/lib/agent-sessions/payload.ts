@@ -390,7 +390,9 @@ function parseSessionMessageAttachments(
   return assertArray(value, "attachments").map((item) => {
     const record = assertRecord(item, "attachment");
     const kind = readStringField(record, "kind");
-    if (kind !== "image" && kind !== "pdf") throw new Error("Invalid attachment kind.");
+    if (kind !== "image" && kind !== "pdf" && kind !== "text") {
+      throw new Error("Invalid attachment kind.");
+    }
     return {
       id: readStringField(record, "id"),
       kind,

@@ -370,7 +370,7 @@ export async function loadAgentSessionDetailForWorkspace(
       : [];
   const attachmentsByMessageId = new Map<
     string,
-    Array<{ id: string; kind: "image" | "pdf"; mediaType: string; filename: string }>
+    Array<{ id: string; kind: "image" | "pdf" | "text"; mediaType: string; filename: string }>
   >();
   for (const row of attachmentRows) {
     const attachment = {

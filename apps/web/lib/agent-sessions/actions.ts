@@ -237,10 +237,13 @@ export async function submitAgentSessionMessage(
     const result = validateAttachmentCandidate({
       mediaType: att.mediaType,
       sizeBytes: att.sizeBytes,
+      filename: att.filename,
     });
     if (!result.ok) {
       return { ok: false, error: "Unsupported or oversized attachment." } as const;
     }
+    // Image/PDF require the session's model to support them; text is always allowed
+    // (it is inlined as text, not sent as an image/file part).
     if (result.kind === "image" && !capability.images) {
       return { ok: false, error: "This model can't read images." } as const;
     }
@@ -917,7 +920,11 @@ async function insertUserMessage(
   // richer prompt than the user-visible `content` (e.g. the interrupted-session continuation).
   const modelContent = options.modelContent ?? content;
   const attachmentRows = options.attachments.map((att) => {
-    const v = validateAttachmentCandidate({ mediaType: att.mediaType, sizeBytes: att.sizeBytes });
+    const v = validateAttachmentCandidate({
+      mediaType: att.mediaType,
+      sizeBytes: att.sizeBytes,
+      filename: att.filename,
+    });
     return {
       id: newAgentSessionMessageAttachmentId(),
       messageId,

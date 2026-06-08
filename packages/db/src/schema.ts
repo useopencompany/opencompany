@@ -554,9 +554,10 @@ export const agentSessionMessages = pgTable(
   }),
 );
 
-// User-uploaded attachments for a session message (images + PDFs). References to Vercel
-// Blob objects only — bytes live in the private Blob store, never in Postgres. Cascade-
-// deleted with the message; the blob objects are deleted explicitly in app code.
+// User-uploaded attachments for a session message (images, PDFs, and text/code files).
+// References to Vercel Blob objects only — bytes live in the private Blob store, never in
+// Postgres. Cascade-deleted with the message; the blob objects are deleted explicitly in
+// app code.
 export const agentSessionMessageAttachments = pgTable(
   "agent_session_message_attachments",
   {
@@ -570,7 +571,7 @@ export const agentSessionMessageAttachments = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    kind: text("kind").$type<"image" | "pdf">().notNull(),
+    kind: text("kind").$type<"image" | "pdf" | "text">().notNull(),
     mediaType: text("media_type").notNull(),
     filename: text("filename").notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -583,7 +584,7 @@ export const agentSessionMessageAttachments = pgTable(
     sessionIdx: index("agent_session_message_attachments_session_idx").on(table.sessionId),
     kindCheck: check(
       "agent_session_message_attachments_kind_check",
-      sql`${table.kind} IN ('image', 'pdf')`,
+      sql`${table.kind} IN ('image', 'pdf', 'text')`,
     ),
   }),
 );
