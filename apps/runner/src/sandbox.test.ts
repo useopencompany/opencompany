@@ -218,6 +218,54 @@ describe("prepareWorkspace", () => {
     );
   });
 
+  it("wires the GitHub credential helper so plain git can authenticate", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+    });
+
+    expect(
+      sandbox.commands.run.mock.calls.some(
+        ([command]) =>
+          String(command).includes("credential.https://github.com.helper") &&
+          String(command).includes("!gh auth git-credential"),
+      ),
+    ).toBe(true);
+  });
+
+  it("installs rg and bun on demand without blocking on failure", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+    });
+
+    const toolingCall = sandbox.commands.run.mock.calls.find(([command]) =>
+      String(command).includes("command -v rg"),
+    );
+    expect(toolingCall).toBeDefined();
+    expect(String(toolingCall?.[0])).toContain("command -v bun");
+  });
+
   it("matches tokenized GitHub remotes without exposing the token", () => {
     expect(
       githubRemoteMatches(
