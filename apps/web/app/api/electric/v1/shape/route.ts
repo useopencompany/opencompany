@@ -89,22 +89,31 @@ export async function GET(request: Request): Promise<Response> {
   resolved.params.forEach((param, index) => {
     originUrl.searchParams.set(`params[${index + 1}]`, param);
   });
-  // Electric Cloud source credentials, if used.
-  if (process.env.ELECTRIC_SOURCE_ID) {
-    originUrl.searchParams.set("source_id", process.env.ELECTRIC_SOURCE_ID);
+  // Authenticate to Electric, server-side only. Mutually-exclusive modes:
+  //  - Electric Cloud: source_id + secret (the source's secret).
+  //  - Self-hosted secure mode: ELECTRIC_SECRET passed as the `secret` query param.
+  //    Electric is secure-by-default and its HTTP API is public unless this is set;
+  //    the secret is injected here and never exposed to the browser (per the Electric
+  //    auth-proxy guidance, used for preview environments — see issue #351).
+  //  - Legacy/custom gatekeeper: ELECTRIC_TOKEN bearer header.
+  const sourceId = process.env.ELECTRIC_SOURCE_ID;
+  const sourceSecret = process.env.ELECTRIC_SOURCE_SECRET;
+  const electricSecret = process.env.ELECTRIC_SECRET;
+  if (sourceId) {
+    originUrl.searchParams.set("source_id", sourceId);
   }
-  if (process.env.ELECTRIC_SOURCE_SECRET) {
-    originUrl.searchParams.set("secret", process.env.ELECTRIC_SOURCE_SECRET);
+  if (sourceSecret) {
+    originUrl.searchParams.set("secret", sourceSecret);
+  } else if (electricSecret) {
+    originUrl.searchParams.set("secret", electricSecret);
   }
 
+  const usesQuerySecret = Boolean(sourceSecret || electricSecret);
   const response = await fetch(originUrl, {
-    headers: process.env.ELECTRIC_SOURCE_SECRET
-      ? {}
-      : {
-          ...(process.env.ELECTRIC_TOKEN
-            ? { Authorization: `Bearer ${process.env.ELECTRIC_TOKEN}` }
-            : {}),
-        },
+    headers:
+      !usesQuerySecret && process.env.ELECTRIC_TOKEN
+        ? { Authorization: `Bearer ${process.env.ELECTRIC_TOKEN}` }
+        : {},
   });
 
   // Electric responses are gzipped/length-bound for its own origin; strip those
