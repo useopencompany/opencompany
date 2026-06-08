@@ -1,5 +1,5 @@
 import { getDb } from "@opencompany/db/client";
-import { agentSessionMessageAttachments } from "@opencompany/db/schema";
+import { agentSessionMessageAttachments, agentSessions } from "@opencompany/db/schema";
 import { get } from "@vercel/blob";
 import { eq } from "drizzle-orm";
 import { currentWorkspace } from "@/lib/auth";
@@ -19,19 +19,28 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   const { id } = await params;
   const db = getDb();
+  // Join the owning session so access matches how sessions are gated everywhere else — per
+  // USER, not just per workspace. Without the userId check a workspace member could fetch
+  // another member's private session attachment by id.
   const [row] = await db
     .select({
       mediaType: agentSessionMessageAttachments.mediaType,
       blobUrl: agentSessionMessageAttachments.blobUrl,
       workspaceId: agentSessionMessageAttachments.workspaceId,
+      sessionUserId: agentSessions.userId,
     })
     .from(agentSessionMessageAttachments)
+    .innerJoin(agentSessions, eq(agentSessionMessageAttachments.sessionId, agentSessions.id))
     .where(eq(agentSessionMessageAttachments.id, id))
     .limit(1);
 
-  // 404 (not 403) on a cross-workspace id so the endpoint never reveals that an attachment
-  // exists in another workspace — same shape as "row missing".
-  if (!row || row.workspaceId !== context.workspace.id) {
+  // 404 (not 403) on a cross-workspace / cross-user id so the endpoint never reveals that an
+  // attachment exists for someone else — same shape as "row missing".
+  if (
+    !row ||
+    row.workspaceId !== context.workspace.id ||
+    row.sessionUserId !== context.user.id
+  ) {
     return new Response(null, { status: 404 });
   }
 
