@@ -333,6 +333,10 @@ export type AgentRuntimeEvent =
       payload: { runId?: number; messageId: string };
     }
   | {
+      type: "after_session.spawned";
+      payload: { runId?: number; messageId: string; childSessionId: string };
+    }
+  | {
       type: "after_session.skipped";
       payload: { messageId: string; reason: string };
     }

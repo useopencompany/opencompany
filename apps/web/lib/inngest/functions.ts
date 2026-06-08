@@ -1,4 +1,7 @@
-import { TOOL_APPROVAL_BACKSTOP_MS } from "@opencompany/agent-runtime";
+import {
+  AFTER_SESSION_IDLE_TRIGGER_SECONDS,
+  TOOL_APPROVAL_BACKSTOP_MS,
+} from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
 import { indexPendingMessageChunks, RECALL_INDEX_SWEEP_LIMIT } from "@opencompany/db/recall";
 import { agentSessionQuestions, agentToolApprovals } from "@opencompany/db/schema";
@@ -196,7 +199,11 @@ export const runAgentAfterSession = inngest.createFunction(
     triggers: { event: AGENT_AFTER_SESSION_CHECK_EVENT },
   },
   async ({ event, step }) => {
-    await step.sleep("wait for session idle", "180s");
+    const idleDelaySeconds =
+      typeof event.data.idleDelaySeconds === "number" && event.data.idleDelaySeconds > 0
+        ? event.data.idleDelaySeconds
+        : AFTER_SESSION_IDLE_TRIGGER_SECONDS;
+    await step.sleep("wait for session idle", `${idleDelaySeconds}s`);
 
     return step.run("run after-session hook if still idle", async () => {
       await callRunner(

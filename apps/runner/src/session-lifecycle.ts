@@ -396,6 +396,20 @@ export async function createAfterSessionRun(input: {
   return run ?? null;
 }
 
+// Marks an after-session run as having spawned a dedicated memory-keeper session, linking to it for
+// auditability. The keeper then runs as its own session; this run record's job is done.
+export async function markAfterSessionRunSpawned(id: number, childSessionId: string) {
+  await getDb()
+    .update(agentSessionAfterSessionRuns)
+    .set({
+      status: "spawned",
+      childSessionId,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessionAfterSessionRuns.id, id));
+}
+
 export async function completeAfterSessionRun(
   id: number,
   input: { status: "completed" | "skipped" | "failed"; skippedReason?: string; lastError?: string },

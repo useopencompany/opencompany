@@ -147,6 +147,7 @@ function sessionRowToRelated(
     id: row.id,
     title: row.title,
     status: row.status,
+    source: row.source,
     agentName: agent?.name ?? "",
     agentPath: agent?.path ?? null,
     parentMessageId: row.parent_message_id,
