@@ -584,6 +584,7 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          hasAttachedRepository: Boolean(input.repository),
           googleContext: input.workspaceId
             ? {
                 workspaceId: input.workspaceId,

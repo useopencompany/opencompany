@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_TOOL_CATALOG,
   AGENT_TOOL_DEFINITION_BY_ID,
+  buildCapabilityDiscovery,
   isDeferrableRuntimeTool,
   partitionRuntimeToolNames,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
@@ -461,5 +462,106 @@ describe("searchRuntimeTools", () => {
     const match = results.find((result) => result.name === "update_agent_file");
     expect(match).toBeDefined();
     expect(match?.parameters.type).toBe("object");
+  });
+});
+
+describe("buildCapabilityDiscovery", () => {
+  // Default: everything's credentials are present (so status hinges on enabled/repo only).
+  const allCredentialsAvailable = () => true;
+  const byId = (results: ReturnType<typeof buildCapabilityDiscovery>) =>
+    new Map(results.map((result) => [result.id, result]));
+
+  it("lists only platform/mixed-credential capabilities (excludes workspace-OAuth ones)", () => {
+    const results = buildCapabilityDiscovery({
+      enabledTools: [],
+      hasAttachedRepository: false,
+      credentialAvailable: allCredentialsAvailable,
+    });
+    const ids = results.map((result) => result.id);
+    // Platform/mixed hosted + coding capabilities are present...
+    expect(ids).toEqual(expect.arrayContaining(["exa", "x", "youtube", "amp", "opencode"]));
+    // ...workspace-OAuth capabilities (MCP servers + Google tools) are not discoverable in v1.
+    for (const excluded of ["linear", "slack", "posthog", "gmail", "google_calendar"]) {
+      expect(ids).not.toContain(excluded);
+    }
+    // The discoverable set is exactly the platform/mixed-credential hosted/coding entries.
+    const discoverableIds = AGENT_TOOL_CATALOG.filter(
+      (entry) =>
+        (entry.type === "hosted_tool" || entry.type === "coding_agent") &&
+        (entry.credentialSource === "platform" || entry.credentialSource === "mixed"),
+    ).map((entry) => entry.id);
+    expect(new Set(ids)).toEqual(new Set(discoverableIds));
+  });
+
+  it("marks a capability enabled when any of its runtime tools is enabled", () => {
+    const results = buildCapabilityDiscovery({
+      enabledTools: ["exa_search"],
+      hasAttachedRepository: false,
+      credentialAvailable: allCredentialsAvailable,
+    });
+    expect(byId(results).get("exa")?.status).toBe("enabled");
+  });
+
+  it("marks an unenabled capability with present credentials as available, with a how-to-enable hint", () => {
+    const results = buildCapabilityDiscovery({
+      enabledTools: [],
+      hasAttachedRepository: false,
+      credentialAvailable: allCredentialsAvailable,
+    });
+    const exa = byId(results).get("exa");
+    expect(exa?.status).toBe("available");
+    expect(exa?.reason).toBeUndefined();
+    expect(exa?.howToEnable).toBe("add @exa to your behavior");
+  });
+
+  it("marks a capability as needs_setup when its platform credential is missing", () => {
+    const results = buildCapabilityDiscovery({
+      enabledTools: [],
+      hasAttachedRepository: true,
+      // Only exa's credential is unavailable.
+      credentialAvailable: (entry) => entry.id !== "exa",
+    });
+    const exa = byId(results).get("exa");
+    expect(exa?.status).toBe("needs_setup");
+    expect(exa?.reason).toContain("EXA_API_KEY");
+  });
+
+  it("marks a github-repo-gated capability (amp) as needs_setup when no repository is attached", () => {
+    const noRepo = buildCapabilityDiscovery({
+      enabledTools: [],
+      hasAttachedRepository: false,
+      credentialAvailable: allCredentialsAvailable,
+    });
+    expect(byId(noRepo).get("amp")?.status).toBe("needs_setup");
+    expect(byId(noRepo).get("amp")?.reason).toContain("repository");
+    // opencode does not require an attached repository, so it stays available.
+    expect(byId(noRepo).get("opencode")?.status).toBe("available");
+
+    const withRepo = buildCapabilityDiscovery({
+      enabledTools: [],
+      hasAttachedRepository: true,
+      credentialAvailable: allCredentialsAvailable,
+    });
+    expect(byId(withRepo).get("amp")?.status).toBe("available");
+  });
+
+  it("filters by a case-insensitive query over id, label, and description", () => {
+    const results = buildCapabilityDiscovery({
+      enabledTools: [],
+      hasAttachedRepository: false,
+      credentialAvailable: allCredentialsAvailable,
+      query: "WEB",
+    });
+    expect(results.length).toBeGreaterThan(0);
+    expect(
+      results.every(
+        (result) =>
+          result.id.toLowerCase().includes("web") ||
+          result.label.toLowerCase().includes("web") ||
+          result.description.toLowerCase().includes("web"),
+      ),
+    ).toBe(true);
+    // exa's description mentions web research.
+    expect(results.map((result) => result.id)).toContain("exa");
   });
 });

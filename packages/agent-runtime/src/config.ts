@@ -261,6 +261,7 @@ function buildToolsIndexSection(input: {
   const lines: string[] = [
     "## Tools",
     "Core file and shell tools (read_file, write_file, edit_file, list_files, git_diff, shell, read_skill) are available directly.",
+    "This list is only what's enabled now — more opinionated capabilities are available to add. When a task needs something you can't currently do, call discover_capabilities to see what you could enable; if one fits, confirm with the user (ask_user_question), then enable it durably via self-edit (update_agent_file).",
   ];
   if (builtinCapabilities.length > 0) {
     lines.push(
@@ -278,9 +279,9 @@ function buildToolsIndexSection(input: {
       }),
     );
   }
-  // Only the always-present core line would remain when the agent has no capability tools or MCP
-  // servers — nothing to discover, so skip the section entirely.
-  return lines.length > 2 ? lines.join("\n") : null;
+  // Always emitted: even an agent with no capability tools or MCP servers should be told it can
+  // discover and add capabilities via discover_capabilities (that's exactly when it matters most).
+  return lines.join("\n");
 }
 
 // The `## Skills` index: one trusted spine per enabled skill, progressively disclosed. External
