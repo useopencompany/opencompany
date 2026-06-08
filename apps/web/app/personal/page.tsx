@@ -8,7 +8,7 @@ import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
 import { currentWorkspace } from "@/lib/auth";
 import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
-import { loadPersonalAgentContextFiles } from "@/lib/personal/context";
+import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/personal/context";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it
@@ -25,9 +25,10 @@ export default async function PersonalPage() {
     name: agentName,
   });
 
-  const [sessions, contextFiles, workspaceIntegrations] = await Promise.all([
+  const [sessions, contextFiles, personalSkills, workspaceIntegrations] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
     loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
+    loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
     loadWorkspaceIntegrationState(),
   ]);
   const userName =
@@ -55,6 +56,7 @@ export default async function PersonalPage() {
                 workspaceName={workspace.name}
                 initialSessions={sessions}
                 contextFiles={contextFiles}
+                personalSkills={personalSkills}
                 githubIntegrationStatus={workspaceIntegrations.github.status}
               />
             </ToastProvider>

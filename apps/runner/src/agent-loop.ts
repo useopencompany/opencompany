@@ -3,11 +3,13 @@ import {
   BUILTIN_USE_TOOL_NAME,
   newAgentSessionMessageId,
   normalizeAgentConfig,
+  type ResolvedSkillMetadata,
   RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
+  scanPersonalSkills,
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
 import { agentFiles, agentSessionMessages } from "@opencompany/db/schema";
@@ -142,17 +144,22 @@ export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-// Load the agent's "hot memory" files (agent/user.md, agent/memory.md) from the DB so they can
-// be injected into the system prompt at session start. We read from agent_files (not the
-// sandbox) because the runtime config is resolved before the bundle materializes; this is what
-// gives hot memory its frozen-snapshot behavior — in-session edits sync back at session end and
-// surface next session. A missing/never-written file resolves to undefined (empty-section path).
-async function loadHotMemory(
+// Load the session-start bundle context the runtime config needs: the agent's "hot memory" files
+// (agent/user.md, agent/memory.md) and its discovered personal skills (agent/skills/<id>/SKILL.md).
+// We read from agent_files (not the sandbox) because the runtime config is resolved before the
+// bundle materializes; this is what gives hot memory and personal skills their frozen-snapshot
+// behavior — in-session edits sync back at session end and surface next session. A missing/never-
+// written file resolves to undefined (empty-section path); malformed skills are skipped.
+async function loadAgentBundleContext(
   db: RunContext["db"],
   workspaceId: string,
   agentId: string,
   agentPath: string | null,
-): Promise<{ userMemory?: string | undefined; agentMemory?: string | undefined }> {
+): Promise<{
+  userMemory?: string | undefined;
+  agentMemory?: string | undefined;
+  personalSkills?: ResolvedSkillMetadata[];
+}> {
   if (!agentPath) return {};
   const bundleDir = agentBundleDir(agentPath);
   const rows = await db
@@ -160,9 +167,18 @@ async function loadHotMemory(
     .from(agentFiles)
     .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agentId)));
   const byPath = new Map(rows.map((row) => [row.path, row.content]));
+  const { skills, warnings } = scanPersonalSkills({ bundleFiles: rows, bundleDir });
+  if (warnings.length > 0) {
+    logger.warn("Skipped malformed personal skills during discovery", {
+      workspace_id: workspaceId,
+      agent_id: agentId,
+      warnings,
+    });
+  }
   return {
     userMemory: byPath.get(`${bundleDir}/user.md`),
     agentMemory: byPath.get(`${bundleDir}/memory.md`),
+    personalSkills: skills.map((skill) => skill.metadata),
   };
 }
 
@@ -303,14 +319,19 @@ async function runMessageWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
-    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
-      ...hotMemory,
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable },
     });
     modelProvider = runtime.model.provider;
@@ -1007,14 +1028,19 @@ async function runAfterSessionWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
-    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
-      ...hotMemory,
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: false },
     });
     modelProvider = runtime.model.provider;
@@ -1430,14 +1456,19 @@ async function resumeApprovalWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
-    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
-      ...hotMemory,
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
@@ -1941,14 +1972,19 @@ async function resumeQuestionResponseWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
-    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
+    const bundleContext = await loadAgentBundleContext(
+      ctx.db,
+      row.workspace.id,
+      row.agent.id,
+      row.agent.path,
+    );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
-      ...hotMemory,
+      ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;

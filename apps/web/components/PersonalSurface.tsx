@@ -1,6 +1,6 @@
 "use client";
 
-import { agentBundleDir } from "@opencompany/agent-runtime";
+import { agentBundleDir, type ResolvedSkillMetadata } from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle, PanelLeft } from "lucide-react";
@@ -24,6 +24,7 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createAgentSessionFromPrompt } from "@/lib/agent-sessions/actions";
 import { type SidebarSessionPayload, seedSessionQueries } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
+import { addPersonalAgentIntegration, type PersonalIntegrationId } from "@/lib/personal/actions";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
@@ -84,6 +85,7 @@ export type PersonalSurfaceProps = {
   workspaceName: string;
   initialSessions: SidebarSessionPayload[];
   contextFiles: AgentBundleFilePayload[];
+  personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
 };
 
@@ -238,6 +240,7 @@ export default function PersonalSurface({
   workspaceName,
   initialSessions,
   contextFiles,
+  personalSkills,
   githubIntegrationStatus,
 }: PersonalSurfaceProps) {
   const hydrated = useHydrated();
@@ -277,8 +280,27 @@ export default function PersonalSurface({
     initialDraft,
   );
 
+  const { showError } = useToast();
+
   const updateCollapsed = (next: boolean) => {
     persistSidebarCollapsed(next);
+  };
+
+  // The manual "Add integration" path appends the integration's @-mention to the agent body
+  // server-side, then hands back the re-derived config + rebuilt draft. We reseed the local config,
+  // the github-requested flag, and the Behavior draft so every surface (sidebar count, integrations
+  // list, Behavior editor) reflects the appended mention without a reload — the body stays the
+  // single source of truth.
+  const handleAddIntegration = async (integration: PersonalIntegrationId) => {
+    const result = await addPersonalAgentIntegration(agent.id, integration);
+    if (!result.ok) {
+      showError(result.error, "Could not add integration");
+      return;
+    }
+    setConfig(result.config);
+    setGitHubRequested(hasPersonalGitHubIntegrationRequest(result.body));
+    draftRef.current = { body: result.body, content: result.content };
+    setBehaviorDraft({ body: result.body, content: result.content });
   };
 
   const openPanel = (panel: PersonalPanel) => {
@@ -357,8 +379,10 @@ export default function PersonalSurface({
           <PersonalCapabilityPanel
             section={activePanel}
             config={config}
+            personalSkills={personalSkills}
             githubRequested={githubRequested}
             githubStatus={githubIntegrationStatus}
+            onAddIntegration={handleAddIntegration}
           />
         </div>
       );
@@ -394,6 +418,7 @@ export default function PersonalSurface({
         contextFiles={files}
         githubRequested={githubRequested}
         config={config}
+        personalSkillCount={personalSkills.length}
         activeSessionId={sessionId}
         activePanel={activePanel}
         activeFilePath={activeFilePath}

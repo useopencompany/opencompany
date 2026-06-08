@@ -95,6 +95,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
       sandbox,
       workdir: row.session.workdir,
       workspaceId: row.workspace.id,
+      agentId: row.agent.id,
       config: agentConfig,
     });
     captureE2BSandboxLatency({

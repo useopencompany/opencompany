@@ -372,6 +372,7 @@ export type PersonalSidebarProps = {
   initialSessions: SidebarSession[];
   contextFiles: ContextFile[];
   config: AgentConfig;
+  personalSkillCount: number;
   githubRequested: boolean;
   activeSessionId: string | null;
   activePanel: PersonalPanel | null;
@@ -392,7 +393,7 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
   const contextTree = useMemo(() => buildContextTree(props.contextFiles), [props.contextFiles]);
   const inboxActive = props.activeSessionId === null && props.activePanel === null;
-  const skillCount = props.config.skills?.length ?? 0;
+  const skillCount = (props.config.skills?.length ?? 0) + props.personalSkillCount;
   const integrationCount = personalIntegrationCount({
     config: props.config,
     githubRequested: props.githubRequested,

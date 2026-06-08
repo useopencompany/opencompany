@@ -16,6 +16,7 @@ import {
   MEMORY_SKILL_ID,
   type ResolvedSkillMetadata,
   resolveEnabledSkillMetadata,
+  SKILL_CREATOR_SKILL_ID,
 } from "./skills";
 import {
   AGENT_TOOL_DEFINITION_BY_ID,
@@ -74,6 +75,10 @@ export function resolveAgentRuntimeConfig(input: {
   // invitation placeholder. See buildHotMemorySection.
   userMemory?: string | undefined;
   agentMemory?: string | undefined;
+  // Personal skills discovered from the agent's bundle (agent/skills/<id>/SKILL.md), as metadata
+  // only. The runner scans these at session start and passes them in; they merge into the ## Skills
+  // index alongside built-in/external skills. Pure-config callers can omit this.
+  personalSkills?: ResolvedSkillMetadata[] | undefined;
   toolPolicy?: {
     policy: WorkspaceToolPolicyMap;
     suspendable: boolean;
@@ -81,7 +86,13 @@ export function resolveAgentRuntimeConfig(input: {
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
-  const skills = resolveEnabledSkillMetadata(input.agent);
+  const baseSkills = resolveEnabledSkillMetadata(input.agent);
+  // Personal skills never shadow a built-in/external skill: drop any whose id is already taken.
+  const baseSkillIds = new Set(baseSkills.map((skill) => skill.id));
+  const personalSkills = (input.personalSkills ?? []).filter(
+    (skill) => !baseSkillIds.has(skill.id),
+  );
+  const skills = [...baseSkills, ...personalSkills];
   const mcpServerKeys = [
     ...new Set(
       input.agent.tools
@@ -106,6 +117,7 @@ export function resolveAgentRuntimeConfig(input: {
     "The sandbox has four file roots. Choose where to put something by how long it should last and who needs it: ./work is a temporary scratch directory for this session only (drafts, intermediate files, deliverables, cloned repos) — nothing here survives the session. ./agent is your private agent folder that persists across sessions, including your hot-memory files and any other private files worth carrying forward. ./brain is shared company knowledge other agents and people rely on; edit it only via mounted @brain/... refs. ./skills is read-only; open it with read_skill.",
     "agent/user.md and agent/memory.md are your HOT MEMORY: both are injected into your context at the start of every session (see the 'Your hot memory' section below), so keep each tight — there is a hard ~3KB cap and anything over it is truncated. user.md is who your user is (identity, preferences, communication style, goals); memory.md is environment, conventions, and durable lessons/workflows. Edit them with edit_file/write_file as you learn; edits take effect next session. Push larger or long-tail durable facts into structured memory or other private agent/ files instead of bloating these two.",
     "agent/memory/ is structured, evidence-grounded memory (canonical objects + cited evidence) — the deep, retrieved layer for the long tail (specific people, companies, decisions). Manage it ONLY through the `memory` tool (not shell), never by editing files there directly; read the memory skill (skill id `memory`) with read_skill before using it.",
+    `agent/skills/ holds your PERSONAL SKILLS: reusable how-to procedures you save for yourself as agent/skills/<id>/SKILL.md folders. They are auto-discovered, listed in ## Skills, and loadable with read_skill from your next session on. When you spot a repeatable workflow worth keeping (or are asked to save one), read the skill-creator skill (read_skill with skillId "${SKILL_CREATOR_SKILL_ID}") and follow it. Use a skill for a repeatable procedure; use memory for facts and your .agent definition for how you behave.`,
     "One-off context that won't matter next session belongs in the conversation, not a file. How you behave going forward lives in your .agent definition via self-edit, not these folders.",
     "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/memory.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",

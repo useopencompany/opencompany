@@ -1,3 +1,5 @@
+import { parse as parseYaml } from "yaml";
+import { validateSkillFiles } from "./skill-resolver";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import {
   type AgentConfig,
@@ -448,6 +450,96 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 
 const MEMORY_SKILL_MD = buildMemorySkillMd();
 
+export const SKILL_CREATOR_SKILL_ID = "skill-creator";
+
+function buildSkillCreatorSkillMd(): string {
+  return `---
+name: skill-creator
+description: Create or improve your own personal skills — reusable, on-demand playbooks for procedures you repeat. Use when you notice a repeatable workflow worth saving, or when the user asks you to "make/save a skill", "remember how to do X", or "create a skill for X".
+---
+
+# Creating a personal skill
+
+A **personal skill** is a small playbook you write for your future self: a reusable procedure you
+can load on demand instead of relearning it each time. This skill explains when to make one and how
+to write a good one. Personal skills are private to you and persist across sessions.
+
+## When to create one
+
+Make a skill when you find yourself repeating — or expect to repeat — a multi-step procedure, and
+notes would help you do it well next time. Don't create one for a one-off task or something you can
+already do without notes.
+
+Pick the right surface — don't put everything in a skill:
+
+- **A repeatable procedure / how-to → a skill** (this surface).
+- **A fact** about a person, company, project, or decision → **memory** (the \`memory\` tool).
+- **How you behave by default** (tone, standing preferences, default tools/model) → your **\`.agent\`
+  definition** via self-edit.
+- **Shared team knowledge** others rely on → the **Brain** (\`brain/\`).
+- **One-off context** for this task only → just keep it in the **conversation**.
+
+## Where it lives and how it loads
+
+- A skill is a folder in your private bundle: \`agent/skills/<id>/SKILL.md\`, plus optional supporting
+  files. Create and edit it with \`write_file\` and \`edit_file\` — there is no special tool.
+- \`<id>\` is a short lowercase slug (letters, digits, hyphens), e.g. \`weekly-digest\`. It can't
+  collide with a built-in skill id.
+- Skills are **auto-discovered** — you never list them anywhere. They appear in your \`## Skills\`
+  index and load with \`read_skill\` **from your next session onward** (the running session was already
+  configured). So a skill you write now is active next time, not mid-session — tell the user that.
+  Within this session you can re-read your draft with \`read_file agent/skills/<id>/SKILL.md\`.
+
+## Write the SKILL.md
+
+Start with YAML frontmatter, then a Markdown body:
+
+\`\`\`
+---
+name: Weekly digest
+description: How to write and post the Monday digest the way the user likes it. Use when preparing the weekly digest or when asked to post the Monday update.
+provenance: agent
+---
+
+# Weekly digest
+
+1. Pull last week's shipped PRs and highlights.
+2. Draft in the user's preferred format (see references/format.md).
+3. Post and confirm.
+\`\`\`
+
+- **\`name\`** (required): a short human title.
+- **\`description\`** (required): the most important line — it's all your future self sees in the
+  index when deciding whether to open the skill. Say both **what** it does and **when** to use it,
+  in a sentence or two. Be specific and a little eager so you actually trigger it.
+- **\`provenance\`** (optional): \`agent\` when you created the skill yourself, \`user\` when the user
+  asked for it.
+
+## Keep it lean (progressive disclosure)
+
+- The SKILL.md body is the instructions you'll follow — write tight, imperative steps, and explain
+  *why* where it matters. Keep it focused on one class of task.
+- If it grows long or carries bulky reference material, split that into supporting files in the same
+  folder and point to them from the body:
+  - \`references/\` — detailed docs you read only when needed.
+  - \`templates/\` — boilerplate to copy.
+  - \`scripts/\` — helper scripts to run.
+- Only the SKILL.md body loads when you open a skill; supporting files load when you read them. Don't
+  dump everything into SKILL.md.
+
+## Constraints
+
+- A skill is **instructions only** — it can't grant tools or capabilities. To change your tools or
+  model, use self-edit, not a skill.
+- Improve a skill over time: when you learn a better way, \`edit_file\` its SKILL.md rather than making
+  a second near-duplicate skill.
+- A malformed skill (missing \`name\`/\`description\`, no \`SKILL.md\`, or an invalid id) is silently
+  skipped at next-session discovery — so double-check the frontmatter after you write it.
+`;
+}
+
+const SKILL_CREATOR_SKILL_MD = buildSkillCreatorSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -473,6 +565,14 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
     defaultEnabled: true,
     files: [{ path: "SKILL.md", content: MEMORY_SKILL_MD }],
   },
+  {
+    id: SKILL_CREATOR_SKILL_ID,
+    name: "Create a personal skill",
+    description:
+      "Create or improve your own personal skills — save a reusable procedure as agent/skills/<id>/SKILL.md to load on demand later. Use when you spot a repeatable workflow worth keeping, or are asked to make or remember a skill.",
+    defaultEnabled: true,
+    files: [{ path: "SKILL.md", content: SKILL_CREATOR_SKILL_MD }],
+  },
 ];
 
 export const AGENT_SKILL_DEFINITION_BY_ID = new Map(
@@ -491,14 +591,17 @@ export function isValidSkillMountId(id: string): boolean {
   return SKILL_MOUNT_ID_RE.test(id) && !id.includes("--");
 }
 
-// Metadata for an enabled skill (built-in or external), without file contents. Built-in
-// files live in code; external files live in the snapshot DB and are loaded by the runner.
+// Metadata for an enabled skill, without file contents. Built-in files live in code; external
+// files live in the snapshot DB; personal files live in the agent's bundle (agent_files). All are
+// loaded by the runner. `provenance` only applies to personal skills (who authored them) and feeds
+// future curation; it is absent for built-in/external skills.
 export type ResolvedSkillMetadata = {
   id: string;
   name: string;
   description: string;
-  origin: "builtin" | "external";
+  origin: "builtin" | "external" | "personal";
   source?: AgentSkillSource;
+  provenance?: "agent" | "user";
 };
 
 // The skills available to a session, as metadata only: every built-in `defaultEnabled`
@@ -652,4 +755,129 @@ export async function computeSkillFolderIntegrity(files: AgentSkillFile[]): Prom
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
   return `sha256:${hex}`;
+}
+
+// Personal skills are procedural playbooks the agent writes for itself. They live as ordinary
+// files in the agent's private bundle under `<bundleDir>/skills/<id>/SKILL.md` (+ supporting
+// files) and are auto-discovered each session — never listed in `skills:` frontmatter, which is
+// reserved for built-in and external skills. The cap keeps the always-injected ## Skills index
+// lean even if the agent accumulates many over time; skills beyond it are simply not surfaced.
+export const MAX_PERSONAL_SKILLS = 16;
+
+// One discovered personal skill: its catalog metadata plus the folder's files (relative to the
+// skill directory, e.g. "SKILL.md", "references/x.md") ready to materialize into the read-only mount.
+export type PersonalSkill = {
+  metadata: ResolvedSkillMetadata;
+  files: AgentSkillFile[];
+};
+
+export type PersonalSkillScanResult = {
+  skills: PersonalSkill[];
+  // Human-readable reasons a candidate folder was skipped (malformed frontmatter, bad id, collision,
+  // validation failure, cap). The runner logs these; the files themselves still persist as bundle files.
+  warnings: string[];
+};
+
+// SKILL.md frontmatter for a personal skill. Like the external-skill parser it requires `name` and
+// `description`, and additionally reads the optional `provenance` marker (agent- vs user-authored).
+function parsePersonalSkillFrontmatter(
+  content: string,
+): { name: string; description: string; provenance?: "agent" | "user" } | null {
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return null;
+  const end = normalized.indexOf("\n---", 4);
+  if (end === -1) return null;
+  let frontmatter: unknown;
+  try {
+    frontmatter = parseYaml(normalized.slice(4, end));
+  } catch {
+    return null;
+  }
+  if (!frontmatter || typeof frontmatter !== "object") return null;
+  const record = frontmatter as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const description = typeof record.description === "string" ? record.description.trim() : "";
+  if (!name || !description) return null;
+  const rawProvenance = typeof record.provenance === "string" ? record.provenance.trim() : "";
+  const provenance =
+    rawProvenance === "agent" || rawProvenance === "user" ? rawProvenance : undefined;
+  return { name, description, ...(provenance ? { provenance } : {}) };
+}
+
+// Discover the agent's personal skills from its bundle files. Pure: no DB, no files, no network —
+// the runner passes in the already-loaded bundle rows. `bundleFiles` are repo-relative paths
+// (e.g. "agents/leo/skills/foo/SKILL.md"); `bundleDir` is the agent's bundle directory
+// ("agents/leo"); `reservedIds` are ids already taken by built-in/external skills so a personal
+// skill can never shadow one. Each candidate folder is validated (valid mount id, no collision,
+// well-formed SKILL.md frontmatter, passes validateSkillFiles); failures are skipped with a warning
+// rather than throwing, so one bad skill never blocks the rest or the session.
+export function scanPersonalSkills(input: {
+  bundleFiles: Array<{ path: string; content: string }>;
+  bundleDir: string;
+  reservedIds?: Iterable<string>;
+}): PersonalSkillScanResult {
+  const skillsPrefix = `${input.bundleDir}/skills/`;
+  const reserved = new Set(input.reservedIds ?? []);
+  const warnings: string[] = [];
+
+  // Group bundle files by skill id (the first path segment under skills/).
+  const filesById = new Map<string, AgentSkillFile[]>();
+  for (const file of input.bundleFiles) {
+    if (!file.path.startsWith(skillsPrefix)) continue;
+    const rest = file.path.slice(skillsPrefix.length);
+    const slash = rest.indexOf("/");
+    if (slash <= 0) continue; // a file directly under skills/ with no skill folder — ignore
+    const id = rest.slice(0, slash);
+    const relative = rest.slice(slash + 1);
+    if (!relative) continue;
+    const list = filesById.get(id);
+    if (list) list.push({ path: relative, content: file.content });
+    else filesById.set(id, [{ path: relative, content: file.content }]);
+  }
+
+  const skills: PersonalSkill[] = [];
+  for (const id of [...filesById.keys()].sort()) {
+    if (skills.length >= MAX_PERSONAL_SKILLS) {
+      warnings.push(
+        `Personal skill "${id}" omitted: exceeds the ${MAX_PERSONAL_SKILLS}-skill cap.`,
+      );
+      continue;
+    }
+    if (!isValidSkillMountId(id)) {
+      warnings.push(`Personal skill "${id}" skipped: not a valid skill id.`);
+      continue;
+    }
+    if (isKnownAgentSkillId(id) || reserved.has(id)) {
+      warnings.push(
+        `Personal skill "${id}" skipped: id collides with a built-in or external skill.`,
+      );
+      continue;
+    }
+    const files = filesById.get(id)!;
+    const validationError = validateSkillFiles(files);
+    if (validationError) {
+      warnings.push(`Personal skill "${id}" skipped: ${validationError}`);
+      continue;
+    }
+    const skillMd = files.find((file) => file.path === "SKILL.md")!; // guaranteed by validateSkillFiles
+    const parsed = parsePersonalSkillFrontmatter(skillMd.content);
+    if (!parsed) {
+      warnings.push(
+        `Personal skill "${id}" skipped: SKILL.md needs valid frontmatter with name and description.`,
+      );
+      continue;
+    }
+    skills.push({
+      metadata: {
+        id,
+        name: parsed.name,
+        description: parsed.description,
+        origin: "personal",
+        ...(parsed.provenance ? { provenance: parsed.provenance } : {}),
+      },
+      files,
+    });
+  }
+
+  return { skills, warnings };
 }

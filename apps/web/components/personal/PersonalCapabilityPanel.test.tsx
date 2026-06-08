@@ -37,6 +37,7 @@ describe("PersonalCapabilityPanel integrations", () => {
       <PersonalCapabilityPanel
         section="integrations"
         config={baseConfig}
+        personalSkills={[]}
         githubRequested={true}
         githubStatus="not_connected"
       />,
@@ -50,6 +51,38 @@ describe("PersonalCapabilityPanel integrations", () => {
       "href",
       "/settings/integrations",
     );
+  });
+
+  it("renders personal skills with a Personal badge in the skills section", () => {
+    render(
+      <PersonalCapabilityPanel
+        section="skills"
+        config={baseConfig}
+        personalSkills={[
+          {
+            id: "weekly-digest",
+            name: "Weekly digest",
+            description: "How I assemble the Monday digest.",
+            origin: "personal",
+            provenance: "agent",
+          },
+          {
+            id: "tone",
+            name: "House tone",
+            description: "Voice rules you taught me.",
+            origin: "personal",
+            provenance: "user",
+          },
+        ]}
+        githubRequested={false}
+        githubStatus="not_connected"
+      />,
+    );
+
+    expect(screen.getByText("Weekly digest")).toBeInTheDocument();
+    expect(screen.getByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("House tone")).toBeInTheDocument();
+    expect(screen.getByText("Personal · you")).toBeInTheDocument();
   });
 
   it("counts the generic GitHub request alongside concrete repositories", () => {
