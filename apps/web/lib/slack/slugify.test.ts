@@ -18,12 +18,12 @@ describe("workspaceChannelSlug", () => {
     expect(workspaceChannelSlug("  --hi--  ")).toBe("hi");
   });
 
-  it("caps length at 70 chars and never ends in a hyphen after truncation", () => {
-    expect(workspaceChannelSlug("a".repeat(100)).length).toBe(70);
+  it("caps length at 57 chars and never ends in a hyphen after truncation", () => {
+    expect(workspaceChannelSlug("a".repeat(100)).length).toBe(57);
     // A separator landing exactly on the cut boundary must not leave a trailing hyphen.
-    const sliced = workspaceChannelSlug(`${"a".repeat(69)} rest`);
+    const sliced = workspaceChannelSlug(`${"a".repeat(56)} rest`);
     expect(sliced.endsWith("-")).toBe(false);
-    expect(sliced).toBe("a".repeat(69));
+    expect(sliced).toBe("a".repeat(56));
   });
 
   it("returns empty string for non-latin-only input", () => {
@@ -32,17 +32,17 @@ describe("workspaceChannelSlug", () => {
 });
 
 describe("channelName", () => {
-  it("prefixes oc- and falls back to team for an empty slug", () => {
-    expect(channelName("")).toBe("oc-team");
-    expect(channelName("acme-corp")).toBe("oc-acme-corp");
+  it("builds <slug>-x-opencompany and falls back to team for an empty slug", () => {
+    expect(channelName("")).toBe("team-x-opencompany");
+    expect(channelName("acme-corp")).toBe("acme-corp-x-opencompany");
   });
 
-  it("appends a suffix when given", () => {
-    expect(channelName("acme-corp", "a1b2c3")).toBe("oc-acme-corp-a1b2c3");
+  it("inserts the per-workspace suffix: <slug>-<suffix>-x-opencompany", () => {
+    expect(channelName("acme-corp", "a1b2c3")).toBe("acme-corp-a1b2c3-x-opencompany");
   });
 
-  it("stays within Slack's 80-char limit even with a collision suffix", () => {
-    const slug = workspaceChannelSlug("a".repeat(100)); // capped at 70
+  it("stays within Slack's 80-char limit with a max-length slug + suffix", () => {
+    const slug = workspaceChannelSlug("a".repeat(100)); // capped at 59
     expect(channelName(slug, "abcdef").length).toBeLessThanOrEqual(80);
   });
 });
