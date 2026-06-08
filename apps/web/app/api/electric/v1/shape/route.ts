@@ -49,6 +49,15 @@ const SHAPE_SCOPES: Record<string, ShapeScope> = {
     table: "session_stars",
     where: ({ userId }) => ({ clause: `"user_id" = $1`, params: [userId] }),
   },
+  // Only live items sync to the client; resolved (done/dismissed) items leave the shape. A snoozed
+  // item stays synced (the client hides it until snoozed_until elapses).
+  inbox_items: {
+    table: "inbox_items",
+    where: ({ workspaceId, userId }) => ({
+      clause: `"workspace_id" = $1 AND "user_id" = $2 AND "status" IN ('open', 'snoozed')`,
+      params: [workspaceId, userId],
+    }),
+  },
 };
 
 function electricBaseUrl(): string | null {

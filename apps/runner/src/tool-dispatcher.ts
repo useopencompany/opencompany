@@ -48,6 +48,7 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
+import { runInboxTool } from "./inbox-tool";
 import { runOpencodeCoderTool } from "./opencode-tool";
 import { runRecallTool } from "./recall-tool";
 import {
@@ -603,6 +604,19 @@ export async function executeRuntimeTool(input: {
           // Runner-side, no sandbox, no Gateway key: queries Postgres directly, scoped to this
           // agent + user via the current session row, excluding the live session.
           return runRecallTool({ sessionId: input.sessionId, args: input.args });
+        }
+        if (
+          input.definition.name === "inbox_list" ||
+          input.definition.name === "inbox_add" ||
+          input.definition.name === "inbox_update"
+        ) {
+          // Runner-side write to the user's personal inbox, scoped to this session's
+          // (workspace, user). Hard-gated to the personal agent at config resolution.
+          return runInboxTool({
+            name: input.definition.name,
+            sessionId: input.sessionId,
+            args: input.args,
+          });
         }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {

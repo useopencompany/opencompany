@@ -328,6 +328,21 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     ).toContain("memory");
   });
 
+  it("hard-gates the inbox tools to the personal agent", () => {
+    const teamAgent = resolveRuntimeToolNamesForConfigTools({ tools: [] });
+    expect(teamAgent).not.toContain("inbox_add");
+    expect(teamAgent).not.toContain("inbox_list");
+    expect(teamAgent).not.toContain("inbox_update");
+
+    const personalAgent = resolveRuntimeToolNamesForConfigTools({
+      tools: [],
+      personalInboxEnabled: true,
+    });
+    expect(personalAgent).toContain("inbox_list");
+    expect(personalAgent).toContain("inbox_add");
+    expect(personalAgent).toContain("inbox_update");
+  });
+
   it("adds delegate_to_agent only when delegatable agents are present", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
     expect(

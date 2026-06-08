@@ -16,7 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
@@ -24,6 +24,7 @@ import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useHydrated } from "@/components/useHydrated";
+import { deriveVisibleInbox } from "@/lib/collections/selectors";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import { personalPaths } from "@/lib/personal/paths";
@@ -367,6 +368,19 @@ function useLivePersonalSessions(agentId: string, initialSessions: SidebarSessio
   }, [rows, isLoading, agentId, initialSessions]);
 }
 
+// Live count of visible inbox items, for the Home nav badge. Mirrors PersonalInbox's derivation
+// (open + elapsed-snooze) and ticks slowly so a snooze waking re-counts without a refresh.
+function useLiveInboxCount() {
+  const { inboxItems } = useCollections();
+  const { data: rows, isLoading } = useLiveQuery((q) => q.from({ item: inboxItems }));
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  return isLoading || !rows ? 0 : deriveVisibleInbox(rows, now).length;
+}
+
 // Derive which surface is active from the URL so the sidebar highlight always tracks the route.
 function useActivePersonalRoute() {
   const pathname = usePathname();
@@ -408,17 +422,20 @@ export default function PersonalSidebar(props: {
 function PersonalSidebarLive(props: { collapsed: boolean; onToggleCollapsed: () => void }) {
   const { agent, initialSessions } = usePersonalAgent();
   const sessions = useLivePersonalSessions(agent.id, initialSessions);
-  return <PersonalSidebarView {...props} sessions={sessions} />;
+  const inboxCount = useLiveInboxCount();
+  return <PersonalSidebarView {...props} sessions={sessions} inboxCount={inboxCount} />;
 }
 
 function PersonalSidebarView({
   sessions,
   collapsed,
   onToggleCollapsed,
+  inboxCount = 0,
 }: {
   sessions: SidebarSession[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  inboxCount?: number;
 }) {
   const router = useRouter();
   const { agent, userName, userEmail, workspaceName, files, config, personalSkills, githubRequested } =
@@ -474,6 +491,11 @@ function PersonalSidebarView({
               className={inboxActive ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}
             />
             <span className="truncate tracking-[-0.005em]">Home</span>
+            {inboxCount > 0 ? (
+              <span className="ml-auto rounded-full bg-ink/10 px-1.5 text-[11px] font-medium tabular-nums text-ink/70">
+                {inboxCount}
+              </span>
+            ) : null}
           </button>
         </nav>
 

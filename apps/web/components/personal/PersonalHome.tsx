@@ -22,7 +22,7 @@ const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 // locked to the single personal agent (no agent picker). On submit it creates a session and
 // navigates to its URL.
 export default function PersonalHome() {
-  const { agent, userName, initialSessions } = usePersonalAgent();
+  const { agent, userName } = usePersonalAgent();
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -69,7 +69,6 @@ export default function PersonalHome() {
       <div className="flex w-full max-w-[600px] flex-col gap-10">
         <PersonalInbox
           userName={userName}
-          sessionIds={initialSessions.map((session) => session.id)}
           onOpenSession={(id) => router.push(personalPaths.session(id))}
         />
         <form

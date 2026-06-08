@@ -1421,6 +1421,98 @@ export const agentSessionArtifacts = pgTable(
   }),
 );
 
+// A forward-flexible artifact attached to an inbox item. v1 renders `fyi` only; `actions` and
+// `reply` are stored so the agent can attach them now and we can make them interactive later.
+export type InboxItemArtifact =
+  | { kind: "fyi" }
+  | {
+      kind: "actions";
+      actions: { id: string; label: string; tone?: "primary" | "default" | "danger" }[];
+    }
+  | { kind: "reply"; placeholder?: string; suggestions?: string[] };
+
+// Personal-agent inbox: attention items an agent posts for a user to triage. Scoped per
+// (workspace, user). The agent writes via the inbox_list/inbox_add/inbox_update tools (runner,
+// internal kind); the user triages from the /personal inbox (done / snooze 6h / dismiss). A
+// snoozed row keeps status='snoozed' + snoozed_until so the agent still sees it; the UI hides it
+// until snoozed_until elapses. Only live items (open/snoozed) are synced to the client.
+export const inboxItems = pgTable(
+  "inbox_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Provenance: the agent session that created the item, so the UI can link back to it.
+    sourceSessionId: text("source_session_id").references(() => agentSessions.id, {
+      onDelete: "set null",
+    }),
+    // Free-text origin label shown on the card (the agent's name or a schedule name).
+    source: text("source"),
+    title: text("title").notNull(),
+    // Markdown summary / FYI body.
+    body: text("body"),
+    // "What happened": the agent's steps leading to this item.
+    steps: jsonb("steps").$type<string[]>(),
+    priority: text("priority").$type<"urgent" | "high" | "med" | "low">(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    // Forward-flexible payload; defaults to a plain FYI.
+    artifact: jsonb("artifact").$type<InboxItemArtifact>(),
+    status: text("status")
+      .$type<"open" | "snoozed" | "done" | "dismissed">()
+      .notNull()
+      .default("open"),
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    // Optional agent-supplied key; a live (open/snoozed) duplicate makes inbox_add a no-op.
+    dedupKey: text("dedup_key"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceUserIdx: index("inbox_items_workspace_user_idx").on(
+      table.workspaceId,
+      table.userId,
+    ),
+    statusIdx: index("inbox_items_status_idx").on(
+      table.workspaceId,
+      table.userId,
+      table.status,
+    ),
+    // One live item per dedup key per user, so inbox_add can no-op a re-post on a schedule rerun.
+    dedupIdx: uniqueIndex("inbox_items_dedup_idx")
+      .on(table.workspaceId, table.userId, table.dedupKey)
+      .where(sql`${table.dedupKey} IS NOT NULL AND ${table.status} IN ('open', 'snoozed')`),
+    statusCheck: check(
+      "inbox_items_status_check",
+      sql`${table.status} IN ('open', 'snoozed', 'done', 'dismissed')`,
+    ),
+    priorityCheck: check(
+      "inbox_items_priority_check",
+      sql`${table.priority} IS NULL OR ${table.priority} IN ('urgent', 'high', 'med', 'low')`,
+    ),
+  }),
+);
+
+export const inboxItemsRelations = relations(inboxItems, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [inboxItems.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [inboxItems.userId],
+    references: [users.id],
+  }),
+  sourceSession: one(agentSessions, {
+    fields: [inboxItems.sourceSessionId],
+    references: [agentSessions.id],
+  }),
+}));
+
 export const onboardingResponses = pgTable(
   "onboarding_responses",
   {

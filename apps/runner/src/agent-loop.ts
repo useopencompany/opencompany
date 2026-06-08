@@ -327,6 +327,7 @@ async function runMessageWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
@@ -1036,6 +1037,7 @@ async function runAfterSessionWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
@@ -1464,6 +1466,7 @@ async function resumeApprovalWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
@@ -1980,6 +1983,7 @@ async function resumeQuestionResponseWithContext(
     );
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
+      personalAgent: row.agent.isDefault,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
