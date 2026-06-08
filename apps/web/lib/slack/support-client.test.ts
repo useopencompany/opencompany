@@ -34,13 +34,13 @@ beforeEach(() => {
 });
 
 describe("createSupportChannel", () => {
-  it("creates a private oc-<slug>-<suffix> channel and returns its id", async () => {
+  it("creates a private <slug>-x-opencompany channel and returns its id", async () => {
     const client = makeClient();
     const id = await createSupportChannel(workspace, { client });
     expect(client.conversations.create).toHaveBeenCalledWith(
       expect.objectContaining({ name: supportChannelName(workspace), is_private: true }),
     );
-    expect(supportChannelName(workspace)).toMatch(/^oc-acme-corp-[0-9a-f]{6}$/);
+    expect(supportChannelName(workspace)).toMatch(/^acme-corp-[0-9a-f]{8}-x-opencompany$/);
     // ownership marker is stamped so a later name_taken retry can verify the channel is ours
     expect(client.conversations.setPurpose).toHaveBeenCalledWith({
       channel: "C123",
