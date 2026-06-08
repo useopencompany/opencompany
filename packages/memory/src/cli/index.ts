@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 import { resolveRoot } from "../store";
 import { formatMemoryUsageReport } from "../usage";
+import { alias } from "./alias";
 import { appendEvidence } from "./append-evidence";
 import { parseArgs } from "./args";
 import { create } from "./create";
+import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
 import { type CommandContext, type CommandResult, fail, render } from "./io";
@@ -17,7 +19,9 @@ const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> 
   query,
   "append-evidence": appendEvidence,
   rewrite,
+  alias,
   merge,
+  delete: del,
   doctor,
 };
 
@@ -31,7 +35,9 @@ Commands:
   query            Hybrid retrieval over the tree (--type, --status, --folder, --since, --limit, --lexical-only)
   append-evidence  Record immutable evidence and link it to canonical subjects
   rewrite          Update compiled truth (requires [^ev:<id>] citations to linked evidence)
+  alias            Add or remove aliases on a canonical object (--add, --remove, repeatable)
   merge            Resolve a duplicate canonical object into another (--from, --into, --dry-run)
+  delete           Permanently remove a memory file (--force, --dry-run); scrubs inbound links
   doctor           Check integrity (--fix-freshness)
 
 Global options:

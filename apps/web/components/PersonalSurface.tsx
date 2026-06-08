@@ -387,7 +387,6 @@ export default function PersonalSurface({
       <PersonalSidebar
         agentId={agent.id}
         agentName={agent.name}
-        agentPath={agent.path}
         userName={userName}
         userEmail={userEmail}
         workspaceName={workspaceName}

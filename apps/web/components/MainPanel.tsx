@@ -211,12 +211,14 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
 
 function MainPanelContent({ agents, slackCard }: { agents: AgentOption[]; slackCard?: ReactNode }) {
   return (
-    <main className="relative flex h-full flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
-      <div className="w-full max-w-[680px]">
-        <Prompt agents={agents} />
-        {slackCard}
-      </div>
-    </main>
+    <div className="flex h-full min-w-0 flex-1 bg-sidebar">
+      <main className="relative my-2 mr-2 flex min-w-0 flex-1 flex-col items-center justify-center overflow-y-auto rounded-xl border border-border bg-canvas px-6 py-10 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <div className="w-full max-w-[680px]">
+          <Prompt agents={agents} />
+          {slackCard}
+        </div>
+      </main>
+    </div>
   );
 }
 

@@ -80,10 +80,14 @@ export async function merge(ctx: CommandContext): Promise<CommandResult> {
     await persist(root, evidence.doc);
   }
 
-  // Stub the source as a redirect.
+  // Stub the source as a redirect. Aliases and related links were consolidated into the target,
+  // so clear them here — leaving them on the stub would make the alias map to two objects and
+  // trip doctor's duplicate_alias check.
   from.doc.frontmatter.status = "merged";
   from.doc.frontmatter.mergedInto = intoId;
   from.doc.frontmatter.updatedAt = now;
+  from.doc.frontmatter.aliases = [];
+  from.doc.frontmatter.related = [];
   from.doc.compiledTruth = `Merged into [[${intoId}]].`;
   from.doc.timeline = [];
   await persist(root, from.doc);

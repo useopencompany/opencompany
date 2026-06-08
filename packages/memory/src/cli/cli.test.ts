@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveRoot } from "../store";
+import { alias } from "./alias";
 import { appendEvidence } from "./append-evidence";
 import { parseArgs } from "./args";
 import { create } from "./create";
+import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
 import type { CommandResult } from "./io";
@@ -185,6 +187,134 @@ describe("memory CLI", () => {
     const evidence = data(await run(get, ["kickoff", "--json"]));
     expect((evidence.frontmatter as { subjects: string[] }).subjects).toContain("acme");
     expect((evidence.frontmatter as { subjects: string[] }).subjects).not.toContain("acme-corp");
+  });
+
+  it("merge consolidates aliases onto the survivor without leaving a duplicate", async () => {
+    await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme"]);
+    await run(create, ["--type", "company", "--id", "acme-corp"]);
+
+    const merged = await run(merge, ["--from", "acme", "--into", "acme-corp"]);
+    expect(merged.code).toBe(0);
+
+    // The survivor owns the alias (and the old id as an alias); the stub keeps none.
+    const survivor = data(await run(get, ["acme-corp", "--json"]));
+    expect((survivor.frontmatter as { aliases: string[] }).aliases).toContain("Acme");
+    const stub = data(await run(get, ["acme", "--json"]));
+    expect((stub.frontmatter as { aliases?: string[] }).aliases ?? []).toEqual([]);
+
+    // No duplicate_alias finding should remain.
+    const health = await run(doctor, []);
+    const codes = (data(health).findings as Array<{ code: string }>).map((f) => f.code);
+    expect(codes).not.toContain("duplicate_alias");
+  });
+
+  it("alias adds and removes names, rejecting collisions and non-canonical targets", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+    await run(create, ["--type", "company", "--id", "globex", "--alias", "Globex Inc"]);
+
+    const added = await run(alias, ["acme", "--add", "Acme Inc", "--add", "ACME"]);
+    expect(added.code).toBe(0);
+    expect(data(added).aliases).toEqual(["Acme Inc", "ACME"]);
+
+    const removed = await run(alias, ["acme", "--remove", "ACME"]);
+    expect(removed.code).toBe(0);
+    expect(data(removed).aliases).toEqual(["Acme Inc"]);
+
+    // Cannot steal an alias another object already owns.
+    const collision = await run(alias, ["acme", "--add", "Globex Inc"]);
+    expect(collision.code).toBe(1);
+
+    // Cannot alias an id another object already owns.
+    const idCollision = await run(alias, ["acme", "--add", "globex"]);
+    expect(idCollision.code).toBe(1);
+
+    // Evidence records reject aliases.
+    await run(appendEvidence, [
+      "--kind",
+      "meeting",
+      "--id",
+      "acme-call",
+      "--subject",
+      "acme",
+      "--source-ref",
+      "x://y",
+    ]);
+    const onEvidence = await run(alias, ["acme-call", "--add", "Nope"]);
+    expect(onEvidence.code).toBe(1);
+
+    // The tree stays healthy after alias edits.
+    const health = await run(doctor, []);
+    const codes = (data(health).findings as Array<{ code: string }>).map((f) => f.code);
+    expect(codes).not.toContain("duplicate_alias");
+  });
+
+  it("deletes a merged stub cleanly and leaves a healthy tree", async () => {
+    await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme"]);
+    await run(create, ["--type", "company", "--id", "acme-corp"]);
+    await run(merge, ["--from", "acme", "--into", "acme-corp"]);
+
+    // A merged stub has no inbound references, so it deletes without --force.
+    const dry = await run(del, ["acme", "--dry-run"]);
+    expect(data(dry).requiresForce).toBe(false);
+    const deleted = await run(del, ["acme"]);
+    expect(deleted.code).toBe(0);
+
+    const gone = await run(get, ["acme", "--json"]);
+    expect(gone.code).toBe(2);
+    const health = await run(doctor, []);
+    expect(health.code).toBe(0);
+  });
+
+  it("delete refuses hard references without --force and scrubs soft ones with it", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+    await run(create, ["--type", "person", "--id", "jane", "--related", "acme"]);
+    await run(appendEvidence, [
+      "--kind",
+      "meeting",
+      "--id",
+      "acme-call",
+      "--subject",
+      "acme",
+      "--source-ref",
+      "x://y",
+    ]);
+    await run(rewrite, ["acme", "--truth", "Acme is a customer [^ev:acme-call]."]);
+
+    // Evidence is cited by acme's compiled truth → a hard reference → refused without --force.
+    const refused = await run(del, ["acme-call"]);
+    expect(refused.code).toBe(1);
+
+    const forced = await run(del, ["acme-call", "--force"]);
+    expect(forced.code).toBe(0);
+
+    // Deleting acme scrubs jane's related link and the (now subject-less) evidence is reported.
+    const deletedAcme = await run(del, ["acme"]);
+    expect(deletedAcme.code).toBe(0);
+    const jane = data(await run(get, ["jane", "--json"]));
+    expect((jane.frontmatter as { related: string[] }).related).not.toContain("acme");
+  });
+
+  it("rewrite treats a backslash-escaped [^ev:] as literal prose, not a citation", async () => {
+    await run(create, ["--type", "concept", "--id", "memory-syntax"]);
+    await run(appendEvidence, [
+      "--kind",
+      "doc",
+      "--id",
+      "syntax-doc",
+      "--subject",
+      "memory-syntax",
+      "--source-ref",
+      "x://y",
+    ]);
+
+    // The escaped occurrence must NOT be validated as a (broken) citation; the real one still is.
+    const good = await run(rewrite, [
+      "memory-syntax",
+      "--truth",
+      "Citations use the \\[^ev:some-id] form, e.g. [^ev:syntax-doc].",
+    ]);
+    expect(good.code).toBe(0);
+    expect(data(good).cited).toEqual(["syntax-doc"]);
   });
 
   it("doctor passes on a healthy tree and flags broken links", async () => {

@@ -1,5 +1,5 @@
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseDocument } from "./document";
 import { idFromRelativePath, relativePathForType } from "./paths";
@@ -105,6 +105,11 @@ export async function writeDocumentText(
 // Convenience: the on-disk path a document of a given type+id should occupy.
 export function pathForDocument(doc: MemoryDocument): string {
   return relativePathForType(doc.frontmatter.type, doc.frontmatter.id);
+}
+
+// Remove a file from the tree. Idempotent: a missing file is treated as already gone.
+export async function removeFile(root: string, relativePath: string): Promise<void> {
+  await rm(path.join(root, relativePath), { force: true });
 }
 
 function toPosix(value: string): string {

@@ -1,15 +1,16 @@
 "use client";
 
 import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
+import { useQuery } from "@tanstack/react-query";
 import { Check, LoaderCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { AgentEditor } from "@/components/agent-editor/AgentEditor";
-import {
-  type AgentSkillCatalogEntry,
-  buildAgentMentionItems,
-} from "@/components/agent-editor/tools";
+import { AgentEditorWithAddSkillDialog } from "@/components/agent-editor/AgentEditorWithAddSkillDialog";
+import { mergeSkillCatalog } from "@/components/agent-editor/skillCatalog";
+import { buildAgentMentionItems } from "@/components/agent-editor/tools";
 import { useToast } from "@/components/ToastProvider";
+import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { updatePersonalAgentBehavior } from "@/lib/personal/actions";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 
 type SaveState = "idle" | "saving" | "saved";
 
@@ -33,7 +34,12 @@ export function PersonalBehaviorEditor({
   // switches) can reseed the editor with the live draft instead of stale server props.
   onDraftChange: (body: string, content: TiptapDoc) => void;
 }) {
+  const { workspaceId } = useWorkspaceContext();
   const { showError } = useToast();
+  const { data: workspaceSkills } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+  });
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [, startTransition] = useTransition();
   const pendingRef = useRef<{ body: string; content: TiptapDoc } | null>(null);
@@ -47,13 +53,9 @@ export function PersonalBehaviorEditor({
       defaultBranch: repository.defaultBranch,
       ...(repository.binding ? { binding: repository.binding } : {}),
     }));
-    const skills: AgentSkillCatalogEntry[] = (config.skills ?? []).flatMap((skill) =>
-      "source" in skill && skill.source
-        ? [{ id: skill.id, name: skill.name, description: skill.description, source: skill.source }]
-        : [],
-    );
+    const skills = mergeSkillCatalog(config.skills ?? [], workspaceSkills ?? []);
     return buildAgentMentionItems(repositories, [], { skills });
-  }, [config.integrations.github.repositories, config.skills]);
+  }, [config.integrations.github.repositories, config.skills, workspaceSkills]);
 
   // The actual persist. `interactive` debounced saves drive the local save indicator; the
   // final flush on unmount runs fire-and-forget (this component is gone, so it must not touch
@@ -127,7 +129,7 @@ export function PersonalBehaviorEditor({
       </div>
 
       <div className="mt-6">
-        <AgentEditor
+        <AgentEditorWithAddSkillDialog
           key={agentId}
           initialBody={initialBody}
           initialContent={initialContent}

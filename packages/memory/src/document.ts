@@ -115,8 +115,9 @@ export function serializeDocument(doc: MemoryDocument): string {
 
 // Footnote citations to evidence, e.g. `[^ev:acme-call-2026-06-06]`. Extracted so rewrite can
 // enforce the "compiled truth must cite linked evidence" invariant and doctor can find broken
-// citations.
-const CITATION_RE = /\[\^ev:([a-z0-9][a-z0-9-]{0,63})\]/g;
+// citations. A leading backslash escapes the pattern — `\[^ev:id]` is treated as literal prose
+// (for documenting the syntax itself), not a citation, so it never trips citation validation.
+const CITATION_RE = /(?<!\\)\[\^ev:([a-z0-9][a-z0-9-]{0,63})\]/g;
 
 export function extractCitations(text: string): string[] {
   const ids = new Set<string>();

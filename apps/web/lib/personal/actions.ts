@@ -24,6 +24,7 @@ import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 import { MAX_BRAIN_FILE_BYTES } from "@/lib/brain/paths";
+import { listWorkspaceSkillSnapshots, toExternalSkillReference } from "@/lib/skills/snapshots";
 
 type UpdateBehaviorResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
 
@@ -73,7 +74,18 @@ export async function updatePersonalAgentBehavior(
     defaultBranch: repository.defaultBranch,
     ...(repository.binding ? { binding: repository.binding } : {}),
   }));
-  const skills = (currentConfig.skills ?? []).filter(isExternalSkillReference);
+  const skillsById = new Map(
+    (currentConfig.skills ?? [])
+      .filter(isExternalSkillReference)
+      .map((skill) => [skill.id, skill] as const),
+  );
+  const workspaceSkillReferences = (await listWorkspaceSkillSnapshots(workspace.id)).map(
+    toExternalSkillReference,
+  );
+  for (const skill of workspaceSkillReferences) {
+    skillsById.set(skill.id, skill);
+  }
+  const skills = [...skillsById.values()];
 
   const derived = deriveAgentConfigFromBody({
     title: agent.name,

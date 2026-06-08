@@ -1,11 +1,9 @@
 "use client";
 
-import { agentBundleDir, agentDefinitionFileNameForPath } from "@opencompany/agent-runtime";
 import type { AgentConfig } from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
-  Blocks,
   Bot,
   ChevronDown,
   ChevronRight,
@@ -15,7 +13,6 @@ import {
   PanelLeft,
   Plug,
   Plus,
-  SlidersHorizontal,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -23,6 +20,7 @@ import { useMemo, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
@@ -124,41 +122,6 @@ function sortContextTree(folder: ContextTreeFolder) {
 // folder headers and file rows on the same grid.
 function contextIndent(depth: number) {
   return 8 + depth * 16;
-}
-
-// The agent definition (the `.agent` file) always exists — it's the agent's instructions — so
-// this row is never dimmed. We show its real filename (e.g. "leo.agent") and a distinct Bot icon
-// so the `.agent` format reads as the agent's identity rather than just another context file.
-// Clicking it opens the Behavior editor (the definition's editable body); the tooltip shows the
-// full bundle path it maps to.
-function ContextDefinitionRow({
-  agentPath,
-  active,
-  onClick,
-}: {
-  agentPath: string | null;
-  active: boolean;
-  onClick: () => void;
-}) {
-  const fileName = agentPath ? agentDefinitionFileNameForPath(agentPath) : "agent.agent";
-  const title = agentPath ? `${agentBundleDir(agentPath)}/${fileName}` : undefined;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
-      }`}
-    >
-      <Bot
-        size={14}
-        strokeWidth={1.75}
-        className={`shrink-0 ${active ? "text-ink" : "text-ink/55"}`}
-      />
-      <span className="truncate tracking-[-0.005em]">{fileName}</span>
-    </button>
-  );
 }
 
 // A single folder in the context tree. Toggles its own children open/closed like VS Code, and
@@ -309,8 +272,10 @@ function groupSessions(sessions: SidebarSession[]) {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const dayMs = 24 * 60 * 60 * 1000;
-  const groups: Array<{ label: string; sessions: SidebarSession[] }> = [
-    { label: "Today", sessions: [] },
+  // Today's sessions render without a header — the label is only used to
+  // separate older time frames below them.
+  const groups: Array<{ label: string; sessions: SidebarSession[]; hideLabel?: boolean }> = [
+    { label: "Today", sessions: [], hideLabel: true },
     { label: "Yesterday", sessions: [] },
     { label: "Last 7 days", sessions: [] },
     { label: "Earlier", sessions: [] },
@@ -401,7 +366,6 @@ function useLivePersonalSessions(agentId: string, initialSessions: SidebarSessio
 export type PersonalSidebarProps = {
   agentId: string;
   agentName: string;
-  agentPath: string | null;
   userName: string;
   userEmail: string;
   workspaceName: string;
@@ -443,7 +407,7 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
       aria-hidden={props.collapsed}
     >
       <div className="flex h-full w-[256px] flex-col">
-        {/* Top icons */}
+        {/* Header controls */}
         <div className="flex items-center gap-1 px-2 pb-2 pt-3">
           <button
             type="button"
@@ -454,12 +418,15 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
+          <SpaceSwitcher
+            activeSpace="personal"
+            workspaceName={props.workspaceName}
+            className="min-w-0 flex-1 px-0 pb-0"
+          />
         </div>
 
-        <SpaceSwitcher activeSpace="personal" workspaceName={props.workspaceName} />
-
         {/* Primary nav */}
-        <nav className="flex flex-col gap-px px-2 pt-1">
+        <nav className="flex flex-col gap-px px-2 pt-2">
           <button
             type="button"
             onClick={props.onNewSession}
@@ -474,16 +441,16 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
               strokeWidth={1.75}
               className={inboxActive ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}
             />
-            <span className="truncate tracking-[-0.005em]">Inbox</span>
+            <span className="truncate tracking-[-0.005em]">Home</span>
           </button>
         </nav>
 
         {/* Scrollable body */}
         <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
-          <Section title="Capabilities">
+          <Section title="Configuration">
             <CapabilityNavRow
-              icon={SlidersHorizontal}
-              label="Behavior"
+              icon={Bot}
+              label="Agent"
               active={props.activePanel === "behavior"}
               onClick={() => props.onSelectPanel("behavior")}
             />
@@ -511,11 +478,6 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
           </Section>
 
           <Section title="Context">
-            <ContextDefinitionRow
-              agentPath={props.agentPath}
-              active={props.activePanel === "behavior"}
-              onClick={() => props.onSelectPanel("behavior")}
-            />
             <ContextTreeNodes
               nodes={contextTree}
               depth={0}
@@ -533,9 +495,11 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
             ) : (
               groupedSessions.map((group, index) => (
                 <div key={group.label} className={index === 0 ? "" : "pt-3"}>
-                  <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-ink-subtle/80">
-                    {group.label}
-                  </div>
+                  {!group.hideLabel && (
+                    <div className="px-2 pb-1 text-[10.5px] font-medium uppercase tracking-[0.05em] text-ink-subtle/80">
+                      {group.label}
+                    </div>
+                  )}
                   <div className="flex flex-col gap-px">
                     {group.sessions.map((session) => (
                       <SessionRow
@@ -552,30 +516,11 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
           </Section>
         </div>
 
-        {/* Footer profile */}
-        <div className="flex items-center gap-2.5 px-3 py-2.5">
-          <div
-            aria-hidden
-            className="h-6 w-6 shrink-0 rounded-full ring-1 ring-black/[0.06]"
-            style={{
-              background:
-                "radial-gradient(circle at 30% 30%, #c9d9ff 0%, #3b5bdb 35%, #0b1224 80%)",
-              boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.18), 0 1px 2px rgba(0,0,0,0.08)",
-            }}
-          />
-          <div className="flex min-w-0 flex-col leading-tight">
-            <span
-              title={props.userEmail}
-              className="truncate text-[12.5px] font-medium tracking-[-0.005em] text-ink"
-            >
-              {props.userName}
-            </span>
-            <span className="truncate text-[11px] text-ink-subtle">
-              {props.agentName} · Personal
-            </span>
-          </div>
-          <Blocks size={14} strokeWidth={1.75} className="ml-auto shrink-0 text-ink-subtle/60" />
-        </div>
+        <SidebarAccountFooter
+          userName={props.userName}
+          userEmail={props.userEmail}
+          subtitle={`${props.agentName} · Personal`}
+        />
       </div>
     </aside>
   );

@@ -9,14 +9,16 @@ export function SpaceSwitcher({
   workspaceName,
   workspaceHref = "/",
   personalHref = "/personal",
+  className,
 }: {
   activeSpace: Space;
   workspaceName: string;
   workspaceHref?: string;
   personalHref?: string;
+  className?: string;
 }) {
   return (
-    <div className="px-2 pb-2">
+    <div className={cn("px-2 pb-2", className)}>
       <nav
         aria-label="Space"
         className="grid grid-cols-2 gap-0.5 rounded-md border border-border bg-surface/45 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.36)]"
@@ -24,11 +26,7 @@ export function SpaceSwitcher({
         <SpaceLink href={personalHref} active={activeSpace === "personal"}>
           Personal
         </SpaceLink>
-        <SpaceLink
-          href={workspaceHref}
-          active={activeSpace === "workspace"}
-          title={workspaceName}
-        >
+        <SpaceLink href={workspaceHref} active={activeSpace === "workspace"} title={workspaceName}>
           {workspaceName}
         </SpaceLink>
       </nav>
