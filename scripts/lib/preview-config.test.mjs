@@ -91,6 +91,7 @@ test("runnerServiceEnv carries the preview-identity trio + direct DB + neon cred
     neonProjectId: "proj-1",
     neonApiKey: "neon-key",
     runnerInternalToken: "tok",
+    runnerStreamTokenSecret: "stream-secret",
     streamsUrl: "https://streams",
     allowedOrigins: "https://pr-42.preview.opencompany.cloud",
   });
@@ -100,6 +101,8 @@ test("runnerServiceEnv carries the preview-identity trio + direct DB + neon cred
   assert.equal(env.NEON_API_KEY, "neon-key");
   assert.equal(env.DATABASE_URL, "postgresql://direct");
   assert.equal(env.RUNNER_DATABASE_URL, "postgresql://direct");
+  assert.equal(env.RUNNER_INTERNAL_TOKEN, "tok");
+  assert.equal(env.RUNNER_STREAM_TOKEN_SECRET, "stream-secret");
   assert.equal(env.RUNNER_WORKER_CONCURRENCY, "2");
   assert.equal(env.RUNNER_DB_POOL_MAX, "5");
 });

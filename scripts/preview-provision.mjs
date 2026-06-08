@@ -58,6 +58,8 @@ const electricStorageDir = process.env.ELECTRIC_STORAGE_DIR?.trim();
 
 // Per-PR shared secrets: minted here, injected into both producer and consumer sides.
 const runnerInternalToken = process.env.RUNNER_INTERNAL_TOKEN?.trim() || `pv-${randomUUID()}`;
+const runnerStreamTokenSecret =
+  process.env.RUNNER_STREAM_TOKEN_SECRET?.trim() || `pv-${randomUUID()}`;
 const electricSecret = process.env.ELECTRIC_SECRET?.trim() || `pv-${randomUUID()}`;
 const streamsToken = process.env.DURABLE_STREAMS_TOKEN?.trim() || undefined;
 
@@ -162,6 +164,7 @@ async function main() {
     neonProjectId,
     neonApiKey,
     runnerInternalToken,
+    runnerStreamTokenSecret,
     streamsUrl: streams.url,
     streamsToken,
     allowedOrigins: names.aliasUrl,
