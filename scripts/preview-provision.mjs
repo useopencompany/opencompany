@@ -16,7 +16,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, writeFileSync } from "node:fs";
-import { createNeonClient } from "./lib/preview-neon.mjs";
 import {
   buildManifest,
   electricServiceEnv,
@@ -24,6 +23,7 @@ import {
   runnerServiceEnv,
   webDeployEnv,
 } from "./lib/preview-config.mjs";
+import { createNeonClient } from "./lib/preview-neon.mjs";
 import {
   buildElectricServiceSpec,
   buildRunnerServiceSpec,
@@ -69,15 +69,23 @@ await main().catch((error) => {
 });
 
 async function main() {
-  log(`Provisioning preview stack for PR #${pr} (sha ${sha.slice(0, 7)})${dryRun ? " [DRY RUN]" : ""}`);
+  log(
+    `Provisioning preview stack for PR #${pr} (sha ${sha.slice(0, 7)})${dryRun ? " [DRY RUN]" : ""}`,
+  );
 
   // 1) Neon branch from the sanitized seed (reset on synchronize for determinism).
-  const neon = createNeonClient({ apiKey: neonApiKey, projectId: neonProjectId, parentBranch: seedBranch });
+  const neon = createNeonClient({
+    apiKey: neonApiKey,
+    projectId: neonProjectId,
+    parentBranch: seedBranch,
+  });
   let branchId = "br-DRYRUN";
   let pooledUrl = "postgresql://DRYRUN-pooler.neon.tech/neondb";
   let directUrl = "postgresql://DRYRUN.neon.tech/neondb";
   if (dryRun) {
-    log(`would ensure Neon branch ${names.neonBranch} from ${seedBranch} (reset=${reset}), ttl=${ttlHours}h`);
+    log(
+      `would ensure Neon branch ${names.neonBranch} from ${seedBranch} (reset=${reset}), ttl=${ttlHours}h`,
+    );
   } else {
     neon.ensureBranch(names.neonBranch, { reset });
     if (ttlHours > 0) neon.setExpiration(names.neonBranch, expiresAt(ttlHours));
@@ -109,7 +117,10 @@ async function main() {
   }
   renderOwnerId = renderOwnerId || "own-DRYRUN";
 
-  const streamsEnv = compact({ DURABLE_STREAMS_DEV_HOST: "0.0.0.0", DURABLE_STREAMS_TOKEN: streamsToken });
+  const streamsEnv = compact({
+    DURABLE_STREAMS_DEV_HOST: "0.0.0.0",
+    DURABLE_STREAMS_TOKEN: streamsToken,
+  });
   const streams = await ensureService(render, {
     name: names.streamsService,
     env: streamsEnv,
@@ -125,7 +136,11 @@ async function main() {
       }),
   });
 
-  const electricEnv = electricServiceEnv({ directDatabaseUrl: directUrl, electricSecret, storageDir: electricStorageDir });
+  const electricEnv = electricServiceEnv({
+    directDatabaseUrl: directUrl,
+    electricSecret,
+    storageDir: electricStorageDir,
+  });
   const electric = await ensureService(render, {
     name: names.electricService,
     env: electricEnv,

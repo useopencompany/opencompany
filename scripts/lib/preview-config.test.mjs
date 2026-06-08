@@ -71,7 +71,10 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
   assert.equal(env.DATABASE_URL, "postgresql://pooled");
   assert.equal(env.RUNNER_INTERNAL_URL, env.RUNNER_PUBLIC_URL);
   assert.equal(env.ELECTRIC_SECRET, "sek");
-  assert.equal(env.NEXT_PUBLIC_WORKOS_REDIRECT_URI, "https://pr-42.preview.opencompany.cloud/auth/callback");
+  assert.equal(
+    env.NEXT_PUBLIC_WORKOS_REDIRECT_URI,
+    "https://pr-42.preview.opencompany.cloud/auth/callback",
+  );
   assert.equal(env.OBSERVABILITY_ENV, "preview");
   assert.equal(env.PREVIEW_PR_NUMBER, "42");
   assert.ok(!("DURABLE_STREAMS_TOKEN" in env));
@@ -99,7 +102,10 @@ test("runnerServiceEnv carries the preview-identity trio + direct DB + neon cred
 });
 
 test("electricServiceEnv sets secure mode + direct DB; drops empty storage dir", () => {
-  const env = electricServiceEnv({ directDatabaseUrl: "postgresql://direct", electricSecret: "sek" });
+  const env = electricServiceEnv({
+    directDatabaseUrl: "postgresql://direct",
+    electricSecret: "sek",
+  });
   assert.equal(env.DATABASE_URL, "postgresql://direct");
   assert.equal(env.ELECTRIC_SECRET, "sek");
   assert.ok(!("ELECTRIC_STORAGE_DIR" in env));

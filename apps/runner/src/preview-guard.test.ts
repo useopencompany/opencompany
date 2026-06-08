@@ -69,7 +69,9 @@ describe("readPreviewIdentity", () => {
 
 describe("assertPreviewIdentity — prod runner (no PREVIEW_ENV)", () => {
   it("passes when no preview identity is present", async () => {
-    await expect(assertPreviewIdentity({ env: {}, databaseUrl: url(PROD_HOST) })).resolves.toBeUndefined();
+    await expect(
+      assertPreviewIdentity({ env: {}, databaseUrl: url(PROD_HOST) }),
+    ).resolves.toBeUndefined();
   });
 
   it("fails closed when a stray NEON_BRANCH_ID is present without PREVIEW_ENV", async () => {

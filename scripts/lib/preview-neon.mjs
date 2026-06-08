@@ -62,7 +62,15 @@ export function createNeonClient({ apiKey, projectId, parentBranch } = {}) {
     // explicit role. Default to the owner; override via NEON_ROLE_NAME / NEON_DATABASE_NAME.
     const databaseName = options.databaseName || process.env.NEON_DATABASE_NAME || "neondb";
     const roleName = options.roleName || process.env.NEON_ROLE_NAME || "neondb_owner";
-    return neon(["connection-string", name, "--pooled", "--database-name", databaseName, "--role-name", roleName]);
+    return neon([
+      "connection-string",
+      name,
+      "--pooled",
+      "--database-name",
+      databaseName,
+      "--role-name",
+      roleName,
+    ]);
   }
 
   return {

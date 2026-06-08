@@ -35,7 +35,9 @@ await main().catch((error) => {
 
 async function main() {
   const desired = await fetchLabeledOpenPrs();
-  log(`Desired previews (open + labeled "${previewLabel}"): ${[...desired].sort((a, b) => a - b).join(", ") || "none"}`);
+  log(
+    `Desired previews (open + labeled "${previewLabel}"): ${[...desired].sort((a, b) => a - b).join(", ") || "none"}`,
+  );
 
   // actual: map of pr -> { reasons:Set, oldestMs:number|undefined }
   const actual = new Map();
@@ -56,7 +58,9 @@ async function main() {
   }
 
   for (const pr of [...desired].filter((pr) => !actual.has(pr))) {
-    log(`PR #${pr} is labeled-open but has no preview resources (will be provisioned on next push).`);
+    log(
+      `PR #${pr} is labeled-open but has no preview resources (will be provisioned on next push).`,
+    );
   }
 
   if (toReap.size === 0) {
@@ -74,7 +78,9 @@ async function main() {
         env: { ...process.env, PREVIEW_PR_NUMBER: String(pr) },
       });
     } catch (error) {
-      console.error(`::warning::Teardown for PR #${pr} failed (will retry next run): ${error.message}`);
+      console.error(
+        `::warning::Teardown for PR #${pr} failed (will retry next run): ${error.message}`,
+      );
     }
   }
 }
@@ -99,7 +105,11 @@ async function collectNeon(actual) {
     log("NEON_API_KEY/NEON_PROJECT_ID unset; skipping Neon enumeration.");
     return;
   }
-  const neon = createNeonClient({ apiKey: neonApiKey, projectId: neonProjectId, parentBranch: seedBranch });
+  const neon = createNeonClient({
+    apiKey: neonApiKey,
+    projectId: neonProjectId,
+    parentBranch: seedBranch,
+  });
   const branches = neon.neon(["branches", "list"], { json: true });
   const list = Array.isArray(branches) ? branches : (branches.branches ?? []);
   for (const branch of list) {
@@ -126,7 +136,9 @@ async function fetchLabeledOpenPrs() {
   while (true) {
     const res = await fetch(
       `https://api.github.com/repos/${repo}/issues?state=open&labels=${encodeURIComponent(previewLabel)}&per_page=100&page=${page}`,
-      { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" } },
+      {
+        headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" },
+      },
     );
     if (!res.ok) throw new Error(`GitHub API ${res.status} listing labeled PRs.`);
     const items = await res.json();

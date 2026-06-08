@@ -15,8 +15,8 @@
 // Usage: node scripts/preview-teardown.mjs [--dry-run]
 
 import { execFileSync } from "node:child_process";
-import { createNeonClient } from "./lib/preview-neon.mjs";
 import { previewNames } from "./lib/preview-config.mjs";
+import { createNeonClient } from "./lib/preview-neon.mjs";
 import { createRenderClient } from "./lib/preview-render.mjs";
 
 const dryRun = process.argv.includes("--dry-run") || isTrue(process.env.PREVIEW_DRY_RUN);
@@ -55,7 +55,9 @@ async function teardownRender() {
   for (const target of targets) {
     try {
       if (dryRun) {
-        log(`would delete Render service ${target.name}${target.id ? ` (${target.id})` : " (resolve by name)"}`);
+        log(
+          `would delete Render service ${target.name}${target.id ? ` (${target.id})` : " (resolve by name)"}`,
+        );
         continue;
       }
       let id = target.id;
@@ -109,7 +111,11 @@ async function teardownNeon() {
       log(`would delete Neon branch ${names.neonBranch} (drops its replication slot)`);
       return;
     }
-    const neon = createNeonClient({ apiKey: neonApiKey, projectId: neonProjectId, parentBranch: seedBranch });
+    const neon = createNeonClient({
+      apiKey: neonApiKey,
+      projectId: neonProjectId,
+      parentBranch: seedBranch,
+    });
     const branch = neon.getBranchByName(names.neonBranch);
     if (!branch) {
       log(`Neon branch ${names.neonBranch} not found (already gone).`);

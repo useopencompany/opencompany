@@ -28,7 +28,9 @@ const roleName = realEnv("NEON_ROLE_NAME");
 
 if (!projectId) fail("NEON_PROJECT_ID is required (set it in .env.local or the environment).");
 if (!parentBranch) {
-  fail("NEON_PARENT_BRANCH is required — the prod branch to fork the seed from (e.g. 'main' or 'production').");
+  fail(
+    "NEON_PARENT_BRANCH is required — the prod branch to fork the seed from (e.g. 'main' or 'production').",
+  );
 }
 
 main();
@@ -46,14 +48,25 @@ function main() {
 
   if (!branch) {
     log(`Creating seed branch ${seedBranch} from ${parentBranch}…`);
-    const created = neonJson(["branches", "create", "--name", seedBranch, "--parent", parentBranch]);
+    const created = neonJson([
+      "branches",
+      "create",
+      "--name",
+      seedBranch,
+      "--parent",
+      parentBranch,
+    ]);
     branch = created.branch ?? created;
   } else {
     log(`Seed branch ${seedBranch} already exists (${branch.id}). Use --refresh to re-fork.`);
   }
 
   const pooled = neon([
-    "connection-string", seedBranch, "--pooled", "--database-name", databaseName,
+    "connection-string",
+    seedBranch,
+    "--pooled",
+    "--database-name",
+    databaseName,
     ...(roleName ? ["--role-name", roleName] : []),
   ]);
   const direct = pooled.replace("-pooler.", ".");
@@ -66,8 +79,12 @@ function main() {
     console.log("\nNext steps:");
     console.log("  1) Sanitize the seed (removes prod PII/secrets) — REQUIRED before using it:");
     console.log(`       psql "${maskUrl(direct)}" -f scripts/sql/preview-seed-sanitize.sql`);
-    console.log("     (or run this script with --apply-sanitize, or paste the SQL in the Neon Console)");
-    console.log("  2) (optional hardening) apply scripts/sql/preview-seed-electric-role.sql after testing.");
+    console.log(
+      "     (or run this script with --apply-sanitize, or paste the SQL in the Neon Console)",
+    );
+    console.log(
+      "  2) (optional hardening) apply scripts/sql/preview-seed-electric-role.sql after testing.",
+    );
     console.log(`  3) Set the repo var PREVIEW_SEED_BRANCH=${seedBranch} (or keep the default).`);
   }
 }
@@ -80,16 +97,23 @@ function runSanitize(directUrl) {
     );
   }
   log("Running sanitization SQL against the seed branch…");
-  execFileSync("psql", [directUrl, "-v", "ON_ERROR_STOP=1", "-f", "scripts/sql/preview-seed-sanitize.sql"], {
-    stdio: "inherit",
-  });
+  execFileSync(
+    "psql",
+    [directUrl, "-v", "ON_ERROR_STOP=1", "-f", "scripts/sql/preview-seed-sanitize.sql"],
+    {
+      stdio: "inherit",
+    },
+  );
   log("Sanitization complete. The seed branch is safe to fork previews from.");
 }
 
 function neon(neonctlArgs) {
   const full = ["neonctl", ...neonctlArgs, "--project-id", projectId];
   if (apiKey) full.push("--api-key", apiKey);
-  return execFileSync("bunx", full, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] }).trim();
+  return execFileSync("bunx", full, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  }).trim();
 }
 function neonJson(neonctlArgs) {
   return JSON.parse(neon([...neonctlArgs, "--output", "json"]));
@@ -107,7 +131,8 @@ function maskUrl(url) {
 }
 function realEnv(name) {
   const value = process.env[name];
-  if (!value || value === "..." || value.includes("...") || value.startsWith("replace-")) return undefined;
+  if (!value || value === "..." || value.includes("...") || value.startsWith("replace-"))
+    return undefined;
   return value;
 }
 function log(message) {

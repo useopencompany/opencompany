@@ -53,7 +53,10 @@ test("streams spec runs the reference server with caller-provided env", () => {
     branch: "feature/x",
     env: { DURABLE_STREAMS_DEV_HOST: "0.0.0.0" },
   });
-  assert.equal(spec.serviceDetails.envSpecificDetails.startCommand, "bun scripts/durable-streams-dev.mjs");
+  assert.equal(
+    spec.serviceDetails.envSpecificDetails.startCommand,
+    "bun scripts/durable-streams-dev.mjs",
+  );
   assert.deepEqual(
     spec.envVars.find((v) => v.key === "DURABLE_STREAMS_DEV_HOST"),
     { key: "DURABLE_STREAMS_DEV_HOST", value: "0.0.0.0" },

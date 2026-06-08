@@ -82,7 +82,9 @@ export function createRenderClient({ apiKey, apiUrl = RENDER_API_URL, fetchImpl 
       if (owners.length === 0) throw new Error("Render API returned no owners for this API key.");
       if (owners.length > 1) {
         const names = owners.map((o) => `${o.name ?? "?"} (${o.id})`).join(", ");
-        throw new Error(`Render API key has multiple owners; set RENDER_OWNER_ID. Options: ${names}`);
+        throw new Error(
+          `Render API key has multiple owners; set RENDER_OWNER_ID. Options: ${names}`,
+        );
       }
       return owners[0].id;
     },
@@ -107,7 +109,11 @@ export function createRenderClient({ apiKey, apiUrl = RENDER_API_URL, fetchImpl 
       const result = await request(`/services/${serviceId}/deploys/${deployId}`);
       return result?.deploy ?? result;
     },
-    async waitForDeploy(serviceId, deployId, { timeoutMs = 900_000, pollMs = 10_000, sleep = defaultSleep } = {}) {
+    async waitForDeploy(
+      serviceId,
+      deployId,
+      { timeoutMs = 900_000, pollMs = 10_000, sleep = defaultSleep } = {},
+    ) {
       const deadline = Date.now() + timeoutMs;
       let last;
       while (Date.now() < deadline) {
@@ -141,7 +147,15 @@ export function serviceHasPreviewTag(service) {
  * The per-PR RUNNER service: builds Dockerfile.runner from this repo at the PR branch,
  * autoDeploy off (the orchestrator triggers deploys for the exact SHA).
  */
-export function buildRunnerServiceSpec({ name, ownerId, repo, branch, env, plan = "starter", region = "frankfurt" }) {
+export function buildRunnerServiceSpec({
+  name,
+  ownerId,
+  repo,
+  branch,
+  env,
+  plan = "starter",
+  region = "frankfurt",
+}) {
   return {
     type: "web_service",
     name,
@@ -162,7 +176,14 @@ export function buildRunnerServiceSpec({ name, ownerId, repo, branch, env, plan 
 }
 
 /** The per-PR ELECTRIC service: runs the public electricsql/electric image. */
-export function buildElectricServiceSpec({ name, ownerId, image = "docker.io/electricsql/electric:latest", env, plan = "starter", region = "frankfurt" }) {
+export function buildElectricServiceSpec({
+  name,
+  ownerId,
+  image = "docker.io/electricsql/electric:latest",
+  env,
+  plan = "starter",
+  region = "frankfurt",
+}) {
   return {
     type: "web_service",
     name,
@@ -184,7 +205,15 @@ export function buildElectricServiceSpec({ name, ownerId, image = "docker.io/ele
  * The per-PR DURABLE STREAMS service: runs the in-memory reference server from this repo.
  * In-memory is acceptable — the transcript is persisted in Postgres (design §4.5).
  */
-export function buildStreamsServiceSpec({ name, ownerId, repo, branch, env = {}, plan = "starter", region = "frankfurt" }) {
+export function buildStreamsServiceSpec({
+  name,
+  ownerId,
+  repo,
+  branch,
+  env = {},
+  plan = "starter",
+  region = "frankfurt",
+}) {
   return {
     type: "web_service",
     name,
