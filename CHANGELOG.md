@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-05
+
+### Added
+- Gmail and Google Calendar are now first-party integrations — connect one or more Google accounts to give agents read-only Gmail and read/write Calendar tools, with per-account calendar selection (#319, #320) — @louis.
+- Switch the model for a single chat on the fly without changing the agent's saved default, in a redesigned composer with a toolbar tray for the agent and model selectors (#331) — @louis.
+- A context-window usage ring in the session top bar shows how full the model's context window is for the current turn (#332) — @louis.
+- Slack Connect — completing onboarding now provisions a private shared Slack channel with our team, surfaced as a "Connect on Slack" card on your workspace home (#278) — @jasper.
+- Tool calls that touch a Linear issue now show an external-link icon that opens the issue directly (#324) — @jasper.
+- Deferred tool discovery — capability tools and coding agents are no longer all preloaded; the model discovers them on demand via `find_tools` and runs them through a `use_tool` dispatcher, improving tool selection and shrinking the cached prompt (#321) — @louis.
+- New shared `@opencompany/ui` component package (shadcn / Tailwind v4) and a design-system app to document and showcase it (#323) — @louis.
+
+### Changed
+- Deferred-tool arguments now run through a validate → coerce → repair pipeline before dispatch, so smaller models' malformed tool calls are fixed automatically instead of failing (#328) — @louis.
+- Brain access scope is now enforced at the tool layer, so out-of-scope Brain writes are rejected up front with a clear error instead of being silently dropped at sync (#327) — @louis.
+- The new-session empty state no longer shows default prompt chips (#315) — @louis.
+- The `/btw` start toast no longer echoes the prompt; it shows just a confirmation and an Open action (#330) — @louis.
+- Faster navigation — removed the route-level session loader that flashed skeletons on fast nav (#303) — @louis.
+- Production deploys are faster and now recover gracefully from interrupted runner deploys (#310, #318) — @louis.
+- Runner model and tool calls are now traced via Braintrust's `wrapAISDK` defaults for richer, lower-maintenance observability (#304) — @louis.
+
+### Fixed
+- Unknown-tool and invalid tool-input calls are now recovered as tool results that steer the model back on track, instead of crashing the turn (#314, #325) — @louis.
+- Fixed a startup-status race that briefly showed "Stopped before finishing" on a freshly started session that was actually still running (#306, #312) — @louis.
+- Runner completions that contain only reasoning and no answer are now rejected instead of recorded as a successful turn (#300) — @louis.
+
+### Security
+- Hardened GitHub permission gating for agent shell commands, closing permission bypasses (#302) — @louis.
+
 ## [0.8.0] - 2026-06-04
 
 ### Added

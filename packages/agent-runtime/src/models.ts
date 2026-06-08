@@ -23,11 +23,19 @@ export type AgentModelDefinition = {
   supportsImages?: boolean;
   supportsPdf?: boolean;
   ratings: ModelRatings;
+  // Max context window in tokens, used to show how full the window is in the UI. These are
+  // per-family estimates for hypothetical/future model ids — replace with confirmed numbers as
+  // they become known. Any model id not found falls back to DEFAULT_CONTEXT_WINDOW_TOKENS.
+  contextWindowTokens: number;
   reasoning?: {
     providerOptions: ModelProviderOptions;
     exposure: ReasoningExposure;
   };
 };
+
+// Fallback context window for an unknown model id (e.g. a session pinned to a model no longer in
+// the catalog). 200k matches the most common frontier window.
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
 
 export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
   gateway: {
@@ -47,6 +55,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-5.4-mini",
     type: "model",
+    contextWindowTokens: 400_000,
     label: "GPT 5.4 Mini",
     description: "Fast GPT model with light thinking for everyday agent work.",
     category: "Fast",
@@ -67,6 +76,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-5.4-nano",
     type: "model",
+    contextWindowTokens: 400_000,
     label: "GPT 5.4 Nano",
     description: "Lowest-cost GPT model for high-volume lightweight agent turns.",
     category: "Fast",
@@ -87,6 +97,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-5.4",
     type: "model",
+    contextWindowTokens: 400_000,
     label: "GPT 5.4",
     description: "Deep thinking GPT model for complex reasoning and long workflows.",
     category: "Deep",
@@ -107,6 +118,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "openai/gpt-5.2-codex",
     type: "model",
+    contextWindowTokens: 400_000,
     label: "GPT 5.2 Codex",
     description: "OpenAI coding model optimized for long-horizon agentic engineering tasks.",
     category: "Deep",
@@ -127,6 +139,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "anthropic/claude-haiku-4.5",
     type: "model",
+    contextWindowTokens: 200_000,
     label: "Claude Haiku 4.5",
     description: "Fast Claude model for lightweight agent workloads.",
     category: "Fast",
@@ -138,6 +151,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "anthropic/claude-sonnet-4.6",
     type: "model",
+    contextWindowTokens: 200_000,
     label: "Claude Sonnet 4.6",
     description: "Deep Claude model for coding and professional work.",
     category: "Deep",
@@ -157,6 +171,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "anthropic/claude-opus-4.7",
     type: "model",
+    contextWindowTokens: 200_000,
     label: "Claude Opus 4.7",
     description: "Highest-capability Claude model for demanding agent workflows.",
     category: "Deep",
@@ -176,6 +191,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "anthropic/claude-opus-4.8",
     type: "model",
+    contextWindowTokens: 200_000,
     label: "Claude Opus 4.8",
     description: "Latest highest-capability Claude model for demanding agent workflows.",
     category: "Deep",
@@ -195,6 +211,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "google/gemini-3-flash",
     type: "model",
+    contextWindowTokens: 1_000_000,
     label: "Gemini 3 Flash",
     description: "Popular Gemini model with strong speed and long-context capacity.",
     category: "Fast",
@@ -206,6 +223,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "google/gemini-3.1-flash-lite-preview",
     type: "model",
+    contextWindowTokens: 1_000_000,
     label: "Gemini 3.1 Flash Lite Preview",
     description: "Very fast, low-cost Gemini model for simple high-volume tasks.",
     category: "Fast",
@@ -217,6 +235,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "deepseek/deepseek-v4-flash",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "DeepSeek V4 Flash",
     description: "High-throughput DeepSeek model for cost-sensitive agent work.",
     category: "Fast",
@@ -228,6 +247,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "mistral/mistral-medium-3.5",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Mistral Medium Latest",
     description: "Popular Mistral model balancing quality, latency, and cost.",
     category: "Deep",
@@ -239,6 +259,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m3",
     type: "model",
+    contextWindowTokens: 1_000_000,
     label: "MiniMax M3",
     description:
       "Latest MiniMax model with 1M context, multimodality, and agentic coding strength.",
@@ -251,6 +272,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2.7",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2.7",
     description: "High-capability MiniMax model for end-to-end software engineering agents.",
     category: "Deep",
@@ -262,6 +284,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2.7-highspeed",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2.7 High Speed",
     description: "Throughput-optimized MiniMax M2.7 variant for latency-sensitive agent work.",
     category: "Fast",
@@ -273,6 +296,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2.5",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2.5",
     description: "MiniMax agentic model for full-stack development and multi-file code work.",
     category: "Deep",
@@ -284,6 +308,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2.5-highspeed",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2.5 High Speed",
     description: "Fast MiniMax M2.5 variant for responsive coding and agent workflows.",
     category: "Fast",
@@ -295,6 +320,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2.1",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2.1",
     description: "MiniMax model for reliable agentic coding with interleaved thinking.",
     category: "Deep",
@@ -306,6 +332,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2.1-lightning",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2.1 Lightning",
     description: "Speed-optimized MiniMax M2.1 variant for fast coding assistance.",
     category: "Fast",
@@ -317,6 +344,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "minimax/minimax-m2",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "MiniMax M2",
     description: "Open-weight MiniMax MoE model built for coding and agentic tasks.",
     category: "Deep",
@@ -328,6 +356,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "moonshotai/kimi-k2.6",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Kimi K2.6",
     description: "Latest Kimi model for long-horizon coding and agent workflows.",
     category: "Deep",
@@ -343,6 +372,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "moonshotai/kimi-k2.5",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Kimi K2.5",
     description: "Kimi multimodal model for agent tasks, coding, and visual understanding.",
     category: "Deep",
@@ -358,6 +388,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "moonshotai/kimi-k2-thinking",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Kimi K2 Thinking",
     description: "Kimi reasoning model for long tool-call chains and explicit deliberation.",
     category: "Deep",
@@ -373,6 +404,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "moonshotai/kimi-k2-thinking-turbo",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Kimi K2 Thinking Turbo",
     description: "Faster Kimi reasoning variant for interactive agent workflows.",
     category: "Fast",
@@ -388,6 +420,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "moonshotai/kimi-k2-turbo",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Kimi K2 Turbo",
     description: "Speed-optimized Kimi K2 variant for latency-sensitive tool use.",
     category: "Fast",
@@ -399,6 +432,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "moonshotai/kimi-k2",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Kimi K2",
     description: "Kimi K2 instruct model for broad coding and agentic pipelines.",
     category: "Deep",
@@ -410,6 +444,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "xai/grok-4.3",
     type: "model",
+    contextWindowTokens: 1_000_000,
     label: "Grok 4.3",
     description: "xAI reasoning model with 1M context, tool use, vision, and web search support.",
     category: "Deep",
@@ -421,6 +456,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "xai/grok-4.20-reasoning",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Grok 4.20 Reasoning",
     description: "Long-context Grok reasoning model for agentic workflows and research.",
     category: "Deep",
@@ -432,6 +468,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "xai/grok-4.20-non-reasoning",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Grok 4.20 Non-Reasoning",
     description: "Long-context Grok model optimized for direct answers and tool calling.",
     category: "Deep",
@@ -443,6 +480,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "xai/grok-4.1-fast-reasoning",
     type: "model",
+    contextWindowTokens: 1_000_000,
     label: "Grok 4.1 Fast Reasoning",
     description: "Fast, low-cost Grok reasoning model with 1M context.",
     category: "Fast",
@@ -454,6 +492,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "xai/grok-4.1-fast-non-reasoning",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Grok 4.1 Fast Non-Reasoning",
     description: "Fast, low-cost Grok model for direct tool-using agent turns.",
     category: "Fast",
@@ -465,6 +504,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "xai/grok-build-0.1",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "Grok Build 0.1",
     description: "xAI coding model trained for fast agentic software development.",
     category: "Fast",
@@ -476,6 +516,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "zai/glm-5.1",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "GLM 5.1",
     description: "Latest GLM model for coding-heavy and agentic engineering tasks.",
     category: "Deep",
@@ -487,6 +528,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "zai/glm-5-turbo",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "GLM 5 Turbo",
     description: "Faster GLM 5 variant for production agent workflows.",
     category: "Fast",
@@ -498,6 +540,7 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
   {
     id: "zai/glm-5v-turbo",
     type: "model",
+    contextWindowTokens: 256_000,
     label: "GLM 5V Turbo",
     description: "Multimodal GLM 5 model tuned for visual coding and GUI tasks.",
     category: "Deep",

@@ -282,6 +282,100 @@ describe("createMcpToolSet", () => {
     expect(mcpClient.close).toHaveBeenCalled();
   });
 
+  it("rejects schema-invalid use_tool arguments locally without calling the server", async () => {
+    const execute = vi.fn(async () => ({ identifier: "OC-123" }));
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    // The catalog's inputSchema comes from the listTools response — that's the schema the
+    // pre-flight validator uses.
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [
+        {
+          name: "create_issue",
+          inputSchema: {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+          },
+        },
+      ],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      create_issue: { description: "Create a Linear issue", execute },
+    });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
+    const useTool = (mcpTools.tools as ToolSet).linear__use_tool;
+    const useInput = { tool: "create_issue", arguments: {} };
+    await useTool?.onInputAvailable?.({
+      input: useInput,
+      toolCallId: "call_invalid",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_invalid");
+    const output = (await useTool?.execute?.(useInput, {
+      toolCallId: "call_invalid",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    })) as { ok: boolean; error: { code: string; message: string; recoverable: boolean } };
+
+    // The server body never ran — the bad payload was caught locally with an actionable error,
+    // distinct from the server-side mcp_tool_execution_failed code.
+    expect(execute).not.toHaveBeenCalled();
+    expect(output.ok).toBe(false);
+    expect(output.error.code).toBe("invalid_tool_input");
+    expect(output.error.recoverable).toBe(true);
+    expect(output.error.message).toContain('missing required "title"');
+    const failed = leaseWrites.appendRuntimeEventForLease.mock.calls
+      .map((call) => call[0] as { type: string; payload: { argResolution?: { surface: string } } })
+      .find((event) => event.type === "tool.failed");
+    expect(failed?.payload.argResolution?.surface).toBe("mcp");
+
+    await mcpTools.close();
+  });
+
+  it("coerces use_tool arguments against the catalog schema before calling the server", async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [
+        {
+          name: "list_issues",
+          inputSchema: {
+            type: "object",
+            properties: { limit: { type: "number" } },
+          },
+        },
+      ],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      list_issues: { description: "List issues", execute },
+    });
+
+    const toolStartCoordinator = createToolStartCoordinator();
+    const mcpTools = await createMcpToolSet(baseInput(agentConfig, toolStartCoordinator));
+    const useTool = (mcpTools.tools as ToolSet).linear__use_tool;
+    const useInput = { tool: "list_issues", arguments: { limit: "5" } };
+    await useTool?.onInputAvailable?.({
+      input: useInput,
+      toolCallId: "call_coerce",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+    toolStartCoordinator.markStarted("call_coerce");
+    await useTool?.execute?.(useInput, {
+      toolCallId: "call_coerce",
+      messages: [],
+      abortSignal: new AbortController().signal,
+    });
+
+    // The string "5" is narrowed to a number before reaching the server body.
+    expect(execute).toHaveBeenCalledWith({ limit: 5 }, { toolCallId: "call_coerce" });
+
+    await mcpTools.close();
+  });
+
   it("lists the server's tools through the search_tools meta-tool", async () => {
     db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({

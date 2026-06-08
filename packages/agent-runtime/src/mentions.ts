@@ -26,6 +26,7 @@ type AgentModelDefinition = {
   category: "Fast" | "Deep";
   supportsReasoning: boolean;
   ratings: ModelRatings;
+  contextWindowTokens: number;
 };
 
 export type AgentConfigDerivationRepository = {
@@ -52,6 +53,7 @@ export const SUPPORTED_AGENT_MODELS: AgentModelDefinition[] = AGENT_MODEL_CATALO
   category: model.category,
   supportsReasoning: model.supportsReasoning,
   ratings: model.ratings,
+  contextWindowTokens: model.contextWindowTokens,
 }));
 
 const TOOL_BY_ID = new Map(SUPPORTED_AGENT_TOOLS.map((tool) => [tool.id, tool]));

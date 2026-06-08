@@ -1,0 +1,7 @@
+/*
+ * The design-system app's only stylesheet. It re-exports the shared
+ * @opencompany/ui styles, which pull in Tailwind, the design tokens, and a
+ * @source directive that scans the ui package. Tailwind auto-detects this app's
+ * own source files from the build root.
+ */
+@import "@opencompany/ui/globals.css";

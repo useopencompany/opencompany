@@ -6,7 +6,7 @@ services:
     autoDeployTrigger: off
     dockerfilePath: ./Dockerfile.runner
     healthCheckPath: /healthz
-    maxShutdownDelaySeconds: 120
+    maxShutdownDelaySeconds: 300
     # `sync: false` only tells Render not to generate these values. Secret values are populated by
     # the Infisical → Render integration, which syncs the prod `/runner` folder into this service.
     # Add new secrets to Infisical (`prod`, path `/runner`); no manual Render dashboard entry needed.
@@ -53,6 +53,11 @@ services:
       - key: APIFY_API_TOKEN
         sync: false
       - key: SUPADATA_API_KEY
+        sync: false
+      # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
       - key: OPENCOMPANY_E2B_TEMPLATE
         sync: false

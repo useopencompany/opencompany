@@ -22,6 +22,7 @@ import {
   createOrConnectSandbox,
   githubRemoteMatches,
   prepareWorkspace,
+  resolveSandboxBrainRelativePath,
   resolveSandboxSkillPath,
   resolveSandboxToolPath,
   runSandboxTool,
@@ -41,10 +42,14 @@ describe("createOrConnectSandbox", () => {
       setTimeout: vi.fn().mockResolvedValue(undefined),
     };
     e2bMocks.create.mockResolvedValue(sandbox);
+    const observations: unknown[] = [];
 
     await createOrConnectSandbox({
       envs: { E2B_API_KEY: "e2b" },
       idleTimeoutMs: 30_000,
+      onLatency: (observation) => {
+        observations.push(observation);
+      },
     });
 
     expect(e2bMocks.create).toHaveBeenCalledWith({
@@ -53,6 +58,14 @@ describe("createOrConnectSandbox", () => {
       lifecycle: { onTimeout: "pause", autoResume: true },
     });
     expect(sandbox.setTimeout).toHaveBeenCalledWith(3_600_000, { requestTimeoutMs: 30_000 });
+    expect(observations).toEqual([
+      expect.objectContaining({
+        operation: "create",
+        outcome: "success",
+        sandboxId: "sbx_new",
+        latencyMs: expect.any(Number),
+      }),
+    ]);
   });
 
   it("resumes existing sandboxes with the active runner timeout", async () => {
@@ -61,11 +74,15 @@ describe("createOrConnectSandbox", () => {
       setTimeout: vi.fn().mockResolvedValue(undefined),
     };
     e2bMocks.connect.mockResolvedValue(sandbox);
+    const observations: unknown[] = [];
 
     const result = await createOrConnectSandbox({
       sandboxId: "sbx_existing",
       envs: {},
       idleTimeoutMs: 30_000,
+      onLatency: (observation) => {
+        observations.push(observation);
+      },
     });
 
     expect(result).toBe(sandbox);
@@ -73,6 +90,15 @@ describe("createOrConnectSandbox", () => {
       timeoutMs: 3_600_000,
       requestTimeoutMs: 30_000,
     });
+    expect(observations).toEqual([
+      expect.objectContaining({
+        operation: "connect",
+        outcome: "success",
+        sandboxId: "sbx_existing",
+        requestedSandboxId: "sbx_existing",
+        latencyMs: expect.any(Number),
+      }),
+    ]);
   });
 
   it("creates a replacement sandbox when the stored sandbox id is stale", async () => {
@@ -82,11 +108,15 @@ describe("createOrConnectSandbox", () => {
     };
     e2bMocks.connect.mockRejectedValue(new Error("sandbox not found"));
     e2bMocks.create.mockResolvedValue(sandbox);
+    const observations: unknown[] = [];
 
     const result = await createOrConnectSandbox({
       sandboxId: "sbx_missing",
       envs: {},
       idleTimeoutMs: 30_000,
+      onLatency: (observation) => {
+        observations.push(observation);
+      },
     });
 
     expect(result).toBe(sandbox);
@@ -95,6 +125,20 @@ describe("createOrConnectSandbox", () => {
       timeoutMs: 30_000,
       lifecycle: { onTimeout: "pause", autoResume: true },
     });
+    expect(observations).toEqual([
+      expect.objectContaining({
+        operation: "connect",
+        outcome: "not_found",
+        requestedSandboxId: "sbx_missing",
+        latencyMs: expect.any(Number),
+      }),
+      expect.objectContaining({
+        operation: "create",
+        outcome: "success",
+        sandboxId: "sbx_replacement",
+        latencyMs: expect.any(Number),
+      }),
+    ]);
   });
 });
 
@@ -355,6 +399,19 @@ describe("resolveSandboxToolPath", () => {
     );
     expect(resolveSandboxToolPath("/home/user/workspace", "brain/foo.md")).toBe(
       "/home/user/workspace/brain/foo.md",
+    );
+  });
+
+  it("resolves brain-relative paths and ignores non-brain roots", () => {
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain/wiki/page.md")).toBe(
+      "wiki/page.md",
+    );
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain")).toBe("");
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "brain/")).toBe("");
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "work/foo.txt")).toBeNull();
+    expect(resolveSandboxBrainRelativePath("/home/user/workspace", "agent/memory.md")).toBeNull();
+    expect(() => resolveSandboxBrainRelativePath("/home/user/workspace", "notes.md")).toThrow(
+      /work\/, brain\/, or agent\//,
     );
   });
 

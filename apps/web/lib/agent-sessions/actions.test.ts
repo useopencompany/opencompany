@@ -13,6 +13,7 @@ import {
 } from "@/lib/agent-sessions/message-runner";
 import { currentWorkspace } from "@/lib/auth";
 import {
+  continueInterruptedSession,
   createAgentSession,
   createAgentSessionFromPrompt,
   resolveToolApproval,
@@ -510,6 +511,121 @@ describe("submitAgentSessionMessage", () => {
 
     expect(result).toEqual({ ok: false, error: "Session not found." });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("continueInterruptedSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+    newAgentSessionMessageIdMock.mockReturnValue("msg_continue");
+  });
+
+  function dbForContinue(session: Record<string, unknown> | null) {
+    const limit = vi.fn().mockResolvedValue(session ? [session] : []);
+    const where = vi.fn(() => ({ limit }));
+    const from = vi.fn(() => ({ where }));
+    const select = vi.fn(() => ({ from }));
+    const returning = vi.fn(() => ({}));
+    const values = vi.fn(() => ({ returning }));
+    const insert = vi.fn(() => ({ values }));
+    const batch = vi
+      .fn()
+      .mockResolvedValue([
+        [{ id: "msg_continue" }],
+        [{ id: 9, createdAt: new Date("2026-06-04T10:00:00.000Z") }],
+      ]);
+    return { db: { select, insert, batch } as never, values };
+  }
+
+  const interruptedSession = {
+    id: "ses_123",
+    agentId: "agt_123",
+    status: "interrupted",
+    runLeaseId: null,
+    modelProvider: "vercel-ai-gateway",
+    modelName: "openai/gpt-5.4-mini",
+  };
+
+  it("rejects inaccessible or archived sessions through the session lookup", async () => {
+    const { db } = dbForContinue(null);
+    getDbMock.mockReturnValue(db);
+
+    const result = await continueInterruptedSession("ses_123");
+
+    expect(result).toEqual({ ok: false, error: "Session not found." });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-interrupted sessions and sessions with an active lease", async () => {
+    const { db: nonInterruptedDb } = dbForContinue({
+      ...interruptedSession,
+      status: "completed",
+    });
+    getDbMock.mockReturnValue(nonInterruptedDb);
+
+    await expect(continueInterruptedSession("ses_123")).resolves.toEqual({
+      ok: false,
+      error: "This session is not interrupted.",
+    });
+
+    const { db: activeLeaseDb } = dbForContinue({
+      ...interruptedSession,
+      runLeaseId: "run_active",
+    });
+    getDbMock.mockReturnValue(activeLeaseDb);
+
+    await expect(continueInterruptedSession("ses_123")).resolves.toEqual({
+      ok: false,
+      error: "This session is still running. Try again shortly.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects no-balance workspaces before dispatching work", async () => {
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+    const { db } = dbForContinue(interruptedSession);
+    getDbMock.mockReturnValue(db);
+
+    const result = await continueInterruptedSession("ses_123");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to continue this session.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("inserts a visible Continue message and dispatches runner work", async () => {
+    const { db, values } = dbForContinue(interruptedSession);
+    getDbMock.mockReturnValue(db);
+
+    const result = await continueInterruptedSession("ses_123");
+
+    expect(result).toEqual({ ok: true, messageId: "msg_continue" });
+    const insertedMessage = values.mock.calls[0]?.[0];
+    expect(insertedMessage).toMatchObject({
+      id: "msg_continue",
+      content: "Continue",
+      modelMessage: {
+        role: "user",
+        content: expect.stringContaining("prior runner process was stopped"),
+      },
+    });
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_continue",
+      workspaceId: "wks_123",
+    });
+    expect(dispatchAgentAfterSessionCheckMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_continue",
+      workspaceId: "wks_123",
+    });
   });
 });
 

@@ -3,6 +3,14 @@ import { parseGitHubCliArgs, resolveWorkspacePath, shellQuote } from "@opencompa
 import { Sandbox } from "e2b";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
+export type SandboxLatencyObservation = {
+  operation: "create" | "connect";
+  outcome: "success" | "not_found" | "error";
+  latencyMs: number;
+  sandboxId?: string;
+  requestedSandboxId?: string;
+  errorName?: string;
+};
 
 const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
@@ -68,17 +76,43 @@ export async function createOrConnectSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
   idleTimeoutMs: number;
+  onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   if (input.sandboxId) {
+    const startedAt = performance.now();
     try {
-      return await Sandbox.connect(input.sandboxId, {
+      const sandbox = await Sandbox.connect(input.sandboxId, {
         timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
         requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
       });
+      emitSandboxLatency(input.onLatency, {
+        operation: "connect",
+        outcome: "success",
+        latencyMs: elapsedMs(startedAt),
+        sandboxId: sandbox.sandboxId,
+        requestedSandboxId: input.sandboxId,
+      });
+      return sandbox;
     } catch (error) {
       if (!isSandboxNotFound(error)) {
+        const name = errorName(error);
+        emitSandboxLatency(input.onLatency, {
+          operation: "connect",
+          outcome: "error",
+          latencyMs: elapsedMs(startedAt),
+          requestedSandboxId: input.sandboxId,
+          ...(name ? { errorName: name } : {}),
+        });
         throw error;
       }
+      const name = errorName(error);
+      emitSandboxLatency(input.onLatency, {
+        operation: "connect",
+        outcome: "not_found",
+        latencyMs: elapsedMs(startedAt),
+        requestedSandboxId: input.sandboxId,
+        ...(name ? { errorName: name } : {}),
+      });
     }
   }
 
@@ -89,6 +123,7 @@ async function createSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
   idleTimeoutMs: number;
+  onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   const options = {
     envs: input.envs,
@@ -99,13 +134,47 @@ async function createSandbox(input: {
     },
   };
 
-  const sandbox = input.template
-    ? await Sandbox.create(input.template, options)
-    : await Sandbox.create(options);
+  const startedAt = performance.now();
+  let sandbox: SandboxHandle;
+  try {
+    sandbox = input.template
+      ? await Sandbox.create(input.template, options)
+      : await Sandbox.create(options);
+    emitSandboxLatency(input.onLatency, {
+      operation: "create",
+      outcome: "success",
+      latencyMs: elapsedMs(startedAt),
+      sandboxId: sandbox.sandboxId,
+    });
+  } catch (error) {
+    const name = errorName(error);
+    emitSandboxLatency(input.onLatency, {
+      operation: "create",
+      outcome: "error",
+      latencyMs: elapsedMs(startedAt),
+      ...(name ? { errorName: name } : {}),
+    });
+    throw error;
+  }
   await sandbox.setTimeout(ACTIVE_SANDBOX_TIMEOUT_MS, {
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
   });
   return sandbox;
+}
+
+function emitSandboxLatency(
+  onLatency: ((observation: SandboxLatencyObservation) => void | Promise<void>) | undefined,
+  observation: SandboxLatencyObservation,
+) {
+  try {
+    void Promise.resolve(onLatency?.(observation)).catch(() => {});
+  } catch {
+    // Analytics must not affect sandbox provisioning.
+  }
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 export async function armSandboxIdleTimeout(sandbox: SandboxHandle, idleTimeoutMs: number) {
@@ -560,6 +629,23 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
   }
 
   throw new Error(allowedRootsMessage);
+}
+
+/**
+ * If a tool path resolves inside the Brain root, return its Brain-relative path
+ * (without the `brain/` prefix; `""` for the Brain root). Returns null when the
+ * path is valid but outside the Brain. Throws the same error as
+ * resolveSandboxToolPath when the path is not in an allowed root at all.
+ */
+export function resolveSandboxBrainRelativePath(
+  workdir: string,
+  inputPath?: string,
+): string | null {
+  const resolved = resolveSandboxToolPath(workdir, inputPath);
+  const relative = relativePath(workdir, resolved);
+  if (relative === "brain") return "";
+  if (relative.startsWith("brain/")) return relative.slice("brain/".length);
+  return null;
 }
 
 export function resolveSandboxSkillPath(workdir: string, skillId: string, inputPath = "SKILL.md") {
