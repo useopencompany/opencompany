@@ -1,5 +1,5 @@
 import type { MemoryDocument, MemoryStatus } from "../schema";
-import { isCanonicalType, isMemoryType, isValidMemoryId } from "../schema";
+import { DEFAULT_RELATION_TYPE, isCanonicalType, isMemoryType, isValidMemoryId } from "../schema";
 import { idExists } from "../store";
 import { nowIso } from "../time";
 import { readStdin } from "./args";
@@ -48,14 +48,16 @@ export async function create(ctx: CommandContext): Promise<CommandResult> {
 
   const now = nowIso();
   const aliases = args.getAll("alias");
-  const related = args.getAll("related").filter(isValidMemoryId);
+  const related = [...new Set(args.getAll("related").filter(isValidMemoryId))].map((target) => ({
+    type: DEFAULT_RELATION_TYPE,
+    target,
+  }));
 
   const doc: MemoryDocument = {
     frontmatter: {
       id,
       type,
       status,
-      freshness: "fresh",
       createdAt: now,
       updatedAt: now,
       related,

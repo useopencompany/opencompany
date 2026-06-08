@@ -1,6 +1,6 @@
 import { extractCitations, parseDocument } from "../document";
 import { idFromRelativePath } from "../paths";
-import type { MemoryStatus, MemoryType } from "../schema";
+import type { MemoryRelation, MemoryStatus, MemoryType } from "../schema";
 import { listFiles } from "../store";
 import { validateDocument } from "../validate";
 
@@ -21,7 +21,8 @@ export type IndexRecord = {
   updatedAt: string;
   capturedAt: string;
   valid: boolean;
-  related: string[];
+  // Outbound typed graph edges (directional) to other memory ids, used for N-hop query expansion.
+  related: MemoryRelation[];
   subjects: string[];
   citations: string[];
 };

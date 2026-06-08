@@ -11,6 +11,7 @@ import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
 import type { CommandResult } from "./io";
+import { link } from "./link";
 import { merge } from "./merge";
 import { query } from "./query";
 import { rewrite } from "./rewrite";
@@ -45,6 +46,11 @@ describe("memory CLI", () => {
     const created = await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme Inc"]);
     expect(created.code).toBe(0);
     expect(data(created).path).toBe("companies/acme.md");
+
+    // New objects start as drafts (uncited scratch) and carry no freshness field.
+    const fm = data(await run(get, ["acme", "--json"])).frontmatter as Record<string, unknown>;
+    expect(fm.status).toBe("draft");
+    expect(fm).not.toHaveProperty("freshness");
 
     const dup = await run(create, ["--type", "company", "--id", "acme"]);
     expect(dup.code).toBe(1);
@@ -86,7 +92,7 @@ describe("memory CLI", () => {
     const after = data(await run(get, ["acme", "--json"]));
     const timeline = after.timeline as Array<{ body: string }>;
     expect(timeline.some((t) => t.body.includes("[^ev:acme-call]"))).toBe(true);
-    // Compiled-truth freshness (updated_at) must be unchanged by evidence capture.
+    // Compiled-truth recency (updated_at) must be unchanged by evidence capture.
     const fmAfter = after.frontmatter as { updatedAt: string };
     expect(fmAfter.updatedAt).toBe((updatedBefore as { updatedAt: string }).updatedAt);
   });
@@ -248,6 +254,61 @@ describe("memory CLI", () => {
     expect(codes).not.toContain("duplicate_alias");
   });
 
+  it("link adds, types, and removes directional related edges on canonical objects", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+    await run(create, ["--type", "person", "--id", "jane"]);
+
+    // Default type is "related".
+    const linked = await run(link, ["acme", "--to", "jane"]);
+    expect(linked.code).toBe(0);
+    expect(data(linked).related).toEqual([{ type: "related", target: "jane" }]);
+
+    // Re-adding the same target updates its type (one edge per target).
+    const retyped = await run(link, ["acme", "--to", "jane", "--as", "employs"]);
+    expect(data(retyped).related).toEqual([{ type: "employs", target: "jane" }]);
+
+    // An invalid type slug is rejected.
+    expect((await run(link, ["acme", "--to", "jane", "--as", "Has Spaces"])).code).toBe(1);
+
+    // Directional: only acme's edges change; jane is untouched.
+    const jane = data(await run(get, ["jane", "--json"]));
+    expect((jane.frontmatter as { related: unknown[] }).related).toEqual([]);
+
+    // Cannot link to a non-existent target, or to self.
+    expect((await run(link, ["acme", "--to", "ghost"])).code).toBe(1);
+    expect((await run(link, ["acme", "--to", "acme"])).code).toBe(1);
+
+    // Removing drops the edge.
+    const removed = await run(link, ["acme", "--remove", "jane"]);
+    expect(removed.code).toBe(0);
+    expect(data(removed).related).toEqual([]);
+  });
+
+  it("query --hops expands the result set along related edges", async () => {
+    await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "acme",
+      "--truth",
+      "Acme is a logistics SaaS customer.",
+    ]);
+    await run(create, ["--type", "person", "--id", "jane-doe", "--truth", "Jane handles ops."]);
+    await run(link, ["acme", "--to", "jane-doe"]);
+
+    // Without hops, a query that only matches acme does not surface jane-doe.
+    const base = await run(query, ["logistics", "--lexical-only"]);
+    const baseIds = (data(base).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(baseIds).toContain("acme");
+    expect(baseIds).not.toContain("jane-doe");
+
+    // With --hops 1, jane-doe is pulled in via the related edge.
+    const expanded = await run(query, ["logistics", "--lexical-only", "--hops", "1"]);
+    const expandedIds = (data(expanded).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(expandedIds).toContain("acme");
+    expect(expandedIds).toContain("jane-doe");
+  });
+
   it("deletes a merged stub cleanly and leaves a healthy tree", async () => {
     await run(create, ["--type", "company", "--id", "acme", "--alias", "Acme"]);
     await run(create, ["--type", "company", "--id", "acme-corp"]);
@@ -291,7 +352,8 @@ describe("memory CLI", () => {
     const deletedAcme = await run(del, ["acme"]);
     expect(deletedAcme.code).toBe(0);
     const jane = data(await run(get, ["jane", "--json"]));
-    expect((jane.frontmatter as { related: string[] }).related).not.toContain("acme");
+    const janeRelated = (jane.frontmatter as { related: Array<{ target: string }> }).related;
+    expect(janeRelated.map((r) => r.target)).not.toContain("acme");
   });
 
   it("rewrite treats a backslash-escaped [^ev:] as literal prose, not a citation", async () => {

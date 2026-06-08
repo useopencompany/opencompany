@@ -9,6 +9,7 @@ import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
 import { type CommandContext, type CommandResult, fail, render } from "./io";
+import { link } from "./link";
 import { merge } from "./merge";
 import { query } from "./query";
 import { rewrite } from "./rewrite";
@@ -20,6 +21,7 @@ const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> 
   "append-evidence": appendEvidence,
   rewrite,
   alias,
+  link,
   merge,
   delete: del,
   doctor,
@@ -42,10 +44,11 @@ Commands:
   rewrite          Update compiled truth (requires [^ev:<id>] citations to linked evidence).
                    Promotes a draft to active once its truth is evidence-backed.
   alias            Add or remove aliases on a canonical object (--add, --remove, repeatable).
+  link             Add or remove directional, typed related edges (--to, --as <type>, --remove).
   merge            Resolve a duplicate canonical object into another (--from, --into, --dry-run).
                    The source id is kept as an alias on the survivor so the old name still resolves.
   delete           Permanently remove a memory file (--force, --dry-run); scrubs inbound links.
-  doctor           Check integrity (--fix-freshness).
+  doctor           Check integrity (broken links, provenance, stale truth, duplicates).
 
 Notes:
   Status lifecycle: draft (uncited scratch) → active (cited) ; deprecated (down-ranked) ; merged (redirect stub).

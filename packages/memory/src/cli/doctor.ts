@@ -2,9 +2,7 @@ import { extractCitations, parseDocument, TIMELINE_HEADING, TRUTH_HEADING } from
 import { typeForFolder } from "../paths";
 import { isCanonicalType, isEvidenceType } from "../schema";
 import { listFiles } from "../store";
-import { nowIso } from "../time";
 import { validateDocument } from "../validate";
-import { persist } from "./common";
 import { type CommandContext, type CommandResult, fail, ok } from "./io";
 
 type Severity = "error" | "warn";
@@ -12,9 +10,9 @@ type Finding = { severity: Severity; code: string; id: string; message: string }
 
 // Walk the whole tree and report integrity problems: missing provenance, duplicate ids/aliases,
 // broken links and citations, orphan evidence, stale compiled truth, type/folder mismatches and
-// malformed bodies. `--fix-freshness` writes back any freshness downgrades it detects.
+// malformed bodies. This is a read-only report — nothing is written back.
 export async function doctor(ctx: CommandContext): Promise<CommandResult> {
-  const { args, root } = ctx;
+  const { root } = ctx;
   const files = await listFiles(root);
   const findings: Finding[] = [];
 
@@ -63,8 +61,6 @@ export async function doctor(ctx: CommandContext): Promise<CommandResult> {
     }
   }
 
-  const freshnessFixes: string[] = [];
-
   for (const file of files) {
     const entry = byId.get(file.id);
     if (!entry) continue;
@@ -103,12 +99,12 @@ export async function doctor(ctx: CommandContext): Promise<CommandResult> {
 
     // Broken related links.
     for (const rel of fm.related ?? []) {
-      if (!byId.has(rel))
+      if (!byId.has(rel.target))
         findings.push({
           severity: "error",
           code: "broken_related",
           id: file.id,
-          message: `Related id "${rel}" does not exist.`,
+          message: `Related id "${rel.target}" (${rel.type}) does not exist.`,
         });
     }
 
@@ -145,19 +141,13 @@ export async function doctor(ctx: CommandContext): Promise<CommandResult> {
 
       // Stale: compiled truth older than the newest evidence about this object.
       const newestEvidence = newestSubjectEvidence(file.id, byId);
-      if (
-        newestEvidence &&
-        fm.updatedAt &&
-        newestEvidence > fm.updatedAt &&
-        fm.freshness !== "stale"
-      ) {
+      if (newestEvidence && fm.updatedAt && newestEvidence > fm.updatedAt) {
         findings.push({
           severity: "warn",
           code: "stale",
           id: file.id,
           message: "Newer evidence exists than the last compiled-truth rewrite.",
         });
-        freshnessFixes.push(file.id);
       }
     }
 
@@ -182,31 +172,15 @@ export async function doctor(ctx: CommandContext): Promise<CommandResult> {
     }
   }
 
-  // Apply freshness downgrades if asked.
-  let fixed = 0;
-  if (args.has("fix-freshness") && freshnessFixes.length > 0) {
-    const now = nowIso();
-    for (const id of new Set(freshnessFixes)) {
-      const entry = byId.get(id);
-      if (!entry) continue;
-      const validation = validateDocument(entry.parsed, id);
-      if (!validation.ok) continue;
-      validation.doc.frontmatter.freshness = "stale";
-      validation.doc.frontmatter.updatedAt = entry.parsed.frontmatter.updatedAt ?? now;
-      await persist(root, validation.doc);
-      fixed++;
-    }
-  }
-
   const errors = findings.filter((f) => f.severity === "error");
   const warnings = findings.filter((f) => f.severity === "warn");
-  const summary = `${files.length} files checked — ${errors.length} error(s), ${warnings.length} warning(s)${fixed > 0 ? `, ${fixed} freshness fix(es)` : ""}.`;
+  const summary = `${files.length} files checked — ${errors.length} error(s), ${warnings.length} warning(s).`;
   const text = [
     summary,
     ...findings.map((f) => `  [${f.severity}] ${f.code} (${f.id}): ${f.message}`),
   ].join("\n");
 
-  const result = { summary, findings, fixed };
+  const result = { summary, findings };
   return errors.length > 0 ? fail(text, 1, result) : ok(text, result);
 }
 

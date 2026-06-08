@@ -78,7 +78,7 @@ export async function query(
     }
   }
 
-  // 4) Fuse. With no signal at all (empty query), fall back to a freshness listing.
+  // 4) Fuse. With no signal at all (empty query), fall back to a recency listing.
   const lists = [...lexicalLists, ...(vectorList.length > 0 ? [vectorList] : [])];
   let relevanceById: Map<string, number>;
   if (lists.length === 0) {
@@ -119,7 +119,7 @@ export async function query(
     }
   }
 
-  // 6) Freshness/position blend, then materialize hits.
+  // 6) Recency/position blend, then materialize hits.
   const scored = ordered
     .map(({ id, relevance }) => {
       const record = byId.get(id);
@@ -216,7 +216,7 @@ function buildAdjacency(byId: Map<string, IndexRecord>): Map<string, Set<string>
     (adjacency.get(b) ?? adjacency.set(b, new Set()).get(b))?.add(a);
   };
   for (const record of byId.values()) {
-    for (const rel of record.related) link(record.id, rel);
+    for (const rel of record.related) link(record.id, rel.target);
     for (const cited of record.citations) link(record.id, cited);
     for (const subject of record.subjects) link(record.id, subject);
   }

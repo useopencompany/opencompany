@@ -28,10 +28,8 @@ export async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   const citations = await validateCitations(root, id, truth);
   if (!citations.ok) return fail(citations.error);
 
-  const freshnessInput = args.get("freshness");
   loaded.doc.compiledTruth = truth;
   loaded.doc.frontmatter.updatedAt = nowIso();
-  loaded.doc.frontmatter.freshness = freshnessInput === "aging" ? "aging" : "fresh";
   if (loaded.doc.frontmatter.status === "draft") {
     loaded.doc.frontmatter.status = "active";
   }

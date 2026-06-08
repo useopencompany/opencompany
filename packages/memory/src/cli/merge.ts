@@ -63,10 +63,16 @@ export async function merge(ctx: CommandContext): Promise<CommandResult> {
     [fromId],
     from.doc.frontmatter.aliases ?? [],
   );
-  into.doc.frontmatter.related = uniqueMerge(
-    into.doc.frontmatter.related,
-    from.doc.frontmatter.related,
-  ).filter((rel) => rel !== fromId && rel !== intoId);
+  // Union the typed edges, one per target (the survivor's type wins on conflict), dropping any
+  // edge that would point at either side of the merge.
+  const mergedRelations: typeof into.doc.frontmatter.related = [];
+  const seenTargets = new Set<string>();
+  for (const rel of [...into.doc.frontmatter.related, ...from.doc.frontmatter.related]) {
+    if (rel.target === fromId || rel.target === intoId || seenTargets.has(rel.target)) continue;
+    seenTargets.add(rel.target);
+    mergedRelations.push(rel);
+  }
+  into.doc.frontmatter.related = mergedRelations;
   into.doc.frontmatter.updatedAt = now;
   await persist(root, into.doc);
 

@@ -49,6 +49,7 @@ import {
   toPersistedModelMessage,
 } from "./model-messages";
 import { runOpencodeCoderTool } from "./opencode-tool";
+import { runRecallTool } from "./recall-tool";
 import {
   RunAbortError,
   type RunControlCheck,
@@ -598,6 +599,11 @@ export async function executeRuntimeTool(input: {
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "recall") {
+          // Runner-side, no sandbox, no Gateway key: queries Postgres directly, scoped to this
+          // agent + user via the current session row, excluding the live session.
+          return runRecallTool({ sessionId: input.sessionId, args: input.args });
+        }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {
             return {
