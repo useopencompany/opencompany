@@ -19,7 +19,7 @@ export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 
 export type MemoryType = CanonicalType | EvidenceType;
 
-export const STATUS_VALUES = ["active", "deprecated", "merged"] as const;
+export const STATUS_VALUES = ["active", "draft", "deprecated", "merged"] as const;
 export type MemoryStatus = (typeof STATUS_VALUES)[number];
 
 const CANONICAL_TYPE_SET = new Set<string>(CANONICAL_TYPES);

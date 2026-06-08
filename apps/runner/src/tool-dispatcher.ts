@@ -29,6 +29,7 @@ import {
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { publishTransientRuntimeEvent } from "./events";
+import { runFetchTranscriptTool } from "./fetch-transcript-tool";
 import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
@@ -36,6 +37,7 @@ import {
   type HostedToolUsage,
   MissingEnvError,
 } from "./hosted-tools";
+import { runInboxTool } from "./inbox-tool";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,
@@ -48,7 +50,6 @@ import {
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
-import { runInboxTool } from "./inbox-tool";
 import { runOpencodeCoderTool } from "./opencode-tool";
 import { runRecallTool } from "./recall-tool";
 import {
@@ -617,6 +618,11 @@ export async function executeRuntimeTool(input: {
             sessionId: input.sessionId,
             args: input.args,
           });
+        }
+        if (input.definition.name === "fetch_transcript") {
+          // Runner-side, no sandbox: reads the full transcript of a session the caller is allowed
+          // to see (its own past sessions, or the parent it was spawned to review).
+          return runFetchTranscriptTool({ callerSessionId: input.sessionId, args: input.args });
         }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {

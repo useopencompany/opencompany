@@ -16,6 +16,7 @@ export type RuntimeToolName =
   | "inbox_list"
   | "inbox_add"
   | "inbox_update"
+  | "fetch_transcript"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -355,9 +356,12 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
     help: [
       "Run memory subcommands; the agent never sees retrieval credentials — they are injected only into this subprocess.",
-      "Commands: create, get, query, append-evidence, rewrite, merge, doctor. Add --json for machine-readable output.",
+      "Commands: create, get, query, append-evidence, rewrite, alias, link, merge, delete, doctor. Add --json for machine-readable output.",
+      "Status lifecycle: objects start as draft (uncited scratch) and become active once rewrite backs their compiled truth with evidence citations. create --status active requires the truth to already be cited; the normal path is create → append-evidence → rewrite.",
       'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
-      'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5.',
+      "Query before answering questions about people, companies, projects, or past decisions: query \"topic\" --type company --limit 5. For relationship questions add --hops 1 to pull in linked objects (a person's company, a company's decisions). query hides merged stubs and invalid records by default.",
+      "get --section truth|timeline|frontmatter scopes both the text and the --json payload to that part.",
+      "Writes are last-write-wins — do not issue two memory writes against the same object in parallel.",
       "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
     ].join("\n"),
   },
@@ -492,6 +496,28 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       "Only items in the current user's inbox can be updated.",
       "Marking an item done/dismissed stamps it resolved and removes it from the user's inbox view.",
+    ].join("\n"),
+  },
+  {
+    name: "fetch_transcript",
+    kind: "internal",
+    description:
+      "Fetch the full, ordered transcript of one of your past sessions by its session id. Use after `recall` surfaces a relevant session and you want the complete conversation, not just the matching snippets. Read-only; you can only fetch your own sessions (or the session you were asked to review).",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "The id of the session whose transcript to fetch.",
+        },
+      },
+      required: ["sessionId"],
+      additionalProperties: false,
+    },
+    help: [
+      "Returns every visible user and assistant message in the session, in chronological order.",
+      "Scoped to your own sessions with this user; internal/background messages are excluded.",
+      "Pair with recall: recall finds the relevant session, fetch_transcript reads it in full.",
     ].join("\n"),
   },
   {
@@ -2308,7 +2334,8 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
       tool.name === "recall" ||
       tool.name === "inbox_list" ||
       tool.name === "inbox_add" ||
-      tool.name === "inbox_update"
+      tool.name === "inbox_update" ||
+      tool.name === "fetch_transcript"
     ) {
       continue;
     }
@@ -2327,6 +2354,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   if (input.memorySkillEnabled) {
     names.add("memory");
     names.add("recall");
+    names.add("fetch_transcript");
   }
   if (input.personalInboxEnabled) {
     names.add("inbox_list");
@@ -2404,6 +2432,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   inbox_list: "List inbox",
   inbox_add: "Add to inbox",
   inbox_update: "Update inbox item",
+  fetch_transcript: "Fetch transcript",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",
@@ -2507,6 +2536,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "inbox_list",
   "inbox_add",
   "inbox_update",
+  "fetch_transcript",
   "ask_user_question",
   "delegate_to_agent",
   "tool_help",

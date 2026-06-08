@@ -6,10 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
-import {
-  deriveVisibleInbox,
-  type InboxItemPayload,
-} from "@/lib/collections/selectors";
+import { deriveVisibleInbox, type InboxItemPayload } from "@/lib/collections/selectors";
 
 // The personal inbox: a live, flat list of attention items the user's agent posted (via the
 // inbox_add tool, including from scheduled/background runs). The user triages each: Done resolves

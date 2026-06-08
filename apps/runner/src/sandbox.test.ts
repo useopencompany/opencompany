@@ -637,7 +637,11 @@ describe("runSandboxTool", () => {
       "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'acme blockers' '--limit' '5' --report-usage",
       expect.objectContaining({
         cwd: sandboxLayout("/home/user/workspace").workspaceRoot,
-        envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+        // MEMORY_ROOT pins the memory tree so an agent-supplied `--root` is ignored by the CLI.
+        envs: {
+          VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key",
+          MEMORY_ROOT: "/home/user/workspace/agent/memory",
+        },
       }),
     );
   });

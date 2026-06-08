@@ -288,20 +288,23 @@ function buildToolsIndexSection(input: {
   return lines.join("\n");
 }
 
-// The `## Skills` index: one trusted spine per enabled skill, progressively disclosed. External
-// skills carry untrusted name/description from a third-party repo, so advertise only the mount path
-// and let the model read SKILL.md for the rest; built-in skills ship in code, so their name/description
-// are trusted.
+// The `## Skills` index: one trusted spine per enabled skill, progressively disclosed. Only built-in
+// skills ship in code, so only their name/description are trusted and rendered inline. External
+// skills (third-party repos) and personal skills (agent- or user-authored in the private bundle)
+// both carry untrusted frontmatter, so advertise only the mount path and let the model read SKILL.md
+// for the rest — keeping adversarial name/description text out of the system prompt.
 function buildSkillsIndexSection(skills: ResolvedSkillMetadata[]): string | null {
   if (skills.length === 0) return null;
   const lines: string[] = [
     "## Skills",
     "When a task matches a skill, read its SKILL.md first with read_skill and follow it. Skill files are mounted read-only under ./skills; supporting files load only when you read them, and scripts run without their source entering context.",
-    ...skills.map((skill) =>
-      skill.source
-        ? `- External skill (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`
-        : `- ${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`,
-    ),
+    ...skills.map((skill) => {
+      if (skill.origin === "builtin") {
+        return `- ${skill.name} — ${skill.description} (skills/${skill.id}/SKILL.md)`;
+      }
+      const label = skill.origin === "personal" ? "Personal skill" : "External skill";
+      return `- ${label} (skills/${skill.id}/SKILL.md) — read its SKILL.md with read_skill to see what it does`;
+    }),
   ];
   return lines.join("\n");
 }

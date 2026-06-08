@@ -28,29 +28,39 @@ export async function get(ctx: CommandContext): Promise<CommandResult> {
   }
 
   const section = args.get("section") ?? "all";
-  const data = {
+  // Both the human `text` and the machine `data` payload are scoped to the requested section, so
+  // `--section truth --json` returns only the truth — not the whole record with the rest ignored.
+  // Every section keeps `id`/`path` (and `followedFrom`) so the caller always knows what it read.
+  const base = {
     id: parsed.frontmatter.id,
     path: file.relativePath,
     ...(followedFrom ? { followedFrom } : {}),
-    frontmatter: parsed.frontmatter,
-    title: parsed.title,
-    compiledTruth: parsed.compiledTruth,
-    timeline: parsed.timeline,
   };
 
   let text: string;
+  let data: Record<string, unknown>;
   switch (section) {
     case "truth":
       text = parsed.compiledTruth;
+      data = { ...base, title: parsed.title, compiledTruth: parsed.compiledTruth };
       break;
     case "timeline":
       text = parsed.timeline.map((entry) => `### ${entry.at}\n${entry.body}`).join("\n\n");
+      data = { ...base, timeline: parsed.timeline };
       break;
     case "frontmatter":
       text = JSON.stringify(parsed.frontmatter, null, 2);
+      data = { ...base, frontmatter: parsed.frontmatter };
       break;
     default:
       text = file.source;
+      data = {
+        ...base,
+        frontmatter: parsed.frontmatter,
+        title: parsed.title,
+        compiledTruth: parsed.compiledTruth,
+        timeline: parsed.timeline,
+      };
   }
 
   return ok(text, data);

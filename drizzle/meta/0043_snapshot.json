@@ -1,5 +1,5 @@
 {
-  "id": "9b7b3d2e-1453-42b6-a4b7-560c99c357dd",
+  "id": "4e74e46e-48b2-45c5-9a7d-1b6d6229c9fc",
   "prevId": "69dfc7a8-f094-4515-9103-7f32fc2ffd1b",
   "version": "7",
   "dialect": "postgresql",
@@ -450,6 +450,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "child_session_id": {
+          "name": "child_session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "skipped_reason": {
           "name": "skipped_reason",
           "type": "text",
@@ -599,6 +605,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "agent_session_after_session_runs_child_session_id_agent_sessions_id_fk": {
+          "name": "agent_session_after_session_runs_child_session_id_agent_sessions_id_fk",
+          "tableFrom": "agent_session_after_session_runs",
+          "tableTo": "agent_sessions",
+          "columnsFrom": [
+            "child_session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -2987,7 +3006,7 @@
       "checkConstraints": {
         "agent_sessions_source_check": {
           "name": "agent_sessions_source_check",
-          "value": "\"agent_sessions\".\"source\" IN ('user', 'agent')"
+          "value": "\"agent_sessions\".\"source\" IN ('user', 'agent', 'memory')"
         }
       },
       "isRLSEnabled": false
@@ -3781,256 +3800,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.inbox_items": {
-      "name": "inbox_items",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_session_id": {
-          "name": "source_session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "steps": {
-          "name": "steps",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "priority": {
-          "name": "priority",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "due_at": {
-          "name": "due_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "artifact": {
-          "name": "artifact",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
-        },
-        "snoozed_until": {
-          "name": "snoozed_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "dedup_key": {
-          "name": "dedup_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "inbox_items_workspace_user_idx": {
-          "name": "inbox_items_workspace_user_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "inbox_items_status_idx": {
-          "name": "inbox_items_status_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "inbox_items_dedup_idx": {
-          "name": "inbox_items_dedup_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "dedup_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"inbox_items\".\"dedup_key\" IS NOT NULL AND \"inbox_items\".\"status\" IN ('open', 'snoozed')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "inbox_items_workspace_id_workspaces_id_fk": {
-          "name": "inbox_items_workspace_id_workspaces_id_fk",
-          "tableFrom": "inbox_items",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "inbox_items_user_id_users_id_fk": {
-          "name": "inbox_items_user_id_users_id_fk",
-          "tableFrom": "inbox_items",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "inbox_items_source_session_id_agent_sessions_id_fk": {
-          "name": "inbox_items_source_session_id_agent_sessions_id_fk",
-          "tableFrom": "inbox_items",
-          "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "source_session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "inbox_items_status_check": {
-          "name": "inbox_items_status_check",
-          "value": "\"inbox_items\".\"status\" IN ('open', 'snoozed', 'done', 'dismissed')"
-        },
-        "inbox_items_priority_check": {
-          "name": "inbox_items_priority_check",
-          "value": "\"inbox_items\".\"priority\" IS NULL OR \"inbox_items\".\"priority\" IN ('urgent', 'high', 'med', 'low')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.onboarding_responses": {

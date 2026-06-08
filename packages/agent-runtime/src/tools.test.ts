@@ -321,11 +321,19 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     ).not.toContain("opencode_coder");
   });
 
-  it("gates the memory tool on the memory skill being enabled", () => {
-    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("memory");
-    expect(
-      resolveRuntimeToolNamesForConfigTools({ tools: [], memorySkillEnabled: true }),
-    ).toContain("memory");
+  it("gates the memory, recall, and fetch_transcript tools on the memory skill being enabled", () => {
+    const withoutMemory = resolveRuntimeToolNamesForConfigTools({ tools: [] });
+    expect(withoutMemory).not.toContain("memory");
+    expect(withoutMemory).not.toContain("recall");
+    expect(withoutMemory).not.toContain("fetch_transcript");
+
+    const withMemory = resolveRuntimeToolNamesForConfigTools({
+      tools: [],
+      memorySkillEnabled: true,
+    });
+    expect(withMemory).toContain("memory");
+    expect(withMemory).toContain("recall");
+    expect(withMemory).toContain("fetch_transcript");
   });
 
   it("hard-gates the inbox tools to the personal agent", () => {

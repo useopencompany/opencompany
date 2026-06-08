@@ -265,7 +265,7 @@ describe("resolveAgentRuntimeConfig skills section", () => {
     expect(resolved.systemPrompt).toContain(`skills/${SKILL_CREATOR_SKILL_ID}/SKILL.md`);
   });
 
-  test("lists discovered personal skills in the index", () => {
+  test("lists discovered personal skills by mount path without inlining untrusted name/description", () => {
     const resolved = resolveAgentRuntimeConfig({
       agent: baseConfig(),
       personalSkills: [
@@ -278,7 +278,10 @@ describe("resolveAgentRuntimeConfig skills section", () => {
       ],
     });
     expect(resolved.systemPrompt).toContain("skills/weekly-digest/SKILL.md");
-    expect(resolved.systemPrompt).toContain("Weekly digest — Post the Monday digest.");
+    // Personal skills carry agent-/user-authored frontmatter, so only the mount path is advertised —
+    // the name/description must NOT be rendered inline (prompt-injection surface).
+    expect(resolved.systemPrompt).toContain("Personal skill (skills/weekly-digest/SKILL.md)");
+    expect(resolved.systemPrompt).not.toContain("Weekly digest — Post the Monday digest.");
   });
 
   test("personal skills never shadow a built-in id", () => {

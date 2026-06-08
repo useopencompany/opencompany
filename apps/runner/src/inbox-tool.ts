@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { agents, agentSessions, type InboxItemArtifact, inboxItems } from "@opencompany/db/schema";
+import { agentSessions, agents, type InboxItemArtifact, inboxItems } from "@opencompany/db/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "./db";
 
@@ -172,7 +172,10 @@ async function runInboxAdd(
   }
 }
 
-async function runInboxUpdate(scope: SessionScope, args: Record<string, unknown>): Promise<unknown> {
+async function runInboxUpdate(
+  scope: SessionScope,
+  args: Record<string, unknown>,
+): Promise<unknown> {
   const id = typeof args.id === "string" ? args.id.trim() : "";
   if (!id) return invalidInput("inbox_update requires the `id` of the item to update.");
 

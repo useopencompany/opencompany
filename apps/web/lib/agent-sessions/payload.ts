@@ -13,6 +13,9 @@ export type SidebarSessionPayload = {
   id: string;
   title: string;
   status: string;
+  // Where the session originated: "user" (web), "agent" (delegated), "memory" (memory-keeper pass),
+  // or "whatsapp" (messaging channel). Drives the source badge + which surface lists it.
+  source: "user" | "agent" | "memory" | "whatsapp";
   modelName: string;
   lastError: string | null;
   createdAt: string;
@@ -28,7 +31,7 @@ export type AgentSessionPayload = {
   agentPath: string | null;
   title: string;
   status: string;
-  source: "user" | "agent";
+  source: "user" | "agent" | "memory" | "whatsapp";
   modelProvider: string;
   modelName: string;
   parentSessionId: string | null;
@@ -47,6 +50,9 @@ export type RelatedSessionPayload = {
   id: string;
   title: string;
   status: string;
+  // "memory" marks a background memory-keeper pass; the UI labels it distinctly from delegated
+  // ("agent") children. "user" never appears here (those are not related children).
+  source: "user" | "agent" | "memory" | "whatsapp";
   agentName: string;
   agentPath: string | null;
   parentMessageId: string | null;
@@ -193,6 +199,7 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     id: detail.session.id,
     title: detail.session.title,
     status: detail.session.status,
+    source: detail.session.source,
     modelName: detail.session.modelName,
     lastError: detail.session.lastError,
     createdAt: detail.session.createdAt,
@@ -245,12 +252,23 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
     id: readStringField(record, "id"),
     title: readNonEmptyStringField(record, "title"),
     status: readNonEmptyStringField(record, "status"),
+    // Tolerant of payloads cached before `source` was carried on the sidebar shape.
+    source: readOptionalSessionSource(record, "source") ?? "user",
     modelName: readNonEmptyStringField(record, "modelName"),
     lastError: readNullableStringField(record, "lastError"),
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
     starredAt: readNullableStringField(record, "starredAt"),
   };
+}
+
+function readOptionalSessionSource(
+  record: Record<string, unknown>,
+  field: string,
+): "user" | "agent" | "memory" | "whatsapp" | undefined {
+  const value = record[field];
+  if (value === undefined) return undefined;
+  return readSessionSource(record, field);
 }
 
 export function parseAgentSessionDetailPayload(value: unknown): AgentSessionDetailPayload {
@@ -339,6 +357,9 @@ function parseRelatedSessionPayload(value: unknown): RelatedSessionPayload {
     id: readStringField(record, "id"),
     title: readNonEmptyStringField(record, "title"),
     status: readNonEmptyStringField(record, "status"),
+    // Tolerant: payloads cached before the memory-keeper feature lack `source`; treat those as the
+    // generic "user" (they predate any memory pass, so the Memory label simply won't show).
+    source: readSessionSourceOrDefault(record, "source", "user"),
     agentName: readNonEmptyStringField(record, "agentName"),
     agentPath: readNullableStringField(record, "agentPath"),
     parentMessageId: readNullableStringField(record, "parentMessageId"),
@@ -465,10 +486,27 @@ function readNonEmptyStringField(record: Record<string, unknown>, field: string)
   return value;
 }
 
-function readSessionSource(record: Record<string, unknown>, field: string): "user" | "agent" {
+function readSessionSource(
+  record: Record<string, unknown>,
+  field: string,
+): "user" | "agent" | "memory" | "whatsapp" {
   const value = readStringField(record, field);
-  if (value !== "user" && value !== "agent") throw new Error(`Invalid ${field}.`);
+  if (value !== "user" && value !== "agent" && value !== "memory" && value !== "whatsapp") {
+    throw new Error(`Invalid ${field}.`);
+  }
   return value;
+}
+
+function readSessionSourceOrDefault(
+  record: Record<string, unknown>,
+  field: string,
+  fallback: "user" | "agent" | "memory" | "whatsapp",
+): "user" | "agent" | "memory" | "whatsapp" {
+  const value = record[field];
+  if (value === "user" || value === "agent" || value === "memory" || value === "whatsapp") {
+    return value;
+  }
+  return fallback;
 }
 
 function readOptionalStringField(record: Record<string, unknown>, field: string) {

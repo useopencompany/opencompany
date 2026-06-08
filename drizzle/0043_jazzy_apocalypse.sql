@@ -1,0 +1,4 @@
+ALTER TABLE "agent_sessions" DROP CONSTRAINT "agent_sessions_source_check";--> statement-breakpoint
+ALTER TABLE "agent_session_after_session_runs" ADD COLUMN "child_session_id" text;--> statement-breakpoint
+ALTER TABLE "agent_session_after_session_runs" ADD CONSTRAINT "agent_session_after_session_runs_child_session_id_agent_sessions_id_fk" FOREIGN KEY ("child_session_id") REFERENCES "public"."agent_sessions"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_sessions" ADD CONSTRAINT "agent_sessions_source_check" CHECK ("agent_sessions"."source" IN ('user', 'agent', 'memory'));

@@ -39,7 +39,7 @@ export type AgentSessionRow = {
   agent_id: string;
   title: string;
   status: string;
-  source: "user" | "agent";
+  source: "user" | "agent" | "memory" | "whatsapp";
   model_provider: string;
   model_name: string;
   parent_session_id: string | null;

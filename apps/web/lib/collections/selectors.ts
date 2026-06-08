@@ -73,6 +73,7 @@ export function deriveSidebarSessions(
       id: row.id,
       title: row.title,
       status: row.status,
+      source: row.source,
       modelName: row.model_name,
       lastError: row.last_error,
       createdAt: row.created_at,
@@ -134,8 +135,7 @@ export function deriveVisibleInbox(rows: InboxItemRow[], now: number): InboxItem
     .filter(
       (row) =>
         row.status === "open" ||
-        (row.status === "snoozed" &&
-          (!row.snoozed_until || Date.parse(row.snoozed_until) <= now)),
+        (row.status === "snoozed" && (!row.snoozed_until || Date.parse(row.snoozed_until) <= now)),
     )
     .map(inboxRowToPayload)
     .sort((a, b) => {
@@ -212,6 +212,7 @@ function sessionRowToRelated(
     id: row.id,
     title: row.title,
     status: row.status,
+    source: row.source,
     agentName: agent?.name ?? "",
     agentPath: agent?.path ?? null,
     parentMessageId: row.parent_message_id,

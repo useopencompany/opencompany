@@ -170,24 +170,30 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
   const limit = Math.min(Math.max(input.limit ?? RECALL_DEFAULT_LIMIT, 1), RECALL_MAX_LIMIT);
   const excludeSessionId = input.excludeSessionId ?? "";
 
+  // The scope filter (agent_id / user_id / not-the-live-session) is inlined into each search
+  // subquery rather than factored into a shared `scoped` CTE on purpose: a CTE referenced more than
+  // once is materialized by Postgres (an optimization fence), which hides the base table from the
+  // planner and makes the `tsv` GIN and `content` trigram indexes ineligible — forcing a full scan
+  // of every one of the user's chunks per `@@` / `<%` evaluation. Querying the base table directly
+  // in `fts`/`trgm` keeps those indexes usable. `ordered` still scans the user's scoped chunks (it
+  // must, to build the neighbor window), but only via the (agent_id, user_id) index.
   const result = await db.execute(sql`
-    WITH scoped AS (
-      SELECT c.id, c.session_id, c.content, c.role, c.message_created_at, c.sub_index, c.tsv
+    WITH tsq AS (SELECT websearch_to_tsquery('english', ${query}) AS query),
+    fts AS (
+      SELECT c.id, ts_rank_cd(c.tsv, tsq.query) AS rank
+      FROM agent_session_message_chunks c, tsq
+      WHERE c.agent_id = ${input.agentId}
+        AND c.user_id = ${input.userId}
+        AND c.session_id <> ${excludeSessionId}
+        AND tsq.query @@ c.tsv
+    ),
+    trgm AS (
+      SELECT c.id, word_similarity(${query}, c.content) AS sim
       FROM agent_session_message_chunks c
       WHERE c.agent_id = ${input.agentId}
         AND c.user_id = ${input.userId}
         AND c.session_id <> ${excludeSessionId}
-    ),
-    tsq AS (SELECT websearch_to_tsquery('english', ${query}) AS query),
-    fts AS (
-      SELECT s.id, ts_rank_cd(s.tsv, tsq.query) AS rank
-      FROM scoped s, tsq
-      WHERE tsq.query @@ s.tsv
-    ),
-    trgm AS (
-      SELECT s.id, word_similarity(${query}, s.content) AS sim
-      FROM scoped s
-      WHERE ${query} <% s.content
+        AND ${query} <% c.content
     ),
     matches AS (
       SELECT cand.id, COALESCE(fts.rank, 0) + COALESCE(trgm.sim, 0) AS score
@@ -196,12 +202,15 @@ export async function recallSessions<TQuery extends PgQueryResultHKT>(
       LEFT JOIN trgm ON trgm.id = cand.id
     ),
     ordered AS (
-      SELECT s.id, s.session_id, s.content, s.role, s.message_created_at,
+      SELECT c.id, c.session_id, c.content, c.role, c.message_created_at,
              row_number() OVER (
-               PARTITION BY s.session_id ORDER BY s.message_created_at, s.sub_index
+               PARTITION BY c.session_id ORDER BY c.message_created_at, c.sub_index
              ) AS ord
-      FROM scoped s
-      WHERE s.content <> ''
+      FROM agent_session_message_chunks c
+      WHERE c.agent_id = ${input.agentId}
+        AND c.user_id = ${input.userId}
+        AND c.session_id <> ${excludeSessionId}
+        AND c.content <> ''
     ),
     top AS (
       SELECT m.id, m.score, o.session_id, o.ord, o.message_created_at

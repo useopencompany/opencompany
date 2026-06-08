@@ -77,9 +77,9 @@ describe("validateDocument", () => {
   });
 
   it("accepts a typed related edge but rejects a bad target or type", () => {
-    expect(validateDocument(parsed({ related: [{ type: "employs", target: "jane" }] }), "acme").ok).toBe(
-      true,
-    );
+    expect(
+      validateDocument(parsed({ related: [{ type: "employs", target: "jane" }] }), "acme").ok,
+    ).toBe(true);
     expect(
       validateDocument(parsed({ related: [{ type: "employs", target: "Not An Id" }] }), "acme").ok,
     ).toBe(false);

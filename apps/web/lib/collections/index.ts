@@ -7,11 +7,7 @@ import type {
   InboxItemRow,
   SessionStarRow,
 } from "@/lib/collections/types";
-import {
-  completeInboxItem,
-  dismissInboxItem,
-  snoozeInboxItem,
-} from "@/lib/inbox/actions";
+import { completeInboxItem, dismissInboxItem, snoozeInboxItem } from "@/lib/inbox/actions";
 
 /**
  * All client collections for a workspace. Built by a factory (not module

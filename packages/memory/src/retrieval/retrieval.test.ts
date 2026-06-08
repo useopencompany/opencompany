@@ -139,6 +139,69 @@ describe("full hybrid query (fake gateway)", () => {
     expect(hits[0]?.id).toBe("acme");
   });
 
+  it("pulls in a linked neighbor with --hops that the text alone would not surface", async () => {
+    await seed([
+      "--type",
+      "company",
+      "--id",
+      "acme",
+      "--truth",
+      "Acme is a logistics company.",
+      "--related",
+      "sea-expansion",
+    ]);
+    await seed([
+      "--type",
+      "decision",
+      "--id",
+      "sea-expansion",
+      "--truth",
+      "Expand into maritime freight.",
+    ]);
+
+    // "logistics" only matches acme directly.
+    const flat = await query(resolveRoot(root), { text: "logistics", limit: 5, lexicalOnly: true });
+    expect(flat.map((h) => h.id)).toEqual(["acme"]);
+
+    // With one hop, the linked decision is pulled in via acme's `related` edge.
+    const hopped = await query(resolveRoot(root), {
+      text: "logistics",
+      limit: 5,
+      lexicalOnly: true,
+      hops: 1,
+    });
+    expect(hopped.map((h) => h.id)).toContain("sea-expansion");
+    // The direct text hit still ranks above the graph neighbor.
+    expect(hopped[0]?.id).toBe("acme");
+  });
+
+  it("foregrounds the record a query names by alias over an incidental mention", async () => {
+    await seed([
+      "--type",
+      "company",
+      "--id",
+      "shopify-co",
+      "--alias",
+      "Shopify simulation company",
+    ]);
+    await seed([
+      "--type",
+      "decision",
+      "--id",
+      "shopify-sea",
+      "--truth",
+      "Shopify simulation company should expand into SEA.",
+    ]);
+
+    const hits = await query(
+      resolveRoot(root),
+      { text: "Shopify simulation company", limit: 5, lexicalOnly: true },
+      {},
+    );
+    // The company owns that exact alias, so it leads despite the decision also mentioning it.
+    expect(hits[0]?.id).toBe("shopify-co");
+  });
+
   it("degrades to lexical when lexicalOnly is set (providers ignored)", async () => {
     await seed(["--type", "company", "--id", "acme", "--truth", "logistics SaaS"]);
     const gateway = {

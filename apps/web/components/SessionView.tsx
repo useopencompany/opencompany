@@ -3168,6 +3168,11 @@ function RelatedSessionLink({
         <span className="block truncate font-medium">{session.title}</span>
         <span className="block truncate text-[11px] text-ink-subtle">{session.agentName}</span>
       </span>
+      {session.source === "memory" ? (
+        <span className="shrink-0 rounded-sm bg-surface px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+          Memory
+        </span>
+      ) : null}
       <ExternalLink size={11} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
     </Link>
   );
@@ -3284,6 +3289,7 @@ function formatRuntimeDate(value: string) {
 
 function summarizeEvent(event: RuntimeEvent) {
   if (event.type === "after_session.started") return "After-session started";
+  if (event.type === "after_session.spawned") return "Memory pass started";
   if (event.type === "after_session.completed") return "After-session completed";
   if (event.type === "after_session.skipped") {
     return `After-session skipped: ${readString(event.payload.reason)}`;
