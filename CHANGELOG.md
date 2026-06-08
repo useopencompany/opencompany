@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-08
+
+### Added
+- Paste, drag, drop, or pick screenshots, PDFs, and text/code files in the session composer; attachments are validated per model, stored in private Vercel Blob, rendered as compact cards, and inlined into runner model calls (#362) — @jasper.
+- Attached skills now appear in the composer slash menu as `/<command>` entries, using the skill's declared `command` frontmatter when present and inserting the matching `@skill/<id>` mention when selected (#350) — @louis.
+- Brain pages now show when the file was last updated directly in the header, and include a copy button for the page title plus current contents (#355, #358) — @louis, @jasper.
+
+### Changed
+- Session pages now use the session title as the browser tab title, making multiple open chats easier to tell apart (#354) — @louis.
+- Slack Connect support channels now use safer `<customer>-<id8>-x-opencompany` naming, include recovery sweeps for stuck provisioning, and have expanded setup and operations docs (#335) — @jasper.
+
+### Fixed
+- `opencode_coder` timeouts and command failures now preserve partial diffs, persist artifacts, return a resumable opencode session id, and report timeout status instead of dropping the work (#344) — @louis.
+- Long-running tool calls no longer trigger runner job replay and double billing after transient lease gaps; job lease TTL and lease-busy retry ceilings are now configurable (#345) — @louis.
+- Coding sandboxes now configure GitHub git credentials and best-effort ensure `rg` and `bun` are available, so plain git commands, repo search, and tests work more reliably inside sessions (#346) — @louis.
+
 ## [0.9.0] - 2026-06-05
 
 ### Added
