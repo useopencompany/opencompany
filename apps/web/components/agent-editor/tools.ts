@@ -144,6 +144,8 @@ export type AgentSkillCatalogEntry = {
   id: string;
   name: string;
   description: string;
+  /** Slash-command slug from SKILL.md frontmatter, if the skill declares one. */
+  command?: string;
   source?: {
     type: "github" | "skills.sh";
     url: string;
