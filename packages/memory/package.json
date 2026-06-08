@@ -15,6 +15,10 @@
       "types": "./src/schema.ts",
       "default": "./src/schema.ts"
     },
+    "./usage": {
+      "types": "./src/usage.ts",
+      "default": "./src/usage.ts"
+    },
     "./cli-bundle": {
       "types": "./src/generated/cli-bundle.ts",
       "default": "./src/generated/cli-bundle.ts"

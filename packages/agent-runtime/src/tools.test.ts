@@ -320,6 +320,13 @@ describe("resolveRuntimeToolNamesForConfigTools", () => {
     ).not.toContain("opencode_coder");
   });
 
+  it("gates the memory tool on the memory skill being enabled", () => {
+    expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("memory");
+    expect(
+      resolveRuntimeToolNamesForConfigTools({ tools: [], memorySkillEnabled: true }),
+    ).toContain("memory");
+  });
+
   it("adds delegate_to_agent only when delegatable agents are present", () => {
     expect(resolveRuntimeToolNamesForConfigTools({ tools: [] })).not.toContain("delegate_to_agent");
     expect(

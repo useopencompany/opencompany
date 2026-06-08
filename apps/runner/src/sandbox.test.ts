@@ -617,6 +617,102 @@ describe("runSandboxTool", () => {
     });
   });
 
+  it("runs the memory CLI from the workspace root with the gateway key scoped to the subprocess", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "1. [company] acme", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: 'query "acme blockers" --limit 5' },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      redactOutput: (value) => value.replaceAll("gw_secret_key", "[redacted]"),
+    });
+
+    expect(sandbox.commands.run).toHaveBeenCalledWith(
+      "bun '/home/user/workspace/skills/memory/memory.js' 'query' 'acme blockers' '--limit' '5' --report-usage",
+      expect.objectContaining({
+        cwd: sandboxLayout("/home/user/workspace").workspaceRoot,
+        envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      }),
+    );
+  });
+
+  it("shell-quotes memory args so a crafted arg cannot break out or read the key", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query foo; env > /tmp/leak" },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+    });
+
+    const [command] = sandbox.commands.run.mock.calls[0] as [string, unknown];
+    // Each crafted token is quoted, so the shell never interprets ; or > as operators.
+    expect(command).toBe(
+      "bun '/home/user/workspace/skills/memory/memory.js' 'query' 'foo;' 'env' '>' '/tmp/leak' --report-usage",
+    );
+    // The key only ever reaches the subprocess env, never the command string the agent shaped.
+    expect(command).not.toContain("gw_secret_key");
+  });
+
+  it("redacts the gateway key from streamed and returned memory output", async () => {
+    const onOutput = vi.fn();
+    const sandbox = {
+      commands: {
+        run: vi.fn(async (_command: string, options: { onStderr?: (data: string) => void }) => {
+          options.onStderr?.("calling gateway gw_secret_key\n");
+          return { stdout: "ok gw_secret_key", stderr: "warn gw_secret_key", exitCode: 0 };
+        }),
+      },
+    };
+
+    const result = await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "memory",
+      args: { args: "query acme" },
+      envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
+      redactOutput: (value) => value.replaceAll("gw_secret_key", "[redacted]"),
+      onOutput,
+    });
+
+    expect(onOutput).toHaveBeenCalledWith("stderr", "calling gateway [redacted]\n");
+    expect(result).toEqual({
+      stdout: "ok [redacted]",
+      stderr: "warn [redacted]",
+      exitCode: 0,
+    });
+  });
+
+  it("rejects malformed memory arguments before dispatching", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+    };
+
+    await expect(
+      runSandboxTool({
+        sandbox: sandbox as never,
+        workdir: "/home/user/workspace",
+        name: "memory",
+        args: { args: "query 'unterminated" },
+      }),
+    ).rejects.toThrow(/empty or malformed/);
+    expect(sandbox.commands.run).not.toHaveBeenCalled();
+  });
+
   it("creates parent directories before writing nested files", async () => {
     const sandbox = {
       commands: {

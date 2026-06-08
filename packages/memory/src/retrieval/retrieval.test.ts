@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseArgs } from "../cli/args";
 import { create } from "../cli/create";
 import { resolveRoot } from "../store";
-import { createGateway, parseJsonStringArray } from "./gateway";
+import { createGateway, type GatewayUsageEntry, parseJsonStringArray } from "./gateway";
 import { query } from "./index";
 import { buildProviders, loadProviders } from "./providers";
 
@@ -47,6 +47,55 @@ describe("gateway (mocked fetch)", () => {
     expect((embedInit as RequestInit | undefined)?.headers).toMatchObject({
       authorization: "Bearer k",
     });
+  });
+
+  it("reports token usage (and Gateway-reported cost) per call via onUsage", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).endsWith("/embeddings")) {
+        return new Response(
+          JSON.stringify({
+            data: [{ embedding: [1, 0] }],
+            usage: { prompt_tokens: 12, total_tokens: 12 },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '["a"]' } }],
+          usage: { prompt_tokens: 30, completion_tokens: 7, total_tokens: 37, cost: 0.0009 },
+        }),
+        { status: 200 },
+      );
+    });
+    const entries: GatewayUsageEntry[] = [];
+    const gateway = createGateway({
+      apiKey: "k",
+      fetch: fetchMock as unknown as typeof fetch,
+      onUsage: (entry) => entries.push(entry),
+    });
+
+    await gateway.embed(["hi"]);
+    await gateway.chat("q");
+
+    expect(entries).toEqual([
+      {
+        model: "openai/text-embedding-3-small",
+        operation: "embeddings",
+        inputTokens: 12,
+        outputTokens: 0,
+        totalTokens: 12,
+        costUsd: null,
+      },
+      {
+        model: "openai/gpt-5.4-nano",
+        operation: "chat",
+        inputTokens: 30,
+        outputTokens: 7,
+        totalTokens: 37,
+        costUsd: 0.0009,
+      },
+    ]);
   });
 });
 

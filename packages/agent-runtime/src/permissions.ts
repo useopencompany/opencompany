@@ -305,6 +305,9 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   edit_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // shell can run anything, so it is the most restrictive system group.
   shell: { providerKey: SYSTEM_PROVIDER_KEY, group: "admin" },
+  // memory only touches the sandbox-local agent/memory/ tree and the routed Gateway; it is a
+  // first-party, parsed-argv tool (no shell breakout), so it stays in the ungated system group.
+  memory: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   // GitHub-effecting tools. gh is conservatively admin unless resolveToolDecision
   // can classify the concrete CLI args; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },

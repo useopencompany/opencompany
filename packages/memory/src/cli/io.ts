@@ -1,12 +1,15 @@
+import type { GatewayUsageEntry } from "../retrieval/gateway";
 import type { ParsedArgs } from "./args";
 
 // Shared shape every command returns. `data` is the machine payload (printed under --json);
 // `text` is the human-readable rendering. `code` is the process exit code: 0 ok, 1 guardrail
-// failure, 2 not found.
+// failure, 2 not found. `usage` is the model-backed retrieval footprint, surfaced out-of-band for
+// session billing (never rendered to the model) — see src/usage.ts.
 export type CommandResult = {
   code: number;
   data: unknown;
   text: string;
+  usage?: GatewayUsageEntry[];
 };
 
 export type CommandContext = {

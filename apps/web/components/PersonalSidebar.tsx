@@ -6,6 +6,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Blocks,
+  Bot,
   ChevronDown,
   FileText,
   Folder,
@@ -19,7 +20,9 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
+import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
@@ -96,9 +99,11 @@ function baseName(path: string) {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
-// The agent definition (AGENTS.md) always exists — it's the agent's instructions — so this
-// row is never dimmed. Clicking it opens the Behavior editor (the definition's editable body).
-// The tooltip shows the real bundle path it maps to.
+// The agent definition (the `.agent` file) always exists — it's the agent's instructions — so
+// this row is never dimmed. We show its real filename (e.g. "leo.agent") and a distinct Bot icon
+// so the `.agent` format reads as the agent's identity rather than just another context file.
+// Clicking it opens the Behavior editor (the definition's editable body); the tooltip shows the
+// full bundle path it maps to.
 function ContextDefinitionRow({
   agentPath,
   active,
@@ -108,9 +113,8 @@ function ContextDefinitionRow({
   active: boolean;
   onClick: () => void;
 }) {
-  const title = agentPath
-    ? `${agentBundleDir(agentPath)}/${agentDefinitionFileNameForPath(agentPath)}`
-    : undefined;
+  const fileName = agentPath ? agentDefinitionFileNameForPath(agentPath) : "agent.agent";
+  const title = agentPath ? `${agentBundleDir(agentPath)}/${fileName}` : undefined;
   return (
     <button
       type="button"
@@ -120,12 +124,12 @@ function ContextDefinitionRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      <FileText
+      <Bot
         size={14}
         strokeWidth={1.75}
         className={`shrink-0 ${active ? "text-ink" : "text-ink/55"}`}
       />
-      <span className="truncate tracking-[-0.005em]">AGENTS.md</span>
+      <span className="truncate tracking-[-0.005em]">{fileName}</span>
     </button>
   );
 }
@@ -337,6 +341,7 @@ export type PersonalSidebarProps = {
   initialSessions: SidebarSession[];
   contextFiles: ContextFile[];
   config: AgentConfig;
+  githubRequested: boolean;
   activeSessionId: string | null;
   activePanel: PersonalPanel | null;
   activeFilePath: string | null;
@@ -360,7 +365,10 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
   );
   const inboxActive = props.activeSessionId === null && props.activePanel === null;
   const skillCount = props.config.skills?.length ?? 0;
-  const integrationCount = props.config.integrations.github.repositories.length;
+  const integrationCount = personalIntegrationCount({
+    config: props.config,
+    githubRequested: props.githubRequested,
+  });
   const toolCount = props.config.tools.length;
 
   return (
@@ -383,6 +391,8 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
         </div>
+
+        <SpaceSwitcher activeSpace="personal" workspaceName={props.workspaceName} />
 
         {/* Primary nav */}
         <nav className="flex flex-col gap-px px-2 pt-1">

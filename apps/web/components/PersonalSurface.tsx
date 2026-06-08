@@ -5,12 +5,16 @@ import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-ru
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, LoaderCircle, PanelLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { Composer } from "@/components/Composer";
 import PersonalSidebar, { type PersonalPanel } from "@/components/PersonalSidebar";
 import { PersonalBehaviorEditor } from "@/components/personal/PersonalBehaviorEditor";
-import { PersonalCapabilityPanel } from "@/components/personal/PersonalCapabilityPanel";
+import {
+  hasPersonalGitHubIntegrationRequest,
+  PersonalCapabilityPanel,
+  type PersonalGitHubIntegrationStatus,
+} from "@/components/personal/PersonalCapabilityPanel";
 import { PersonalContextFileEditor } from "@/components/personal/PersonalContextFileEditor";
 import { PersonalInbox } from "@/components/personal/PersonalInbox";
 import SessionView from "@/components/SessionView";
@@ -24,6 +28,7 @@ import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 const TEXTAREA_MAX_HEIGHT_PX = 220;
 const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
+const sidebarCollapsedSubscribers = new Set<() => void>();
 
 type PersonalAgent = {
   id: string;
@@ -45,6 +50,33 @@ type PersonalView =
   | { kind: "file"; relativePath: string }
   | { kind: "newFile"; prefix: string };
 
+function subscribeSidebarCollapsed(onStoreChange: () => void) {
+  sidebarCollapsedSubscribers.add(onStoreChange);
+
+  function handleStorage(event: StorageEvent) {
+    if (event.key === SIDEBAR_STORAGE_KEY) onStoreChange();
+  }
+
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    sidebarCollapsedSubscribers.delete(onStoreChange);
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
+function getSidebarCollapsedSnapshot() {
+  return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+}
+
+function getSidebarCollapsedServerSnapshot() {
+  return false;
+}
+
+function persistSidebarCollapsed(next: boolean) {
+  window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+  for (const subscriber of sidebarCollapsedSubscribers) subscriber();
+}
+
 export type PersonalSurfaceProps = {
   agent: PersonalAgent;
   userName: string;
@@ -52,6 +84,7 @@ export type PersonalSurfaceProps = {
   workspaceName: string;
   initialSessions: SidebarSessionPayload[];
   contextFiles: AgentBundleFilePayload[];
+  githubIntegrationStatus: PersonalGitHubIntegrationStatus;
 };
 
 // Composer locked to the single personal agent (no agent picker). On submit it creates a
@@ -116,64 +149,64 @@ function PersonalComposer({
       }}
     >
       <Composer
-            variant="expanded"
-            error={error}
-            input={
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    submit();
-                  }
-                }}
-                onPaste={(event) => {
-                  const items = event.clipboardData?.items;
-                  if (!items) return;
-                  const itemArray = Array.from(items);
-                  const hasImage = itemArray.some(
-                    (item) => item.kind === "file" && item.type.startsWith("image/"),
-                  );
-                  if (!hasImage) return;
-                  const hasText = itemArray.some((item) => item.kind === "string");
-                  if (!hasText) event.preventDefault();
-                  showToast({
-                    title: "Image upload coming soon",
-                    description: hasText
-                      ? "The text was pasted; the image was ignored."
-                      : "Image attachments aren't supported yet.",
-                    tone: "default",
-                  });
-                }}
-                rows={1}
-                placeholder={`Message ${agent.name}`}
-                className="min-h-9 w-full resize-none content-center bg-transparent text-[15px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-              />
-            }
-            leftControls={
-              <ModelPicker
-                value={model || DEFAULT_MODEL_ID}
-                fallbackModelId={DEFAULT_MODEL_ID}
-                onChange={(modelId) => setModel(modelId)}
-              />
-            }
-            action={
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-                aria-label={isPending ? "Starting session…" : "Start session"}
-              >
-                {isPending ? (
-                  <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
-                ) : (
-                  <ArrowUp size={13} strokeWidth={2} />
-                )}
-              </button>
-            }
+        variant="expanded"
+        error={error}
+        input={
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            onPaste={(event) => {
+              const items = event.clipboardData?.items;
+              if (!items) return;
+              const itemArray = Array.from(items);
+              const hasImage = itemArray.some(
+                (item) => item.kind === "file" && item.type.startsWith("image/"),
+              );
+              if (!hasImage) return;
+              const hasText = itemArray.some((item) => item.kind === "string");
+              if (!hasText) event.preventDefault();
+              showToast({
+                title: "Image upload coming soon",
+                description: hasText
+                  ? "The text was pasted; the image was ignored."
+                  : "Image attachments aren't supported yet.",
+                tone: "default",
+              });
+            }}
+            rows={1}
+            placeholder={`Message ${agent.name}`}
+            className="min-h-9 w-full resize-none content-center bg-transparent text-[15px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
+            style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+          />
+        }
+        leftControls={
+          <ModelPicker
+            value={model || DEFAULT_MODEL_ID}
+            fallbackModelId={DEFAULT_MODEL_ID}
+            onChange={(modelId) => setModel(modelId)}
+          />
+        }
+        action={
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={isPending ? "Starting session…" : "Start session"}
+          >
+            {isPending ? (
+              <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
+            ) : (
+              <ArrowUp size={13} strokeWidth={2} />
+            )}
+          </button>
+        }
       />
     </form>
   );
@@ -205,12 +238,20 @@ export default function PersonalSurface({
   workspaceName,
   initialSessions,
   contextFiles,
+  githubIntegrationStatus,
 }: PersonalSurfaceProps) {
   const hydrated = useHydrated();
   const [view, setView] = useState<PersonalView>({ kind: "inbox" });
   const [config, setConfig] = useState<AgentConfig>(agent.config);
+  const [githubRequested, setGitHubRequested] = useState(() =>
+    hasPersonalGitHubIntegrationRequest(agent.body),
+  );
   const [files, setFiles] = useState<AgentBundleFilePayload[]>(contextFiles);
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useSyncExternalStore(
+    subscribeSidebarCollapsed,
+    getSidebarCollapsedSnapshot,
+    getSidebarCollapsedServerSnapshot,
+  );
 
   const bundleDir = agent.path ? agentBundleDir(agent.path) : null;
 
@@ -224,25 +265,25 @@ export default function PersonalSurface({
     });
   };
 
-  // The editable behavior lives here, not just in the (immutable) `agent` prop the server
-  // rendered with. The behavior editor unmounts whenever you switch panels, so its seed must
-  // reflect the latest edit — otherwise remounting reseeds it from stale server props and the
-  // change appears lost until a full reload. A ref (not state) keeps this re-render-free: the
-  // editor owns its own DOM, and renderMain() reads the current draft when it remounts.
-  const draftRef = useRef<{ body: string; content: TiptapDoc }>({
+  // The editable behavior lives here, not just in the immutable `agent` prop the server rendered
+  // with. The editor owns per-keystroke rendering; the parent only snapshots that draft when the
+  // Behavior panel opens so remounts do not reseed from stale server props.
+  const initialDraft = {
     body: agent.body,
     content: agent.content,
-  });
-
-  // Restore the persisted collapse preference once on the client. SSR/first render stays
-  // expanded so the markup matches the server HTML, then snaps to the stored value.
-  useEffect(() => {
-    setCollapsed(window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
-  }, []);
+  };
+  const draftRef = useRef<{ body: string; content: TiptapDoc }>(initialDraft);
+  const [behaviorDraft, setBehaviorDraft] = useState<{ body: string; content: TiptapDoc }>(
+    initialDraft,
+  );
 
   const updateCollapsed = (next: boolean) => {
-    setCollapsed(next);
-    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+    persistSidebarCollapsed(next);
+  };
+
+  const openPanel = (panel: PersonalPanel) => {
+    if (panel === "behavior") setBehaviorDraft(draftRef.current);
+    setView({ kind: "panel", panel });
   };
 
   const sessionId = view.kind === "session" ? view.sessionId : null;
@@ -298,12 +339,13 @@ export default function PersonalSurface({
         <div className="h-full overflow-y-auto">
           <PersonalBehaviorEditor
             agentId={agent.id}
-            initialBody={draftRef.current.body || config.instructions}
-            initialContent={draftRef.current.content}
+            initialBody={behaviorDraft.body || config.instructions}
+            initialContent={behaviorDraft.content}
             config={config}
             onConfigChange={setConfig}
             onDraftChange={(body, content) => {
               draftRef.current = { body, content };
+              setGitHubRequested(hasPersonalGitHubIntegrationRequest(body));
             }}
           />
         </div>
@@ -312,7 +354,12 @@ export default function PersonalSurface({
     if (activePanel) {
       return (
         <div className="h-full overflow-y-auto">
-          <PersonalCapabilityPanel section={activePanel} config={config} />
+          <PersonalCapabilityPanel
+            section={activePanel}
+            config={config}
+            githubRequested={githubRequested}
+            githubStatus={githubIntegrationStatus}
+          />
         </div>
       );
     }
@@ -346,6 +393,7 @@ export default function PersonalSurface({
         workspaceName={workspaceName}
         initialSessions={initialSessions}
         contextFiles={files}
+        githubRequested={githubRequested}
         config={config}
         activeSessionId={sessionId}
         activePanel={activePanel}
@@ -354,7 +402,7 @@ export default function PersonalSurface({
         onToggleCollapsed={() => updateCollapsed(!collapsed)}
         onNewSession={() => setView({ kind: "inbox" })}
         onSelectSession={(id) => setView({ kind: "session", sessionId: id })}
-        onSelectPanel={(panel) => setView({ kind: "panel", panel })}
+        onSelectPanel={openPanel}
         onSelectFile={(relativePath) => setView({ kind: "file", relativePath })}
         onNewFile={(prefix) => setView({ kind: "newFile", prefix })}
       />

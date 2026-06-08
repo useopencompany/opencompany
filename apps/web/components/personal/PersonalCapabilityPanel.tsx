@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  extractMentionIds,
   isExternalSkillReference,
   repositoryIdForFullName,
 } from "@opencompany/agent-runtime";
@@ -16,7 +17,8 @@ const SECTION_META: Record<
 > = {
   skills: {
     title: "Skills",
-    description: "Skill packs your agent can load on demand. Add one by @-mentioning it in Behavior.",
+    description:
+      "Skill packs your agent can load on demand. Add one by @-mentioning it in Behavior.",
     empty: "No skills yet. Mention @skill/… in Behavior to add one.",
   },
   integrations: {
@@ -32,16 +34,35 @@ const SECTION_META: Record<
 };
 
 type Row = { id: string; icon: LucideIcon; label: string; description: string };
+type IntegrationRow = Row & {
+  badge?: string;
+  badgeHref?: string;
+};
+
+export type PersonalGitHubIntegrationStatus =
+  | "not_connected"
+  | "connected"
+  | "needs_repository_access"
+  | "needs_reauth"
+  | "sync_failed"
+  | "error";
 
 export function PersonalCapabilityPanel({
   section,
   config,
+  githubRequested,
+  githubStatus,
 }: {
   section: CapabilitySection;
   config: AgentConfig;
+  githubRequested: boolean;
+  githubStatus: PersonalGitHubIntegrationStatus;
 }) {
   const meta = SECTION_META[section];
-  const rows = buildRows(section, config);
+  const rows =
+    section === "integrations"
+      ? buildPersonalIntegrationRows(config, { githubRequested, githubStatus })
+      : buildRows(section, config);
 
   return (
     <div className="mx-auto w-full max-w-[680px] px-6 py-10">
@@ -65,7 +86,7 @@ export function PersonalCapabilityPanel({
   );
 }
 
-function CapabilityRow({ icon: Icon, label, description }: Row) {
+function CapabilityRow({ icon: Icon, label, description, badge, badgeHref }: IntegrationRow) {
   return (
     <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-surface/55 px-3.5 py-3">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
@@ -75,8 +96,65 @@ function CapabilityRow({ icon: Icon, label, description }: Row) {
         <div className="truncate text-[13px] font-medium text-ink">{label}</div>
         <div className="mt-0.5 truncate text-[12px] leading-4 text-ink-muted">{description}</div>
       </div>
+      {badge &&
+        (badgeHref ? (
+          <a
+            href={badgeHref}
+            className="shrink-0 rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[10.5px] font-medium text-warning transition-opacity hover:opacity-80"
+          >
+            {badge}
+          </a>
+        ) : (
+          <span className="shrink-0 rounded-full border border-success-border bg-success-bg px-2 py-0.5 text-[10.5px] font-medium text-success">
+            {badge}
+          </span>
+        ))}
     </div>
   );
+}
+
+export function hasPersonalGitHubIntegrationRequest(body: string) {
+  return extractMentionIds(body).some((id) => id.trim().toLowerCase() === "github");
+}
+
+export function personalIntegrationCount(input: { config: AgentConfig; githubRequested: boolean }) {
+  return input.config.integrations.github.repositories.length + (input.githubRequested ? 1 : 0);
+}
+
+export function buildPersonalIntegrationRows(
+  config: AgentConfig,
+  input: { githubRequested: boolean; githubStatus: PersonalGitHubIntegrationStatus },
+): IntegrationRow[] {
+  const rows: IntegrationRow[] = [];
+  const needsSetup = input.githubStatus !== "connected";
+
+  if (input.githubRequested) {
+    rows.push({
+      id: "github",
+      icon: GitBranch,
+      label: "GitHub",
+      description: needsSetup
+        ? "Set up GitHub in workspace settings before using repositories."
+        : "Workspace GitHub integration is available.",
+      badge: needsSetup ? "Requires setup" : "Connected",
+      ...(needsSetup ? { badgeHref: "/settings/integrations" } : {}),
+    });
+  }
+
+  rows.push(
+    ...config.integrations.github.repositories.map((repository) => ({
+      id: repository.binding
+        ? `${repository.binding.connection.externalId}:${repository.binding.externalId}`
+        : repositoryIdForFullName(repository.fullName),
+      icon: GitBranch,
+      label: repository.fullName,
+      description: repository.binding?.connection.label
+        ? `GitHub · ${repository.binding.connection.label}`
+        : "GitHub repository",
+    })),
+  );
+
+  return rows;
 }
 
 function buildRows(section: CapabilitySection, config: AgentConfig): Row[] {
@@ -100,15 +178,8 @@ function buildRows(section: CapabilitySection, config: AgentConfig): Row[] {
     }));
   }
 
-  const repositories = config.integrations.github.repositories;
-  return repositories.map((repository) => ({
-    id: repository.binding
-      ? `${repository.binding.connection.externalId}:${repository.binding.externalId}`
-      : repositoryIdForFullName(repository.fullName),
-    icon: GitBranch,
-    label: repository.fullName,
-    description: repository.binding?.connection.label
-      ? `GitHub · ${repository.binding.connection.label}`
-      : "GitHub repository",
-  }));
+  return buildPersonalIntegrationRows(config, {
+    githubRequested: false,
+    githubStatus: "not_connected",
+  });
 }

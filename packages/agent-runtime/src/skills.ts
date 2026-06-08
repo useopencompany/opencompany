@@ -370,14 +370,16 @@ description: Maintain durable, evidence-grounded memory across sessions with the
 # Structured memory
 
 You have a persistent, structured memory under \`agent/memory/\` that survives across sessions.
-Manage it **only** through the \`memory\` CLI — do not hand-edit files under \`agent/memory/\` with
-\`edit_file\`/\`write_file\`; the CLI enforces the structure, provenance, and links that keep memory
-trustworthy. (\`agent/memory.md\` remains your freeform scratchpad; the structured tree is separate.)
+Manage it **only** through the \`memory\` tool — do not hand-edit files under \`agent/memory/\` with
+\`edit_file\`/\`write_file\`, and do not run the CLI yourself with \`shell\`; the \`memory\` tool enforces
+the structure, provenance, and links that keep memory trustworthy (and runs model-backed retrieval
+with credentials you never handle). (\`agent/memory.md\` remains your freeform scratchpad; the
+structured tree is separate.)
 
-Run it with Bun:
+Call the \`memory\` tool, passing the subcommand and flags in its \`args\` string:
 
 \`\`\`
-bun skills/${MEMORY_SKILL_ID}/${MEMORY_CLI_FILE} <command> [options]
+memory({ args: '<command> [options]' })
 \`\`\`
 
 Add \`--json\` to any command for machine-readable output.

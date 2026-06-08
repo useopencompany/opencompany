@@ -1,5 +1,10 @@
 import path from "node:path";
-import { parseGitHubCliArgs, resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
+import {
+  MEMORY_CLI_FILE,
+  parseGitHubCliArgs,
+  resolveWorkspacePath,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { Sandbox } from "e2b";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
@@ -389,6 +394,41 @@ export async function runSandboxTool(input: {
     const command = ["gh", ...ghArgv.map(shellQuote)].join(" ");
     const result = await runCommandWithExitResult(input.sandbox, command, {
       cwd: layout.workRoot,
+      ...(input.envs ? { envs: input.envs } : {}),
+      timeoutMs: 120_000,
+      onStdout: async (data: string) => {
+        await input.onOutput?.("stdout", redact(data));
+      },
+      onStderr: async (data: string) => {
+        await input.onOutput?.("stderr", redact(data));
+      },
+    });
+    return truncate({
+      stdout: redact(String(result.stdout ?? "")),
+      stderr: redact(String(result.stderr ?? "")),
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+    });
+  }
+
+  if (input.name === "memory") {
+    const memoryArgv = parseGitHubCliArgs(readString(args, "args"));
+    if (!memoryArgv || memoryArgv.length === 0) {
+      throw new Error("Memory CLI arguments are empty or malformed.");
+    }
+    const layout = sandboxLayout(input.workdir);
+    // The CLI bundle is delivered to the read-only skills mount (see apps/runner/src/skills.ts).
+    // Build the command from the parsed, shell-quoted argv so the agent only controls argv tokens
+    // and cannot break out to read the injected Gateway key. --report-usage makes the CLI emit its
+    // model-backed retrieval footprint on stderr for billing.
+    const cliPath = `${layout.skillsRoot}/memory/${MEMORY_CLI_FILE}`;
+    const command = [
+      "bun",
+      shellQuote(cliPath),
+      ...memoryArgv.map(shellQuote),
+      "--report-usage",
+    ].join(" ");
+    const result = await runCommandWithExitResult(input.sandbox, command, {
+      cwd: layout.workspaceRoot,
       ...(input.envs ? { envs: input.envs } : {}),
       timeoutMs: 120_000,
       onStdout: async (data: string) => {

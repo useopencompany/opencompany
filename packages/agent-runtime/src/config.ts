@@ -13,6 +13,7 @@ import {
 } from "./permissions";
 import {
   AGENT_SELF_EDIT_SKILL_ID,
+  MEMORY_SKILL_ID,
   type ResolvedSkillMetadata,
   resolveEnabledSkillMetadata,
 } from "./skills";
@@ -95,7 +96,7 @@ export function resolveAgentRuntimeConfig(input: {
     "Keep command output concise and explain material changes to the user.",
     "When a request will take more than a few tool calls or roughly twenty seconds, open your reply with one or two plain-language sentences before any tool call: what you are about to do, a rough time estimate, what you will deliver, and what you will save to memory. Offer a useful optional add-on when it fits. For quick replies, skip this and answer directly.",
     "The sandbox has four file roots. Choose where to put something by how long it should last and who needs it: ./work is a temporary scratch directory for this session only (drafts, intermediate files, deliverables, cloned repos) — nothing here survives the session. ./agent is your private agent folder that persists across sessions: keep freeform durable notes in agent/memory.md, plus any other private files worth carrying forward. ./brain is shared company knowledge other agents and people rely on; edit it only via mounted @brain/... refs. ./skills is read-only; open it with read_skill.",
-    "agent/memory/ is structured, evidence-grounded memory (canonical objects + cited evidence). Manage it ONLY through the `memory` CLI, never by editing files there directly; read the memory skill (skill id `memory`) with read_skill before using it.",
+    "agent/memory/ is structured, evidence-grounded memory (canonical objects + cited evidence). Manage it ONLY through the `memory` tool (not shell), never by editing files there directly; read the memory skill (skill id `memory`) with read_skill before using it.",
     "One-off context that won't matter next session belongs in the conversation, not a file. How you behave going forward lives in your .agent definition via self-edit, not these folders.",
     "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/memory.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
@@ -147,6 +148,7 @@ export function resolveAgentRuntimeConfig(input: {
       agents: input.agent.agents,
       repositories,
       selfEditEnabled: skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID),
+      memorySkillEnabled: skills.some((skill) => skill.id === MEMORY_SKILL_ID),
     }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };

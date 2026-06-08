@@ -18,6 +18,7 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("exa_search")).toEqual({ providerKey: "exa", group: "read" });
     expect(classifyRuntimeTool("edit_file")).toEqual({ providerKey: "system", group: "modify" });
     expect(classifyRuntimeTool("shell")).toEqual({ providerKey: "system", group: "admin" });
+    expect(classifyRuntimeTool("memory")).toEqual({ providerKey: "system", group: "read" });
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
     expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "modify" });
     expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
@@ -223,6 +224,11 @@ describe("resolveToolDecision", () => {
     expect(
       resolveToolDecision({ toolName: "exa_search", policy: empty, suspendable: true }).decision,
     ).toBe("allow");
+    expect(resolveToolDecision({ toolName: "memory", policy: empty, suspendable: true })).toEqual({
+      decision: "allow",
+      providerKey: "system",
+      group: "read",
+    });
   });
 
   it("applies the default hybrid stance for gated providers", () => {

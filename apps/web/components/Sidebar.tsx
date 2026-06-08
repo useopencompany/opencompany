@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
 import FeedbackDialog from "@/components/FeedbackDialog";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
+import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useToast } from "@/components/ToastProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -722,6 +723,12 @@ function SidebarContent({
               <PanelLeft size={15} strokeWidth={1.75} />
             </button>
           </div>
+
+          <SpaceSwitcher
+            activeSpace="workspace"
+            workspaceName={workspaceName}
+            workspaceHref={pathname}
+          />
 
           {/* Primary nav */}
           <nav className="flex flex-col gap-px px-2 pt-1">

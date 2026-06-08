@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { resolveRoot } from "../store";
+import { formatMemoryUsageReport } from "../usage";
 import { appendEvidence } from "./append-evidence";
 import { parseArgs } from "./args";
 import { create } from "./create";
@@ -50,6 +51,9 @@ async function main(): Promise<void> {
   const handler = COMMANDS[commandName];
   const args = parseArgs(argv.slice(1));
   const json = args.has("json");
+  // Set by the runner's `memory` tool only. When on, emit the model-backed retrieval footprint as
+  // a trailing sentinel line the runner parses for billing and strips before the model sees it.
+  const reportUsage = args.has("report-usage");
 
   if (!handler) {
     const result = fail(`Unknown command "${commandName}". Run \`memory help\`.`);
@@ -62,6 +66,11 @@ async function main(): Promise<void> {
   try {
     const result = await handler(ctx);
     render(result, json);
+    // The marker goes to stderr, not stdout: it keeps the model-facing result (stdout) pristine and
+    // avoids being dropped if stdout is truncated. The runner parses it off stderr and strips it.
+    if (reportUsage && result.usage && result.usage.length > 0) {
+      process.stderr.write(`${formatMemoryUsageReport(result.usage)}\n`);
+    }
     process.exit(result.code);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -7,6 +7,7 @@ import { ToastProvider } from "@/components/ToastProvider";
 import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
 import { currentWorkspace } from "@/lib/auth";
+import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
 import { loadPersonalAgentContextFiles } from "@/lib/personal/context";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 
@@ -24,9 +25,10 @@ export default async function PersonalPage() {
     name: agentName,
   });
 
-  const [sessions, contextFiles] = await Promise.all([
+  const [sessions, contextFiles, workspaceIntegrations] = await Promise.all([
     loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
     loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
+    loadWorkspaceIntegrationState(),
   ]);
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
@@ -53,6 +55,7 @@ export default async function PersonalPage() {
                 workspaceName={workspace.name}
                 initialSessions={sessions}
                 contextFiles={contextFiles}
+                githubIntegrationStatus={workspaceIntegrations.github.status}
               />
             </ToastProvider>
           </CollectionsProvider>

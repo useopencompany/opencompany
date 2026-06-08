@@ -11,6 +11,7 @@ import type { AgentConfigTool, AgentMcpToolConfig, AgentToolId } from "./types";
 export type RuntimeToolName =
   | "shell"
   | "gh"
+  | "memory"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -328,6 +329,31 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Commands run from ./work. Clone a repository first (git clone or gh repo clone <owner>/<repo> work/<repo>) when you need its code or files.",
       "Use this tool for gh pr create / gh pr view / gh issue list / gh api as needed.",
       "Never push to or open a PR against a repository's default branch directly; always use a feature branch.",
+    ].join("\n"),
+  },
+  {
+    name: "memory",
+    kind: "sandbox",
+    description:
+      "Run the structured `memory` CLI over agent/memory/ — create canonical objects, append cited evidence, rewrite compiled truth, and run hybrid retrieval. This is the only way to read or write structured memory; never edit files under agent/memory/ directly. Pass the subcommand and flags via args (e.g. 'query \"acme blockers\"').",
+    parameters: {
+      type: "object",
+      properties: {
+        args: {
+          type: "string",
+          description:
+            'Arguments passed to the memory CLI, without the leading "memory". Example: \'query "acme enterprise blockers" --limit 5\'.',
+        },
+      },
+      required: ["args"],
+      additionalProperties: false,
+    },
+    help: [
+      "Run memory subcommands; the agent never sees retrieval credentials — they are injected only into this subprocess.",
+      "Commands: create, get, query, append-evidence, rewrite, merge, doctor. Add --json for machine-readable output.",
+      'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
+      'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5.',
+      "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
     ].join("\n"),
   },
   {
@@ -2108,14 +2134,22 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   tools: ReadonlyArray<{ id?: unknown }> | undefined;
   agents?: ReadonlyArray<unknown> | undefined;
   repositories?: ReadonlyArray<unknown> | undefined;
-  // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on.
+  // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on;
+  // `memory` only when the memory skill is on.
   selfEditEnabled?: boolean;
+  memorySkillEnabled?: boolean;
 }) {
   const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
     // Skill- and reference-gated tools are added below, not unconditionally.
-    if (tool.name === "delegate_to_agent" || tool.name === "update_agent_file") continue;
+    if (
+      tool.name === "delegate_to_agent" ||
+      tool.name === "update_agent_file" ||
+      tool.name === "memory"
+    ) {
+      continue;
+    }
     // Unconditional core tools (no configToolId) are always available, except
     // those gated on an attached repository (e.g. gh).
     if (tool.configToolId) continue;
@@ -2126,6 +2160,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   names.add("find_tools");
   if (input.selfEditEnabled) {
     names.add("update_agent_file");
+  }
+  if (input.memorySkillEnabled) {
+    names.add("memory");
   }
 
   const selectedToolIds = new Set(
@@ -2193,6 +2230,7 @@ export const BUILTIN_USE_TOOL_NAME = "use_tool";
 export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   shell: "Run command",
   gh: "GitHub CLI",
+  memory: "Memory",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",
@@ -2290,6 +2328,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "shell",
   "read_skill",
   "gh",
+  "memory",
   "ask_user_question",
   "delegate_to_agent",
   "tool_help",

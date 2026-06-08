@@ -1,13 +1,20 @@
-import { createGateway, type Gateway, parseJsonStringArray } from "./gateway";
+import {
+  createGateway,
+  type Gateway,
+  type GatewayUsageEntry,
+  parseJsonStringArray,
+} from "./gateway";
 import type { RetrievalProviders } from "./index";
 
 // Build the model-backed retrieval stages from the environment. When VERCEL_AI_GATEWAY_API_KEY
 // is present, the full hybrid stack (query expansion + vector + rerank) engages; otherwise this
 // returns {} and `query` runs the offline lexical pipeline. The key is read from the CLI's own
-// environment — see the runner integration note for how it is (or isn't) delivered to the
-// sandbox.
+// environment — the runner injects it only into this subprocess (see apps/runner/src/memory-tool.ts).
+// `onUsage` (optional) receives each Gateway call's token/cost footprint so the caller can report
+// it back to the runner for session billing.
 export async function loadProviders(
   env: NodeJS.ProcessEnv = process.env,
+  onUsage?: (entry: GatewayUsageEntry) => void,
 ): Promise<RetrievalProviders> {
   const apiKey = env.VERCEL_AI_GATEWAY_API_KEY;
   if (!apiKey) return {};
@@ -16,6 +23,7 @@ export async function loadProviders(
     apiKey,
     ...(env.MEMORY_EMBEDDING_MODEL ? { embeddingModel: env.MEMORY_EMBEDDING_MODEL } : {}),
     ...(env.MEMORY_RETRIEVAL_MODEL ? { chatModel: env.MEMORY_RETRIEVAL_MODEL } : {}),
+    ...(onUsage ? { onUsage } : {}),
   });
 
   return buildProviders(gateway);

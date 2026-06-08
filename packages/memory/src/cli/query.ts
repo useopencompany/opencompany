@@ -1,3 +1,4 @@
+import type { GatewayUsageEntry } from "../retrieval/gateway";
 import { query as runQuery } from "../retrieval/index";
 import { loadProviders } from "../retrieval/providers";
 import { isMemoryStatus, isMemoryType, type MemoryType } from "../schema";
@@ -13,7 +14,12 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
   const statusInput = args.get("status");
   const lexicalOnly = args.has("lexical-only");
 
-  const providers = lexicalOnly ? {} : await loadProviders();
+  // Collect the model-backed retrieval footprint so the runner can bill it. Always gathered when
+  // the Gateway stages run; the CLI only emits it on stdout under --report-usage (see index.ts).
+  const usage: GatewayUsageEntry[] = [];
+  const providers = lexicalOnly
+    ? {}
+    : await loadProviders(process.env, (entry) => usage.push(entry));
   const folder = args.get("folder");
   const since = args.get("since");
 
@@ -40,5 +46,5 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
           )
           .join("\n");
 
-  return ok(text_, { count: hits.length, hits });
+  return { ...ok(text_, { count: hits.length, hits }), usage };
 }

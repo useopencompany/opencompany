@@ -485,7 +485,7 @@ export function PersonalInbox({
 
       {remaining === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-surface/35 px-4 py-10 text-center text-[13px] text-ink-muted">
-          You're all caught up. Start something below.
+          You&apos;re all caught up. Start something below.
         </div>
       ) : (
         <div className="relative min-h-[150px]">

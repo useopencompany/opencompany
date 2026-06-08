@@ -62,28 +62,31 @@ export function PersonalBehaviorEditor({
   const persistRef = useRef<
     ((patch: { body: string; content: TiptapDoc }, interactive: boolean) => Promise<void>) | null
   >(null);
-  persistRef.current = async (patch, interactive) => {
-    try {
-      const result = await updatePersonalAgentBehavior(agentId, patch);
-      if (!result.ok) {
+
+  useEffect(() => {
+    persistRef.current = async (patch, interactive) => {
+      try {
+        const result = await updatePersonalAgentBehavior(agentId, patch);
+        if (!result.ok) {
+          if (interactive) {
+            setSaveState("idle");
+            showError(result.error, "Could not save behavior");
+          }
+          return;
+        }
+        onConfigChange(result.config);
+        if (interactive) setSaveState("saved");
+      } catch (error) {
         if (interactive) {
           setSaveState("idle");
-          showError(result.error, "Could not save behavior");
+          showError(
+            error instanceof Error ? error.message : "Could not save behavior",
+            "Could not save behavior",
+          );
         }
-        return;
       }
-      onConfigChange(result.config);
-      if (interactive) setSaveState("saved");
-    } catch (error) {
-      if (interactive) {
-        setSaveState("idle");
-        showError(
-          error instanceof Error ? error.message : "Could not save behavior",
-          "Could not save behavior",
-        );
-      }
-    }
-  };
+    };
+  }, [agentId, onConfigChange, showError]);
 
   const flush = () => {
     const patch = pendingRef.current;

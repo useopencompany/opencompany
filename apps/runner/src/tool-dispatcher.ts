@@ -42,6 +42,7 @@ import {
   requireLeaseWrite,
   StaleRunLeaseError,
 } from "./lease-writes";
+import { runMemoryTool } from "./memory-tool";
 import {
   buildToolModelMessage,
   serializeToolOutputForStorage,
@@ -696,6 +697,22 @@ export async function executeRuntimeTool(input: {
           usage = opencodeResult.usage;
         }
         return opencodeResult;
+      }
+      if (input.definition.name === "memory") {
+        const memoryResult = await runMemoryTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          env: input.env,
+          onOutput: async (stream, delta) => {
+            await input.checkAbort();
+            commandOutput.push(stream, delta);
+          },
+        });
+        if (memoryResult.usage) {
+          usage = memoryResult.usage;
+        }
+        return memoryResult.output;
       }
       const brainSnapshotBefore =
         input.definition.name === "shell"
