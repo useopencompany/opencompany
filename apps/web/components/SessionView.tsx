@@ -729,17 +729,24 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 <div className="flex flex-wrap gap-2">
                   {message.attachments.map((att) =>
                     att.kind === "image" ? (
+                      // Fixed-size, overflow-clipped thumbnail. An unconstrained <img> has no
+                      // dimensions until it loads, so it would reflow/overlap neighboring
+                      // content (especially while the assistant reply streams in). A fixed box
+                      // reserves space up front and never overflows the bubble.
                       <a
                         key={att.id}
                         href={`/api/attachments/${att.id}`}
                         target="_blank"
                         rel="noreferrer"
+                        title={att.filename}
+                        className="block h-28 w-28 shrink-0 overflow-hidden rounded-md border border-ink-subtle/30"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={`/api/attachments/${att.id}`}
                           alt={att.filename}
-                          className="max-h-48 max-w-xs rounded-md border border-ink-subtle/30 object-cover"
+                          loading="lazy"
+                          className="h-full w-full object-cover"
                         />
                       </a>
                     ) : (
