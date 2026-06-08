@@ -298,7 +298,8 @@ every 6h ─► .github/workflows/preview-reaper.yml  (desired = labeled-open PR
   comment, plus GitHub Deployment status when a deployment record exists.
 - **Data:** previews fork from a sanitized `preview-seed` branch, **never** prod `main`
   (no prod PII). DB resets from the seed on every push (deterministic per SHA).
-- **Base secrets:** Infisical `dev`; per-PR dynamic values are minted by the orchestrator.
+- **Base secrets:** Infisical `dev`; runner static runtime secrets currently reuse
+  Infisical `prod` + `/runner`; per-PR dynamic values are minted by the orchestrator.
 - **Safety gate:** `apps/runner/src/preview-guard.ts` refuses to boot a preview runner unless
   the attached Neon endpoint is verified (Neon API) to belong to its `NEON_BRANCH_ID`, and
   refuses to boot a prod runner that carries any preview identity.
@@ -338,7 +339,10 @@ computes — already done for this project).
    `NEON_PROJECT_ID`, `RENDER_API_KEY`, and `VERCEL_TOKEN/ORG_ID/PROJECT_ID` (the same
    `RENDER_API_KEY` / `VERCEL_*` model as the prod release CI; `RENDER_OWNER_ID` is
    optional — auto-resolved from the API). Broaden the OIDC machine identity so the
-   `PR Preview` and `Preview Reaper` workflows may read it.
+   `PR Preview` and `Preview Reaper` workflows may read it. The `PR Preview` workflow also
+   reads runner runtime secrets from `prod` + `/runner` by default
+   (`PREVIEW_RUNNER_INFISICAL_ENV_SLUG` / `PREVIEW_RUNNER_INFISICAL_SECRET_PATH`) so preview
+   runners can boot with E2B, AI Gateway, integration encryption, and GitHub App credentials.
 5. **WorkOS.** On the preview AuthKit env, register wildcard **login** and **sign-out**
    redirects (`https://*.preview.opencompany.cloud/...`) and keep a concrete default (a
    wildcard cannot be the default).

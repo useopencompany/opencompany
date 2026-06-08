@@ -92,6 +92,14 @@ test("runnerServiceEnv carries the preview-identity trio + direct DB + neon cred
     neonApiKey: "neon-key",
     runnerInternalToken: "tok",
     runnerStreamTokenSecret: "stream-secret",
+    runnerRuntimeEnv: {
+      E2B_API_KEY: "e2b-key",
+      VERCEL_AI_GATEWAY_API_KEY: "gateway-key",
+      INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: "encryption-key",
+      DATABASE_URL: "postgresql://prod",
+      RUNNER_ALLOWED_ORIGINS: "https://prod.example.com",
+      OBSERVABILITY_ENV: "production",
+    },
     streamsUrl: "https://streams",
     allowedOrigins: "https://pr-42.preview.opencompany.cloud",
   });
@@ -103,8 +111,13 @@ test("runnerServiceEnv carries the preview-identity trio + direct DB + neon cred
   assert.equal(env.RUNNER_DATABASE_URL, "postgresql://direct");
   assert.equal(env.RUNNER_INTERNAL_TOKEN, "tok");
   assert.equal(env.RUNNER_STREAM_TOKEN_SECRET, "stream-secret");
+  assert.equal(env.E2B_API_KEY, "e2b-key");
+  assert.equal(env.VERCEL_AI_GATEWAY_API_KEY, "gateway-key");
+  assert.equal(env.INTEGRATION_CREDENTIAL_ENCRYPTION_KEY, "encryption-key");
   assert.equal(env.RUNNER_WORKER_CONCURRENCY, "2");
   assert.equal(env.RUNNER_DB_POOL_MAX, "5");
+  assert.equal(env.RUNNER_ALLOWED_ORIGINS, "https://pr-42.preview.opencompany.cloud");
+  assert.equal(env.OBSERVABILITY_ENV, "preview");
 });
 
 test("electricServiceEnv sets secure mode + direct DB; drops empty storage dir", () => {

@@ -95,6 +95,7 @@ export function runnerServiceEnv({
   neonApiKey,
   runnerInternalToken,
   runnerStreamTokenSecret,
+  runnerRuntimeEnv = {},
   streamsUrl,
   streamsToken,
   allowedOrigins,
@@ -102,6 +103,7 @@ export function runnerServiceEnv({
   dbPoolMax = "5",
 }) {
   return compact({
+    ...runnerRuntimeEnv,
     PREVIEW_ENV: "true",
     PREVIEW_PR_NUMBER: pr === undefined ? undefined : String(pr),
     NEON_BRANCH_ID: neonBranchId,

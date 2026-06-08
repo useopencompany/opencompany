@@ -215,8 +215,10 @@ Release-only script vars:
 These power the label-gated per-PR preview stack (issue #351). They are read by the
 `pr-preview.yml` / `preview-reaper.yml` workflows and the `scripts/preview-*.mjs` scripts.
 Provision/orchestration credentials are fetched from Infisical (`dev` + `/release` by
-default, configurable). The web/runner/electric **runtime** values are minted per-PR by
-the orchestrator and are not stored anywhere long-term.
+default, configurable). Runner static runtime secrets are fetched separately from
+Infisical (`prod` + `/runner` by default while previews reuse production service keys).
+The web/runner/electric preview-specific runtime values are minted per-PR by the
+orchestrator and are not stored anywhere long-term.
 
 ### GitHub Actions `preview` environment — repo variables (`vars.*`)
 
@@ -225,6 +227,8 @@ the orchestrator and are not stored anywhere long-term.
 | `PREVIEW_BASE_DOMAIN` | Yes | Wildcard preview domain attached to the Vercel project, e.g. `preview.opencompany.cloud`. Alias = `pr-<n>.<domain>`. |
 | `PREVIEW_INFISICAL_ENV_SLUG` | No | Infisical env for provision creds. Defaults to `dev`. |
 | `PREVIEW_INFISICAL_SECRET_PATH` | No | Infisical path for provision creds. Defaults to `/release`. |
+| `PREVIEW_RUNNER_INFISICAL_ENV_SLUG` | No | Infisical env for runner runtime secrets. Defaults to `prod`. |
+| `PREVIEW_RUNNER_INFISICAL_SECRET_PATH` | No | Infisical path for runner runtime secrets. Defaults to `/runner`. |
 | `PREVIEW_SEED_BRANCH` | No | Neon branch to fork previews from. Defaults to `preview-seed`. |
 | `PREVIEW_NEON_TTL_HOURS` | No | Neon branch TTL backstop. Defaults to `24`. |
 | `PREVIEW_MAX_AGE_HOURS` | No | Reaper hard max age for any preview resource. Defaults to `24`. |
@@ -241,6 +245,15 @@ the orchestrator and are not stored anywhere long-term.
 | `RENDER_API_KEY` | provision/teardown/reaper | Create/destroy per-PR Render services. Same key model as the prod release CI. |
 | `RENDER_OWNER_ID` | provision (optional) | Workspace/owner id for create-service. Auto-resolved from the API when the key has a single workspace; only set it if the key spans multiple. |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | pr-preview.yml | Vercel build/deploy/alias. |
+
+### Runner runtime credentials (Infisical `prod` + `/runner`, fetched via OIDC)
+
+| Var | Used by | Notes |
+|---|---|---|
+| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. The encryption key must match web so preview runners can read seeded encrypted integration credentials. |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | runner | Enables runner Brain sync. |
+| `GITHUB_INTEGRATION_APP_ID`, `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | runner | Enables connected-repository GitHub operations. |
+| Optional runner tool/provider keys | runner | `EXA_API_KEY`, `APIFY_API_TOKEN`, `X_API_BEARER_TOKEN`, `SUPADATA_API_KEY`, `AMP_API_KEY`, Google/Slack OAuth keys, and observability settings are passed through when present. |
 
 ### Per-PR runtime values (minted by the orchestrator, injected — never stored)
 

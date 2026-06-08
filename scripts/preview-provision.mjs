@@ -56,12 +56,45 @@ const renderPlan = process.env.RENDER_PLAN?.trim() || "starter";
 const electricImage = process.env.ELECTRIC_IMAGE?.trim() || "docker.io/electricsql/electric:latest";
 const electricStorageDir = process.env.ELECTRIC_STORAGE_DIR?.trim();
 
+const requiredRunnerRuntimeEnv = requiredEnvMap([
+  "E2B_API_KEY",
+  "VERCEL_AI_GATEWAY_API_KEY",
+  "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
+  "GITHUB_APP_ID",
+  "GITHUB_APP_INSTALLATION_ID",
+  "GITHUB_APP_PRIVATE_KEY",
+  "GITHUB_INTEGRATION_APP_ID",
+  "GITHUB_INTEGRATION_APP_PRIVATE_KEY",
+]);
+const optionalRunnerRuntimeEnv = optionalEnvMap([
+  "EXA_API_KEY",
+  "X_API_BEARER_TOKEN",
+  "APIFY_API_TOKEN",
+  "SUPADATA_API_KEY",
+  "AMP_API_KEY",
+  "OPENCOMPANY_E2B_TEMPLATE",
+  "OPENCOMPANY_AMP_E2B_TEMPLATE",
+  "GOOGLE_OAUTH_CLIENT_ID",
+  "GOOGLE_OAUTH_CLIENT_SECRET",
+  "SLACK_MCP_CLIENT_ID",
+  "SLACK_MCP_CLIENT_SECRET",
+  "BETTER_STACK_ERRORS_DSN",
+  "OBSERVABILITY_ENABLED",
+  "OBSERVABILITY_LOG_LEVEL",
+  "OBSERVABILITY_TIMING",
+  "BRAINTRUST_ENABLED",
+  "BRAINTRUST_API_KEY",
+  "BRAINTRUST_PROJECT_ID",
+  "BRAINTRUST_PROJECT_NAME",
+]);
+
 // Per-PR shared secrets: minted here, injected into both producer and consumer sides.
-const runnerInternalToken = process.env.RUNNER_INTERNAL_TOKEN?.trim() || `pv-${randomUUID()}`;
+const runnerInternalToken =
+  process.env.PREVIEW_RUNNER_INTERNAL_TOKEN?.trim() || `pv-${randomUUID()}`;
 const runnerStreamTokenSecret =
-  process.env.RUNNER_STREAM_TOKEN_SECRET?.trim() || `pv-${randomUUID()}`;
+  process.env.PREVIEW_RUNNER_STREAM_TOKEN_SECRET?.trim() || `pv-${randomUUID()}`;
 const electricSecret = process.env.ELECTRIC_SECRET?.trim() || `pv-${randomUUID()}`;
-const streamsToken = process.env.DURABLE_STREAMS_TOKEN?.trim() || undefined;
+const streamsToken = process.env.PREVIEW_DURABLE_STREAMS_TOKEN?.trim() || `pv-${randomUUID()}`;
 
 const names = previewNames(pr, { baseDomain });
 
@@ -165,6 +198,7 @@ async function main() {
     neonApiKey,
     runnerInternalToken,
     runnerStreamTokenSecret,
+    runnerRuntimeEnv: { ...requiredRunnerRuntimeEnv, ...optionalRunnerRuntimeEnv },
     streamsUrl: streams.url,
     streamsToken,
     allowedOrigins: names.aliasUrl,
@@ -295,6 +329,33 @@ function requireEnv(name) {
     process.exit(1);
   }
   return value;
+}
+function requiredEnvMap(names) {
+  const env = {};
+  const missing = [];
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) {
+      env[name] = value;
+    } else {
+      missing.push(name);
+    }
+  }
+  if (missing.length > 0) {
+    console.error(
+      `Missing required preview runner runtime env vars: ${missing.join(", ")}. Fetch the runner runtime secret path before provisioning previews.`,
+    );
+    process.exit(1);
+  }
+  return env;
+}
+function optionalEnvMap(names) {
+  const env = {};
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) env[name] = value;
+  }
+  return env;
 }
 // Fail fast on a malformed TTL: Number("abc") is NaN, which would silently skip
 // expiration (ttlHours > 0 is false) and write an invalid TTL into the manifest.

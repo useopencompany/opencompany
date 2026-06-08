@@ -31,6 +31,8 @@ env:
   INFISICAL_ENV_SLUG: ${{ vars.PREVIEW_INFISICAL_ENV_SLUG || 'dev' }}
   INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
   INFISICAL_SECRET_PATH: ${{ vars.PREVIEW_INFISICAL_SECRET_PATH || '/release' }}
+  PREVIEW_RUNNER_INFISICAL_ENV_SLUG: ${{ vars.PREVIEW_RUNNER_INFISICAL_ENV_SLUG || 'prod' }}
+  PREVIEW_RUNNER_INFISICAL_SECRET_PATH: ${{ vars.PREVIEW_RUNNER_INFISICAL_SECRET_PATH || '/runner' }}
   PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN }}
   PREVIEW_SEED_BRANCH: ${{ vars.PREVIEW_SEED_BRANCH || 'preview-seed' }}
 
@@ -186,6 +188,16 @@ jobs:
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
           secret-path: ${{ env.INFISICAL_SECRET_PATH }}
+
+      - name: Fetch preview runner runtime secrets from Infisical
+        uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_MACHINE_IDENTITY_ID || secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.PREVIEW_RUNNER_INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: ${{ env.PREVIEW_RUNNER_INFISICAL_SECRET_PATH }}
 
       - name: Provision preview stack (Neon + migrate + Render)
         id: provision
