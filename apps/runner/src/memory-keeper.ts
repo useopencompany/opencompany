@@ -71,7 +71,6 @@ export async function spawnMemoryKeeperSession(input: {
   // Lazy import to keep the static module graph acyclic: jobs.ts imports the agent-loop handlers,
   // and agent-loop imports this file, so a static `./jobs` import here would close the loop.
   const { enqueueRunnerJob } = await import("./jobs");
-  await enqueueRunnerJob({ kind: "start", sessionId: childSessionId });
   await enqueueRunnerJob({ kind: "message", sessionId: childSessionId, messageId: childMessageId });
 
   return { childSessionId, childMessageId };

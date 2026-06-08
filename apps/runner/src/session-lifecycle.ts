@@ -492,6 +492,7 @@ export async function startSession(sessionId: string, env: RunnerEnv) {
     .where(
       and(
         eq(agentSessions.id, sessionId),
+        eq(agentSessions.status, "provisioning"),
         isNull(agentSessions.archivedAt),
         isNull(agentSessions.runLeaseId),
       ),

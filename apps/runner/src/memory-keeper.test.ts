@@ -75,12 +75,9 @@ describe("spawnMemoryKeeperSession", () => {
 
     expect(inserts.some((i) => i.table === agentSessionEvents)).toBe(true);
 
-    // Async boot: provision the sandbox (start) then run the seeded message.
-    expect(jobMocks.enqueueRunnerJob).toHaveBeenNthCalledWith(1, {
-      kind: "start",
-      sessionId: result.childSessionId,
-    });
-    expect(jobMocks.enqueueRunnerJob).toHaveBeenNthCalledWith(2, {
+    // The message job hydrates a sandbox under the run lease only if the memory pass needs one.
+    expect(jobMocks.enqueueRunnerJob).toHaveBeenCalledOnce();
+    expect(jobMocks.enqueueRunnerJob).toHaveBeenCalledWith({
       kind: "message",
       sessionId: result.childSessionId,
       messageId: result.childMessageId,
