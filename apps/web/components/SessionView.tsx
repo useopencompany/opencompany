@@ -836,6 +836,29 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
 
+  // A file dropped anywhere in the window — not just on the composer drop zone — must NOT make
+  // the browser navigate to / open the file (its default). Prevent that window-wide, and route
+  // any in-window file drop into the composer as an attachment.
+  useEffect(() => {
+    const onWindowDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    };
+    const onWindowDrop = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      dragCounterRef.current = 0;
+      setIsDragActive(false);
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length > 0) acceptFiles(files);
+    };
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [acceptFiles]);
+
   // The Durable Stream self-recovers (the client reconnects + resumes from its
   // offset) and refresh/visibility recovery is no longer needed — a refresh
   // replays the whole transcript from the stream.
@@ -1284,14 +1307,12 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               setIsDragActive(false);
             }
           }}
-          onDrop={(event) => {
-            if (!attachmentsEnabled) return;
-            event.preventDefault();
+          onDrop={() => {
+            // The window-level drop handler (see effect above) preventDefaults + accepts, so a
+            // drop anywhere in the app attaches and the browser never opens the file. Here we
+            // only clear the hover overlay (avoids double-accepting the same drop).
             dragCounterRef.current = 0;
             setIsDragActive(false);
-            if (event.dataTransfer.files.length > 0) {
-              acceptFiles(Array.from(event.dataTransfer.files));
-            }
           }}
         >
           {isDragActive ? (
