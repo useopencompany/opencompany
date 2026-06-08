@@ -151,7 +151,7 @@ jobs:
           # Reset-on-synchronize: re-fork the branch from the seed on every new commit so
           # the preview DB is deterministic for the SHA's migrations.
           PREVIEW_RESET: ${{ github.event.action == 'synchronize' }}
-          NEON_BRANCH_TTL_HOURS: ${{ vars.PREVIEW_NEON_TTL_HOURS || '72' }}
+          NEON_BRANCH_TTL_HOURS: ${{ vars.PREVIEW_NEON_TTL_HOURS || '24' }}
           ELECTRIC_STORAGE_DIR: ${{ vars.PREVIEW_ELECTRIC_STORAGE_DIR }}
           RENDER_REGION: ${{ vars.PREVIEW_RENDER_REGION || 'frankfurt' }}
           RENDER_PLAN: ${{ vars.PREVIEW_RENDER_PLAN || 'starter' }}
@@ -273,7 +273,7 @@ jobs:
               "",
               ok ? `<details><summary>Stack</summary>\n\n- Runner: ${process.env.RUNNER_URL}\n- Electric: ${process.env.ELECTRIC_URL}\n- Commit: \`${sha}\`\n\n</details>` : "",
               "",
-              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams). The DB is **reset from the sanitized seed on every push**. Auto-expires via TTL + the reaper (every 6h).",
+              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams). The DB is **reset from the sanitized seed on every push**. Auto-expires ~24h after the last push (Neon TTL + the reaper, every 6h); removing the `preview` label or closing the PR tears it down immediately.",
             ].join("\n");
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER),

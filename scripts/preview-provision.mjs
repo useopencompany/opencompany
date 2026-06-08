@@ -42,7 +42,7 @@ const reset = isTrue(process.env.PREVIEW_RESET);
 const neonApiKey = requireEnv("NEON_API_KEY");
 const neonProjectId = requireEnv("NEON_PROJECT_ID");
 const seedBranch = process.env.PREVIEW_SEED_BRANCH?.trim() || "preview-seed";
-const ttlHours = Number(process.env.NEON_BRANCH_TTL_HOURS ?? "72");
+const ttlHours = Number(process.env.NEON_BRANCH_TTL_HOURS ?? "24");
 
 const renderApiKey = requireEnv("RENDER_API_KEY");
 // Optional: auto-resolved from the API when the key has a single workspace owner.

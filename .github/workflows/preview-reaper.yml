@@ -58,6 +58,6 @@ jobs:
       - name: Reconcile
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PREVIEW_MAX_AGE_HOURS: ${{ vars.PREVIEW_MAX_AGE_HOURS || '72' }}
+          PREVIEW_MAX_AGE_HOURS: ${{ vars.PREVIEW_MAX_AGE_HOURS || '24' }}
           PREVIEW_DRY_RUN: ${{ inputs.dry_run }}
         run: node scripts/preview-reaper.mjs

@@ -18,7 +18,7 @@ const dryRun = process.argv.includes("--dry-run") || isTrue(process.env.PREVIEW_
 const repo = requireEnv("GITHUB_REPOSITORY");
 const githubToken = requireEnv("GITHUB_TOKEN");
 const previewLabel = process.env.PREVIEW_LABEL?.trim() || "preview";
-const maxAgeHours = Number(process.env.PREVIEW_MAX_AGE_HOURS ?? "72");
+const maxAgeHours = Number(process.env.PREVIEW_MAX_AGE_HOURS ?? "24");
 
 const renderApiKey = process.env.RENDER_API_KEY?.trim();
 const neonApiKey = process.env.NEON_API_KEY?.trim();
