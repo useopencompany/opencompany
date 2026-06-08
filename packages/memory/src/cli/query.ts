@@ -22,6 +22,7 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
     : await loadProviders(process.env, (entry) => usage.push(entry));
   const folder = args.get("folder");
   const since = args.get("since");
+  const hops = args.number("hops");
 
   const hits = await runQuery(
     root,
@@ -31,6 +32,9 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
       ...(statusInput && isMemoryStatus(statusInput) ? { status: statusInput } : {}),
       ...(folder ? { folder } : {}),
       ...(since ? { since } : {}),
+      ...(hops !== undefined && hops > 0 ? { hops } : {}),
+      ...(args.has("include-merged") ? { includeMerged: true } : {}),
+      ...(args.has("include-invalid") ? { includeInvalid: true } : {}),
       limit: args.number("limit") ?? 10,
       lexicalOnly,
     },

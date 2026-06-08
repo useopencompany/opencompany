@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -315,6 +315,117 @@ describe("memory CLI", () => {
     ]);
     expect(good.code).toBe(0);
     expect(data(good).cited).toEqual(["syntax-doc"]);
+  });
+
+  it("scopes get --section in the JSON data payload", async () => {
+    await run(create, ["--type", "company", "--id", "acme", "--truth", "Acme is a logistics SaaS."]);
+
+    const truth = data(await run(get, ["acme", "--section", "truth"]));
+    expect(truth.compiledTruth).toBe("Acme is a logistics SaaS.");
+    expect(truth.frontmatter).toBeUndefined();
+    expect(truth.timeline).toBeUndefined();
+
+    const fm = data(await run(get, ["acme", "--section", "frontmatter"]));
+    expect(fm.frontmatter).toBeDefined();
+    expect(fm.compiledTruth).toBeUndefined();
+
+    const all = data(await run(get, ["acme", "--section", "all"]));
+    expect(all.frontmatter).toBeDefined();
+    expect(all.compiledTruth).toBeDefined();
+    expect(all.timeline).toBeDefined();
+  });
+
+  it("enforces the create/rewrite citation contract: uncited truth stays a draft", async () => {
+    // Uncited truth can start life as a draft (scratch)…
+    const draft = await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "acme",
+      "--truth",
+      "Acme is interesting.",
+    ]);
+    expect(draft.code).toBe(0);
+    const draftFm = data(await run(get, ["acme", "--section", "frontmatter"]));
+    expect((draftFm.frontmatter as { status: string }).status).toBe("draft");
+
+    // …but it cannot be born `active` with uncited compiled truth.
+    const activeUncited = await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "globex",
+      "--status",
+      "active",
+      "--truth",
+      "Globex is established.",
+    ]);
+    expect(activeUncited.code).toBe(1);
+
+    // An active stub with no compiled truth is fine.
+    const activeStub = await run(create, ["--type", "company", "--id", "initech", "--status", "active"]);
+    expect(activeStub.code).toBe(0);
+  });
+
+  it("promotes a draft to active when rewrite backs its truth with evidence", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+    await run(appendEvidence, [
+      "--kind",
+      "meeting",
+      "--id",
+      "acme-call",
+      "--subject",
+      "acme",
+      "--source-ref",
+      "gcal://abc",
+    ]);
+
+    const rewritten = await run(rewrite, [
+      "acme",
+      "--truth",
+      "Acme is evaluating enterprise [^ev:acme-call].",
+    ]);
+    expect(rewritten.code).toBe(0);
+    expect(data(rewritten).status).toBe("active");
+
+    const fm = data(await run(get, ["acme", "--section", "frontmatter"]));
+    expect((fm.frontmatter as { status: string }).status).toBe("active");
+  });
+
+  it("query hides merged stubs by default and surfaces them with --include-merged", async () => {
+    await run(create, ["--type", "company", "--id", "acme"]);
+    await run(create, ["--type", "company", "--id", "acme-corp"]);
+    await run(merge, ["--from", "acme-corp", "--into", "acme"]);
+
+    const hidden = await run(query, ["acme-corp", "--lexical-only"]);
+    const hiddenIds = (data(hidden).hits as Array<{ id: string }>).map((h) => h.id);
+    // The survivor resolves the old name (kept as an alias); the merged stub itself is hidden.
+    expect(hiddenIds).toContain("acme");
+    expect(hiddenIds).not.toContain("acme-corp");
+
+    const shown = await run(query, ["acme-corp", "--lexical-only", "--include-merged"]);
+    const shownIds = (data(shown).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(shownIds).toContain("acme-corp");
+  });
+
+  it("query hides records that fail strict validation unless --include-invalid", async () => {
+    await run(create, ["--type", "company", "--id", "acme", "--truth", "Acme makes widgets."]);
+    // A hand-broken file (bad status, missing timestamps) — readable but doctor-invalid.
+    await mkdir(path.join(root, "companies"), { recursive: true });
+    await writeFile(
+      path.join(root, "companies", "broken.md"),
+      "---\nid: broken\ntype: company\nstatus: nonsense\n---\n# Broken widgets\n\n## Compiled truth\nBroken makes widgets too.\n\n## Timeline\n",
+      "utf8",
+    );
+
+    const clean = await run(query, ["widgets", "--lexical-only"]);
+    const cleanIds = (data(clean).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(cleanIds).toContain("acme");
+    expect(cleanIds).not.toContain("broken");
+
+    const withInvalid = await run(query, ["widgets", "--lexical-only", "--include-invalid"]);
+    const withInvalidIds = (data(withInvalid).hits as Array<{ id: string }>).map((h) => h.id);
+    expect(withInvalidIds).toContain("broken");
   });
 
   it("doctor passes on a healthy tree and flags broken links", async () => {

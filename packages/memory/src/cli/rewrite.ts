@@ -1,13 +1,14 @@
-import { extractCitations } from "../document";
-import { isCanonicalType, isEvidenceType } from "../schema";
+import { isCanonicalType } from "../schema";
 import { nowIso } from "../time";
 import { readStdin } from "./args";
-import { loadValid, persist } from "./common";
+import { loadValid, persist, validateCitations } from "./common";
 import { type CommandContext, type CommandResult, fail, notFound, ok } from "./io";
 
 // Update a canonical object's compiled truth. The integrity gate: the new truth must cite
 // evidence with [^ev:<id>] footnotes, every cited evidence must exist, and each must already
-// list this object in its `subjects`. The timeline is never touched here.
+// list this object in its `subjects`. The timeline is never touched here. A successful rewrite
+// also promotes a `draft` to `active`: now that the truth is evidence-backed, it is no longer
+// scratch (the create/rewrite contract — uncited truth lives in draft, cited truth is active).
 export async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   const { args, root } = ctx;
   const id = args.positionals[0] ?? args.get("id");
@@ -24,41 +25,22 @@ export async function rewrite(ctx: CommandContext): Promise<CommandResult> {
   const truth = (args.has("truth-stdin") ? await readStdin() : (args.get("truth") ?? "")).trim();
   if (!truth) return fail("`--truth` (or `--truth-stdin`) is required.");
 
-  const cited = extractCitations(truth);
-  if (cited.length === 0) {
-    return fail(
-      "Compiled truth must cite evidence with [^ev:<evidence-id>] footnotes. Capture evidence first with `memory append-evidence`.",
-    );
-  }
-
-  // Validate each citation: it must resolve to an evidence record that lists this object.
-  for (const evidenceId of cited) {
-    const evidence = await loadValid(root, evidenceId);
-    if (evidence.kind === "missing") {
-      return fail(`Cited evidence "${evidenceId}" does not exist.`);
-    }
-    if (evidence.kind === "invalid") {
-      return fail(`Cited evidence "${evidenceId}" is invalid: ${evidence.errors[0]}`);
-    }
-    if (!isEvidenceType(evidence.doc.frontmatter.type)) {
-      return fail(`Citation "${evidenceId}" is not an evidence record.`);
-    }
-    if (!(evidence.doc.frontmatter.subjects ?? []).includes(id)) {
-      return fail(
-        `Evidence "${evidenceId}" does not list "${id}" as a subject — it cannot back this claim.`,
-      );
-    }
-  }
+  const citations = await validateCitations(root, id, truth);
+  if (!citations.ok) return fail(citations.error);
 
   const freshnessInput = args.get("freshness");
   loaded.doc.compiledTruth = truth;
   loaded.doc.frontmatter.updatedAt = nowIso();
   loaded.doc.frontmatter.freshness = freshnessInput === "aging" ? "aging" : "fresh";
+  if (loaded.doc.frontmatter.status === "draft") {
+    loaded.doc.frontmatter.status = "active";
+  }
 
   const relativePath = await persist(root, loaded.doc);
-  return ok(`Rewrote compiled truth for "${id}" (cited: ${cited.join(", ")}).`, {
+  return ok(`Rewrote compiled truth for "${id}" (cited: ${citations.cited.join(", ")}).`, {
     id,
     path: relativePath,
-    cited,
+    status: loaded.doc.frontmatter.status,
+    cited: citations.cited,
   });
 }

@@ -30,15 +30,26 @@ const HELP = `memory — structured, evidence-first memory for the personal agen
 Usage: memory <command> [options]
 
 Commands:
-  create           Create a canonical object (person|company|project|customer|decision|concept|theme)
-  get              Fetch a memory file (--section truth|timeline|frontmatter|all, --follow)
-  query            Hybrid retrieval over the tree (--type, --status, --folder, --since, --limit, --lexical-only)
-  append-evidence  Record immutable evidence and link it to canonical subjects
-  rewrite          Update compiled truth (requires [^ev:<id>] citations to linked evidence)
-  alias            Add or remove aliases on a canonical object (--add, --remove, repeatable)
-  merge            Resolve a duplicate canonical object into another (--from, --into, --dry-run)
-  delete           Permanently remove a memory file (--force, --dry-run); scrubs inbound links
-  doctor           Check integrity (--fix-freshness)
+  create           Create a canonical object (person|company|project|customer|decision|concept|theme).
+                   New objects start as drafts; --status active with compiled truth requires citations.
+  get              Fetch a memory file (--section truth|timeline|frontmatter|all, --follow).
+                   --section scopes both the text and the --json payload.
+  query            Hybrid retrieval over the tree.
+                   Filters: --type, --status, --folder, --since, --limit, --lexical-only.
+                   --hops N follows related links + citations N steps out, pulling in neighbors.
+                   Hides merged stubs and invalid records by default; --include-merged / --include-invalid opt back in.
+  append-evidence  Record immutable evidence and link it to canonical subjects.
+  rewrite          Update compiled truth (requires [^ev:<id>] citations to linked evidence).
+                   Promotes a draft to active once its truth is evidence-backed.
+  alias            Add or remove aliases on a canonical object (--add, --remove, repeatable).
+  merge            Resolve a duplicate canonical object into another (--from, --into, --dry-run).
+                   The source id is kept as an alias on the survivor so the old name still resolves.
+  delete           Permanently remove a memory file (--force, --dry-run); scrubs inbound links.
+  doctor           Check integrity (--fix-freshness).
+
+Notes:
+  Status lifecycle: draft (uncited scratch) → active (cited) ; deprecated (down-ranked) ; merged (redirect stub).
+  Writes are last-write-wins with no locking — avoid running two writes against the same object in parallel.
 
 Global options:
   --root <path>    Memory root (default: agent/memory)
