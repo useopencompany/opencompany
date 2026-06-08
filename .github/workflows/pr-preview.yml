@@ -146,7 +146,8 @@ jobs:
           # Per-PR dynamic env passed at deploy time as both runtime (-e) and build (-b)
           # vars so NEXT_PUBLIC_* are inlined and server vars are present at runtime,
           # without mutating the shared Vercel Preview env.
-          mapfile -t flags < <(node -e '
+          flags=()
+          while IFS= read -r line; do flags+=("$line"); done < <(node -e '
             const e = JSON.parse(process.env.WEB_ENV || "{}");
             for (const [k, v] of Object.entries(e)) { console.log("-e"); console.log(`${k}=${v}`); console.log("-b"); console.log(`${k}=${v}`); }
           ')

@@ -56,10 +56,13 @@ export function createNeonClient({ apiKey, projectId, parentBranch } = {}) {
     neon(["branches", "set-expiration", name, "--expires-at", expiresAtIso]);
   }
 
-  function pooledConnectionString(name, { databaseName = "neondb", roleName } = {}) {
-    const args = ["connection-string", name, "--pooled", "--database-name", databaseName];
-    if (roleName) args.push("--role-name", roleName);
-    return neon(args);
+  function pooledConnectionString(name, options = {}) {
+    // Neon branches forked from prod can carry multiple roles (e.g. neondb_owner +
+    // Supabase-style authenticator/anon/authenticated), so connection-string requires an
+    // explicit role. Default to the owner; override via NEON_ROLE_NAME / NEON_DATABASE_NAME.
+    const databaseName = options.databaseName || process.env.NEON_DATABASE_NAME || "neondb";
+    const roleName = options.roleName || process.env.NEON_ROLE_NAME || "neondb_owner";
+    return neon(["connection-string", name, "--pooled", "--database-name", databaseName, "--role-name", roleName]);
   }
 
   return {
