@@ -1,6 +1,5 @@
 "use client";
 
-import type { AgentConfig } from "@opencompany/agent-runtime/types";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -16,8 +15,10 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useCollections } from "@/components/CollectionsProvider";
+import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
@@ -25,17 +26,15 @@ import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
-
-// The agent-config surfaces the sidebar can open in the main panel.
-export type PersonalPanel = "behavior" | "skills" | "integrations" | "tools";
+import { personalPaths } from "@/lib/personal/paths";
 
 // Sessions mid-archive must not flash in the list (mirrors deriveSidebarSessions).
 const HIDDEN_SESSION_STATUSES = new Set(["archiving", "archived"]);
 
 type SidebarSession = SidebarSessionPayload;
 
-// A clickable capability/behavior row that opens its surface in the main panel. Capability
-// rows show a count of how many of that thing the agent's `.agent` config currently has.
+// A clickable capability/behavior row that navigates to its surface. Capability rows show a count
+// of how many of that thing the agent's `.agent` config currently has.
 function CapabilityNavRow({
   icon: Icon,
   label,
@@ -125,8 +124,9 @@ function contextIndent(depth: number) {
 }
 
 // A single folder in the context tree. Toggles its own children open/closed like VS Code, and
-// starts collapsed so the tree opens compact. The chevron reflects the state; a non-folder row
-// reserves the same chevron column (see ContextTreeNodes) so file and folder icons stay aligned.
+// starts collapsed so the tree opens compact — but auto-opens (and stays open) whenever the active
+// file lives inside it, so deep-linking a file reveals it. The chevron reflects the state; a
+// non-folder row reserves the same chevron column (see ContextTreeNodes) so icons stay aligned.
 function ContextFolderNode({
   node,
   depth,
@@ -138,13 +138,17 @@ function ContextFolderNode({
   activeFilePath: string | null;
   onSelectFile: (relativePath: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const containsActive = activeFilePath?.startsWith(`${node.path}/`) ?? false;
+  // Open follows the user's explicit toggle once they make one; until then it defaults to "open
+  // when the active file lives inside" so deep-linking a file reveals it without an effect.
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
+  const open = manualOpen ?? containsActive;
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <div className="flex flex-col gap-px">
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setManualOpen(!open)}
         aria-expanded={open}
         style={{ paddingLeft: contextIndent(depth) }}
         className="flex w-full items-center gap-2.5 rounded-md py-[5px] pr-2 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
@@ -363,49 +367,76 @@ function useLivePersonalSessions(agentId: string, initialSessions: SidebarSessio
   }, [rows, isLoading, agentId, initialSessions]);
 }
 
-export type PersonalSidebarProps = {
-  agentId: string;
-  agentName: string;
-  userName: string;
-  userEmail: string;
-  workspaceName: string;
-  initialSessions: SidebarSession[];
-  contextFiles: ContextFile[];
-  config: AgentConfig;
-  personalSkillCount: number;
-  githubRequested: boolean;
-  activeSessionId: string | null;
-  activePanel: PersonalPanel | null;
-  activeFilePath: string | null;
+// Derive which surface is active from the URL so the sidebar highlight always tracks the route.
+function useActivePersonalRoute() {
+  const pathname = usePathname();
+  const segments = pathname.split("/").filter(Boolean); // e.g. ["personal", "files", "memory", "x.md"]
+  const [, section, ...rest] = segments;
+
+  const inboxActive = segments.length === 1; // exactly "/personal"
+  const activePanel =
+    section === "agent" || section === "skills" || section === "integrations" || section === "tools"
+      ? section
+      : null;
+  const activeSessionId = section === "session" ? (rest[0] ?? null) : null;
+  // Files live at /personal/files/<...segments>; the "new" route is the create form, not a file.
+  const activeFilePath =
+    section === "files" && rest.length > 0 && rest[0] !== "new"
+      ? rest.map((part) => decodeURIComponent(part)).join("/")
+      : null;
+
+  return { inboxActive, activePanel, activeSessionId, activeFilePath };
+}
+
+// Hydration gate. useLiveQuery (inside useLivePersonalSessions) reads useSyncExternalStore with no
+// server snapshot, so — exactly like Sidebar/SidebarLive, MainPanel, SessionView and AgentsView —
+// it must only be subscribed AFTER hydration. Mounting it during the SSR / first client render
+// leaves the collection's load state stuck, so new sessions never stream in and the list only
+// updates on a full refresh. Until hydrated we render the server-provided list.
+export default function PersonalSidebar(props: {
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  onNewSession: () => void;
-  onSelectSession: (sessionId: string) => void;
-  onSelectPanel: (panel: PersonalPanel) => void;
-  onSelectFile: (relativePath: string) => void;
-  onNewFile: (prefix: string) => void;
-};
-
-export default function PersonalSidebar(props: PersonalSidebarProps) {
+}) {
   const hydrated = useHydrated();
-  const liveSessions = useLivePersonalSessions(props.agentId, props.initialSessions);
-  const sessions = hydrated ? liveSessions : props.initialSessions;
+  const { initialSessions } = usePersonalAgent();
+  if (!hydrated) return <PersonalSidebarView {...props} sessions={initialSessions} />;
+  return <PersonalSidebarLive {...props} />;
+}
+
+// Client-only: subscribes the agent_sessions collection via useLiveQuery and feeds the live,
+// agent-scoped session list into the presentational sidebar.
+function PersonalSidebarLive(props: { collapsed: boolean; onToggleCollapsed: () => void }) {
+  const { agent, initialSessions } = usePersonalAgent();
+  const sessions = useLivePersonalSessions(agent.id, initialSessions);
+  return <PersonalSidebarView {...props} sessions={sessions} />;
+}
+
+function PersonalSidebarView({
+  sessions,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  sessions: SidebarSession[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
+  const router = useRouter();
+  const { agent, userName, userEmail, workspaceName, files, config, personalSkills, githubRequested } =
+    usePersonalAgent();
+  const { inboxActive, activePanel, activeSessionId, activeFilePath } = useActivePersonalRoute();
+
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
-  const contextTree = useMemo(() => buildContextTree(props.contextFiles), [props.contextFiles]);
-  const inboxActive = props.activeSessionId === null && props.activePanel === null;
-  const skillCount = (props.config.skills?.length ?? 0) + props.personalSkillCount;
-  const integrationCount = personalIntegrationCount({
-    config: props.config,
-    githubRequested: props.githubRequested,
-  });
-  const toolCount = props.config.tools.length;
+  const contextTree = useMemo(() => buildContextTree(files), [files]);
+  const skillCount = (config.skills?.length ?? 0) + personalSkills.length;
+  const integrationCount = personalIntegrationCount({ config, githubRequested });
+  const toolCount = config.tools.length;
 
   return (
     <aside
       className={`relative h-full shrink-0 overflow-hidden bg-sidebar transition-[width] duration-200 ease-out ${
-        props.collapsed ? "w-0" : "w-[256px]"
+        collapsed ? "w-0" : "w-[256px]"
       }`}
-      aria-hidden={props.collapsed}
+      aria-hidden={collapsed}
     >
       <div className="flex h-full w-[256px] flex-col">
         {/* Header controls */}
@@ -413,15 +444,15 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
           <button
             type="button"
             aria-label="Collapse sidebar"
-            aria-expanded={!props.collapsed}
-            onClick={props.onToggleCollapsed}
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapsed}
             className="rounded-md p-1.5 text-ink/60 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
           <SpaceSwitcher
             activeSpace="personal"
-            workspaceName={props.workspaceName}
+            workspaceName={workspaceName}
             className="min-w-0 flex-1 px-0 pb-0"
           />
         </div>
@@ -430,7 +461,7 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
         <nav className="flex flex-col gap-px px-2 pt-2">
           <button
             type="button"
-            onClick={props.onNewSession}
+            onClick={() => router.push(personalPaths.home)}
             className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
               inboxActive
                 ? "bg-surface-active text-ink"
@@ -452,29 +483,29 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
             <CapabilityNavRow
               icon={Bot}
               label="Agent"
-              active={props.activePanel === "behavior"}
-              onClick={() => props.onSelectPanel("behavior")}
+              active={activePanel === "agent"}
+              onClick={() => router.push(personalPaths.agent)}
             />
             <CapabilityNavRow
               icon={Sparkles}
               label="Skills"
               count={skillCount}
-              active={props.activePanel === "skills"}
-              onClick={() => props.onSelectPanel("skills")}
+              active={activePanel === "skills"}
+              onClick={() => router.push(personalPaths.skills)}
             />
             <CapabilityNavRow
               icon={Plug}
               label="Integrations"
               count={integrationCount}
-              active={props.activePanel === "integrations"}
-              onClick={() => props.onSelectPanel("integrations")}
+              active={activePanel === "integrations"}
+              onClick={() => router.push(personalPaths.integrations)}
             />
             <CapabilityNavRow
               icon={Wrench}
               label="Tools"
               count={toolCount}
-              active={props.activePanel === "tools"}
-              onClick={() => props.onSelectPanel("tools")}
+              active={activePanel === "tools"}
+              onClick={() => router.push(personalPaths.tools)}
             />
           </Section>
 
@@ -482,10 +513,10 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
             <ContextTreeNodes
               nodes={contextTree}
               depth={0}
-              activeFilePath={props.activeFilePath}
-              onSelectFile={props.onSelectFile}
+              activeFilePath={activeFilePath}
+              onSelectFile={(relativePath) => router.push(personalPaths.file(relativePath))}
             />
-            <NewContextFileRow onClick={() => props.onNewFile("")} />
+            <NewContextFileRow onClick={() => router.push(personalPaths.newFile())} />
           </Section>
 
           <Section title="Sessions">
@@ -506,8 +537,8 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
                       <SessionRow
                         key={session.id}
                         session={session}
-                        active={props.activeSessionId === session.id}
-                        onSelect={props.onSelectSession}
+                        active={activeSessionId === session.id}
+                        onSelect={(id) => router.push(personalPaths.session(id))}
                       />
                     ))}
                   </div>
@@ -518,9 +549,9 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
         </div>
 
         <SidebarAccountFooter
-          userName={props.userName}
-          userEmail={props.userEmail}
-          subtitle={`${props.agentName} · Personal`}
+          userName={userName}
+          userEmail={userEmail}
+          subtitle={`${agent.name} · Personal`}
         />
       </div>
     </aside>
