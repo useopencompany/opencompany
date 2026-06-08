@@ -161,6 +161,33 @@ jobs:
         run: |
           bunx vercel alias set "${{ steps.deploy-web.outputs.url }}" "${{ steps.provision.outputs.alias }}" --token="$VERCEL_TOKEN"
 
+      - name: Post preview URL (early)
+        # Surface the URL the moment the alias resolves, before the health smoke wait.
+        # The final "Upsert PR comment" step updates this same comment to ready/failed.
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: https://${{ steps.provision.outputs.alias }}
+        with:
+          script: |
+            const marker = "<!-- pr-preview -->";
+            const body = [
+              marker,
+              "### 🔄 Preview environment deploying…",
+              "",
+              `**Preview:** ${process.env.PREVIEW_URL}`,
+              "",
+              "_Verifying health — this comment updates when it's ready._",
+            ].join("\n");
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER),
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER), body });
+            }
+
       - name: Smoke check web + runner health
         env:
           WEB_URL: https://${{ steps.provision.outputs.alias }}
