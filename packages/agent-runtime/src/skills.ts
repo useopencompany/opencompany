@@ -359,7 +359,11 @@ export const MEMORY_SKILL_ID = "memory";
 // Relative path (under skills/<id>/) where the runner drops the bundled CLI. The skill's files
 // in this catalog are SKILL.md only — the ~150 KB JS bundle is delivered by the runner so it
 // never bloats agent-runtime (and the web bundle that imports it).
-export const MEMORY_CLI_FILE = "memory.js";
+//
+// `.mjs` (not `.js`) is load-bearing: the bundle is ESM (`import …`, `import.meta.url`), and it
+// lands in a read-only skills mount with no package.json, so `node memory.js` would treat it as
+// CommonJS and fail on the first `import`. The `.mjs` extension forces ESM.
+export const MEMORY_CLI_FILE = "memory.mjs";
 
 function buildMemorySkillMd(): string {
   return `---

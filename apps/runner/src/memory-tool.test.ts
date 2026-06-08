@@ -31,7 +31,7 @@ describe("runMemoryTool", () => {
       { cwd: string; envs?: Record<string, string> },
     ];
     expect(command).toBe(
-      "bun '/home/user/workspace/skills/memory/memory.js' 'query' 'acme' --report-usage",
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'acme' --report-usage",
     );
     expect(options.envs).toEqual({ VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" });
     expect(command).not.toContain("gw_secret_key");

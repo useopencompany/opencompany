@@ -422,7 +422,7 @@ export async function runSandboxTool(input: {
     // model-backed retrieval footprint on stderr for billing.
     const cliPath = `${layout.skillsRoot}/memory/${MEMORY_CLI_FILE}`;
     const command = [
-      "bun",
+      "node",
       shellQuote(cliPath),
       ...memoryArgv.map(shellQuote),
       "--report-usage",

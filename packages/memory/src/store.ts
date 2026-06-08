@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseDocument } from "./document";
@@ -24,27 +25,43 @@ export function resolveRoot(explicit: string | undefined, cwd: string = process.
 
 // Walk the tree and return every markdown file that sits directly inside a known folder.
 export async function listFiles(root: string): Promise<StoredFile[]> {
-  let entries: Array<{ relativePath: string }>;
+  const relativePaths = await walkMarkdown(root, "");
+
+  const files: StoredFile[] = [];
+  for (const relativePath of relativePaths) {
+    const id = idFromRelativePath(relativePath);
+    if (!id) continue;
+    const source = await readFile(path.join(root, relativePath), "utf8");
+    files.push({ relativePath, id, source });
+  }
+  return files;
+}
+
+// Recursively collect markdown files as root-relative POSIX paths. We do the recursion by hand
+// (one non-recursive readdir per directory, building each child's path from the directory we're
+// in) rather than `readdir(root, { recursive: true })` + `Dirent.parentPath`: that property only
+// exists on Node >= 20.12, and on the older Node in the sandbox runtime it is `undefined`, so
+// `path.join(entry.parentPath, ...)` threw "path argument must be of type string. Received
+// undefined" for every `get`/`query`.
+async function walkMarkdown(root: string, relDir: string): Promise<string[]> {
+  let entries: Dirent[];
   try {
-    const names = await readdir(root, { recursive: true, withFileTypes: true });
-    entries = names
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-      .map((entry) => ({
-        relativePath: toPosix(path.relative(root, path.join(entry.parentPath, entry.name))),
-      }));
+    entries = await readdir(path.join(root, relDir), { withFileTypes: true });
   } catch (error) {
     if (isNotFound(error)) return [];
     throw error;
   }
 
-  const files: StoredFile[] = [];
+  const found: string[] = [];
   for (const entry of entries) {
-    const id = idFromRelativePath(entry.relativePath);
-    if (!id) continue;
-    const source = await readFile(path.join(root, entry.relativePath), "utf8");
-    files.push({ relativePath: entry.relativePath, id, source });
+    const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      found.push(...(await walkMarkdown(root, childRel)));
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      found.push(toPosix(childRel));
+    }
   }
-  return files;
+  return found;
 }
 
 // Find a file by id anywhere in the tree (ids are globally unique, so the folder is incidental).

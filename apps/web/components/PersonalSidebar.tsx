@@ -8,6 +8,7 @@ import {
   Blocks,
   Bot,
   ChevronDown,
+  ChevronRight,
   FileText,
   Folder,
   Inbox,
@@ -73,30 +74,56 @@ function CapabilityNavRow({
 
 type ContextFile = AgentBundleFilePayload;
 
-// The agent bundle is a flat-ish folder; group its files into the canonical slots the
-// runner materializes (memory.md, skills/, attachments). `files/` is the catch-all so any
-// path the agent writes still shows up somewhere real instead of silently disappearing.
-const CONTEXT_FOLDERS: Array<{
-  key: string;
-  label: string;
-  match: (relativePath: string) => boolean;
-}> = [
-  { key: "memory", label: "memory/", match: (p) => p === "memory.md" || p.startsWith("memory/") },
-  { key: "skills", label: "skills/", match: (p) => p.startsWith("skills/") },
-  { key: "files", label: "files/", match: () => true },
-];
+// The context tree mirrors the agent bundle exactly: every file sits at its real path under the
+// bundle dir, and folders are only the directories that actually contain files. There are no
+// synthetic buckets, canonical slots, or always-present folders — what the sidebar shows is the
+// true on-disk state of `agent/`.
+type ContextTreeFolder = {
+  kind: "folder";
+  name: string;
+  path: string;
+  children: ContextTreeNode[];
+};
+type ContextTreeFile = { kind: "file"; name: string; file: ContextFile };
+type ContextTreeNode = ContextTreeFolder | ContextTreeFile;
 
-function categorizeContextFiles(files: ContextFile[]) {
-  const buckets = new Map<string, ContextFile[]>(CONTEXT_FOLDERS.map((folder) => [folder.key, []]));
+function buildContextTree(files: ContextFile[]): ContextTreeNode[] {
+  const root: ContextTreeFolder = { kind: "folder", name: "", path: "", children: [] };
   for (const file of files) {
-    const folder = CONTEXT_FOLDERS.find((candidate) => candidate.match(file.relativePath));
-    if (folder) buckets.get(folder.key)?.push(file);
+    const segments = file.relativePath.split("/").filter(Boolean);
+    let current = root;
+    for (const name of segments.slice(0, -1)) {
+      const folderPath = current.path ? `${current.path}/${name}` : name;
+      let next = current.children.find(
+        (child): child is ContextTreeFolder => child.kind === "folder" && child.name === name,
+      );
+      if (!next) {
+        next = { kind: "folder", name, path: folderPath, children: [] };
+        current.children.push(next);
+      }
+      current = next;
+    }
+    current.children.push({ kind: "file", name: segments.at(-1) ?? file.relativePath, file });
   }
-  return buckets;
+  sortContextTree(root);
+  return root.children;
 }
 
-function baseName(path: string) {
-  return path.split("/").filter(Boolean).at(-1) ?? path;
+// Folders before files, each alphabetical — the conventional, stable file-tree ordering.
+function sortContextTree(folder: ContextTreeFolder) {
+  folder.children.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  for (const child of folder.children) {
+    if (child.kind === "folder") sortContextTree(child);
+  }
+}
+
+// Indentation grows with tree depth so nested files sit under their folder. Plain px math keeps
+// folder headers and file rows on the same grid.
+function contextIndent(depth: number) {
+  return 8 + depth * 16;
 }
 
 // The agent definition (the `.agent` file) always exists — it's the agent's instructions — so
@@ -134,75 +161,115 @@ function ContextDefinitionRow({
   );
 }
 
-// A canonical folder slot. Empty slots stay dimmed so the structure is discoverable before
-// the agent has written anything into it; populated slots list their real files nested below.
-// Files are clickable to open in the editor; the folder header reveals a "+" to add a file.
-function ContextFolderRow({
-  label,
-  files,
+// A single folder in the context tree. Toggles its own children open/closed like VS Code, and
+// starts collapsed so the tree opens compact. The chevron reflects the state; a non-folder row
+// reserves the same chevron column (see ContextTreeNodes) so file and folder icons stay aligned.
+function ContextFolderNode({
+  node,
+  depth,
   activeFilePath,
   onSelectFile,
-  onNewFile,
 }: {
-  label: string;
-  files: ContextFile[];
+  node: ContextTreeFolder;
+  depth: number;
   activeFilePath: string | null;
   onSelectFile: (relativePath: string) => void;
-  onNewFile: (prefix: string) => void;
 }) {
-  const empty = files.length === 0;
+  const [open, setOpen] = useState(false);
+  const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <div className="flex flex-col gap-px">
-      <div
-        className={`group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-[13px] ${
-          empty ? "text-ink/35" : "text-ink/90"
-        }`}
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        style={{ paddingLeft: contextIndent(depth) }}
+        className="flex w-full items-center gap-2.5 rounded-md py-[5px] pr-2 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        <Folder
-          size={14}
-          strokeWidth={1.75}
-          className={`shrink-0 ${empty ? "text-ink/30" : "text-ink/55"}`}
+        <Chevron size={12} strokeWidth={2} className="shrink-0 text-ink/40" />
+        <Folder size={14} strokeWidth={1.75} className="shrink-0 text-ink/55" />
+        <span className="truncate tracking-[-0.005em]">{node.name}/</span>
+      </button>
+      {open && (
+        <ContextTreeNodes
+          nodes={node.children}
+          depth={depth + 1}
+          activeFilePath={activeFilePath}
+          onSelectFile={onSelectFile}
         />
-        <span className="truncate tracking-[-0.005em]">{label}</span>
-        <button
-          type="button"
-          onClick={() => onNewFile(label)}
-          aria-label={`New file in ${label}`}
-          title={`New file in ${label}`}
-          className="ml-auto rounded p-0.5 text-ink-subtle opacity-0 transition-opacity duration-150 hover:bg-surface-hover hover:text-ink focus:opacity-100 focus:outline-none group-hover:opacity-100"
-        >
-          <Plus size={13} strokeWidth={2} />
-        </button>
-        {!empty && (
-          <span className="text-[11px] tabular-nums text-ink-subtle group-hover:hidden">
-            {files.length}
-          </span>
-        )}
-      </div>
-      {files.map((file) => {
-        const active = activeFilePath === file.relativePath;
-        return (
+      )}
+    </div>
+  );
+}
+
+// Renders the context tree. Folders toggle open/closed (collapsed by default); files are
+// clickable and open in the editor. Every row maps 1:1 to a real bundle path — there are no
+// synthetic rows, counts, or empty-slot placeholders. Files reserve a leading chevron-width
+// spacer so their icons line up with folder icons at the same depth.
+function ContextTreeNodes({
+  nodes,
+  depth,
+  activeFilePath,
+  onSelectFile,
+}: {
+  nodes: ContextTreeNode[];
+  depth: number;
+  activeFilePath: string | null;
+  onSelectFile: (relativePath: string) => void;
+}) {
+  return (
+    <>
+      {nodes.map((node) =>
+        node.kind === "folder" ? (
+          <ContextFolderNode
+            key={`dir:${node.path}`}
+            node={node}
+            depth={depth}
+            activeFilePath={activeFilePath}
+            onSelectFile={onSelectFile}
+          />
+        ) : (
           <button
             type="button"
-            key={file.path}
-            onClick={() => onSelectFile(file.relativePath)}
-            title={file.relativePath}
-            className={`flex w-full items-center gap-2.5 rounded-md py-[3px] pl-[30px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-              active
+            key={`file:${node.file.path}`}
+            onClick={() => onSelectFile(node.file.relativePath)}
+            title={node.file.relativePath}
+            style={{ paddingLeft: contextIndent(depth) }}
+            className={`flex w-full items-center gap-2.5 rounded-md py-[3px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+              activeFilePath === node.file.relativePath
                 ? "bg-surface-active text-ink"
                 : "text-ink/70 hover:bg-surface-hover hover:text-ink"
             }`}
           >
+            <span aria-hidden className="w-3 shrink-0" />
             <FileText
               size={13}
               strokeWidth={1.75}
-              className={`shrink-0 ${active ? "text-ink/70" : "text-ink/40"}`}
+              className={`shrink-0 ${
+                activeFilePath === node.file.relativePath ? "text-ink/70" : "text-ink/40"
+              }`}
             />
-            <span className="truncate tracking-[-0.005em]">{baseName(file.relativePath)}</span>
+            <span className="truncate tracking-[-0.005em]">{node.name}</span>
           </button>
-        );
-      })}
-    </div>
+        ),
+      )}
+    </>
+  );
+}
+
+// Create a file anywhere in the bundle. Opens the editor with an empty path so the user types
+// the real relative path (e.g. "memory/notes.md") — no folder is assumed or invented.
+function NewContextFileRow({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ paddingLeft: contextIndent(0) }}
+      className="flex w-full items-center gap-2.5 rounded-md py-[5px] pr-2 text-left text-[13px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <Plus size={14} strokeWidth={1.75} className="shrink-0" />
+      <span className="truncate tracking-[-0.005em]">New file</span>
+    </button>
   );
 }
 
@@ -359,10 +426,7 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
   const liveSessions = useLivePersonalSessions(props.agentId, props.initialSessions);
   const sessions = hydrated ? liveSessions : props.initialSessions;
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
-  const contextFolders = useMemo(
-    () => categorizeContextFiles(props.contextFiles),
-    [props.contextFiles],
-  );
+  const contextTree = useMemo(() => buildContextTree(props.contextFiles), [props.contextFiles]);
   const inboxActive = props.activeSessionId === null && props.activePanel === null;
   const skillCount = props.config.skills?.length ?? 0;
   const integrationCount = personalIntegrationCount({
@@ -452,16 +516,13 @@ export default function PersonalSidebar(props: PersonalSidebarProps) {
               active={props.activePanel === "behavior"}
               onClick={() => props.onSelectPanel("behavior")}
             />
-            {CONTEXT_FOLDERS.map((folder) => (
-              <ContextFolderRow
-                key={folder.key}
-                label={folder.label}
-                files={contextFolders.get(folder.key) ?? []}
-                activeFilePath={props.activeFilePath}
-                onSelectFile={props.onSelectFile}
-                onNewFile={props.onNewFile}
-              />
-            ))}
+            <ContextTreeNodes
+              nodes={contextTree}
+              depth={0}
+              activeFilePath={props.activeFilePath}
+              onSelectFile={props.onSelectFile}
+            />
+            <NewContextFileRow onClick={() => props.onNewFile("")} />
           </Section>
 
           <Section title="Sessions">

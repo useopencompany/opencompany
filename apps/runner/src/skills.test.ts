@@ -66,7 +66,7 @@ describe("materializeSkillsForSession", () => {
     });
 
     const memoryJs = sandbox.files.write.mock.calls.find(
-      ([path]) => path === `/home/user/workspace/skills/${MEMORY_SKILL_ID}/memory.js`,
+      ([path]) => path === `/home/user/workspace/skills/${MEMORY_SKILL_ID}/memory.mjs`,
     );
     expect(memoryJs).toBeDefined();
     // The bundle is the self-contained CLI (minisearch inlined), written as root.

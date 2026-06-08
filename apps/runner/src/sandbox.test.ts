@@ -634,7 +634,7 @@ describe("runSandboxTool", () => {
     });
 
     expect(sandbox.commands.run).toHaveBeenCalledWith(
-      "bun '/home/user/workspace/skills/memory/memory.js' 'query' 'acme blockers' '--limit' '5' --report-usage",
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'acme blockers' '--limit' '5' --report-usage",
       expect.objectContaining({
         cwd: sandboxLayout("/home/user/workspace").workspaceRoot,
         envs: { VERCEL_AI_GATEWAY_API_KEY: "gw_secret_key" },
@@ -660,7 +660,7 @@ describe("runSandboxTool", () => {
     const [command] = sandbox.commands.run.mock.calls[0] as [string, unknown];
     // Each crafted token is quoted, so the shell never interprets ; or > as operators.
     expect(command).toBe(
-      "bun '/home/user/workspace/skills/memory/memory.js' 'query' 'foo;' 'env' '>' '/tmp/leak' --report-usage",
+      "node '/home/user/workspace/skills/memory/memory.mjs' 'query' 'foo;' 'env' '>' '/tmp/leak' --report-usage",
     );
     // The key only ever reaches the subprocess env, never the command string the agent shaped.
     expect(command).not.toContain("gw_secret_key");

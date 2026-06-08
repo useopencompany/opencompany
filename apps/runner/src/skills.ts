@@ -51,7 +51,7 @@ export async function materializeSkillsForSession(input: {
 
   // The `memory` skill's CLI bundle is delivered here rather than via the skill catalog so the
   // ~150 KB JS never ships inside agent-runtime (and the web bundle that imports it). The agent
-  // runs it with `bun skills/memory/memory.js <command>`.
+  // runs it with `node skills/memory/memory.mjs <command>`.
   if (skills.some((skill) => skill.id === MEMORY_SKILL_ID)) {
     await input.sandbox.files.write(
       `${layout.skillsRoot}/${MEMORY_SKILL_ID}/${MEMORY_CLI_FILE}`,
