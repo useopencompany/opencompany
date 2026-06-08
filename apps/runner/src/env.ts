@@ -21,6 +21,11 @@ export type RunnerEnv = {
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
+  // Wall-clock ceiling for a single opencode_coder delegation. Large monorepo tasks routinely
+  // exceed the old hard 10 minutes; tunable per environment. On timeout the run no longer throws
+  // away its work — the partial diff + resumable opencode session id are surfaced (opencode-tool.ts).
+  // The job lease TTL (jobs.ts) must comfortably exceed this so a long run is not re-claimed.
+  opencodeTimeoutMs: number;
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
   // validation + coercion always run; this only gates the small-model fallback. Default on.
   toolArgRepairEnabled: boolean;
@@ -48,6 +53,7 @@ export function loadEnv(): RunnerEnv {
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
+    opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
