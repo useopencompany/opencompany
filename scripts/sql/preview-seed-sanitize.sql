@@ -37,10 +37,12 @@ UPDATE workspaces
 SET workos_organization_id = 'preview-' || id;
 
 -- 4) Integration connection metadata (the secrets themselves were deleted above).
+--    external_id is NOT NULL and carries a unique (workspace, provider, external_id)
+--    index, so scrub it to a per-row placeholder rather than NULL.
 UPDATE workspace_integrations
 SET account_email = NULL,
     account_name = NULL,
-    external_id = NULL;
+    external_id = 'preview-' || id;
 
 UPDATE workspace_mcp_servers
 SET endpoint_url = 'https://mcp.preview.invalid';

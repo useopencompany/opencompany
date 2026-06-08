@@ -4,9 +4,12 @@ name: PR Preview
 # for PRs carrying the `preview` label it provisions an isolated vertical ANTOS stack —
 # Neon branch (from the sanitized preview-seed) + per-PR Render runner + Electric +
 # Durable Streams + a Vercel web preview wired to all of them — and tears it all down on
-# close or when the label is removed. Base/static secrets come from Infisical `dev`; the
-# per-PR dynamic values (branch DB URL, runner/electric/streams URLs, tokens) are minted
-# by scripts/preview-provision.mjs and injected here.
+# close or when the label is removed. Preview orchestration is intentionally advisory:
+# failures are reported in the PR comment and deployment status when available, but must
+# not block merges.
+# Base/static secrets come from Infisical `dev`; the per-PR dynamic values (branch DB URL,
+# runner/electric/streams URLs, tokens) are minted by scripts/preview-provision.mjs and
+# injected here.
 #
 # The companion reconciler (every 6h) is .github/workflows/preview-reaper.yml.
 
@@ -44,6 +47,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'preview')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
+    continue-on-error: true
     permissions:
       checks: read
       contents: read
@@ -118,7 +122,8 @@ jobs:
               core.info(run ? `CI status: ${run.status}…` : "CI check not reported yet, waiting…");
               await sleep(20000);
             }
-            core.setFailed(`Timed out waiting for CI "${checkName}" on ${sha.slice(0, 7)}.`);
+            core.warning(`Timed out waiting for CI "${checkName}" on ${sha.slice(0, 7)} — skipping preview.`);
+            core.setOutput("passed", "false");
 
   # ---------------------------------------------------------------------------
   # Provision / update the full preview stack for a labeled, open PR.
@@ -133,6 +138,7 @@ jobs:
       needs.await-ci.outputs.passed == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
+    continue-on-error: true
     environment: preview
     permissions:
       contents: read
@@ -300,10 +306,10 @@ jobs:
         run: bun run release:smoke
 
       - name: Upsert PR comment
-        if: ${{ always() && steps.provision.outputs.alias != '' }}
+        if: ${{ always() }}
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
-          PREVIEW_URL: https://${{ steps.provision.outputs.alias }}
+          PREVIEW_ALIAS: ${{ steps.provision.outputs.alias }}
           RUNNER_URL: ${{ steps.provision.outputs.runner_url }}
           ELECTRIC_URL: ${{ steps.provision.outputs.electric_url }}
           JOB_STATUS: ${{ job.status }}
@@ -312,11 +318,15 @@ jobs:
             const marker = "<!-- pr-preview -->";
             const ok = process.env.JOB_STATUS === "success";
             const sha = process.env.PR_SHA.slice(0, 7);
+            const previewUrl = process.env.PREVIEW_ALIAS ? `https://${process.env.PREVIEW_ALIAS}` : "";
+            const failureMessage = previewUrl
+              ? `Provision/deploy failed — see the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`
+              : `Provision/deploy failed before a preview alias was assigned — see the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`;
             const body = [
               marker,
               `### 🚀 Preview environment ${ok ? "ready" : "failed"}`,
               "",
-              ok ? `**Preview:** ${process.env.PREVIEW_URL}` : `Provision/deploy failed — see the [workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`,
+              ok ? `**Preview:** ${previewUrl}` : failureMessage,
               "",
               ok ? `<details><summary>Stack</summary>\n\n- Runner: ${process.env.RUNNER_URL}\n- Electric: ${process.env.ELECTRIC_URL}\n- Commit: \`${sha}\`\n\n</details>` : "",
               "",

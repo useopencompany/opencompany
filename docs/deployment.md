@@ -292,6 +292,10 @@ every 6h ─► .github/workflows/preview-reaper.yml  (desired = labeled-open PR
 ```
 
 - **Gating:** label-gated on `preview` (cost control). No label, no stack.
+- **Merge policy:** PR previews are advisory. Do not require `PR Preview`,
+  `Wait for CI to pass`, or `Provision preview stack` in branch protection/rulesets;
+  keep the CI quality check as the merge gate. Preview failures still update the PR
+  comment, plus GitHub Deployment status when a deployment record exists.
 - **Data:** previews fork from a sanitized `preview-seed` branch, **never** prod `main`
   (no prod PII). DB resets from the seed on every push (deterministic per SHA).
 - **Base secrets:** Infisical `dev`; per-PR dynamic values are minted by the orchestrator.
