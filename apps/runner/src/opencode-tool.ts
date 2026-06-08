@@ -270,7 +270,12 @@ export async function runOpencodeCoderTool(input: {
 
   // Never open a PR from a timed-out run: the work is partial and possibly mid-edit. Surface the
   // diff + resumable session id instead and let a follow-up (resumed) call publish once complete.
-  if (args.createPullRequest === true && target.kind === "attached" && timedOut && !pullRequestUrl) {
+  if (
+    args.createPullRequest === true &&
+    target.kind === "attached" &&
+    timedOut &&
+    !pullRequestUrl
+  ) {
     pullRequestSkippedReason = "coder_timed_out";
   }
 
