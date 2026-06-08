@@ -380,7 +380,14 @@ describe("memory CLI", () => {
   });
 
   it("scopes get --section in the JSON data payload", async () => {
-    await run(create, ["--type", "company", "--id", "acme", "--truth", "Acme is a logistics SaaS."]);
+    await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "acme",
+      "--truth",
+      "Acme is a logistics SaaS.",
+    ]);
 
     const truth = data(await run(get, ["acme", "--section", "truth"]));
     expect(truth.compiledTruth).toBe("Acme is a logistics SaaS.");
@@ -425,7 +432,14 @@ describe("memory CLI", () => {
     expect(activeUncited.code).toBe(1);
 
     // An active stub with no compiled truth is fine.
-    const activeStub = await run(create, ["--type", "company", "--id", "initech", "--status", "active"]);
+    const activeStub = await run(create, [
+      "--type",
+      "company",
+      "--id",
+      "initech",
+      "--status",
+      "active",
+    ]);
     expect(activeStub.code).toBe(0);
   });
 

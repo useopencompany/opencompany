@@ -114,6 +114,11 @@ export async function del(ctx: CommandContext): Promise<CommandResult> {
 
   return ok(
     `Deleted "${id}" (${file.relativePath}).${notes.length > 0 ? ` Follow up: ${notes.join("; ")}.` : ""}`,
-    { id, path: file.relativePath, scrubbed: { related: relatedLinks, subjects: evidenceSubjects }, notes },
+    {
+      id,
+      path: file.relativePath,
+      scrubbed: { related: relatedLinks, subjects: evidenceSubjects },
+      notes,
+    },
   );
 }

@@ -1,5 +1,10 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { DEFAULT_RELATION_TYPE, type MemoryFrontmatter, type MemoryRelation, type MemorySource } from "./schema";
+import {
+  DEFAULT_RELATION_TYPE,
+  type MemoryFrontmatter,
+  type MemoryRelation,
+  type MemorySource,
+} from "./schema";
 
 // On-disk YAML uses snake_case (created_at, merged_into, captured_at); the TS model uses
 // camelCase. These two functions are the only place that mapping lives.

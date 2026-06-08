@@ -37,6 +37,7 @@ import {
   type HostedToolUsage,
   MissingEnvError,
 } from "./hosted-tools";
+import { runInboxTool } from "./inbox-tool";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,
@@ -604,6 +605,19 @@ export async function executeRuntimeTool(input: {
           // Runner-side, no sandbox, no Gateway key: queries Postgres directly, scoped to this
           // agent + user via the current session row, excluding the live session.
           return runRecallTool({ sessionId: input.sessionId, args: input.args });
+        }
+        if (
+          input.definition.name === "inbox_list" ||
+          input.definition.name === "inbox_add" ||
+          input.definition.name === "inbox_update"
+        ) {
+          // Runner-side write to the user's personal inbox, scoped to this session's
+          // (workspace, user). Hard-gated to the personal agent at config resolution.
+          return runInboxTool({
+            name: input.definition.name,
+            sessionId: input.sessionId,
+            args: input.args,
+          });
         }
         if (input.definition.name === "fetch_transcript") {
           // Runner-side, no sandbox: reads the full transcript of a session the caller is allowed

@@ -8,11 +8,7 @@ import { personalPaths, relativePathFromSegments } from "@/lib/personal/paths";
 
 // Editor for an existing bundle file. The [...path] segments reconstruct the real relative path
 // (e.g. memory/notes.md). If the file was deleted out from under us, fall back to the home view.
-export default function PersonalFilePage({
-  params,
-}: {
-  params: Promise<{ path: string[] }>;
-}) {
+export default function PersonalFilePage({ params }: { params: Promise<{ path: string[] }> }) {
   const { path } = use(params);
   const router = useRouter();
   const { agent, bundleDir, files, upsertFile } = usePersonalAgent();

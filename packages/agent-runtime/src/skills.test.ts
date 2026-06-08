@@ -280,9 +280,7 @@ describe("resolveAgentRuntimeConfig skills section", () => {
     expect(resolved.systemPrompt).toContain("skills/weekly-digest/SKILL.md");
     // Personal skills carry agent-/user-authored frontmatter, so only the mount path is advertised —
     // the name/description must NOT be rendered inline (prompt-injection surface).
-    expect(resolved.systemPrompt).toContain(
-      "Personal skill (skills/weekly-digest/SKILL.md)",
-    );
+    expect(resolved.systemPrompt).toContain("Personal skill (skills/weekly-digest/SKILL.md)");
     expect(resolved.systemPrompt).not.toContain("Weekly digest — Post the Monday digest.");
   });
 

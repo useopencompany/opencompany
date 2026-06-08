@@ -83,6 +83,9 @@ export function resolveAgentRuntimeConfig(input: {
     policy: WorkspaceToolPolicyMap;
     suspendable: boolean;
   };
+  // True when this is the user's personal/default agent (agents.isDefault). Hard-gates the
+  // inbox tools so only the personal agent can post to a user's personal inbox.
+  personalAgent?: boolean;
 }): ResolvedAgentRuntimeConfig {
   const instructions = input.agent.instructions.trim() || "Help the user complete the task.";
   const repositories = input.agent.integrations?.github?.repositories ?? [];
@@ -171,6 +174,7 @@ export function resolveAgentRuntimeConfig(input: {
       repositories,
       selfEditEnabled: skills.some((skill) => skill.id === AGENT_SELF_EDIT_SKILL_ID),
       memorySkillEnabled: skills.some((skill) => skill.id === MEMORY_SKILL_ID),
+      personalInboxEnabled: input.personalAgent ?? false,
     }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };

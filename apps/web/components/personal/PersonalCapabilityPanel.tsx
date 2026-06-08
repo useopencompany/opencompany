@@ -3,11 +3,19 @@
 import {
   extractMentionIds,
   isExternalSkillReference,
-  repositoryIdForFullName,
   type ResolvedSkillMetadata,
+  repositoryIdForFullName,
 } from "@opencompany/agent-runtime";
 import type { AgentConfig } from "@opencompany/agent-runtime/types";
-import { Check, GitBranch, LoaderCircle, type LucideIcon, Plus, Sparkles, Wrench } from "lucide-react";
+import {
+  Check,
+  GitBranch,
+  LoaderCircle,
+  type LucideIcon,
+  Plus,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { useState } from "react";
 import { findTool } from "@/components/agent-editor/tools";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
@@ -235,7 +243,11 @@ function AddIntegrationMenu({
                     </div>
                   </div>
                   {loading ? (
-                    <LoaderCircle size={13} strokeWidth={2} className="shrink-0 animate-spin text-ink-subtle" />
+                    <LoaderCircle
+                      size={13}
+                      strokeWidth={2}
+                      className="shrink-0 animate-spin text-ink-subtle"
+                    />
                   ) : added ? (
                     <Check size={14} strokeWidth={2} className="shrink-0 text-success" />
                   ) : null}

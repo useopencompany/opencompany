@@ -13,6 +13,9 @@ export type RuntimeToolName =
   | "gh"
   | "memory"
   | "recall"
+  | "inbox_list"
+  | "inbox_add"
+  | "inbox_update"
   | "fetch_transcript"
   | "read_file"
   | "read_skill"
@@ -356,7 +359,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Commands: create, get, query, append-evidence, rewrite, alias, link, merge, delete, doctor. Add --json for machine-readable output.",
       "Status lifecycle: objects start as draft (uncited scratch) and become active once rewrite backs their compiled truth with evidence citations. create --status active requires the truth to already be cited; the normal path is create → append-evidence → rewrite.",
       'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
-      'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5. For relationship questions add --hops 1 to pull in linked objects (a person\'s company, a company\'s decisions). query hides merged stubs and invalid records by default.',
+      "Query before answering questions about people, companies, projects, or past decisions: query \"topic\" --type company --limit 5. For relationship questions add --hops 1 to pull in linked objects (a person's company, a company's decisions). query hides merged stubs and invalid records by default.",
       "get --section truth|timeline|frontmatter scopes both the text and the --json payload to that part.",
       "Writes are last-write-wins — do not issue two memory writes against the same object in parallel.",
       "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
@@ -388,6 +391,111 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Returns each hit as a short window: the matching message plus the one before and after it for context.",
       "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
       "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
+    ].join("\n"),
+  },
+  {
+    name: "inbox_list",
+    kind: "internal",
+    description:
+      "List the items currently in this user's personal inbox (the attention items you and other runs have posted for them). Returns open and snoozed items, plus recently resolved ones when include_resolved is set. Call this BEFORE inbox_add so you can reuse a dedup_key and avoid posting a duplicate of something already there.",
+    parameters: {
+      type: "object",
+      properties: {
+        include_resolved: {
+          type: "boolean",
+          description:
+            "Also include recently done/dismissed items (default false). Useful to check whether the user already dealt with something before re-raising it.",
+        },
+      },
+      additionalProperties: false,
+    },
+    help: [
+      "Items are scoped to the current user; the live session's agent posts on their behalf.",
+      "status is one of open | snoozed | done | dismissed. A snoozed item is hidden from the user's inbox until snoozed_until passes, but you still see it here.",
+      "Match on dedup_key (or title) to decide whether to skip an inbox_add.",
+    ].join("\n"),
+  },
+  {
+    name: "inbox_add",
+    kind: "internal",
+    description:
+      "Post a new attention item to the user's personal inbox — an FYI, a finished result, or something that needs their decision. Use this when, during your run (including scheduled runs), you produce something the user should see but you should not interrupt them for synchronously. Keep the title short and action-oriented; put detail in body and the play-by-play in steps. Pass a stable dedup_key (e.g. a slug for the underlying thing) so re-running on a schedule does not create duplicates.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short, action-oriented headline shown on the card. Required.",
+        },
+        body: {
+          type: "string",
+          description: "Optional markdown summary / FYI detail shown under the title.",
+        },
+        steps: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional 'what happened' — the few steps you took that led to this item, newest-relevant last. Shown when the user expands the card.",
+        },
+        priority: {
+          type: "string",
+          enum: ["urgent", "high", "med", "low"],
+          description: "Optional priority. Omit if it's a routine FYI.",
+        },
+        due_at: {
+          type: "string",
+          description: "Optional ISO-8601 timestamp for when this is due or time-sensitive.",
+        },
+        source: {
+          type: "string",
+          description:
+            "Optional short origin label shown on the card (e.g. your name or the schedule that produced this). Defaults to your agent name.",
+        },
+        dedup_key: {
+          type: "string",
+          description:
+            "Optional stable key. If a live (open/snoozed) item with this key already exists, this call is a no-op and returns that item — use it to make scheduled posts idempotent.",
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    help: [
+      "Call inbox_list first and reuse a dedup_key to avoid duplicates across scheduled runs.",
+      "The item links back to this session automatically, so the user can open the conversation from the card.",
+      "Use inbox_add for asynchronous attention items; use ask_user_question only when you must block the current run on the user's answer.",
+    ].join("\n"),
+  },
+  {
+    name: "inbox_update",
+    kind: "internal",
+    description:
+      "Update an existing inbox item you posted — typically to mark it done once you've resolved it, or to revise its title/body/priority. Pass the item id from inbox_list.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The inbox item id (from inbox_list). Required." },
+        status: {
+          type: "string",
+          enum: ["open", "done", "dismissed"],
+          description:
+            "New status. Set 'done' when you've resolved the item so it leaves the user's inbox.",
+        },
+        title: { type: "string", description: "Optional new title." },
+        body: { type: "string", description: "Optional new markdown body." },
+        priority: {
+          type: "string",
+          enum: ["urgent", "high", "med", "low"],
+          description: "Optional new priority.",
+        },
+        due_at: { type: "string", description: "Optional new ISO-8601 due timestamp." },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    help: [
+      "Only items in the current user's inbox can be updated.",
+      "Marking an item done/dismissed stamps it resolved and removes it from the user's inbox view.",
     ].join("\n"),
   },
   {
@@ -2211,6 +2319,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   // `memory` only when the memory skill is on.
   selfEditEnabled?: boolean;
   memorySkillEnabled?: boolean;
+  // The inbox tools are hard-gated to the user's personal/default agent so team agents never
+  // post to a personal inbox. The runner passes `row.agent.isDefault`.
+  personalInboxEnabled?: boolean;
 }) {
   const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
@@ -2221,6 +2332,9 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
       tool.name === "update_agent_file" ||
       tool.name === "memory" ||
       tool.name === "recall" ||
+      tool.name === "inbox_list" ||
+      tool.name === "inbox_add" ||
+      tool.name === "inbox_update" ||
       tool.name === "fetch_transcript"
     ) {
       continue;
@@ -2241,6 +2355,11 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     names.add("memory");
     names.add("recall");
     names.add("fetch_transcript");
+  }
+  if (input.personalInboxEnabled) {
+    names.add("inbox_list");
+    names.add("inbox_add");
+    names.add("inbox_update");
   }
 
   const selectedToolIds = new Set(
@@ -2310,6 +2429,9 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   gh: "GitHub CLI",
   memory: "Memory",
   recall: "Recall past sessions",
+  inbox_list: "List inbox",
+  inbox_add: "Add to inbox",
+  inbox_update: "Update inbox item",
   fetch_transcript: "Fetch transcript",
   read_file: "Read file",
   read_skill: "Read skill",
@@ -2411,6 +2533,9 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "gh",
   "memory",
   "recall",
+  "inbox_list",
+  "inbox_add",
+  "inbox_update",
   "fetch_transcript",
   "ask_user_question",
   "delegate_to_agent",

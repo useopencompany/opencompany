@@ -50,7 +50,10 @@ export async function validateCitations(
       return { ok: false, error: `Cited evidence "${evidenceId}" does not exist.` };
     }
     if (evidence.kind === "invalid") {
-      return { ok: false, error: `Cited evidence "${evidenceId}" is invalid: ${evidence.errors[0]}` };
+      return {
+        ok: false,
+        error: `Cited evidence "${evidenceId}" is invalid: ${evidence.errors[0]}`,
+      };
     }
     if (!isEvidenceType(evidence.doc.frontmatter.type)) {
       return { ok: false, error: `Citation "${evidenceId}" is not an evidence record.` };
