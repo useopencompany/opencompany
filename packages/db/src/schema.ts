@@ -379,7 +379,7 @@ export const agentSessions = pgTable(
       .references(() => agents.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled session"),
     status: text("status").notNull().default("created"),
-    source: text("source").$type<"user" | "agent">().notNull().default("user"),
+    source: text("source").$type<"user" | "agent" | "memory">().notNull().default("user"),
     modelProvider: text("model_provider").notNull().default("vercel-ai-gateway"),
     modelName: text("model_name").notNull().default("openai/gpt-5.4-mini"),
     parentSessionId: text("parent_session_id"),
@@ -426,7 +426,10 @@ export const agentSessions = pgTable(
       columns: [table.parentSessionId],
       foreignColumns: [table.id],
     }).onDelete("set null"),
-    sourceCheck: check("agent_sessions_source_check", sql`${table.source} IN ('user', 'agent')`),
+    sourceCheck: check(
+      "agent_sessions_source_check",
+      sql`${table.source} IN ('user', 'agent', 'memory')`,
+    ),
   }),
 );
 
@@ -646,6 +649,11 @@ export const agentSessionAfterSessionRuns = pgTable(
     agentVersion: integer("agent_version").notNull(),
     status: text("status").notNull().default("queued"),
     runLeaseId: text("run_lease_id"),
+    // For runs that spawn a dedicated memory-keeper session (status "spawned"),
+    // this links to that background session so the pass is auditable.
+    childSessionId: text("child_session_id").references(() => agentSessions.id, {
+      onDelete: "set null",
+    }),
     skippedReason: text("skipped_reason"),
     lastError: text("last_error"),
     startedAt: timestamp("started_at", { withTimezone: true }),

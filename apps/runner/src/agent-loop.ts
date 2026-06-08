@@ -1,6 +1,8 @@
 import {
   agentBundleDir,
   BUILTIN_USE_TOOL_NAME,
+  MEMORY_KEEPER_SYSTEM_PROMPT,
+  MEMORY_SKILL_ID,
   newAgentSessionMessageId,
   normalizeAgentConfig,
   type ResolvedSkillMetadata,
@@ -9,6 +11,8 @@ import {
   type RuntimeToolDefinition,
   type RuntimeToolName,
   resolveAgentRuntimeConfig,
+  resolveEnabledSkillMetadata,
+  restrictToolsForMemoryKeeper,
   scanPersonalSkills,
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
@@ -49,6 +53,7 @@ import {
   updateSandboxForLease,
 } from "./lease-writes";
 import { createMcpToolSet } from "./mcp-tools";
+import { spawnMemoryKeeperSession } from "./memory-keeper";
 import {
   appendAssistantTextPart,
   buildModelMessages,
@@ -94,6 +99,7 @@ import {
   loadNextSteerMessage,
   loadSession,
   loadUserMessage,
+  markAfterSessionRunSpawned,
   optionalUserContext,
   resolveSandboxBilling,
   setStatus,
@@ -334,13 +340,25 @@ async function runMessageWithContext(
       ...bundleContext,
       toolPolicy: { policy: toolPolicy, suspendable },
     });
+    // Memory-keeper mode: a `source: "memory"` session is an invisible background pass that runs
+    // under the personal agent's own bundle but with a platform-owned system prompt appended and a
+    // restricted toolset. Keep the agent's model and the rest of `runtime` (file roots, hot memory,
+    // tool index) intact — only the framing and the tools change.
+    const memoryKeeperRun = row.session.source === "memory";
+    const enabledTools = memoryKeeperRun
+      ? restrictToolsForMemoryKeeper(runtime.tools)
+      : runtime.tools;
+    const systemPrompt = memoryKeeperRun
+      ? `${runtime.systemPrompt}\n\n${MEMORY_KEEPER_SYSTEM_PROMPT}`
+      : runtime.systemPrompt;
     modelProvider = runtime.model.provider;
     modelName = runtime.model.name;
     logBraintrustSpan(braintrustSpan, {
       metadata: {
         model_provider: modelProvider,
         model_name: modelName,
-        enabled_tools: runtime.tools,
+        enabled_tools: enabledTools,
+        ...(memoryKeeperRun ? { run_type: "memory_keeper" } : {}),
       },
     });
 
@@ -364,7 +382,7 @@ async function runMessageWithContext(
 
     const checkAbort = createLeaseAbortCheck(ctx);
     await observeRunStep(ctx, "initial_run_control_check", () => checkAbort({ force: true }));
-    validateHostedToolEnvironment({ enabledTools: runtime.tools, env: input.env });
+    validateHostedToolEnvironment({ enabledTools, env: input.env });
 
     await requireLeaseWrite(
       timeAsync(ctx.trace, "append_running_status", () =>
@@ -431,7 +449,7 @@ async function runMessageWithContext(
     // overlaps the model's first tokens instead of stalling the first tool call by ~10s.
     // Gated on the turn actually exposing sandbox tools; never billed or synced unless a
     // tool truly uses it (see createSandboxAcquirer / wasUsed).
-    if (runtimeHasSandboxTools(runtime.tools)) {
+    if (runtimeHasSandboxTools(enabledTools)) {
       sandboxAcquirer.warm();
     }
 
@@ -446,7 +464,7 @@ async function runMessageWithContext(
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
-      enabledTools: runtime.tools,
+      enabledTools,
       repository: row.repository,
       signal: ctx.controller.signal,
       checkAbort,
@@ -477,8 +495,8 @@ async function runMessageWithContext(
     const turn = await executeStreamingTurn({
       ctx,
       row,
-      runtime,
-      system: runtime.systemPrompt,
+      runtime: { ...runtime, tools: enabledTools },
+      system: systemPrompt,
       messages,
       tools,
       mcpContext: {
@@ -984,7 +1002,21 @@ async function runAfterSessionWithContext(
       outcome = "skipped_archived";
       return;
     }
-    if (!afterSession?.enabled || !afterSession.prompt.trim()) {
+    // Recursion guard: only user-initiated sessions get a memory pass / after-session run. A
+    // memory-keeper session (source "memory") or a delegated child (source "agent") must never
+    // trigger one, or memory passes would spawn memory passes. (Such sessions are created inside the
+    // runner and never flow through the web dispatch sites either — this is defense in depth.)
+    if (row.session.source !== "user") {
+      outcome = "skipped_non_user_source";
+      return;
+    }
+    // The personal/default agent with memory enabled gets the dedicated memory-keeper pass even when
+    // it has no `#after-session` prompt. Any other agent falls back to the legacy in-session hook,
+    // which still requires an explicit prompt.
+    const memoryKeeperEligible =
+      row.agent.isDefault &&
+      resolveEnabledSkillMetadata(agentConfig).some((skill) => skill.id === MEMORY_SKILL_ID);
+    if (!memoryKeeperEligible && (!afterSession?.enabled || !afterSession.prompt.trim())) {
       outcome = "skipped_disabled";
       return;
     }
@@ -1094,6 +1126,53 @@ async function runAfterSessionWithContext(
     logBraintrustSpan(braintrustSpan, {
       metadata: { after_session_run_id: afterSessionRunId },
     });
+
+    // Memory-keeper path: instead of running an internal turn in this session, spawn a dedicated,
+    // invisible memory-keeper session (same agent/bundle, source "memory") that reads this session's
+    // transcript and updates memory. The brief parent lease + the after-session run record (deduped
+    // per parent message version) we just took ensure only one keeper spawns per idle message.
+    if (memoryKeeperEligible) {
+      const { childSessionId } = await observeRunStep(ctx, "spawn_memory_keeper", () =>
+        spawnMemoryKeeperSession({
+          parentSessionId: input.sessionId,
+          parentTitle: row.session.title,
+          workspaceId: row.workspace.id,
+          userId: row.session.userId,
+          agentId: row.agent.id,
+          modelProvider: row.session.modelProvider,
+          modelName: row.session.modelName,
+        }),
+      );
+      await markAfterSessionRunSpawned(afterSessionRunId, childSessionId);
+      await appendRuntimeEventForLease({
+        sessionId: input.sessionId,
+        messageId: null,
+        leaseId: ctx.leaseId,
+        leaseOwner: ctx.leaseOwner,
+        type: "after_session.spawned",
+        payload: { runId: afterSessionRunId, messageId: input.messageId, childSessionId },
+      });
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      outcome = "spawned_memory_keeper";
+      logger.info("Runner memory-keeper spawned", {
+        event: "opencompany.memory_keeper_spawned",
+        workspace_id: workspaceId,
+        user_id: userId,
+        agent_id: agentId,
+        session_id: input.sessionId,
+        message_id: input.messageId,
+        child_session_id: childSessionId,
+      });
+      return;
+    }
+
+    // Below: the legacy in-session after-session hook for non-default agents that declare an
+    // explicit `#after-session` prompt. `afterSession` is guaranteed enabled here.
+    if (!afterSession) {
+      outcome = "skipped_disabled";
+      await releaseRunLease(input.sessionId, ctx.leaseId, ctx.leaseOwner, "completed");
+      return;
+    }
 
     await requireLeaseWrite(
       appendRuntimeEventForLease({

@@ -189,6 +189,18 @@ describe("session payload cache helpers", () => {
               createdAt: "2026-05-24T10:00:00.000Z",
               updatedAt: "2026-05-24T10:01:00.000Z",
             },
+            {
+              id: "ses_memory",
+              title: "Memory pass: Parent",
+              status: "completed",
+              source: "memory",
+              agentName: "Leo",
+              agentPath: "agents/leo/leo.agent",
+              parentMessageId: null,
+              parentToolCallId: null,
+              createdAt: "2026-05-24T10:05:00.000Z",
+              updatedAt: "2026-05-24T10:06:00.000Z",
+            },
           ],
         },
       },
@@ -196,6 +208,9 @@ describe("session payload cache helpers", () => {
 
     expect(parsed.detail.related.parent?.id).toBe("ses_parent");
     expect(parsed.detail.related.children[0]?.parentToolCallId).toBe("call_delegate");
+    // Missing `source` on older payloads falls back to "user"; the memory pass carries "memory".
+    expect(parsed.detail.related.children[0]?.source).toBe("user");
+    expect(parsed.detail.related.children[1]?.source).toBe("memory");
   });
 
   it("round-trips the latest model-request debug snapshot", () => {

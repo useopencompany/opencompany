@@ -28,7 +28,7 @@ export type AgentSessionPayload = {
   agentPath: string | null;
   title: string;
   status: string;
-  source: "user" | "agent";
+  source: "user" | "agent" | "memory";
   modelProvider: string;
   modelName: string;
   parentSessionId: string | null;
@@ -47,6 +47,9 @@ export type RelatedSessionPayload = {
   id: string;
   title: string;
   status: string;
+  // "memory" marks a background memory-keeper pass; the UI labels it distinctly from delegated
+  // ("agent") children. "user" never appears here (those are not related children).
+  source: "user" | "agent" | "memory";
   agentName: string;
   agentPath: string | null;
   parentMessageId: string | null;
@@ -339,6 +342,9 @@ function parseRelatedSessionPayload(value: unknown): RelatedSessionPayload {
     id: readStringField(record, "id"),
     title: readNonEmptyStringField(record, "title"),
     status: readNonEmptyStringField(record, "status"),
+    // Tolerant: payloads cached before the memory-keeper feature lack `source`; treat those as the
+    // generic "user" (they predate any memory pass, so the Memory label simply won't show).
+    source: readSessionSourceOrDefault(record, "source", "user"),
     agentName: readNonEmptyStringField(record, "agentName"),
     agentPath: readNullableStringField(record, "agentPath"),
     parentMessageId: readNullableStringField(record, "parentMessageId"),
@@ -465,10 +471,25 @@ function readNonEmptyStringField(record: Record<string, unknown>, field: string)
   return value;
 }
 
-function readSessionSource(record: Record<string, unknown>, field: string): "user" | "agent" {
+function readSessionSource(
+  record: Record<string, unknown>,
+  field: string,
+): "user" | "agent" | "memory" {
   const value = readStringField(record, field);
-  if (value !== "user" && value !== "agent") throw new Error(`Invalid ${field}.`);
+  if (value !== "user" && value !== "agent" && value !== "memory") {
+    throw new Error(`Invalid ${field}.`);
+  }
   return value;
+}
+
+function readSessionSourceOrDefault(
+  record: Record<string, unknown>,
+  field: string,
+  fallback: "user" | "agent" | "memory",
+): "user" | "agent" | "memory" {
+  const value = record[field];
+  if (value === "user" || value === "agent" || value === "memory") return value;
+  return fallback;
 }
 
 function readOptionalStringField(record: Record<string, unknown>, field: string) {

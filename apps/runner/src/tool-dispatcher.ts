@@ -29,6 +29,7 @@ import {
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { publishTransientRuntimeEvent } from "./events";
+import { runFetchTranscriptTool } from "./fetch-transcript-tool";
 import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
@@ -603,6 +604,11 @@ export async function executeRuntimeTool(input: {
           // Runner-side, no sandbox, no Gateway key: queries Postgres directly, scoped to this
           // agent + user via the current session row, excluding the live session.
           return runRecallTool({ sessionId: input.sessionId, args: input.args });
+        }
+        if (input.definition.name === "fetch_transcript") {
+          // Runner-side, no sandbox: reads the full transcript of a session the caller is allowed
+          // to see (its own past sessions, or the parent it was spawned to review).
+          return runFetchTranscriptTool({ callerSessionId: input.sessionId, args: input.args });
         }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {

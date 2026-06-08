@@ -13,6 +13,7 @@ export type RuntimeToolName =
   | "gh"
   | "memory"
   | "recall"
+  | "fetch_transcript"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -384,6 +385,28 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Returns each hit as a short window: the matching message plus the one before and after it for context.",
       "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
       "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
+    ].join("\n"),
+  },
+  {
+    name: "fetch_transcript",
+    kind: "internal",
+    description:
+      "Fetch the full, ordered transcript of one of your past sessions by its session id. Use after `recall` surfaces a relevant session and you want the complete conversation, not just the matching snippets. Read-only; you can only fetch your own sessions (or the session you were asked to review).",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "The id of the session whose transcript to fetch.",
+        },
+      },
+      required: ["sessionId"],
+      additionalProperties: false,
+    },
+    help: [
+      "Returns every visible user and assistant message in the session, in chronological order.",
+      "Scoped to your own sessions with this user; internal/background messages are excluded.",
+      "Pair with recall: recall finds the relevant session, fetch_transcript reads it in full.",
     ].join("\n"),
   },
   {
@@ -2194,7 +2217,8 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
       tool.name === "delegate_to_agent" ||
       tool.name === "update_agent_file" ||
       tool.name === "memory" ||
-      tool.name === "recall"
+      tool.name === "recall" ||
+      tool.name === "fetch_transcript"
     ) {
       continue;
     }
@@ -2213,6 +2237,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   if (input.memorySkillEnabled) {
     names.add("memory");
     names.add("recall");
+    names.add("fetch_transcript");
   }
 
   const selectedToolIds = new Set(
@@ -2282,6 +2307,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   gh: "GitHub CLI",
   memory: "Memory",
   recall: "Recall past sessions",
+  fetch_transcript: "Fetch transcript",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",
@@ -2382,6 +2408,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "gh",
   "memory",
   "recall",
+  "fetch_transcript",
   "ask_user_question",
   "delegate_to_agent",
   "tool_help",

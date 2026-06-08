@@ -7,7 +7,7 @@ import {
   agents,
   sessionStars,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
   type SidebarSessionPayload,
@@ -176,6 +176,7 @@ export async function loadAgentSessionDetailForWorkspace(
             id: agentSessions.id,
             title: agentSessions.title,
             status: agentSessions.status,
+            source: agentSessions.source,
             agentName: agents.name,
             agentPath: agents.path,
             parentMessageId: agentSessions.parentMessageId,
@@ -200,6 +201,7 @@ export async function loadAgentSessionDetailForWorkspace(
         id: agentSessions.id,
         title: agentSessions.title,
         status: agentSessions.status,
+        source: agentSessions.source,
         agentName: agents.name,
         agentPath: agents.path,
         parentMessageId: agentSessions.parentMessageId,
@@ -214,7 +216,9 @@ export async function loadAgentSessionDetailForWorkspace(
           eq(agentSessions.parentSessionId, sessionId),
           eq(agentSessions.workspaceId, workspaceId),
           eq(agentSessions.userId, userId),
-          eq(agentSessions.source, "agent"),
+          // Both delegated children ("agent") and memory-keeper passes ("memory") are grouped
+          // under their parent; the live session list filters to source "user" so neither clutters it.
+          inArray(agentSessions.source, ["agent", "memory"]),
           isNull(agentSessions.archivedAt),
         ),
       )
@@ -404,7 +408,12 @@ export async function loadAgentSessionDetailForWorkspace(
   const cost = rollup.cost;
   const serializedSession = {
     ...session,
-    source: session.source === "agent" ? ("agent" as const) : ("user" as const),
+    source:
+      session.source === "agent"
+        ? ("agent" as const)
+        : session.source === "memory"
+          ? ("memory" as const)
+          : ("user" as const),
   };
 
   return serializeAgentSessionDetail({
