@@ -377,8 +377,9 @@ You have a persistent, structured memory under \`agent/memory/\` that survives a
 Manage it **only** through the \`memory\` tool — do not hand-edit files under \`agent/memory/\` with
 \`edit_file\`/\`write_file\`, and do not run the CLI yourself with \`shell\`; the \`memory\` tool enforces
 the structure, provenance, and links that keep memory trustworthy (and runs model-backed retrieval
-with credentials you never handle). (\`agent/memory.md\` remains your freeform scratchpad; the
-structured tree is separate.)
+with credentials you never handle). (This structured tree is separate from your hot-memory files
+\`agent/user.md\` and \`agent/memory.md\`, which are small, always-loaded, and edited directly — use
+this tree for the deep, retrieved long tail, not for facts that should ride in every session.)
 
 Call the \`memory\` tool, passing the subcommand and flags in its \`args\` string:
 
@@ -400,6 +401,8 @@ synthesized belief) on top, and an **append-only timeline** of dated entries bel
 
 The rule that keeps memory honest: **compiled truth must cite evidence.** You capture evidence
 first, then rewrite an object's compiled truth with \`[^ev:<evidence-id>]\` citations pointing at it.
+(Need to write the citation pattern literally, e.g. to document it? Escape it as \`\\[^ev:id]\` and it
+is treated as prose, not a citation.)
 
 Every file has a unique \`id\` that is also its file name. Ids are lowercase slugs
 (e.g. \`acme\`, \`jane-doe\`, \`acme-call-2026-06-06\`).
@@ -414,11 +417,19 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 - **rewrite** — update an object's compiled truth. Must cite linked evidence.
   \`memory rewrite acme --truth "Acme is evaluating our enterprise tier; SSO is the gating requirement [^ev:acme-call-2026-06-06]."\`
   Every \`[^ev:...]\` must point at evidence that lists this object as a subject, or it is rejected.
+- **alias** — add or remove alternate names on a canonical object (retrieval matches on them).
+  \`memory alias acme --add "Acme Corp" --remove "ACME"\` (both flags repeatable). An alias another
+  object already owns is rejected, so aliases stay globally unique.
 - **get** — read a file. \`memory get acme\` (add \`--section truth|timeline|frontmatter\`).
 - **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
   Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`.
-- **merge** — fold a duplicate canonical object into another, then re-synthesize.
+- **merge** — fold a duplicate canonical object into another, then re-synthesize. Aliases, related
+  links and timeline move to the survivor; the source becomes a redirect stub.
   \`memory merge --from acme-corp --into acme\` (then \`memory rewrite acme ...\`). Use \`--dry-run\` first.
+- **delete** — permanently remove a file (a leftover merge stub, a duplicate, or a bad object).
+  \`memory delete acme-corp\` (use \`--dry-run\` to preview). Related links and evidence subjects are
+  scrubbed automatically; if the target is still cited or is a merge target, it needs \`--force\` and
+  you must repair those references afterward (run \`memory doctor\`).
 - **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
   \`memory doctor\` (add \`--fix-freshness\` to mark stale objects).
 
@@ -429,6 +440,8 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 - Before answering questions about people, companies, or past decisions, **query** memory.
 - Keep compiled truth tight and current; let the timeline hold the history.
 - Run **doctor** occasionally and after merges to catch broken links and stale summaries.
+- Prefer **merge** over **delete** when two objects are the same thing — it preserves the evidence
+  and timeline. Reach for **delete** only to clear leftover stubs or genuinely bad objects.
 - Don't record one-off, throwaway context here — that belongs in the conversation.
 `;
 }

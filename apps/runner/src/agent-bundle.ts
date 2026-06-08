@@ -12,7 +12,11 @@ import { type SandboxHandle, sandboxLayout } from "./sandbox";
 const MAX_AGENT_BUNDLE_FILE_BYTES = MAX_BRAIN_FILE_BYTES;
 const MAX_AGENT_BUNDLE_MOUNT_FILES = MAX_BRAIN_MOUNT_FILES;
 const MAX_AGENT_BUNDLE_MOUNT_BYTES = MAX_BRAIN_MOUNT_BYTES;
+// Hot-memory files: always-present so the agent can read/edit them and so the runtime can
+// inject them into the system prompt every session (see resolveAgentRuntimeConfig). Created
+// empty when absent, exactly like a freshly-seeded scratchpad.
 const AGENT_MEMORY_PATH = "memory.md";
+const AGENT_USER_MEMORY_PATH = "user.md";
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
 type AgentFileRow = typeof agentFiles.$inferSelect;
@@ -66,14 +70,15 @@ export async function materializeAgentBundleForSession(input: {
     });
   }
 
-  if (!mountedPaths.has(AGENT_MEMORY_PATH)) {
+  for (const path of [AGENT_MEMORY_PATH, AGENT_USER_MEMORY_PATH]) {
+    if (mountedPaths.has(path)) continue;
     const contentHash = hashContent("");
-    await input.sandbox.files.write(`${layout.agentRoot}/${AGENT_MEMORY_PATH}`, "");
+    await input.sandbox.files.write(`${layout.agentRoot}/${path}`, "");
     await mountAgentBundleFile({
       sessionId: input.sessionId,
       workspaceId: input.workspaceId,
-      repoPath: repoPathFor(bundle.dir, AGENT_MEMORY_PATH),
-      relativePath: AGENT_MEMORY_PATH,
+      repoPath: repoPathFor(bundle.dir, path),
+      relativePath: path,
       contentHash,
     });
   }

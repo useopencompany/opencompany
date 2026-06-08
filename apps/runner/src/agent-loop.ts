@@ -1,4 +1,5 @@
 import {
+  agentBundleDir,
   BUILTIN_USE_TOOL_NAME,
   newAgentSessionMessageId,
   normalizeAgentConfig,
@@ -9,7 +10,7 @@ import {
   resolveAgentRuntimeConfig,
 } from "@opencompany/agent-runtime";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import { agentSessionMessages } from "@opencompany/db/schema";
+import { agentFiles, agentSessionMessages } from "@opencompany/db/schema";
 import {
   captureException,
   createLogger,
@@ -25,7 +26,7 @@ import {
   traceBraintrustStep,
 } from "@opencompany/observability/braintrust";
 import type { ModelMessage } from "ai";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { syncAgentBundleFromSandbox } from "./agent-bundle";
 import { syncBrainFromSandbox } from "./brain";
@@ -140,6 +141,30 @@ export { createToolStartCoordinator } from "./tool-start-coordinator";
 export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
+
+// Load the agent's "hot memory" files (agent/user.md, agent/memory.md) from the DB so they can
+// be injected into the system prompt at session start. We read from agent_files (not the
+// sandbox) because the runtime config is resolved before the bundle materializes; this is what
+// gives hot memory its frozen-snapshot behavior — in-session edits sync back at session end and
+// surface next session. A missing/never-written file resolves to undefined (empty-section path).
+async function loadHotMemory(
+  db: RunContext["db"],
+  workspaceId: string,
+  agentId: string,
+  agentPath: string | null,
+): Promise<{ userMemory?: string | undefined; agentMemory?: string | undefined }> {
+  if (!agentPath) return {};
+  const bundleDir = agentBundleDir(agentPath);
+  const rows = await db
+    .select({ path: agentFiles.path, content: agentFiles.content })
+    .from(agentFiles)
+    .where(and(eq(agentFiles.workspaceId, workspaceId), eq(agentFiles.agentId, agentId)));
+  const byPath = new Map(rows.map((row) => [row.path, row.content]));
+  return {
+    userMemory: byPath.get(`${bundleDir}/user.md`),
+    agentMemory: byPath.get(`${bundleDir}/memory.md`),
+  };
+}
 
 export async function runMessage(input: {
   sessionId: string;
@@ -278,12 +303,14 @@ async function runMessageWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...hotMemory,
       toolPolicy: { policy: toolPolicy, suspendable },
     });
     modelProvider = runtime.model.provider;
@@ -980,12 +1007,14 @@ async function runAfterSessionWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...hotMemory,
       toolPolicy: { policy: toolPolicy, suspendable: false },
     });
     modelProvider = runtime.model.provider;
@@ -1139,7 +1168,7 @@ async function runAfterSessionWithContext(
         ...runtime,
         tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
       },
-      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward in your agent folder (agent/memory.md for durable learnings), and skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward in your hot-memory files — durable facts about the user in agent/user.md, durable environment/workflow lessons in agent/memory.md — but keep both tight (they load into every future session, ~3KB cap each); push longer-tail durable facts into structured memory instead. Skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
       messages,
       tools,
       mcpContext: {
@@ -1401,12 +1430,14 @@ async function resumeApprovalWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...hotMemory,
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;
@@ -1910,12 +1941,14 @@ async function resumeQuestionResponseWithContext(
     const toolPolicy = await observeRunStep(ctx, "load_tool_policy", () =>
       loadWorkspaceToolPolicy(row.workspace.id),
     );
+    const hotMemory = await loadHotMemory(ctx.db, row.workspace.id, row.agent.id, row.agent.path);
     const runtime = resolveAgentRuntimeConfig({
       agent: agentConfig,
       modelOverride: row.session.modelName ?? undefined,
       workspaceName: row.workspace.name,
       sessionTitle: row.session.title,
       ...optionalUserContext(row.user),
+      ...hotMemory,
       toolPolicy: { policy: toolPolicy, suspendable: true },
     });
     modelProvider = runtime.model.provider;

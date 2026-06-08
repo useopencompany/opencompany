@@ -226,6 +226,10 @@ This is what mentions can be:
 
 If you write `@something` that doesn't match anything, opencompany leaves it as plain text. It won't error, but it also won't do anything special.
 
+### Hot memory
+
+Every session loads two small files from the agent folder straight into the agent's context, so it remembers durable context without looking it up: `agent/user.md` (who you are — preferences, style, goals) and `agent/memory.md` (environment, conventions, durable lessons). They're created empty, edited by the agent as it learns, and kept small (each is capped at ~3 KB when loaded). Bigger or long-tail facts go into structured memory instead. Edits take effect on the next session.
+
 ### After-session memory
 
 Add `#after-session` to run a background memory pass after a session has been idle for 3 minutes:
@@ -234,7 +238,7 @@ Add `#after-session` to run a background memory pass after a session has been id
 Help with customer calls. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
 ```
 
-The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update `agent/memory.md` when there is useful long-lived context to save. Use Brain only for shared company knowledge.
+The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. It does not create a visible chat message; it reuses the agent loop and can update the hot-memory files (`agent/user.md`, `agent/memory.md`) when there is useful long-lived context to save — keeping them tight. Use Brain only for shared company knowledge.
 
 ### Tiptap content is not the contract
 

@@ -66,6 +66,14 @@ export function resolveAgentRuntimeConfig(input: {
   userFirstName?: string;
   userLastName?: string;
   userEmail?: string;
+  // "Hot memory": the raw contents of the agent's two always-loaded bundle files,
+  // `agent/user.md` (who the user is) and `agent/memory.md` (environment, conventions,
+  // durable lessons). Injected verbatim (capped) into the system prompt so the agent
+  // carries a tiny, curated profile into every session without retrieving it. The caller
+  // reads these from the DB at session start; an absent/empty file falls back to an
+  // invitation placeholder. See buildHotMemorySection.
+  userMemory?: string | undefined;
+  agentMemory?: string | undefined;
   toolPolicy?: {
     policy: WorkspaceToolPolicyMap;
     suspendable: boolean;
@@ -95,8 +103,9 @@ export function resolveAgentRuntimeConfig(input: {
     "Avoid launching more than eight tool calls in one batch; inspect results before deciding whether more calls are useful.",
     "Keep command output concise and explain material changes to the user.",
     "When a request will take more than a few tool calls or roughly twenty seconds, open your reply with one or two plain-language sentences before any tool call: what you are about to do, a rough time estimate, what you will deliver, and what you will save to memory. Offer a useful optional add-on when it fits. For quick replies, skip this and answer directly.",
-    "The sandbox has four file roots. Choose where to put something by how long it should last and who needs it: ./work is a temporary scratch directory for this session only (drafts, intermediate files, deliverables, cloned repos) — nothing here survives the session. ./agent is your private agent folder that persists across sessions: keep freeform durable notes in agent/memory.md, plus any other private files worth carrying forward. ./brain is shared company knowledge other agents and people rely on; edit it only via mounted @brain/... refs. ./skills is read-only; open it with read_skill.",
-    "agent/memory/ is structured, evidence-grounded memory (canonical objects + cited evidence). Manage it ONLY through the `memory` tool (not shell), never by editing files there directly; read the memory skill (skill id `memory`) with read_skill before using it.",
+    "The sandbox has four file roots. Choose where to put something by how long it should last and who needs it: ./work is a temporary scratch directory for this session only (drafts, intermediate files, deliverables, cloned repos) — nothing here survives the session. ./agent is your private agent folder that persists across sessions, including your hot-memory files and any other private files worth carrying forward. ./brain is shared company knowledge other agents and people rely on; edit it only via mounted @brain/... refs. ./skills is read-only; open it with read_skill.",
+    "agent/user.md and agent/memory.md are your HOT MEMORY: both are injected into your context at the start of every session (see the 'Your hot memory' section below), so keep each tight — there is a hard ~3KB cap and anything over it is truncated. user.md is who your user is (identity, preferences, communication style, goals); memory.md is environment, conventions, and durable lessons/workflows. Edit them with edit_file/write_file as you learn; edits take effect next session. Push larger or long-tail durable facts into structured memory or other private agent/ files instead of bloating these two.",
+    "agent/memory/ is structured, evidence-grounded memory (canonical objects + cited evidence) — the deep, retrieved layer for the long tail (specific people, companies, decisions). Manage it ONLY through the `memory` tool (not shell), never by editing files there directly; read the memory skill (skill id `memory`) with read_skill before using it.",
     "One-off context that won't matter next session belongs in the conversation, not a file. How you behave going forward lives in your .agent definition via self-edit, not these folders.",
     "File tools require paths prefixed with work/, brain/, or agent/. Bare paths like README.md are invalid; use work/README.md, brain/README.md, or agent/memory.md. Use read_skill for skill files.",
     "Use edit_file for targeted changes to existing files. Use write_file only for new files or intentional full-file overwrites.",
@@ -126,6 +135,7 @@ export function resolveAgentRuntimeConfig(input: {
     input.workspaceName ? `Workspace: ${input.workspaceName}` : null,
     input.sessionTitle ? `Session: ${input.sessionTitle}` : null,
     ...formatUserContext(input),
+    buildHotMemorySection({ userMemory: input.userMemory, agentMemory: input.agentMemory }),
   ].filter(Boolean);
 
   const effectiveModelName =
@@ -152,6 +162,52 @@ export function resolveAgentRuntimeConfig(input: {
     }),
     mcpServers: input.agent.tools.filter((tool): tool is AgentMcpToolConfig => tool.type === "mcp"),
   };
+}
+
+// Hard byte cap per hot-memory file when injected into the system prompt. Both files load
+// into EVERY turn, so an unbounded file would silently bloat context and degrade the prompt
+// cache. Kept deliberately small (Hermes-style "tiny memory"); content beyond it is truncated
+// with a visible marker so the agent is nudged to trim rather than losing data unknowingly.
+export const MAX_HOT_MEMORY_BYTES = 3072;
+
+// Truncate on a UTF-8 byte boundary (not a code-unit boundary) so multibyte characters are
+// never split, and append a marker the agent can see and act on. Returns the input unchanged
+// when it already fits.
+function truncateHotMemory(content: string): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(content).length <= MAX_HOT_MEMORY_BYTES) return content;
+  const marker = "\n…[truncated — trim this file to keep it under ~3KB]";
+  const budget = MAX_HOT_MEMORY_BYTES - encoder.encode(marker).length;
+  // Walk back from the byte budget to the nearest valid character boundary.
+  let end = content.length;
+  while (end > 0 && encoder.encode(content.slice(0, end)).length > budget) {
+    end -= 1;
+  }
+  return `${content.slice(0, end).trimEnd()}${marker}`;
+}
+
+// The "Your hot memory" block: the agent's two always-loaded bundle files, injected verbatim
+// (capped) so identity/preferences and environment facts ride in every session without a
+// retrieval step. Always renders both subsections; an empty file shows an invitation
+// placeholder so a fresh agent is nudged to start keeping memory rather than seeing nothing.
+function buildHotMemorySection(input: {
+  userMemory: string | undefined;
+  agentMemory: string | undefined;
+}): string {
+  const renderBody = (raw: string | undefined, emptyHint: string): string => {
+    const trimmed = raw?.trim() ?? "";
+    return trimmed ? truncateHotMemory(trimmed) : `(empty — ${emptyHint})`;
+  };
+  return [
+    "## Your hot memory — always loaded at the start of every session (keep each tight; ~3KB cap)",
+    "Edit these with file tools as you learn. Changes take effect next session.",
+    "",
+    "### user.md — who your user is (identity, preferences, communication style, goals)",
+    renderBody(input.userMemory, "populate this as you learn durable facts about your user"),
+    "",
+    "### memory.md — environment, conventions, durable lessons & workflows",
+    renderBody(input.agentMemory, "populate this with durable environment/workflow facts"),
+  ].join("\n");
 }
 
 function formatUserContext(input: {
