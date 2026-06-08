@@ -5,6 +5,7 @@ import {
   type EnqueueRunnerJobInput,
   enqueueRunnerJob,
   RUNNER_JOB_MAX_ATTEMPTS,
+  RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS,
   type RunnerJob,
   type RunnerJobHandlers,
   type RunnerJobStatus,
@@ -391,6 +392,36 @@ describe("runner job execution", () => {
     expect(firstJob(store).leaseId).toBeNull();
     expect(firstJob(store).lastError).toBe("Run lease is busy.");
   });
+
+  it("gives up on a lease-busy job once the lease-busy ceiling is reached", async () => {
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "running",
+        attempts: RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          runMessage: vi.fn(async () => {
+            throw new RunLeaseBusyError();
+          }),
+        }),
+      }),
+    ).rejects.toThrow(RunLeaseBusyError);
+
+    // Past the ceiling the runaway re-claim loop stops: the in-flight run owns the message.
+    expect(firstJob(store).status).toBe("failed");
+    expect(firstJob(store).leaseId).toBeNull();
+  });
 });
 
 describe("runner job worker wake", () => {
@@ -675,6 +706,8 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
     toolArgRepairEnabled: false,
+    jobLeaseTtlMs: 300_000,
+    jobMaxLeaseBusyAttempts: 10,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

@@ -562,6 +562,8 @@ export function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bSandboxIdleTimeoutMs: 30_000,
     opencodeTimeoutMs: 1_200_000,
     toolArgRepairEnabled: false,
+    jobLeaseTtlMs: 300_000,
+    jobMaxLeaseBusyAttempts: 10,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],
