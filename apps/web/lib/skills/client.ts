@@ -5,7 +5,13 @@ export async function fetchWorkspaceSkills(): Promise<AgentSkillCatalogEntry[]> 
   const response = await fetch("/api/skills");
   if (!response.ok) return [];
   const data = (await response.json()) as {
-    skills?: Array<{ id?: unknown; name?: unknown; description?: unknown; source?: unknown }>;
+    skills?: Array<{
+      id?: unknown;
+      name?: unknown;
+      description?: unknown;
+      command?: unknown;
+      source?: unknown;
+    }>;
   };
   return (data.skills ?? []).flatMap((skill) => {
     if (typeof skill.id !== "string") return [];
@@ -15,6 +21,7 @@ export async function fetchWorkspaceSkills(): Promise<AgentSkillCatalogEntry[]> 
         id: skill.id,
         name: typeof skill.name === "string" ? skill.name : skill.id,
         description: typeof skill.description === "string" ? skill.description : "",
+        ...(typeof skill.command === "string" && skill.command ? { command: skill.command } : {}),
         ...(source ? { source } : {}),
       },
     ];
