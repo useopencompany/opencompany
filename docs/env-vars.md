@@ -142,9 +142,9 @@ Setup checklist:
 If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
 and the workspace-home card degrades to the booking fallback (onboarding never breaks).
 
-Channel naming: each customer channel is `<customer-slug>-<id6>-x-opencompany` (the
-`-x-opencompany` convention plus a short per-workspace suffix that keeps names globally unique,
-so two same-named customers never collide). Ownership is also stamped in the channel purpose
+Channel naming: each customer channel is `<customer-slug>-<id8>-x-opencompany` (the
+`-x-opencompany` convention plus a short per-workspace suffix so two same-named customers
+practically never collide). Ownership is also stamped in the channel purpose
 (`opencompany-support:<workspaceId>`) and checked before adopting on a retry, so a channel is
 never hijacked across workspaces.
 

@@ -18,12 +18,12 @@ describe("workspaceChannelSlug", () => {
     expect(workspaceChannelSlug("  --hi--  ")).toBe("hi");
   });
 
-  it("caps length at 59 chars and never ends in a hyphen after truncation", () => {
-    expect(workspaceChannelSlug("a".repeat(100)).length).toBe(59);
+  it("caps length at 57 chars and never ends in a hyphen after truncation", () => {
+    expect(workspaceChannelSlug("a".repeat(100)).length).toBe(57);
     // A separator landing exactly on the cut boundary must not leave a trailing hyphen.
-    const sliced = workspaceChannelSlug(`${"a".repeat(58)} rest`);
+    const sliced = workspaceChannelSlug(`${"a".repeat(56)} rest`);
     expect(sliced.endsWith("-")).toBe(false);
-    expect(sliced).toBe("a".repeat(58));
+    expect(sliced).toBe("a".repeat(56));
   });
 
   it("returns empty string for non-latin-only input", () => {
