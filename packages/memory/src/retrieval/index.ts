@@ -1,6 +1,6 @@
 import type { MemoryStatus, MemoryType } from "../schema";
 import { blend } from "./blend";
-import { lexicalSearch } from "./bm25";
+import { lexicalSearch, titleAliasMatch } from "./bm25";
 import { buildCorpus, type IndexRecord } from "./corpus";
 import { reciprocalRankFusion } from "./fuse";
 
@@ -12,8 +12,14 @@ export type QueryOptions = {
   since?: string;
   limit?: number;
   lexicalOnly?: boolean;
-  // Number of `related`-edge hops to expand the result set by (0 = no graph expansion).
+  // Graph expansion: follow `related` links + evidence citations/subjects this many hops out
+  // from the top text hits, pulling linked neighbors into the result with a decaying boost.
+  // 0 (default) keeps retrieval flat — purely text-driven.
   hops?: number;
+  // By default retrieval mirrors doctor's integrity view: `merged` redirect stubs and records
+  // that fail strict validation are hidden. These opt back in for recovery/debugging.
+  includeMerged?: boolean;
+  includeInvalid?: boolean;
 };
 
 // Optional model-backed stages, injected by the runtime when an AI Gateway key is available.
@@ -81,6 +87,17 @@ export async function query(
     relevanceById = reciprocalRankFusion(lists);
   }
 
+  // 4a) Graph expansion — pull linked neighbors of the top hits into the result with a per-hop
+  // decaying boost, so relationship queries surface the connected object (a person's company, a
+  // company's decision) even when it didn't match the text directly.
+  if ((options.hops ?? 0) > 0) {
+    expandAlongGraph(relevanceById, byId, options.hops ?? 0);
+  }
+
+  // 4b) Name boost — a query that *is* a record's title/alias foregrounds that record, undoing
+  // the rank-flattening of fusion (an exact "Acme Inc" hit should beat an incidental mention).
+  applyNameBoost(relevanceById, byId, options.text);
+
   // 5) Rerank (model) — reorder the top fused candidates.
   let ordered = [...relevanceById.entries()]
     .map(([id, relevance]) => ({ id, relevance }))
@@ -100,33 +117,6 @@ export async function query(
     } catch {
       // Rerank is best-effort.
     }
-  }
-
-  // 5b) Graph expansion (opt-in) — fold in memories reachable via `related` edges, up to N hops.
-  // Expanded nodes inherit a damped fraction of their parent's relevance so they rank below the
-  // direct matches that pulled them in. Only ids that survived the candidate filters are eligible.
-  const hops = options.hops ?? 0;
-  if (hops > 0 && ordered.length > 0) {
-    const HOP_DECAY = 0.5;
-    const relevanceByIdExpanded = new Map(ordered.map(({ id, relevance }) => [id, relevance]));
-    let frontier = [...ordered];
-    for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
-      const next: Array<{ id: string; relevance: number }> = [];
-      for (const { id, relevance } of frontier) {
-        const record = byId.get(id);
-        if (!record) continue;
-        for (const { target } of record.related) {
-          if (relevanceByIdExpanded.has(target) || !byId.has(target)) continue;
-          const expandedRelevance = relevance * HOP_DECAY;
-          relevanceByIdExpanded.set(target, expandedRelevance);
-          next.push({ id: target, relevance: expandedRelevance });
-        }
-      }
-      frontier = next;
-    }
-    ordered = [...relevanceByIdExpanded.entries()]
-      .map(([id, relevance]) => ({ id, relevance }))
-      .sort((a, b) => b.relevance - a.relevance);
   }
 
   // 6) Recency/position blend, then materialize hits.
@@ -153,7 +143,11 @@ export async function query(
 function applyFilters(records: IndexRecord[], options: QueryOptions): IndexRecord[] {
   const typeSet = options.types && options.types.length > 0 ? new Set(options.types) : null;
   const sinceMs = options.since ? Date.parse(options.since) : Number.NaN;
+  // An explicit `--status merged` is itself a request to see merged stubs.
+  const includeMerged = options.includeMerged || options.status === "merged";
   return records.filter((record) => {
+    if (!includeMerged && record.status === "merged") return false;
+    if (!options.includeInvalid && !record.valid) return false;
     if (typeSet && !typeSet.has(record.type)) return false;
     if (options.status && record.status !== options.status) return false;
     if (
@@ -169,6 +163,81 @@ function applyFilters(records: IndexRecord[], options: QueryOptions): IndexRecor
     }
     return true;
   });
+}
+
+// Each hop pulls a neighbor in at this fraction of the node that reached it, so a 1-hop neighbor
+// of the top hit ranks below the directly-matched hits but above unrelated records.
+const HOP_DECAY = 0.5;
+// How many top hits seed the expansion — bounds the work and keeps weak matches from dragging in
+// their whole neighborhood.
+const GRAPH_SEED_LIMIT = 20;
+// Name-match weight (see titleAliasMatch): an exact title/alias match adds a full max-relevance,
+// guaranteeing it leads; a containment match adds half.
+const NAME_BOOST = 1;
+
+// Mutate the relevance map in place, BFS-ing out from the top-ranked hits along the memory graph
+// (related links, evidence citations, evidence→subject edges — all treated as undirected). A
+// neighbor only present via the graph enters the results; one already ranked keeps its higher
+// score. Neighbors outside the filtered candidate set (`byId`) are skipped, so filters still hold.
+function expandAlongGraph(
+  relevance: Map<string, number>,
+  byId: Map<string, IndexRecord>,
+  hops: number,
+): void {
+  const adjacency = buildAdjacency(byId);
+  let frontier = [...relevance.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, GRAPH_SEED_LIMIT)
+    .map(([id, score]) => ({ id, score }));
+
+  for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
+    const next: Array<{ id: string; score: number }> = [];
+    for (const { id, score } of frontier) {
+      const boosted = score * HOP_DECAY;
+      for (const neighbor of adjacency.get(id) ?? []) {
+        if (!byId.has(neighbor)) continue;
+        if (boosted > (relevance.get(neighbor) ?? 0)) {
+          relevance.set(neighbor, boosted);
+          next.push({ id: neighbor, score: boosted });
+        }
+      }
+    }
+    frontier = next;
+  }
+}
+
+// Undirected adjacency over the candidate set: related↔related, canonical↔cited evidence, and
+// evidence↔subject. Edges are added both ways so a query landing on either end can reach the other.
+function buildAdjacency(byId: Map<string, IndexRecord>): Map<string, Set<string>> {
+  const adjacency = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (a === b) return;
+    (adjacency.get(a) ?? adjacency.set(a, new Set()).get(a))?.add(b);
+    (adjacency.get(b) ?? adjacency.set(b, new Set()).get(b))?.add(a);
+  };
+  for (const record of byId.values()) {
+    for (const rel of record.related) link(record.id, rel.target);
+    for (const cited of record.citations) link(record.id, cited);
+    for (const subject of record.subjects) link(record.id, subject);
+  }
+  return adjacency;
+}
+
+// Add a name-match bump (scaled to the current max relevance) so a query that names a record by
+// title/alias floats that record to the top regardless of fusion's rank-flattening.
+function applyNameBoost(
+  relevance: Map<string, number>,
+  byId: Map<string, IndexRecord>,
+  text: string,
+): void {
+  if (!text.trim()) return;
+  const maxRelevance = Math.max(0, ...relevance.values()) || 1;
+  for (const record of byId.values()) {
+    const match = titleAliasMatch(record, text);
+    if (match > 0) {
+      relevance.set(record.id, (relevance.get(record.id) ?? 0) + match * NAME_BOOST * maxRelevance);
+    }
+  }
 }
 
 async function vectorSearch(

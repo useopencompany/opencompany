@@ -35,7 +35,7 @@ export function validateDocument(parsed: ParsedDocument, expectedId?: string): V
     errors.push("`type` is required and must be a known canonical or evidence type.");
   }
   if (!isMemoryStatus(fm.status)) {
-    errors.push("`status` is required and must be active, deprecated, or merged.");
+    errors.push("`status` is required and must be active, draft, deprecated, or merged.");
   }
   if (!isIsoTimestamp(fm.createdAt)) {
     errors.push("`created_at` is required and must be an ISO-8601 UTC timestamp.");
