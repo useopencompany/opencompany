@@ -546,7 +546,7 @@ async function runCommandWithExitResult(
   }
 }
 
-function commandExitResult(error: unknown) {
+export function commandExitResult(error: unknown) {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   if (record.name !== "CommandExitError") return null;
@@ -557,6 +557,15 @@ function commandExitResult(error: unknown) {
     stderr: typeof record.stderr === "string" ? record.stderr : "",
     exitCode: record.exitCode,
   };
+}
+
+// E2B raises a `TimeoutError` when a command exceeds its `timeoutMs` (the process is killed
+// server-side). Matched by name to stay decoupled from the SDK's class identity, mirroring
+// `commandExitResult`. Lets long tool calls capture partial state instead of bubbling a bare throw.
+export function isCommandTimeoutError(error: unknown) {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: unknown }).name === "TimeoutError",
+  );
 }
 
 function gitDiffCommand(workRoot: string) {

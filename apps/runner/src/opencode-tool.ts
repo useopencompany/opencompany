@@ -26,7 +26,9 @@ import type { HostedToolUsage } from "./hosted-tools";
 import { isRunLeaseCurrent, requireLeaseWrite } from "./lease-writes";
 import {
   cloneGitHubRepositoryIntoWorkdir,
+  commandExitResult,
   githubRemoteMatches,
+  isCommandTimeoutError,
   type SandboxHandle,
   sandboxLayout,
 } from "./sandbox";
@@ -173,17 +175,19 @@ export async function runOpencodeCoderTool(input: {
   await ensureOpencodeInstalled(input.sandbox);
 
   const stream = createOpencodeStreamAccumulator();
-  const result = await input.sandbox.commands.run(
-    `cd ${shellQuote(layout.workRoot)} && export PATH=${OPENCODE_BIN_PATH}:"$PATH" && ${buildOpencodeCommand(
-      {
-        task,
-        model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
-        sessionId: requestedSessionId,
-      },
-    )}`,
+  const opencodeCommand = `cd ${shellQuote(layout.workRoot)} && export PATH=${OPENCODE_BIN_PATH}:"$PATH" && ${buildOpencodeCommand(
     {
+      task,
+      model: `${OPENCODE_PROVIDER_ID}/${modelId}`,
+      sessionId: requestedSessionId,
+    },
+  )}`;
+  let timedOut = false;
+  let result: { stdout?: unknown; stderr?: unknown; exitCode?: number | null };
+  try {
+    result = await input.sandbox.commands.run(opencodeCommand, {
       envs: opencodeEnv,
-      timeoutMs: 600_000,
+      timeoutMs: input.env.opencodeTimeoutMs,
       onStdout: async (data: string) => {
         const redacted = redact(data);
         const activity = stream.push(redacted);
@@ -192,13 +196,31 @@ export async function runOpencodeCoderTool(input: {
       onStderr: async (data: string) => {
         await input.onOutput?.(redact(data));
       },
-    },
-  );
+    });
+  } catch (error) {
+    // Recover instead of failing the whole tool call: a non-zero opencode exit (CommandExitError)
+    // still carries stdout/stderr, and a wall-clock timeout leaves the sandbox alive with files
+    // written so far. Either way the streamed events were already parsed (so the resumable opencode
+    // session id is captured), and we fall through to snapshot the partial diff below.
+    const exitResult = commandExitResult(error);
+    if (exitResult) {
+      result = exitResult;
+    } else if (isCommandTimeoutError(error)) {
+      timedOut = true;
+      result = { stdout: "", stderr: "", exitCode: null };
+      await input.onOutput?.(
+        "opencode: timed out — capturing the partial diff and resumable session id.\n",
+      );
+    } else {
+      throw error;
+    }
+  }
   stream.finish();
   const summary = stream.summary({
     exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
     stdout: redact(String(result.stdout ?? "")),
     stderr: redact(String(result.stderr ?? "")),
+    timedOut,
   });
 
   await input.sandbox.commands.run(`cd ${shellQuote(layout.workRoot)} && git add -N .`, {
@@ -246,9 +268,21 @@ export async function runOpencodeCoderTool(input: {
     }
   }
 
+  // Never open a PR from a timed-out run: the work is partial and possibly mid-edit. Surface the
+  // diff + resumable session id instead and let a follow-up (resumed) call publish once complete.
   if (
     args.createPullRequest === true &&
     target.kind === "attached" &&
+    timedOut &&
+    !pullRequestUrl
+  ) {
+    pullRequestSkippedReason = "coder_timed_out";
+  }
+
+  if (
+    args.createPullRequest === true &&
+    target.kind === "attached" &&
+    !timedOut &&
     !pullRequestUrl &&
     (hasDiff || localCommitCount > 0)
   ) {
@@ -594,7 +628,7 @@ interface OpencodeUsage {
 
 type OpencodeStreamSummary = {
   sessionId: string | null;
-  status: "success" | "error" | "unknown";
+  status: "success" | "error" | "timeout" | "unknown";
   result: string;
   error: string | null;
   usage: OpencodeUsage | null;
@@ -723,17 +757,22 @@ export function createOpencodeStreamAccumulator() {
       exitCode: number | null;
       stdout: string;
       stderr: string;
+      timedOut?: boolean;
     }): OpencodeStreamSummary {
-      const status: OpencodeStreamSummary["status"] = error
-        ? "error"
-        : input.exitCode === 0
-          ? "success"
-          : input.exitCode == null
-            ? "unknown"
-            : "error";
+      const status: OpencodeStreamSummary["status"] = input.timedOut
+        ? "timeout"
+        : error
+          ? "error"
+          : input.exitCode === 0
+            ? "success"
+            : input.exitCode == null
+              ? "unknown"
+              : "error";
       const result = resultText.trim() || input.stdout.trim();
       const resolvedError =
-        error ?? (status === "error" && input.stderr.trim() ? input.stderr.trim() : null);
+        status === "timeout"
+          ? "opencode timed out before finishing. The session id above can be passed as opencodeSessionId to resume from where it left off; the partial diff is shown below."
+          : (error ?? (status === "error" && input.stderr.trim() ? input.stderr.trim() : null));
       const usage: OpencodeUsage | null = sawTokens
         ? {
             input_tokens: inputTokens,
