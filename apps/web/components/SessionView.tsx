@@ -1,10 +1,15 @@
 "use client";
 
 import {
+  ATTACHMENT_MAX_PER_MESSAGE,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+  modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
+import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,8 +27,10 @@ import {
   LoaderCircle,
   MessageCircleQuestion,
   PanelRight,
+  Play,
   Plus,
   ShieldAlert,
+  Sparkles,
   TerminalSquare,
   Upload,
   Wrench,
@@ -33,6 +40,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -44,11 +52,21 @@ import {
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ModelPicker } from "@/components/agent-editor/ModelPicker";
+import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
+import { Composer } from "@/components/Composer";
+import {
+  AttachmentCard,
+  ComposerAttachments,
+  type PendingAttachment,
+  uploadAttachment,
+} from "@/components/composer-attachments";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
 import { useToast } from "@/components/ToastProvider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useHydrated } from "@/components/useHydrated";
 import { useSessionStream } from "@/components/useSessionStream";
 import { formatElapsed, WorkingIndicator } from "@/components/WorkingIndicator";
@@ -57,7 +75,9 @@ import { SessionPageSkeleton } from "@/components/WorkspaceRouteSkeletons";
 import {
   abortAgentSession,
   cancelAgentSessionQuestion,
+  continueInterruptedSession,
   resolveToolApproval,
+  setAgentSessionModel,
   submitAgentSessionMessage,
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
@@ -71,6 +91,7 @@ import {
   type AssistantTurnPart,
   buildAssistantTurnParts,
   buildBackgroundActivityParts,
+  buildSessionDebugTurns,
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
@@ -84,24 +105,43 @@ import {
   type SessionToolUsageSummary,
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
-import { deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import {
   getSlashContext,
   matchSlashCommands,
   parseSlashCommand,
+  SLASH_COMMANDS,
   type SlashCommand,
 } from "@/lib/slash-commands/registry";
+import {
+  buildSkillSlashCommands,
+  type SkillCommandSource,
+} from "@/lib/slash-commands/skill-commands";
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
 
-// A turn is actively generating tokens right now — the transcript must replay from
-// offset "-1" to reconstruct the in-flight assistant text. Every other status (settled,
-// paused, or brand-new) seeds the live read from the stream's current end instead, since
-// the durable transcript is already painted from the server snapshot.
-const ACTIVE_STREAMING_STATUSES = new Set(["running", "aborting"]);
+// Snapshot statuses where the server snapshot is the authoritative transcript AND no
+// turn can still be racing into the Durable Stream — the lease has been released
+// (terminal) or the run is durably parked (paused). Safe to tail from the stream's
+// current end. Every other status (active OR startup) must replay from "-1": during
+// `created`/`provisioning`/`ready` the runner can claim the lease and emit
+// `message.created` between when the snapshot was read and when we resolve HEAD, and
+// the reducer's `message.completed` is a silent no-op without the matching
+// `message.created` in the overlay — the assistant turn would never reach `completed`
+// and we'd misrender "Stopped before finishing" once status flips to `awaiting_approval`.
+const SETTLED_SNAPSHOT_STATUSES = new Set([
+  "completed",
+  "failed",
+  "aborted",
+  "archived",
+  "awaiting_approval",
+  "awaiting_input",
+]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+const DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-5.4-mini";
 const STREAM_APPEND_ANIMATION_MIN_INTERVAL_MS = 120;
 
 // How far from the bottom (in px) before we consider the user "pinned".
@@ -266,8 +306,119 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [formError, setFormError] = useState<string | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<OptimisticUserMessage[]>([]);
   const [isPending, startTransition] = useTransition();
+  // Optimistic per-session model override. The displayed model is this when set, else the
+  // persisted session model. Switching is sticky for the session and applies to the next
+  // turn — it never interrupts an in-flight run — so this uses its own transition rather
+  // than the send path's `isPending`.
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
+  const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // Latest-attachments ref so the unmount cleanup can revoke all outstanding object URLs
+  // with an empty-dep effect (fires on unmount only) instead of re-running on every change.
+  const attachmentsRef = useRef(attachments);
+  // Sync the ref in an effect (not during render — that trips the react-compiler lint
+  // rule) so the empty-dep unmount cleanup below can revoke outstanding object URLs.
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentCapability = modelSupportsAttachments(session.modelName);
+  // Attaching is always available: text/code files need no model capability (they are
+  // inlined as text). The per-file image/pdf capability gate happens in acceptFiles.
+  const attachmentsEnabled = true;
+
+  const acceptFiles = useCallback(
+    (files: File[]) => {
+      setAttachments((prev) => {
+        const next = [...prev];
+        for (const file of files) {
+          if (next.length >= ATTACHMENT_MAX_PER_MESSAGE) {
+            showToast({
+              title: "Limit reached",
+              description: `Max ${ATTACHMENT_MAX_PER_MESSAGE} files.`,
+              tone: "default",
+            });
+            break;
+          }
+          const validation = validateAttachmentCandidate({
+            mediaType: file.type,
+            sizeBytes: file.size,
+            filename: file.name,
+          });
+          if (!validation.ok) {
+            showToast({
+              title: validation.reason === "size" ? "File too large" : "Unsupported file",
+              description:
+                validation.reason === "size"
+                  ? "Max 25 MB (images/PDFs) or 2 MB (text files)."
+                  : "Images, PDFs, and common text/code files.",
+              tone: "default",
+            });
+            continue;
+          }
+          // Image/PDF need the model to support them; text is always allowed.
+          if (validation.kind === "pdf" && !attachmentCapability.pdf) {
+            showToast({
+              title: "Unsupported file",
+              description: "This session's model can't read PDFs.",
+              tone: "default",
+            });
+            continue;
+          }
+          if (validation.kind === "image" && !attachmentCapability.images) {
+            showToast({
+              title: "Unsupported file",
+              description: "This session's model can't read images.",
+              tone: "default",
+            });
+            continue;
+          }
+          const id = crypto.randomUUID();
+          next.push({
+            id,
+            filename: file.name,
+            mediaType: file.type,
+            kind: validation.kind,
+            sizeBytes: file.size,
+            status: "uploading",
+            ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
+          });
+          void uploadAttachment({ id, file, workspaceId, sessionId: session.id })
+            .then((res) =>
+              setAttachments((cur) =>
+                cur.map((a) => (a.id === id ? { ...a, status: "ready", ...res } : a)),
+              ),
+            )
+            .catch((err) =>
+              setAttachments((cur) =>
+                cur.map((a) => (a.id === id ? { ...a, status: "error", error: String(err) } : a)),
+              ),
+            );
+        }
+        return next;
+      });
+    },
+    [attachmentCapability, session.id, workspaceId, showToast],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+  // Revoke any still-live preview object URLs when the composer unmounts (e.g. navigating
+  // away with unsent attachments) so they don't leak.
+  useEffect(() => {
+    return () => {
+      for (const att of attachmentsRef.current) {
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      }
+    };
+  }, []);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -304,11 +455,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // (durable rows + transient token deltas) through the shared reducer. `onEvent`
   // resolves the felt-TTFT timer on the first streamed assistant activity.
   const { state: streamState, status: streamStatus } = useSessionStream(session.id, {
-    // Seed from the stream's current end unless a turn is actively generating at open
-    // time (then replay from "-1" to rebuild in-flight text). Read from the server
-    // snapshot status, which is stable for this session load; captured at subscribe
+    // Seed from the stream's current end only when the snapshot is settled or paused
+    // (no in-flight turn AND no startup race window). For active or startup statuses
+    // we replay from "-1" — see SETTLED_SNAPSHOT_STATUSES above. Captured at subscribe
     // time inside the hook, so the later terminal-status flip doesn't re-open the stream.
-    seedFromEnd: !ACTIVE_STREAMING_STATUSES.has(detail.session.status),
+    seedFromEnd: SETTLED_SNAPSHOT_STATUSES.has(detail.session.status),
     onEvent: (event) => {
       const pending = pendingTtftRef.current;
       if (
@@ -340,7 +491,14 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // Aggregates (usage/cost/toolUsage) stay server-sourced — the recursive
     // session-tree rollup isn't reproduced client-side (D2); refreshed on
     // completion via the effect below.
-    const aggregates = { usage: detail.usage, toolUsage: detail.toolUsage, cost: detail.cost };
+    const aggregates = {
+      usage: detail.usage,
+      toolUsage: detail.toolUsage,
+      cost: detail.cost,
+      // Server-sourced like the other aggregates (refreshed on turn completion); the context
+      // gauge in the top bar reads this rather than the cumulative `usage` total.
+      currentContextTokens: detail.currentContextTokens,
+    };
     // The Postgres snapshot (`detail`) is the system-of-record floor; the Durable
     // Stream (`streamState`) is the live overlay. Union-merge the two so the
     // transcript paints instantly from the snapshot AND never drops a durable
@@ -379,6 +537,57 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       lastError: null,
     };
   }, [baseRuntime, optimisticUserMessages]);
+  // Full-detail debug snapshot for the "Copy session JSON" affordance. Assembled lazily
+  // (only when the button is clicked) so we never stringify the whole transcript on
+  // every render. Pulls from the merged `runtime` so it includes live stream state, and
+  // carries the raw `modelMessage` per turn plus every runtime event payload verbatim —
+  // the highest-fidelity view the client has. The assembled system prompt and tool catalog
+  // are built in the runner at request time and are otherwise ephemeral; the runner persists
+  // them per turn as a `debug.model_request` event, and the loader surfaces the latest one as
+  // the top-level `detail.latestModelRequest` field (those events are kept out of the windowed
+  // `events` list — see loadAgentSessionDetailForWorkspace), so we hoist it to top-level fields
+  // here for convenience. The transcript is exported as one consolidated entry per user / assistant /
+  // tool turn (`buildSessionDebugTurns`) rather than the raw token/tool delta stream, which
+  // is far easier to read; each turn still carries its verbatim `modelMessage`.
+  const buildSessionDebugSnapshot = () => {
+    // Prefer a snapshot from the live event stream (freshest during an active turn); fall back to
+    // the dedicated `detail.latestModelRequest` field, which carries the most-recent snapshot even
+    // on long sessions whose latest turn falls outside the windowed `events` list (the loader
+    // excludes these large snapshots from that window — see loadAgentSessionDetailForWorkspace).
+    const latestModelRequest = ([...runtime.events]
+      .reverse()
+      .find((event) => event.type === "debug.model_request")?.payload ??
+      detail.latestModelRequest ??
+      undefined) as
+      | {
+          systemPrompt?: string;
+          toolsSentToModel?: unknown;
+          deferredToolsNotSent?: unknown;
+          // Legacy field names from events persisted before the rename — fall back so older
+          // sessions still export their tool snapshot.
+          tools?: unknown;
+          deferredTools?: unknown;
+        }
+      | undefined;
+    return {
+      exportedAt: new Date().toISOString(),
+      session: detail.session,
+      related: detail.related,
+      status: runtime.currentStatus,
+      lastError: runtime.lastError,
+      systemPrompt: latestModelRequest?.systemPrompt ?? null,
+      // `toolsSentToModel` mirrors the tools actually registered in the latest model call;
+      // `deferredToolsNotSent` are reachable only via `find_tools` + `use_tool` and are NOT sent to
+      // the model. Named explicitly so the withheld set is never misread as injected.
+      toolsSentToModel: latestModelRequest?.toolsSentToModel ?? latestModelRequest?.tools ?? null,
+      deferredToolsNotSent:
+        latestModelRequest?.deferredToolsNotSent ?? latestModelRequest?.deferredTools ?? null,
+      usage: runtime.usage,
+      toolUsage: runtime.toolUsage,
+      cost: runtime.cost,
+      turns: buildSessionDebugTurns(runtime.messages),
+    };
+  };
   // Refresh the server aggregates once a turn reaches a terminal state (the stream
   // drives the transcript, but usage/cost come from the detail query).
   const lastSettledStatusRef = useRef(runtime.currentStatus);
@@ -390,6 +599,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       void queryClient.invalidateQueries({ queryKey: detailKey });
     }
   }, [runtime.currentStatus, detailKey, queryClient]);
+  // Reflect the open session's title in the browser tab so it's easy to tell tabs
+  // apart. Restored to the default on unmount / navigation away.
+  useEffect(() => {
+    const previousTitle = document.title;
+    const name = session.title.trim();
+    document.title = name ? `${name} · opencompany` : "opencompany";
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [session.title]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -449,6 +668,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // Paused specifically for an ask_user_question: the composer is hidden and the question card is
   // the only input surface (the card's X cancels back to the composer).
   const sessionIsAwaitingInput = runtime.currentStatus === "awaiting_input";
+  const sessionIsInterrupted = runtime.currentStatus === "interrupted";
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -497,11 +717,34 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               parts={assistantParts}
               sessionCanGenerate={sessionCanGenerate}
               sessionIsPaused={sessionIsPaused}
+              sessionIsInterrupted={sessionIsInterrupted}
+              stoppedError={runtime.currentStatus === "failed" ? runtime.lastError : null}
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
           ) : (
-            message.content
+            <div className="flex flex-col gap-2">
+              {message.content ? <div>{message.content}</div> : null}
+              {message.attachments && message.attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {message.attachments.map((att) => (
+                    <a
+                      key={att.id}
+                      href={`/api/attachments/${att.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block"
+                    >
+                      <AttachmentCard
+                        kind={att.kind}
+                        filename={att.filename}
+                        src={att.kind === "image" ? `/api/attachments/${att.id}` : undefined}
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           )}
           {canCopy && message.status !== "running" && !awaitingInput ? (
             <div
@@ -579,6 +822,29 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     window.addEventListener("blur", reset);
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
+
+  // A file dropped anywhere in the window — not just on the composer drop zone — must NOT make
+  // the browser navigate to / open the file (its default). Prevent that window-wide, and route
+  // any in-window file drop into the composer as an attachment.
+  useEffect(() => {
+    const onWindowDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    };
+    const onWindowDrop = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      dragCounterRef.current = 0;
+      setIsDragActive(false);
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length > 0) acceptFiles(files);
+    };
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [acceptFiles]);
 
   // The Durable Stream self-recovers (the client reconnects + resumes from its
   // offset) and refresh/visibility recovery is no longer needed — a refresh
@@ -695,13 +961,44 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     [],
   );
 
+  // Skills attached to this session's agent contribute `/<command>` entries alongside the
+  // built-ins — using each skill's declared `command:` when present, else a slug of its name.
+  // The attached set comes from the synced agent config; the command + metadata come from the
+  // workspace skill catalog.
+  const { agents } = useCollections();
+  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const { data: skillCatalog } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+    staleTime: 60_000,
+  });
+  const allSlashCommands = useMemo(() => {
+    const attached = agentRows?.find((agent) => agent.id === session.agentId);
+    const attachedIds = new Set(
+      (attached ? (agentRowToListItem(attached).config.skills ?? []) : []).map((skill) => skill.id),
+    );
+    const sources: SkillCommandSource[] = (skillCatalog ?? [])
+      .filter((skill) => attachedIds.has(skill.id))
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        ...(skill.command ? { command: skill.command } : {}),
+      }));
+    if (sources.length === 0) return SLASH_COMMANDS;
+    return [
+      ...SLASH_COMMANDS,
+      ...buildSkillSlashCommands(sources, new Set(SLASH_COMMANDS.map((c) => c.id))),
+    ];
+  }, [agentRows, session.agentId, skillCatalog]);
+
   // Command mode is active while the caret sits on a `/token` (at the start of the
   // input or after whitespace). The token after the slash is the live filter query.
   const slashContext = useMemo(() => getSlashContext(input, caret), [input, caret]);
   const slashQuery = slashContext?.query ?? null;
   const slashCommands = useMemo(
-    () => (slashQuery !== null ? matchSlashCommands(slashQuery) : []),
-    [slashQuery],
+    () => (slashQuery !== null ? matchSlashCommands(slashQuery, allSlashCommands) : []),
+    [slashQuery, allSlashCommands],
   );
   const slashMenuOpen = slashQuery !== null && !slashDismissed && slashCommands.length > 0;
   const slashActiveId = slashCommands[slashActiveIndex]?.id ?? null;
@@ -724,7 +1021,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     slashCommandInFlightRef.current.add(commandKey);
     startTransition(async () => {
       try {
-        await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+        await command.run({
+          session,
+          workspaceId,
+          router,
+          queryClient,
+          setInput,
+          insertMention,
+          showToast,
+          args,
+        });
       } finally {
         slashCommandInFlightRef.current.delete(commandKey);
       }
@@ -751,6 +1057,52 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  // Drop a literal token (e.g. `@skill/<id> `) into the composer and leave the caret after it.
+  // Used by skill-derived commands so invoking `/<command>` swaps in the skill's mention for the
+  // user to keep typing around. Targets the active slash token when the menu is open; otherwise
+  // (the run-on-send path, where the `/command ` token may carry a trailing space) it replaces
+  // the leading `/command` token, preserving any args the user typed after it.
+  const insertMention = (token: string) => {
+    let start: number;
+    let end: number;
+    if (slashContext) {
+      start = slashContext.start;
+      end = slashContext.end;
+    } else {
+      const leading = input.match(/^\s*\/\w+\s?/);
+      if (leading) {
+        start = 0;
+        end = leading[0].length;
+      } else {
+        start = caret;
+        end = caret;
+      }
+    }
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const next = `${before}${token}${after}`;
+    const nextCaret = before.length + token.length;
+    setInput(next);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
+    });
+  };
+
+  // Choosing a command from the menu: an `applyOnSelect` command (skill commands) runs straight
+  // away so the slash token becomes its mention in one step; everything else inserts its trigger
+  // and waits for the user to send (so `/clear <prompt>` etc. can take args).
+  const selectSlashCommand = (command: SlashCommand) => {
+    if (command.applyOnSelect) {
+      runSlashCommand(command);
+    } else {
+      insertSlashCommand(command);
+    }
+  };
+
   // Land the cursor in the composer when arriving at a fresh, empty session (e.g.
   // right after `/clear` navigates here), so the user can start typing immediately.
   const didAutofocusRef = useRef(false);
@@ -765,7 +1117,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // may run even while busy (they navigate away).
   const handleSend = () => {
     if (isPending) return;
-    const parsed = parseSlashCommand(input);
+    const parsed = parseSlashCommand(input, allSlashCommands);
     if (parsed) {
       runSlashCommand(parsed.command, parsed.args);
       return;
@@ -777,7 +1129,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
-    if (!content) return;
+    const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
+    if (!content && ready.length === 0) return;
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
     const submittedAtMs = Date.now();
@@ -800,9 +1153,25 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
-      const result = await submitAgentSessionMessage(session.id, content);
+      const result = await submitAgentSessionMessage(
+        session.id,
+        content,
+        ready.map((a) => ({
+          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
+          blobPathname: a.blobPathname!,
+          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
+          blobUrl: a.blobUrl!,
+          mediaType: a.mediaType,
+          filename: a.filename,
+          sizeBytes: a.sizeBytes,
+        })),
+      );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
+        // Sent successfully — drop the previews and clear the tray. Revoke the object
+        // URLs so the not-yet-uploaded local-file previews don't leak.
+        attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+        setAttachments([]);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
             message.optimisticId === optimisticId
@@ -821,23 +1190,76 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  // Switch the model for this session on the fly. Optimistic: reflect the pick immediately,
+  // persist it (sticky for the session, used on the next turn), and revert on failure.
+  const handleModelChange = (modelId: string) => {
+    const previous = modelOverride;
+    setModelOverride(modelId);
+    setFormError(null);
+    startModelTransition(async () => {
+      const result = await setAgentSessionModel(session.id, modelId);
+      if (!result.ok) {
+        setModelOverride(previous);
+        setFormError(result.error);
+      }
+    });
+  };
+
+  const handleContinueInterrupted = () => {
+    if (!sessionIsInterrupted || isPending) return;
+    const content = "Continue";
+    setFormError(null);
+    const optimisticId = newOptimisticMessageId();
+    const submittedAtMs = Date.now();
+    const optimisticMessage: OptimisticUserMessage = {
+      optimisticId,
+      submittedAtMs,
+      confirmedMessageId: null,
+      existingMessageIds: baseRuntime.messages.map((message) => message.id),
+      id: optimisticId,
+      role: "user",
+      content,
+      status: "completed",
+      createdAt: new Date(submittedAtMs).toISOString(),
+      completedAt: new Date(submittedAtMs).toISOString(),
+    };
+    setOptimisticUserMessages((current) => [...current, optimisticMessage]);
+    setPendingScrollMessageId(optimisticId);
+    pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
+    startTransition(async () => {
+      const result = await continueInterruptedSession(session.id);
+      if (result.ok) {
+        if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
+        setOptimisticUserMessages((current) =>
+          current.map((message) =>
+            message.optimisticId === optimisticId
+              ? { ...message, confirmedMessageId: result.messageId }
+              : message,
+          ),
+        );
+        return;
+      }
+      pendingTtftRef.current = null;
+      setOptimisticUserMessages((current) =>
+        current.filter((message) => message.optimisticId !== optimisticId),
+      );
+      setFormError(result.error);
+    });
+  };
+
   return (
     <main className="relative flex h-full flex-1 overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="border-b border-border-subtle bg-canvas/90 px-6 py-3">
-          <div className="mx-auto flex w-full max-w-[960px] items-center gap-3">
-            <Bot size={14} strokeWidth={1.8} className="shrink-0 text-ink-muted" />
-            <div className="min-w-0 pr-10">
-              <div className="truncate text-[13px] font-medium tracking-[-0.005em] text-ink">
-                {session.agentName}
-              </div>
-            </div>
-          </div>
-        </div>
+        <SessionTopBar
+          session={session}
+          currentContextTokens={runtime.currentContextTokens}
+          inspectorCollapsed={inspectorCollapsed}
+          onToggleInspector={() => updateInspectorCollapsed(!inspectorCollapsed)}
+        />
 
         <div
           ref={scrollContainerRef}
-          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-8 lg:px-12 py-6"
+          className="relative flex-1 overflow-y-auto overscroll-contain [overflow-anchor:auto] px-6 py-6"
           onWheel={markUserScrollIntent}
           onTouchMove={markUserScrollIntent}
           onScroll={(event) => {
@@ -853,33 +1275,31 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
           }}
           onDragEnter={(event) => {
+            if (!attachmentsEnabled) return;
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
             dragCounterRef.current += 1;
             setIsDragActive(true);
           }}
           onDragOver={(event) => {
+            if (!attachmentsEnabled) return;
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
           }}
           onDragLeave={(event) => {
+            if (!attachmentsEnabled) return;
             event.preventDefault();
             dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
             if (dragCounterRef.current === 0) {
               setIsDragActive(false);
             }
           }}
-          onDrop={(event) => {
-            event.preventDefault();
+          onDrop={() => {
+            // The window-level drop handler (see effect above) preventDefaults + accepts, so a
+            // drop anywhere in the app attaches and the browser never opens the file. Here we
+            // only clear the hover overlay (avoids double-accepting the same drop).
             dragCounterRef.current = 0;
             setIsDragActive(false);
-            if (event.dataTransfer.files.length > 0) {
-              showToast({
-                title: "Coming soon",
-                description: "File attachments will be available soon.",
-                tone: "default",
-              });
-            }
           }}
         >
           {isDragActive ? (
@@ -890,7 +1310,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
                 <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
                 <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
+                <p className="text-[11.5px] text-ink-subtle">
+                  Images, PDF, text &amp; code · or paste with ⌘V
+                </p>
               </div>
             </div>
           ) : null}
@@ -906,29 +1328,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="rounded-lg border border-dashed border-border bg-surface/40 px-6 py-12 text-center">
                 <Bot size={18} strokeWidth={1.7} className="mx-auto text-ink-subtle" />
                 <p className="mt-3 text-[13.5px] font-medium text-ink">Session is ready</p>
-                <p className="mt-1 text-[12.5px] text-ink-muted">
-                  Start with one of these, or write your own.
-                </p>
-                <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  {[
-                    "Set up the dev environment",
-                    "Run the test suite",
-                    "Open a PR for current changes",
-                    "Explain the codebase",
-                  ].map((chip) => (
-                    <button
-                      key={chip}
-                      type="button"
-                      onClick={() => {
-                        setInput(chip);
-                        textareaRef.current?.focus();
-                      }}
-                      className="rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-ink/90 transition-colors hover:bg-surface-muted"
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                </div>
+                <p className="mt-1 text-[12.5px] text-ink-muted">Write a message to get started.</p>
               </div>
             ) : null}
 
@@ -968,7 +1368,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     part.type === "tool-call" ? (
                       <div key={part.toolCall.id} className="flex justify-start">
                         <div className="max-w-[68%] break-words text-[14px] leading-6 text-ink/90">
-                          <ToolCallCard toolCall={part.toolCall} />
+                          <ToolCallCard
+                            toolCall={part.toolCall}
+                            sessionIsInterrupted={sessionIsInterrupted}
+                          />
                         </div>
                       </div>
                     ) : null,
@@ -984,7 +1387,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             there's a single input surface. Falls back to the text composer if the pending question
             can't be located (status race), so the user is never stuck. */}
         {sessionIsAwaitingInput && pendingQuestion ? (
-          <div className="bg-canvas px-8 lg:px-12 py-4">
+          <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
               <QuestionComposer
                 key={pendingQuestion.id}
@@ -994,208 +1397,255 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             </div>
           </div>
         ) : (
-          <div className="bg-canvas px-8 lg:px-12 py-4">
-            <div className="group/composer mx-auto max-w-[960px]">
-              {formError ? <p className="mb-2 text-[12px] text-danger">{formError}</p> : null}
-              <div className="relative flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-shadow focus-within:border-border-strong focus-within:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]">
-                {slashMenuOpen ? (
-                  <SlashCommandMenu
-                    id={slashMenuId}
-                    commands={slashCommands}
-                    activeId={slashActiveId}
-                    onSelect={(command) => insertSlashCommand(command)}
-                    onHover={(id) => {
-                      const idx = slashCommands.findIndex((command) => command.id === id);
-                      if (idx >= 0) setSlashActiveIndex(idx);
-                    }}
-                  />
-                ) : null}
-                <div ref={attachMenuRef} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setAttachMenuOpen((prev) => !prev)}
-                    aria-label="Attach file"
-                    aria-expanded={attachMenuOpen}
-                    aria-haspopup="menu"
-                    className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
-                  >
-                    <Plus size={15} strokeWidth={1.75} />
-                  </button>
-                  {attachMenuOpen ? (
-                    <div
-                      role="menu"
-                      className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
-                    >
+          <div className="bg-canvas px-6 py-4">
+            <div className="mx-auto max-w-[960px]">
+              <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
+              <Composer
+                variant="compact"
+                error={formError}
+                banner={
+                  sessionIsInterrupted ? (
+                    <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2 text-[12.5px] text-warning">
+                        <SessionStatusDot status="interrupted" />
+                        <span className="truncate">Interrupted</span>
+                      </div>
                       <button
                         type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          showToast({
-                            title: "Coming soon",
-                            description: "File attachments will be available soon.",
-                            tone: "default",
-                          });
-                          setAttachMenuOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                        disabled={isPending}
+                        onClick={handleContinueInterrupted}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-warning-border bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        <Upload size={13} strokeWidth={1.75} />
-                        Upload file
+                        <Play size={12} strokeWidth={1.9} />
+                        Continue
                       </button>
                     </div>
-                  ) : null}
-                </div>
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(event) => {
-                    setInput(event.target.value);
-                    setCaret(event.target.selectionStart ?? event.target.value.length);
-                  }}
-                  onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
-                  onKeyDown={(event) => {
-                    // While the slash menu is open it owns navigation keys; focus
-                    // stays in the textarea so typing keeps filtering the list.
-                    if (slashMenuOpen && !event.nativeEvent.isComposing) {
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault();
-                        setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
-                        return;
-                      }
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setSlashActiveIndex(
-                          (i) => (i - 1 + slashCommands.length) % slashCommands.length,
-                        );
-                        return;
-                      }
-                      // Enter and Tab both insert the highlighted command into the input
-                      // (they do not run it) — the user runs it by then pressing Enter to send.
-                      if (event.key === "Enter" || event.key === "Tab") {
-                        if (event.key === "Enter" && event.shiftKey) {
-                          // shift+Enter falls through to a normal newline.
-                        } else {
+                  ) : null
+                }
+                overlay={
+                  slashMenuOpen ? (
+                    <SlashCommandMenu
+                      id={slashMenuId}
+                      commands={slashCommands}
+                      activeId={slashActiveId}
+                      onSelect={(command) => selectSlashCommand(command)}
+                      onHover={(id) => {
+                        const idx = slashCommands.findIndex((command) => command.id === id);
+                        if (idx >= 0) setSlashActiveIndex(idx);
+                      }}
+                    />
+                  ) : null
+                }
+                input={
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(event) => {
+                      setInput(event.target.value);
+                      setCaret(event.target.selectionStart ?? event.target.value.length);
+                    }}
+                    onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+                    onKeyDown={(event) => {
+                      // While the slash menu is open it owns navigation keys; focus
+                      // stays in the textarea so typing keeps filtering the list.
+                      if (slashMenuOpen && !event.nativeEvent.isComposing) {
+                        if (event.key === "ArrowDown") {
                           event.preventDefault();
-                          const command = slashCommands[slashActiveIndex];
-                          if (command) insertSlashCommand(command);
+                          setSlashActiveIndex((i) => (i + 1) % slashCommands.length);
+                          return;
+                        }
+                        if (event.key === "ArrowUp") {
+                          event.preventDefault();
+                          setSlashActiveIndex(
+                            (i) => (i - 1 + slashCommands.length) % slashCommands.length,
+                          );
+                          return;
+                        }
+                        // Enter and Tab pick the highlighted command: built-ins insert their
+                        // trigger (the user then sends to run it), while skill commands
+                        // (`applyOnSelect`) apply immediately, swapping in the skill mention.
+                        if (event.key === "Enter" || event.key === "Tab") {
+                          if (event.key === "Enter" && event.shiftKey) {
+                            // shift+Enter falls through to a normal newline.
+                          } else {
+                            event.preventDefault();
+                            const command = slashCommands[slashActiveIndex];
+                            if (command) selectSlashCommand(command);
+                            return;
+                          }
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          setSlashDismissed(true);
                           return;
                         }
                       }
-                      if (event.key === "Escape") {
+                      if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
                         event.preventDefault();
-                        setSlashDismissed(true);
-                        return;
+                        handleSend();
                       }
-                    }
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
+                    }}
+                    onPaste={(event) => {
+                      if (!attachmentsEnabled) return;
+                      const items = event.clipboardData?.items;
+                      if (!items) return;
+                      const files: File[] = [];
+                      for (const item of Array.from(items)) {
+                        if (item.kind !== "file") continue;
+                        const file = item.getAsFile();
+                        if (file) files.push(file);
+                      }
+                      if (files.length === 0) return;
+                      // Files in the clipboard: take them as attachments and stop the browser
+                      // from also pasting them (e.g. an image) into the textarea. Any text
+                      // portion of a mixed paste still falls through normally.
                       event.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  onPaste={(event) => {
-                    const items = event.clipboardData?.items;
-                    if (!items) return;
-                    const itemArray = Array.from(items);
-                    const hasImage = itemArray.some(
-                      (item) => item.kind === "file" && item.type.startsWith("image/"),
-                    );
-                    if (!hasImage) return;
-                    const hasText = itemArray.some((item) => item.kind === "string");
-                    // Pure-image paste: stop the browser default so nothing visible
-                    // changes in the textarea and the toast is the only signal.
-                    // Mixed text+image: let the browser paste the text portion
-                    // alongside the toast so the user keeps what they expected.
-                    if (!hasText) event.preventDefault();
-                    showToast({
-                      title: "Image upload coming soon",
-                      description: hasText
-                        ? "The text was pasted; the image was ignored."
-                        : "Image attachments aren't supported yet.",
-                      tone: "default",
-                    });
-                  }}
-                  placeholder="Ask this agent to do something"
-                  role="combobox"
-                  aria-expanded={slashMenuOpen}
-                  aria-controls={slashMenuOpen ? slashMenuId : undefined}
-                  aria-activedescendant={slashActiveOptionId}
-                  aria-haspopup="listbox"
-                  rows={1}
-                  className="min-h-9 flex-1 resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
-                  style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                />
-                {canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
-                  <button
-                    type="button"
-                    disabled={isPending}
-                    onClick={requestAbort}
-                    aria-label="Stop generating"
-                    title="Stop generating"
-                    className="flex h-9 w-9 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    <CircleStop size={16} strokeWidth={1.9} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))}
-                    onClick={handleSend}
-                    aria-label="Send message"
-                    className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
-                  >
-                    <ArrowUp size={13} strokeWidth={2} />
-                  </button>
-                )}
-              </div>
-              <div
-                className={`mt-1.5 flex items-center justify-end gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
-                  slashMenuOpen
-                    ? "opacity-100"
-                    : "opacity-0 group-focus-within/composer:opacity-100"
-                }`}
-              >
-                {slashMenuOpen ? (
+                      acceptFiles(files);
+                    }}
+                    placeholder="Ask this agent to do something"
+                    role="combobox"
+                    aria-expanded={slashMenuOpen}
+                    aria-controls={slashMenuOpen ? slashMenuId : undefined}
+                    aria-activedescendant={slashActiveOptionId}
+                    aria-haspopup="listbox"
+                    rows={1}
+                    className="min-h-9 w-full resize-none content-center bg-transparent text-[14px] leading-5 text-ink outline-none placeholder:text-ink-subtle"
+                    style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
+                  />
+                }
+                leftControls={
                   <>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↑↓
-                      </kbd>{" "}
-                      navigate
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↵
-                      </kbd>{" "}
-                      insert
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        esc
-                      </kbd>{" "}
-                      dismiss
-                    </span>
+                    <div ref={attachMenuRef} className="relative">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        // Text/code files often have no registered MIME, so listing extensions
+                        // keeps them pickable; the broad set plus `*` lets any file through and
+                        // validation rejects unsupported ones with a toast.
+                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less"
+                        className="hidden"
+                        onChange={(event) => {
+                          acceptFiles(Array.from(event.target.files ?? []));
+                          event.target.value = "";
+                          setAttachMenuOpen(false);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setAttachMenuOpen((prev) => !prev)}
+                        aria-label="Attach file"
+                        aria-expanded={attachMenuOpen}
+                        aria-haspopup="menu"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
+                      >
+                        <Plus size={15} strokeWidth={1.75} />
+                      </button>
+                      {attachMenuOpen ? (
+                        <div
+                          role="menu"
+                          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[200px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_8px_24px_-8px_rgba(15,15,15,0.12),0_2px_4px_rgba(15,15,15,0.05)]"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
+                          >
+                            <Upload size={13} strokeWidth={1.75} />
+                            Upload file
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <ModelPicker
+                      value={modelOverride ?? session.modelName}
+                      fallbackModelId={DEFAULT_MODEL_ID}
+                      onChange={handleModelChange}
+                    />
                   </>
-                ) : (
-                  <>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ↵
-                      </kbd>{" "}
-                      send
-                    </span>
-                    <span>
-                      <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
-                        ⇧↵
-                      </kbd>{" "}
-                      new line
-                    </span>
-                  </>
-                )}
-              </div>
+                }
+                action={
+                  canAbort && (hasRunningAssistantMessage || showWaitingForAssistant) ? (
+                    <button
+                      type="button"
+                      disabled={isPending}
+                      onClick={requestAbort}
+                      aria-label="Stop generating"
+                      title="Stop generating"
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-danger-border bg-danger-bg text-danger transition-colors hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <CircleStop size={16} strokeWidth={1.9} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={
+                        isPending ||
+                        attachments.some((a) => a.status !== "ready") ||
+                        (!parseSlashCommand(input, allSlashCommands) &&
+                          (isBusy || (!input.trim() && attachments.length === 0)))
+                      }
+                      onClick={handleSend}
+                      aria-label="Send message"
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas transition-opacity hover:bg-ink/85 disabled:opacity-40"
+                    >
+                      <ArrowUp size={13} strokeWidth={2} />
+                    </button>
+                  )
+                }
+                rightControls={
+                  <div
+                    className={`flex items-center gap-3 px-1 text-[11px] text-ink-subtle transition-opacity duration-150 ${
+                      slashMenuOpen
+                        ? "opacity-100"
+                        : "hidden opacity-0 group-focus-within/composer:opacity-100 sm:flex"
+                    }`}
+                  >
+                    {slashMenuOpen ? (
+                      <>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ↑↓
+                          </kbd>{" "}
+                          navigate
+                        </span>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ↵
+                          </kbd>{" "}
+                          insert
+                        </span>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            esc
+                          </kbd>{" "}
+                          dismiss
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ↵
+                          </kbd>{" "}
+                          send
+                        </span>
+                        <span>
+                          <kbd className="rounded border border-border bg-surface-muted px-1 font-mono text-[10px] text-ink-muted">
+                            ⇧↵
+                          </kbd>{" "}
+                          new line
+                        </span>
+                      </>
+                    )}
+                  </div>
+                }
+              />
             </div>
           </div>
         )}
@@ -1220,6 +1670,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       >
         <div className="mb-5 flex items-center justify-between pr-9 lg:mb-7">
           <div className="text-[12px] font-medium text-ink">Runtime</div>
+          <CopySessionJsonButton build={buildSessionDebugSnapshot} />
         </div>
         <SessionInspector
           session={session}
@@ -1240,17 +1691,137 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           onAbort={requestAbort}
         />
       </aside>
-
-      <button
-        type="button"
-        aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
-        aria-expanded={!inspectorCollapsed}
-        onClick={() => updateInspectorCollapsed(!inspectorCollapsed)}
-        className="fixed right-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <PanelRight size={15} strokeWidth={1.75} />
-      </button>
     </main>
+  );
+}
+
+// Slim session header: agent name, the model (with its provider icon), the count of enabled
+// capabilities (tools + MCP + skills), and the runtime-sidebar toggle. The agent config — and
+// thus the capability count — is read live from the synced `agents` collection so it stays
+// reactive without threading extra fields through the session payload.
+function SessionTopBar({
+  session,
+  currentContextTokens,
+  inspectorCollapsed,
+  onToggleInspector,
+}: {
+  session: AgentSessionDetailPayload["session"];
+  currentContextTokens: number;
+  inspectorCollapsed: boolean;
+  onToggleInspector: () => void;
+}) {
+  const { agents } = useCollections();
+  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const capabilityCount = useMemo(() => {
+    const row = agentRows?.find((agent) => agent.id === session.agentId);
+    if (!row) return null;
+    const config = agentRowToListItem(row).config;
+    // `config.tools` already folds MCP servers in (entries with type "mcp"), so tools + MCP is
+    // its length; skills are tracked separately.
+    return config.tools.length + (config.skills?.length ?? 0);
+  }, [agentRows, session.agentId]);
+
+  const model = findModel(session.modelName);
+  const ModelIcon = model?.icon ?? Sparkles;
+  const modelLabel = model?.label ?? session.modelName.split("/").at(-1) ?? session.modelName;
+  const contextMax = model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+
+  return (
+    <header className="flex items-center justify-between gap-3 px-6 py-2">
+      <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
+        <span className="truncate font-medium text-ink">{session.agentName}</span>
+        <span className="shrink-0 text-ink-subtle/60" aria-hidden>
+          ·
+        </span>
+        <span className="flex min-w-0 shrink items-center gap-1.5">
+          <ModelIcon size={12} className="shrink-0 text-ink-muted" />
+          <span className="truncate">{modelLabel}</span>
+        </span>
+        {capabilityCount && capabilityCount > 0 ? (
+          <>
+            <span className="shrink-0 text-ink-subtle/60" aria-hidden>
+              ·
+            </span>
+            <span className="shrink-0">
+              {capabilityCount} {capabilityCount === 1 ? "capability" : "capabilities"}
+            </span>
+          </>
+        ) : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {currentContextTokens > 0 ? (
+          <ContextWindowMeter used={currentContextTokens} max={contextMax} />
+        ) : null}
+        <button
+          type="button"
+          aria-label={inspectorCollapsed ? "Expand runtime details" : "Collapse runtime details"}
+          aria-expanded={!inspectorCollapsed}
+          onClick={onToggleInspector}
+          className="shrink-0 rounded-md p-1.5 text-ink/55 transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <PanelRight size={15} strokeWidth={1.75} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// Compact token formatter for the context gauge tooltip: 980 → "980", 14_200 → "14k", 1_000_000 → "1M".
+function formatCompactTokens(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return `${value}`;
+}
+
+// A small ring that fills to the share of the model's context window in use. The exact
+// "used / max" figure stays out of the chrome and is surfaced only on hover (native title),
+// keeping the top bar quiet.
+function ContextWindowMeter({ used, max }: { used: number; max: number }) {
+  const fraction = max > 0 ? Math.min(1, used / max) : 0;
+  const size = 14;
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const detail = `${formatCompactTokens(used)} / ${formatCompactTokens(max)} context · ${Math.round(
+    fraction * 100,
+  )}%`;
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger
+          aria-label={`Context window usage: ${detail}`}
+          className="flex shrink-0 items-center rounded-full text-ink-muted outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              strokeWidth={strokeWidth}
+              stroke="currentColor"
+              className="text-ink/15"
+            />
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              strokeWidth={strokeWidth}
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - fraction)}
+              className="text-ink/70 transition-[stroke-dashoffset] duration-500"
+            />
+          </svg>
+        </TooltipTrigger>
+        <TooltipContent>{detail}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -1394,11 +1965,62 @@ function CopyMessageButton({ text }: { text: string }) {
   );
 }
 
+// One-click "copy the whole session as JSON" for debugging. Builds the snapshot lazily on
+// click (large transcripts shouldn't be stringified on every render) and shows a brief
+// "Copied" confirmation, mirroring CopyMessageButton.
+function CopySessionJsonButton({ build }: { build: () => unknown }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { showError } = useToast();
+
+  useEffect(
+    () => () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur();
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(build(), null, 2));
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showError("Couldn't copy the session JSON to the clipboard.");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "Copied debug JSON" : "Copy debug JSON"}
+      title={
+        copied
+          ? "Copied"
+          : "Copy the full session debug JSON (system prompt + latest model-call tools)"
+      }
+      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-ink-subtle transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      {copied ? (
+        <Check size={11} strokeWidth={2} className="text-success" />
+      ) : (
+        <Copy size={11} strokeWidth={1.75} />
+      )}
+      <span>{copied ? "Copied" : "Copy Debug JSON"}</span>
+    </button>
+  );
+}
+
 export function AssistantMessageContent({
   message,
   parts,
   sessionCanGenerate,
   sessionIsPaused = false,
+  sessionIsInterrupted = false,
+  stoppedError = null,
   reasoningActive = false,
   activeStartedAt,
 }: {
@@ -1406,6 +2028,8 @@ export function AssistantMessageContent({
   parts: AssistantTurnPart[];
   sessionCanGenerate: boolean;
   sessionIsPaused?: boolean;
+  sessionIsInterrupted?: boolean;
+  stoppedError?: string | null;
   reasoningActive?: boolean;
   activeStartedAt?: string | undefined;
 }) {
@@ -1445,7 +2069,11 @@ export function AssistantMessageContent({
           toolCall: {
             ...part.toolCall,
             status: "failed" as const,
-            outputPreview: part.toolCall.outputPreview || "Stopped before finishing.",
+            outputPreview:
+              part.toolCall.outputPreview ||
+              (sessionIsInterrupted
+                ? "Interrupted before this tool returned a result."
+                : "Stopped before finishing."),
           },
         }
       : part,
@@ -1533,7 +2161,11 @@ export function AssistantMessageContent({
         return (
           <div key={group.key} className="space-y-1.5">
             {group.toolCalls.map((toolCall) => (
-              <ToolCallCard key={toolCall.id} toolCall={toolCall} />
+              <ToolCallCard
+                key={toolCall.id}
+                toolCall={toolCall}
+                sessionIsInterrupted={sessionIsInterrupted}
+              />
             ))}
           </div>
         );
@@ -1549,7 +2181,7 @@ export function AssistantMessageContent({
             thinking={reasoningActive}
           />
         ) : isStopped ? (
-          <AssistantStoppedNotice />
+          <AssistantStoppedNotice errorMessage={stoppedError} />
         ) : (
           "..."
         )
@@ -1561,7 +2193,7 @@ export function AssistantMessageContent({
           thinking={reasoningActive}
         />
       ) : null}
-      {hasParts && isStopped ? <AssistantStoppedNotice /> : null}
+      {hasParts && isStopped ? <AssistantStoppedNotice errorMessage={stoppedError} /> : null}
     </div>
   );
 }
@@ -1675,11 +2307,23 @@ function formatStepDuration(seconds: number) {
   return `${minutes} min`;
 }
 
-function AssistantStoppedNotice({ elapsedSeconds }: { elapsedSeconds?: number | null }) {
+function AssistantStoppedNotice({
+  elapsedSeconds,
+  errorMessage,
+}: {
+  elapsedSeconds?: number | null;
+  errorMessage?: string | null;
+}) {
+  const detail = errorMessage?.trim();
   return (
-    <div className="inline-flex items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
+    <div className="inline-flex max-w-full items-center gap-1.5 text-[12.5px] font-medium leading-6 text-danger">
       <AlertCircle size={13} strokeWidth={1.8} className="shrink-0" />
       <span>Stopped before finishing</span>
+      {detail ? (
+        <span className="min-w-0 break-words text-[12px] font-normal leading-5 text-danger/80">
+          : {detail}
+        </span>
+      ) : null}
       {typeof elapsedSeconds === "number" ? (
         <span className="text-[12px] font-normal tabular-nums text-danger/70">
           {formatElapsed(elapsedSeconds)}
@@ -1743,16 +2387,46 @@ function ReasoningCard({
   );
 }
 
-function ToolCallCard({ toolCall }: { toolCall: RuntimeToolCall }) {
+function ToolCallCard({
+  toolCall,
+  sessionIsInterrupted = false,
+}: {
+  toolCall: RuntimeToolCall;
+  sessionIsInterrupted?: boolean;
+}) {
   // ask_user_question renders a dedicated question card (interactive while pending, a read-only
   // summary once answered/cancelled) instead of the generic tool-call chrome.
   if (toolCall.question) {
     return <QuestionCard toolCall={toolCall} />;
   }
-  return <ToolCallCardDefault toolCall={toolCall} />;
+  const interrupted =
+    sessionIsInterrupted &&
+    (toolCall.status === "running" ||
+      toolCall.outputPreview === "Interrupted before this tool returned a result.");
+  return (
+    <ToolCallCardDefault
+      toolCall={
+        interrupted && toolCall.status === "running"
+          ? {
+              ...toolCall,
+              status: "failed" as const,
+              outputPreview:
+                toolCall.outputPreview || "Interrupted before this tool returned a result.",
+            }
+          : toolCall
+      }
+      interrupted={interrupted}
+    />
+  );
 }
 
-function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
+function ToolCallCardDefault({
+  toolCall,
+  interrupted = false,
+}: {
+  toolCall: RuntimeToolCall;
+  interrupted?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const approvalContext = useContext(ToolApprovalContext);
   const { showError } = useToast();
@@ -1786,57 +2460,74 @@ function ToolCallCardDefault({ toolCall }: { toolCall: RuntimeToolCall }) {
 
   return (
     <div className="-ml-1 text-[11.5px] leading-5 text-ink-muted">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-        className="flex max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
-      >
-        <ChevronRight
-          size={11}
-          strokeWidth={1.9}
-          className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
-        />
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-          <Wrench size={11} strokeWidth={1.75} />
-        </span>
-        <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
-          {toolCall.label || formatToolName(toolCall.name)}
-        </span>
-        {toolCall.brainPath ? (
-          <span
-            title={`Updated brain/${toolCall.brainPath}`}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
+      <div className="flex min-w-0 max-w-full items-center gap-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
+        >
+          <ChevronRight
+            size={11}
+            strokeWidth={1.9}
+            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
+            <Wrench size={11} strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0 truncate font-medium text-ink/65" title={toolCall.name}>
+            {toolCall.label || formatToolName(toolCall.name)}
+          </span>
+          {toolCall.brainPath ? (
+            <span
+              title={`Updated brain/${toolCall.brainPath}`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success-border bg-success-bg px-1.5 py-px text-[10.5px] font-medium text-success"
+            >
+              <Brain size={9} strokeWidth={1.9} />
+              Brain updated
+            </span>
+          ) : null}
+          {approvalStatusLabel ? (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+                approvalStatusLabel.tone === "danger"
+                  ? "text-danger"
+                  : approvalStatusLabel.tone === "success"
+                    ? "text-success"
+                    : "text-warning"
+              }`}
+            >
+              <ShieldAlert size={9} strokeWidth={1.9} />
+              {approvalStatusLabel.label}
+            </span>
+          ) : isFailed ? (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
+                interrupted ? "text-warning" : "text-danger"
+              }`}
+            >
+              <AlertCircle size={9} strokeWidth={1.9} />
+              {interrupted ? "interrupted" : "failed"}
+            </span>
+          ) : !isCompleted ? (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
+              <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
+              running
+            </span>
+          ) : null}
+        </button>
+        {toolCall.issueUrl ? (
+          <a
+            href={toolCall.issueUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="In Linear öffnen"
+            className="inline-flex shrink-0 items-center rounded-md p-0.5 text-ink-subtle transition-colors hover:bg-surface-hover/65 hover:text-ink/75"
           >
-            <Brain size={9} strokeWidth={1.9} />
-            Brain updated
-          </span>
+            <ExternalLink size={11} strokeWidth={1.9} />
+          </a>
         ) : null}
-        {approvalStatusLabel ? (
-          <span
-            className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
-              approvalStatusLabel.tone === "danger"
-                ? "text-danger"
-                : approvalStatusLabel.tone === "success"
-                  ? "text-success"
-                  : "text-warning"
-            }`}
-          >
-            <ShieldAlert size={9} strokeWidth={1.9} />
-            {approvalStatusLabel.label}
-          </span>
-        ) : isFailed ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-danger">
-            <AlertCircle size={9} strokeWidth={1.9} />
-            failed
-          </span>
-        ) : !isCompleted ? (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-ink-subtle">
-            <LoaderCircle size={9} strokeWidth={2} className="animate-spin text-warning" />
-            running
-          </span>
-        ) : null}
-      </button>
+      </div>
       {awaitingApproval || resolvingApproval ? (
         <ToolApprovalPrompt
           approval={toolCall.approval}
@@ -2829,6 +3520,7 @@ function statusLabel(status: string) {
   if (status === "ready") return "Ready";
   if (status === "running") return "Running";
   if (status === "awaiting_approval" || status === "awaiting_input") return "Paused";
+  if (status === "interrupted") return "Interrupted";
   if (status === "completed") return "Done";
   if (status === "aborting") return "Aborting";
   if (status === "archiving") return "Archiving";

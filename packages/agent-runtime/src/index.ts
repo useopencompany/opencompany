@@ -1,5 +1,6 @@
 export * from "./after-session";
 export * from "./agent-file";
+export * from "./attachments";
 export * from "./brain";
 export * from "./config";
 export * from "./events";
@@ -12,5 +13,6 @@ export * from "./schedules";
 export * from "./skill-resolver";
 export * from "./skills";
 export * from "./tiptap-builder";
+export * from "./tool-args";
 export * from "./tools";
 export * from "./types";

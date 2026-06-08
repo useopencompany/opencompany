@@ -1,0 +1,250 @@
+@import "tailwindcss";
+
+/*
+ * Make Tailwind scan this package's component source for utility classes,
+ * regardless of which app imports these styles. Resolved relative to this file
+ * (src/styles/), so `../` points at packages/ui/src.
+ */
+@source "../**/*.{ts,tsx}";
+
+/*
+ * OpenCompany Design System — design tokens.
+ *
+ * Token NAMES follow the shadcn/ui convention (background, foreground, primary,
+ * muted, accent, destructive, …) so shadcn components and third-party registries
+ * drop in cleanly. Token VALUES are seeded from OpenCompany's existing palette
+ * (apps/web/app/globals.css) so the system matches the product's look.
+ *
+ * Theming uses the `@theme inline` indirection: utilities reference `var(--token)`
+ * at runtime, and we swap the raw `--token` values per color scheme. Dark mode is
+ * driven by `data-theme="dark"` (the convention already used in apps/web) with a
+ * `prefers-color-scheme` fallback for system preference.
+ */
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* OpenCompany brand + status semantics preserved alongside shadcn tokens. */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-active: var(--surface-active);
+  --color-surface-selected: var(--surface-selected);
+
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-info-border: var(--info-border);
+  --color-brand: var(--brand);
+  --color-brand-bg: var(--brand-bg);
+  --color-brand-border: var(--brand-border);
+
+  --font-sans: var(--font-sans);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica", "Arial", sans-serif;
+
+  --background: #f7f7f5;
+  --foreground: #111111;
+
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+
+  --primary: #111111;
+  --primary-foreground: #f7f7f5;
+  --secondary: #ececea;
+  --secondary-foreground: #111111;
+  --muted: #fafaf7;
+  --muted-foreground: #6b6b6b;
+  --accent: #f3f3f0;
+  --accent-foreground: #111111;
+  --destructive: #a33929;
+  --destructive-foreground: #ffffff;
+
+  --border: #e6e6e3;
+  --border-strong: #d4d4cf;
+  --border-subtle: #eaeae6;
+  --input: #e6e6e3;
+  --ring: #9a9a96;
+
+  --sidebar: #f1f1ef;
+  --sidebar-foreground: #111111;
+  --surface-raised: #fbfbfa;
+  --surface-active: #e3e3df;
+  --surface-selected: #eef0ec;
+
+  --success: #216b35;
+  --success-bg: #f0f8f2;
+  --success-border: #cfe5d5;
+  --warning: #795b19;
+  --warning-bg: #fff8e7;
+  --warning-border: #eadcb6;
+  --info: #2b557f;
+  --info-bg: #eef3fb;
+  --info-border: #d6dde9;
+  --brand: #5a3b78;
+  --brand-bg: #f4f0fb;
+  --brand-border: #ded6e9;
+}
+
+/* Dark palette — applied on explicit selection (data-theme="dark"). */
+:root[data-theme="dark"] {
+  --background: #10120f;
+  --foreground: #f0f1ec;
+
+  --card: #1a1c18;
+  --card-foreground: #f0f1ec;
+  --popover: #1a1c18;
+  --popover-foreground: #f0f1ec;
+
+  --primary: #f0f1ec;
+  --primary-foreground: #10120f;
+  --secondary: #2a2e27;
+  --secondary-foreground: #f0f1ec;
+  --muted: #242720;
+  --muted-foreground: #a8aca2;
+  --accent: #2f342b;
+  --accent-foreground: #f0f1ec;
+  --destructive: #b4422e;
+  --destructive-foreground: #ffffff;
+
+  --border: #2b2e28;
+  --border-strong: #3c4237;
+  --border-subtle: #22251f;
+  --input: #2b2e28;
+  --ring: #7b8074;
+
+  --sidebar: #151713;
+  --sidebar-foreground: #f0f1ec;
+  --surface-raised: #20231e;
+  --surface-active: #3a4035;
+  --surface-selected: #293228;
+
+  --success: #9fdaa8;
+  --success-bg: #193021;
+  --success-border: #2e5537;
+  --warning: #f1d08a;
+  --warning-bg: #322613;
+  --warning-border: #5b4218;
+  --info: #a9cfff;
+  --info-bg: #18283a;
+  --info-border: #2f4b6a;
+  --brand: #d0b8ef;
+  --brand-bg: #2a2138;
+  --brand-border: #4a3864;
+}
+
+/* Dark palette — system preference fallback when no explicit theme is set. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #10120f;
+    --foreground: #f0f1ec;
+
+    --card: #1a1c18;
+    --card-foreground: #f0f1ec;
+    --popover: #1a1c18;
+    --popover-foreground: #f0f1ec;
+
+    --primary: #f0f1ec;
+    --primary-foreground: #10120f;
+    --secondary: #2a2e27;
+    --secondary-foreground: #f0f1ec;
+    --muted: #242720;
+    --muted-foreground: #a8aca2;
+    --accent: #2f342b;
+    --accent-foreground: #f0f1ec;
+    --destructive: #b4422e;
+    --destructive-foreground: #ffffff;
+
+    --border: #2b2e28;
+    --border-strong: #3c4237;
+    --border-subtle: #22251f;
+    --input: #2b2e28;
+    --ring: #7b8074;
+
+    --sidebar: #151713;
+    --sidebar-foreground: #f0f1ec;
+    --surface-raised: #20231e;
+    --surface-active: #3a4035;
+    --surface-selected: #293228;
+
+    --success: #9fdaa8;
+    --success-bg: #193021;
+    --success-border: #2e5537;
+    --warning: #f1d08a;
+    --warning-bg: #322613;
+    --warning-border: #5b4218;
+    --info: #a9cfff;
+    --info-bg: #18283a;
+    --info-border: #2f4b6a;
+    --brand: #d0b8ef;
+    --brand-bg: #2a2138;
+    --brand-border: #4a3864;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+    }
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+}

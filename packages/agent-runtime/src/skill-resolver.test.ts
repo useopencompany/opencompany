@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   discoverSkillDirectories,
   ensureSkillMountId,
+  normalizeSkillCommand,
   parseSkillFrontmatter,
   parseSkillUrl,
   resolveSkill,
@@ -118,6 +119,35 @@ describe("parseSkillFrontmatter", () => {
   test("returns null without frontmatter or required fields", () => {
     expect(parseSkillFrontmatter("no frontmatter")).toBeNull();
     expect(parseSkillFrontmatter("---\nname: Foo\n---\nbody")).toBeNull();
+  });
+
+  test("reads an optional command slug", () => {
+    expect(
+      parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\ncommand: /Graph-ify\n---\nbody"),
+    ).toEqual({ name: "Foo", description: "Bar", command: "graph_ify" });
+  });
+
+  test("omits command when absent or empty after normalization", () => {
+    expect(parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\n---\nbody")).not.toHaveProperty(
+      "command",
+    );
+    expect(
+      parseSkillFrontmatter("---\nname: Foo\ndescription: Bar\ncommand: '!!!'\n---\nbody"),
+    ).not.toHaveProperty("command");
+  });
+});
+
+describe("normalizeSkillCommand", () => {
+  test("strips leading slash, lowercases, and collapses separators to underscores", () => {
+    expect(normalizeSkillCommand("/Graph-ify")).toBe("graph_ify");
+    expect(normalizeSkillCommand("Deep Research")).toBe("deep_research");
+    expect(normalizeSkillCommand("deep_research")).toBe("deep_research");
+  });
+
+  test("returns null for non-strings or empty slugs", () => {
+    expect(normalizeSkillCommand(undefined)).toBeNull();
+    expect(normalizeSkillCommand(42)).toBeNull();
+    expect(normalizeSkillCommand("///")).toBeNull();
   });
 });
 

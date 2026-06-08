@@ -1,11 +1,19 @@
 import {
   AGENT_SELF_EDIT_SKILL_ID,
+  type AgentBrainReference,
   type AgentConfig,
+  BUILTIN_USE_TOOL_NAME,
   buildDeniedToolOutput,
+  formatBrainReferenceDisplay,
+  isBrainListingAllowed,
+  isBrainPathAllowed,
+  isDeferrableRuntimeTool,
   newAgentSessionMessageId,
+  RUNTIME_TOOL_DEFINITION_BY_NAME,
   RUNTIME_TOOL_DEFINITIONS,
   type RuntimeToolDefinition,
   type RuntimeToolName,
+  type ToolArgResolution,
 } from "@opencompany/agent-runtime";
 import type { WorkspaceRepository } from "@opencompany/db/schema";
 import { captureException } from "@opencompany/observability";
@@ -46,8 +54,14 @@ import {
   RunLeaseLostError,
   withRunControlChecks,
 } from "./run-control";
-import { resolveSandboxToolPath, runSandboxTool, type SandboxHandle } from "./sandbox";
+import {
+  resolveSandboxBrainRelativePath,
+  resolveSandboxToolPath,
+  runSandboxTool,
+  type SandboxHandle,
+} from "./sandbox";
 import { hasReadSkill, markSkillRead } from "./self-edit-gate";
+import { prepareToolArgs } from "./tool-arg-repair";
 import type { ToolStartCoordinator, ToolStartVerdict } from "./tool-start-coordinator";
 import { recordToolUsage } from "./usage-recorder";
 
@@ -211,7 +225,269 @@ export function createToolSet(input: {
     }) as ToolSet[string];
   }
 
+  // The generic built-in dispatcher. Deferred capability tools are not registered with their own
+  // schemas; the model lists them with find_tools and runs one through this single tool. Mirrors
+  // the per-server MCP `{server}__use_tool` meta-tool: same approval gate, same persistence tail.
+  tools[BUILTIN_USE_TOOL_NAME] = tool({
+    description:
+      "Run a tool that is not preloaded. Set `tool` to a name returned by find_tools and " +
+      "`arguments` to that tool's input. Each underlying tool keeps its own permission, so a write " +
+      "or destructive tool may require approval.",
+    inputSchema: jsonSchema(BUILTIN_USE_TOOL_INPUT_SCHEMA as never),
+    onInputAvailable: async ({ input: toolInput, toolCallId }) => {
+      await input.checkAbort();
+      input.toolStartCoordinator.record({
+        toolCallId,
+        name: BUILTIN_USE_TOOL_NAME,
+        input: toolInput,
+      });
+    },
+    execute: async (toolInput, options) => {
+      const verdict = await input.toolStartCoordinator.waitForStarted(
+        options.toolCallId,
+        input.signal,
+      );
+      if (verdict.decision === "suspend") {
+        return SUSPENDED_TOOL_OUTPUT;
+      }
+      if (verdict.decision === "deny") {
+        return persistDeniedToolResult({
+          sessionId: input.sessionId,
+          assistantMessageId: input.assistantMessageId,
+          runLeaseId: input.runLeaseId,
+          runLeaseOwner: input.runLeaseOwner,
+          internalMessages: input.internalMessages,
+          toolCallId: options.toolCallId,
+          toolName: BUILTIN_USE_TOOL_NAME,
+          verdict,
+        });
+      }
+      return dispatchBuiltinUseTool({
+        sessionId: input.sessionId,
+        assistantMessageId: input.assistantMessageId,
+        runLeaseId: input.runLeaseId,
+        runLeaseOwner: input.runLeaseOwner,
+        ...(input.internalMessages ? { internalMessages: true } : {}),
+        workspaceId: input.workspaceId,
+        agentConfig: input.agentConfig,
+        toolCallId: options.toolCallId,
+        args: toolInput,
+        getSandbox: input.getSandbox,
+        workdir: input.workdir,
+        env: input.env,
+        enabledTools: input.enabledTools,
+        repository: input.repository,
+        signal: input.signal,
+        checkAbort: input.checkAbort,
+        observabilityContext: input.observabilityContext,
+        toolBudget: input.toolBudget,
+        delegateToAgent: input.delegateToAgent,
+      });
+    },
+  }) as ToolSet[string];
+
   return tools;
+}
+
+const BUILTIN_USE_TOOL_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    tool: {
+      type: "string",
+      description: "Exact tool name returned by find_tools.",
+    },
+    arguments: {
+      type: "object",
+      description: "Arguments object for the chosen tool, matching its input schema.",
+      additionalProperties: true,
+    },
+  },
+  required: ["tool"],
+  additionalProperties: false,
+} as const;
+
+function parseUseToolInput(args: unknown): { tool: string; arguments: unknown } {
+  if (isRecord(args)) {
+    const tool = typeof args.tool === "string" ? args.tool.trim() : "";
+    return { tool, arguments: args.arguments ?? {} };
+  }
+  return { tool: "", arguments: {} };
+}
+
+// Resolve the named deferred tool and run it through the existing executeRuntimeTool tail, but
+// persist the result under `use_tool` so it pairs with the model's dispatcher call. An unknown or
+// non-deferred tool name is persisted as a recoverable error pointing back to find_tools.
+export async function dispatchBuiltinUseTool(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean;
+  workspaceId: string;
+  agentConfig: AgentConfig;
+  toolCallId: string;
+  args: unknown;
+  getSandbox: () => Promise<SandboxHandle>;
+  workdir: string;
+  env: RunnerEnv;
+  enabledTools: RuntimeToolName[];
+  repository?: WorkspaceRepository | null | undefined;
+  signal: AbortSignal;
+  checkAbort: RunControlCheck;
+  observabilityContext?: ToolObservabilityContext | undefined;
+  toolBudget?: ToolBudget | undefined;
+  delegateToAgent?: DelegateToAgent | undefined;
+}) {
+  const { tool: rawName, arguments: rawArgs } = parseUseToolInput(input.args);
+  const definition = rawName
+    ? RUNTIME_TOOL_DEFINITION_BY_NAME.get(rawName as RuntimeToolName)
+    : undefined;
+  if (
+    !definition ||
+    !isDeferrableRuntimeTool(rawName) ||
+    !input.enabledTools.includes(rawName as RuntimeToolName)
+  ) {
+    return persistBuiltinUseToolError({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
+      ...(input.internalMessages ? { internalMessages: true } : {}),
+      toolCallId: input.toolCallId,
+      message: rawName
+        ? `Unknown or unavailable tool "${rawName}". Call find_tools to list available tools, then pass an exact name as "tool".`
+        : 'Missing "tool" argument. Call find_tools to list available tools, then pass one as "tool".',
+    });
+  }
+  // Layers 1–3 (validate → coerce → repair). The repair fallback is gated on the gateway key +
+  // kill switch; when off (e.g. unit tests with an empty env) only the deterministic layers run.
+  const prepared = await prepareToolArgs({
+    surface: "builtin",
+    toolName: rawName,
+    schema: definition.parameters,
+    rawArgs,
+    repair: {
+      apiKey: input.env.vercelAiGatewayApiKey,
+      enabled: input.env.toolArgRepairEnabled,
+    },
+    signal: input.signal,
+    observability: {
+      sessionId: input.sessionId,
+      ...(input.observabilityContext?.workspaceId
+        ? { workspaceId: input.observabilityContext.workspaceId }
+        : {}),
+      ...(input.observabilityContext?.agentId
+        ? { agentId: input.observabilityContext.agentId }
+        : {}),
+      ...(input.observabilityContext?.modelName
+        ? { modelName: input.observabilityContext.modelName }
+        : {}),
+    },
+  });
+  if (!prepared.ok) {
+    return persistBuiltinUseToolError({
+      sessionId: input.sessionId,
+      assistantMessageId: input.assistantMessageId,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
+      ...(input.internalMessages ? { internalMessages: true } : {}),
+      toolCallId: input.toolCallId,
+      message: `Invalid arguments for "${rawName}": ${prepared.errors
+        .map((error) => error.message)
+        .join(
+          "; ",
+        )}. Call tool_help({ tool: "${rawName}" }) for its schema, then retry use_tool with arguments that match it.`,
+      code: "invalid_tool_input",
+      argResolution: prepared.resolution,
+    });
+  }
+  return executeRuntimeTool({
+    sessionId: input.sessionId,
+    assistantMessageId: input.assistantMessageId,
+    runLeaseId: input.runLeaseId,
+    runLeaseOwner: input.runLeaseOwner,
+    ...(input.internalMessages ? { internalMessages: true } : {}),
+    workspaceId: input.workspaceId,
+    agentConfig: input.agentConfig,
+    toolCallId: input.toolCallId,
+    definition,
+    args: prepared.args,
+    persistAsToolName: BUILTIN_USE_TOOL_NAME,
+    argResolution: prepared.resolution,
+    getSandbox: input.getSandbox,
+    workdir: input.workdir,
+    env: input.env,
+    enabledTools: input.enabledTools,
+    repository: input.repository,
+    signal: input.signal,
+    checkAbort: input.checkAbort,
+    observabilityContext: input.observabilityContext,
+    toolBudget: input.toolBudget,
+    delegateToAgent: input.delegateToAgent,
+  });
+}
+
+// Persist a recoverable error tool-result for a `use_tool` call that named no/unknown tool or passed
+// arguments that fail its schema. Mirrors the failure tail of executeRuntimeTool so the model
+// recovers turn-by-turn. `code` defaults to the unknown-tool case; arg-validation failures pass
+// "invalid_tool_input" to match the rest of the runtime's recoverable input errors.
+async function persistBuiltinUseToolError(input: {
+  sessionId: string;
+  assistantMessageId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  internalMessages?: boolean;
+  toolCallId: string;
+  message: string;
+  code?: string;
+  argResolution?: ToolArgResolution | undefined;
+}) {
+  const output: FailedToolOutput = {
+    ok: false,
+    error: {
+      message: input.message,
+      code: input.code ?? "unknown_runtime_tool",
+      recoverable: true,
+    },
+  };
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: BUILTIN_USE_TOOL_NAME,
+          output,
+        }),
+      ),
+      toolName: BUILTIN_USE_TOOL_NAME,
+      toolCallId: input.toolCallId,
+      internal: input.internalMessages ?? false,
+    }),
+  );
+  await requireLeaseWrite(
+    appendRuntimeEventForLease({
+      sessionId: input.sessionId,
+      messageId: input.assistantMessageId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      type: "tool.failed",
+      payload: {
+        messageId: input.assistantMessageId,
+        toolCallId: input.toolCallId,
+        name: BUILTIN_USE_TOOL_NAME,
+        error: output.error,
+        outputPreview: formatRuntimePreview(output),
+        ...(input.argResolution ? { argResolution: input.argResolution } : {}),
+      },
+    }),
+  );
+  return output;
 }
 
 export function pickRuntimeTools(tools: ToolSet, names: string[]) {
@@ -264,6 +540,14 @@ export async function executeRuntimeTool(input: {
   toolCallId: string;
   definition: RuntimeToolDefinition;
   args: unknown;
+  // When set, the persisted tool-result message and the tool.completed/failed event use this name
+  // instead of the runtime tool's own name. Used by the built-in `use_tool` dispatcher so the
+  // result pairs with the `use_tool` tool-call the model made (observability still records the real
+  // tool via captureException + usage attribution).
+  persistAsToolName?: string;
+  // How the deferred-tool arguments were resolved (valid/coerced/repaired) before this ran. Carried
+  // onto the tool.completed/failed event for telemetry. Only set on the use_tool dispatch path.
+  argResolution?: ToolArgResolution | undefined;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -275,6 +559,7 @@ export async function executeRuntimeTool(input: {
   toolBudget?: ToolBudget | undefined;
   delegateToAgent?: DelegateToAgent | undefined;
 }) {
+  const persistedToolName = input.persistAsToolName ?? input.definition.name;
   let output: unknown;
   let failedOutput: FailedToolOutput | null = null;
   let usage: HostedToolUsage | undefined;
@@ -298,6 +583,14 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          googleContext: input.workspaceId
+            ? {
+                workspaceId: input.workspaceId,
+                encryptionKey: input.env.integrationCredentialEncryptionKey,
+                clientId: input.env.googleOAuthClientId,
+                clientSecret: input.env.googleOAuthClientSecret,
+              }
+            : undefined,
         });
         usage = result.usage;
         return result.output;
@@ -348,6 +641,7 @@ export async function executeRuntimeTool(input: {
         name: input.definition.name,
         args: input.args,
         workdir: input.workdir,
+        brainReferences: input.agentConfig?.brain ?? [],
       });
       const activeSandbox = await input.getSandbox();
       sandboxIdForCapture = activeSandbox.sandboxId;
@@ -541,11 +835,11 @@ export async function executeRuntimeTool(input: {
       modelMessage: toPersistedModelMessage(
         buildToolModelMessage({
           toolCallId: input.toolCallId,
-          toolName: input.definition.name,
+          toolName: persistedToolName,
           output,
         }),
       ),
-      toolName: input.definition.name,
+      toolName: persistedToolName,
       toolCallId: input.toolCallId,
       internal: input.internalMessages ?? false,
     }),
@@ -561,9 +855,10 @@ export async function executeRuntimeTool(input: {
         payload: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
-          name: input.definition.name,
+          name: persistedToolName,
           error: failedOutput.error,
           outputPreview: formatRuntimePreview(output),
+          ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );
@@ -578,8 +873,9 @@ export async function executeRuntimeTool(input: {
         payload: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
-          name: input.definition.name,
+          name: persistedToolName,
           outputPreview: formatRuntimePreview(output),
+          ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );
@@ -704,10 +1000,11 @@ function throwIfAborted(signal: AbortSignal) {
   }
 }
 
-function preflightSandboxToolArgs(input: {
+export function preflightSandboxToolArgs(input: {
   name: RuntimeToolName;
   args: unknown;
   workdir: string;
+  brainReferences: AgentBrainReference[];
 }) {
   if (
     input.name !== "read_file" &&
@@ -727,8 +1024,11 @@ function preflightSandboxToolArgs(input: {
     throw new RecoverableToolError("Tool argument path must be a string.", "invalid_tool_input");
   }
 
+  const requestedPath = typeof pathValue === "string" ? pathValue : undefined;
+
+  let brainRelativePath: string | null;
   try {
-    resolveSandboxToolPath(input.workdir, typeof pathValue === "string" ? pathValue : undefined);
+    brainRelativePath = resolveSandboxBrainRelativePath(input.workdir, requestedPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
     throw new RecoverableToolError(
@@ -736,6 +1036,37 @@ function preflightSandboxToolArgs(input: {
       "invalid_sandbox_path",
     );
   }
+
+  // Enforce the agent's true Brain access scope. The root check above only
+  // verifies the path is under brain/; here we reject Brain paths the agent's
+  // @brain/... references do not mount, so out-of-scope writes fail loudly
+  // instead of succeeding in the sandbox and being silently dropped at sync.
+  if (brainRelativePath === null) return;
+
+  const allowed =
+    input.name === "list_files"
+      ? isBrainListingAllowed(brainRelativePath, input.brainReferences)
+      : isBrainPathAllowed(brainRelativePath, input.brainReferences);
+  if (allowed) return;
+
+  throw new RecoverableToolError(
+    brainAccessDeniedMessage(brainRelativePath, input.brainReferences),
+    "brain_path_not_mounted",
+  );
+}
+
+function brainAccessDeniedMessage(
+  brainRelativePath: string,
+  references: AgentBrainReference[],
+): string {
+  const target = `brain/${brainRelativePath}`;
+  if (references.length === 0) {
+    return `${target} is outside this agent's Brain access — this agent has no mounted Brain paths. Add @brain/... references to the agent definition (via self-edit) before reading or writing Brain files, or ask the user to grant access.`;
+  }
+  const allowed = references
+    .map((reference) => formatBrainReferenceDisplay(reference.path))
+    .join(", ");
+  return `${target} is outside this agent's mounted Brain access. This agent can only read or write Brain files under: ${allowed}. To work elsewhere in the Brain, add the path to this agent's brain refs (e.g. @brain/${brainRelativePath}) via self-edit, or ask the user to grant access.`;
 }
 
 function isFatalToolError(

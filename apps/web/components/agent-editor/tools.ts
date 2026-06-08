@@ -13,6 +13,7 @@ import type {
 import {
   AtSign,
   BarChart3,
+  CalendarDays,
   Clock3,
   Code2,
   FileText,
@@ -20,6 +21,7 @@ import {
   GitBranch,
   ListTodo,
   type LucideIcon,
+  Mail,
   MessageSquare,
   MessagesSquare,
   Music2,
@@ -68,6 +70,8 @@ type BaseAgentMentionItem = {
   supportsReasoning?: boolean;
   // Capability / Speed / Cost tiers shown in the model picker (models only).
   ratings?: ModelRatings;
+  // Max context window in tokens (models only) — used to show how full the window is.
+  contextWindowTokens?: number;
   // Set on integrations that are enabled on the agent but not yet set up in the
   // workspace. The mention stays selectable; the UI shows a "Needs setup" badge
   // linking to `connectUrl` (Settings → Integrations connect flow).
@@ -140,6 +144,8 @@ export type AgentSkillCatalogEntry = {
   id: string;
   name: string;
   description: string;
+  /** Slash-command slug from SKILL.md frontmatter, if the skill declares one. */
+  command?: string;
   source?: {
     type: "github" | "skills.sh";
     url: string;
@@ -159,6 +165,8 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,
+  gmail: Mail,
+  google_calendar: CalendarDays,
 };
 
 // Real brand logos keyed by the provider prefix of the model id (the part
@@ -217,6 +225,7 @@ export const AGENT_MODELS: AgentModel[] = SUPPORTED_AGENT_MODELS.map((model) => 
   category: model.category,
   supportsReasoning: model.supportsReasoning,
   ratings: model.ratings,
+  contextWindowTokens: model.contextWindowTokens,
   icon: modelIconFor(model.id),
 }));
 

@@ -1,7 +1,8 @@
-import type { TextStreamPart, ToolSet } from "ai";
+import { modelMessageSchema, type TextStreamPart, type ToolSet } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
+import { buildAssistantModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
 import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
 import {
@@ -29,6 +30,7 @@ const leaseWrites = vi.hoisted(() => ({
     await eventMocks.appendRuntimeEvent(undefined, event);
     return true;
   }),
+  insertToolMessageForLease: vi.fn(async () => true),
   insertToolApprovalForLease: vi.fn(async () => "inserted"),
   requireLeaseWrite: vi.fn(async (value: unknown) => value),
 }));
@@ -149,9 +151,13 @@ describe("collectAssistantStream", () => {
       toolName: "slack__chat_postMessage",
       input: { text: "hi" },
     });
-    // The approval row + event are persisted, and parked siblings are released.
+    // The approval row + event are persisted, and parked siblings are released. The event
+    // carries the structured input so the approval card can unwrap a use_tool envelope.
     expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "tool.approval_required" }),
+      expect.objectContaining({
+        type: "tool.approval_required",
+        payload: expect.objectContaining({ input: { text: "hi" } }),
+      }),
     );
     expect(suspend).toHaveBeenCalledTimes(1);
     // The stream is torn down on the way out.
@@ -311,6 +317,75 @@ describe("collectAssistantStream", () => {
 
     // Initial part read (1) plus the forced finish-step boundary read (2).
     expect(heartbeatAndLoadState).toHaveBeenCalledTimes(2);
+  });
+
+  it("persists invalid tool input stream errors as recoverable tool results", async () => {
+    const coordinator = createToolStartCoordinator();
+    const markStarted = vi.spyOn(coordinator, "markStarted");
+    const malformedInput = '{"path":"brain/report.md","content":"unterminated';
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_write",
+        toolName: "write_file",
+        input: malformedInput,
+        invalid: true,
+      }),
+      streamPart({
+        type: "tool-error",
+        toolCallId: "call_write",
+        toolName: "write_file",
+        input: malformedInput,
+        error:
+          "Invalid input for tool write_file: JSON parsing failed. Error message: JSON Parse error: Unterminated string",
+      }),
+      streamPart({
+        type: "finish-step",
+        finishReason: "tool-calls",
+        rawFinishReason: "tool_use",
+      }),
+    ]);
+
+    await expect(collect(stream, { toolStartCoordinator: coordinator })).resolves.toMatchObject({
+      assistantReplayParts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_write",
+          toolName: "write_file",
+          input: malformedInput,
+        },
+      ],
+      lastStepEndedWithToolCalls: true,
+    });
+
+    expect(markStarted).not.toHaveBeenCalled();
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "ses_123",
+        toolName: "write_file",
+        toolCallId: "call_write",
+        content: expect.stringContaining('"code":"invalid_tool_input"'),
+      }),
+    );
+    const insertCalls = vi.mocked(leaseWrites.insertToolMessageForLease).mock.calls as unknown[][];
+    const insertedToolMessage = insertCalls[0]?.[0] as { content?: unknown } | undefined;
+    expect(String(insertedToolMessage?.content)).not.toContain("unterminated");
+    expect(leaseWrites.appendRuntimeEventForLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool.failed",
+        payload: expect.objectContaining({
+          toolCallId: "call_write",
+          name: "write_file",
+          error: expect.objectContaining({
+            code: "invalid_tool_input",
+            recoverable: true,
+          }),
+        }),
+      }),
+    );
+    expect(leaseWrites.appendRuntimeEventForLease).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tool.started" }),
+    );
   });
 
   it("stops within one stream part when the local controller is aborted, without a DB read", async () => {
@@ -653,6 +728,39 @@ describe("stream error handling", () => {
         input: { query: "YC agent discussion" },
       },
     });
+  });
+
+  it("replays tool calls with the parsed coordinator input when the stream part has no input", async () => {
+    const toolStartCoordinator = createToolStartCoordinator();
+    toolStartCoordinator.record({
+      toolCallId: "call_search",
+      name: "find_tools",
+      input: { query: "", capability: "" },
+    });
+    const stream = createStream([
+      streamPart({
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "find_tools",
+        input: undefined,
+      }),
+    ]);
+
+    const result = await collect(stream, { toolStartCoordinator });
+
+    expect(result.assistantReplayParts).toEqual([
+      {
+        type: "tool-call",
+        toolCallId: "call_search",
+        toolName: "find_tools",
+        input: { query: "", capability: "" },
+      },
+    ]);
+    expect(
+      modelMessageSchema.safeParse(
+        buildAssistantModelMessage({ content: "", parts: result.assistantReplayParts }),
+      ).success,
+    ).toBe(true);
   });
 
   it("rejects turn completion when the model is still requesting tools at the step cap", () => {

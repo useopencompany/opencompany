@@ -5,6 +5,7 @@ import {
   type EnqueueRunnerJobInput,
   enqueueRunnerJob,
   RUNNER_JOB_MAX_ATTEMPTS,
+  RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS,
   type RunnerJob,
   type RunnerJobHandlers,
   type RunnerJobStatus,
@@ -12,6 +13,7 @@ import {
   runClaimedRunnerJob,
   startRunnerJobWorker,
 } from "./jobs";
+import { RunLeaseBusyError } from "./run-control";
 import { MessageTurnFailedError, ToolStepLimitExceededError } from "./runner-errors";
 
 afterEach(() => {
@@ -360,6 +362,66 @@ describe("runner job execution", () => {
     expect(firstJob(store).leaseId).toBeNull();
     expect(firstJob(store).lastError).toBe("still broken");
   });
+
+  it("keeps lease-busy jobs pending even after the max attempt", async () => {
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "running",
+        attempts: RUNNER_JOB_MAX_ATTEMPTS,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          runMessage: vi.fn(async () => {
+            throw new RunLeaseBusyError();
+          }),
+        }),
+      }),
+    ).rejects.toThrow(RunLeaseBusyError);
+
+    expect(firstJob(store).status).toBe("pending");
+    expect(firstJob(store).leaseId).toBeNull();
+    expect(firstJob(store).lastError).toBe("Run lease is busy.");
+  });
+
+  it("gives up on a lease-busy job once the lease-busy ceiling is reached", async () => {
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "running",
+        attempts: RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS,
+        leaseId: "lease_123",
+        leaseOwner: "runner-a",
+      }),
+    ]);
+
+    await expect(
+      runClaimedRunnerJob({
+        job: firstJob(store),
+        env: env(),
+        store,
+        handlers: handlers({
+          runMessage: vi.fn(async () => {
+            throw new RunLeaseBusyError();
+          }),
+        }),
+      }),
+    ).rejects.toThrow(RunLeaseBusyError);
+
+    // Past the ceiling the runaway re-claim loop stops: the in-flight run owns the message.
+    expect(firstJob(store).status).toBe("failed");
+    expect(firstJob(store).leaseId).toBeNull();
+  });
 });
 
 describe("runner job worker wake", () => {
@@ -425,6 +487,34 @@ describe("runner job worker shutdown", () => {
 
     expect(firstJob(store).status).toBe("completed");
     expect(stopped).toBe(true);
+  });
+
+  it("runs the interrupt hook when active jobs outlive the shutdown deadline", async () => {
+    vi.useFakeTimers();
+    const store = createMemoryRunnerJobStore([
+      job({
+        id: 1,
+        kind: "message",
+        status: "pending",
+        nextRunAt: new Date("2026-05-27T00:00:00.000Z"),
+      }),
+    ]);
+    const runMessage = vi.fn(async () => new Promise<void>(() => undefined));
+    const onInterrupt = vi.fn();
+    const worker = startRunnerJobWorker(env(), {
+      store,
+      handlers: handlers({ runMessage }),
+      pollIntervalMs: 50,
+    });
+
+    await vi.waitFor(() => expect(runMessage).toHaveBeenCalledOnce());
+
+    const stopPromise = worker.stop({ interruptAfterMs: 250, onInterrupt });
+    await vi.advanceTimersByTimeAsync(250);
+    await stopPromise;
+
+    expect(onInterrupt).toHaveBeenCalledOnce();
+    expect(firstJob(store).status).toBe("running");
   });
 });
 
@@ -614,6 +704,10 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
+    opencodeTimeoutMs: 1_200_000,
+    toolArgRepairEnabled: false,
+    jobLeaseTtlMs: 300_000,
+    jobMaxLeaseBusyAttempts: 10,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

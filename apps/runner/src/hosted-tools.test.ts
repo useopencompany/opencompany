@@ -947,6 +947,30 @@ describe("executeHostedTool", () => {
       },
     });
   });
+
+  it("find_tools lists a capability compactly and points at tool_help", async () => {
+    const result = await executeHostedTool({
+      name: "find_tools",
+      args: { capability: "exa" },
+      env: env(),
+      enabledTools: ["find_tools", "tool_help", "exa_search", "exa_contents", "exa_answer"],
+      signal: new AbortController().signal,
+    });
+    const output = result.output as {
+      toolCount: number;
+      useTool: string;
+      toolHelp: string;
+      tools: Array<Record<string, unknown>>;
+    };
+    expect(output.useTool).toBe("use_tool");
+    expect(output.toolHelp).toBe("tool_help");
+    expect(output.toolCount).toBe(output.tools.length);
+    expect(output.tools.map((tool) => tool.name)).toContain("exa_search");
+    // Compact entries only — the verbose per-tool help is reachable via tool_help, not here.
+    for (const tool of output.tools) {
+      expect(tool).not.toHaveProperty("help");
+    }
+  });
 });
 
 describe("getHostedToolFailureContext", () => {
@@ -1945,6 +1969,10 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
+    opencodeTimeoutMs: 1_200_000,
+    toolArgRepairEnabled: false,
+    jobLeaseTtlMs: 300_000,
+    jobMaxLeaseBusyAttempts: 10,
     workerConcurrency: 2,
     port: 3040,
     allowedOrigins: ["http://localhost:3000"],

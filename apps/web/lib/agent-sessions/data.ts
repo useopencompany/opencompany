@@ -1,13 +1,14 @@
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
+  agentSessionMessageAttachments,
   agentSessionMessages,
   agentSessions,
   agentSessionUsage,
   agents,
   sessionStars,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
   type SidebarSessionPayload,
@@ -123,7 +124,16 @@ export async function loadAgentSessionDetailForWorkspace(
 
   if (!session) return null;
 
-  const [parentRows, children, messages, events, usageRows, rollupRows] = await Promise.all([
+  const [
+    parentRows,
+    children,
+    messages,
+    events,
+    usageRows,
+    rollupRows,
+    latestModelRequestRows,
+    latestUsageRows,
+  ] = await Promise.all([
     session.parentSessionId
       ? db
           .select({
@@ -182,7 +192,15 @@ export async function loadAgentSessionDetailForWorkspace(
     db
       .select()
       .from(agentSessionEvents)
-      .where(eq(agentSessionEvents.sessionId, sessionId))
+      // Exclude the per-turn `debug.model_request` snapshots from the windowed event list: they are
+      // large, hidden from the inspector, and would otherwise consume the 300-row budget (and ship
+      // to the browser repeatedly). The latest one is fetched separately below.
+      .where(
+        and(
+          eq(agentSessionEvents.sessionId, sessionId),
+          ne(agentSessionEvents.type, "debug.model_request"),
+        ),
+      )
       .orderBy(asc(agentSessionEvents.id))
       .limit(300),
     db
@@ -289,9 +307,38 @@ export async function loadAgentSessionDetailForWorkspace(
       CROSS JOIN cost_totals
       CROSS JOIN tool_totals
     `),
+    // The single most-recent model-request debug snapshot. Surfaced as a top-level detail field
+    // (not via the windowed `events` above) so the "Copy Debug JSON" export still finds it on long
+    // sessions whose latest turn falls outside the 300-event window.
+    db
+      .select({ payload: agentSessionEvents.payload })
+      .from(agentSessionEvents)
+      .where(
+        and(
+          eq(agentSessionEvents.sessionId, sessionId),
+          eq(agentSessionEvents.type, "debug.model_request"),
+        ),
+      )
+      .orderBy(desc(agentSessionEvents.id))
+      .limit(1),
+    // The most recent model step for THIS session only (not the recursive tree). Its
+    // input + output tokens approximate how full the model's context window currently is —
+    // the prompt just sent plus what was generated and carried into the next turn. This is the
+    // "context now" figure, distinct from the cumulative `usage` rollup which only grows.
+    db
+      .select({
+        inputTokens: agentSessionUsage.inputTokens,
+        outputTokens: agentSessionUsage.outputTokens,
+      })
+      .from(agentSessionUsage)
+      .where(eq(agentSessionUsage.sessionId, sessionId))
+      .orderBy(desc(agentSessionUsage.createdAt))
+      .limit(1),
   ]);
   const rollup = parseSessionTreeRollup(rowsFromExecute<Record<string, unknown>>(rollupRows)[0]);
   const usage = rollup.usage;
+  const latestUsage = latestUsageRows[0];
+  const currentContextTokens = latestUsage ? latestUsage.inputTokens + latestUsage.outputTokens : 0;
   const usageByMessageId = new Map<string, { outputReasoningTokens: number }>();
   for (const row of usageRows) {
     if (!row.messageId) continue;
@@ -303,6 +350,42 @@ export async function loadAgentSessionDetailForWorkspace(
     ...event,
     createdAt: event.createdAt.toISOString(),
   }));
+  // Batch-load attachment metadata for these messages (only user messages can carry
+  // attachments, but we key by id so the join is a single query). Only the 4 client-safe
+  // fields are projected — blobUrl/blobPathname/sizeBytes never reach the browser; the UI
+  // fetches the bytes through /api/attachments/[id].
+  const messageIds = messages.map((message) => message.id);
+  const attachmentRows =
+    messageIds.length > 0
+      ? await db
+          .select({
+            id: agentSessionMessageAttachments.id,
+            messageId: agentSessionMessageAttachments.messageId,
+            kind: agentSessionMessageAttachments.kind,
+            mediaType: agentSessionMessageAttachments.mediaType,
+            filename: agentSessionMessageAttachments.filename,
+          })
+          .from(agentSessionMessageAttachments)
+          .where(inArray(agentSessionMessageAttachments.messageId, messageIds))
+      : [];
+  const attachmentsByMessageId = new Map<
+    string,
+    Array<{ id: string; kind: "image" | "pdf" | "text"; mediaType: string; filename: string }>
+  >();
+  for (const row of attachmentRows) {
+    const attachment = {
+      id: row.id,
+      kind: row.kind,
+      mediaType: row.mediaType,
+      filename: row.filename,
+    };
+    const existing = attachmentsByMessageId.get(row.messageId);
+    if (existing) {
+      existing.push(attachment);
+    } else {
+      attachmentsByMessageId.set(row.messageId, [attachment]);
+    }
+  }
   const messagesWithUsage = messages.map((message) => {
     const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
     const sessionMessage = {
@@ -311,10 +394,12 @@ export async function loadAgentSessionDetailForWorkspace(
       createdAt: message.createdAt.toISOString(),
       completedAt: message.completedAt?.toISOString() ?? null,
     };
+    const attachments = attachmentsByMessageId.get(message.id);
     return {
       ...message,
       outputReasoningTokens,
       thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
+      ...(attachments ? { attachments } : {}),
     };
   });
   const toolUsage = rollup.toolUsage;
@@ -335,6 +420,8 @@ export async function loadAgentSessionDetailForWorkspace(
     usage,
     toolUsage,
     cost,
+    currentContextTokens,
+    latestModelRequest: latestModelRequestRows[0]?.payload ?? null,
   });
 }
 
@@ -435,6 +522,8 @@ export function buildCreatedSessionDetail(input: {
     usage: EMPTY_USAGE,
     toolUsage: EMPTY_TOOL_USAGE,
     cost: EMPTY_COST,
+    // A just-created session has no model steps yet, so the context window is empty.
+    currentContextTokens: 0,
   });
 }
 

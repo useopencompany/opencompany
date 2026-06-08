@@ -18,6 +18,11 @@ export type SlashCommandContext = {
   queryClient: QueryClient;
   /** Update the composer's textarea value. */
   setInput: (value: string) => void;
+  /**
+   * Insert a token (e.g. `@skill/<id> `) at the caret, replacing the active slash token, and
+   * leave the caret after it so the user can keep typing. Used by skill-derived commands.
+   */
+  insertMention: (token: string) => void;
   showToast: ReturnType<typeof useToast>["showToast"];
   /** Text that followed the command token on the same message (the "rest"). */
   args: string;
@@ -33,6 +38,13 @@ export type SlashCommand = {
   icon: LucideIcon;
   /** Extra terms to match against, beyond `id`/`title`. */
   keywords?: string[];
+  /**
+   * Run as soon as the command is chosen from the menu, instead of inserting its trigger and
+   * waiting for the user to send. Built-in commands (which take args after the trigger, e.g.
+   * `/clear <prompt>`) leave this off; skill commands set it so picking `/<command>` swaps in
+   * the mention in a single step rather than `/<command>` → mention → send.
+   */
+  applyOnSelect?: boolean;
   run: (ctx: SlashCommandContext) => void | Promise<void>;
 };
 
@@ -100,7 +112,6 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       const sessionId = result.session.id;
       showToast({
         title: prompt ? "Working on it in a new session" : "New session started",
-        ...(prompt ? { description: prompt } : {}),
         action: {
           label: "Open",
           onClick: () => router.push(`/session/${sessionId}`),
@@ -133,12 +144,15 @@ export function getSlashContext(
  * after the token is returned as `args` (the new prompt). Returns null for incidental
  * mid-sentence slash tokens.
  */
-export function parseSlashCommand(input: string): { command: SlashCommand; args: string } | null {
+export function parseSlashCommand(
+  input: string,
+  commands: SlashCommand[] = SLASH_COMMANDS,
+): { command: SlashCommand; args: string } | null {
   const trimmed = input.trim();
   const match = trimmed.match(/^\/(\w+)(?=\s|$)/);
   const word = match?.[1];
   if (!word) return null;
-  const command = SLASH_COMMANDS.find((c) => c.id.toLowerCase() === word.toLowerCase());
+  const command = commands.find((c) => c.id.toLowerCase() === word.toLowerCase());
   if (!command) return null;
   return { command, args: trimmed.slice(match[0].length).trim() };
 }
@@ -147,11 +161,14 @@ export function parseSlashCommand(input: string): { command: SlashCommand; args:
  * Filter commands for a query (the text after the leading slash). Prefix matches on
  * the command id rank first, then any substring match on id/title/keywords.
  */
-export function matchSlashCommands(query: string): SlashCommand[] {
+export function matchSlashCommands(
+  query: string,
+  commands: SlashCommand[] = SLASH_COMMANDS,
+): SlashCommand[] {
   const q = query.trim().toLowerCase();
-  if (!q) return SLASH_COMMANDS;
+  if (!q) return commands;
 
-  const scored = SLASH_COMMANDS.map((command) => {
+  const scored = commands.map((command) => {
     const haystack = [command.id, command.title, ...(command.keywords ?? [])]
       .join(" ")
       .toLowerCase();

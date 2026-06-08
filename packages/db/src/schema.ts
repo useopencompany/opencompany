@@ -191,6 +191,9 @@ export const workspaceSkillSnapshots = pgTable(
     skillId: text("skill_id").notNull(),
     name: text("name").notNull(),
     description: text("description").notNull(),
+    // Optional slash-command slug declared in SKILL.md frontmatter; surfaced in the composer
+    // as `/<command>` for agents that enable this skill. Null when the skill declares none.
+    command: text("command"),
     sourceType: text("source_type").notNull().default("github"),
     sourceUrl: text("source_url").notNull(),
     requestedRef: text("requested_ref").notNull(),
@@ -547,6 +550,41 @@ export const agentSessionMessages = pgTable(
     ),
     responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
       table.responseToMessageId,
+    ),
+  }),
+);
+
+// User-uploaded attachments for a session message (images, PDFs, and text/code files).
+// References to Vercel Blob objects only — bytes live in the private Blob store, never in
+// Postgres. Cascade-deleted with the message; the blob objects are deleted explicitly in
+// app code.
+export const agentSessionMessageAttachments = pgTable(
+  "agent_session_message_attachments",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"image" | "pdf" | "text">().notNull(),
+    mediaType: text("media_type").notNull(),
+    filename: text("filename").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    blobUrl: text("blob_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    messageIdx: index("agent_session_message_attachments_message_idx").on(table.messageId),
+    sessionIdx: index("agent_session_message_attachments_session_idx").on(table.sessionId),
+    kindCheck: check(
+      "agent_session_message_attachments_kind_check",
+      sql`${table.kind} IN ('image', 'pdf', 'text')`,
     ),
   }),
 );
@@ -1364,6 +1402,36 @@ export const onboardingResponses = pgTable(
   },
   (table) => ({
     workspaceIdx: index("onboarding_responses_workspace_idx").on(table.workspaceId),
+  }),
+);
+
+export type SlackChannelStatus = "pending" | "active" | "failed";
+
+// One private Slack Connect support channel per workspace, provisioned after the
+// customer's first onboarding. Unique workspaceId + the "already active" short-circuit
+// in the Inngest provisioning function guarantee exactly one channel per workspace
+// even under retries or a double event dispatch.
+export const workspaceSlackChannels = pgTable(
+  "workspace_slack_channels",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    slackChannelId: text("slack_channel_id"),
+    slackTeamId: text("slack_team_id"),
+    inviteUrl: text("invite_url"),
+    status: text("status").$type<SlackChannelStatus>().notNull().default("pending"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: uniqueIndex("workspace_slack_channels_workspace_idx").on(table.workspaceId),
+    statusCheck: check(
+      "workspace_slack_channels_status_check",
+      sql`${table.status} IN ('pending', 'active', 'failed')`,
+    ),
   }),
 );
 

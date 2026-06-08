@@ -1,4 +1,4 @@
-import type { RuntimeToolName } from "./tools";
+import { BUILTIN_USE_TOOL_NAME, type RuntimeToolName } from "./tools";
 
 // Human-readable permission groups exposed to users, ordered from least to most
 // dangerous. Every concrete tool/action a provider exposes maps to exactly one group.
@@ -208,6 +208,28 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
     groups: ["read"],
     gated: false,
   },
+  gmail: {
+    providerKey: "gmail",
+    displayName: "Gmail",
+    // Read-only integration: agents can only read mail.
+    groups: ["read"],
+    gated: true,
+    permissionDescriptions: {
+      read: "Read messages, threads, and labels",
+    },
+  },
+  google_calendar: {
+    providerKey: "google_calendar",
+    displayName: "Google Calendar",
+    groups: ["read", "post", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      read: "List calendars and read events and free/busy",
+      post: "Create new events",
+      modify: "Edit existing events",
+      admin: "Delete events",
+    },
+  },
   [SYSTEM_PROVIDER_KEY]: {
     providerKey: SYSTEM_PROVIDER_KEY,
     displayName: "Sandbox",
@@ -260,6 +282,21 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   instagram_get_metadata: { providerKey: "instagram", group: "read" },
   instagram_get_transcript: { providerKey: "instagram", group: "read" },
   social_get_job: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  // Gmail hosted tools — read-only mailbox access.
+  gmail_list_messages: { providerKey: "gmail", group: "read" },
+  gmail_get_message: { providerKey: "gmail", group: "read" },
+  gmail_search: { providerKey: "gmail", group: "read" },
+  gmail_list_threads: { providerKey: "gmail", group: "read" },
+  gmail_get_thread: { providerKey: "gmail", group: "read" },
+  gmail_list_labels: { providerKey: "gmail", group: "read" },
+  // Google Calendar hosted tools — reads vs writes split across groups.
+  calendar_list_calendars: { providerKey: "google_calendar", group: "read" },
+  calendar_list_events: { providerKey: "google_calendar", group: "read" },
+  calendar_get_event: { providerKey: "google_calendar", group: "read" },
+  calendar_get_freebusy: { providerKey: "google_calendar", group: "read" },
+  calendar_create_event: { providerKey: "google_calendar", group: "post" },
+  calendar_update_event: { providerKey: "google_calendar", group: "modify" },
+  calendar_delete_event: { providerKey: "google_calendar", group: "admin" },
   // Sandbox-local file IO.
   read_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   list_files: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
@@ -370,6 +407,21 @@ export function mcpInvokeEffectiveToolName(toolName: string, toolInput: unknown)
   if (typeof requested !== "string" || !requested.trim()) return toolName;
   const providerKey = toolName.slice(0, separatorIndex);
   return `${providerKey}${MCP_TOOL_NAME_SEPARATOR}${requested.trim()}`;
+}
+
+// The generic built-in `use_tool` dispatcher carries the real action in its `tool` argument, so
+// the gate must classify by the underlying runtime tool — the dispatcher name has no verb and is
+// `system`/ungated. Returns the requested runtime tool name when present, else the name unchanged
+// so an unparseable invoke stays gated by the dispatcher (which returns a recoverable error with
+// no side effect).
+export function builtinInvokeEffectiveToolName(toolName: string, toolInput: unknown): string {
+  if (toolName !== BUILTIN_USE_TOOL_NAME) return toolName;
+  const requested =
+    toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
+      ? (toolInput as Record<string, unknown>).tool
+      : undefined;
+  if (typeof requested !== "string" || !requested.trim()) return toolName;
+  return requested.trim();
 }
 
 // MCP tool names are "{serverKey}__{rawTool}". Resolve the provider from the prefix
@@ -649,7 +701,12 @@ export function resolveToolDecision(input: {
               : undefined,
           ),
         }
-      : classifyTool(mcpInvokeEffectiveToolName(input.toolName, input.toolInput));
+      : classifyTool(
+          mcpInvokeEffectiveToolName(
+            builtinInvokeEffectiveToolName(input.toolName, input.toolInput),
+            input.toolInput,
+          ),
+        );
   if (!classification) {
     return { decision: "allow", providerKey: SYSTEM_PROVIDER_KEY, group: "read" };
   }

@@ -8,6 +8,7 @@ export function SessionStatusDot({ status, pulse = false }: { status: string; pu
           ? "bg-success shadow-[0_0_0_2px_rgba(22,163,74,0.12)]"
           : status === "awaiting_approval" ||
               status === "awaiting_input" ||
+              status === "interrupted" ||
               status === "aborting" ||
               status === "archiving"
             ? "bg-warning shadow-[0_0_0_2px_rgba(217,119,6,0.11)]"
@@ -23,6 +24,7 @@ export function SessionStatusDot({ status, pulse = false }: { status: string; pu
         ? "var(--color-success)"
         : status === "awaiting_approval" ||
             status === "awaiting_input" ||
+            status === "interrupted" ||
             status === "aborting" ||
             status === "archiving"
           ? "var(--color-warning)"

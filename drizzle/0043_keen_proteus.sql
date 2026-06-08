@@ -1,0 +1,2 @@
+ALTER TABLE "agent_session_message_attachments" DROP CONSTRAINT "agent_session_message_attachments_kind_check";--> statement-breakpoint
+ALTER TABLE "agent_session_message_attachments" ADD CONSTRAINT "agent_session_message_attachments_kind_check" CHECK ("agent_session_message_attachments"."kind" IN ('image', 'pdf', 'text'));

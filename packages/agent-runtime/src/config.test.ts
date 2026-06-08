@@ -135,6 +135,10 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).toContain("You can evolve your own definition.");
     expect(resolved.systemPrompt).toContain("skills/agent-self-edit/SKILL.md");
     expect(resolved.systemPrompt).toContain("before calling update_agent_file");
+    // update_agent_file is deferred: the guidance must point at the find_tools/use_tool discovery
+    // flow rather than implying a directly preloaded tool.
+    expect(resolved.systemPrompt).toContain('find_tools({ query: "update_agent_file" })');
+    expect(resolved.systemPrompt).toContain('use_tool({ tool: "update_agent_file", arguments })');
     expect(resolved.tools).toContain("update_agent_file");
   });
 
@@ -286,6 +290,46 @@ describe("resolveAgentRuntimeConfig", () => {
         "web_fetch",
       ]),
     );
+  });
+
+  it("renders a Tools index of capabilities without leaking deferred tool schemas", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Research agent",
+      instructions: "Research things.",
+      model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+      tools: [
+        { id: "exa", type: "hosted_tool", label: "exa", description: "Web research." },
+        { id: "instagram", type: "hosted_tool", label: "instagram", description: "Read IG." },
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "linear",
+          description: "Use workspace-configured Linear MCP tools.",
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({ agent: config });
+
+    // Capability-level spine, both surfaces present.
+    expect(resolved.systemPrompt).toContain("## Tools");
+    expect(resolved.systemPrompt).toContain("- exa —");
+    expect(resolved.systemPrompt).toContain("- instagram —");
+    expect(resolved.systemPrompt).toContain("find_tools");
+    expect(resolved.systemPrompt).toContain("use_tool");
+    expect(resolved.systemPrompt).toContain("Linear");
+    expect(resolved.systemPrompt).toContain("linear__search_tools");
+
+    // Deferred runtime tools are enabled, but their per-tool names/schemas are not in the prompt.
+    expect(resolved.tools).toContain("exa_search");
+    expect(resolved.tools).toContain("instagram_get_profile");
+    expect(resolved.systemPrompt).not.toContain("exa_search");
+    expect(resolved.systemPrompt).not.toContain("instagram_get_profile");
   });
 
   it("keeps MCP tools separate from static runtime tools", () => {
@@ -612,6 +656,54 @@ describe("resolveAgentRuntimeConfig", () => {
       },
       reasoningExposure: "summary",
     });
+  });
+
+  it("uses a valid modelOverride in place of the agent default", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Override agent",
+      instructions: "Do the work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      modelOverride: "anthropic/claude-opus-4.8",
+    });
+
+    expect(resolved.model.name).toBe("anthropic/claude-opus-4.8");
+    // The agent's saved default is never mutated by an override.
+    expect(config.model.name).toBe("openai/gpt-5.4-mini");
+  });
+
+  it("falls back to the agent default when modelOverride is unknown", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Override agent",
+      instructions: "Do the work.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      modelOverride: "not-a-real/model",
+    });
+
+    expect(resolved.model.name).toBe("openai/gpt-5.4-mini");
   });
 });
 

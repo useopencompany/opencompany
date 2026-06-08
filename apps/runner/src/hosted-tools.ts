@@ -1,6 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getRuntimeToolHelp, type RuntimeToolName } from "@opencompany/agent-runtime";
+import {
+  getRuntimeToolHelp,
+  type RuntimeToolName,
+  searchRuntimeTools,
+} from "@opencompany/agent-runtime";
 import type { RunnerEnv } from "./env";
+import {
+  executeGoogleHostedTool,
+  type GoogleToolContext,
+  isGoogleHostedTool,
+} from "./google-tools";
 
 export type HostedToolUsage = {
   provider: string;
@@ -205,7 +214,19 @@ export async function executeHostedTool(input: {
   env: RunnerEnv;
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
+  googleContext?: GoogleToolContext | undefined;
 }): Promise<HostedToolResult> {
+  // Google (Gmail + Calendar) tools resolve per-account workspace credentials rather than a
+  // platform env var, so they take a different path with the credential context attached.
+  if (isGoogleHostedTool(input.name)) {
+    return executeGoogleHostedTool({
+      name: input.name,
+      args: input.args,
+      context: input.googleContext,
+      signal: input.signal,
+    });
+  }
+
   const handler = HOSTED_TOOL_HANDLERS[input.name];
   if (!handler) throw new Error(`Unknown hosted tool: ${input.name}`);
   return handler.execute(input);
@@ -223,6 +244,9 @@ export function validateHostedToolEnvironment(input: {
 const HOSTED_TOOL_HANDLERS: Partial<Record<RuntimeToolName, HostedToolHandler>> = {
   tool_help: {
     execute: ({ args, enabledTools }) => executeToolHelp(args, enabledTools),
+  },
+  find_tools: {
+    execute: ({ args, enabledTools }) => executeToolSearch(args, enabledTools),
   },
   exa_search: {
     execute: ({ args, env, signal }) => executeExaSearch(args, env, signal),
@@ -450,6 +474,32 @@ function executeToolHelp(args: unknown, enabledTools: RuntimeToolName[]): Hosted
   }
 
   return { output: help };
+}
+
+function executeToolSearch(args: unknown, enabledTools: RuntimeToolName[]): HostedToolResult {
+  const record = asRecord(args);
+  // Both are optional in the find_tools schema — omitting them lists every tool. readString throws
+  // on a missing key, so use readOptionalString to avoid rejecting a valid capability-only (or
+  // argument-less) discovery call.
+  const capability = readOptionalString(record, "capability");
+  const query = readOptionalString(record, "query");
+  const tools = searchRuntimeTools(
+    {
+      ...(capability ? { capability } : {}),
+      ...(query ? { query } : {}),
+    },
+    enabledTools,
+  );
+  return {
+    output: {
+      toolCount: tools.length,
+      useTool: "use_tool",
+      // Discovery results are compact (no per-tool help). Point the model at tool_help so it can
+      // pull a single tool's detailed usage instructions before invoking it via use_tool.
+      toolHelp: "tool_help",
+      tools,
+    },
+  };
 }
 
 async function executeExaSearch(

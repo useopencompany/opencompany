@@ -2,8 +2,13 @@
 
 import {
   type AgentSessionQuestionAnswer,
+  ATTACHMENT_MAX_PER_MESSAGE,
+  getAgentModelDefinition,
+  modelSupportsAttachments,
   newAgentSessionId,
+  newAgentSessionMessageAttachmentId,
   newAgentSessionMessageId,
+  validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
@@ -11,6 +16,7 @@ import { getDb } from "@opencompany/db/client";
 import {
   type Agent,
   agentSessionEvents,
+  agentSessionMessageAttachments,
   agentSessionMessages,
   agentSessionQuestions,
   agentSessions,
@@ -88,7 +94,11 @@ export async function createAgentSession(idOrPath: string) {
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-export async function createAgentSessionFromPrompt(agentId: string, content: string) {
+export async function createAgentSessionFromPrompt(
+  agentId: string,
+  content: string,
+  modelId?: string,
+) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
   if (!trimmed) {
@@ -107,14 +117,22 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
     return { ok: false, error: "Agent not found." } as const;
   }
 
+  // A valid catalog model picked in the composer overrides the agent's default for this
+  // session only; an unknown/stale id is ignored in favor of the agent default.
+  const modelName = modelId && getAgentModelDefinition(modelId) ? modelId : agent.config.model.name;
+
   const { session, statusEvent } = await insertAgentSession({
     agent,
     title: titleFromPrompt(trimmed),
     userId: user.id,
     workspaceId: workspace.id,
+    modelName,
   });
   const sessionId = session.id;
-  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed);
+  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed, {
+    workspaceId: workspace.id,
+    attachments: [],
+  });
   const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
@@ -130,7 +148,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
         agent_id: agent.id,
         session_id: sessionId,
         model_provider: agent.config.model.provider,
-        model_name: agent.config.model.name,
+        model_name: modelName,
         source: "prompt",
       }),
       captureServerEvent("session_message_sent", user.id, {
@@ -140,7 +158,7 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
         session_id: sessionId,
         message_id: messageId,
         model_provider: agent.config.model.provider,
-        model_name: agent.config.model.name,
+        model_name: modelName,
         is_initial_message: true,
         message_length: trimmed.length,
       }),
@@ -156,10 +174,22 @@ export async function createAgentSessionFromPrompt(agentId: string, content: str
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-export async function submitAgentSessionMessage(sessionId: string, content: string) {
+export type SubmitAttachmentInput = {
+  blobPathname: string;
+  blobUrl: string;
+  mediaType: string;
+  filename: string;
+  sizeBytes: number;
+};
+
+export async function submitAgentSessionMessage(
+  sessionId: string,
+  content: string,
+  attachments: SubmitAttachmentInput[] = [],
+) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();
-  if (!trimmed) {
+  if (!trimmed && attachments.length === 0) {
     return { ok: false, error: "Message is required." } as const;
   }
 
@@ -196,6 +226,35 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
     return { ok: false, error: "Session not found." } as const;
   }
 
+  // Re-validate attachments server-side: the client checks are advisory only, so the
+  // limit, the MIME/size envelope, the model capability and the blob-path scoping are all
+  // re-enforced here against the session's actual model and the caller's workspace.
+  if (attachments.length > ATTACHMENT_MAX_PER_MESSAGE) {
+    return { ok: false, error: "Too many attachments." } as const;
+  }
+  const capability = modelSupportsAttachments(session.modelName);
+  for (const att of attachments) {
+    const result = validateAttachmentCandidate({
+      mediaType: att.mediaType,
+      sizeBytes: att.sizeBytes,
+      filename: att.filename,
+    });
+    if (!result.ok) {
+      return { ok: false, error: "Unsupported or oversized attachment." } as const;
+    }
+    // Image/PDF require the session's model to support them; text is always allowed
+    // (it is inlined as text, not sent as an image/file part).
+    if (result.kind === "image" && !capability.images) {
+      return { ok: false, error: "This model can't read images." } as const;
+    }
+    if (result.kind === "pdf" && !capability.pdf) {
+      return { ok: false, error: "This model can't read PDFs." } as const;
+    }
+    if (!att.blobPathname.startsWith(`workspace/${workspace.id}/`)) {
+      return { ok: false, error: "Attachment outside workspace scope." } as const;
+    }
+  }
+
   // A freeform reply while an ask_user_question is pending supersedes it: the user chose to
   // answer in prose instead. Cancel the pending row so the backstop can't later revive the
   // session, and do NOT trigger a question resume — the new message run continues the turn (the
@@ -216,7 +275,10 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
       ),
     );
 
-  const { message } = await insertUserMessage(sessionId, trimmed);
+  const { message } = await insertUserMessage(sessionId, trimmed, {
+    workspaceId: workspace.id,
+    attachments,
+  });
   const messageId = message.id;
 
   // Analytics is a network flush (PostHog) that previously blocked this action's return
@@ -236,6 +298,115 @@ export async function submitAgentSessionMessage(sessionId: string, content: stri
         model_name: session.modelName,
         is_initial_message: false,
         message_length: trimmed.length,
+      }),
+    ]),
+  );
+
+  return { ok: true, messageId } as const;
+}
+
+// Switch the model a session runs with, on the fly. This is the session's own model override
+// (stored on agentSessions.modelName) — it is sticky for the session and applies to every
+// following turn until changed again. It does NOT touch the agent's saved default model. The
+// runner reads agentSessions.modelName as the model override on its next turn, so this takes
+// effect on the next message and never interrupts an in-flight run.
+export async function setAgentSessionModel(sessionId: string, modelId: string) {
+  const { user, workspace } = await currentWorkspace();
+  if (!getAgentModelDefinition(modelId)) {
+    return { ok: false, error: "Unknown model." } as const;
+  }
+
+  const db = getDb();
+  const updated = await db
+    .update(agentSessions)
+    .set({
+      modelProvider: "vercel-ai-gateway",
+      modelName: modelId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .returning({ id: agentSessions.id });
+
+  if (updated.length === 0) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+
+  return { ok: true } as const;
+}
+
+export async function continueInterruptedSession(sessionId: string) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+  const [hasBalance, sessionRows] = await Promise.all([
+    hasPositiveWorkspaceBalance({ db, workspaceId: workspace.id }),
+    db
+      .select({
+        id: agentSessions.id,
+        agentId: agentSessions.agentId,
+        status: agentSessions.status,
+        runLeaseId: agentSessions.runLeaseId,
+        modelProvider: agentSessions.modelProvider,
+        modelName: agentSessions.modelName,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.workspaceId, workspace.id),
+          eq(agentSessions.userId, user.id),
+          isNull(agentSessions.archivedAt),
+        ),
+      )
+      .limit(1),
+  ]);
+
+  if (!hasBalance) {
+    return { ok: false, error: "Add workspace credits to continue this session." } as const;
+  }
+  const session = sessionRows[0];
+  if (!session) {
+    return { ok: false, error: "Session not found." } as const;
+  }
+  if (session.status !== "interrupted") {
+    return { ok: false, error: "This session is not interrupted." } as const;
+  }
+  if (session.runLeaseId) {
+    return { ok: false, error: "This session is still running. Try again shortly." } as const;
+  }
+
+  const { message } = await insertUserMessage(sessionId, "Continue", {
+    workspaceId: workspace.id,
+    attachments: [],
+    modelContent: [
+      "Continue from the interrupted turn.",
+      "The prior runner process was stopped while this session was active.",
+      "Inspect the current workspace and sandbox state before deciding what to do next.",
+      "Do not repeat completed work or duplicate side effects if the interrupted tool already made progress.",
+    ].join(" "),
+  });
+  const messageId = message.id;
+
+  after(() =>
+    Promise.all([
+      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
+      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      captureServerEvent("session_message_sent", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: session.agentId,
+        session_id: sessionId,
+        message_id: messageId,
+        model_provider: session.modelProvider,
+        model_name: session.modelName,
+        is_initial_message: false,
+        message_length: "Continue".length,
       }),
     ]),
   );
@@ -685,9 +856,13 @@ async function insertAgentSession(input: {
   title: string;
   userId: string;
   workspaceId: string;
+  // Per-session model override. Defaults to the agent's configured model when omitted.
+  // The agent's saved default (agent.config.model.name) is never changed by this.
+  modelName?: string;
 }) {
   const db = getDb();
   const sessionId = newAgentSessionId();
+  const modelName = input.modelName ?? input.agent.config.model.name;
 
   // Return the canonical session row and status-event row so callers can synthesize the
   // session detail payload in-memory (see buildCreatedSessionDetail) instead of issuing a
@@ -702,7 +877,7 @@ async function insertAgentSession(input: {
         agentId: input.agent.id,
         title: input.title,
         modelProvider: input.agent.config.model.provider,
-        modelName: input.agent.config.model.name,
+        modelName,
       })
       .returning(),
     db
@@ -730,29 +905,67 @@ async function insertAgentSession(input: {
   return { session, statusEvent };
 }
 
-async function insertUserMessage(sessionId: string, content: string) {
+async function insertUserMessage(
+  sessionId: string,
+  content: string,
+  options: { workspaceId: string; attachments: SubmitAttachmentInput[]; modelContent?: string },
+) {
   const db = getDb();
   const messageId = newAgentSessionMessageId();
   const payload = { messageId, role: "user", content, status: "completed" };
 
-  const [messageRows, eventRows] = await db.batch([
-    db
-      .insert(agentSessionMessages)
-      .values({
-        id: messageId,
-        sessionId,
-        role: "user",
-        status: "completed",
-        content,
-        modelMessage: { role: "user", content },
-        completedAt: new Date(),
-      })
-      .returning(),
-    db
-      .insert(agentSessionEvents)
-      .values({ sessionId, messageId, type: "message.created", payload })
-      .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt }),
-  ]);
+  // The model message stays TEXT-ONLY — attachment bytes never touch Postgres. The
+  // attachment rows here only persist metadata + the private-blob pointers; the runner
+  // hydrates the bytes from Blob at run time. `modelContent` lets a caller send the model a
+  // richer prompt than the user-visible `content` (e.g. the interrupted-session continuation).
+  const modelContent = options.modelContent ?? content;
+  const attachmentRows = options.attachments.map((att) => {
+    const v = validateAttachmentCandidate({
+      mediaType: att.mediaType,
+      sizeBytes: att.sizeBytes,
+      filename: att.filename,
+    });
+    return {
+      id: newAgentSessionMessageAttachmentId(),
+      messageId,
+      sessionId,
+      workspaceId: options.workspaceId,
+      kind: v.ok ? v.kind : ("image" as const),
+      mediaType: att.mediaType,
+      filename: att.filename,
+      sizeBytes: att.sizeBytes,
+      blobPathname: att.blobPathname,
+      blobUrl: att.blobUrl,
+    };
+  });
+
+  const messageInsert = db
+    .insert(agentSessionMessages)
+    .values({
+      id: messageId,
+      sessionId,
+      role: "user",
+      status: "completed",
+      content,
+      modelMessage: { role: "user", content: modelContent },
+      completedAt: new Date(),
+    })
+    .returning();
+  const eventInsert = db
+    .insert(agentSessionEvents)
+    .values({ sessionId, messageId, type: "message.created", payload })
+    .returning({ id: agentSessionEvents.id, createdAt: agentSessionEvents.createdAt });
+
+  // db.batch is variadic-tuple typed, so a conditionally-pushed op fights the result-tuple
+  // inference. Branch into two explicit batch literals instead of casting.
+  const [messageRows, eventRows] =
+    attachmentRows.length > 0
+      ? await db.batch([
+          messageInsert,
+          eventInsert,
+          db.insert(agentSessionMessageAttachments).values(attachmentRows).returning(),
+        ])
+      : await db.batch([messageInsert, eventInsert]);
 
   const message = messageRows[0];
   const eventRow = eventRows[0];

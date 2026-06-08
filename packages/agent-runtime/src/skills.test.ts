@@ -239,9 +239,9 @@ describe("external skills", () => {
 describe("resolveAgentRuntimeConfig skills section", () => {
   test("advertises enabled skills and exposes update_agent_file", () => {
     const resolved = resolveAgentRuntimeConfig({ agent: baseConfig() });
-    expect(resolved.systemPrompt).toContain("Skills available this session");
+    expect(resolved.systemPrompt).toContain("## Skills");
     expect(resolved.systemPrompt).toContain(`skills/${AGENT_SELF_EDIT_SKILL_ID}/SKILL.md`);
-    expect(resolved.systemPrompt).toContain("read them with read_skill");
+    expect(resolved.systemPrompt).toContain("read its SKILL.md first with read_skill");
     expect(resolved.tools).toContain("update_agent_file");
     expect(resolved.tools).toContain("read_skill");
   });

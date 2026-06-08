@@ -12,11 +12,19 @@ export type PersistedModelMessage = Record<string, unknown>;
 type AssistantContentPart = Extract<AssistantModelMessage["content"], unknown[]>[number];
 type ReasoningReplayPart = Extract<AssistantContentPart, { type: "reasoning" }>;
 
+export type ReplayAttachment = {
+  kind: "image" | "pdf" | "text";
+  mediaType: string;
+  filename: string;
+  base64: string; // hydrated by the loader (bytes downloaded from Blob)
+};
+
 export type StoredSessionMessageForModelReplay = {
   id?: string;
   role: string;
   content: string;
   modelMessage?: PersistedModelMessage | null;
+  attachments?: ReplayAttachment[];
 };
 
 export type AssistantReplayPart = ReasoningReplayPart | TextPart | ToolCallPart;
@@ -34,6 +42,31 @@ export function buildModelMessages(
     const message = storedMessages[index];
     if (!message) continue;
     const modelMessage = readStoredModelMessage(message);
+
+    if (message.role === "user" && message.attachments && message.attachments.length > 0) {
+      const parts: Array<Record<string, unknown>> = [];
+      if (message.content) parts.push({ type: "text", text: message.content });
+      for (const att of message.attachments) {
+        if (att.kind === "image") {
+          // modelMessageSchema (ai@6) accepts a raw base64 string for `image` (DataContent).
+          parts.push({ type: "image", image: att.base64, mediaType: att.mediaType });
+        } else if (att.kind === "text") {
+          // Text/code files are inlined as plain text (not base64) so every model can read
+          // them with no file/vision capability — the bytes are UTF-8 decoded here.
+          const text = Buffer.from(att.base64, "base64").toString("utf8");
+          parts.push({ type: "text", text: `\n\nAttached file "${att.filename}":\n\n${text}` });
+        } else {
+          parts.push({
+            type: "file",
+            data: att.base64,
+            mediaType: att.mediaType,
+            filename: att.filename,
+          });
+        }
+      }
+      messages.push(validateModelMessage({ role: "user", content: parts }, message.id));
+      continue;
+    }
 
     if (isAssistantMessageWithToolCalls(modelMessage)) {
       const toolMessagesByCallId = new Map<string, ToolModelMessage>();

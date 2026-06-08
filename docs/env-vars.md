@@ -40,6 +40,8 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Vercel web envs | Integration GitHub App OAuth client secret. |
 | `GITHUB_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign GitHub integration OAuth state. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel web envs | Base64-encoded 32-byte key used to encrypt workspace provider credentials stored in Neon. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Vercel, Render | Google OAuth client shared by the Gmail and Google Calendar integrations. Redirect URIs: `${NEXT_PUBLIC_APP_URL}/api/integrations/gmail/callback` and `.../api/integrations/google-calendar/callback`. The runner also needs these to refresh access tokens. |
+| `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
@@ -67,9 +69,15 @@ Set these in Vercel Production.
 | `GITHUB_INTEGRATION_APP_CLIENT_SECRET` | Yes | Integration app OAuth client secret. |
 | `GITHUB_INTEGRATION_STATE_SECRET` | Yes | Dedicated secret used to sign setup state. Generate a separate 32+ character value. |
 | `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Base64-encoded 32-byte key used to encrypt workspace provider and MCP credentials in Neon. Generate with `openssl rand -base64 32`. |
+| `GOOGLE_OAUTH_CLIENT_ID` | Google only | Google OAuth client id (Gmail + Calendar integrations). |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Google OAuth client secret. |
+| `GOOGLE_INTEGRATION_STATE_SECRET` | Google only | Dedicated secret used to sign Google OAuth setup state. Generate a separate 32+ character value. |
 | `MCP_OAUTH_STATE_SECRET` | MCP only | Dedicated secret used to sign MCP OAuth setup state. Generate a separate 32+ character value with `openssl rand -base64 32`. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Callback URL: `${NEXT_PUBLIC_APP_URL}/api/mcp/slack/callback`. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Stored only in env, not in Neon. |
+| `SLACK_SUPPORT_BOT_TOKEN` | Slack Connect only | `xoxb-…` bot token for OC's own support Slack app. The Inngest provisioning function runs on the web deployment, so this lives here (not the runner). Server-only, never `NEXT_PUBLIC`. Empty = feature disabled (no-ops to `failed`, onboarding never crashes). Distinct from `SLACK_MCP_*`. |
+| `SLACK_SUPPORT_TEAM_ID` | Slack Connect only | OC Slack workspace/team id (`T…`), denormalized for link building. |
+| `SLACK_SUPPORT_MEMBER_IDS` | Slack Connect only | Comma-separated `U…` ids of OC support members auto-invited to each channel. |
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |
@@ -110,6 +118,61 @@ Set these in Vercel Production.
 | `NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL` | No | Browser log level. |
 | `NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN` | No | Browser and fallback server error DSN. |
 
+## Slack support channel (Slack Connect)
+
+`SLACK_SUPPORT_*` power the post-onboarding Slack Connect channel (see the Vercel Web table
+above). They live in **Infisical `prod` + `/web`** (synced to Vercel `opencompany-web`
+Production — *not* `opencompany-dashboard`), because the Inngest provisioning function runs on
+the web deployment.
+
+Setup checklist:
+
+1. Create a Slack app for OC's own support workspace (api.slack.com/apps → From scratch).
+2. Bot Token Scopes: `groups:write` (create the private channel, invite members, stamp the
+   ownership purpose), `groups:read` (adopt this workspace's own channel on a `name_taken`
+   retry instead of duplicating), `chat:write` (intro message), `conversations.connect:write`
+   (the external customer invite).
+3. Install to the workspace → copy the Bot User OAuth Token (`xoxb-…`) → `SLACK_SUPPORT_BOT_TOKEN`.
+4. `SLACK_SUPPORT_TEAM_ID` = the host workspace team id (`T…`); derive via `auth.test`.
+5. `SLACK_SUPPORT_MEMBER_IDS` = comma-separated `U…` of the OC support people to auto-add to
+   every customer channel (private channels are only visible to their members).
+6. The host Slack workspace must be on a **paid plan** (Pro or a Pro trial). Slack Connect
+   shared channels are unavailable on Free — `conversations.inviteShared` errors `not_paid`.
+
+If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
+and the workspace-home card degrades to the booking fallback (onboarding never breaks).
+
+Channel naming: each customer channel is `<customer-slug>-<id8>-x-opencompany` (the
+`-x-opencompany` convention plus a short per-workspace suffix so two same-named customers
+practically never collide). Ownership is also stamped in the channel purpose
+(`opencompany-support:<workspaceId>`) and checked before adopting on a retry, so a channel is
+never hijacked across workspaces.
+
+Recovery: an hourly Inngest cron (`sweep-failed-slack-support-channels`) re-dispatches
+provisioning for workspaces stuck in `failed` or `pending` — so a transient failure, or a
+workspace onboarded *before* `SLACK_SUPPORT_*` was configured, self-heals on the next sweep
+(no manual backfill). It waits ~15 min before retrying a failure (so the provisioning function's
+own Inngest retries run first), gives up on failures older than 7 days, and drains oldest-first.
+
+### Testing & operations
+
+- **Delivery:** `conversations.inviteShared` returns no shareable `url`, so Slack delivers the
+  invite itself — by **email** to recipients without a Slack account, **in-app** (under "Slack
+  Connect" invitations) to those who have one. The card therefore says "check your email"; both
+  paths reach the customer. The invitee chooses which of *their* Slack orgs to file the shared
+  channel into.
+- **Visibility:** the channel is private — only its members see it. `SLACK_SUPPORT_MEMBER_IDS`
+  must list the OC support people, or no human (only the bot) will see the channels. Being a
+  workspace member is not enough.
+- **Testing a fresh onboarding:** a Google-Workspace **plus-alias** (`you+test@domain`) receives
+  mail but is **not** a Google account, so it can't complete Google SSO login. To re-test with a
+  real account, reset the user (full delete is blocked by an FK): `delete from
+  workspace_slack_channels where workspace_id=:ws; delete from onboarding_responses where
+  user_id=:u; delete from agents where workspace_id=:ws and path='agents/leo/leo.agent';` then
+  re-onboard.
+- **Sandbox:** don't test against the real customer-facing Slack in a way that spams colleagues —
+  use a Pro-trial workspace and set `SLACK_SUPPORT_MEMBER_IDS` to just yourself.
+
 ## Render Runner
 
 Set these in the Render `opencompany-runner` service.
@@ -131,10 +194,12 @@ Set these in the Render `opencompany-runner` service.
 | `OPENCOMPANY_E2B_TEMPLATE` | No | Optional custom E2B template. |
 | `AMP_API_KEY` | AMP only | Platform AMP credential used by the runner when agents enable the AMP coding tool. |
 | `OPENCOMPANY_AMP_E2B_TEMPLATE` | No | Optional AMP-specific E2B template; defaults to `amp`. |
-| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP bearer tokens for dynamic MCP tools. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel. |
+| `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Yes | Decrypts workspace MCP and Google (Gmail/Calendar) credentials. Validated at runner boot — the runner fails to start if it is missing or malformed. Must match Vercel. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google only | Used by the runner to refresh Gmail/Calendar access tokens against Google's token endpoint. Must match Vercel. |
 | `SLACK_MCP_CLIENT_ID` | MCP only | Slack hosted MCP OAuth client id. Must match Vercel. |
 | `SLACK_MCP_CLIENT_SECRET` | MCP only | Slack hosted MCP OAuth client secret. Must match Vercel. |
 | `RUNNER_E2B_IDLE_TIMEOUT_MS` | No | Sandbox idle timeout, defaults to `30000`. |
+| `RUNNER_TOOL_ARG_REPAIR_ENABLED` | No | Kill switch for the model-based deferred-tool argument repair fallback (Layer 3). Deterministic validation + coercion always run; this only gates the small-model repair. Defaults to `true`. |
 | `RUNNER_WORKER_CONCURRENCY` | No | Max parallel sessions per instance, defaults to `8` (prod 40). Bounded by the event loop + E2B sandbox quota + gateway rate limits, not CPU/RAM. |
 | `RUNNER_INSTANCE_ID` | No | Stable runner identity for hosted deployments. |
 | `GITHUB_APP_ID` | Yes | Enables runner Brain sync to GitHub. |

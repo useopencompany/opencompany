@@ -338,6 +338,120 @@ describe("buildModelMessages", () => {
   });
 });
 
+describe("buildModelMessages with attachments", () => {
+  const imageBase64 = Buffer.from("fake-png-bytes").toString("base64");
+  const pdfBase64 = Buffer.from("fake-pdf-bytes").toString("base64");
+
+  it("inlines an image attachment as a text part then an image part", () => {
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_image",
+        role: "user",
+        content: "What is in this screenshot?",
+        modelMessage: { role: "user", content: "What is in this screenshot?" },
+        attachments: [
+          {
+            kind: "image",
+            mediaType: "image/png",
+            filename: "screenshot.png",
+            base64: imageBase64,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is in this screenshot?" },
+          { type: "image", image: imageBase64, mediaType: "image/png" },
+        ],
+      },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
+  it("inlines a pdf attachment as a file part with the application/pdf media type", () => {
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_pdf",
+        role: "user",
+        content: "Summarize this document.",
+        modelMessage: { role: "user", content: "Summarize this document." },
+        attachments: [
+          {
+            kind: "pdf",
+            mediaType: "application/pdf",
+            filename: "report.pdf",
+            base64: pdfBase64,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Summarize this document." },
+          {
+            type: "file",
+            data: pdfBase64,
+            mediaType: "application/pdf",
+            filename: "report.pdf",
+          },
+        ],
+      },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
+  it("inlines a text attachment as a text part carrying the filename and decoded contents", () => {
+    const textBase64 = Buffer.from("hello world").toString("base64");
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_text",
+        role: "user",
+        content: "Review these notes.",
+        modelMessage: { role: "user", content: "Review these notes." },
+        attachments: [
+          {
+            kind: "text",
+            mediaType: "text/markdown",
+            filename: "notes.md",
+            base64: textBase64,
+          },
+        ],
+      },
+    ]);
+
+    expect(messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Review these notes." },
+          { type: "text", text: '\n\nAttached file "notes.md":\n\nhello world' },
+        ],
+      },
+    ]);
+    expect(messages.every((message) => modelMessageSchema.safeParse(message).success)).toBe(true);
+  });
+
+  it("keeps an attachment-free user message as plain text content", () => {
+    const messages = buildModelMessages([
+      {
+        id: "msg_user_plain",
+        role: "user",
+        content: "Just text.",
+        modelMessage: { role: "user", content: "Just text." },
+      },
+    ]);
+
+    expect(messages).toEqual([{ role: "user", content: "Just text." }]);
+  });
+});
+
 describe("buildAssistantModelMessage", () => {
   it("uses text content for text-only assistant messages", () => {
     expect(

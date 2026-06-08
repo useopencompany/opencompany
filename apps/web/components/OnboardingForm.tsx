@@ -4,6 +4,7 @@ import { captureEvent } from "@opencompany/analytics/client";
 import { ArrowLeft, ArrowRight, ArrowUpRight, Check } from "lucide-react";
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { INTRO_CALL_CAL_LINK, INTRO_CALL_URL } from "@/lib/booking";
 import { completeOnboarding, type OnboardingActionState } from "@/lib/onboarding/actions";
 import {
   agentExperienceOptions,
@@ -25,8 +26,8 @@ const initialState: OnboardingActionState = {
   },
 };
 
-const onboardingCallCalLink = "team/opencompany/intro-call";
-const onboardingCallUrl = `https://cal.com/${onboardingCallCalLink}?overlayCalendar=true`;
+const onboardingCallCalLink = INTRO_CALL_CAL_LINK;
+const onboardingCallUrl = INTRO_CALL_URL;
 // embed.js is served from app.cal.com; the booking pages it frames live on cal.com.
 const calEmbedOrigin = "https://cal.com";
 const calEmbedScriptSrc = "https://app.cal.com/embed/embed.js";

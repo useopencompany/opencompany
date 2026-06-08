@@ -3,6 +3,14 @@ import { parseGitHubCliArgs, resolveWorkspacePath, shellQuote } from "@opencompa
 import { Sandbox } from "e2b";
 
 export type SandboxHandle = Awaited<ReturnType<typeof Sandbox.create>>;
+export type SandboxLatencyObservation = {
+  operation: "create" | "connect";
+  outcome: "success" | "not_found" | "error";
+  latencyMs: number;
+  sandboxId?: string;
+  requestedSandboxId?: string;
+  errorName?: string;
+};
 
 const ACTIVE_SANDBOX_TIMEOUT_MS = 60 * 60 * 1000;
 const SANDBOX_REQUEST_TIMEOUT_MS = 30_000;
@@ -68,17 +76,43 @@ export async function createOrConnectSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
   idleTimeoutMs: number;
+  onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   if (input.sandboxId) {
+    const startedAt = performance.now();
     try {
-      return await Sandbox.connect(input.sandboxId, {
+      const sandbox = await Sandbox.connect(input.sandboxId, {
         timeoutMs: ACTIVE_SANDBOX_TIMEOUT_MS,
         requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
       });
+      emitSandboxLatency(input.onLatency, {
+        operation: "connect",
+        outcome: "success",
+        latencyMs: elapsedMs(startedAt),
+        sandboxId: sandbox.sandboxId,
+        requestedSandboxId: input.sandboxId,
+      });
+      return sandbox;
     } catch (error) {
       if (!isSandboxNotFound(error)) {
+        const name = errorName(error);
+        emitSandboxLatency(input.onLatency, {
+          operation: "connect",
+          outcome: "error",
+          latencyMs: elapsedMs(startedAt),
+          requestedSandboxId: input.sandboxId,
+          ...(name ? { errorName: name } : {}),
+        });
         throw error;
       }
+      const name = errorName(error);
+      emitSandboxLatency(input.onLatency, {
+        operation: "connect",
+        outcome: "not_found",
+        latencyMs: elapsedMs(startedAt),
+        requestedSandboxId: input.sandboxId,
+        ...(name ? { errorName: name } : {}),
+      });
     }
   }
 
@@ -89,6 +123,7 @@ async function createSandbox(input: {
   template?: string | undefined;
   envs: Record<string, string>;
   idleTimeoutMs: number;
+  onLatency?: (observation: SandboxLatencyObservation) => void | Promise<void>;
 }) {
   const options = {
     envs: input.envs,
@@ -99,13 +134,47 @@ async function createSandbox(input: {
     },
   };
 
-  const sandbox = input.template
-    ? await Sandbox.create(input.template, options)
-    : await Sandbox.create(options);
+  const startedAt = performance.now();
+  let sandbox: SandboxHandle;
+  try {
+    sandbox = input.template
+      ? await Sandbox.create(input.template, options)
+      : await Sandbox.create(options);
+    emitSandboxLatency(input.onLatency, {
+      operation: "create",
+      outcome: "success",
+      latencyMs: elapsedMs(startedAt),
+      sandboxId: sandbox.sandboxId,
+    });
+  } catch (error) {
+    const name = errorName(error);
+    emitSandboxLatency(input.onLatency, {
+      operation: "create",
+      outcome: "error",
+      latencyMs: elapsedMs(startedAt),
+      ...(name ? { errorName: name } : {}),
+    });
+    throw error;
+  }
   await sandbox.setTimeout(ACTIVE_SANDBOX_TIMEOUT_MS, {
     requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
   });
   return sandbox;
+}
+
+function emitSandboxLatency(
+  onLatency: ((observation: SandboxLatencyObservation) => void | Promise<void>) | undefined,
+  observation: SandboxLatencyObservation,
+) {
+  try {
+    void Promise.resolve(onLatency?.(observation)).catch(() => {});
+  } catch {
+    // Analytics must not affect sandbox provisioning.
+  }
+}
+
+function elapsedMs(startedAt: number) {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
 export async function armSandboxIdleTimeout(sandbox: SandboxHandle, idleTimeoutMs: number) {
@@ -179,6 +248,43 @@ export async function prepareWorkspace(input: {
     command: `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
+  // Wire git to GitHub's credential helper so plain `git push` / `git clone https://github.com/...`
+  // work whenever a GH token is present in the command env (the coding tools inject one) instead of
+  // failing with "could not read Username for github.com". Equivalent to `gh auth setup-git` but set
+  // directly so it does not require gh to be authenticated at prepare time. Written to the `user`
+  // global gitconfig — the same user the shell tool runs as.
+  await runSandboxPreparationCommand({
+    sandbox: input.sandbox,
+    stage: "configure_git_credential_helper",
+    commandName: "git_config_credential_helper",
+    command: [
+      `git config --global --replace-all ${shellQuote("credential.https://github.com.helper")} ${shellQuote("")}`,
+      `git config --global --add ${shellQuote("credential.https://github.com.helper")} ${shellQuote("!gh auth git-credential")}`,
+    ].join(" && "),
+    options: { user: SANDBOX_USER, timeoutMs: 30_000 },
+  });
+  await ensureSandboxDevTooling(input.sandbox);
+}
+
+// Best-effort install of the CLIs coding sessions reach for but that the base image may lack:
+// `rg` (ripgrep) for repo search and `bun` for running tests/builds. Presence-checked, so it is a
+// fast no-op once these are baked into the template — which is the proper fix; this is the safety
+// net until then. Never fatal: a failed install (e.g. a non-apt base image) must not block session
+// readiness, so the shell `|| true` guards swallow install errors and any sandbox-level error is
+// caught here. bun installs to /usr/local so it lands on PATH for the shell tool without sourcing a
+// profile.
+async function ensureSandboxDevTooling(sandbox: SandboxHandle) {
+  try {
+    await sandbox.commands.run(
+      [
+        "command -v rg >/dev/null 2>&1 || (apt-get update -y && apt-get install -y ripgrep) || true",
+        "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash || true",
+      ].join("\n"),
+      { user: SANDBOX_ROOT_USER, timeoutMs: 180_000 },
+    );
+  } catch {
+    // Swallow: dev tooling is a convenience, not a precondition for the session to run.
+  }
 }
 
 async function runSandboxPreparationCommand(input: {
@@ -477,7 +583,7 @@ async function runCommandWithExitResult(
   }
 }
 
-function commandExitResult(error: unknown) {
+export function commandExitResult(error: unknown) {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   if (record.name !== "CommandExitError") return null;
@@ -488,6 +594,15 @@ function commandExitResult(error: unknown) {
     stderr: typeof record.stderr === "string" ? record.stderr : "",
     exitCode: record.exitCode,
   };
+}
+
+// E2B raises a `TimeoutError` when a command exceeds its `timeoutMs` (the process is killed
+// server-side). Matched by name to stay decoupled from the SDK's class identity, mirroring
+// `commandExitResult`. Lets long tool calls capture partial state instead of bubbling a bare throw.
+export function isCommandTimeoutError(error: unknown) {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: unknown }).name === "TimeoutError",
+  );
 }
 
 function gitDiffCommand(workRoot: string) {
@@ -560,6 +675,23 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
   }
 
   throw new Error(allowedRootsMessage);
+}
+
+/**
+ * If a tool path resolves inside the Brain root, return its Brain-relative path
+ * (without the `brain/` prefix; `""` for the Brain root). Returns null when the
+ * path is valid but outside the Brain. Throws the same error as
+ * resolveSandboxToolPath when the path is not in an allowed root at all.
+ */
+export function resolveSandboxBrainRelativePath(
+  workdir: string,
+  inputPath?: string,
+): string | null {
+  const resolved = resolveSandboxToolPath(workdir, inputPath);
+  const relative = relativePath(workdir, resolved);
+  if (relative === "brain") return "";
+  if (relative.startsWith("brain/")) return relative.slice("brain/".length);
+  return null;
 }
 
 export function resolveSandboxSkillPath(workdir: string, skillId: string, inputPath = "SKILL.md") {

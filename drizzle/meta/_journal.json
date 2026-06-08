@@ -281,6 +281,34 @@
       "when": 1780596846247,
       "tag": "0039_fuzzy_maelstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1780650465613,
+      "tag": "0040_clumsy_corsair",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1780744250560,
+      "tag": "0041_blue_shinobi_shaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1780923424409,
+      "tag": "0042_grey_epoch",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1780928088083,
+      "tag": "0043_keen_proteus",
+      "breakpoints": true
     }
   ]
 }
