@@ -1,13 +1,13 @@
 name: Preview Reaper
 
-# Hourly reconciler for per-PR preview stacks (issue #351 §7, Layer 3). Destroys any
+# Reconciler for per-PR preview stacks, runs every 6 hours (issue #351 §7, Layer 3). Destroys any
 # preview resource whose PR is closed, lost the `preview` label, or exceeded its TTL —
 # the backstop that guarantees ephemeral infra never leaks even if a `closed` event was
 # missed or a provision failed halfway. Tag-driven and idempotent; never touches prod.
 
 on:
   schedule:
-    - cron: "17 * * * *" # hourly, offset to avoid top-of-hour contention
+    - cron: "17 */6 * * *" # every 6 hours, offset to avoid top-of-hour contention
   workflow_dispatch:
     inputs:
       dry_run:

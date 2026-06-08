@@ -8,7 +8,7 @@ name: PR Preview
 # per-PR dynamic values (branch DB URL, runner/electric/streams URLs, tokens) are minted
 # by scripts/preview-provision.mjs and injected here.
 #
-# The companion hourly reconciler is .github/workflows/preview-reaper.yml.
+# The companion reconciler (every 6h) is .github/workflows/preview-reaper.yml.
 
 on:
   pull_request:
@@ -192,7 +192,7 @@ jobs:
               "",
               ok ? `<details><summary>Stack</summary>\n\n- Runner: ${process.env.RUNNER_URL}\n- Electric: ${process.env.ELECTRIC_URL}\n- Commit: \`${sha}\`\n\n</details>` : "",
               "",
-              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams). The DB is **reset from the sanitized seed on every push**. Auto-expires via TTL + the hourly reaper.",
+              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams). The DB is **reset from the sanitized seed on every push**. Auto-expires via TTL + the reaper (every 6h).",
             ].join("\n");
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER),

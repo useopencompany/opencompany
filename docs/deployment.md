@@ -287,7 +287,7 @@ labeled PR ──► .github/workflows/pr-preview.yml
                  ├─ Render streams  oc-preview-pr-<n>-streams  (in-memory @durable-streams/server)
                  └─ Vercel web deploy ──► alias pr-<n>.<PREVIEW_BASE_DOMAIN>, per-PR env injected
 closed / unlabeled ──► scripts/preview-teardown.mjs  (delete all + Neon branch → drops the replication slot)
-hourly ──► .github/workflows/preview-reaper.yml  (desired = labeled-open PRs; destroys orphans/over-TTL)
+every 6h ─► .github/workflows/preview-reaper.yml  (desired = labeled-open PRs; destroys orphans/over-TTL)
 ```
 
 - **Gating:** label-gated on `preview` (cost control). No label, no stack.
