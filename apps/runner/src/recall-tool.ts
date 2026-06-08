@@ -1,7 +1,13 @@
 import { recallSessions } from "@opencompany/db/recall";
 import { agentSessions } from "@opencompany/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "./db";
+
+// Recall runs inside a live agent turn, so it must never hang it. The FTS/trigram search is
+// index-backed (see recall.ts) but the neighbor-window scan is bounded only by the user's chunk
+// count, so we cap each search with a transaction-local statement_timeout. SET LOCAL resets when the
+// transaction ends, so it never leaks to other queries on the pooled connection.
+const RECALL_STATEMENT_TIMEOUT_MS = 5000;
 
 // The `recall` tool runs in the runner process (kind: "internal"), not the sandbox: it queries
 // Postgres directly (the sandbox has no DB access) and needs no AI Gateway key — v1 recall is pure
@@ -39,13 +45,28 @@ export async function runRecallTool(input: { sessionId: string; args: unknown })
     };
   }
 
-  const results = await recallSessions(db, {
-    agentId: session.agentId,
-    userId: session.userId,
-    excludeSessionId: input.sessionId,
-    query,
-    ...(limit !== undefined ? { limit } : {}),
-  });
+  let results: Awaited<ReturnType<typeof recallSessions>>;
+  try {
+    results = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL statement_timeout = ${RECALL_STATEMENT_TIMEOUT_MS}`);
+      return recallSessions(tx, {
+        agentId: session.agentId,
+        userId: session.userId,
+        excludeSessionId: input.sessionId,
+        query,
+        ...(limit !== undefined ? { limit } : {}),
+      });
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: {
+        message: `Recall search failed: ${error instanceof Error ? error.message : String(error)}`,
+        code: "recall_failed",
+        recoverable: true,
+      },
+    };
+  }
 
   return {
     ok: true,

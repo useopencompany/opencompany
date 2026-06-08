@@ -17,6 +17,15 @@ export type StoredFile = {
 // the resolved absolute root so the CLI controls `--root` once and tests point at a temp dir.
 
 export function resolveRoot(explicit: string | undefined, cwd: string = process.cwd()): string {
+  // A trusted caller (the runner) pins the root via MEMORY_ROOT. When set it is authoritative and a
+  // caller-supplied `--root` is ignored: the memory tool's argv is fully agent-controlled, so
+  // honoring `--root` would let the agent escape the memory tree (e.g. `--root ../../` or an
+  // absolute path) and read/write arbitrary files in the workspace. Direct CLI use and tests (no
+  // MEMORY_ROOT) keep the explicit `--root` / default behavior.
+  const pinned = process.env.MEMORY_ROOT?.trim();
+  if (pinned) {
+    return path.resolve(cwd, pinned);
+  }
   if (explicit && explicit.trim().length > 0) {
     return path.resolve(cwd, explicit);
   }

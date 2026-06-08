@@ -427,9 +427,13 @@ export async function runSandboxTool(input: {
       ...memoryArgv.map(shellQuote),
       "--report-usage",
     ].join(" ");
+    // Pin the memory root to the workspace's agent/memory tree. The CLI treats MEMORY_ROOT as
+    // authoritative and ignores any agent-supplied `--root` (see resolveRoot), so the agent cannot
+    // point the memory tool outside its tree even though it controls every argv token.
+    const memoryRoot = `${layout.workspaceRoot}/agent/memory`;
     const result = await runCommandWithExitResult(input.sandbox, command, {
       cwd: layout.workspaceRoot,
-      ...(input.envs ? { envs: input.envs } : {}),
+      envs: { ...input.envs, MEMORY_ROOT: memoryRoot },
       timeoutMs: 120_000,
       onStdout: async (data: string) => {
         await input.onOutput?.("stdout", redact(data));

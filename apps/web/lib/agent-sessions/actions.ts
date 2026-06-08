@@ -49,7 +49,7 @@ export async function createAgentSession(idOrPath: string) {
       redirectTo: "/settings?billing=insufficient",
     } as const;
   }
-  const agent = await loadAgentForSession(idOrPath, workspace.id);
+  const agent = await loadAgentForSession(idOrPath, workspace.id, user.id);
 
   if (!agent) {
     return { ok: false, error: "Agent not found." } as const;
@@ -107,7 +107,7 @@ export async function createAgentSessionFromPrompt(
     } as const;
   }
 
-  const agent = await loadAgentForSession(agentId, workspace.id);
+  const agent = await loadAgentForSession(agentId, workspace.id, user.id);
   if (!agent) {
     return { ok: false, error: "Agent not found." } as const;
   }
@@ -782,7 +782,7 @@ async function archiveSessionLocally(
   return txid;
 }
 
-async function loadAgentForSession(idOrPath: string, workspaceId: string) {
+async function loadAgentForSession(idOrPath: string, workspaceId: string, userId: string) {
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
   const [agent] = await db
@@ -796,7 +796,14 @@ async function loadAgentForSession(idOrPath: string, workspaceId: string) {
     )
     .limit(1);
 
-  return agent ?? null;
+  if (!agent) return null;
+
+  // Default agents are private to a single user (the personal agent). Workspace scoping alone is
+  // not enough here: a workspace peer who supplies another user's personal agent id must not be
+  // able to start a session against it. Shared (non-default) agents stay workspace-visible.
+  if (agent.isDefault && agent.userId !== userId) return null;
+
+  return agent;
 }
 
 async function insertAgentSession(input: {
