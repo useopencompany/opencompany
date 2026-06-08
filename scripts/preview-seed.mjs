@@ -22,7 +22,7 @@ const applySanitize = args.has("--apply-sanitize");
 const projectId = realEnv("NEON_PROJECT_ID");
 const parentBranch = realEnv("NEON_PARENT_BRANCH");
 const apiKey = realEnv("NEON_API_KEY");
-const seedBranch = realEnv("PREVIEW_SEED_BRANCH") || "preview-seed";
+const seedBranch = safeSeedBranch(realEnv("PREVIEW_SEED_BRANCH"));
 const databaseName = realEnv("NEON_DATABASE_NAME") || "neondb";
 const roleName = realEnv("NEON_ROLE_NAME");
 
@@ -30,6 +30,11 @@ if (!projectId) fail("NEON_PROJECT_ID is required (set it in .env.local or the e
 if (!parentBranch) {
   fail(
     "NEON_PARENT_BRANCH is required — the prod branch to fork the seed from (e.g. 'main' or 'production').",
+  );
+}
+if (seedBranch.toLowerCase() === parentBranch.toLowerCase()) {
+  fail(
+    `Refusing to use PREVIEW_SEED_BRANCH="${seedBranch}" because it matches NEON_PARENT_BRANCH. This would delete or reuse the parent branch during seed refresh.`,
   );
 }
 
@@ -134,6 +139,15 @@ function realEnv(name) {
   if (!value || value === "..." || value.includes("...") || value.startsWith("replace-"))
     return undefined;
   return value;
+}
+function safeSeedBranch(value) {
+  const branch = value?.trim() || "preview-seed";
+  if (!/^preview-seed(?:[-/_a-z0-9.]+)?$/i.test(branch)) {
+    fail(
+      `Unsafe PREVIEW_SEED_BRANCH "${branch}". Use a sanitized preview seed branch named preview-seed or preview-seed-*; never use a production branch as the seed.`,
+    );
+  }
+  return branch;
 }
 function log(message) {
   console.log(`[preview-seed] ${message}`);

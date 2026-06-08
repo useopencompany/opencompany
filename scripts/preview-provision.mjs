@@ -41,7 +41,7 @@ const reset = isTrue(process.env.PREVIEW_RESET);
 
 const neonApiKey = requireEnv("NEON_API_KEY");
 const neonProjectId = requireEnv("NEON_PROJECT_ID");
-const seedBranch = process.env.PREVIEW_SEED_BRANCH?.trim() || "preview-seed";
+const seedBranch = safeSeedBranch(process.env.PREVIEW_SEED_BRANCH);
 const ttlHours = Number(process.env.NEON_BRANCH_TTL_HOURS ?? "24");
 
 const renderApiKey = requireEnv("RENDER_API_KEY");
@@ -292,4 +292,14 @@ function requireEnv(name) {
     process.exit(1);
   }
   return value;
+}
+function safeSeedBranch(value) {
+  const branch = value?.trim() || "preview-seed";
+  if (!/^preview-seed(?:[-/_a-z0-9.]+)?$/i.test(branch)) {
+    console.error(
+      `Unsafe PREVIEW_SEED_BRANCH "${branch}". Use a sanitized preview seed branch named preview-seed or preview-seed-*; never fork previews from production.`,
+    );
+    process.exit(1);
+  }
+  return branch;
 }

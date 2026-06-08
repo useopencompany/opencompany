@@ -278,7 +278,7 @@ This implements issue #351. Design notes live in the issue and the workspace pla
 
 GitHub Actions is the single orchestrator (mirrors `release-production.yml`):
 
-```
+```text
 labeled PR ──► .github/workflows/pr-preview.yml
                  ├─ await-ci: wait for the CI quality check (lint/typecheck/build/test) to pass — else skip
                  │  scripts/preview-provision.mjs
@@ -315,11 +315,13 @@ computes — already done for this project).
 
 1. **`preview-seed` Neon branch.** Fork from prod and sanitize (remove PII/secrets) with
    the bundled tooling:
+
    ```bash
    NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed                 # create the branch
    psql "$SEED_DIRECT_URL" -f scripts/sql/preview-seed-sanitize.sql      # scrub PII/secrets (REQUIRED)
    # or: NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed -- --apply-sanitize
    ```
+
    Re-fork + re-sanitize on a cadence (`--refresh`) so the seed stays realistic. Electric
    uses the branch owner role by default; `scripts/sql/preview-seed-electric-role.sql` is
    an optional least-privilege hardening to apply + test later.

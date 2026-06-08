@@ -90,11 +90,18 @@ async function teardownVercelAlias() {
     const token = process.env.VERCEL_TOKEN?.trim();
     const args = ["vercel", "alias", "rm", names.alias, "--yes"];
     if (token) args.push("--token", token);
-    execFileSync("bunx", args, { stdio: "inherit" });
+    const output = execFileSync("bunx", args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (output.trim()) console.log(output.trim());
     log(`Removed Vercel alias ${names.alias}.`);
   } catch (error) {
-    // A missing alias exits non-zero; treat as already-removed rather than a failure.
-    log(`Vercel alias ${names.alias} not removed (likely already gone): ${error.message}`);
+    if (isMissingVercelAliasError(error)) {
+      log(`Vercel alias ${names.alias} not found (already gone).`);
+      return;
+    }
+    failures.push(`Vercel alias ${names.alias}: ${error.message}`);
   }
 }
 
@@ -136,6 +143,15 @@ function parseManifest(value) {
     log("PREVIEW_MANIFEST is not valid JSON; falling back to derived names.");
     return null;
   }
+}
+function isMissingVercelAliasError(error) {
+  const text = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`.toLowerCase();
+  return (
+    text.includes("not found") ||
+    text.includes("could not find") ||
+    text.includes("does not exist") ||
+    text.includes("doesn't exist")
+  );
 }
 function log(message) {
   console.log(`[preview-teardown] ${message}`);

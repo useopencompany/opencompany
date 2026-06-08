@@ -104,6 +104,21 @@ describe("assertPreviewIdentity — preview runner", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
+  it("uses NEON_API_URL from the injected env", async () => {
+    const fetchImpl = neonApi({ "ep-preview-endpoint-123456": "br-preview-pr-42" });
+    await expect(
+      assertPreviewIdentity({
+        env: { ...baseEnv, NEON_API_URL: "https://neon.example.test/api/v2" },
+        databaseUrl: url(PREVIEW_HOST),
+        fetchImpl,
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://neon.example.test/api/v2/projects/proj-1/endpoints/ep-preview-endpoint-123456",
+      expect.any(Object),
+    );
+  });
+
   it("fails closed when the endpoint belongs to a DIFFERENT branch (e.g. prod DB)", async () => {
     // The catastrophic case: a preview runner accidentally pointed at the prod endpoint.
     const fetchImpl = neonApi({ "ep-prod-endpoint-000000": "br-prod-main" });

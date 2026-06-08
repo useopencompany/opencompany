@@ -18,7 +18,7 @@ const dryRun = process.argv.includes("--dry-run") || isTrue(process.env.PREVIEW_
 const repo = requireEnv("GITHUB_REPOSITORY");
 const githubToken = requireEnv("GITHUB_TOKEN");
 const previewLabel = process.env.PREVIEW_LABEL?.trim() || "preview";
-const maxAgeHours = Number(process.env.PREVIEW_MAX_AGE_HOURS ?? "24");
+const maxAgeHours = nonNegativeNumberEnv("PREVIEW_MAX_AGE_HOURS", "24");
 
 const renderApiKey = process.env.RENDER_API_KEY?.trim();
 const neonApiKey = process.env.NEON_API_KEY?.trim();
@@ -163,6 +163,15 @@ function requireEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) {
     console.error(`${name} is required.`);
+    process.exit(1);
+  }
+  return value;
+}
+function nonNegativeNumberEnv(name, fallback) {
+  const raw = process.env[name]?.trim() || fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    console.error(`${name} must be a non-negative number; got "${raw}".`);
     process.exit(1);
   }
   return value;

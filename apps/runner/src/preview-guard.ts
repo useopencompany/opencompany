@@ -16,8 +16,6 @@ import { resolveRunnerDatabaseUrl } from "./db";
 // Either way, a misconfiguration fails closed (refuses to boot) instead of polling the
 // wrong database.
 
-const NEON_API_BASE = process.env.NEON_API_URL?.trim() || "https://console.neon.tech/api/v2";
-
 export class PreviewIdentityError extends Error {
   constructor(message: string) {
     super(message);
@@ -117,6 +115,7 @@ export async function assertPreviewIdentity(
     apiKey,
     projectId,
     endpointId,
+    apiBase: neonApiBase(env),
   });
 
   if (branchId !== identity.neonBranchId) {
@@ -131,8 +130,9 @@ async function fetchEndpointBranchId(args: {
   apiKey: string;
   projectId: string;
   endpointId: string;
+  apiBase: string;
 }): Promise<string | undefined> {
-  const url = `${NEON_API_BASE}/projects/${encodeURIComponent(args.projectId)}/endpoints/${encodeURIComponent(args.endpointId)}`;
+  const url = `${args.apiBase}/projects/${encodeURIComponent(args.projectId)}/endpoints/${encodeURIComponent(args.endpointId)}`;
   let response: Response;
   try {
     response = await args.fetchImpl(url, {
@@ -162,4 +162,8 @@ function isTrue(value: string | undefined): boolean {
 function trimmed(value: string | undefined): string | undefined {
   const v = value?.trim();
   return v ? v : undefined;
+}
+
+function neonApiBase(env: NodeJS.ProcessEnv): string {
+  return env.NEON_API_URL?.trim() || "https://console.neon.tech/api/v2";
 }
