@@ -255,4 +255,17 @@ describe("createOpencodeStreamAccumulator", () => {
     stream.finish();
     expect(stream.summary({ exitCode: 0, stdout: "", stderr: "" }).result).toBe("ok");
   });
+
+  it("marks a timed-out run and surfaces the resumable session id + partial result", () => {
+    const stream = createOpencodeStreamAccumulator();
+    stream.push(`${JSON.stringify({ type: "session", sessionID: "ses_abc" })}\n`);
+    stream.push(`${JSON.stringify({ type: "text", text: "partial work so far" })}\n`);
+    stream.finish();
+    // timedOut wins over the exit code so a killed process is never reported as success.
+    const summary = stream.summary({ exitCode: null, stdout: "", stderr: "", timedOut: true });
+    expect(summary.status).toBe("timeout");
+    expect(summary.sessionId).toBe("ses_abc");
+    expect(summary.result).toBe("partial work so far");
+    expect(summary.error).toMatch(/resume/i);
+  });
 });

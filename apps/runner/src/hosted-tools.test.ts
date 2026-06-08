@@ -1969,6 +1969,7 @@ function env(overrides: Partial<RunnerEnv> = {}): RunnerEnv {
     e2bTemplate: undefined,
     ampE2bTemplate: undefined,
     e2bSandboxIdleTimeoutMs: 30_000,
+    opencodeTimeoutMs: 1_200_000,
     toolArgRepairEnabled: false,
     workerConcurrency: 2,
     port: 3040,
