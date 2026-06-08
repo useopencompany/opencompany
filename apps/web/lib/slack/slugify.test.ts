@@ -18,12 +18,12 @@ describe("workspaceChannelSlug", () => {
     expect(workspaceChannelSlug("  --hi--  ")).toBe("hi");
   });
 
-  it("caps length at 66 chars and never ends in a hyphen after truncation", () => {
-    expect(workspaceChannelSlug("a".repeat(100)).length).toBe(66);
+  it("caps length at 59 chars and never ends in a hyphen after truncation", () => {
+    expect(workspaceChannelSlug("a".repeat(100)).length).toBe(59);
     // A separator landing exactly on the cut boundary must not leave a trailing hyphen.
-    const sliced = workspaceChannelSlug(`${"a".repeat(65)} rest`);
+    const sliced = workspaceChannelSlug(`${"a".repeat(58)} rest`);
     expect(sliced.endsWith("-")).toBe(false);
-    expect(sliced).toBe("a".repeat(65));
+    expect(sliced).toBe("a".repeat(58));
   });
 
   it("returns empty string for non-latin-only input", () => {
@@ -37,8 +37,12 @@ describe("channelName", () => {
     expect(channelName("acme-corp")).toBe("acme-corp-x-opencompany");
   });
 
-  it("stays within Slack's 80-char limit for a max-length slug", () => {
-    const slug = workspaceChannelSlug("a".repeat(100)); // capped at 66
-    expect(channelName(slug).length).toBeLessThanOrEqual(80);
+  it("inserts the per-workspace suffix: <slug>-<suffix>-x-opencompany", () => {
+    expect(channelName("acme-corp", "a1b2c3")).toBe("acme-corp-a1b2c3-x-opencompany");
+  });
+
+  it("stays within Slack's 80-char limit with a max-length slug + suffix", () => {
+    const slug = workspaceChannelSlug("a".repeat(100)); // capped at 59
+    expect(channelName(slug, "abcdef").length).toBeLessThanOrEqual(80);
   });
 });

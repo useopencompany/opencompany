@@ -12,8 +12,15 @@ const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 // never get a support channel.
 export const SLACK_SUPPORT_RECOVERY_CRON = "0 * * * *";
 
-// A `pending` row older than this is treated as stuck (worker crashed mid-provision).
-const STALE_PENDING_MS = 60 * 60 * 1000;
+// Don't re-dispatch a failure until it's been failed at least this long — let the
+// provisioning function's own Inngest retries finish before the sweep piles on.
+const FAILED_RETRY_DELAY_MS = 15 * 60 * 1000;
+// Stop re-dispatching failures older than this: a permanently-failing workspace gives up
+// instead of being re-provisioned every hour forever.
+const FAILED_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// A `pending` row older than this is treated as stuck — comfortably above the provisioning
+// retry window AND larger than the hourly cron interval, so a slow-but-alive run isn't swept.
+const STALE_PENDING_MS = 2 * 60 * 60 * 1000;
 
 type StepLike = { run: <T>(label: string, fn: () => Promise<T> | T) => Promise<T> };
 
@@ -23,10 +30,15 @@ export async function runSlackSupportRecoverySweep(
   // Feature off → nothing to recover (provisioning would just no-op to failed again).
   if (!isSlackSupportConfigured()) return { redispatched: 0 };
 
-  const rows = await step.run("list-recoverable", () =>
-    // Date.now() inside the step so the result is memoized deterministically on replay.
-    listRecoverableSlackChannels(new Date(Date.now() - STALE_PENDING_MS)),
-  );
+  const rows = await step.run("list-recoverable", () => {
+    // Date.now() inside the step so the bounds (and the row set) are memoized on replay.
+    const now = Date.now();
+    return listRecoverableSlackChannels({
+      failedRetryBefore: new Date(now - FAILED_RETRY_DELAY_MS),
+      failedMaxAgeAfter: new Date(now - FAILED_MAX_AGE_MS),
+      stalePendingBefore: new Date(now - STALE_PENDING_MS),
+    });
+  });
   if (rows.length === 0) return { redispatched: 0 };
 
   for (const row of rows) {

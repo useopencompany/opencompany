@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { WebClient } from "@slack/web-api";
 import { channelName, workspaceChannelSlug } from "./slugify";
 
@@ -91,12 +92,16 @@ function isCustomerInviteBenign(error: unknown): boolean {
   return code === "already_in_channel" || code === "already_invited" || code === "already_shared";
 }
 
-// The Slack channel name for a workspace's support channel: "<slug>-x-opencompany"
-// (matches the existing partner-channel convention). Names are not globally unique —
-// two same-named workspaces collide — but ownership is enforced via the channel purpose,
-// so a colliding OTHER-workspace channel is never adopted (it fails safe, never leaks).
+// A short per-workspace suffix from the workspace id (sha256 → 6 hex, uniform). Baked into
+// the channel name so names are globally unique: a same-named customer never collides, and a
+// `name_taken` on retry can only be this workspace's own prior attempt (not a hijack).
+function channelSuffix(workspaceId: string): string {
+  return createHash("sha256").update(workspaceId).digest("hex").slice(0, 6);
+}
+
+// The Slack channel name for a workspace's support channel: "<slug>-<suffix>-x-opencompany".
 export function supportChannelName(workspace: { id: string; name: string }): string {
-  return channelName(workspaceChannelSlug(workspace.name));
+  return channelName(workspaceChannelSlug(workspace.name), channelSuffix(workspace.id));
 }
 
 // Ownership marker stamped into the channel's purpose. It is the source of truth for

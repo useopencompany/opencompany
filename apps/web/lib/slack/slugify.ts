@@ -1,8 +1,8 @@
 // Slack channel names: lowercase, only a-z 0-9, hyphens/underscores, <= 80 chars.
-// We build "<slug>-x-opencompany" (matching the existing partner-channel convention,
-// e.g. aurelio-x-opencompany). Fixed overhead "-x-opencompany" = 14 chars, so the slug
-// must cap at 66.
-const MAX_SLUG_LEN = 66;
+// We build "<slug>-<id-suffix>-x-opencompany" — the -x-opencompany convention plus a short
+// per-workspace suffix that keeps the name globally unique (a same-named customer never
+// collides). Fixed overhead "-" + 6-char suffix + "-x-opencompany" = 21 chars → slug cap 59.
+const MAX_SLUG_LEN = 59;
 
 export function workspaceChannelSlug(name: string): string {
   return name
@@ -16,7 +16,8 @@ export function workspaceChannelSlug(name: string): string {
     .replace(/-+$/g, ""); // re-trim: slice can cut mid-word and reintroduce a trailing hyphen
 }
 
-// "<slug>-x-opencompany" — matches the existing partner-channel naming convention.
-export function channelName(slug: string): string {
-  return `${slug || "team"}-x-opencompany`;
+// "<slug>-<suffix>-x-opencompany" (or "<slug>-x-opencompany" when no suffix is given).
+export function channelName(slug: string, suffix?: string): string {
+  const safe = slug || "team";
+  return suffix ? `${safe}-${suffix}-x-opencompany` : `${safe}-x-opencompany`;
 }

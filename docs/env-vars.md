@@ -142,15 +142,17 @@ Setup checklist:
 If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
 and the workspace-home card degrades to the booking fallback (onboarding never breaks).
 
-Channel naming: each customer channel is `<customer-slug>-x-opencompany` (matching the existing
-partner channels, e.g. `aurelio-x-opencompany`). Names aren't globally unique; ownership is
-enforced via the channel purpose (`opencompany-support:<workspaceId>`), so a same-named
-other-workspace channel is never adopted — it fails safe to the booking card.
+Channel naming: each customer channel is `<customer-slug>-<id6>-x-opencompany` (the
+`-x-opencompany` convention plus a short per-workspace suffix that keeps names globally unique,
+so two same-named customers never collide). Ownership is also stamped in the channel purpose
+(`opencompany-support:<workspaceId>`) and checked before adopting on a retry, so a channel is
+never hijacked across workspaces.
 
 Recovery: an hourly Inngest cron (`sweep-failed-slack-support-channels`) re-dispatches
-provisioning for workspaces stuck in `failed` or `pending` >1h, so a transient failure — or a
-workspace onboarded *before* `SLACK_SUPPORT_*` was configured — self-heals on the next sweep
-(no manual backfill needed).
+provisioning for workspaces stuck in `failed` or `pending` — so a transient failure, or a
+workspace onboarded *before* `SLACK_SUPPORT_*` was configured, self-heals on the next sweep
+(no manual backfill). It waits ~15 min before retrying a failure (so the provisioning function's
+own Inngest retries run first), gives up on failures older than 7 days, and drains oldest-first.
 
 ### Testing & operations
 

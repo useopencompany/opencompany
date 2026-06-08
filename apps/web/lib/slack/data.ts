@@ -6,7 +6,7 @@ import {
   workspaceSlackChannels,
   workspaces,
 } from "@opencompany/db/schema";
-import { and, eq, lt, ne, or } from "drizzle-orm";
+import { and, asc, eq, gt, lt, ne, or } from "drizzle-orm";
 
 export type WorkspaceSlackChannel = {
   status: SlackChannelStatus;
@@ -122,11 +122,15 @@ export type RecoverableSlackChannel = {
   firstName: string | null;
 };
 
-// Channels that should be re-provisioned by the recovery sweep: terminal `failed`, or
-// `pending` stuck past `stalePendingBefore` (a crashed/lost worker). Joined with the
-// workspace owner so the provisioning event can be reconstructed. Capped to bound a sweep.
+// Channels the recovery sweep should re-provision. Joined with the workspace owner so the
+// provisioning event can be reconstructed. Oldest-first + capped so a large backlog drains
+// fairly without starving the tail. Two cases:
+// - `failed`: retry, but only after `failedRetryBefore` (let Inngest's own retries finish
+//   first) and only while newer than `failedMaxAgeAfter` (give up on permanently-failed rows
+//   so they stop being swept forever).
+// - `pending`: stuck past `stalePendingBefore` (a crashed/lost worker).
 export async function listRecoverableSlackChannels(
-  stalePendingBefore: Date,
+  bounds: { failedRetryBefore: Date; failedMaxAgeAfter: Date; stalePendingBefore: Date },
   limit = 50,
 ): Promise<RecoverableSlackChannel[]> {
   const db = getDb();
@@ -142,12 +146,17 @@ export async function listRecoverableSlackChannels(
     .innerJoin(users, eq(users.id, workspaces.createdByUserId))
     .where(
       or(
-        eq(workspaceSlackChannels.status, "failed"),
+        and(
+          eq(workspaceSlackChannels.status, "failed"),
+          lt(workspaceSlackChannels.updatedAt, bounds.failedRetryBefore),
+          gt(workspaceSlackChannels.createdAt, bounds.failedMaxAgeAfter),
+        ),
         and(
           eq(workspaceSlackChannels.status, "pending"),
-          lt(workspaceSlackChannels.updatedAt, stalePendingBefore),
+          lt(workspaceSlackChannels.updatedAt, bounds.stalePendingBefore),
         ),
       ),
     )
+    .orderBy(asc(workspaceSlackChannels.updatedAt))
     .limit(limit);
 }
