@@ -3,6 +3,7 @@
 import type { AttachmentKind } from "@opencompany/agent-runtime";
 import { upload } from "@vercel/blob/client";
 import { FileText, X } from "lucide-react";
+// (AttachmentCard is also imported by SessionView for the sent-message thread render.)
 
 export type PendingAttachment = {
   id: string;
@@ -35,6 +36,76 @@ export async function uploadAttachment(input: {
   return { blobPathname: blob.pathname, blobUrl: blob.url };
 }
 
+// Short type label shown under the filename (ChatGPT-style file card). Prefer the extension
+// (PNG, PDF, TS, …) since it's the most recognizable; fall back to the kind.
+function attachmentTypeLabel(kind: AttachmentKind, filename: string): string {
+  const ext = filename.includes(".") ? filename.split(".").pop()?.toUpperCase() : undefined;
+  if (ext && ext.length <= 5) return ext;
+  if (kind === "image") return "Image";
+  if (kind === "pdf") return "PDF";
+  return "Text";
+}
+
+// One compact, uniform attachment card — used both in the composer (with a remove button +
+// upload status) and in the sent message thread (wrapped in a link). Images show a small
+// thumbnail; everything else shows a file icon. Fixed size so it never overflows or reflows.
+export function AttachmentCard({
+  kind,
+  filename,
+  src,
+  status,
+  error,
+  onRemove,
+}: {
+  kind: AttachmentKind;
+  filename: string;
+  /** Thumbnail source for images (object URL in the composer, served URL in the thread). */
+  src?: string | undefined;
+  status?: "uploading" | "ready" | "error" | undefined;
+  error?: string | undefined;
+  onRemove?: (() => void) | undefined;
+}) {
+  const subtitle =
+    status === "uploading"
+      ? "Uploading…"
+      : status === "error"
+        ? (error ?? "Upload failed")
+        : attachmentTypeLabel(kind, filename);
+
+  return (
+    <div className="group/att relative flex w-[200px] items-center gap-2.5 rounded-xl border border-ink-subtle/30 bg-surface px-2.5 py-2">
+      {kind === "image" && src ? (
+        // eslint-disable-next-line @next/next/no-img-element -- thumbnail of a blob:/served URL; next/image can't optimize these.
+        <img src={src} alt={filename} className="h-9 w-9 shrink-0 rounded-md object-cover" />
+      ) : (
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-muted text-ink-muted">
+          <FileText size={16} strokeWidth={1.75} />
+        </div>
+      )}
+      <div className="min-w-0 flex-1 text-left">
+        <div className="truncate text-[12.5px] font-medium text-ink">{filename}</div>
+        <div className={`text-[11px] ${status === "error" ? "text-danger" : "text-ink-subtle"}`}>
+          {subtitle}
+        </div>
+      </div>
+      {onRemove ? (
+        <button
+          type="button"
+          aria-label={`Remove ${filename}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemove();
+          }}
+          className="-mr-0.5 shrink-0 rounded p-0.5 text-ink-muted transition-opacity hover:text-ink sm:opacity-0 sm:group-hover/att:opacity-100"
+        >
+          <X size={14} strokeWidth={2} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function ComposerAttachments({
   attachments,
   onRemove,
@@ -46,32 +117,15 @@ export function ComposerAttachments({
   return (
     <div className="flex flex-wrap gap-2 px-1 pb-2">
       {attachments.map((att) => (
-        <div
+        <AttachmentCard
           key={att.id}
-          className="group relative flex items-center gap-2 rounded-md border border-border bg-surface px-2 py-1.5 text-[12px] text-ink"
-        >
-          {att.kind === "image" && att.previewUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- object-URL preview of a not-yet-uploaded local file; next/image can't optimize a blob: URL.
-            <img src={att.previewUrl} alt={att.filename} className="h-8 w-8 rounded object-cover" />
-          ) : (
-            <FileText size={16} strokeWidth={1.75} className="text-ink-muted" />
-          )}
-          <span className="max-w-[140px] truncate">{att.filename}</span>
-          {att.status === "uploading" ? <span className="text-ink-subtle">…</span> : null}
-          {att.status === "error" ? (
-            <span className="text-danger" title={att.error}>
-              !
-            </span>
-          ) : null}
-          <button
-            type="button"
-            aria-label={`Remove ${att.filename}`}
-            onClick={() => onRemove(att.id)}
-            className="ml-1 text-ink-muted hover:text-ink"
-          >
-            <X size={13} strokeWidth={2} />
-          </button>
-        </div>
+          kind={att.kind}
+          filename={att.filename}
+          src={att.previewUrl}
+          status={att.status}
+          error={att.error}
+          onRemove={() => onRemove(att.id)}
+        />
       ))}
     </div>
   );
