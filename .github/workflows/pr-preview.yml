@@ -20,6 +20,7 @@ concurrency:
 
 permissions:
   contents: read
+  checks: read
   deployments: write
   pull-requests: write
   id-token: write
@@ -36,14 +37,67 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Provision / update the full preview stack for a labeled, open PR.
+  # Gate: don't provision a preview until CI (lint/typecheck/build/test) passes
+  # for the PR's head SHA. Waits for the `CI` workflow's quality check to conclude.
   # ---------------------------------------------------------------------------
-  deploy:
-    name: Provision preview stack
+  await-ci:
+    name: Wait for CI to pass
     if: >-
       github.event.action != 'closed' &&
       github.event.action != 'unlabeled' &&
       contains(github.event.pull_request.labels.*.name, 'preview')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.wait.outputs.passed }}
+    steps:
+      - name: Wait for CI quality check
+        id: wait
+        uses: actions/github-script@v7
+        env:
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          # The check-run name == the CI quality job's `name:` (.github/workflows/ci.yml).
+          CI_CHECK_NAME: "Lint, typecheck, build, and test"
+        with:
+          script: |
+            const sha = process.env.PR_SHA;
+            const checkName = process.env.CI_CHECK_NAME;
+            const deadline = Date.now() + 28 * 60 * 1000;
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+            while (Date.now() < deadline) {
+              const { data } = await github.rest.checks.listForRef({
+                owner: context.repo.owner, repo: context.repo.repo, ref: sha, per_page: 100,
+              });
+              const runs = data.check_runs
+                .filter((c) => c.name === checkName)
+                .sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+              const run = runs[0];
+              if (run && run.status === "completed") {
+                if (run.conclusion === "success") {
+                  core.info(`CI "${checkName}" passed for ${sha.slice(0, 7)}.`);
+                  core.setOutput("passed", "true");
+                  return;
+                }
+                core.warning(`CI "${checkName}" concluded "${run.conclusion}" — skipping preview.`);
+                core.setOutput("passed", "false");
+                return;
+              }
+              core.info(run ? `CI status: ${run.status}…` : "CI check not reported yet, waiting…");
+              await sleep(20000);
+            }
+            core.setFailed(`Timed out waiting for CI "${checkName}" on ${sha.slice(0, 7)}.`);
+
+  # ---------------------------------------------------------------------------
+  # Provision / update the full preview stack for a labeled, open PR.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Provision preview stack
+    needs: await-ci
+    if: >-
+      github.event.action != 'closed' &&
+      github.event.action != 'unlabeled' &&
+      contains(github.event.pull_request.labels.*.name, 'preview') &&
+      needs.await-ci.outputs.passed == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     environment: preview

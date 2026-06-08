@@ -280,6 +280,7 @@ GitHub Actions is the single orchestrator (mirrors `release-production.yml`):
 
 ```
 labeled PR ──► .github/workflows/pr-preview.yml
+                 ├─ await-ci: wait for the CI quality check (lint/typecheck/build/test) to pass — else skip
                  │  scripts/preview-provision.mjs
                  ├─ Neon branch  preview/pr-<n>  (forked from sanitized preview-seed, migrated, TTL)
                  ├─ Render runner   oc-preview-pr-<n>-runner   (builds Dockerfile.runner @ PR branch)
