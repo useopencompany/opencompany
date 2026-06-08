@@ -28,6 +28,12 @@ import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
 import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/email/signup-welcome";
 import { inngest } from "@/lib/inngest/client";
 import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
+import { runDeliverWhatsappReply, runWhatsappDeliverySweep } from "@/lib/messaging/delivery";
+import {
+  type DeliverWhatsappReplyInput,
+  WHATSAPP_DELIVER_REPLY_EVENT,
+  WHATSAPP_DELIVERY_SWEEP_CRON,
+} from "@/lib/messaging/events";
 import { SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT } from "@/lib/slack/events";
 import {
   sweepWorkspaceSyncOutbox as runWorkspaceSyncOutboxSweep,
@@ -483,6 +489,43 @@ export const provisionSlackSupportChannel = inngest.createFunction(
     >[0]),
 );
 
+// Outbound WhatsApp delivery, web-side only (the runner never learns about channels). Polls for the
+// completed assistant reply, then sends it over the Cloud API. Per-session concurrency preserves
+// reply ordering within a thread.
+export const deliverWhatsappReply = inngest.createFunction(
+  {
+    id: "deliver-whatsapp-reply",
+    name: "Deliver WhatsApp reply",
+    retries: 3,
+    concurrency: {
+      limit: 1,
+      key: "event.data.sessionId",
+    },
+    triggers: { event: WHATSAPP_DELIVER_REPLY_EVENT },
+  },
+  // Cast at the Inngest adapter boundary: the runtime step is structurally compatible with the
+  // narrow WorkflowStep the handler accepts (which keeps it unit-testable).
+  async ({ event, step }) =>
+    runDeliverWhatsappReply({
+      data: event.data as DeliverWhatsappReplyInput,
+      step: step as unknown as Parameters<typeof runDeliverWhatsappReply>[0]["step"],
+    }),
+);
+
+// Backstop: re-deliver any recently-completed WhatsApp reply with no outbound row (a per-message job
+// that timed out or didn't run). The outbound-existence guard in deliverReply keeps this safe.
+export const sweepWhatsappDeliveries = inngest.createFunction(
+  {
+    id: "sweep-whatsapp-deliveries",
+    name: "Sweep WhatsApp deliveries",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: WHATSAPP_DELIVERY_SWEEP_CRON },
+  },
+  async ({ step }) =>
+    runWhatsappDeliverySweep(step as unknown as Parameters<typeof runWhatsappDeliverySweep>[0]),
+);
+
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
@@ -499,4 +542,6 @@ export const inngestFunctions = [
   sweepExpiredSessionQuestions,
   sendSignupWelcome,
   provisionSlackSupportChannel,
+  deliverWhatsappReply,
+  sweepWhatsappDeliveries,
 ];
