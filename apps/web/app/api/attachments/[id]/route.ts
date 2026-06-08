@@ -36,11 +36,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   // 404 (not 403) on a cross-workspace / cross-user id so the endpoint never reveals that an
   // attachment exists for someone else — same shape as "row missing".
-  if (
-    !row ||
-    row.workspaceId !== context.workspace.id ||
-    row.sessionUserId !== context.user.id
-  ) {
+  if (!row || row.workspaceId !== context.workspace.id || row.sessionUserId !== context.user.id) {
     return new Response(null, { status: 404 });
   }
 
