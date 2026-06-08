@@ -20,7 +20,12 @@ const TERMINAL_FAIL = new Set([
   "deactivated",
 ]);
 
-export function createRenderClient({ apiKey, apiUrl = RENDER_API_URL, fetchImpl = fetch } = {}) {
+export function createRenderClient({
+  apiKey,
+  apiUrl = RENDER_API_URL,
+  fetchImpl = fetch,
+  timeoutMs = 60_000,
+} = {}) {
   if (!apiKey) throw new Error("RENDER_API_KEY is required.");
 
   async function request(path, init = {}, { allowEmpty = false } = {}) {
@@ -28,6 +33,9 @@ export function createRenderClient({ apiKey, apiUrl = RENDER_API_URL, fetchImpl 
     try {
       response = await fetchImpl(`${apiUrl}${path}`, {
         ...init,
+        // Abort a stalled call rather than blocking provision/teardown until the
+        // whole GitHub job times out (which could leave partial preview resources).
+        signal: init.signal ?? AbortSignal.timeout(timeoutMs),
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${apiKey}`,
@@ -36,6 +44,9 @@ export function createRenderClient({ apiKey, apiUrl = RENDER_API_URL, fetchImpl 
         },
       });
     } catch (error) {
+      if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+        throw new Error(`Render API request to ${path} timed out after ${timeoutMs}ms.`);
+      }
       throw new Error(`Render API request failed: ${error?.cause?.message ?? error.message}`);
     }
     const text = await response.text();

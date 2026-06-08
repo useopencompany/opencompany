@@ -34,4 +34,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO electric;
 -- CREATE on the database; publication-for-tables additionally needs table ownership or
 -- elevated rights. If Electric fails to create its publication under this role, grant the
 -- managed Neon replication role membership instead, or fall back to the branch owner.
-GRANT CREATE ON DATABASE neondb TO electric;
+-- Resolve the database name at runtime so this works for nonstandard NEON_DATABASE_NAME.
+DO $$
+BEGIN
+  EXECUTE format('GRANT CREATE ON DATABASE %I TO electric', current_database());
+END $$;

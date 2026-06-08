@@ -96,19 +96,23 @@ export async function GET(request: Request): Promise<Response> {
   //    the secret is injected here and never exposed to the browser (per the Electric
   //    auth-proxy guidance, used for preview environments — see issue #351).
   //  - Legacy/custom gatekeeper: ELECTRIC_TOKEN bearer header.
-  const sourceId = process.env.ELECTRIC_SOURCE_ID;
-  const sourceSecret = process.env.ELECTRIC_SOURCE_SECRET;
-  const electricSecret = process.env.ELECTRIC_SECRET;
-  if (sourceId) {
-    originUrl.searchParams.set("source_id", sourceId);
+  const sourceId = process.env.ELECTRIC_SOURCE_ID?.trim();
+  const sourceSecret = process.env.ELECTRIC_SOURCE_SECRET?.trim();
+  const electricSecret = process.env.ELECTRIC_SECRET?.trim();
+  // Electric Cloud needs source_id and secret together; one without the other is
+  // a misconfiguration that would send an invalid upstream auth combo, so fail
+  // loudly instead of silently falling back to a self-hosted secret.
+  if (Boolean(sourceId) !== Boolean(sourceSecret)) {
+    return new Response("Electric sync is misconfigured.", { status: 503 });
   }
-  if (sourceSecret) {
+  if (sourceId && sourceSecret) {
+    originUrl.searchParams.set("source_id", sourceId);
     originUrl.searchParams.set("secret", sourceSecret);
   } else if (electricSecret) {
     originUrl.searchParams.set("secret", electricSecret);
   }
 
-  const usesQuerySecret = Boolean(sourceSecret || electricSecret);
+  const usesQuerySecret = Boolean((sourceId && sourceSecret) || electricSecret);
   const response = await fetch(originUrl, {
     headers:
       !usesQuerySecret && process.env.ELECTRIC_TOKEN

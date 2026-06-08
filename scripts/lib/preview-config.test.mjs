@@ -76,6 +76,9 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
     "https://pr-42.preview.opencompany.cloud/auth/callback",
   );
   assert.equal(env.OBSERVABILITY_ENV, "preview");
+  assert.equal(env.NEXT_PUBLIC_OBSERVABILITY_RELEASE, "abc1234");
+  // Server-side OBSERVABILITY_RELEASE stays unset (manual-override-only convention).
+  assert.ok(!("OBSERVABILITY_RELEASE" in env));
   assert.equal(env.PREVIEW_PR_NUMBER, "42");
   assert.ok(!("DURABLE_STREAMS_TOKEN" in env));
 });

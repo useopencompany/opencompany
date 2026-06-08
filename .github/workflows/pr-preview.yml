@@ -370,6 +370,7 @@ jobs:
     environment: preview
     permissions:
       contents: read
+      deployments: write # mark the preview GitHub Deployment inactive on teardown
       id-token: write
       pull-requests: write
     env:
@@ -404,10 +405,30 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
+            const { owner, repo } = context.repo;
+            // Mark the GitHub Deployment inactive so the Environments view + audit trail
+            // don't keep showing a live deployment after the stack is gone.
+            const environment = `preview/pr-${process.env.PR_NUMBER}`;
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              owner,
+              repo,
+              environment,
+              per_page: 100,
+            });
+            for (const deployment of deployments) {
+              await github.rest.repos.createDeploymentStatus({
+                owner,
+                repo,
+                deployment_id: deployment.id,
+                state: "inactive",
+                description: "Preview environment torn down",
+              });
+            }
+
             const marker = "<!-- pr-preview -->";
             const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               issue_number: Number(process.env.PR_NUMBER),
               per_page: 100,
             });

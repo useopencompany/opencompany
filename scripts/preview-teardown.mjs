@@ -43,7 +43,9 @@ log(`Preview teardown complete for PR #${pr}.`);
 async function teardownRender() {
   const renderApiKey = process.env.RENDER_API_KEY?.trim();
   if (!renderApiKey) {
-    log("RENDER_API_KEY unset; skipping Render teardown.");
+    // A silent skip would let teardown "succeed" while Render services keep running.
+    if (!dryRun) failures.push("RENDER_API_KEY unset; cannot tear down Render services.");
+    else log("RENDER_API_KEY unset; skipping Render teardown (dry run).");
     return;
   }
   const render = createRenderClient({ apiKey: renderApiKey });
@@ -109,7 +111,9 @@ async function teardownNeon() {
   const neonApiKey = process.env.NEON_API_KEY?.trim();
   const neonProjectId = process.env.NEON_PROJECT_ID?.trim();
   if (!neonApiKey || !neonProjectId) {
-    log("NEON_API_KEY/NEON_PROJECT_ID unset; skipping Neon teardown.");
+    // A silent skip would leave the Neon branch (and its replication slot) alive.
+    if (!dryRun) failures.push("NEON_API_KEY/NEON_PROJECT_ID unset; cannot tear down Neon branch.");
+    else log("NEON_API_KEY/NEON_PROJECT_ID unset; skipping Neon teardown (dry run).");
     return;
   }
   const seedBranch = process.env.PREVIEW_SEED_BRANCH?.trim() || "preview-seed";

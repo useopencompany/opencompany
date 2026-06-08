@@ -42,7 +42,7 @@ const reset = isTrue(process.env.PREVIEW_RESET);
 const neonApiKey = requireEnv("NEON_API_KEY");
 const neonProjectId = requireEnv("NEON_PROJECT_ID");
 const seedBranch = safeSeedBranch(process.env.PREVIEW_SEED_BRANCH);
-const ttlHours = Number(process.env.NEON_BRANCH_TTL_HOURS ?? "24");
+const ttlHours = nonNegativeNumberEnv("NEON_BRANCH_TTL_HOURS", "24");
 
 const renderApiKey = requireEnv("RENDER_API_KEY");
 // Optional: auto-resolved from the API when the key has a single workspace owner.
@@ -289,6 +289,17 @@ function requireEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) {
     console.error(`${name} is required.`);
+    process.exit(1);
+  }
+  return value;
+}
+// Fail fast on a malformed TTL: Number("abc") is NaN, which would silently skip
+// expiration (ttlHours > 0 is false) and write an invalid TTL into the manifest.
+function nonNegativeNumberEnv(name, fallback) {
+  const raw = process.env[name]?.trim() || fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    console.error(`${name} must be a non-negative number; got "${raw}".`);
     process.exit(1);
   }
   return value;

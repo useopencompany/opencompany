@@ -72,7 +72,9 @@ export function webDeployEnv({
     DURABLE_STREAMS_TOKEN: streamsToken,
     NEXT_PUBLIC_WORKOS_REDIRECT_URI: redirectUri,
     OBSERVABILITY_ENV: "preview",
-    OBSERVABILITY_RELEASE: sha,
+    // Leave server-side OBSERVABILITY_RELEASE unset (repo convention: it's a manual
+    // override only). The browser tag below is enough for release grouping, and the
+    // server falls back to it via next.config. See docs/observability.md.
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: sha,
     PREVIEW_PR_NUMBER: pr === undefined ? undefined : String(pr),
   });
