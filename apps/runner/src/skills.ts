@@ -2,9 +2,12 @@ import {
   type AgentConfig,
   type AgentSkillFile,
   isExternalSkillReference,
+  MEMORY_CLI_FILE,
+  MEMORY_SKILL_ID,
   resolveEnabledBuiltinSkillFiles,
   shellQuote,
 } from "@opencompany/agent-runtime";
+import { getMemoryCliSource } from "@opencompany/memory/cli-bundle";
 import { type SandboxHandle, sandboxLayout } from "./sandbox";
 import { loadExternalSkillFiles } from "./skill-snapshots";
 
@@ -44,6 +47,17 @@ export async function materializeSkillsForSession(input: {
       });
       await input.sandbox.files.write(fullPath, file.content, { user: SANDBOX_ROOT_USER });
     }
+  }
+
+  // The `memory` skill's CLI bundle is delivered here rather than via the skill catalog so the
+  // ~150 KB JS never ships inside agent-runtime (and the web bundle that imports it). The agent
+  // runs it with `bun skills/memory/memory.js <command>`.
+  if (skills.some((skill) => skill.id === MEMORY_SKILL_ID)) {
+    await input.sandbox.files.write(
+      `${layout.skillsRoot}/${MEMORY_SKILL_ID}/${MEMORY_CLI_FILE}`,
+      getMemoryCliSource(),
+      { user: SANDBOX_ROOT_USER },
+    );
   }
 
   // Lock the tree down: root-owned, directories traversable+readable (555), files read-only

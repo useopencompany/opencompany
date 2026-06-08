@@ -354,6 +354,81 @@ Don't just stop after setup. In plain language:
 
 const OPENCOMPANY_SETUP_SKILL_MD = buildOpenCompanySetupSkillMd();
 
+export const MEMORY_SKILL_ID = "memory";
+
+// Relative path (under skills/<id>/) where the runner drops the bundled CLI. The skill's files
+// in this catalog are SKILL.md only — the ~150 KB JS bundle is delivered by the runner so it
+// never bloats agent-runtime (and the web bundle that imports it).
+export const MEMORY_CLI_FILE = "memory.js";
+
+function buildMemorySkillMd(): string {
+  return `---
+name: memory
+description: Maintain durable, evidence-grounded memory across sessions with the \`memory\` CLI — canonical objects (people, companies, projects, decisions…) compiled from cited evidence, plus hybrid retrieval.
+---
+
+# Structured memory
+
+You have a persistent, structured memory under \`agent/memory/\` that survives across sessions.
+Manage it **only** through the \`memory\` CLI — do not hand-edit files under \`agent/memory/\` with
+\`edit_file\`/\`write_file\`; the CLI enforces the structure, provenance, and links that keep memory
+trustworthy. (\`agent/memory.md\` remains your freeform scratchpad; the structured tree is separate.)
+
+Run it with Bun:
+
+\`\`\`
+bun skills/${MEMORY_SKILL_ID}/${MEMORY_CLI_FILE} <command> [options]
+\`\`\`
+
+Add \`--json\` to any command for machine-readable output.
+
+## The model: compiled truth + evidence
+
+Memory has two kinds of files, each a two-layer document — a **compiled truth** (your current
+synthesized belief) on top, and an **append-only timeline** of dated entries below:
+
+- **Canonical objects** — one file per real thing: \`person\`, \`company\`, \`project\`, \`customer\`,
+  \`decision\`, \`concept\`, \`theme\`. This is what you believe is true *now*.
+- **Evidence** — immutable source records (\`meeting\`, \`conversation\`, \`doc\`, \`research\`,
+  \`correction\`) with provenance, linked to the canonical objects they are about.
+
+The rule that keeps memory honest: **compiled truth must cite evidence.** You capture evidence
+first, then rewrite an object's compiled truth with \`[^ev:<evidence-id>]\` citations pointing at it.
+
+Every file has a unique \`id\` that is also its file name. Ids are lowercase slugs
+(e.g. \`acme\`, \`jane-doe\`, \`acme-call-2026-06-06\`).
+
+## Commands
+
+- **create** — a new canonical object.
+  \`memory create --type company --id acme --alias "Acme Inc" --truth "Logistics SaaS we sell to."\`
+- **append-evidence** — record immutable evidence and link it to canonical subjects.
+  \`memory append-evidence --kind meeting --id acme-call-2026-06-06 --subject acme --subject jane-doe --source-ref "gcal://event/abc" --summary "Confirmed enterprise eval; SSO is the blocker."\`
+  Provenance (\`--kind\` + \`--source-ref\`) and at least one existing \`--subject\` are required.
+- **rewrite** — update an object's compiled truth. Must cite linked evidence.
+  \`memory rewrite acme --truth "Acme is evaluating our enterprise tier; SSO is the gating requirement [^ev:acme-call-2026-06-06]."\`
+  Every \`[^ev:...]\` must point at evidence that lists this object as a subject, or it is rejected.
+- **get** — read a file. \`memory get acme\` (add \`--section truth|timeline|frontmatter\`).
+- **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
+  Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`.
+- **merge** — fold a duplicate canonical object into another, then re-synthesize.
+  \`memory merge --from acme-corp --into acme\` (then \`memory rewrite acme ...\`). Use \`--dry-run\` first.
+- **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
+  \`memory doctor\` (add \`--fix-freshness\` to mark stale objects).
+
+## How to use it well
+
+- When you learn something durable about a person, company, project, customer, or decision,
+  **capture it as evidence first**, then **rewrite** the relevant object's compiled truth citing it.
+- Before answering questions about people, companies, or past decisions, **query** memory.
+- Keep compiled truth tight and current; let the timeline hold the history.
+- Run **doctor** occasionally and after merges to catch broken links and stale summaries.
+- Don't record one-off, throwaway context here — that belongs in the conversation.
+`;
+}
+
+const MEMORY_SKILL_MD = buildMemorySkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -370,6 +445,14 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
       "Set up the workspace for a new user — establish the Brain (shared company knowledge) and tune your own definition for great day-one scaffolding.",
     defaultEnabled: true,
     files: [{ path: "SKILL.md", content: OPENCOMPANY_SETUP_SKILL_MD }],
+  },
+  {
+    id: MEMORY_SKILL_ID,
+    name: "Structured memory",
+    description:
+      "Maintain durable, evidence-grounded memory across sessions with the memory CLI — canonical objects compiled from cited evidence, plus hybrid retrieval.",
+    defaultEnabled: true,
+    files: [{ path: "SKILL.md", content: MEMORY_SKILL_MD }],
   },
 ];
 
