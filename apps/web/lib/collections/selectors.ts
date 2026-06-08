@@ -68,6 +68,7 @@ export function deriveSidebarSessions(
       id: row.id,
       title: row.title,
       status: row.status,
+      source: row.source,
       modelName: row.model_name,
       lastError: row.last_error,
       createdAt: row.created_at,

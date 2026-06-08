@@ -3,7 +3,7 @@
 // view-state machine. Keep this the single source of truth for personal URLs; components link
 // through `personalPaths.*` rather than hand-writing `/personal/...` strings.
 
-export type PersonalPanel = "agent" | "skills" | "integrations" | "tools";
+export type PersonalPanel = "agent" | "skills" | "integrations" | "tools" | "channels";
 
 export const personalPaths = {
   home: "/personal",
@@ -12,6 +12,7 @@ export const personalPaths = {
   skills: "/personal/skills",
   integrations: "/personal/integrations",
   tools: "/personal/tools",
+  channels: "/personal/channels",
   // A bundle file lives at its real relative path (e.g. "memory/notes.md"); encode each segment
   // so the [...path] route round-trips slashes and reserved characters cleanly.
   file: (relativePath: string) =>

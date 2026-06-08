@@ -379,7 +379,10 @@ export const agentSessions = pgTable(
       .references(() => agents.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled session"),
     status: text("status").notNull().default("created"),
-    source: text("source").$type<"user" | "agent" | "memory">().notNull().default("user"),
+    source: text("source")
+      .$type<"user" | "agent" | "memory" | "whatsapp">()
+      .notNull()
+      .default("user"),
     modelProvider: text("model_provider").notNull().default("vercel-ai-gateway"),
     modelName: text("model_name").notNull().default("openai/gpt-5.4-mini"),
     parentSessionId: text("parent_session_id"),
@@ -428,7 +431,7 @@ export const agentSessions = pgTable(
     }).onDelete("set null"),
     sourceCheck: check(
       "agent_sessions_source_check",
-      sql`${table.source} IN ('user', 'agent', 'memory')`,
+      sql`${table.source} IN ('user', 'agent', 'memory', 'whatsapp')`,
     ),
   }),
 );
@@ -626,6 +629,114 @@ export const agentSessionMessageChunks = pgTable(
     contentTrgmIdx: index("agent_session_message_chunks_content_trgm_idx").using(
       "gin",
       table.content.op("gin_trgm_ops"),
+    ),
+  }),
+);
+
+// A user's binding to a messaging transport (WhatsApp today). Scoped to the personal agent —
+// messaging is a personal-only surface, so this always points at the user's default agent. Holds
+// the link-flow state, the bound peer address, and the rolling session pointer used for the idle
+// window. Provider secrets are platform-level env and never stored here.
+export const messagingChannels = pgTable(
+  "messaging_channels",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    // Provider id from @opencompany/messaging (e.g. "whatsapp").
+    provider: text("provider").notNull(),
+    // disconnected → pending_link (token minted, awaiting the user's first message) → connected.
+    status: text("status").notNull().default("disconnected"),
+    // The bound peer address (WhatsApp wa_id, E.164 digits, no `+`). Null until the link completes.
+    externalId: text("external_id"),
+    // The peer's WhatsApp profile/display name, captured at link time for the health view.
+    profileName: text("profile_name"),
+    // One-time link token rendered into the connect QR; cleared once a peer binds to it.
+    linkToken: text("link_token"),
+    linkTokenExpiresAt: timestamp("link_token_expires_at", { withTimezone: true }),
+    // The session inbound messages currently route into. Reset to null when the idle window lapses
+    // so the next inbound message hard-starts a fresh session.
+    activeSessionId: text("active_session_id").references(() => agentSessions.id, {
+      onDelete: "set null",
+    }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    lastOutboundAt: timestamp("last_outbound_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // At most one channel per (user, provider) per workspace.
+    workspaceUserProviderIdx: uniqueIndex("messaging_channels_workspace_user_provider_idx").on(
+      table.workspaceId,
+      table.userId,
+      table.provider,
+    ),
+    // Inbound routing key: a bound peer address maps to exactly one channel for a provider. Partial
+    // so unbound channels (null external_id) don't collide.
+    providerExternalIdx: uniqueIndex("messaging_channels_provider_external_idx")
+      .on(table.provider, table.externalId)
+      .where(sql`${table.externalId} is not null`),
+    // Link-token lookup when the user's first (pre-binding) message arrives.
+    linkTokenIdx: index("messaging_channels_link_token_idx").on(table.linkToken),
+    activeSessionIdx: index("messaging_channels_active_session_idx").on(table.activeSessionId),
+    statusCheck: check(
+      "messaging_channels_status_check",
+      sql`${table.status} IN ('disconnected', 'pending_link', 'connected', 'error')`,
+    ),
+  }),
+);
+
+// Append-only log of inbound/outbound messages across messaging channels. Serves three jobs:
+// inbound idempotency (dedupe provider webhook retries by providerMessageId), outbound delivery
+// tracking (pending → sent/failed), and the Channels health view (including unknown-sender hits,
+// which have a null channelId). Message bodies are not the system of record — the agent transcript
+// is — so we keep only a short preview here.
+export const messagingMessages = pgTable(
+  "messaging_messages",
+  {
+    id: text("id").primaryKey(),
+    // Null when an unrecognized number messages our platform line (no channel to attribute it to).
+    channelId: text("channel_id").references(() => messagingChannels.id, { onDelete: "set null" }),
+    provider: text("provider").notNull(),
+    direction: text("direction").notNull(), // 'inbound' | 'outbound'
+    // The peer's channel address (wa_id).
+    externalContactId: text("external_contact_id").notNull(),
+    // Provider-issued message id (WhatsApp wamid). Globally unique across providers, so a single
+    // partial-unique index dedupes inbound retries and records outbound delivery ids.
+    providerMessageId: text("provider_message_id"),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    // For outbound rows: the assistant message we delivered.
+    agentMessageId: text("agent_message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    // inbound: 'received' | 'unlinked' | 'linked' ; outbound: 'pending' | 'sent' | 'failed'.
+    status: text("status").notNull().default("received"),
+    // Truncated body for the health view; not authoritative.
+    preview: text("preview"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    channelIdx: index("messaging_messages_channel_idx").on(table.channelId, table.createdAt),
+    sessionIdx: index("messaging_messages_session_idx").on(table.sessionId),
+    providerMessageIdIdx: uniqueIndex("messaging_messages_provider_message_id_idx")
+      .on(table.providerMessageId)
+      .where(sql`${table.providerMessageId} is not null`),
+    directionCheck: check(
+      "messaging_messages_direction_check",
+      sql`${table.direction} IN ('inbound', 'outbound')`,
     ),
   }),
 );
@@ -1881,3 +1992,5 @@ export type OnboardingResponse = typeof onboardingResponses.$inferSelect;
 export type WorkspaceToolPolicy = typeof workspaceToolPolicies.$inferSelect;
 export type AgentToolApproval = typeof agentToolApprovals.$inferSelect;
 export type AgentSessionQuestion = typeof agentSessionQuestions.$inferSelect;
+export type MessagingChannel = typeof messagingChannels.$inferSelect;
+export type MessagingMessage = typeof messagingMessages.$inferSelect;

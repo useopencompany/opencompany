@@ -33,6 +33,7 @@ export async function loadSidebarSessionsForWorkspace(
     id: agentSessions.id,
     title: agentSessions.title,
     status: agentSessions.status,
+    source: agentSessions.source,
     modelName: agentSessions.modelName,
     lastError: agentSessions.lastError,
     createdAt: agentSessions.createdAt,
@@ -97,6 +98,7 @@ export async function loadPersonalSessionsForAgent(
       id: agentSessions.id,
       title: agentSessions.title,
       status: agentSessions.status,
+      source: agentSessions.source,
       modelName: agentSessions.modelName,
       lastError: agentSessions.lastError,
       createdAt: agentSessions.createdAt,
@@ -108,7 +110,8 @@ export async function loadPersonalSessionsForAgent(
         eq(agentSessions.workspaceId, workspaceId),
         eq(agentSessions.userId, userId),
         eq(agentSessions.agentId, agentId),
-        eq(agentSessions.source, "user"),
+        // Unified personal list: web-originated AND WhatsApp-originated threads (not delegated).
+        inArray(agentSessions.source, ["user", "whatsapp"]),
         isNull(agentSessions.archivedAt),
       ),
     )
@@ -413,7 +416,9 @@ export async function loadAgentSessionDetailForWorkspace(
         ? ("agent" as const)
         : session.source === "memory"
           ? ("memory" as const)
-          : ("user" as const),
+          : session.source === "whatsapp"
+            ? ("whatsapp" as const)
+            : ("user" as const),
   };
 
   return serializeAgentSessionDetail({

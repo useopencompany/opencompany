@@ -9,6 +9,7 @@ import {
   FileText,
   Folder,
   Inbox,
+  MessageCircle,
   PanelLeft,
   Plug,
   Plus,
@@ -332,6 +333,14 @@ function SessionRow({
     >
       {showStatusDot ? <SessionStatusDot status={session.status} pulse /> : null}
       <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>
+      {session.source === "whatsapp" ? (
+        <MessageCircle
+          size={12}
+          strokeWidth={2}
+          className="shrink-0 text-emerald-600"
+          aria-label="WhatsApp"
+        />
+      ) : null}
     </button>
   );
 }
@@ -349,7 +358,8 @@ function useLivePersonalSessions(agentId: string, initialSessions: SidebarSessio
       .filter(
         (row) =>
           row.agent_id === agentId &&
-          row.source === "user" &&
+          // Unified list: web sessions AND WhatsApp-originated sessions (not delegated agent ones).
+          (row.source === "user" || row.source === "whatsapp") &&
           row.archived_at === null &&
           !HIDDEN_SESSION_STATUSES.has(row.status),
       )
@@ -357,6 +367,7 @@ function useLivePersonalSessions(agentId: string, initialSessions: SidebarSessio
         id: row.id,
         title: row.title,
         status: row.status,
+        source: row.source === "whatsapp" ? ("whatsapp" as const) : ("user" as const),
         modelName: row.model_name,
         lastError: row.last_error,
         createdAt: row.created_at,
@@ -375,7 +386,11 @@ function useActivePersonalRoute() {
 
   const inboxActive = segments.length === 1; // exactly "/personal"
   const activePanel =
-    section === "agent" || section === "skills" || section === "integrations" || section === "tools"
+    section === "agent" ||
+    section === "skills" ||
+    section === "integrations" ||
+    section === "tools" ||
+    section === "channels"
       ? section
       : null;
   const activeSessionId = section === "session" ? (rest[0] ?? null) : null;
@@ -421,8 +436,16 @@ function PersonalSidebarView({
   onToggleCollapsed: () => void;
 }) {
   const router = useRouter();
-  const { agent, userName, userEmail, workspaceName, files, config, personalSkills, githubRequested } =
-    usePersonalAgent();
+  const {
+    agent,
+    userName,
+    userEmail,
+    workspaceName,
+    files,
+    config,
+    personalSkills,
+    githubRequested,
+  } = usePersonalAgent();
   const { inboxActive, activePanel, activeSessionId, activeFilePath } = useActivePersonalRoute();
 
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
@@ -506,6 +529,12 @@ function PersonalSidebarView({
               count={toolCount}
               active={activePanel === "tools"}
               onClick={() => router.push(personalPaths.tools)}
+            />
+            <CapabilityNavRow
+              icon={MessageCircle}
+              label="Channels"
+              active={activePanel === "channels"}
+              onClick={() => router.push(personalPaths.channels)}
             />
           </Section>
 
