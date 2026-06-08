@@ -66,7 +66,8 @@ export type RuntimeToolName =
   | "calendar_delete_event"
   | "web_fetch"
   | "tool_help"
-  | "find_tools";
+  | "find_tools"
+  | "discover_capabilities";
 
 export type RuntimeToolDefinition = {
   name: RuntimeToolName;
@@ -2119,6 +2120,23 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "discover_capabilities",
+    kind: "hosted",
+    description:
+      "List capabilities you could add to yourself but have not enabled yet — the opinionated tools beyond what is already in your ## Tools index. Each result reports whether it is already enabled, available to enable now, or needs setup first, plus how to enable it. Use this when a task needs something you cannot currently do; then confirm with the user and enable it via self-edit. Read-only — discovering a capability does not enable it.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            'Optional case-insensitive substring filter over capability ids, labels, and descriptions (e.g. "web", "video", "email"). Omit to list every capability.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 export const RUNTIME_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
@@ -2158,6 +2176,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   }
   names.add("tool_help");
   names.add("find_tools");
+  names.add("discover_capabilities");
   if (input.selfEditEnabled) {
     names.add("update_agent_file");
   }
@@ -2286,6 +2305,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   web_fetch: "Fetch web page",
   tool_help: "Tool help",
   find_tools: "Find tools",
+  discover_capabilities: "Discover capabilities",
 };
 
 // Resolve the display title for any tool name the UI may encounter. The `use_tool` dispatcher
@@ -2333,6 +2353,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "delegate_to_agent",
   "tool_help",
   "find_tools",
+  "discover_capabilities",
 ];
 
 // Deferrable runtime tools that are not capability-catalog entries but are still loaded on demand
@@ -2427,5 +2448,90 @@ export function searchRuntimeTools(
       parameters: definition.parameters,
     });
   }
+  return results;
+}
+
+export type CapabilityDiscoveryStatus = "enabled" | "available" | "needs_setup";
+
+export type CapabilityDiscoveryResult = {
+  id: AgentToolId;
+  label: string;
+  description: string;
+  status: CapabilityDiscoveryStatus;
+  // Present only when status is "needs_setup": a short human reason for what's missing.
+  reason?: string;
+  // What the agent should do to enable it — the @-mention to add to its behavior.
+  howToEnable: string;
+};
+
+// Capabilities whose eligibility this v1 can determine honestly and synchronously: those gated only
+// on a platform secret (`"platform"`) or a platform secret plus an attached repo (`"mixed"`).
+// `"workspace"`-credentialed capabilities (MCP servers like Linear/Slack, and the Google tools
+// Gmail/Calendar) are intentionally excluded — their eligibility needs per-workspace/per-account
+// OAuth connection state that isn't available in this pure path, and the agent cannot self-connect
+// them anyway. They're a clean phase-2 follow-up once that state is threaded into the session.
+const DISCOVERABLE_CREDENTIAL_SOURCES = new Set<AgentToolDefinition["credentialSource"]>([
+  "platform",
+  "mixed",
+]);
+
+// Back the `discover_capabilities` tool: list the opinionated capability catalog (the same entries
+// surfaced as @-mentions in the editor) with an eligibility verdict, so the agent can find a tool it
+// has not enabled yet and offer to add it. Unlike `searchRuntimeTools` (which only expands the
+// agent's already-enabled set), this advertises the *not-yet-enabled* shop.
+//
+// `credentialAvailable` is supplied by the caller (the runner) so the platform-secret check reuses
+// the exact same validation that gates execution — discovery and execution can never disagree.
+export function buildCapabilityDiscovery(input: {
+  enabledTools: readonly RuntimeToolName[];
+  hasAttachedRepository: boolean;
+  credentialAvailable: (entry: AgentToolDefinition) => boolean;
+  query?: string;
+}): CapabilityDiscoveryResult[] {
+  const enabledSet = new Set(input.enabledTools);
+  const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : "";
+  const results: CapabilityDiscoveryResult[] = [];
+
+  for (const entry of AGENT_TOOL_CATALOG) {
+    if (entry.type !== "hosted_tool" && entry.type !== "coding_agent") continue;
+    if (!DISCOVERABLE_CREDENTIAL_SOURCES.has(entry.credentialSource)) continue;
+    if (
+      query &&
+      !entry.id.toLowerCase().includes(query) &&
+      !entry.label.toLowerCase().includes(query) &&
+      !entry.description.toLowerCase().includes(query)
+    ) {
+      continue;
+    }
+
+    let status: CapabilityDiscoveryStatus;
+    let reason: string | undefined;
+    if (entry.runtimeTools.some((name) => enabledSet.has(name))) {
+      status = "enabled";
+    } else if (!input.credentialAvailable(entry)) {
+      status = "needs_setup";
+      reason = entry.requiredPlatformEnvVars?.length
+        ? `requires ${entry.requiredPlatformEnvVars.join(", ")}`
+        : "missing platform credentials";
+    } else if (
+      entry.requiredWorkspaceResource?.provider === "github" &&
+      !input.hasAttachedRepository
+    ) {
+      status = "needs_setup";
+      reason = "attach a GitHub repository first";
+    } else {
+      status = "available";
+    }
+
+    results.push({
+      id: entry.id,
+      label: entry.label,
+      description: entry.description,
+      status,
+      ...(reason ? { reason } : {}),
+      howToEnable: `add @${entry.id} to your behavior`,
+    });
+  }
+
   return results;
 }
