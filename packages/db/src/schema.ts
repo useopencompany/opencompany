@@ -191,6 +191,9 @@ export const workspaceSkillSnapshots = pgTable(
     skillId: text("skill_id").notNull(),
     name: text("name").notNull(),
     description: text("description").notNull(),
+    // Optional slash-command slug declared in SKILL.md frontmatter; surfaced in the composer
+    // as `/<command>` for agents that enable this skill. Null when the skill declares none.
+    command: text("command"),
     sourceType: text("source_type").notNull().default("github"),
     sourceUrl: text("source_url").notNull(),
     requestedRef: text("requested_ref").notNull(),

@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Copy,
   FileCode2,
   FilePlus2,
   FileText,
@@ -31,6 +33,7 @@ import {
   fileNameFromPath,
   resolveBrainFileRenameName,
 } from "@/lib/brain/file-names";
+import { formatBrainRelativeTime } from "@/lib/brain/relative-time";
 import {
   ancestorFolderPaths,
   type BrainTreeNode,
@@ -1019,13 +1022,20 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
           {selected ? (
             <>
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[12.5px]">
-                <FileIcon path={selected.path} />
-                <span title={selected.path} className="min-w-0 truncate font-medium text-ink">
-                  {fileNameFromPath(selected.path)}
-                </span>
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px]">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <FileIcon path={selected.path} />
+                  <span title={selected.path} className="min-w-0 truncate font-medium text-ink">
+                    {fileNameFromPath(selected.path)}
+                  </span>
+                </div>
+                <BrainUpdatedAt updatedAt={selected.updatedAt} />
               </div>
-              <div ref={fileMenuRef} className="relative ml-auto shrink-0">
+              <BrainCopyButton
+                className="ml-auto shrink-0"
+                text={`${fileNameFromPath(selected.path)}\n\n${draftContent}`}
+              />
+              <div ref={fileMenuRef} className="relative shrink-0">
                 <button
                   type="button"
                   aria-label="Open file actions"
@@ -1589,6 +1599,43 @@ function RawBrainEditor({
   );
 }
 
+function BrainCopyButton({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const handleCopy = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.currentTarget.blur();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore — clipboard may be blocked in insecure contexts
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Copied" : "Copy title and contents"}
+      title={copied ? "Copied" : "Copy title and contents"}
+      onClick={handleCopy}
+      className={`flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 hover:bg-surface-subtle hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+        copied ? "text-success" : ""
+      } ${className ?? ""}`}
+    >
+      {copied ? <Check size={15} strokeWidth={1.75} /> : <Copy size={15} strokeWidth={1.75} />}
+    </button>
+  );
+}
+
 function BrainFileMenu({
   file,
   deleteDisabled,
@@ -1993,4 +2040,23 @@ function formatBrainDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+// Always-visible "Updated 2 hours ago" label in the file header. The relative
+// label is friendliest for "when did this last change"; the exact date is one
+// hover away. suppressHydrationWarning: the relative value is computed against
+// the wall clock, which can differ by a tick between SSR and hydration.
+function BrainUpdatedAt({ updatedAt }: { updatedAt: string }) {
+  const parsed = new Date(updatedAt);
+  const isValid = !Number.isNaN(parsed.getTime());
+  return (
+    <time
+      dateTime={isValid ? parsed.toISOString() : undefined}
+      title={isValid ? `Last updated ${formatBrainDate(updatedAt)}` : undefined}
+      suppressHydrationWarning
+      className="shrink-0 whitespace-nowrap text-[11.5px] text-ink-subtle"
+    >
+      Updated {formatBrainRelativeTime(updatedAt)}
+    </time>
+  );
 }

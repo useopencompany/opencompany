@@ -56,6 +56,7 @@ export async function saveSkillSnapshot(
       skillId: resolved.skillId,
       name: resolved.name,
       description: resolved.description,
+      command: resolved.command ?? null,
       sourceType: resolved.source.type,
       sourceUrl: resolved.source.url,
       requestedRef: resolved.source.ref,
@@ -79,6 +80,7 @@ export async function saveSkillSnapshot(
       set: {
         name: resolved.name,
         description: resolved.description,
+        command: resolved.command ?? null,
         resolvedCommit: resolved.resolvedCommit,
         integrity: resolved.integrity,
         files: resolved.files,
