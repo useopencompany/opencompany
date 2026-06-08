@@ -7,10 +7,9 @@ const canonical: MemoryDocument = {
     id: "acme",
     type: "company",
     status: "active",
-    freshness: "fresh",
     createdAt: "2026-05-12T09:00:00Z",
     updatedAt: "2026-06-06T14:32:00Z",
-    related: ["jane-doe"],
+    related: [{ type: "employs", target: "jane-doe" }],
     aliases: ["Acme Inc"],
   },
   title: "Acme",
@@ -28,9 +27,36 @@ describe("document round-trip", () => {
     expect(parsed.frontmatter.id).toBe("acme");
     expect(parsed.frontmatter.type).toBe("company");
     expect(parsed.frontmatter.aliases).toEqual(["Acme Inc"]);
+    expect(parsed.frontmatter.related).toEqual([{ type: "employs", target: "jane-doe" }]);
     expect(parsed.title).toBe("Acme");
     expect(parsed.compiledTruth).toContain("customer since 2026-05");
     expect(parsed.timeline).toHaveLength(2);
+  });
+
+  it("reads legacy bare-string related entries as untyped edges, alongside typed ones", () => {
+    const text = [
+      "---",
+      "id: acme",
+      "type: company",
+      "status: active",
+      "created_at: 2026-05-12T09:00:00Z",
+      "updated_at: 2026-05-12T09:00:00Z",
+      "related:",
+      "  - jane-doe",
+      "  - { type: depends_on, target: globex }",
+      "---",
+      "# Acme",
+      "",
+      "## Compiled truth",
+      "x",
+      "",
+      "## Timeline",
+    ].join("\n");
+    const parsed = parseDocument(text);
+    expect(parsed.frontmatter.related).toEqual([
+      { type: "related", target: "jane-doe" },
+      { type: "depends_on", target: "globex" },
+    ]);
   });
 
   it("sorts the timeline newest-first on serialize", () => {

@@ -1,10 +1,10 @@
 import type { ParsedDocument } from "./document";
 import {
   isEvidenceType,
-  isMemoryFreshness,
   isMemoryStatus,
   isMemoryType,
   isValidMemoryId,
+  isValidRelationType,
   type MemoryDocument,
   type MemoryFrontmatter,
 } from "./schema";
@@ -35,10 +35,7 @@ export function validateDocument(parsed: ParsedDocument, expectedId?: string): V
     errors.push("`type` is required and must be a known canonical or evidence type.");
   }
   if (!isMemoryStatus(fm.status)) {
-    errors.push("`status` is required and must be active, draft, deprecated, or merged.");
-  }
-  if (!isMemoryFreshness(fm.freshness)) {
-    errors.push("`freshness` is required and must be fresh, aging, or stale.");
+    errors.push("`status` is required and must be active, deprecated, or merged.");
   }
   if (!isIsoTimestamp(fm.createdAt)) {
     errors.push("`created_at` is required and must be an ISO-8601 UTC timestamp.");
@@ -62,11 +59,6 @@ export function validateDocument(parsed: ParsedDocument, expectedId?: string): V
       if (!isIsoTimestamp(fm.source.capturedAt)) {
         errors.push("`source.captured_at` must be an ISO-8601 UTC timestamp.");
       }
-      if (fm.source.kind !== fm.type) {
-        errors.push(
-          `\`source.kind\` (${fm.source.kind}) must match the evidence type (${fm.type}).`,
-        );
-      }
     }
   } else {
     if (fm.subjects && fm.subjects.length > 0) {
@@ -83,8 +75,13 @@ export function validateDocument(parsed: ParsedDocument, expectedId?: string): V
   if (fm.status === "merged" && !fm.mergedInto) {
     errors.push("A merged record must set `merged_into` to its target id.");
   }
-  if (fm.related && !fm.related.every(isValidMemoryId)) {
-    errors.push("Every `related` entry must be a valid memory id.");
+  if (
+    fm.related &&
+    !fm.related.every((rel) => isValidMemoryId(rel.target) && isValidRelationType(rel.type))
+  ) {
+    errors.push(
+      "Every `related` entry needs a valid `target` id and a lowercase `type` slug (a-z, 0-9, _).",
+    );
   }
 
   if (errors.length > 0) return { ok: false, errors };
@@ -94,7 +91,6 @@ export function validateDocument(parsed: ParsedDocument, expectedId?: string): V
     id: fm.id as string,
     type: fm.type as MemoryFrontmatter["type"],
     status: fm.status as MemoryFrontmatter["status"],
-    freshness: fm.freshness as MemoryFrontmatter["freshness"],
     createdAt: fm.createdAt as string,
     updatedAt: fm.updatedAt as string,
     related: fm.related ?? [],

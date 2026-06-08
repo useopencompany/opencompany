@@ -12,6 +12,7 @@ export type RuntimeToolName =
   | "shell"
   | "gh"
   | "memory"
+  | "recall"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -355,6 +356,34 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
       'Query before answering questions about people, companies, projects, or past decisions: query "topic" --type company --limit 5.',
       "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
+    ].join("\n"),
+  },
+  {
+    name: "recall",
+    kind: "internal",
+    description:
+      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges. Use to remember earlier discussions, decisions, or facts that are not in your current context. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "What to look for, in natural language or keywords. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of matching exchanges to return (default 5, max 20).",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Searches the raw transcript of your previous sessions with this user (this agent only); the current session is excluded.",
+      "Returns each hit as a short window: the matching message plus the one before and after it for context.",
+      "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
+      "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
     ].join("\n"),
   },
   {
@@ -2164,7 +2193,8 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
     if (
       tool.name === "delegate_to_agent" ||
       tool.name === "update_agent_file" ||
-      tool.name === "memory"
+      tool.name === "memory" ||
+      tool.name === "recall"
     ) {
       continue;
     }
@@ -2182,6 +2212,7 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   }
   if (input.memorySkillEnabled) {
     names.add("memory");
+    names.add("recall");
   }
 
   const selectedToolIds = new Set(
@@ -2250,6 +2281,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   shell: "Run command",
   gh: "GitHub CLI",
   memory: "Memory",
+  recall: "Recall past sessions",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",
@@ -2349,6 +2381,7 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "read_skill",
   "gh",
   "memory",
+  "recall",
   "ask_user_question",
   "delegate_to_agent",
   "tool_help",

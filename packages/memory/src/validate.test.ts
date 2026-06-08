@@ -8,7 +8,6 @@ function parsed(overrides: Partial<ParsedDocument["frontmatter"]>): ParsedDocume
       id: "acme",
       type: "company",
       status: "active",
-      freshness: "fresh",
       createdAt: "2026-05-12T09:00:00Z",
       updatedAt: "2026-05-12T09:00:00Z",
       related: [],
@@ -53,28 +52,40 @@ describe("validateDocument", () => {
     }
   });
 
-  it("accepts well-formed evidence and matches source.kind to type", () => {
+  it("accepts well-formed evidence with provenance", () => {
     const ok = validateDocument(
       parsed({
         id: "acme-call",
         type: "meeting",
         subjects: ["acme"],
-        source: { kind: "meeting", ref: "gcal://x", capturedAt: "2026-06-06T14:30:00Z" },
+        source: { ref: "gcal://x", capturedAt: "2026-06-06T14:30:00Z" },
       }),
       "acme-call",
     );
     expect(ok.ok).toBe(true);
 
-    const mismatch = validateDocument(
+    const badTimestamp = validateDocument(
       parsed({
         id: "acme-call",
         type: "meeting",
         subjects: ["acme"],
-        source: { kind: "doc", ref: "gcal://x", capturedAt: "2026-06-06T14:30:00Z" },
+        source: { ref: "gcal://x", capturedAt: "yesterday" },
       }),
       "acme-call",
     );
-    expect(mismatch.ok).toBe(false);
+    expect(badTimestamp.ok).toBe(false);
+  });
+
+  it("accepts a typed related edge but rejects a bad target or type", () => {
+    expect(validateDocument(parsed({ related: [{ type: "employs", target: "jane" }] }), "acme").ok).toBe(
+      true,
+    );
+    expect(
+      validateDocument(parsed({ related: [{ type: "employs", target: "Not An Id" }] }), "acme").ok,
+    ).toBe(false);
+    expect(
+      validateDocument(parsed({ related: [{ type: "Bad Type", target: "jane" }] }), "acme").ok,
+    ).toBe(false);
   });
 
   it("requires merged_into when status is merged", () => {

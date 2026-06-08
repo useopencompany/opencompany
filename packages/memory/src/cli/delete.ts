@@ -29,7 +29,9 @@ export async function del(ctx: CommandContext): Promise<CommandResult> {
   for (const other of await listFiles(root)) {
     if (other.id === id) continue;
     const parsed = parseDocument(other.source);
-    if ((parsed.frontmatter.related ?? []).includes(id)) relatedLinks.push(other.id);
+    if ((parsed.frontmatter.related ?? []).some((rel) => rel.target === id)) {
+      relatedLinks.push(other.id);
+    }
     if (parsed.frontmatter.mergedInto === id) mergedStubs.push(other.id);
     if (
       isEvidenceType(parsed.frontmatter.type) &&
@@ -82,8 +84,8 @@ export async function del(ctx: CommandContext): Promise<CommandResult> {
     const other = await loadValid(root, otherId);
     if (other.kind !== "ok") continue;
     let changed = false;
-    if ((other.doc.frontmatter.related ?? []).includes(id)) {
-      other.doc.frontmatter.related = other.doc.frontmatter.related.filter((r) => r !== id);
+    if ((other.doc.frontmatter.related ?? []).some((r) => r.target === id)) {
+      other.doc.frontmatter.related = other.doc.frontmatter.related.filter((r) => r.target !== id);
       changed = true;
     }
     if (other.doc.frontmatter.subjects?.includes(id)) {

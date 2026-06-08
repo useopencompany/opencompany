@@ -6,7 +6,7 @@ import type {
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
-import { relations, sql } from "drizzle-orm";
+import { relations, type SQL, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -65,6 +65,15 @@ const bytea = customType<{ data: Buffer }>({
       return Buffer.from(hex, "hex");
     }
     throw new Error(`Unexpected bytea value from driver (${typeof value}).`);
+  },
+});
+
+// Postgres full-text search vector. Only ever written by the database (a STORED
+// generated column), so no from/toDriver mapping is needed — the app reads `content`,
+// never the tsvector itself.
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
   },
 });
 
@@ -558,6 +567,62 @@ export const agentSessionMessages = pgTable(
     ),
     responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
       table.responseToMessageId,
+    ),
+  }),
+);
+
+// Derived search index over `agent_session_messages` for cross-session recall. The transcript
+// (sessions + messages) stays the source of truth; chunks are a rebuildable projection: one row
+// per user/assistant message (oversized messages split by char budget into `sub_index` slices),
+// indexed for Postgres FTS (`tsv`) and pg_trgm fuzzy/typo matching (`content`). Populated by an
+// idempotent sweep (see packages/db/src/recall.ts); searched by the runner-side `recall` tool.
+// `agent_id`/`user_id` are denormalized from the session so a scoped search needs no join.
+export const agentSessionMessageChunks = pgTable(
+  "agent_session_message_chunks",
+  {
+    id: serial("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    subIndex: integer("sub_index").notNull().default(0),
+    content: text("content").notNull(),
+    messageCreatedAt: timestamp("message_created_at", { withTimezone: true }).notNull(),
+    tsv: tsvector("tsv").generatedAlwaysAs((): SQL => sql`to_tsvector('english', "content")`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    messageSubIdx: uniqueIndex("agent_session_message_chunks_message_sub_idx").on(
+      table.messageId,
+      table.subIndex,
+    ),
+    // Scope filter for recall: agent + user, with session/recency for ordering and exclusion.
+    scopeIdx: index("agent_session_message_chunks_scope_idx").on(
+      table.agentId,
+      table.userId,
+      table.sessionId,
+      table.messageCreatedAt,
+    ),
+    // Neighbor expansion: walk a session's chunks in transcript order.
+    sessionOrderIdx: index("agent_session_message_chunks_session_order_idx").on(
+      table.sessionId,
+      table.messageCreatedAt,
+      table.subIndex,
+    ),
+    // Keyword relevance (FTS) and typo/fuzzy (trigram) — both GIN.
+    tsvIdx: index("agent_session_message_chunks_tsv_idx").using("gin", table.tsv),
+    contentTrgmIdx: index("agent_session_message_chunks_content_trgm_idx").using(
+      "gin",
+      table.content.op("gin_trgm_ops"),
     ),
   }),
 );

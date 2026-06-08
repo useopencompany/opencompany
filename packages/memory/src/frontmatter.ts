@@ -1,5 +1,5 @@
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import type { MemoryFrontmatter, MemorySource } from "./schema";
+import { DEFAULT_RELATION_TYPE, type MemoryFrontmatter, type MemoryRelation, type MemorySource } from "./schema";
 
 // On-disk YAML uses snake_case (created_at, merged_into, captured_at); the TS model uses
 // camelCase. These two functions are the only place that mapping lives.
@@ -37,13 +37,11 @@ export function parseFrontmatter(yaml: string): Partial<MemoryFrontmatter> {
   if (type) out.type = type as MemoryFrontmatter["type"];
   const status = readString(raw.status);
   if (status) out.status = status as MemoryFrontmatter["status"];
-  const freshness = readString(raw.freshness);
-  if (freshness) out.freshness = freshness as MemoryFrontmatter["freshness"];
   const createdAt = readString(raw.created_at);
   if (createdAt) out.createdAt = createdAt;
   const updatedAt = readString(raw.updated_at);
   if (updatedAt) out.updatedAt = updatedAt;
-  out.related = readStringArray(raw.related);
+  out.related = readRelations(raw.related);
 
   const aliases = readStringArray(raw.aliases);
   if (aliases.length > 0) out.aliases = aliases;
@@ -58,15 +56,37 @@ export function parseFrontmatter(yaml: string): Partial<MemoryFrontmatter> {
   return out;
 }
 
+// Read the typed-edge list, deduping by target (one edge per target). A bare string entry is
+// read as an untyped edge (`{ type: "related", target }`) so legacy `related: [id, id]` files
+// keep working; object entries `{ type, target }` are read as-is.
+function readRelations(value: unknown): MemoryRelation[] {
+  if (!Array.isArray(value)) return [];
+  const out: MemoryRelation[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    let relation: MemoryRelation | null = null;
+    if (typeof item === "string") {
+      const target = readString(item);
+      if (target) relation = { type: DEFAULT_RELATION_TYPE, target };
+    } else if (isRecord(item)) {
+      const target = readString(item.target);
+      if (target) relation = { type: readString(item.type) ?? DEFAULT_RELATION_TYPE, target };
+    }
+    if (relation && !seen.has(relation.target)) {
+      seen.add(relation.target);
+      out.push(relation);
+    }
+  }
+  return out;
+}
+
 function parseSource(value: unknown): MemorySource | null {
   if (!isRecord(value)) return null;
-  const kind = readString(value.kind);
   const ref = readString(value.ref);
   const capturedAt = readString(value.captured_at);
-  if (!kind || !ref || !capturedAt) return null;
+  if (!ref || !capturedAt) return null;
   const author = readString(value.author);
   return {
-    kind: kind as MemorySource["kind"],
     ref,
     capturedAt,
     ...(author ? { author } : {}),
@@ -80,10 +100,9 @@ export function serializeFrontmatter(frontmatter: MemoryFrontmatter): string {
     id: frontmatter.id,
     type: frontmatter.type,
     status: frontmatter.status,
-    freshness: frontmatter.freshness,
     created_at: frontmatter.createdAt,
     updated_at: frontmatter.updatedAt,
-    related: frontmatter.related ?? [],
+    related: (frontmatter.related ?? []).map((r) => ({ type: r.type, target: r.target })),
   };
   if (frontmatter.aliases && frontmatter.aliases.length > 0) record.aliases = frontmatter.aliases;
   if (frontmatter.mergedInto) record.merged_into = frontmatter.mergedInto;
@@ -91,7 +110,6 @@ export function serializeFrontmatter(frontmatter: MemoryFrontmatter): string {
     record.subjects = frontmatter.subjects;
   if (frontmatter.source) {
     record.source = {
-      kind: frontmatter.source.kind,
       ref: frontmatter.source.ref,
       captured_at: frontmatter.source.capturedAt,
       ...(frontmatter.source.author ? { author: frontmatter.source.author } : {}),

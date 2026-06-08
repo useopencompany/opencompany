@@ -32,6 +32,7 @@ export async function query(ctx: CommandContext): Promise<CommandResult> {
       ...(folder ? { folder } : {}),
       ...(since ? { since } : {}),
       limit: args.number("limit") ?? 10,
+      hops: args.number("hops") ?? 0,
       lexicalOnly,
     },
     providers,

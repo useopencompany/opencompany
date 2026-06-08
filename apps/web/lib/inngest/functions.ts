@@ -1,5 +1,6 @@
 import { TOOL_APPROVAL_BACKSTOP_MS } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
+import { indexPendingMessageChunks, RECALL_INDEX_SWEEP_LIMIT } from "@opencompany/db/recall";
 import { agentSessionQuestions, agentToolApprovals } from "@opencompany/db/schema";
 import { and, eq, lt } from "drizzle-orm";
 import {
@@ -72,6 +73,37 @@ export const sweepWorkspaceSyncOutbox = inngest.createFunction(
   },
   async ({ step }) => {
     return runWorkspaceSyncOutboxSweep(step);
+  },
+);
+
+// Cross-session recall index. Chunks completed user/assistant messages into the searchable
+// agent_session_message_chunks projection (see @opencompany/db/recall) so the runner-side `recall`
+// tool can find them. The sweep is idempotent and re-entrant: it drains a fresh session's messages
+// within a minute and backfills history over successive runs. Each run loops a few batches so a
+// backlog catches up quickly without one cron tick doing unbounded work.
+const RECALL_INDEX_SWEEP_CRON = "* * * * *";
+const RECALL_INDEX_SWEEP_MAX_ITERATIONS = 5;
+
+export const sweepRecallIndex = inngest.createFunction(
+  {
+    id: "sweep-recall-index",
+    name: "Sweep cross-session recall index",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: RECALL_INDEX_SWEEP_CRON },
+  },
+  async ({ step }) => {
+    const db = getDb();
+    let indexed = 0;
+    for (let iteration = 0; iteration < RECALL_INDEX_SWEEP_MAX_ITERATIONS; iteration += 1) {
+      const result = (await step.run(`index message chunks ${iteration}`, async () =>
+        indexPendingMessageChunks(db),
+      )) as Awaited<ReturnType<typeof indexPendingMessageChunks>>;
+      indexed += result.indexed;
+      // A non-full batch means the backlog is drained; stop until the next tick.
+      if (result.scanned < RECALL_INDEX_SWEEP_LIMIT) break;
+    }
+    return { indexed };
   },
 );
 
@@ -447,6 +479,7 @@ export const provisionSlackSupportChannel = inngest.createFunction(
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
+  sweepRecallIndex,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,

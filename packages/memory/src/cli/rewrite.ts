@@ -50,10 +50,8 @@ export async function rewrite(ctx: CommandContext): Promise<CommandResult> {
     }
   }
 
-  const freshnessInput = args.get("freshness");
   loaded.doc.compiledTruth = truth;
   loaded.doc.frontmatter.updatedAt = nowIso();
-  loaded.doc.frontmatter.freshness = freshnessInput === "aging" ? "aging" : "fresh";
 
   const relativePath = await persist(root, loaded.doc);
   return ok(`Rewrote compiled truth for "${id}" (cited: ${cited.join(", ")}).`, {

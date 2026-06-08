@@ -422,9 +422,15 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
 - **alias** — add or remove alternate names on a canonical object (retrieval matches on them).
   \`memory alias acme --add "Acme Corp" --remove "ACME"\` (both flags repeatable). An alias another
   object already owns is rejected, so aliases stay globally unique.
+- **link** — add or remove **directional, typed** \`related\` edges between canonical objects.
+  \`memory link acme --to jane --as employs\` — \`--as\` is a freeform lowercase relation type
+  (e.g. \`employs\`, \`works_at\`, \`depends_on\`, \`part_of\`; defaults to \`related\`). \`--to\` and
+  \`--remove\` are repeatable; there's one edge per target, so re-linking updates its type. Edits
+  only the named object's links; query can then expand along them (see \`--hops\` below).
 - **get** — read a file. \`memory get acme\` (add \`--section truth|timeline|frontmatter\`).
 - **query** — hybrid retrieval over everything. \`memory query "acme enterprise blockers"\`
-  Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`.
+  Filter with \`--type\`, \`--status\`, \`--folder\`, \`--since\`, \`--limit\`. Add \`--hops N\` to also pull
+  in objects reachable via \`related\` edges (e.g. \`--hops 1\` surfaces directly-linked neighbours).
 - **merge** — fold a duplicate canonical object into another, then re-synthesize. Aliases, related
   links and timeline move to the survivor; the source becomes a redirect stub.
   \`memory merge --from acme-corp --into acme\` (then \`memory rewrite acme ...\`). Use \`--dry-run\` first.
@@ -433,13 +439,15 @@ Every file has a unique \`id\` that is also its file name. Ids are lowercase slu
   scrubbed automatically; if the target is still cited or is a merge target, it needs \`--force\` and
   you must repair those references afterward (run \`memory doctor\`).
 - **doctor** — health check (broken links, missing provenance, stale truth, duplicates).
-  \`memory doctor\` (add \`--fix-freshness\` to mark stale objects).
+  \`memory doctor\` — a read-only report; fix what it flags with the commands above.
 
 ## How to use it well
 
 - When you learn something durable about a person, company, project, customer, or decision,
   **capture it as evidence first**, then **rewrite** the relevant object's compiled truth citing it.
 - Before answering questions about people, companies, or past decisions, **query** memory.
+- When two objects are connected (a person at a company, a decision on a project), **link** them
+  so future queries can hop between them with \`--hops\`. A well-linked graph retrieves better.
 - Keep compiled truth tight and current; let the timeline hold the history.
 - Run **doctor** occasionally and after merges to catch broken links and stale summaries.
 - Prefer **merge** over **delete** when two objects are the same thing — it preserves the evidence

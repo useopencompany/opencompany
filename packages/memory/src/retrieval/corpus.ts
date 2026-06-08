@@ -1,6 +1,6 @@
 import { parseDocument } from "../document";
 import { idFromRelativePath } from "../paths";
-import type { MemoryStatus, MemoryType } from "../schema";
+import type { MemoryRelation, MemoryStatus, MemoryType } from "../schema";
 import { listFiles } from "../store";
 
 // A flattened, searchable view of one memory file. Compiled truth and timeline text are kept
@@ -16,6 +16,8 @@ export type IndexRecord = {
   timelineText: string;
   updatedAt: string;
   capturedAt: string;
+  // Outbound typed graph edges (directional) to other memory ids, used for N-hop query expansion.
+  related: MemoryRelation[];
 };
 
 // Build the corpus by walking the memory root and leniently parsing each file. Files that fail
@@ -39,6 +41,7 @@ export async function buildCorpus(root: string): Promise<IndexRecord[]> {
       timelineText: parsed.timeline.map((entry) => entry.body).join("\n"),
       updatedAt: fm.updatedAt ?? "",
       capturedAt: fm.source?.capturedAt ?? "",
+      related: fm.related ?? [],
     });
   }
   return records;

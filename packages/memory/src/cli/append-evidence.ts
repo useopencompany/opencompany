@@ -9,7 +9,7 @@ import { type CommandContext, type CommandResult, fail, ok } from "./io";
 // Record an immutable evidence file and link it to its subjects. Evidence requires provenance
 // (kind + source ref) and at least one existing canonical subject. Appending an evidence
 // timeline entry to each subject does NOT touch the subject's compiled truth or updated_at —
-// only `rewrite` advances compiled truth, keeping freshness meaningful.
+// only `rewrite` advances compiled truth, keeping recency meaningful.
 export async function appendEvidence(ctx: CommandContext): Promise<CommandResult> {
   const { args, root } = ctx;
   const kind = args.get("kind");
@@ -59,13 +59,11 @@ export async function appendEvidence(ctx: CommandContext): Promise<CommandResult
       id,
       type: kind as EvidenceType,
       status: "active",
-      freshness: "fresh",
       createdAt: now,
       updatedAt: now,
       related: [],
       subjects,
       source: {
-        kind: kind as EvidenceType,
         ref: sourceRef,
         capturedAt,
         ...(author ? { author } : {}),

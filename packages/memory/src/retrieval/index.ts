@@ -12,6 +12,8 @@ export type QueryOptions = {
   since?: string;
   limit?: number;
   lexicalOnly?: boolean;
+  // Number of `related`-edge hops to expand the result set by (0 = no graph expansion).
+  hops?: number;
 };
 
 // Optional model-backed stages, injected by the runtime when an AI Gateway key is available.
@@ -70,7 +72,7 @@ export async function query(
     }
   }
 
-  // 4) Fuse. With no signal at all (empty query), fall back to a freshness listing.
+  // 4) Fuse. With no signal at all (empty query), fall back to a recency listing.
   const lists = [...lexicalLists, ...(vectorList.length > 0 ? [vectorList] : [])];
   let relevanceById: Map<string, number>;
   if (lists.length === 0) {
@@ -100,7 +102,34 @@ export async function query(
     }
   }
 
-  // 6) Freshness/position blend, then materialize hits.
+  // 5b) Graph expansion (opt-in) — fold in memories reachable via `related` edges, up to N hops.
+  // Expanded nodes inherit a damped fraction of their parent's relevance so they rank below the
+  // direct matches that pulled them in. Only ids that survived the candidate filters are eligible.
+  const hops = options.hops ?? 0;
+  if (hops > 0 && ordered.length > 0) {
+    const HOP_DECAY = 0.5;
+    const relevanceByIdExpanded = new Map(ordered.map(({ id, relevance }) => [id, relevance]));
+    let frontier = [...ordered];
+    for (let hop = 0; hop < hops && frontier.length > 0; hop++) {
+      const next: Array<{ id: string; relevance: number }> = [];
+      for (const { id, relevance } of frontier) {
+        const record = byId.get(id);
+        if (!record) continue;
+        for (const { target } of record.related) {
+          if (relevanceByIdExpanded.has(target) || !byId.has(target)) continue;
+          const expandedRelevance = relevance * HOP_DECAY;
+          relevanceByIdExpanded.set(target, expandedRelevance);
+          next.push({ id: target, relevance: expandedRelevance });
+        }
+      }
+      frontier = next;
+    }
+    ordered = [...relevanceByIdExpanded.entries()]
+      .map(([id, relevance]) => ({ id, relevance }))
+      .sort((a, b) => b.relevance - a.relevance);
+  }
+
+  // 6) Recency/position blend, then materialize hits.
   const scored = ordered
     .map(({ id, relevance }) => {
       const record = byId.get(id);

@@ -9,6 +9,7 @@ import { del } from "./delete";
 import { doctor } from "./doctor";
 import { get } from "./get";
 import { type CommandContext, type CommandResult, fail, render } from "./io";
+import { link } from "./link";
 import { merge } from "./merge";
 import { query } from "./query";
 import { rewrite } from "./rewrite";
@@ -20,6 +21,7 @@ const COMMANDS: Record<string, (ctx: CommandContext) => Promise<CommandResult>> 
   "append-evidence": appendEvidence,
   rewrite,
   alias,
+  link,
   merge,
   delete: del,
   doctor,
@@ -32,13 +34,14 @@ Usage: memory <command> [options]
 Commands:
   create           Create a canonical object (person|company|project|customer|decision|concept|theme)
   get              Fetch a memory file (--section truth|timeline|frontmatter|all, --follow)
-  query            Hybrid retrieval over the tree (--type, --status, --folder, --since, --limit, --lexical-only)
+  query            Hybrid retrieval over the tree (--type, --status, --folder, --since, --limit, --hops, --lexical-only)
   append-evidence  Record immutable evidence and link it to canonical subjects
   rewrite          Update compiled truth (requires [^ev:<id>] citations to linked evidence)
   alias            Add or remove aliases on a canonical object (--add, --remove, repeatable)
+  link             Add or remove directional, typed related edges (--to, --as <type>, --remove)
   merge            Resolve a duplicate canonical object into another (--from, --into, --dry-run)
   delete           Permanently remove a memory file (--force, --dry-run); scrubs inbound links
-  doctor           Check integrity (--fix-freshness)
+  doctor           Check integrity (broken links, provenance, stale truth, duplicates)
 
 Global options:
   --root <path>    Memory root (default: agent/memory)
