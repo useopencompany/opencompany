@@ -33,6 +33,7 @@ import {
   fileNameFromPath,
   resolveBrainFileRenameName,
 } from "@/lib/brain/file-names";
+import { formatBrainRelativeTime } from "@/lib/brain/relative-time";
 import {
   ancestorFolderPaths,
   type BrainTreeNode,
@@ -1103,11 +1104,14 @@ export default function BrainView({
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle bg-canvas/85 px-5 backdrop-blur-md">
           {selected ? (
             <>
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[12.5px]">
-                <FileIcon path={selected.path} />
-                <span title={selected.path} className="min-w-0 truncate font-medium text-ink">
-                  {fileNameFromPath(selected.path)}
-                </span>
+              <div className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px]">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <FileIcon path={selected.path} />
+                  <span title={selected.path} className="min-w-0 truncate font-medium text-ink">
+                    {fileNameFromPath(selected.path)}
+                  </span>
+                </div>
+                <BrainUpdatedAt updatedAt={selected.updatedAt} />
               </div>
               <BrainCopyButton
                 className="ml-auto shrink-0"
@@ -2118,4 +2122,23 @@ function formatBrainDate(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+// Always-visible "Updated 2 hours ago" label in the file header. The relative
+// label is friendliest for "when did this last change"; the exact date is one
+// hover away. suppressHydrationWarning: the relative value is computed against
+// the wall clock, which can differ by a tick between SSR and hydration.
+function BrainUpdatedAt({ updatedAt }: { updatedAt: string }) {
+  const parsed = new Date(updatedAt);
+  const isValid = !Number.isNaN(parsed.getTime());
+  return (
+    <time
+      dateTime={isValid ? parsed.toISOString() : undefined}
+      title={isValid ? `Last updated ${formatBrainDate(updatedAt)}` : undefined}
+      suppressHydrationWarning
+      className="shrink-0 whitespace-nowrap text-[11.5px] text-ink-subtle"
+    >
+      Updated {formatBrainRelativeTime(updatedAt)}
+    </time>
+  );
 }

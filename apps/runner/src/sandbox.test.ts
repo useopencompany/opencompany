@@ -218,6 +218,54 @@ describe("prepareWorkspace", () => {
     );
   });
 
+  it("wires the GitHub credential helper so plain git can authenticate", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+    });
+
+    expect(
+      sandbox.commands.run.mock.calls.some(
+        ([command]) =>
+          String(command).includes("credential.https://github.com.helper") &&
+          String(command).includes("!gh auth git-credential"),
+      ),
+    ).toBe(true);
+  });
+
+  it("installs rg and bun on demand without blocking on failure", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0 }),
+      },
+      files: {
+        write: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+
+    await prepareWorkspace({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      agentFile: "agent",
+    });
+
+    const toolingCall = sandbox.commands.run.mock.calls.find(([command]) =>
+      String(command).includes("command -v rg"),
+    );
+    expect(toolingCall).toBeDefined();
+    expect(String(toolingCall?.[0])).toContain("command -v bun");
+  });
+
   it("matches tokenized GitHub remotes without exposing the token", () => {
     expect(
       githubRemoteMatches(
@@ -549,6 +597,54 @@ describe("runSandboxTool", () => {
     );
     expect(onOutput).toHaveBeenCalledWith("stderr", "using [redacted]\n");
     expect(result).toEqual({ stdout: "ok [redacted]", stderr: "", exitCode: 0 });
+  });
+
+  it("does not attach a permissionHint to a successful gh command that merely echoes the 403 phrase", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn().mockResolvedValue({
+          // A successful `gh issue view`/`gh pr view` whose body quotes the phrase must not be
+          // mistaken for a permission denial.
+          stdout: "Body: we hit a 403 Resource not accessible by integration last week",
+          stderr: "",
+          exitCode: 0,
+        }),
+      },
+    };
+
+    const result = (await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "issue view 339" },
+    })) as { permissionHint?: string };
+
+    expect(result.permissionHint).toBeUndefined();
+  });
+
+  it("attaches a permissionHint when a gh command fails with the 403 permission error", async () => {
+    const sandbox = {
+      commands: {
+        run: vi.fn(async () => {
+          throw Object.assign(new Error("exit status 1"), {
+            name: "CommandExitError",
+            stdout: "",
+            stderr: "GraphQL: Resource not accessible by integration (createIssue)",
+            exitCode: 1,
+          });
+        }),
+      },
+    };
+
+    const result = (await runSandboxTool({
+      sandbox: sandbox as never,
+      workdir: "/home/user/workspace",
+      name: "gh",
+      args: { args: "issue create --title T" },
+    })) as { exitCode: number | null; permissionHint?: string };
+
+    expect(result.exitCode).toBe(1);
+    expect(result.permissionHint).toMatch(/Issues: Read/);
   });
 
   it("quotes parsed gh arguments before dispatching through the sandbox shell", async () => {

@@ -12,11 +12,19 @@ export type PersistedModelMessage = Record<string, unknown>;
 type AssistantContentPart = Extract<AssistantModelMessage["content"], unknown[]>[number];
 type ReasoningReplayPart = Extract<AssistantContentPart, { type: "reasoning" }>;
 
+export type ReplayAttachment = {
+  kind: "image" | "pdf" | "text";
+  mediaType: string;
+  filename: string;
+  base64: string; // hydrated by the loader (bytes downloaded from Blob)
+};
+
 export type StoredSessionMessageForModelReplay = {
   id?: string;
   role: string;
   content: string;
   modelMessage?: PersistedModelMessage | null;
+  attachments?: ReplayAttachment[];
 };
 
 export type AssistantReplayPart = ReasoningReplayPart | TextPart | ToolCallPart;
@@ -34,6 +42,31 @@ export function buildModelMessages(
     const message = storedMessages[index];
     if (!message) continue;
     const modelMessage = readStoredModelMessage(message);
+
+    if (message.role === "user" && message.attachments && message.attachments.length > 0) {
+      const parts: Array<Record<string, unknown>> = [];
+      if (message.content) parts.push({ type: "text", text: message.content });
+      for (const att of message.attachments) {
+        if (att.kind === "image") {
+          // modelMessageSchema (ai@6) accepts a raw base64 string for `image` (DataContent).
+          parts.push({ type: "image", image: att.base64, mediaType: att.mediaType });
+        } else if (att.kind === "text") {
+          // Text/code files are inlined as plain text (not base64) so every model can read
+          // them with no file/vision capability — the bytes are UTF-8 decoded here.
+          const text = Buffer.from(att.base64, "base64").toString("utf8");
+          parts.push({ type: "text", text: `\n\nAttached file "${att.filename}":\n\n${text}` });
+        } else {
+          parts.push({
+            type: "file",
+            data: att.base64,
+            mediaType: att.mediaType,
+            filename: att.filename,
+          });
+        }
+      }
+      messages.push(validateModelMessage({ role: "user", content: parts }, message.id));
+      continue;
+    }
 
     if (isAssistantMessageWithToolCalls(modelMessage)) {
       const toolMessagesByCallId = new Map<string, ToolModelMessage>();
@@ -132,12 +165,12 @@ export function validateModelMessage(value: unknown, messageId = "unknown"): Mod
 
 export function serializeToolOutputForStorage(output: unknown) {
   try {
-    const serialized = JSON.stringify(output);
+    const serialized = stringifyJsonForStorage(output);
     if (serialized !== undefined) return serialized;
   } catch {
     // Fall through to a text representation for non-JSON values.
   }
-  return String(output);
+  return sanitizeStringForJsonStorage(String(output));
 }
 
 function legacyModelMessage(message: StoredSessionMessageForModelReplay): ModelMessage | null {
@@ -286,10 +319,51 @@ function toToolResultOutput(output: unknown): ToolResultPart["output"] {
 
 function toJsonValue(output: unknown): { ok: true; value: unknown } | { ok: false } {
   try {
-    const serialized = JSON.stringify(output);
+    const serialized = stringifyJsonForStorage(output);
     if (serialized === undefined) return { ok: false };
     return { ok: true, value: JSON.parse(serialized) };
   } catch {
     return { ok: false };
   }
+}
+
+function stringifyJsonForStorage(value: unknown) {
+  return JSON.stringify(value, (_key, nestedValue: unknown) => {
+    if (typeof nestedValue === "string") {
+      return sanitizeStringForJsonStorage(nestedValue);
+    }
+    return nestedValue;
+  });
+}
+
+function sanitizeStringForJsonStorage(value: string) {
+  return replaceLoneSurrogates(value).replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+    "\uFFFD",
+  );
+}
+
+function replaceLoneSurrogates(value: string) {
+  let output = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        output += value.slice(index, index + 2);
+        index += 1;
+      } else {
+        output += "\uFFFD";
+      }
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      output += "\uFFFD";
+      continue;
+    }
+
+    output += value.charAt(index);
+  }
+  return output;
 }

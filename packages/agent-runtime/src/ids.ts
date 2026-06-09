@@ -6,6 +6,10 @@ export function newAgentSessionMessageId() {
   return `msg_${randomSuffix()}`;
 }
 
+export function newAgentSessionMessageAttachmentId() {
+  return `att_${randomSuffix()}`;
+}
+
 export function newRunLeaseId() {
   return `run_${randomSuffix()}`;
 }

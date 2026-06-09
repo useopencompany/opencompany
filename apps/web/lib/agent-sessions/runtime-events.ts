@@ -18,6 +18,12 @@ export type SessionMessage = {
   createdAt?: string | undefined;
   completedAt?: string | null | undefined;
   thinkingDurationSeconds?: number | undefined;
+  attachments?: Array<{
+    id: string;
+    kind: "image" | "pdf" | "text";
+    mediaType: string;
+    filename: string;
+  }>;
 };
 
 export type RuntimeEvent = {
