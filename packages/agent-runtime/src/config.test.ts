@@ -118,7 +118,7 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).not.toContain("User last name:");
   });
 
-  const hotMemoryConfig = (): AgentConfig => ({
+  const profileConfig = (): AgentConfig => ({
     schemaVersion: "agent.v1",
     title: "Personal agent",
     instructions: "Help the user.",
@@ -129,43 +129,38 @@ describe("resolveAgentRuntimeConfig", () => {
     triggers: [],
   });
 
-  it("injects populated hot-memory files verbatim into the system prompt", () => {
+  it("injects the populated profile verbatim into the system prompt", () => {
     const resolved = resolveAgentRuntimeConfig({
-      agent: hotMemoryConfig(),
+      agent: profileConfig(),
       userMemory: "Goes by Lou. Prefers terse answers.",
-      agentMemory: "Monorepo uses pnpm + turbo.",
     });
 
-    expect(resolved.systemPrompt).toContain("## Your hot memory");
+    expect(resolved.systemPrompt).toContain("## Your profile");
     expect(resolved.systemPrompt).toContain("Goes by Lou. Prefers terse answers.");
-    expect(resolved.systemPrompt).toContain("Monorepo uses pnpm + turbo.");
-    // No invitation placeholder when a file has content.
+    // No invitation placeholder when the profile has content.
     expect(resolved.systemPrompt).not.toContain("(empty — populate this as you learn");
   });
 
-  it("injects labeled empty sections inviting population when hot-memory files are absent", () => {
-    const resolved = resolveAgentRuntimeConfig({ agent: hotMemoryConfig() });
+  it("injects a labeled empty section inviting population when the profile is absent", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig() });
 
-    expect(resolved.systemPrompt).toContain("## Your hot memory");
+    expect(resolved.systemPrompt).toContain("## Your profile");
     expect(resolved.systemPrompt).toContain(
-      "(empty — populate this as you learn durable facts about your user)",
-    );
-    expect(resolved.systemPrompt).toContain(
-      "(empty — populate this with durable environment/workflow facts)",
+      "(empty — populate this as you learn who your user is)",
     );
   });
 
-  it("truncates an oversized hot-memory file with a marker and bounds its length", () => {
+  it("truncates an oversized profile with a marker and bounds its length", () => {
     const big = "x".repeat(10_000);
     const resolved = resolveAgentRuntimeConfig({
-      agent: hotMemoryConfig(),
+      agent: profileConfig(),
       userMemory: big,
     });
 
     expect(resolved.systemPrompt).toContain("[truncated");
     expect(resolved.systemPrompt).not.toContain(big);
-    // The injected user.md body must not exceed the cap (+ marker slack).
-    const section = resolved.systemPrompt.slice(resolved.systemPrompt.indexOf("### user.md"));
+    // The injected profile body must not exceed the cap (+ marker slack).
+    const section = resolved.systemPrompt.slice(resolved.systemPrompt.indexOf("## Your profile"));
     expect(Buffer.byteLength(section, "utf8")).toBeLessThan(3500);
   });
 

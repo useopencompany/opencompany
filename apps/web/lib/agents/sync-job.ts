@@ -29,7 +29,7 @@ export function resolveAgentSyncRename(input: {
   };
 }
 
-// Enqueues an agent bundle file (memory.md, etc.) into the unified workspace
+// Enqueues an agent bundle file (user.md, etc.) into the unified workspace
 // projection outbox. `path` is the full repo path (agents/<slug>/...).
 export function agentFileSyncJobUpsert(
   db: Db,

@@ -620,7 +620,7 @@ export async function deleteAgent(
   }
 
   // Enqueue async deletion of the agent's repo files (the .agent definition and
-  // any bundle files such as agent/memory.md) through the unified projector. We
+  // any bundle files such as agent/user.md) through the unified projector. We
   // read the bundle files before the cascade delete below removes the agentFiles
   // rows. NOTE: unlike the previous GitHub-first delete, this is asynchronous —
   // a deleted agent's files linger in the repo until the next projection commit,
