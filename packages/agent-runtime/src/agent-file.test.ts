@@ -137,6 +137,27 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Better Stack MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Better Stack ops",
+      body: "Investigate production telemetry with @betterstack.",
+    });
+
+    expect(source).toContain("id: betterstack");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: betterstack");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "betterstack",
+        type: "mcp",
+        server: "betterstack",
+        label: "betterstack",
+        description: "Use workspace-configured Better Stack MCP tools.",
+      },
+    ]);
+  });
+
   test("round-trips X hosted tool config without secrets", () => {
     const source = serializeAgentFile({
       title: "X research",

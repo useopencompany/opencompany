@@ -100,6 +100,21 @@ const slackAgentConfig: AgentConfig = {
   ],
 };
 
+const betterStackAgentConfig: AgentConfig = {
+  ...agentConfig,
+  title: "Better Stack",
+  instructions: "Use @betterstack.",
+  tools: [
+    {
+      id: "betterstack",
+      type: "mcp",
+      server: "betterstack",
+      label: "betterstack",
+      description: "Use workspace-configured Better Stack MCP tools.",
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey());
@@ -594,6 +609,43 @@ describe("createMcpToolSet", () => {
     await mcpTools.close();
     expect(mcpClient.close).toHaveBeenCalled();
   });
+
+  it("loads Better Stack MCP OAuth tools with dynamic client credentials", async () => {
+    db.queryResults = [[betterStackServerRow()], [betterStackOAuthConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({
+      tools: [{ name: "telemetry_query", description: "Run a telemetry query" }],
+    } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      telemetry_query: { description: "Run a telemetry query", execute: vi.fn() },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(betterStackAgentConfig));
+
+    expect((mcpTools.tools as ToolSet).betterstack__search_tools).toBeDefined();
+    expect((mcpTools.tools as ToolSet).betterstack__use_tool).toBeDefined();
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          type: "http",
+          url: "https://mcp.betterstack.com",
+          authProvider: expect.any(Object),
+        }),
+      }),
+    );
+    const call = vi.mocked(createMCPClient).mock.calls.at(-1)?.[0] as {
+      transport?: { authProvider?: { tokens: () => unknown; clientInformation: () => unknown } };
+    };
+    expect(call.transport?.authProvider?.tokens()).toEqual({
+      access_token: "betterstack_access",
+      refresh_token: "betterstack_refresh",
+      token_type: "Bearer",
+    });
+    expect(call.transport?.authProvider?.clientInformation()).toEqual({
+      client_id: "betterstack_client",
+    });
+
+    await mcpTools.close();
+  });
 });
 
 function baseInput(
@@ -679,6 +731,34 @@ function slackOAuthConnectionRow() {
       },
       "oauth",
       "wmcps_slack",
+    ),
+  };
+}
+
+function betterStackServerRow() {
+  return {
+    id: "wmcps_betterstack",
+    endpointUrl: "https://mcp.betterstack.com",
+    status: "configured",
+  };
+}
+
+function betterStackOAuthConnectionRow() {
+  return {
+    serverId: "wmcps_betterstack",
+    credentialKind: "oauth",
+    encryptionKeyVersion: 1,
+    encryptedPayload: encryptPayload(
+      {
+        clientInformation: { client_id: "betterstack_client" },
+        tokens: {
+          access_token: "betterstack_access",
+          refresh_token: "betterstack_refresh",
+          token_type: "Bearer",
+        },
+      },
+      "oauth",
+      "wmcps_betterstack",
     ),
   };
 }

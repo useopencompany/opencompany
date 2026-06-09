@@ -24,15 +24,19 @@ beforeEach(() => {
 });
 
 describe("loadWorkspaceMcpSettingsForWorkspace", () => {
-  it("reports Linear and Slack MCP configured states independently", async () => {
+  it("reports MCP provider configured states independently", async () => {
     db.queryResults = [
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
+        mcpServerRow("wmcps_posthog", "posthog", "configured"),
+        mcpServerRow("wmcps_betterstack", "betterstack", "configured"),
       ],
       [
         { serverKey: "linear", kind: "bearer_token" },
         { serverKey: "slack", kind: "oauth" },
+        { serverKey: "posthog", kind: "oauth" },
+        { serverKey: "betterstack", kind: "oauth" },
       ],
     ];
 
@@ -46,6 +50,16 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
     expect(settings.slack).toMatchObject({
       configured: true,
       serverId: "wmcps_slack",
+      status: "configured",
+    });
+    expect(settings.posthog).toMatchObject({
+      configured: true,
+      serverId: "wmcps_posthog",
+      status: "configured",
+    });
+    expect(settings.betterstack).toMatchObject({
+      configured: true,
+      serverId: "wmcps_betterstack",
       status: "configured",
     });
   });
@@ -68,7 +82,7 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
 
 function mcpServerRow(
   id: string,
-  serverKey: "linear" | "slack",
+  serverKey: "linear" | "slack" | "posthog" | "betterstack",
   status: "configured" | "missing_credential" | "disabled" | "error",
 ) {
   return {

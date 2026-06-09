@@ -6,13 +6,14 @@ import {
   type LucideIcon,
   Mail,
   MessageSquare,
+  Monitor,
 } from "lucide-react";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 
 // The integrations a /personal agent can attach. Each entry maps to the same @-mention the agent
 // could write itself (see PERSONAL_INTEGRATION_MENTIONS) — first-party OAuth integrations
-// (GitHub, Gmail, Google Calendar) and workspace MCP servers (Linear, Slack, PostHog) are all
-// surfaced together as "integrations". `connectUrl` points at the existing OAuth start route; the
+// (GitHub, Gmail, Google Calendar) and workspace MCP servers (Linear, Slack, PostHog, Better Stack)
+// are all surfaced together as "integrations". `connectUrl` points at the existing OAuth start route; the
 // connect flow runs in a popup window that lands on /onboarding/connected (a tiny popup-closer that
 // messages the opener and closes), so the integrations tab never navigates away.
 
@@ -87,6 +88,14 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/posthog/start?returnTo=${encodeURIComponent(returnTo)}`,
   },
+  {
+    id: "betterstack",
+    label: "Better Stack",
+    description: "Query observability, incidents, monitors, and status pages.",
+    icon: Monitor,
+    kind: "mcp",
+    connectUrl: (returnTo) => `/api/mcp/betterstack/start?returnTo=${encodeURIComponent(returnTo)}`,
+  },
 ];
 
 const CATALOG_BY_ID = new Map(PERSONAL_INTEGRATIONS_CATALOG.map((entry) => [entry.id, entry]));
@@ -110,4 +119,5 @@ export const PERSONAL_INTEGRATION_TOOL_IDS = new Set<string>([
   "linear",
   "slack",
   "posthog",
+  "betterstack",
 ]);

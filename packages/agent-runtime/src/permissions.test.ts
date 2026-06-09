@@ -119,6 +119,22 @@ describe("classifyMcpTool", () => {
       providerKey: "linear",
       group: "modify",
     });
+    expect(classifyTool("betterstack__telemetry_query")).toEqual({
+      providerKey: "betterstack",
+      group: "read",
+    });
+    expect(classifyTool("betterstack__uptime_create_incident_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "post",
+    });
+    expect(classifyTool("betterstack__telemetry_edit_chart_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "modify",
+    });
+    expect(classifyTool("betterstack__telemetry_remove_dashboard_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "admin",
+    });
   });
 
   it("falls back to the verb heuristic for unmapped MCP tools", () => {

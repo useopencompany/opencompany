@@ -24,6 +24,7 @@ import {
   Mail,
   MessageSquare,
   MessagesSquare,
+  Monitor,
   Music2,
   Plus,
   Search,
@@ -165,6 +166,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,
+  betterstack: Monitor,
   gmail: Mail,
   google_calendar: CalendarDays,
 };
@@ -346,9 +348,7 @@ export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentS
 // All tools are always available. MCP-backed tools (Linear, Slack) that are already
 // connected behave normally; not-yet-connected ones stay selectable but carry
 // `needsSetup`/`connectUrl` so the UI can flag them and link to the connect flow.
-function buildToolMentionItems(options: {
-  enabledMcpToolIds?: AgentToolId[];
-}): AgentTool[] {
+function buildToolMentionItems(options: { enabledMcpToolIds?: AgentToolId[] }): AgentTool[] {
   return AGENT_TOOLS.flatMap((tool) => {
     if (tool.kind !== "tool" || !isMcpToolId(tool.id)) return [tool];
     const connected = Boolean(options.enabledMcpToolIds?.includes(tool.id));
@@ -395,7 +395,7 @@ function agentMentionId(path: string) {
 }
 
 function isMcpToolId(id: AgentToolId) {
-  return id === "linear" || id === "slack" || id === "posthog";
+  return id === "linear" || id === "slack" || id === "posthog" || id === "betterstack";
 }
 
 function repositoryMentionId(repository: {

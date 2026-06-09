@@ -5,6 +5,7 @@ import {
   type LucideIcon,
   Mail,
   MessageSquare,
+  Monitor,
   Rocket,
   SquareKanban,
   UserRoundCog,
@@ -40,7 +41,8 @@ export const ONBOARDING_SETUPS: OnboardingSetup[] = [
   {
     id: "co-founder",
     title: "Co-founder",
-    description: "A thinking partner for strategy, product, and the hard calls — moves fast with me.",
+    description:
+      "A thinking partner for strategy, product, and the hard calls — moves fast with me.",
     icon: Rocket,
     integrations: ["linear", "github", "slack"],
     starterTask: "Help me think through the most important thing I should be working on right now",
@@ -69,7 +71,7 @@ export const ONBOARDING_CONNECTED_MESSAGE = "oc-integration-connected" as const;
 
 export type OnboardingConnectedMessage = {
   type: typeof ONBOARDING_CONNECTED_MESSAGE;
-  // Equals a PersonalIntegrationId (github, gmail, google_calendar, linear, slack, posthog).
+  // Equals a PersonalIntegrationId (github, gmail, google_calendar, linear, slack, posthog, betterstack).
   provider: string | null;
   status: string | null;
   reason: string | null;
@@ -133,5 +135,12 @@ export const ONBOARDING_INTEGRATIONS: OnboardingIntegration[] = [
     description: "Pull product analytics and usage insights.",
     icon: BarChart3,
     connectHref: `/api/mcp/posthog/start?returnTo=${ONBOARDING_RETURN_TO}`,
+  },
+  {
+    id: "betterstack",
+    label: "Better Stack",
+    description: "Pull observability, incidents, and uptime context.",
+    icon: Monitor,
+    connectHref: `/api/mcp/betterstack/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },
 ];

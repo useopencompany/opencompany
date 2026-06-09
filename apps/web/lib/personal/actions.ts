@@ -207,8 +207,8 @@ export async function resetPersonalAgent(): Promise<ResetPersonalAgentResult> {
 // The integrations the manual "Add integration" button and the onboarding integrations step can
 // append, keyed by the @-mention token written into the body. Each mention maps to an entry in the
 // runtime AGENT_TOOL_CATALOG, so enabling here is identical to the user typing the mention in
-// Behavior. MCP providers (linear/slack/posthog) are enabled per-agent via the mention but connected
-// at the workspace level via OAuth; the runner renders a graceful "enabled but not connected"
+// Behavior. MCP providers (linear/slack/posthog/betterstack) are enabled per-agent via the mention
+// but connected at the workspace level via OAuth; the runner renders a graceful "enabled but not connected"
 // placeholder until that's done, so writing the mention early is safe.
 const PERSONAL_INTEGRATION_MENTIONS = {
   github: "@github",
@@ -217,6 +217,7 @@ const PERSONAL_INTEGRATION_MENTIONS = {
   linear: "@linear",
   slack: "@slack",
   posthog: "@posthog",
+  betterstack: "@betterstack",
 } as const;
 
 export type PersonalIntegrationId = keyof typeof PERSONAL_INTEGRATION_MENTIONS;
@@ -415,10 +416,7 @@ type SetNameResult = { ok: true; config: AgentConfig } | { ok: false; error: str
  * source/hash would drift from the displayed name. Local-only and scoped to the caller's own default
  * agent, like {@link updatePersonalAgentBehavior}.
  */
-export async function setPersonalAgentName(
-  agentId: string,
-  name: string,
-): Promise<SetNameResult> {
+export async function setPersonalAgentName(agentId: string, name: string): Promise<SetNameResult> {
   const trimmed = name.trim();
   if (!trimmed) return { ok: false, error: "Enter a name for your agent." };
   if (trimmed.length > 60) return { ok: false, error: "Keep the agent name under 60 characters." };

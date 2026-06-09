@@ -6,6 +6,9 @@ import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
 import {
+  BETTERSTACK_MCP_ENDPOINT_URL,
+  BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
+  BETTERSTACK_MCP_SERVER_KEY,
   LINEAR_MCP_ENDPOINT_URL,
   LINEAR_MCP_SERVER_KEY,
   type McpProviderKey,
@@ -97,6 +100,23 @@ export async function removePostHogMcpConnection() {
   return { ok: true as const };
 }
 
+export async function removeBetterStackMcpConnection() {
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  const server = await upsertBetterStackMcpServer(
+    workspace.id,
+    "missing_credential",
+    "Better Stack MCP connection was removed.",
+  );
+  await deleteMcpCredential({
+    workspaceId: workspace.id,
+    serverId: server.id,
+    kind: BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
+  });
+
+  revalidateMcpPaths();
+  return { ok: true as const };
+}
+
 export async function upsertLinearMcpServer(
   workspaceId: string,
   status: "configured" | "missing_credential" | "error",
@@ -137,6 +157,21 @@ export async function upsertPostHogMcpServer(
     serverKey: POSTHOG_MCP_SERVER_KEY,
     displayName: "PostHog",
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
+    status,
+    statusReason,
+  });
+}
+
+export async function upsertBetterStackMcpServer(
+  workspaceId: string,
+  status: "configured" | "missing_credential" | "error",
+  statusReason: string | null,
+) {
+  return upsertMcpServer({
+    workspaceId,
+    serverKey: BETTERSTACK_MCP_SERVER_KEY,
+    displayName: "Better Stack",
+    endpointUrl: BETTERSTACK_MCP_ENDPOINT_URL,
     status,
     statusReason,
   });

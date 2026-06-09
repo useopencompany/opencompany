@@ -254,6 +254,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     credentialSource: "workspace",
   },
   {
+    id: "betterstack",
+    type: "mcp",
+    server: "betterstack",
+    label: "betterstack",
+    description: "Use workspace-configured Better Stack MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
+  {
     id: "gmail",
     type: "hosted_tool",
     label: "gmail",

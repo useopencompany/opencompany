@@ -504,7 +504,14 @@ describe("buildCapabilityDiscovery", () => {
     // Platform/mixed hosted + coding capabilities are present...
     expect(ids).toEqual(expect.arrayContaining(["exa", "x", "youtube", "amp", "opencode"]));
     // ...workspace-OAuth capabilities (MCP servers + Google tools) are not discoverable in v1.
-    for (const excluded of ["linear", "slack", "posthog", "gmail", "google_calendar"]) {
+    for (const excluded of [
+      "linear",
+      "slack",
+      "posthog",
+      "betterstack",
+      "gmail",
+      "google_calendar",
+    ]) {
       expect(ids).not.toContain(excluded);
     }
     // The discoverable set is exactly the platform/mixed-credential hosted/coding entries.

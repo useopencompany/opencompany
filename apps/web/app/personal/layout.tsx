@@ -53,6 +53,7 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     linear: mcpSettings.linear.configured,
     slack: mcpSettings.slack.configured,
     posthog: mcpSettings.posthog.configured,
+    betterstack: mcpSettings.betterstack.configured,
   };
 
   return (
