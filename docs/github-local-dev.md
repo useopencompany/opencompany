@@ -19,6 +19,17 @@ stable domain.
 ## GitHub App Settings
 
 Create or copy a GitHub App for local development. Match the production app permissions and events.
+
+**Repository permissions** the work integration App needs (grant these on both the dev and
+production Apps; expanding scope on an existing App requires the org installation to re-approve):
+
+- **Contents:** Read & write — clone, branch, commit, push.
+- **Pull requests:** Read & write — open/update PRs.
+- **Issues:** Read & write — `gh issue create` and the Issues API. Without this, those calls fail with
+  `403 Resource not accessible by integration` (the runner surfaces an actionable hint, but the
+  operation stays blocked until the grant + re-approval land).
+- **Metadata:** Read-only (mandatory baseline).
+
 For the current integration flow:
 
 - Set **Setup URL** to `https://your-static-domain.ngrok.app/api/integrations/github/callback`.
