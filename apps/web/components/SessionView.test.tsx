@@ -18,6 +18,7 @@ import {
   submitAgentSessionQuestionResponse,
 } from "@/lib/agent-sessions/actions";
 import type { AgentSessionDetailPayload } from "@/lib/agent-sessions/payload";
+import { TOOL_STEP_LIMIT_EXCEEDED_MESSAGE } from "@/lib/agent-sessions/resumable";
 import type {
   AssistantTurnPart,
   RuntimeToolCall,
@@ -1050,6 +1051,35 @@ describe("SessionViewContent — interrupted continue", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  });
+
+  it("shows a compact Continue action for failed sessions that reached the tool-step limit", () => {
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          status: "failed",
+          lastError: TOOL_STEP_LIMIT_EXCEEDED_MESSAGE,
+        }),
+      }),
+    );
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.getByText("Step limit reached")).toBeInTheDocument();
+    expect(screen.queryByText(TOOL_STEP_LIMIT_EXCEEDED_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("does not show Continue for ordinary failed sessions", () => {
+    renderSessionViewContent(
+      makeDetail({
+        session: makeSession({
+          status: "failed",
+          lastError: "Gateway down",
+        }),
+      }),
+    );
+
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Gateway down").length).toBeGreaterThan(0);
   });
 
   it("clicking Continue inserts an optimistic message and dispatches the action", async () => {
