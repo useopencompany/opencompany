@@ -330,6 +330,13 @@
       "when": 1780997126967,
       "tag": "0046_drop_agent_memory_md",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1780999079854,
+      "tag": "0047_repair_agents_personal_columns",
+      "breakpoints": true
     }
   ]
 }
