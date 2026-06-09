@@ -12,6 +12,7 @@ import { assertRunnerDbConfig, closeDb } from "./db";
 import { flushAllSessionStreams } from "./durable-streams";
 import { loadEnv } from "./env";
 import { startRunnerJobWorker } from "./jobs";
+import { assertPreviewIdentity } from "./preview-guard";
 import { createServer } from "./server";
 import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
 
@@ -22,6 +23,10 @@ initializeExceptionReporting();
 
 const env = loadEnv();
 assertRunnerDbConfig();
+// Refuse to boot a preview runner that can't prove its DB belongs to its preview branch,
+// and refuse to boot a prod runner carrying stray preview identity. This makes "preview
+// runner polling the prod job queue" structurally impossible (issue #351 §6).
+await assertPreviewIdentity();
 const jobWorker = startRunnerJobWorker(env, {
   concurrency: env.workerConcurrency,
   staleRunSweep: interruptStaleActiveRuns,
