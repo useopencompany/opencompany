@@ -18,13 +18,6 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" data-theme="system" suppressHydrationWarning>
-      <head>
-        <script
-          // Apply the stored theme before React hydrates so manual dark/light
-          // selections do not flash back to the system preference on reload.
-          dangerouslySetInnerHTML={{ __html: themeInitScript }}
-        />
-      </head>
       <body className="font-sans antialiased text-[14px] text-ink">
         <ThemeProvider initialTheme="system">
           <AuthKitProvider>{children}</AuthKitProvider>
@@ -33,5 +26,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-
-const themeInitScript = `(()=>{try{var e="opencompany-theme",t={system:1,light:1,dark:1},m=localStorage.getItem(e);if(!t[m]){var r=document.cookie.match(/(?:^|; )opencompany-theme=([^;]*)/);m=r?decodeURIComponent(r[1]):"system"}if(!t[m])m="system";var o=m==="system"?(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):m;document.documentElement.dataset.theme=m;document.documentElement.dataset.resolvedTheme=o}catch(e){}})();`;
