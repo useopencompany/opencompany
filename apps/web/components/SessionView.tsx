@@ -88,6 +88,7 @@ import {
   SESSIONS_QUERY_STALE_TIME_MS,
   sessionQueryKeys,
 } from "@/lib/agent-sessions/payload";
+import { isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
 import {
   type AssistantTurnPart,
   buildAssistantTurnParts,
@@ -684,6 +685,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // the only input surface (the card's X cancels back to the composer).
   const sessionIsAwaitingInput = runtime.currentStatus === "awaiting_input";
   const sessionIsInterrupted = runtime.currentStatus === "interrupted";
+  const sessionHasResumableStepLimitFailure = isToolStepLimitResumable({
+    status: runtime.currentStatus,
+    lastError: runtime.lastError,
+  });
+  const sessionCanContinue = sessionIsInterrupted || sessionHasResumableStepLimitFailure;
   const hasRunningAssistantMessage = visibleMessages.some(
     (message) => message.role === "assistant" && message.status === "running" && sessionCanGenerate,
   );
@@ -733,7 +739,11 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               sessionCanGenerate={sessionCanGenerate}
               sessionIsPaused={sessionIsPaused}
               sessionIsInterrupted={sessionIsInterrupted}
-              stoppedError={runtime.currentStatus === "failed" ? runtime.lastError : null}
+              stoppedError={
+                runtime.currentStatus === "failed" && !sessionHasResumableStepLimitFailure
+                  ? runtime.lastError
+                  : null
+              }
               reasoningActive={isReasoningInProgress(message, runtime.events)}
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
@@ -1221,7 +1231,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   };
 
   const handleContinueInterrupted = () => {
-    if (!sessionIsInterrupted || isPending) return;
+    if (!sessionCanContinue || isPending) return;
     const content = "Continue";
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
@@ -1332,7 +1342,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             </div>
           ) : null}
           <div className="mx-auto max-w-[960px] space-y-5">
-            {runtime.lastError ? (
+            {runtime.lastError && !sessionHasResumableStepLimitFailure ? (
               <div className="flex items-start gap-2 rounded-md border border-danger-border bg-danger-bg px-3 py-2 text-[12.5px] leading-5 text-danger">
                 <AlertCircle size={14} strokeWidth={1.8} className="mt-0.5 shrink-0" />
                 <span>{runtime.lastError}</span>
@@ -1419,11 +1429,13 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 variant="compact"
                 error={formError}
                 banner={
-                  sessionIsInterrupted ? (
+                  sessionCanContinue ? (
                     <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-bg px-3 py-2">
                       <div className="flex min-w-0 items-center gap-2 text-[12.5px] text-warning">
                         <SessionStatusDot status="interrupted" />
-                        <span className="truncate">Interrupted</span>
+                        <span className="truncate">
+                          {sessionIsInterrupted ? "Interrupted" : "Step limit reached"}
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -1691,7 +1703,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
           session={session}
           related={detail.related}
           currentStatus={runtime.currentStatus}
-          lastError={runtime.lastError}
+          lastError={sessionHasResumableStepLimitFailure ? null : runtime.lastError}
           streamStatus={streamStatus}
           streamErrorMessage={streamStatus === "error" ? "Stream connection error" : null}
           connectionStale={false}

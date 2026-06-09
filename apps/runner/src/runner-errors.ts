@@ -2,6 +2,8 @@ import type { AgentSessionQuestionPrompt } from "@opencompany/agent-runtime";
 
 import type { AssistantReplayPart } from "./model-messages";
 
+// Keep this message in sync with TOOL_STEP_LIMIT_EXCEEDED_MESSAGE in
+// apps/web/lib/agent-sessions/resumable.ts — the web layer matches against it by string equality.
 export const TOOL_STEP_LIMIT_EXCEEDED_MESSAGE =
   "Agent reached the tool-step limit before producing a final answer. Send another message to continue.";
 

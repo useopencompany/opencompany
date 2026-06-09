@@ -7,6 +7,22 @@ type InstallationToken = {
 
 const cachedTokens = new Map<string, InstallationToken>();
 
+// GitHub returns this when an installation token is valid but the App was never granted the
+// permission for the attempted action (e.g. `gh issue create` / POST /repos/:o/:r/issues with no
+// Issues:write). The raw stderr ("Resource not accessible by integration") is opaque, so we turn it
+// into an actionable instruction the agent — or an operator reading logs — can act on directly.
+const GITHUB_PERMISSION_ERROR_PATTERN = /resource not accessible by integration/i;
+
+export function gitHubPermissionErrorHint(detail: string): string | null {
+  if (!GITHUB_PERMISSION_ERROR_PATTERN.test(detail)) return null;
+  return [
+    "GitHub denied this action: the GitHub App installation lacks the required permission",
+    '(403 "Resource not accessible by integration").',
+    'If this is an Issues operation (e.g. creating an issue), grant the GitHub App "Issues: Read',
+    "& write" + " and have the org installation re-approve the expanded permissions, then retry.",
+  ].join(" ");
+}
+
 export async function getGitHubInstallationToken(
   installationId = process.env.GITHUB_APP_INSTALLATION_ID,
 ) {
@@ -173,7 +189,12 @@ async function githubRequest<T>(input: {
   });
 
   if (!response.ok) {
-    throw new Error(`GitHub request failed with ${response.status}: ${await response.text()}`);
+    const detail = await response.text();
+    if (response.status === 403) {
+      const hint = gitHubPermissionErrorHint(detail);
+      if (hint) throw new Error(hint);
+    }
+    throw new Error(`GitHub request failed with ${response.status}: ${detail}`);
   }
 
   return (await response.json()) as T;

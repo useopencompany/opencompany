@@ -1,10 +1,25 @@
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getGitHubWorkInstallationToken } from "./github";
+import { getGitHubWorkInstallationToken, gitHubPermissionErrorHint } from "./github";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe("gitHubPermissionErrorHint", () => {
+  it("turns a 'resource not accessible by integration' error into an actionable hint", () => {
+    const hint = gitHubPermissionErrorHint(
+      "HTTP 403: Resource not accessible by integration (https://api.github.com/repos/o/r/issues)",
+    );
+    expect(hint).toMatch(/Issues: Read/);
+    expect(hint).toMatch(/re-approve/);
+  });
+
+  it("returns null for unrelated errors so normal failures pass through untouched", () => {
+    expect(gitHubPermissionErrorHint("HTTP 404: Not Found")).toBeNull();
+    expect(gitHubPermissionErrorHint("")).toBeNull();
+  });
 });
 
 describe("GitHub installation tokens", () => {
