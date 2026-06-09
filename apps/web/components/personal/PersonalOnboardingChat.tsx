@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Composer } from "@/components/Composer";
@@ -14,6 +14,16 @@ import { resetPersonalAgent } from "@/lib/personal/actions";
 import { personalPaths } from "@/lib/personal/paths";
 
 const TEXTAREA_MAX_HEIGHT_PX = 220;
+
+function isValidWebsite(value: string) {
+  const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(withProtocol);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".");
+  } catch {
+    return false;
+  }
+}
 
 type PersonalOnboardingChatProps = {
   agentId: string;
@@ -71,6 +81,18 @@ export function PersonalOnboardingChat({
     if (isAdvancing) return;
     if (!name.trim()) {
       setError("Add your name to continue.");
+      return;
+    }
+    if (!role.trim()) {
+      setError("Add your role to continue.");
+      return;
+    }
+    if (!website.trim()) {
+      setError("Add your website to continue.");
+      return;
+    }
+    if (!isValidWebsite(website.trim())) {
+      setError("Enter a valid website.");
       return;
     }
     setError(null);
@@ -131,7 +153,7 @@ export function PersonalOnboardingChat({
 
   return (
     <main className="relative flex h-screen w-screen flex-col items-center justify-center overflow-y-auto bg-canvas px-6 py-10">
-      <div className="flex w-full max-w-[600px] flex-col gap-6">
+      <div className="flex w-full max-w-[460px] flex-col gap-6">
         {step === "identity" ? (
           <IdentityStep
             name={name}
@@ -203,19 +225,21 @@ function IdentityStep({
   isAdvancing,
   error,
 }: IdentityStepProps) {
+  const canContinue = Boolean(name.trim() && role.trim() && website.trim());
+
   return (
     <>
-      <div className="flex flex-col gap-1.5 text-center">
-        <h1 className="text-[22px] font-medium tracking-[-0.01em] text-ink">
+      <div className="text-center">
+        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
           First, tell me about you
         </h1>
-        <p className="text-[14px] leading-6 text-ink-subtle">
+        <p className="mx-auto mt-1.5 max-w-[360px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
           A few details so I can tailor what I do for you.
         </p>
       </div>
 
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-5"
         onSubmit={(event) => {
           event.preventDefault();
           onContinue();
@@ -242,20 +266,23 @@ function IdentityStep({
           inputMode="url"
         />
 
-        {error ? <p className="text-[12px] text-danger">{error}</p> : null}
+        {error ? <p className="text-center text-[12px] leading-4 text-red-700">{error}</p> : null}
 
         <button
           type="submit"
-          disabled={isAdvancing || !name.trim()}
-          className="flex h-10 items-center justify-center gap-2 rounded-xl bg-ink text-[14px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={isAdvancing || !canContinue}
+          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted disabled:opacity-60"
         >
           {isAdvancing ? (
             <>
-              <LoaderCircle size={14} strokeWidth={2} className="animate-spin" />
-              Setting things up…
+              <LoaderCircle size={12} strokeWidth={2} className="animate-spin" />
+              <span>Setting things up…</span>
             </>
           ) : (
-            "Continue"
+            <>
+              <span>Continue</span>
+              <ArrowRight size={12} strokeWidth={2} />
+            </>
           )}
         </button>
       </form>
@@ -281,8 +308,8 @@ function OnboardingField({
   inputMode,
 }: OnboardingFieldProps) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-[13px] font-medium text-ink-subtle">{label}</span>
+    <label className="block">
+      <span className="text-[12px] font-medium text-ink-subtle">{label}</span>
       <input
         type="text"
         // biome-ignore lint/a11y/noAutofocus: first field of a focused single-purpose onboarding form.
@@ -291,7 +318,7 @@ function OnboardingField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 w-full rounded-xl border border-border bg-surface px-3.5 text-[15px] tracking-[-0.005em] text-ink shadow-[0_1px_2px_rgba(15,15,15,0.03)] outline-none transition-shadow placeholder:text-ink-subtle focus:border-border-strong focus:shadow-[0_1px_2px_rgba(15,15,15,0.04),0_0_0_3px_rgba(15,15,15,0.05)]"
+        className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
       />
     </label>
   );
@@ -326,7 +353,7 @@ function PromptStep({
 }: PromptStepProps) {
   return (
     <>
-      <h1 className="text-center text-[22px] font-medium tracking-[-0.01em] text-ink">
+      <h1 className="text-center text-[18px] font-semibold tracking-[-0.01em] text-ink">
         What do you want to get done today?
       </h1>
 
@@ -411,9 +438,10 @@ function PromptStep({
         type="button"
         onClick={onBack}
         disabled={isPending}
-        className="mx-auto text-[12px] text-ink-subtle/70 transition-colors duration-150 hover:text-ink disabled:opacity-50"
+        className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
       >
-        Back
+        <ArrowLeft size={12} strokeWidth={2} />
+        <span>Back</span>
       </button>
     </>
   );

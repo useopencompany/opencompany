@@ -15,7 +15,12 @@ export default async function PersonalOnboardingPage() {
     name: agentName,
   });
 
-  const defaultName = user.firstName?.trim() || "";
+  // Prefill the name field from the WorkOS profile captured at sign-up (first + last
+  // when available, otherwise whichever we have).
+  const defaultName =
+    [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() ||
+    user.firstName?.trim() ||
+    "";
 
   return (
     <PersonalOnboardingChat
