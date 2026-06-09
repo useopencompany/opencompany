@@ -476,7 +476,6 @@ export default function BrainView({
 
   function toggleFolder(path: string) {
     setSelectedContextPath(path);
-    syncBrainUrl(path);
     setExpandedPaths((current) => {
       const next = new Set(current);
       if (next.has(path)) next.delete(path);
