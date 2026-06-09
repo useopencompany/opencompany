@@ -18,6 +18,7 @@ import {
   triggerAgentApprovalResume,
   triggerAgentQuestionResume,
 } from "@/lib/agent-sessions/message-runner";
+import { ORPHANED_RUN_REAP_CRON, reapOrphanedRunningSessions } from "@/lib/agent-sessions/reaper";
 import { callRunner } from "@/lib/agent-sessions/runner";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
@@ -73,6 +74,25 @@ export const sweepWorkspaceSyncOutbox = inngest.createFunction(
   },
   async ({ step }) => {
     return runWorkspaceSyncOutboxSweep(step);
+  },
+);
+
+// Backstop reaper: a runner that dies mid-turn (crash, redeploy, OOM) leaves its
+// session stranded in `running`/`aborting` with an expired run lease — nothing else
+// transitions it, so the UI spins forever. This sweep fails those sessions so the
+// turn ends and the next message can cleanly reclaim the (already-expired) lease.
+export const sweepOrphanedRunningSessions = inngest.createFunction(
+  {
+    id: "sweep-orphaned-running-sessions",
+    name: "Reap orphaned running sessions",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: ORPHANED_RUN_REAP_CRON },
+  },
+  async ({ step }) => {
+    return step.run("reap orphaned running sessions", async () => {
+      return reapOrphanedRunningSessions();
+    });
   },
 );
 
@@ -464,6 +484,7 @@ export const sweepFailedSlackSupportChannels = inngest.createFunction(
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
+  sweepOrphanedRunningSessions,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,
