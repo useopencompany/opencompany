@@ -16,7 +16,7 @@ import { createServer } from "./server";
 import { interruptActiveRuns, interruptStaleActiveRuns } from "./session-interruptions";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "index" });
-const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 270_000;
+const RENDER_SHUTDOWN_INTERRUPT_AFTER_MS = 0;
 
 initializeExceptionReporting();
 

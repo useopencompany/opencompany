@@ -1,3 +1,4 @@
+import { agentSessionEvents } from "@opencompany/db/schema";
 import { sql } from "drizzle-orm";
 import { type ActiveRunSnapshot, abortActiveRun, listActiveRuns } from "./active-runs";
 import { getDb } from "./db";
@@ -9,6 +10,11 @@ export type SessionInterruptReason = "runner_shutdown" | "stale_heartbeat";
 
 type PersistedRuntimeEventRow = Omit<PersistedRuntimeEvent, "createdAt"> & {
   createdAt: Date | string;
+};
+type InterruptedRunRow = {
+  sessionId: string;
+  leaseId: string;
+  leaseOwner: string;
 };
 
 export async function interruptCurrentRun(
@@ -23,9 +29,11 @@ export async function interruptActiveRuns(reason: SessionInterruptReason = "runn
   const runs = listActiveRuns();
   const results = await Promise.allSettled(
     runs.map(async (run) => {
-      const interrupted = await interruptCurrentRun({ ...run, reason });
-      abortActiveRun(run.sessionId);
-      return interrupted;
+      try {
+        return await interruptCurrentRun({ ...run, reason });
+      } finally {
+        abortActiveRun(run.sessionId);
+      }
     }),
   );
   return results.filter((result) => result.status === "fulfilled" && result.value).length;
@@ -85,17 +93,18 @@ async function interruptRunSql(input: ActiveRunSnapshot & { reason: SessionInter
 }
 
 async function interruptStaleRunsSql(input: { staleBefore: Date; reason: SessionInterruptReason }) {
-  const result = await getDb().execute(sql`
-    WITH candidates AS (
-      SELECT id, run_lease_id AS "leaseId", run_lease_owner AS "leaseOwner"
-      FROM agent_sessions
-      WHERE status = 'running'
-        AND archived_at IS NULL
-        AND run_lease_id IS NOT NULL
-        AND run_heartbeat_at IS NOT NULL
-        AND run_heartbeat_at < ${input.staleBefore}
-    ),
-    updated AS (
+  return getDb().transaction(async (tx) => {
+    const updatedResult = await tx.execute(sql`
+      WITH candidates AS (
+        SELECT id, run_lease_id AS "leaseId", run_lease_owner AS "leaseOwner"
+        FROM agent_sessions
+        WHERE status = 'running'
+          AND archived_at IS NULL
+          AND run_lease_id IS NOT NULL
+          AND run_lease_owner IS NOT NULL
+          AND run_heartbeat_at IS NOT NULL
+          AND run_heartbeat_at < ${input.staleBefore}
+      )
       UPDATE agent_sessions AS session
       SET status = 'interrupted',
           run_lease_id = NULL,
@@ -108,30 +117,42 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
           updated_at = now()
       FROM candidates
       WHERE session.id = candidates.id
-      RETURNING candidates.id, candidates."leaseId", candidates."leaseOwner"
-    ),
-    status_events AS (
-      INSERT INTO agent_session_events (session_id, message_id, type, payload)
-      SELECT id, NULL, 'session.status', '{"status":"interrupted"}'::jsonb
-      FROM updated
-      RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
-    ),
-    audit_events AS (
-      INSERT INTO agent_session_events (session_id, message_id, type, payload)
-      SELECT
-        id,
-        NULL,
-        'session.interrupted',
-        jsonb_build_object('reason', ${input.reason}, 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
-      FROM updated
-      RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
-    )
-    SELECT * FROM status_events
-    UNION ALL
-    SELECT * FROM audit_events
-  `);
+      RETURNING
+        session.id AS "sessionId",
+        candidates."leaseId",
+        candidates."leaseOwner"
+    `);
+    const interrupted = rowsFromExecute<InterruptedRunRow>(updatedResult);
+    const events: PersistedRuntimeEvent[] = [];
 
-  return normalizeRows(rowsFromExecute<PersistedRuntimeEventRow>(result));
+    for (const run of interrupted) {
+      events.push(
+        ...(await tx
+          .insert(agentSessionEvents)
+          .values([
+            {
+              sessionId: run.sessionId,
+              messageId: null,
+              type: "session.status",
+              payload: { status: "interrupted" },
+            },
+            {
+              sessionId: run.sessionId,
+              messageId: null,
+              type: "session.interrupted",
+              payload: {
+                reason: input.reason,
+                leaseId: run.leaseId,
+                leaseOwner: run.leaseOwner,
+              },
+            },
+          ])
+          .returning()),
+      );
+    }
+
+    return events;
+  });
 }
 
 function publishEvents(events: PersistedRuntimeEvent[]) {
