@@ -410,6 +410,62 @@ export async function markAfterSessionRunSpawned(id: number, childSessionId: str
     .where(eq(agentSessionAfterSessionRuns.id, id));
 }
 
+export async function completeSpawnedAfterSessionRunForChild(input: {
+  childSessionId: string;
+  status: "completed" | "failed";
+  lastError?: string;
+}) {
+  const db = getDb();
+  const [run] = await db
+    .select({
+      id: agentSessionAfterSessionRuns.id,
+      sessionId: agentSessionAfterSessionRuns.sessionId,
+      lastUserMessageId: agentSessionAfterSessionRuns.lastUserMessageId,
+      status: agentSessionAfterSessionRuns.status,
+    })
+    .from(agentSessionAfterSessionRuns)
+    .where(eq(agentSessionAfterSessionRuns.childSessionId, input.childSessionId))
+    .limit(1);
+
+  if (!run || run.status === input.status) return null;
+  if (run.status !== "spawned" && run.status !== "running") return null;
+
+  await db
+    .update(agentSessionAfterSessionRuns)
+    .set({
+      status: input.status,
+      lastError: input.status === "failed" ? (input.lastError ?? null) : null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSessionAfterSessionRuns.id, run.id));
+
+  if (input.status === "completed") {
+    await appendRuntimeEvent(db, {
+      sessionId: run.sessionId,
+      type: "after_session.completed",
+      payload: {
+        runId: run.id,
+        messageId: run.lastUserMessageId,
+        childSessionId: input.childSessionId,
+      },
+    });
+  } else {
+    await appendRuntimeEvent(db, {
+      sessionId: run.sessionId,
+      type: "after_session.failed",
+      payload: {
+        runId: run.id,
+        messageId: run.lastUserMessageId,
+        childSessionId: input.childSessionId,
+        message: input.lastError ?? "Memory update failed.",
+      },
+    });
+  }
+
+  return run;
+}
+
 export async function completeAfterSessionRun(
   id: number,
   input: { status: "completed" | "skipped" | "failed"; skippedReason?: string; lastError?: string },
