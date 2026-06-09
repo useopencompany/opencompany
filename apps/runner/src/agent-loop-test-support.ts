@@ -20,6 +20,7 @@ export type MessageState = {
   sessionId: string;
   role?: string;
   content?: string;
+  modelMessage?: Record<string, unknown> | null;
   status?: string;
   responseToMessageId?: string | null;
   toolName?: string | null;
@@ -148,7 +149,11 @@ export function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseW
         (item) => item.id === input.assistantMessageId && item.sessionId === input.sessionId,
       );
       if (!message) return false;
-      Object.assign(message, { status: "completed", content: input.content });
+      Object.assign(message, {
+        status: "completed",
+        content: input.content,
+        modelMessage: input.modelMessage,
+      });
       return true;
     },
     async insertToolMessage(input, lease) {
@@ -159,6 +164,7 @@ export function createStateLeaseWriteStore(getState: () => LeaseDbState): LeaseW
         role: "tool",
         status: "completed",
         content: input.content,
+        modelMessage: input.modelMessage,
         toolName: input.toolName,
         toolCallId: input.toolCallId,
       });

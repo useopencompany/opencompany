@@ -4,7 +4,12 @@ import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { buildAssistantModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
-import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
+import {
+  assertTurnComplete,
+  detectIncompleteTurn,
+  isToolStepLimitExceeded,
+  MAX_MODEL_STEPS,
+} from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
@@ -764,21 +769,22 @@ describe("stream error handling", () => {
   });
 
   it("rejects turn completion when the model is still requesting tools at the step cap", () => {
-    expect(() =>
-      assertTurnComplete({
-        assistantContent: "Partial progress.",
-        assistantReplayParts: [
-          {
-            type: "tool-call",
-            toolCallId: "call_123",
-            toolName: "list_files",
-            input: {},
-          },
-        ],
-        lastStepEndedWithToolCalls: true,
-        stepCount: MAX_MODEL_STEPS,
-      }),
-    ).toThrow(ToolStepLimitExceededError);
+    const streamResult = {
+      assistantContent: "Partial progress.",
+      assistantReplayParts: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "call_123",
+          toolName: "list_files",
+          input: {},
+        },
+      ],
+      lastStepEndedWithToolCalls: true,
+      stepCount: MAX_MODEL_STEPS,
+    };
+
+    expect(isToolStepLimitExceeded(streamResult)).toBe(true);
+    expect(() => assertTurnComplete(streamResult)).toThrow(ToolStepLimitExceededError);
   });
 
   it("allows normal turns that end with final assistant text", () => {
