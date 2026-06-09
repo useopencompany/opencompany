@@ -204,11 +204,19 @@ export async function resetPersonalAgent(): Promise<ResetPersonalAgentResult> {
   return { ok: true };
 }
 
-// The integrations the manual "Add integration" button can append, keyed by the @-mention token it
-// writes into the body. Today only the workspace GitHub integration is mentionable this way; new
-// providers slot in here as they become first-class personal integrations.
+// The integrations the manual "Add integration" button and the onboarding integrations step can
+// append, keyed by the @-mention token written into the body. Each mention maps to an entry in the
+// runtime AGENT_TOOL_CATALOG, so enabling here is identical to the user typing the mention in
+// Behavior. MCP providers (linear/slack/posthog) are enabled per-agent via the mention but connected
+// at the workspace level via OAuth; the runner renders a graceful "enabled but not connected"
+// placeholder until that's done, so writing the mention early is safe.
 const PERSONAL_INTEGRATION_MENTIONS = {
   github: "@github",
+  gmail: "@gmail",
+  google_calendar: "@google_calendar",
+  linear: "@linear",
+  slack: "@slack",
+  posthog: "@posthog",
 } as const;
 
 export type PersonalIntegrationId = keyof typeof PERSONAL_INTEGRATION_MENTIONS;
@@ -299,6 +307,100 @@ export async function addPersonalAgentIntegration(
   });
 
   return { ok: true, config: saved.config, body: saved.body, content };
+}
+
+type EnableIntegrationsResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
+
+/**
+ * Enable several integrations on the /personal agent in a single write — used by the onboarding
+ * integrations step (and the chosen setup pack, which pre-selects some).
+ *
+ * Like {@link addPersonalAgentIntegration}, this is not a separate store: it appends each missing
+ * integration's @-mention to the agent's `.agent` body and re-derives the config from that text, so
+ * the mentions stay visible/removable in Behavior and the manual, onboarding, and @-mention paths
+ * can never diverge. Batching keeps it to one load + one save (vs. N round-trips) and means an
+ * abandoned onboarding never leaves the agent half-configured. Local-only and idempotent: mentions
+ * already present are skipped, and an empty/all-present set is a no-op that returns the current
+ * config.
+ */
+export async function enablePersonalAgentIntegrations(
+  agentId: string,
+  integrations: PersonalIntegrationId[],
+): Promise<EnableIntegrationsResult> {
+  const mentions = integrations
+    .map((id) => PERSONAL_INTEGRATION_MENTIONS[id])
+    .filter((mention): mention is (typeof PERSONAL_INTEGRATION_MENTIONS)[PersonalIntegrationId] =>
+      Boolean(mention),
+    );
+
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  const [agent] = await db
+    .select({
+      id: agents.id,
+      name: agents.name,
+      body: agents.body,
+      config: agents.config,
+      version: agents.version,
+    })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.id, agentId),
+        eq(agents.workspaceId, workspace.id),
+        eq(agents.userId, user.id),
+        eq(agents.isDefault, true),
+      ),
+    )
+    .limit(1);
+
+  if (!agent) {
+    return { ok: false, error: "Personal agent not found." };
+  }
+
+  if (mentions.length === 0) {
+    return { ok: true, config: agent.config };
+  }
+
+  // Only append mentions not already in the body so re-enabling is a no-op rather than a duplicate.
+  const present = new Set(extractMentionIds(agent.body).map((id) => id.toLowerCase()));
+  const toAppend = mentions.filter(
+    (mention) => !present.has(mention.replace(/^@/, "").toLowerCase()),
+  );
+  if (toAppend.length === 0) {
+    return { ok: true, config: agent.config };
+  }
+
+  const trimmedBody = agent.body.replace(/\s+$/g, "");
+  const appended = toAppend.join("\n\n");
+  const nextBody = trimmedBody.length === 0 ? appended : `${trimmedBody}\n\n${appended}`;
+
+  const saved = await derivePersonalAgentSave(agent, workspace.id, nextBody);
+  const content = buildAgentTiptapDoc(saved.body, buildConfigMentionResolver(saved.config));
+  const contentHash = hashAgentSource(saved.source);
+
+  await db
+    .update(agents)
+    .set({
+      name: saved.title,
+      body: saved.body,
+      content,
+      contentHash,
+      version: agent.version + 1,
+      config: saved.config,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
+
+  await captureServerEvent("agent_saved", user.id, {
+    user_id: user.id,
+    workspace_id: workspace.id,
+    agent_id: agent.id,
+    changed_fields: ["body"],
+  });
+
+  return { ok: true, config: saved.config };
 }
 
 type ContextFileResult = { ok: true; file: AgentBundleFilePayload } | { ok: false; error: string };

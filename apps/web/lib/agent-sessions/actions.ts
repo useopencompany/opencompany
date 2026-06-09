@@ -43,6 +43,10 @@ import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validatio
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
+import {
+  enablePersonalAgentIntegrations,
+  type PersonalIntegrationId,
+} from "@/lib/personal/actions";
 import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {
@@ -183,6 +187,15 @@ export type PersonalOnboardingContext = {
   role: string;
 };
 
+// The chosen setup pack (if any) from the onboarding "setup" step, plus the integrations the user
+// left enabled on the integrations step. Both are best-effort scaffolding: the integrations are
+// written to the agent body before the run fires, and the setup's mode + integration list ride
+// (invisibly) into the first message so the onboarding skill tunes the soul to that role.
+export type PersonalOnboardingOptions = {
+  integrations: PersonalIntegrationId[];
+  setup?: { id: string; title: string; intent: string };
+};
+
 // V2 onboarding (/onboarding/personal): the visible first message is the user's "what do you want to
 // get done today?" answer. We seed it as a normal user message (so it reads naturally in the
 // transcript) but the model-only content also carries (a) the background context the user gave on
@@ -193,6 +206,7 @@ export async function createPersonalOnboardingSession(
   agentId: string,
   context: PersonalOnboardingContext,
   prompt: string,
+  options: PersonalOnboardingOptions = { integrations: [] },
 ) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = prompt.trim();
@@ -205,6 +219,13 @@ export async function createPersonalOnboardingSession(
       error: "Add workspace credits to start a session.",
       redirectTo: "/settings?billing=insufficient",
     } as const;
+  }
+
+  // Enable the integrations the user kept selected before the run fires. This appends their
+  // @mentions to the agent body (idempotent); the deferred run below reads the fresh agent, so the
+  // tools are wired in time. Best-effort — a failure here must not block starting the session.
+  if (options.integrations.length > 0) {
+    await enablePersonalAgentIntegrations(agentId, options.integrations);
   }
 
   const agent = await loadAgentForSession(agentId, workspace.id, user.id);
@@ -223,7 +244,7 @@ export async function createPersonalOnboardingSession(
   // Visible content = the task verbatim. Model-only content appends the background context and the
   // onboarding pointer; it never renders in the transcript (modelMessage), so the user just sees
   // their own message.
-  const modelContent = buildOnboardingModelContent(trimmed, context);
+  const modelContent = buildOnboardingModelContent(trimmed, context, options);
   const { message, createdEvent } = await insertUserMessage(sessionId, trimmed, {
     workspaceId: workspace.id,
     attachments: [],
@@ -1089,11 +1110,19 @@ async function insertUserMessage(
 // background context they gave on the first screen (only the fields they filled in), then the thin
 // pointer that tells the agent to run its onboarding skill before tackling the task. None of the
 // appended context renders in the transcript — it rides in modelMessage only.
-function buildOnboardingModelContent(prompt: string, context: PersonalOnboardingContext) {
+function buildOnboardingModelContent(
+  prompt: string,
+  context: PersonalOnboardingContext,
+  options: PersonalOnboardingOptions = { integrations: [] },
+) {
   const facts = [
     context.name.trim() ? `- Name: ${context.name.trim()}` : null,
     context.role.trim() ? `- Role: ${context.role.trim()}` : null,
     context.website.trim() ? `- Website: ${context.website.trim()}` : null,
+    options.setup ? `- Chosen setup: ${options.setup.title} — ${options.setup.intent}` : null,
+    options.integrations.length
+      ? `- Integrations I enabled: ${options.integrations.join(", ")}`
+      : null,
   ].filter(Boolean);
 
   const contextBlock = facts.length

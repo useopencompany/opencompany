@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ArrowUp, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, Check, ExternalLink, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Composer } from "@/components/Composer";
@@ -10,6 +10,12 @@ import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createPersonalOnboardingSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
 import { generateOnboardingPills } from "@/lib/onboarding/pills";
+import {
+  ONBOARDING_INTEGRATIONS,
+  ONBOARDING_SETUPS,
+  type OnboardingSetup,
+} from "@/lib/onboarding/setups";
+import type { PersonalIntegrationId } from "@/lib/personal/actions";
 import { resetPersonalAgent } from "@/lib/personal/actions";
 import { personalPaths } from "@/lib/personal/paths";
 
@@ -31,15 +37,25 @@ type PersonalOnboardingChatProps = {
   devReset: boolean;
 };
 
-type Step = "identity" | "prompt";
+type Step = "identity" | "setup" | "integrations" | "prompt";
 
-// V2 onboarding (/onboarding/personal): two distraction-free screens, no sidebar/inbox chrome.
+// V2 onboarding (/onboarding/personal): four distraction-free screens, no sidebar/inbox chrome.
 //
-//  1. Identity — name, website, role. On continue we fire a fast model (server action) to draft
-//     example pills tailored to who they are; the identity also rides invisibly into the first
-//     message so the onboarding skill starts already knowing them.
-//  2. Prompt — "What do you want to get done today?" with the tailored pills. Submitting (typing or
-//     tapping a pill) seeds the task into an onboarding session and lands the user in /personal.
+//  1. Identity — name, website, role. On continue we fire a fast model (server action) in the
+//     background to draft example pills tailored to who they are; the identity also rides invisibly
+//     into the first message so the onboarding skill starts already knowing them.
+//  2. Setup — pick a "what can this agent do for me" pack (or start from scratch). A pack
+//     pre-selects its integrations, prefills the first task, and rides (invisibly) into the first
+//     message as a mode the onboarding skill tunes the soul to.
+//  3. Integrations — the integrations/MCPs we support. Selecting one enables it on the agent (its
+//     @mention is written at submit); "Connect" opens the auth flow in a new tab so this screen's
+//     state survives the round-trip.
+//  4. Prompt — "What do you want to get done today?" (prefilled from the pack) with the tailored
+//     pills. Submitting seeds the task into an onboarding session and lands the user in /personal.
+//
+// Integration mentions are written once, at submit (see createPersonalOnboardingSession →
+// enablePersonalAgentIntegrations), not eagerly per toggle — so an abandoned onboarding never
+// leaves the agent half-configured. The OAuth "Connect" links are independent of that.
 export function PersonalOnboardingChat({
   agentId,
   defaultName,
@@ -55,10 +71,15 @@ export function PersonalOnboardingChat({
   const [website, setWebsite] = useState("");
   const [role, setRole] = useState("");
   const [pills, setPills] = useState<string[]>([]);
+  const pillsRequested = useRef(false);
+
+  const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
+  const [selectedIntegrations, setSelectedIntegrations] = useState<Set<PersonalIntegrationId>>(
+    new Set(),
+  );
 
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isAdvancing, startAdvanceTransition] = useTransition();
   const [isPending, startTransition] = useTransition();
   const [isResetting, startResetTransition] = useTransition();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -77,8 +98,20 @@ export function PersonalOnboardingChat({
     el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
   }, [input, step]);
 
-  const advanceToPrompt = () => {
-    if (isAdvancing) return;
+  // Best-effort, fire-and-forget: kick off pills generation when the user leaves the identity screen
+  // so they're ready by the time they reach the prompt screen. The action always resolves with at
+  // least the fallback set, and a failure never blocks the flow.
+  const kickOffPills = () => {
+    if (pillsRequested.current) return;
+    pillsRequested.current = true;
+    void generateOnboardingPills({
+      name: name.trim(),
+      website: website.trim(),
+      role: role.trim(),
+    }).then(({ pills: generated }) => setPills(generated));
+  };
+
+  const advanceFromIdentity = () => {
     if (!name.trim()) {
       setError("Add your name to continue.");
       return;
@@ -96,16 +129,30 @@ export function PersonalOnboardingChat({
       return;
     }
     setError(null);
-    startAdvanceTransition(async () => {
-      // Best-effort: the action always resolves with at least the fallback pills, so a model
-      // failure never blocks moving to the next screen.
-      const { pills: generated } = await generateOnboardingPills({
-        name: name.trim(),
-        website: website.trim(),
-        role: role.trim(),
-      });
-      setPills(generated);
-      setStep("prompt");
+    kickOffPills();
+    setStep("setup");
+  };
+
+  const selectSetup = (setup: OnboardingSetup) => {
+    setSelectedSetupId(setup.id);
+    setSelectedIntegrations(new Set(setup.integrations));
+    setInput(setup.starterTask);
+    setError(null);
+    setStep("integrations");
+  };
+
+  const skipSetup = () => {
+    setSelectedSetupId(null);
+    setError(null);
+    setStep("integrations");
+  };
+
+  const toggleIntegration = (id: PersonalIntegrationId) => {
+    setSelectedIntegrations((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
 
@@ -113,11 +160,20 @@ export function PersonalOnboardingChat({
     const content = (text ?? input).trim();
     if (!content || isPending) return;
     setError(null);
+    const setupPack = selectedSetupId
+      ? ONBOARDING_SETUPS.find((setup) => setup.id === selectedSetupId)
+      : undefined;
     startTransition(async () => {
       const result = await createPersonalOnboardingSession(
         agentId,
         { name: name.trim(), website: website.trim(), role: role.trim() },
         content,
+        {
+          integrations: [...selectedIntegrations],
+          ...(setupPack
+            ? { setup: { id: setupPack.id, title: setupPack.title, intent: setupPack.soulIntent } }
+            : {}),
+        },
       );
       if (!result.ok) {
         if ("redirectTo" in result) {
@@ -144,6 +200,9 @@ export function PersonalOnboardingChat({
       setWebsite("");
       setRole("");
       setPills([]);
+      pillsRequested.current = false;
+      setSelectedSetupId(null);
+      setSelectedIntegrations(new Set());
       setInput("");
       showToast({ title: "Personal agent reset", tone: "default" });
       // Re-run the server layout/page so ensurePersonalAgent provisions a fresh agent.
@@ -151,9 +210,11 @@ export function PersonalOnboardingChat({
     });
   };
 
+  const isWide = step === "setup" || step === "integrations";
+
   return (
     <main className="relative flex h-screen w-screen flex-col items-center justify-center overflow-y-auto bg-canvas px-6 py-10">
-      <div className="flex w-full max-w-[460px] flex-col gap-6">
+      <div className={`flex w-full flex-col gap-6 ${isWide ? "max-w-[560px]" : "max-w-[460px]"}`}>
         {step === "identity" ? (
           <IdentityStep
             name={name}
@@ -162,9 +223,31 @@ export function PersonalOnboardingChat({
             onNameChange={setName}
             onWebsiteChange={setWebsite}
             onRoleChange={setRole}
-            onContinue={advanceToPrompt}
-            isAdvancing={isAdvancing}
+            onContinue={advanceFromIdentity}
             error={error}
+          />
+        ) : step === "setup" ? (
+          <SetupStep
+            selectedSetupId={selectedSetupId}
+            onSelect={selectSetup}
+            onSkip={skipSetup}
+            onBack={() => {
+              setError(null);
+              setStep("identity");
+            }}
+          />
+        ) : step === "integrations" ? (
+          <IntegrationsStep
+            selected={selectedIntegrations}
+            onToggle={toggleIntegration}
+            onContinue={() => {
+              setError(null);
+              setStep("prompt");
+            }}
+            onBack={() => {
+              setError(null);
+              setStep("setup");
+            }}
           />
         ) : (
           <PromptStep
@@ -179,7 +262,7 @@ export function PersonalOnboardingChat({
             onPillSelect={(pill) => submit(pill)}
             onBack={() => {
               setError(null);
-              setStep("identity");
+              setStep("integrations");
             }}
             showToast={showToast}
           />
@@ -210,7 +293,6 @@ type IdentityStepProps = {
   onWebsiteChange: (value: string) => void;
   onRoleChange: (value: string) => void;
   onContinue: () => void;
-  isAdvancing: boolean;
   error: string | null;
 };
 
@@ -222,7 +304,6 @@ function IdentityStep({
   onWebsiteChange,
   onRoleChange,
   onContinue,
-  isAdvancing,
   error,
 }: IdentityStepProps) {
   const canContinue = Boolean(name.trim() && role.trim() && website.trim());
@@ -270,20 +351,11 @@ function IdentityStep({
 
         <button
           type="submit"
-          disabled={isAdvancing || !canContinue}
+          disabled={!canContinue}
           className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted disabled:opacity-60"
         >
-          {isAdvancing ? (
-            <>
-              <LoaderCircle size={12} strokeWidth={2} className="animate-spin" />
-              <span>Setting things up…</span>
-            </>
-          ) : (
-            <>
-              <span>Continue</span>
-              <ArrowRight size={12} strokeWidth={2} />
-            </>
-          )}
+          <span>Continue</span>
+          <ArrowRight size={12} strokeWidth={2} />
         </button>
       </form>
     </>
@@ -321,6 +393,170 @@ function OnboardingField({
         className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
       />
     </label>
+  );
+}
+
+type SetupStepProps = {
+  selectedSetupId: string | null;
+  onSelect: (setup: OnboardingSetup) => void;
+  onSkip: () => void;
+  onBack: () => void;
+};
+
+// Setup packs: example "modes" that show what the agent can do. Picking one is the blank-box hack —
+// the user doesn't invent the use case from scratch, they pick a role and the rest is scaffolded.
+function SetupStep({ selectedSetupId, onSelect, onSkip, onBack }: SetupStepProps) {
+  return (
+    <>
+      <div className="text-center">
+        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
+          What should I help you with?
+        </h1>
+        <p className="mx-auto mt-1.5 max-w-[420px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
+          Pick a starting point and I'll set myself up for it. You can change this anytime.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        {ONBOARDING_SETUPS.map((setup) => {
+          const Icon = setup.icon;
+          const selected = setup.id === selectedSetupId;
+          return (
+            <button
+              key={setup.id}
+              type="button"
+              onClick={() => onSelect(setup)}
+              className={`flex flex-col gap-2 rounded-lg border bg-surface/55 px-3.5 py-3 text-left transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15 ${
+                selected ? "border-ink/40 bg-surface" : "border-border"
+              }`}
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+                <Icon size={15} strokeWidth={1.85} />
+              </span>
+              <span className="text-[13px] font-medium text-ink">{setup.title}</span>
+              <span className="text-[12px] leading-4 text-ink-muted">{setup.description}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ArrowLeft size={12} strokeWidth={2} />
+          <span>Back</span>
+        </button>
+        <button
+          type="button"
+          onClick={onSkip}
+          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <span>Start from scratch</span>
+          <ArrowRight size={12} strokeWidth={2} />
+        </button>
+      </div>
+    </>
+  );
+}
+
+type IntegrationsStepProps = {
+  selected: Set<PersonalIntegrationId>;
+  onToggle: (id: PersonalIntegrationId) => void;
+  onContinue: () => void;
+  onBack: () => void;
+};
+
+// Integrations/MCPs we support. Selecting enables the integration on the agent (the @mention is
+// written at submit). "Connect" opens the auth flow in a new tab — the personal agent enables MCPs
+// per-agent via the mention, but they're authorized at the workspace level, so connecting is a
+// separate, optional step the user can also do later.
+function IntegrationsStep({ selected, onToggle, onContinue, onBack }: IntegrationsStepProps) {
+  return (
+    <>
+      <div className="text-center">
+        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
+          Connect what I can use
+        </h1>
+        <p className="mx-auto mt-1.5 max-w-[420px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
+          Pick the tools I should have access to. Connect now or later — you can manage these in
+          settings anytime.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {ONBOARDING_INTEGRATIONS.map((integration) => {
+          const Icon = integration.icon;
+          const isSelected = selected.has(integration.id);
+          return (
+            <div
+              key={integration.id}
+              className={`flex min-w-0 items-center gap-3 rounded-lg border bg-surface/55 px-3.5 py-3 transition-colors ${
+                isSelected ? "border-ink/30" : "border-border"
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => onToggle(integration.id)}
+                aria-pressed={isSelected}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none"
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+                  <Icon size={15} strokeWidth={1.85} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-ink">
+                    {integration.label}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-muted">
+                    {integration.description}
+                  </span>
+                </span>
+                <span
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                    isSelected
+                      ? "border-ink bg-ink text-canvas"
+                      : "border-border-strong bg-surface text-transparent"
+                  }`}
+                >
+                  <Check size={12} strokeWidth={2.5} />
+                </span>
+              </button>
+              <a
+                href={integration.connectHref}
+                target="_blank"
+                rel="noreferrer"
+                className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[11.5px] font-medium text-ink-subtle transition-colors hover:border-border-strong hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              >
+                Connect
+                <ExternalLink size={11} strokeWidth={2} />
+              </a>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={onContinue}
+          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+        >
+          <span>Continue</span>
+          <ArrowRight size={12} strokeWidth={2} />
+        </button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <ArrowLeft size={12} strokeWidth={2} />
+          <span>Back</span>
+        </button>
+      </div>
+    </>
   );
 }
 
