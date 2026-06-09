@@ -124,33 +124,17 @@ describe("agent editor mention tools", () => {
     );
   });
 
-  test("only exposes configured MCP tools for the workspace", () => {
+  test("always exposes MCP tools for the workspace", () => {
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:linear")).toBe(
-      false,
+      true,
     );
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:slack")).toBe(
-      false,
+      true,
     );
-    expect(
-      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
-        (item) => item.mentionId === "tool:linear",
-      ),
-    ).toBe(true);
-    expect(
-      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
-        (item) => item.mentionId === "tool:slack",
-      ),
-    ).toBe(false);
-    expect(
-      buildAgentMentionItems([], [], { enabledMcpToolIds: ["slack"] }).some(
-        (item) => item.mentionId === "tool:slack",
-      ),
-    ).toBe(true);
   });
 
-  test("shows not-connected MCP tools with a needs-setup badge when the beta is on", () => {
+  test("shows not-connected MCP tools with a needs-setup badge", () => {
     const items = buildAgentMentionItems([], [], {
-      mcpEnabled: true,
       enabledMcpToolIds: ["linear"],
     });
     const linear = items.find((item) => item.mentionId === "tool:linear");

@@ -156,9 +156,10 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 // Load the session-start bundle context the runtime config needs: the agent's profile file
 // (agent/user.md) and its discovered personal skills (agent/skills/<id>/SKILL.md). We read from
 // agent_files (not the sandbox) because the runtime config is resolved before the bundle
-// materializes; this is what gives the profile and personal skills their frozen-snapshot behavior
-// — in-session edits sync back at session end and surface next session. A missing/never-written
-// file resolves to undefined (empty-section path); malformed skills are skipped.
+// materializes. This runs every turn, so an in-session edit (synced back to agent_files at the
+// end of a turn) surfaces on the agent's next turn in the same session — no new session needed.
+// A missing/never-written file resolves to undefined (empty-section path); malformed skills are
+// skipped.
 async function loadAgentBundleContext(
   db: RunContext["db"],
   workspaceId: string,

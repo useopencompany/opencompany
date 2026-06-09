@@ -170,7 +170,6 @@ export async function loadAgentForWorkspace(
     usableRepositories,
     agentReferences.filter((reference) => reference.path !== agent.path),
     {
-      mcpEnabled: mcpSettings.mcpEnabled,
       linearConfigured: mcpSettings.linear.configured,
       slackConfigured: mcpSettings.slack.configured,
     },

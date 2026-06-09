@@ -228,7 +228,7 @@ If you write `@something` that doesn't match anything, opencompany leaves it as 
 
 ### Profile
 
-Every session loads one small file from the agent folder straight into the agent's context, so it remembers durable context without looking it up: `agent/user.md` (who the user is — preferences, style, goals). It's created empty, edited by the agent as it learns, and kept small (capped at ~3 KB when loaded). The profile is not a general facts store — every other durable fact (people, companies, projects, decisions, lessons) goes into structured memory via the `memory` tool. Edits take effect on the next session.
+Every session loads one small file from the agent folder straight into the agent's context, so it remembers durable context without looking it up: `agent/user.md` (who the user is — preferences, style, goals). It's created empty, edited by the agent as it learns, and kept small (capped at ~3 KB when loaded). The profile is not a general facts store — every other durable fact (people, companies, projects, decisions, lessons) goes into structured memory via the `memory` tool. The agent's edits sync at the end of a turn and are reloaded on its next turn in the same session — no new session needed.
 
 ### After-session memory
 

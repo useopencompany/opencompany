@@ -224,8 +224,8 @@ function buildProfileSection(input: { userMemory: string | undefined }): string 
     ? truncateProfile(trimmed)
     : "(empty — populate this as you learn who your user is)";
   return [
-    "## Your profile — agent/user.md, loaded at the start of every session (keep it tight; ~3KB cap)",
-    "Who your user is: identity, preferences, communication style, goals. Edit it with file tools as you learn; changes take effect next session. This is NOT a general facts store — durable facts about people, companies, projects, and decisions go into structured memory via the `memory` tool.",
+    "## Your profile — agent/user.md, reloaded every turn (keep it tight; ~3KB cap)",
+    "Who your user is: identity, preferences, communication style, goals. Edit it with file tools as you learn; edits apply from your next turn in this same session. This is NOT a general facts store — durable facts about people, companies, projects, and decisions go into structured memory via the `memory` tool.",
     "",
     body,
   ].join("\n");

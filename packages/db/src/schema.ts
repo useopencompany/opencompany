@@ -91,6 +91,11 @@ export const users = pgTable(
     // company/workspace surface (root → /company). Defaults true in this phase. Keeps the company
     // model fully alive per-user so we can flip individuals rather than the whole deployment.
     personalFirst: boolean("personal_first").notNull().default(true),
+    // Per-user "Pro mode" switch for the personal-agent surface. When true the user sees advanced
+    // surfaces (e.g. the read-only agent Memory inspector) that are hidden by default. Off for
+    // everyone until they opt in from personal Settings. Kept on `users` (a tiny boolean) so the
+    // auth hot path loads it for free, mirroring `personalFirst`.
+    proMode: boolean("pro_mode").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -1,25 +1,92 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ArrowUp, Check, ExternalLink, LoaderCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ExternalLink,
+  LoaderCircle,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Composer } from "@/components/Composer";
-import { useToast } from "@/components/ToastProvider";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
 import { createPersonalOnboardingSession } from "@/lib/agent-sessions/actions";
 import { seedSessionQueries } from "@/lib/agent-sessions/payload";
-import { generateOnboardingPills } from "@/lib/onboarding/pills";
 import {
+  agentExperienceOptions,
+  heardFromOptions,
+  teamSizeOptions,
+} from "@/lib/onboarding/options";
+import {
+  ONBOARDING_CONNECTED_MESSAGE,
   ONBOARDING_INTEGRATIONS,
   ONBOARDING_SETUPS,
-  type OnboardingSetup,
+  type OnboardingConnectedMessage,
 } from "@/lib/onboarding/setups";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
-import { resetPersonalAgent } from "@/lib/personal/actions";
 import { personalPaths } from "@/lib/personal/paths";
 
-const TEXTAREA_MAX_HEIGHT_PX = 220;
+// V3 onboarding (/onboarding/personal). Same stepper shell as the legacy workspace onboarding —
+// progress dots, a centered title/subtitle per step, and a consistent Continue/Back footer — wrapped
+// around the personal-agent flow:
+//
+//   0. Where did you hear about us — attribution (persisted for analytics only).
+//   1. About you — role, team size, company URL. The URL is optional but we nudge once if skipped,
+//      since it lets the agent research the company.
+//   2. Agent familiarity — how much the user has used agents before.
+//   3. Name + preset — name the agent and pick a starting point (Co-founder / Executive Assistant /
+//      start from scratch). A preset pre-selects its integrations and seeds the first task.
+//   4. Integrations — connect tools INLINE: "Connect" opens the OAuth flow in a popup that reports
+//      back to this window (see /onboarding/connected), so the page never navigates. The checkbox
+//      enables the integration on the agent regardless of whether it's connected yet.
+//   5. Launch — a single "set up my agent" CTA. It persists the survey, names the agent, enables the
+//      selected integrations, and seeds the first session (which runs the agent's onboarding skill),
+//      then drops the user into /personal.
+//
+// The user no longer types a first task — the seeded session opens with the preset's starter task
+// (or a sensible default for "start from scratch").
+
+const SCRATCH = "__scratch__";
+const DEFAULT_SCRATCH_TASK =
+  "Introduce yourself, then help me figure out the best place to start.";
+
+const SETUP_EYEBROW = "Let's set up your personal agent";
+
+const STEPS = [
+  {
+    eyebrow: null,
+    title: "Where did you hear about us?",
+    subtitle: "This helps us understand where useful people are finding us.",
+  },
+  {
+    eyebrow: null,
+    title: "Tell us about you",
+    subtitle: "Just enough context for your agent to be useful from day one.",
+  },
+  {
+    eyebrow: null,
+    title: "How familiar are you with agents?",
+    subtitle: "Use the answer that sounds closest to you.",
+  },
+  {
+    eyebrow: SETUP_EYEBROW,
+    title: "Name your agent and pick a starting point",
+    subtitle: "Give it a name and a role to start from. You can change all of this later.",
+  },
+  {
+    eyebrow: SETUP_EYEBROW,
+    title: "Connect what your agent can use",
+    subtitle: "Connecting these makes your first session much better — but you can do it later too.",
+  },
+  {
+    eyebrow: SETUP_EYEBROW,
+    title: "Ready when you are",
+    subtitle: "I'll get myself set up, then start on your first task.",
+  },
+] as const;
+
+const LAST_STEP = STEPS.length - 1;
 
 function isValidWebsite(value: string) {
   const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
@@ -31,147 +98,276 @@ function isValidWebsite(value: string) {
   }
 }
 
+function ChoiceButton({
+  children,
+  selected,
+  onClick,
+}: {
+  children: React.ReactNode;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-h-8 w-full items-center rounded-md border px-3 py-1.5 text-left text-[12.5px] font-medium tracking-[-0.005em] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+        selected
+          ? "border-border-strong bg-surface-active text-ink shadow-[inset_0_0_0_1px_rgba(255,255,255,0.55)]"
+          : "border-border bg-surface text-ink/85 hover:bg-surface-hover"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function OnboardingField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  optional,
+  autoFocus,
+  inputMode,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  optional?: boolean;
+  autoFocus?: boolean;
+  inputMode?: "url" | "text";
+}) {
+  return (
+    <label className="block">
+      <span className="flex items-center gap-1.5 text-[12px] font-medium text-ink-subtle">
+        <span>{label}</span>
+        {optional ? (
+          <span className="rounded-[3px] bg-surface-subtle px-1 py-px text-[9px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+            Optional
+          </span>
+        ) : null}
+      </span>
+      <input
+        type="text"
+        // biome-ignore lint/a11y/noAutofocus: focused single-purpose onboarding step.
+        autoFocus={autoFocus}
+        inputMode={inputMode}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+      />
+    </label>
+  );
+}
+
 type PersonalOnboardingChatProps = {
   agentId: string;
   defaultName: string;
-  devReset: boolean;
+  userEmail: string;
 };
 
-type Step = "identity" | "setup" | "integrations" | "prompt";
-
-// V2 onboarding (/onboarding/personal): four distraction-free screens, no sidebar/inbox chrome.
-//
-//  1. Identity — name, website, role. On continue we fire a fast model (server action) in the
-//     background to draft example pills tailored to who they are; the identity also rides invisibly
-//     into the first message so the onboarding skill starts already knowing them.
-//  2. Setup — pick a "what can this agent do for me" pack (or start from scratch). A pack
-//     pre-selects its integrations, prefills the first task, and rides (invisibly) into the first
-//     message as a mode the onboarding skill tunes the soul to.
-//  3. Integrations — the integrations/MCPs we support. Selecting one enables it on the agent (its
-//     @mention is written at submit); "Connect" opens the auth flow in a new tab so this screen's
-//     state survives the round-trip.
-//  4. Prompt — "What do you want to get done today?" (prefilled from the pack) with the tailored
-//     pills. Submitting seeds the task into an onboarding session and lands the user in /personal.
-//
-// Integration mentions are written once, at submit (see createPersonalOnboardingSession →
-// enablePersonalAgentIntegrations), not eagerly per toggle — so an abandoned onboarding never
-// leaves the agent half-configured. The OAuth "Connect" links are independent of that.
 export function PersonalOnboardingChat({
   agentId,
   defaultName,
-  devReset,
+  userEmail,
 }: PersonalOnboardingChatProps) {
   const { workspaceId } = useWorkspaceContext();
   const queryClient = useQueryClient();
   const router = useRouter();
-  const { showToast, showError } = useToast();
 
-  const [step, setStep] = useState<Step>("identity");
-  const [name, setName] = useState(defaultName);
-  const [website, setWebsite] = useState("");
-  const [role, setRole] = useState("");
-  const [pills, setPills] = useState<string[]>([]);
-  const pillsRequested = useRef(false);
-
-  const [selectedSetupId, setSelectedSetupId] = useState<string | null>(null);
-  const [selectedIntegrations, setSelectedIntegrations] = useState<Set<PersonalIntegrationId>>(
-    new Set(),
-  );
-
-  const [input, setInput] = useState("");
+  const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // Step 0 — attribution.
+  const [heardFrom, setHeardFrom] = useState("");
+  const [heardFromDetail, setHeardFromDetail] = useState("");
+
+  // Step 1 — about you.
+  const [role, setRole] = useState("");
+  const [teamSize, setTeamSize] = useState("");
+  const [companyUrl, setCompanyUrl] = useState("");
+  const [urlNudged, setUrlNudged] = useState(false);
+
+  // Step 2 — familiarity.
+  const [agentExperience, setAgentExperience] = useState("");
+
+  // Step 3 — name + preset.
+  const [agentName, setAgentName] = useState("");
+  const [presetChoice, setPresetChoice] = useState<string | null>(null);
+
+  // Step 4 — integrations.
+  const [selected, setSelected] = useState<Set<PersonalIntegrationId>>(new Set());
+  const [connected, setConnected] = useState<Set<PersonalIntegrationId>>(new Set());
+  const [connecting, setConnecting] = useState<PersonalIntegrationId | null>(null);
+  const connectingRef = useRef<PersonalIntegrationId | null>(null);
+
   const [isPending, startTransition] = useTransition();
-  const [isResetting, startResetTransition] = useTransition();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSubmit = Boolean(input.trim() && !isPending);
 
+  const meta = STEPS[step] ?? STEPS[0];
+  const isWide = step === 3 || step === 4;
+
+  // Listen for the inline-connect popup reporting back (see /onboarding/connected). Only ever from
+  // our own origin, and only the connected/error contract.
   useEffect(() => {
-    if (step !== "prompt") return;
-    const el = textareaRef.current;
-    if (!el) return;
-    el.focus();
-    if (input.length === 0) {
-      el.style.height = "";
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-  }, [input, step]);
+    function onMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as OnboardingConnectedMessage | undefined;
+      if (!data || data.type !== ONBOARDING_CONNECTED_MESSAGE) return;
 
-  // Best-effort, fire-and-forget: kick off pills generation when the user leaves the identity screen
-  // so they're ready by the time they reach the prompt screen. The action always resolves with at
-  // least the fallback set, and a failure never blocks the flow.
-  const kickOffPills = () => {
-    if (pillsRequested.current) return;
-    pillsRequested.current = true;
-    void generateOnboardingPills({
-      name: name.trim(),
-      website: website.trim(),
-      role: role.trim(),
-    }).then(({ pills: generated }) => setPills(generated));
-  };
+      setConnecting(null);
+      connectingRef.current = null;
 
-  const advanceFromIdentity = () => {
-    if (!name.trim()) {
-      setError("Add your name to continue.");
-      return;
+      const provider = data.provider as PersonalIntegrationId | null;
+      if (!provider) return;
+      if (data.status === "connected") {
+        setError(null);
+        setConnected((prev) => new Set(prev).add(provider));
+        setSelected((prev) => new Set(prev).add(provider));
+      } else {
+        setError("That connection didn't complete. You can try again or continue without it.");
+      }
     }
-    if (!role.trim()) {
-      setError("Add your role to continue.");
-      return;
-    }
-    if (!website.trim()) {
-      setError("Add your website to continue.");
-      return;
-    }
-    if (!isValidWebsite(website.trim())) {
-      setError("Enter a valid website.");
-      return;
-    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  function goBack() {
     setError(null);
-    kickOffPills();
-    setStep("setup");
-  };
+    setStep((current) => Math.max(current - 1, 0));
+  }
 
-  const selectSetup = (setup: OnboardingSetup) => {
-    setSelectedSetupId(setup.id);
-    setSelectedIntegrations(new Set(setup.integrations));
-    setInput(setup.starterTask);
+  function advance() {
     setError(null);
-    setStep("integrations");
-  };
+    setStep((current) => Math.min(current + 1, LAST_STEP));
+  }
 
-  const skipSetup = () => {
-    setSelectedSetupId(null);
+  function chooseHeardFrom(value: string) {
+    setHeardFrom(value);
+    if (value !== "other") setHeardFromDetail("");
     setError(null);
-    setStep("integrations");
-  };
+    if (value !== "other") advance();
+  }
 
-  const toggleIntegration = (id: PersonalIntegrationId) => {
-    setSelectedIntegrations((prev) => {
+  function chooseAgentExperience(value: string) {
+    setAgentExperience(value);
+    setError(null);
+    advance();
+  }
+
+  function choosePreset(id: string) {
+    setError(null);
+    setPresetChoice(id);
+    if (id === SCRATCH) return;
+    const preset = ONBOARDING_SETUPS.find((p) => p.id === id);
+    if (preset) {
+      setSelected((prev) => new Set([...prev, ...preset.integrations]));
+    }
+  }
+
+  function toggleIntegration(id: PersonalIntegrationId) {
+    setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }
 
-  const submit = (text?: string) => {
-    const content = (text ?? input).trim();
-    if (!content || isPending) return;
+  function handleConnect(id: PersonalIntegrationId) {
+    const def = ONBOARDING_INTEGRATIONS.find((i) => i.id === id);
+    if (!def) return;
+    const width = 520;
+    const height = 720;
+    const left = window.screenX + Math.max(0, (window.outerWidth - width) / 2);
+    const top = window.screenY + Math.max(0, (window.outerHeight - height) / 2);
+    const popup = window.open(
+      def.connectHref,
+      "oc-onboarding-connect",
+      `width=${width},height=${height},left=${left},top=${top}`,
+    );
+    if (!popup) {
+      setError("Allow popups for this site to connect, then try again.");
+      return;
+    }
     setError(null);
-    const setupPack = selectedSetupId
-      ? ONBOARDING_SETUPS.find((setup) => setup.id === selectedSetupId)
-      : undefined;
+    setConnecting(id);
+    connectingRef.current = id;
+    // If the user closes the popup without finishing, clear the pending state so the row resets.
+    const timer = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(timer);
+        if (connectingRef.current === id) {
+          setConnecting(null);
+          connectingRef.current = null;
+        }
+      }
+    }, 500);
+  }
+
+  function goForward() {
+    if (step === 0) {
+      if (!heardFrom) return setError("Choose where you heard about us.");
+      if (heardFrom === "other" && !heardFromDetail.trim()) {
+        return setError("Tell us where you heard about us.");
+      }
+      return advance();
+    }
+    if (step === 1) {
+      if (!role.trim()) return setError("Enter your role.");
+      if (!teamSize) return setError("Choose your team size.");
+      if (companyUrl.trim() && !isValidWebsite(companyUrl.trim())) {
+        return setError("Enter a valid company URL.");
+      }
+      // Nudge once if they skip the URL — it makes the agent meaningfully better — then let them by.
+      if (!companyUrl.trim() && !urlNudged) {
+        setUrlNudged(true);
+        setError(null);
+        return;
+      }
+      return advance();
+    }
+    if (step === 2) {
+      if (!agentExperience) return setError("Choose your experience level.");
+      return advance();
+    }
+    if (step === 3) {
+      if (!agentName.trim()) return setError("Name your agent.");
+      if (!presetChoice) return setError("Pick a starting point.");
+      return advance();
+    }
+    if (step === 4) {
+      return advance();
+    }
+  }
+
+  function submit() {
+    if (isPending) return;
+    const preset =
+      presetChoice && presetChoice !== SCRATCH
+        ? ONBOARDING_SETUPS.find((p) => p.id === presetChoice)
+        : undefined;
+    const prompt = preset?.starterTask ?? DEFAULT_SCRATCH_TASK;
+    setError(null);
     startTransition(async () => {
       const result = await createPersonalOnboardingSession(
         agentId,
-        { name: name.trim(), website: website.trim(), role: role.trim() },
-        content,
         {
-          integrations: [...selectedIntegrations],
-          ...(setupPack
-            ? { setup: { id: setupPack.id, title: setupPack.title, intent: setupPack.soulIntent } }
+          name: defaultName.trim(),
+          website: companyUrl.trim(),
+          role: role.trim(),
+          teamSize,
+          agentExperience,
+        },
+        prompt,
+        {
+          integrations: [...selected],
+          agentName: agentName.trim(),
+          survey: { heardFrom, heardFromDetail: heardFromDetail.trim() },
+          ...(preset
+            ? { setup: { id: preset.id, title: preset.title, intent: preset.soulIntent } }
             : {}),
         },
       );
@@ -186,499 +382,324 @@ export function PersonalOnboardingChat({
       seedSessionQueries(queryClient, workspaceId, result.detail);
       router.push(personalPaths.session(result.session.id));
     });
-  };
-
-  const reset = () => {
-    if (isResetting) return;
-    startResetTransition(async () => {
-      const result = await resetPersonalAgent();
-      if (!result.ok) {
-        showError(result.error, "Could not reset agent");
-        return;
-      }
-      setStep("identity");
-      setWebsite("");
-      setRole("");
-      setPills([]);
-      pillsRequested.current = false;
-      setSelectedSetupId(null);
-      setSelectedIntegrations(new Set());
-      setInput("");
-      showToast({ title: "Personal agent reset", tone: "default" });
-      // Re-run the server layout/page so ensurePersonalAgent provisions a fresh agent.
-      router.refresh();
-    });
-  };
-
-  const isWide = step === "setup" || step === "integrations";
+  }
 
   return (
-    <main className="relative flex h-screen w-screen flex-col items-center justify-center overflow-y-auto bg-canvas px-6 py-10">
-      <div className={`flex w-full flex-col gap-6 ${isWide ? "max-w-[560px]" : "max-w-[460px]"}`}>
-        {step === "identity" ? (
-          <IdentityStep
-            name={name}
-            website={website}
-            role={role}
-            onNameChange={setName}
-            onWebsiteChange={setWebsite}
-            onRoleChange={setRole}
-            onContinue={advanceFromIdentity}
-            error={error}
-          />
-        ) : step === "setup" ? (
-          <SetupStep
-            selectedSetupId={selectedSetupId}
-            onSelect={selectSetup}
-            onSkip={skipSetup}
-            onBack={() => {
-              setError(null);
-              setStep("identity");
-            }}
-          />
-        ) : step === "integrations" ? (
-          <IntegrationsStep
-            selected={selectedIntegrations}
-            onToggle={toggleIntegration}
-            onContinue={() => {
-              setError(null);
-              setStep("prompt");
-            }}
-            onBack={() => {
-              setError(null);
-              setStep("setup");
-            }}
-          />
-        ) : (
-          <PromptStep
-            input={input}
-            error={error}
-            isPending={isPending}
-            canSubmit={canSubmit}
-            pills={pills}
-            textareaRef={textareaRef}
-            onInputChange={setInput}
-            onSubmit={() => submit()}
-            onPillSelect={(pill) => submit(pill)}
-            onBack={() => {
-              setError(null);
-              setStep("integrations");
-            }}
-            showToast={showToast}
-          />
-        )}
-      </div>
+    <main className="relative flex min-h-screen w-screen flex-col bg-canvas px-5">
+      <section
+        className={`mx-auto flex min-h-screen w-full flex-col pb-8 pt-[13vh] ${
+          isWide ? "max-w-[560px]" : "max-w-[460px]"
+        }`}
+      >
+        <div className="text-center">
+          <div className="mb-8 flex justify-center gap-1">
+            {STEPS.map((item, index) => (
+              <span
+                key={item.title}
+                aria-hidden
+                className={`h-1 rounded-full transition-all ${
+                  index === step ? "w-5 bg-ink" : "w-1 bg-border-strong"
+                }`}
+              />
+            ))}
+          </div>
 
-      {devReset ? (
-        <button
-          type="button"
-          onClick={reset}
-          disabled={isResetting}
-          className="fixed bottom-4 right-4 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-ink-subtle/70 transition-colors duration-150 hover:text-ink disabled:opacity-50"
-          aria-label="Reset personal agent (dev only)"
-        >
-          {isResetting ? <LoaderCircle size={12} strokeWidth={2} className="animate-spin" /> : null}
-          Reset agent
-        </button>
-      ) : null}
+          {meta.eyebrow ? (
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-subtle">
+              {meta.eyebrow}
+            </p>
+          ) : null}
+          <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">{meta.title}</h1>
+          <p className="mx-auto mt-1.5 max-w-[400px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
+            {meta.subtitle}
+          </p>
+        </div>
+
+        <div className="mt-8">
+          {step === 0 ? (
+            <div className="space-y-2">
+              {heardFromOptions.map((option) => (
+                <ChoiceButton
+                  key={option.value}
+                  selected={heardFrom === option.value}
+                  onClick={() => chooseHeardFrom(option.value)}
+                >
+                  {option.label}
+                </ChoiceButton>
+              ))}
+              {heardFrom === "other" ? (
+                <label className="block pt-2">
+                  <span className="text-[12px] font-medium text-ink-subtle">Source</span>
+                  <input
+                    type="text"
+                    value={heardFromDetail}
+                    onChange={(event) => setHeardFromDetail(event.target.value)}
+                    placeholder="Where did you hear about us?"
+                    className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
+                  />
+                </label>
+              ) : null}
+            </div>
+          ) : null}
+
+          {step === 1 ? (
+            <div className="space-y-5">
+              <OnboardingField
+                label="Your role"
+                value={role}
+                onChange={setRole}
+                placeholder="Founder, PM, engineer..."
+                autoFocus
+              />
+              <fieldset>
+                <legend className="text-[12px] font-medium text-ink-subtle">Team size</legend>
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {teamSizeOptions.map((option) => (
+                    <ChoiceButton
+                      key={option.value}
+                      selected={teamSize === option.value}
+                      onClick={() => {
+                        setTeamSize(option.value);
+                        setError(null);
+                      }}
+                    >
+                      {option.label}
+                    </ChoiceButton>
+                  ))}
+                </div>
+              </fieldset>
+              <div>
+                <OnboardingField
+                  label="Company URL"
+                  value={companyUrl}
+                  onChange={(value) => {
+                    setCompanyUrl(value);
+                    setError(null);
+                  }}
+                  placeholder="acme.com"
+                  optional
+                  inputMode="url"
+                />
+                {urlNudged && !companyUrl.trim() ? (
+                  <p className="mt-2 text-[12px] leading-4 text-ink-muted">
+                    Adding your site lets your agent research your company and tailor everything to
+                    you — it makes a real difference. Press Continue again to skip.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {step === 2 ? (
+            <div className="space-y-2">
+              {agentExperienceOptions.map((option) => (
+                <ChoiceButton
+                  key={option.value}
+                  selected={agentExperience === option.value}
+                  onClick={() => chooseAgentExperience(option.value)}
+                >
+                  {option.label}
+                </ChoiceButton>
+              ))}
+            </div>
+          ) : null}
+
+          {step === 3 ? (
+            <div className="space-y-5">
+              <OnboardingField
+                label="Agent name"
+                value={agentName}
+                onChange={(value) => {
+                  setAgentName(value);
+                  setError(null);
+                }}
+                placeholder="Friday, Ada, Leo..."
+                autoFocus
+              />
+              <div>
+                <span className="text-[12px] font-medium text-ink-subtle">Starting point</span>
+                <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  {ONBOARDING_SETUPS.map((preset) => {
+                    const Icon = preset.icon;
+                    const isSelected = presetChoice === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => choosePreset(preset.id)}
+                        className={`flex flex-col gap-2 rounded-lg border bg-surface/55 px-3.5 py-3 text-left transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15 ${
+                          isSelected ? "border-ink/40 bg-surface" : "border-border"
+                        }`}
+                      >
+                        <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+                          <Icon size={15} strokeWidth={1.85} />
+                        </span>
+                        <span className="text-[13px] font-medium text-ink">{preset.title}</span>
+                        <span className="text-[12px] leading-4 text-ink-muted">
+                          {preset.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => choosePreset(SCRATCH)}
+                  className={`mt-2.5 flex w-full items-center justify-between rounded-lg border bg-surface/55 px-3.5 py-2.5 text-left transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15 ${
+                    presetChoice === SCRATCH ? "border-ink/40 bg-surface" : "border-border"
+                  }`}
+                >
+                  <span className="text-[13px] font-medium text-ink">Start from scratch</span>
+                  <span className="text-[12px] text-ink-muted">I'll set it up myself</span>
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {step === 4 ? (
+            <div className="space-y-2">
+              {ONBOARDING_INTEGRATIONS.map((integration) => {
+                const Icon = integration.icon;
+                const isSelected = selected.has(integration.id);
+                const isConnected = connected.has(integration.id);
+                const isConnecting = connecting === integration.id;
+                return (
+                  <div
+                    key={integration.id}
+                    className={`flex min-w-0 items-center gap-3 rounded-lg border bg-surface/55 px-3.5 py-3 transition-colors ${
+                      isSelected ? "border-ink/30" : "border-border"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleIntegration(integration.id)}
+                      aria-pressed={isSelected}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none"
+                    >
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
+                        <Icon size={15} strokeWidth={1.85} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium text-ink">
+                          {integration.label}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-muted">
+                          {integration.description}
+                        </span>
+                      </span>
+                      <span
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                          isSelected
+                            ? "border-ink bg-ink text-canvas"
+                            : "border-border-strong bg-surface text-transparent"
+                        }`}
+                      >
+                        <Check size={12} strokeWidth={2.5} />
+                      </span>
+                    </button>
+                    {isConnected ? (
+                      <span className="flex shrink-0 items-center gap-1 rounded-md border border-pill-green-text/20 bg-pill-green px-2 py-1 text-[11.5px] font-medium text-pill-green-text">
+                        <Check size={11} strokeWidth={2.5} />
+                        Connected
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleConnect(integration.id)}
+                        disabled={isConnecting}
+                        className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[11.5px] font-medium text-ink-subtle transition-colors hover:border-border-strong hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-60"
+                      >
+                        {isConnecting ? (
+                          <LoaderCircle size={11} strokeWidth={2} className="animate-spin" />
+                        ) : (
+                          <ExternalLink size={11} strokeWidth={2} />
+                        )}
+                        {isConnecting ? "Connecting" : "Connect"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {step === LAST_STEP ? (
+            <div className="space-y-2.5 rounded-lg border border-border bg-surface/55 px-4 py-3.5">
+              <SummaryRow label="Agent">{agentName.trim() || "Your agent"}</SummaryRow>
+              <SummaryRow label="Starting point">
+                {presetChoice && presetChoice !== SCRATCH
+                  ? (ONBOARDING_SETUPS.find((p) => p.id === presetChoice)?.title ?? "From scratch")
+                  : "From scratch"}
+              </SummaryRow>
+              <SummaryRow label="Integrations">
+                {selected.size === 0
+                  ? "None yet"
+                  : `${selected.size} enabled · ${connected.size} connected`}
+              </SummaryRow>
+            </div>
+          ) : null}
+
+          {error ? (
+            <p className="mt-4 text-center text-[12px] leading-4 text-red-700">{error}</p>
+          ) : null}
+        </div>
+
+        <div className="mt-5 space-y-3">
+          {step === LAST_STEP ? (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={isPending}
+              className="flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted"
+            >
+              {isPending ? (
+                <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
+              ) : null}
+              <span>
+                {isPending ? "Setting up" : `Set up ${agentName.trim() || "my agent"}`}
+              </span>
+              {isPending ? null : <ArrowRight size={12} strokeWidth={2} />}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={goForward}
+              className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
+            >
+              <span>Continue</span>
+              <ArrowRight size={12} strokeWidth={2} />
+            </button>
+          )}
+
+          {step > 0 ? (
+            <button
+              type="button"
+              onClick={goBack}
+              disabled={isPending}
+              className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
+            >
+              <ArrowLeft size={12} strokeWidth={2} />
+              <span>Back</span>
+            </button>
+          ) : null}
+        </div>
+
+        <div className="mt-auto pt-8 text-center text-[12.5px] leading-5 text-ink-muted">
+          <div>Using {userEmail}</div>
+          <a href="/auth/sign-out" className="text-ink-subtle transition-colors hover:text-ink">
+            Use a different email
+          </a>
+        </div>
+      </section>
     </main>
   );
 }
 
-type IdentityStepProps = {
-  name: string;
-  website: string;
-  role: string;
-  onNameChange: (value: string) => void;
-  onWebsiteChange: (value: string) => void;
-  onRoleChange: (value: string) => void;
-  onContinue: () => void;
-  error: string | null;
-};
-
-function IdentityStep({
-  name,
-  website,
-  role,
-  onNameChange,
-  onWebsiteChange,
-  onRoleChange,
-  onContinue,
-  error,
-}: IdentityStepProps) {
-  const canContinue = Boolean(name.trim() && role.trim() && website.trim());
-
+function SummaryRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <>
-      <div className="text-center">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-          First, tell me about you
-        </h1>
-        <p className="mx-auto mt-1.5 max-w-[360px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
-          A few details so I can tailor what I do for you.
-        </p>
-      </div>
-
-      <form
-        className="flex flex-col gap-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onContinue();
-        }}
-      >
-        <OnboardingField
-          label="Your name"
-          value={name}
-          onChange={onNameChange}
-          placeholder="Alex Rivera"
-          autoFocus
-        />
-        <OnboardingField
-          label="Your role"
-          value={role}
-          onChange={onRoleChange}
-          placeholder="Head of Growth"
-        />
-        <OnboardingField
-          label="Website"
-          value={website}
-          onChange={onWebsiteChange}
-          placeholder="acme.com"
-          inputMode="url"
-        />
-
-        {error ? <p className="text-center text-[12px] leading-4 text-red-700">{error}</p> : null}
-
-        <button
-          type="submit"
-          disabled={!canContinue}
-          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:bg-ink-muted disabled:opacity-60"
-        >
-          <span>Continue</span>
-          <ArrowRight size={12} strokeWidth={2} />
-        </button>
-      </form>
-    </>
-  );
-}
-
-type OnboardingFieldProps = {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  autoFocus?: boolean;
-  inputMode?: "url" | "text";
-};
-
-function OnboardingField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  autoFocus,
-  inputMode,
-}: OnboardingFieldProps) {
-  return (
-    <label className="block">
-      <span className="text-[12px] font-medium text-ink-subtle">{label}</span>
-      <input
-        type="text"
-        // biome-ignore lint/a11y/noAutofocus: first field of a focused single-purpose onboarding form.
-        autoFocus={autoFocus}
-        inputMode={inputMode}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="mt-2 h-8 w-full rounded-md border border-border bg-surface px-3 text-[12.5px] text-ink outline-none transition-colors placeholder:text-ink-subtle focus:border-ink/30 focus:ring-2 focus:ring-ink/10"
-      />
-    </label>
-  );
-}
-
-type SetupStepProps = {
-  selectedSetupId: string | null;
-  onSelect: (setup: OnboardingSetup) => void;
-  onSkip: () => void;
-  onBack: () => void;
-};
-
-// Setup packs: example "modes" that show what the agent can do. Picking one is the blank-box hack —
-// the user doesn't invent the use case from scratch, they pick a role and the rest is scaffolded.
-function SetupStep({ selectedSetupId, onSelect, onSkip, onBack }: SetupStepProps) {
-  return (
-    <>
-      <div className="text-center">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-          What should I help you with?
-        </h1>
-        <p className="mx-auto mt-1.5 max-w-[420px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
-          Pick a starting point and I'll set myself up for it. You can change this anytime.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-        {ONBOARDING_SETUPS.map((setup) => {
-          const Icon = setup.icon;
-          const selected = setup.id === selectedSetupId;
-          return (
-            <button
-              key={setup.id}
-              type="button"
-              onClick={() => onSelect(setup)}
-              className={`flex flex-col gap-2 rounded-lg border bg-surface/55 px-3.5 py-3 text-left transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/15 ${
-                selected ? "border-ink/40 bg-surface" : "border-border"
-              }`}
-            >
-              <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
-                <Icon size={15} strokeWidth={1.85} />
-              </span>
-              <span className="text-[13px] font-medium text-ink">{setup.title}</span>
-              <span className="text-[12px] leading-4 text-ink-muted">{setup.description}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onBack}
-          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <ArrowLeft size={12} strokeWidth={2} />
-          <span>Back</span>
-        </button>
-        <button
-          type="button"
-          onClick={onSkip}
-          className="flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <span>Start from scratch</span>
-          <ArrowRight size={12} strokeWidth={2} />
-        </button>
-      </div>
-    </>
-  );
-}
-
-type IntegrationsStepProps = {
-  selected: Set<PersonalIntegrationId>;
-  onToggle: (id: PersonalIntegrationId) => void;
-  onContinue: () => void;
-  onBack: () => void;
-};
-
-// Integrations/MCPs we support. Selecting enables the integration on the agent (the @mention is
-// written at submit). "Connect" opens the auth flow in a new tab — the personal agent enables MCPs
-// per-agent via the mention, but they're authorized at the workspace level, so connecting is a
-// separate, optional step the user can also do later.
-function IntegrationsStep({ selected, onToggle, onContinue, onBack }: IntegrationsStepProps) {
-  return (
-    <>
-      <div className="text-center">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-ink">
-          Connect what I can use
-        </h1>
-        <p className="mx-auto mt-1.5 max-w-[420px] text-[13px] leading-5 tracking-[-0.005em] text-ink-muted">
-          Pick the tools I should have access to. Connect now or later — you can manage these in
-          settings anytime.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        {ONBOARDING_INTEGRATIONS.map((integration) => {
-          const Icon = integration.icon;
-          const isSelected = selected.has(integration.id);
-          return (
-            <div
-              key={integration.id}
-              className={`flex min-w-0 items-center gap-3 rounded-lg border bg-surface/55 px-3.5 py-3 transition-colors ${
-                isSelected ? "border-ink/30" : "border-border"
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => onToggle(integration.id)}
-                aria-pressed={isSelected}
-                className="flex min-w-0 flex-1 items-center gap-3 text-left focus:outline-none"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink-muted">
-                  <Icon size={15} strokeWidth={1.85} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[13px] font-medium text-ink">
-                    {integration.label}
-                  </span>
-                  <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-muted">
-                    {integration.description}
-                  </span>
-                </span>
-                <span
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors ${
-                    isSelected
-                      ? "border-ink bg-ink text-canvas"
-                      : "border-border-strong bg-surface text-transparent"
-                  }`}
-                >
-                  <Check size={12} strokeWidth={2.5} />
-                </span>
-              </button>
-              <a
-                href={integration.connectHref}
-                target="_blank"
-                rel="noreferrer"
-                className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-[11.5px] font-medium text-ink-subtle transition-colors hover:border-border-strong hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              >
-                Connect
-                <ExternalLink size={11} strokeWidth={2} />
-              </a>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={onContinue}
-          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-[12px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/20"
-        >
-          <span>Continue</span>
-          <ArrowRight size={12} strokeWidth={2} />
-        </button>
-        <button
-          type="button"
-          onClick={onBack}
-          className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <ArrowLeft size={12} strokeWidth={2} />
-          <span>Back</span>
-        </button>
-      </div>
-    </>
-  );
-}
-
-type PromptStepProps = {
-  input: string;
-  error: string | null;
-  isPending: boolean;
-  canSubmit: boolean;
-  pills: string[];
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-  onInputChange: (value: string) => void;
-  onSubmit: () => void;
-  onPillSelect: (pill: string) => void;
-  onBack: () => void;
-  showToast: ReturnType<typeof useToast>["showToast"];
-};
-
-function PromptStep({
-  input,
-  error,
-  isPending,
-  canSubmit,
-  pills,
-  textareaRef,
-  onInputChange,
-  onSubmit,
-  onPillSelect,
-  onBack,
-  showToast,
-}: PromptStepProps) {
-  return (
-    <>
-      <h1 className="text-center text-[18px] font-semibold tracking-[-0.01em] text-ink">
-        What do you want to get done today?
-      </h1>
-
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <Composer
-          variant="expanded"
-          error={error}
-          input={
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(event) => onInputChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault();
-                  onSubmit();
-                }
-              }}
-              onPaste={(event) => {
-                const items = event.clipboardData?.items;
-                if (!items) return;
-                const itemArray = Array.from(items);
-                const hasImage = itemArray.some(
-                  (item) => item.kind === "file" && item.type.startsWith("image/"),
-                );
-                if (!hasImage) return;
-                const hasText = itemArray.some((item) => item.kind === "string");
-                if (!hasText) event.preventDefault();
-                showToast({
-                  title: "Image upload coming soon",
-                  description: hasText
-                    ? "The text was pasted; the image was ignored."
-                    : "Image attachments aren't supported yet.",
-                  tone: "default",
-                });
-              }}
-              rows={1}
-              placeholder="e.g. Research our top 3 competitors and summarize how we differ"
-              className="min-h-9 w-full resize-none content-center bg-transparent text-[15px] leading-6 tracking-[-0.005em] text-ink placeholder:text-ink-subtle outline-none"
-              style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-            />
-          }
-          action={
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label={isPending ? "Starting session…" : "Start session"}
-            >
-              {isPending ? (
-                <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
-              ) : (
-                <ArrowUp size={13} strokeWidth={2} />
-              )}
-            </button>
-          }
-        />
-      </form>
-
-      {pills.length > 0 ? (
-        <div className="flex flex-wrap justify-center gap-2">
-          {pills.map((pill) => (
-            <button
-              key={pill}
-              type="button"
-              disabled={isPending}
-              onClick={() => onPillSelect(pill)}
-              className="rounded-full border border-border bg-surface px-3.5 py-1.5 text-[13px] tracking-[-0.005em] text-ink-subtle shadow-[0_1px_2px_rgba(15,15,15,0.03)] transition-colors duration-150 hover:border-border-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {pill}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={onBack}
-        disabled={isPending}
-        className="mx-auto flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
-      >
-        <ArrowLeft size={12} strokeWidth={2} />
-        <span>Back</span>
-      </button>
-    </>
+    <div className="flex items-center justify-between gap-3 text-[12.5px]">
+      <span className="text-ink-subtle">{label}</span>
+      <span className="truncate font-medium text-ink">{children}</span>
+    </div>
   );
 }

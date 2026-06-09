@@ -1,98 +1,95 @@
 import {
   BarChart3,
-  Briefcase,
   CalendarDays,
   GitBranch,
-  Inbox,
-  LineChart,
   type LucideIcon,
   Mail,
   MessageSquare,
+  Rocket,
   SquareKanban,
-  Telescope,
+  UserRoundCog,
 } from "lucide-react";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 
-// The catalogs that drive the two middle onboarding screens (/onboarding/personal):
+// The catalogs that drive the personal-agent setup screens (/onboarding/personal):
 //
-//  - ONBOARDING_SETUPS — "what can this agent do for me?" packs shown right after identity. Picking
-//    one pre-selects its integrations, prefills the first task, and feeds a "mode" intent into the
-//    first message so the onboarding skill tunes the agent's soul to that role.
-//  - ONBOARDING_INTEGRATIONS — the integrations/MCPs we support, shown as a connect step. Selecting
-//    a row enables it on the agent (writes its @mention at submit); `connectHref` opens the auth
-//    flow in a new tab so the in-progress onboarding state survives the round-trip.
+//  - ONBOARDING_SETUPS — the preset "starting points" shown on the agent-setup step. Picking one
+//    pre-selects its integrations, gives the first session a starter task, and feeds a "mode" intent
+//    into the first message so the onboarding skill tunes the agent's soul to that role. "Start from
+//    scratch" is offered alongside these in the UI (it simply selects no preset).
+//  - ONBOARDING_INTEGRATIONS — the integrations/MCPs we support, shown as a connect step. Each row's
+//    checkbox enables it on the agent (writes its @mention at submit); `connectHref` is opened in a
+//    popup (target /onboarding/connected) so the user can authorize inline without the onboarding
+//    page itself ever navigating away.
 
 export type OnboardingSetup = {
   id: string;
   title: string;
   description: string;
   icon: LucideIcon;
-  // Integrations to pre-select on the integrations step when this pack is chosen.
+  // Integrations to pre-select on the integrations step when this preset is chosen.
   integrations: PersonalIntegrationId[];
-  // Prefilled into the prompt box; the user can still edit it.
+  // The first task the seeded session opens with (the user no longer types one).
   starterTask: string;
-  // A short, plain-language description of the mode this pack implies. Rides (invisibly) into the
+  // A short, plain-language description of the mode this preset implies. Rides (invisibly) into the
   // first message so the onboarding skill can tune `agent/soul.md` to fit — it is never shown.
   soulIntent: string;
 };
 
 export const ONBOARDING_SETUPS: OnboardingSetup[] = [
   {
-    id: "chief-of-staff",
-    title: "Chief of Staff",
-    description: "Stays on top of my calendar, inbox, and priorities so nothing slips.",
-    icon: Briefcase,
-    integrations: ["google_calendar", "gmail", "linear"],
-    starterTask: "Give me a daily brief of what needs my attention",
+    id: "co-founder",
+    title: "Co-founder",
+    description: "A thinking partner for strategy, product, and the hard calls — moves fast with me.",
+    icon: Rocket,
+    integrations: ["linear", "github", "slack"],
+    starterTask: "Help me think through the most important thing I should be working on right now",
     soulIntent:
-      "A proactive chief of staff who manages my priorities, calendar, and communications, " +
-      "surfaces what needs my attention, and keeps things moving without being asked.",
+      "A co-founder-like partner who thinks strategically about the business and product, pushes " +
+      "back on my thinking, connects the dots across what's happening, and helps me move fast on " +
+      "what matters most.",
   },
   {
-    id: "research-analyst",
-    title: "Research Analyst",
-    description: "Digs into companies, people, and markets and writes tight memos.",
-    icon: Telescope,
-    integrations: ["github"],
-    starterTask: "Research our top 3 competitors and how we differ",
+    id: "executive-assistant",
+    title: "Executive Assistant",
+    description: "Runs my calendar, inbox, and follow-ups so my time goes to the right things.",
+    icon: UserRoundCog,
+    integrations: ["google_calendar", "gmail", "slack"],
+    starterTask: "Get me on top of my inbox and calendar for today",
     soulIntent:
-      "A rigorous research analyst who investigates companies, people, and markets from primary " +
-      "sources and produces tight, well-cited memos.",
-  },
-  {
-    id: "inbox-and-comms",
-    title: "Inbox & Comms",
-    description: "Drafts replies in my voice and keeps my messages from piling up.",
-    icon: Inbox,
-    integrations: ["gmail", "slack"],
-    starterTask: "Draft the replies I owe people",
-    soulIntent:
-      "A communications assistant who drafts email and messages in my voice, keeps my inbox under " +
-      "control, and flags what genuinely needs me.",
-  },
-  {
-    id: "product-and-growth",
-    title: "Product & Growth",
-    description: "Tracks what's shipping, what's blocked, and how it's landing.",
-    icon: LineChart,
-    integrations: ["linear", "posthog", "github"],
-    starterTask: "Summarize what's shipping and what's blocked",
-    soulIntent:
-      "A product and growth copilot who tracks what's shipping and blocked, ties work to outcomes, " +
-      "and reads product analytics to tell me how it's landing.",
+      "A sharp executive assistant who manages my calendar, inbox, and communications, protects " +
+      "my time, drafts replies in my voice, and makes sure nothing slips through the cracks.",
   },
 ];
+
+// postMessage contract between the inline-connect popup (/onboarding/connected) and the onboarding
+// window. The popup reads the OAuth status params, posts this, and closes; the onboarding window
+// listens and flips the row to "connected".
+export const ONBOARDING_CONNECTED_MESSAGE = "oc-integration-connected" as const;
+
+export type OnboardingConnectedMessage = {
+  type: typeof ONBOARDING_CONNECTED_MESSAGE;
+  // Equals a PersonalIntegrationId (github, gmail, google_calendar, linear, slack, posthog).
+  provider: string | null;
+  status: string | null;
+  reason: string | null;
+};
 
 export type OnboardingIntegration = {
   id: PersonalIntegrationId;
   label: string;
   description: string;
   icon: LucideIcon;
-  // Opened in a new tab from the integrations step to authorize the connection.
+  // OAuth start route, opened in a popup window from the integrations step. Every start route lands
+  // back on /onboarding/connected (a tiny page that messages the opener and closes itself), so the
+  // user authorizes inline without the onboarding page navigating. See PersonalOnboardingChat.
   connectHref: string;
 };
 
-const ONBOARDING_RETURN_TO = "/onboarding/personal";
+// All OAuth flows accept an arbitrary relative `returnTo` and redirect back to it with a status
+// param on completion (integrations: `?integration=<id>&setup=…`, MCPs: `?mcp=<id>&setup=…`). We
+// point them all at this popup-closer page.
+const ONBOARDING_RETURN_TO = "/onboarding/connected";
 
 export const ONBOARDING_INTEGRATIONS: OnboardingIntegration[] = [
   {
@@ -100,21 +97,21 @@ export const ONBOARDING_INTEGRATIONS: OnboardingIntegration[] = [
     label: "GitHub",
     description: "Read and edit repositories, open pull requests.",
     icon: GitBranch,
-    connectHref: "/settings/integrations",
+    connectHref: `/api/integrations/github/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },
   {
     id: "gmail",
     label: "Gmail",
     description: "Read your mail to draft, triage, and summarize.",
     icon: Mail,
-    connectHref: "/settings/integrations",
+    connectHref: `/api/integrations/gmail/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },
   {
     id: "google_calendar",
     label: "Google Calendar",
     description: "Read and manage events across your calendars.",
     icon: CalendarDays,
-    connectHref: "/settings/integrations",
+    connectHref: `/api/integrations/google-calendar/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },
   {
     id: "linear",

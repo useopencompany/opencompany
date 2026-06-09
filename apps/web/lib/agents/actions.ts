@@ -545,7 +545,6 @@ export async function updateAgent(
           usableRepositories,
           workspaceAgentReferences,
           {
-            mcpEnabled: mcpSettings.mcpEnabled,
             linearConfigured: mcpSettings.linear.configured,
             slackConfigured: mcpSettings.slack.configured,
           },

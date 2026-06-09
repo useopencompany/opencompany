@@ -12,6 +12,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
+import { captureException } from "@opencompany/observability";
 import { getDb } from "@opencompany/db/client";
 import {
   type Agent,
@@ -22,7 +23,9 @@ import {
   agentSessions,
   agents,
   agentToolApprovals,
+  onboardingResponses,
   sessionStars,
+  workspaces,
 } from "@opencompany/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
@@ -43,9 +46,11 @@ import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validatio
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
+import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
 import {
   enablePersonalAgentIntegrations,
   type PersonalIntegrationId,
+  setPersonalAgentName,
 } from "@/lib/personal/actions";
 import { determineApprovalResolution } from "./approval-resolution";
 
@@ -178,23 +183,79 @@ export async function createAgentSessionFromPrompt(
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-// Background context the user gave on the first onboarding screen (name / website / role). It is
-// never typed into chat — the prompt screen only asks "what do you want to get done today?" — so we
-// inject it invisibly into the first message's model content (see buildOnboardingModelContent).
+// Background context the user gave on the onboarding screens (their role, company, team size, and
+// how familiar they are with agents). It is never typed into chat — the user no longer types a first
+// task — so we inject it invisibly into the first message's model content so the onboarding skill
+// starts already knowing them (see buildOnboardingModelContent).
 export type PersonalOnboardingContext = {
   name: string;
   website: string;
   role: string;
+  teamSize?: string;
+  agentExperience?: string;
 };
 
-// The chosen setup pack (if any) from the onboarding "setup" step, plus the integrations the user
-// left enabled on the integrations step. Both are best-effort scaffolding: the integrations are
-// written to the agent body before the run fires, and the setup's mode + integration list ride
-// (invisibly) into the first message so the onboarding skill tunes the soul to that role.
+// The chosen preset (if any) from the agent-setup step, the integrations the user left enabled, the
+// name they gave the agent, and the short attribution survey we persist for analytics. The
+// integrations are written to the agent body before the run fires; the preset's mode + integration
+// list ride (invisibly) into the first message so the onboarding skill tunes the soul to that role;
+// the survey + context are persisted best-effort and never block the session.
 export type PersonalOnboardingOptions = {
   integrations: PersonalIntegrationId[];
   setup?: { id: string; title: string; intent: string };
+  agentName?: string;
+  survey?: { heardFrom: string; heardFromDetail: string };
 };
+
+// Persist the onboarding answers (attribution survey + role/team/company) the same way the legacy
+// workspace flow did — minus the leo scaffold, sales-call booking, and redirect. Best-effort: a
+// failure here must never block the user from starting their first session. Idempotent on userId, so
+// re-running onboarding (e.g. dev reset) doesn't duplicate the row.
+async function persistPersonalOnboardingSurvey(
+  userId: string,
+  workspaceId: string,
+  context: PersonalOnboardingContext,
+  survey: { heardFrom: string; heardFromDetail: string } | undefined,
+) {
+  try {
+    const db = getDb();
+    const now = new Date();
+    const heardFrom = survey?.heardFrom?.trim() ?? "";
+    const companyUrl = normalizeCompanyUrl(context.website.trim());
+
+    if (heardFrom) {
+      await db
+        .insert(onboardingResponses)
+        .values({
+          userId,
+          workspaceId,
+          heardFrom,
+          heardFromDetail:
+            heardFrom === "other" ? (survey?.heardFromDetail?.trim() || null) : null,
+          role: context.role.trim(),
+          agentExperience: context.agentExperience?.trim() || "",
+          helpAreas: [],
+          updatedAt: now,
+        })
+        .onConflictDoNothing({ target: onboardingResponses.userId });
+    }
+
+    await db
+      .update(workspaces)
+      .set({
+        ...(context.teamSize?.trim() ? { teamSize: context.teamSize.trim() } : {}),
+        ...(companyUrl ? { companyUrl } : {}),
+        updatedAt: now,
+      })
+      .where(eq(workspaces.id, workspaceId));
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.personal_onboarding_survey_persist_failed",
+      workspace_id: workspaceId,
+      user_id: userId,
+    });
+  }
+}
 
 // V2 onboarding (/onboarding/personal): the visible first message is the user's "what do you want to
 // get done today?" answer. We seed it as a normal user message (so it reads naturally in the
@@ -219,6 +280,15 @@ export async function createPersonalOnboardingSession(
       error: "Add workspace credits to start a session.",
       redirectTo: "/company/settings?billing=insufficient",
     } as const;
+  }
+
+  // Persist the attribution survey + role/team/company (best-effort, never blocks the session).
+  await persistPersonalOnboardingSurvey(user.id, workspace.id, context, options.survey);
+
+  // Name the agent the user chose. Re-serializes the agent source so name + body stay in lockstep,
+  // and runs before integrations are enabled so the freshly-written name flows into that save too.
+  if (options.agentName?.trim()) {
+    await setPersonalAgentName(agentId, options.agentName.trim());
   }
 
   // Enable the integrations the user kept selected before the run fires. This appends their
@@ -1119,6 +1189,10 @@ function buildOnboardingModelContent(
     context.name.trim() ? `- Name: ${context.name.trim()}` : null,
     context.role.trim() ? `- Role: ${context.role.trim()}` : null,
     context.website.trim() ? `- Website: ${context.website.trim()}` : null,
+    context.teamSize?.trim() ? `- Team size: ${context.teamSize.trim()}` : null,
+    context.agentExperience?.trim()
+      ? `- Experience with agents: ${context.agentExperience.trim()}`
+      : null,
     options.setup ? `- Chosen setup: ${options.setup.title} — ${options.setup.intent}` : null,
     options.integrations.length
       ? `- Integrations I enabled: ${options.integrations.join(", ")}`

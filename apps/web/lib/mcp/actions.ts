@@ -1,14 +1,13 @@
 "use server";
 
 import { getDb } from "@opencompany/db/client";
-import { workspaceExperiments, workspaceMcpServers } from "@opencompany/db/schema";
+import { workspaceMcpServers } from "@opencompany/db/schema";
 import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
 import {
   LINEAR_MCP_ENDPOINT_URL,
   LINEAR_MCP_SERVER_KEY,
-  MCP_EXPERIMENT_KEY,
   type McpProviderKey,
   POSTHOG_MCP_ENDPOINT_URL,
   POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
@@ -18,27 +17,6 @@ import {
   SLACK_MCP_SERVER_KEY,
 } from "@/lib/mcp/data";
 import { linearMcpOAuthCredentialKind } from "@/lib/mcp/linear-oauth";
-
-export async function setWorkspaceMcpExperimentEnabled(enabled: boolean) {
-  const { workspace } = await currentWorkspace({ requireAdmin: true });
-  const now = new Date();
-
-  await getDb()
-    .insert(workspaceExperiments)
-    .values({
-      workspaceId: workspace.id,
-      key: MCP_EXPERIMENT_KEY,
-      enabled,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [workspaceExperiments.workspaceId, workspaceExperiments.key],
-      set: { enabled, updatedAt: now },
-    });
-
-  revalidateMcpPaths();
-  return { ok: true as const, enabled };
-}
 
 export async function saveLinearMcpToken(token: string) {
   const { workspace } = await currentWorkspace({ requireAdmin: true });

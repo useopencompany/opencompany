@@ -3,8 +3,10 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
+  Blocks,
   Bot,
   Brain,
+  BrainCircuit,
   ChevronDown,
   Inbox,
   MessageCircle,
@@ -23,6 +25,7 @@ import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { deriveVisibleInbox } from "@/lib/collections/selectors";
+import { PERSONAL_INTEGRATION_TOOL_IDS } from "@/lib/personal/integrations-catalog";
 import { personalPaths } from "@/lib/personal/paths";
 
 // Sessions mid-archive must not flash in the list (mirrors deriveSidebarSessions).
@@ -63,6 +66,48 @@ function CapabilityNavRow({
         <span className="ml-auto text-[11px] tabular-nums text-ink-subtle">{count}</span>
       )}
     </button>
+  );
+}
+
+// A collapsible parent nav row that toggles a set of child capability rows. Used to group
+// Skills / Integrations / Tools / Channels under a single "Capabilities" entry.
+function CapabilityGroupRow({
+  icon: Icon,
+  label,
+  childActive,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  childActive: boolean;
+  children: React.ReactNode;
+}) {
+  // Default open when one of the children is the active surface, so the highlight is visible.
+  const [open, setOpen] = useState(childActive);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="group flex w-full items-center gap-2.5 rounded-md px-2 py-[5px] text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Icon
+          size={14}
+          strokeWidth={1.75}
+          className="shrink-0 text-ink/60 group-hover:text-ink/80"
+        />
+        <span className="truncate tracking-[-0.005em]">{label}</span>
+        <ChevronDown
+          size={13}
+          strokeWidth={2}
+          className={`ml-auto shrink-0 text-ink-subtle transition-transform duration-150 ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+      {open && <div className="mt-px flex flex-col gap-px pl-3.5">{children}</div>}
+    </div>
   );
 }
 
@@ -226,6 +271,8 @@ function useActivePersonalRoute() {
   const activePanel =
     section === "agent" ||
     section === "brain" ||
+    section === "memory" ||
+    section === "settings" ||
     section === "skills" ||
     section === "integrations" ||
     section === "tools" ||
@@ -278,14 +325,16 @@ function PersonalSidebarView({
   inboxCount?: number;
 }) {
   const router = useRouter();
-  const { agent, userName, userEmail, config, personalSkills, githubRequested } =
+  const { agent, userName, userEmail, config, personalSkills, githubRequested, proMode } =
     usePersonalAgent();
   const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
 
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
   const skillCount = (config.skills?.length ?? 0) + personalSkills.length;
   const integrationCount = personalIntegrationCount({ config, githubRequested });
-  const toolCount = config.tools.length;
+  const toolCount = config.tools.filter(
+    (tool) => !PERSONAL_INTEGRATION_TOOL_IDS.has(tool.id),
+  ).length;
 
   return (
     <aside
@@ -337,44 +386,63 @@ function PersonalSidebarView({
         <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
           <Section title="Configuration">
             <CapabilityNavRow
-              icon={Brain}
-              label="Personal Brain"
-              active={activePanel === "brain"}
-              onClick={() => router.push(personalPaths.brain)}
-            />
-            <CapabilityNavRow
               icon={Bot}
               label="Agent"
               active={activePanel === "agent"}
               onClick={() => router.push(personalPaths.agent)}
             />
+            {proMode && (
+              <CapabilityNavRow
+                icon={BrainCircuit}
+                label="Memory"
+                active={activePanel === "memory"}
+                onClick={() => router.push(personalPaths.memory)}
+              />
+            )}
             <CapabilityNavRow
-              icon={Sparkles}
-              label="Skills"
-              count={skillCount}
-              active={activePanel === "skills"}
-              onClick={() => router.push(personalPaths.skills)}
+              icon={Brain}
+              label="Personal Brain"
+              active={activePanel === "brain"}
+              onClick={() => router.push(personalPaths.brain)}
             />
-            <CapabilityNavRow
-              icon={Plug}
-              label="Integrations"
-              count={integrationCount}
-              active={activePanel === "integrations"}
-              onClick={() => router.push(personalPaths.integrations)}
-            />
-            <CapabilityNavRow
-              icon={Wrench}
-              label="Tools"
-              count={toolCount}
-              active={activePanel === "tools"}
-              onClick={() => router.push(personalPaths.tools)}
-            />
-            <CapabilityNavRow
-              icon={MessageCircle}
-              label="Channels"
-              active={activePanel === "channels"}
-              onClick={() => router.push(personalPaths.channels)}
-            />
+            <CapabilityGroupRow
+              icon={Blocks}
+              label="Capabilities"
+              childActive={
+                activePanel === "skills" ||
+                activePanel === "integrations" ||
+                activePanel === "tools" ||
+                activePanel === "channels"
+              }
+            >
+              <CapabilityNavRow
+                icon={Sparkles}
+                label="Skills"
+                count={skillCount}
+                active={activePanel === "skills"}
+                onClick={() => router.push(personalPaths.skills)}
+              />
+              <CapabilityNavRow
+                icon={Plug}
+                label="Integrations"
+                count={integrationCount}
+                active={activePanel === "integrations"}
+                onClick={() => router.push(personalPaths.integrations)}
+              />
+              <CapabilityNavRow
+                icon={Wrench}
+                label="Tools"
+                count={toolCount}
+                active={activePanel === "tools"}
+                onClick={() => router.push(personalPaths.tools)}
+              />
+              <CapabilityNavRow
+                icon={MessageCircle}
+                label="Channels"
+                active={activePanel === "channels"}
+                onClick={() => router.push(personalPaths.channels)}
+              />
+            </CapabilityGroupRow>
           </Section>
 
           <Section title="Sessions">
@@ -410,6 +478,7 @@ function PersonalSidebarView({
           userName={userName}
           userEmail={userEmail}
           subtitle={`${agent.name} · Personal`}
+          settingsHref={personalPaths.settings}
         />
       </div>
     </aside>

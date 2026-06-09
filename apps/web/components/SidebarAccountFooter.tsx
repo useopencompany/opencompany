@@ -28,6 +28,9 @@ type Props = {
   userEmail: string;
   subtitle: string;
   trailing?: ReactNode;
+  // Where the "Settings" menu item links. Defaults to the workspace settings; the personal surface
+  // overrides it to its own lightweight settings page.
+  settingsHref?: string;
 };
 
 async function fetchStatusPageAggregateState(): Promise<StatusPageAggregateState> {
@@ -150,11 +153,13 @@ function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
 function AccountMenu({
   userName,
   userEmail,
+  settingsHref,
   onClose,
   onFeedbackOpen,
 }: {
   userName: string;
   userEmail: string;
+  settingsHref: string;
   onClose: () => void;
   onFeedbackOpen: () => void;
 }) {
@@ -166,7 +171,7 @@ function AccountMenu({
     action?: () => void;
   }> = [
     { icon: MessageSquarePlus, label: "Feedback", action: onFeedbackOpen },
-    { icon: Settings, label: "Settings", href: "/settings" },
+    { icon: Settings, label: "Settings", href: settingsHref },
     { icon: ScrollText, label: "Changelog", href: "/changelog" },
     { icon: CircleHelp, label: "Docs", href: "/docs" },
   ];
@@ -227,7 +232,13 @@ function AccountMenu({
   );
 }
 
-export function SidebarAccountFooter({ userName, userEmail, subtitle, trailing }: Props) {
+export function SidebarAccountFooter({
+  userName,
+  userEmail,
+  subtitle,
+  trailing,
+  settingsHref = "/settings",
+}: Props) {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const footerRef = useRef<HTMLDivElement>(null);
@@ -263,6 +274,7 @@ export function SidebarAccountFooter({ userName, userEmail, subtitle, trailing }
           <AccountMenu
             userName={userName}
             userEmail={userEmail}
+            settingsHref={settingsHref}
             onClose={() => setAccountMenuOpen(false)}
             onFeedbackOpen={() => setFeedbackOpen(true)}
           />

@@ -187,7 +187,7 @@ describe("runtime tool definitions", () => {
     // The help is a pointer to the skill, not a second copy of the protocol.
     expect(definition.help).toContain("source of truth");
     expect(definition.help).toContain("COMPLETE new Markdown body");
-    expect(definition.help).toContain("next session");
+    expect(definition.help).toContain("next turn in this same session");
   });
 
   it("keeps Exa category compatibility guidance in the visible search schema", () => {

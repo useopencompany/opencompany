@@ -8,7 +8,10 @@ import { WorkspaceProvider } from "@/components/WorkspaceContext";
 import { loadPersonalSessionsForAgent } from "@/lib/agent-sessions/data";
 import { currentWorkspace } from "@/lib/auth";
 import { loadWorkspaceIntegrationState } from "@/lib/integrations/actions";
+import { loadGoogleIntegrationState } from "@/lib/integrations/google-data";
+import { loadWorkspaceMcpSettingsForWorkspace } from "@/lib/mcp/data";
 import { loadPersonalAgentContextFiles, loadPersonalSkills } from "@/lib/personal/context";
+import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 
 // Standalone experimentation surface. Deliberately OUTSIDE the (workspace) route group, so it does
@@ -29,14 +32,28 @@ export default async function PersonalLayout({ children }: { children: React.Rea
     name: agentName,
   });
 
-  const [sessions, contextFiles, personalSkills, workspaceIntegrations] = await Promise.all([
-    loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
-    loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
-    loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
-    loadWorkspaceIntegrationState(),
-  ]);
+  const [sessions, contextFiles, personalSkills, workspaceIntegrations, googleState, mcpSettings] =
+    await Promise.all([
+      loadPersonalSessionsForAgent(user.id, workspace.id, agent.id),
+      loadPersonalAgentContextFiles(workspace.id, agent.id, agent.path),
+      loadPersonalSkills(workspace.id, agent.id, agent.path, agent.config),
+      loadWorkspaceIntegrationState(),
+      loadGoogleIntegrationState(),
+      loadWorkspaceMcpSettingsForWorkspace(workspace.id),
+    ]);
   const userName =
     [authUser.firstName, authUser.lastName].filter(Boolean).join(" ").trim() || authUser.email;
+
+  // Whether each integration is connected at the workspace level, so the personal Integrations
+  // tab and the add modal can show "Connected" vs "Connect" and link to the in-tab OAuth flow.
+  const integrationConnections: PersonalIntegrationConnections = {
+    github: workspaceIntegrations.github.status === "connected",
+    gmail: googleState.gmail.status === "connected",
+    google_calendar: googleState.google_calendar.status === "connected",
+    linear: mcpSettings.linear.configured,
+    slack: mcpSettings.slack.configured,
+    posthog: mcpSettings.posthog.configured,
+  };
 
   return (
     <AnalyticsProvider
@@ -62,6 +79,8 @@ export default async function PersonalLayout({ children }: { children: React.Rea
                 contextFiles={contextFiles}
                 personalSkills={personalSkills}
                 githubIntegrationStatus={workspaceIntegrations.github.status}
+                integrationConnections={integrationConnections}
+                proMode={user.proMode}
               >
                 {children}
               </PersonalShell>

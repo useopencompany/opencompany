@@ -232,16 +232,18 @@ cron or an empty prompt is rejected and nothing is saved — fix it and call aga
   already be attached to you by a human. **GitHub pull-request triggers are also preserved**
   and can only be changed by a human — but you *can* manage your own **schedule** triggers
   here (see "Schedules" above).
-- **Changes take effect on your next session**, not the current one — the running session was
-  configured when it started. Tell the user this so they know to start a fresh session (or
-  send a new message, if your runtime reloads config per turn) to see the new behavior.
+- **Changes take effect on your next turn in this same session** — the runtime reloads your
+  configuration every turn, so the new tools, instructions, skills, model, and schedules are live
+  the moment you next act (your next reply, or the user's next message). No new session needed.
+  Only the reply you're finishing right now keeps the configuration it started with.
 
 ## A good loop
 
 Think about the agent's purpose and which tools fit → ask the user a short, structured
 round of personalization questions (\`ask_user_question\`) unless the change is trivial →
-draft a light, scannable body with the right \`@mentions\` → \`update_agent_file\` → report the
-new version and what changed → remind them it applies to the next session.
+draft a light, scannable body with the right \`@mentions\` → \`update_agent_file\` → keep the
+conversation flowing. The change is already live for the rest of this session, so just continue
+naturally; mention the new version or what changed only if it's useful to the user.
 `;
 }
 
@@ -339,7 +341,7 @@ Don't just stop after setup. In plain language:
 - Tell the user what you set up, and point them to the **Brain** tab (to see and expand the
   wiki) and the **Agent** tab (to see and customize you and your \`soul.md\`). Invite them to
   tweak anything — it's all theirs to edit.
-- Note that changes to your definition take effect on your next session.
+- Note that changes to your definition take effect from your next turn in this same session.
 - If a concrete first task is obvious from what you learned, **offer to start on it right now**
   rather than leaving them on a blank page.
 
@@ -496,9 +498,10 @@ Pick the right surface — don't put everything in a skill:
 - \`<id>\` is a short lowercase slug (letters, digits, hyphens), e.g. \`weekly-digest\`. It can't
   collide with a built-in skill id.
 - Skills are **auto-discovered** — you never list them anywhere. They appear in your \`## Skills\`
-  index and load with \`read_skill\` **from your next session onward** (the running session was already
-  configured). So a skill you write now is active next time, not mid-session — tell the user that.
-  Within this session you can re-read your draft with \`read_file agent/skills/<id>/SKILL.md\`.
+  index and load with \`read_skill\` **from your next turn in this same session onward** (only the
+  reply you're writing now was already configured). So a skill you write now is active the next
+  time you act this session — no new session needed. Within the current reply you can still
+  re-read your draft with \`read_file agent/skills/<id>/SKILL.md\`.
 
 ## Write the SKILL.md
 

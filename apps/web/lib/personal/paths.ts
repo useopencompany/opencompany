@@ -3,13 +3,23 @@
 // view-state machine. Keep this the single source of truth for personal URLs; components link
 // through `personalPaths.*` rather than hand-writing `/personal/...` strings.
 
-export type PersonalPanel = "agent" | "skills" | "integrations" | "tools" | "channels" | "brain";
+export type PersonalPanel =
+  | "agent"
+  | "skills"
+  | "integrations"
+  | "tools"
+  | "channels"
+  | "brain"
+  | "memory"
+  | "settings";
 
 export const personalPaths = {
   home: "/personal",
   session: (id: string) => `/personal/session/${id}`,
   agent: "/personal/agent",
   brain: "/personal/brain",
+  memory: "/personal/memory",
+  settings: "/personal/settings",
   skills: "/personal/skills",
   integrations: "/personal/integrations",
   tools: "/personal/tools",

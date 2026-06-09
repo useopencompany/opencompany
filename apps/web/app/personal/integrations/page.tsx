@@ -4,8 +4,14 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { PersonalCapabilityPanel } from "@/components/personal/PersonalCapabilityPanel";
 
 export default function PersonalIntegrationsPage() {
-  const { config, personalSkills, githubRequested, githubIntegrationStatus, addIntegration } =
-    usePersonalAgent();
+  const {
+    config,
+    personalSkills,
+    githubRequested,
+    githubIntegrationStatus,
+    integrationConnections,
+    addIntegration,
+  } = usePersonalAgent();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -15,6 +21,7 @@ export default function PersonalIntegrationsPage() {
         personalSkills={personalSkills}
         githubRequested={githubRequested}
         githubStatus={githubIntegrationStatus}
+        connections={integrationConnections}
         onAddIntegration={addIntegration}
       />
     </div>

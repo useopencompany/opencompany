@@ -202,7 +202,6 @@ const detailAgent: AgentDetailPayload = {
   ],
   workspaceAgents: [{ path: "agents/research/research.agent", name: "Research" }],
   mcp: {
-    mcpEnabled: false,
     linearConfigured: false,
     slackConfigured: false,
   },

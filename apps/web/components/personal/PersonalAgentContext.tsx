@@ -7,6 +7,7 @@ import type { PersonalGitHubIntegrationStatus } from "@/components/personal/Pers
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
+import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 
 // The immutable identity of the personal agent the surface is rendering. Mutable surfaces
 // (config, behavior body) live as context state below, not here.
@@ -32,11 +33,18 @@ export type PersonalAgentContextValue = {
   initialSessions: SidebarSessionPayload[];
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
+  // Workspace-level connection state per integration, used to render Connected/Connect badges.
+  integrationConnections: PersonalIntegrationConnections;
 
   config: AgentConfig;
   setConfig: (config: AgentConfig) => void;
 
   githubRequested: boolean;
+
+  // Per-user "Pro mode" switch (advanced surfaces, e.g. the Memory inspector). Seeded from the DB
+  // at layout load; setProMode flips it optimistically so the sidebar updates without a reload.
+  proMode: boolean;
+  setProMode: (next: boolean) => void;
 
   // The behavior editor's live draft. Held as a ref-backed getter (not state) because only the
   // Behavior route reads it, and only at mount — it must not trigger re-renders elsewhere.

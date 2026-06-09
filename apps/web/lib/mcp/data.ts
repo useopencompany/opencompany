@@ -1,12 +1,7 @@
 import { getDb } from "@opencompany/db/client";
-import {
-  workspaceExperiments,
-  workspaceMcpCredentials,
-  workspaceMcpServers,
-} from "@opencompany/db/schema";
+import { workspaceMcpCredentials, workspaceMcpServers } from "@opencompany/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 
-export const MCP_EXPERIMENT_KEY = "mcp";
 export const LINEAR_MCP_SERVER_KEY = "linear";
 export const LINEAR_MCP_ENDPOINT_URL = "https://mcp.linear.app/mcp";
 export const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
@@ -26,7 +21,6 @@ export const MCP_PROVIDER_KEYS = [
 export type McpProviderKey = (typeof MCP_PROVIDER_KEYS)[number];
 
 export type WorkspaceMcpSettings = {
-  mcpEnabled: boolean;
   linear: WorkspaceMcpProviderSettings;
   slack: WorkspaceMcpProviderSettings;
   posthog: WorkspaceMcpProviderSettings;
@@ -44,17 +38,7 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
   workspaceId: string,
 ): Promise<WorkspaceMcpSettings> {
   const db = getDb();
-  const [[experiment], servers, credentials] = await Promise.all([
-    db
-      .select({ enabled: workspaceExperiments.enabled })
-      .from(workspaceExperiments)
-      .where(
-        and(
-          eq(workspaceExperiments.workspaceId, workspaceId),
-          eq(workspaceExperiments.key, MCP_EXPERIMENT_KEY),
-        ),
-      )
-      .limit(1),
+  const [servers, credentials] = await Promise.all([
     db
       .select({
         id: workspaceMcpServers.id,
@@ -113,7 +97,6 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
   }
 
   return {
-    mcpEnabled: experiment?.enabled === true,
     linear: settingsFor(LINEAR_MCP_SERVER_KEY),
     slack: settingsFor(SLACK_MCP_SERVER_KEY),
     posthog: settingsFor(POSTHOG_MCP_SERVER_KEY),

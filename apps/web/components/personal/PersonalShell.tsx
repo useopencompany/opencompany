@@ -18,6 +18,7 @@ import { useToast } from "@/components/ToastProvider";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import { addPersonalAgentIntegration, type PersonalIntegrationId } from "@/lib/personal/actions";
+import type { PersonalIntegrationConnections } from "@/lib/personal/integrations-catalog";
 
 const SIDEBAR_STORAGE_KEY = "opencompany-personal-sidebar-collapsed";
 const sidebarCollapsedSubscribers = new Set<() => void>();
@@ -60,6 +61,8 @@ export type PersonalShellProps = {
   contextFiles: AgentBundleFilePayload[];
   personalSkills: ResolvedSkillMetadata[];
   githubIntegrationStatus: PersonalGitHubIntegrationStatus;
+  integrationConnections: PersonalIntegrationConnections;
+  proMode: boolean;
   children: React.ReactNode;
 };
 
@@ -75,10 +78,13 @@ export default function PersonalShell({
   contextFiles,
   personalSkills,
   githubIntegrationStatus,
+  integrationConnections,
+  proMode: initialProMode,
   children,
 }: PersonalShellProps) {
   const { showError } = useToast();
   const [config, setConfig] = useState<AgentConfig>(agent.config);
+  const [proMode, setProMode] = useState(initialProMode);
   const [githubRequested, setGitHubRequested] = useState(() =>
     hasPersonalGitHubIntegrationRequest(agent.body),
   );
@@ -134,8 +140,11 @@ export default function PersonalShell({
       initialSessions,
       personalSkills,
       githubIntegrationStatus,
+      integrationConnections,
       config,
       setConfig,
+      proMode,
+      setProMode,
       githubRequested,
       getDraft: () => draftRef.current,
       setDraft: (body: string, content: typeof agent.content) => {
@@ -149,7 +158,17 @@ export default function PersonalShell({
     // upsertFile/addIntegration close over stable setters; re-create only when rendered data
     // changes. agent/initial* are stable per layout mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agent, bundleDir, config, githubRequested, files, personalSkills, githubIntegrationStatus],
+    [
+      agent,
+      bundleDir,
+      config,
+      proMode,
+      githubRequested,
+      files,
+      personalSkills,
+      githubIntegrationStatus,
+      integrationConnections,
+    ],
   );
 
   return (

@@ -1,12 +1,17 @@
 import type { AgentConfig } from "@opencompany/agent-runtime/types";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildPersonalIntegrationRows,
   hasPersonalGitHubIntegrationRequest,
   PersonalCapabilityPanel,
   personalIntegrationCount,
 } from "./PersonalCapabilityPanel";
+
+// The Connect badge opens a popup and refreshes via the App Router; stub it so the panel renders.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 const baseConfig: AgentConfig = {
   schemaVersion: "agent.v1",
@@ -45,12 +50,49 @@ describe("PersonalCapabilityPanel integrations", () => {
 
     expect(screen.getByText("GitHub")).toBeInTheDocument();
     expect(
-      screen.getByText("Set up GitHub in workspace settings before using repositories."),
+      screen.getByText("Connect GitHub before your agent can use repositories."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Requires setup" })).toHaveAttribute(
-      "href",
-      "/settings/integrations",
+    // Connect opens the OAuth flow in a popup (see useConnectPopup), so it's a button, not a link.
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
+  });
+
+  it("renders an enabled MCP integration with a Connect badge when not connected", () => {
+    const config: AgentConfig = {
+      ...baseConfig,
+      tools: [
+        {
+          id: "linear",
+          type: "mcp",
+          server: "linear",
+          label: "Linear",
+          description: "Linear MCP",
+        },
+      ],
+    };
+
+    render(
+      <PersonalCapabilityPanel
+        section="integrations"
+        config={config}
+        personalSkills={[]}
+        githubRequested={false}
+        githubStatus="not_connected"
+        connections={{
+          github: false,
+          gmail: false,
+          google_calendar: false,
+          linear: false,
+          slack: false,
+          posthog: false,
+        }}
+      />,
     );
+
+    expect(screen.getByText("Linear")).toBeInTheDocument();
+    // Connect opens the OAuth flow in a popup (see useConnectPopup), so it's a button, not a link.
+    expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
   });
 
   it("renders personal skills with a Personal badge in the skills section", () => {

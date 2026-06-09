@@ -188,7 +188,7 @@ export async function applyAgentSelfUpdate(input: {
     changedFields,
     ...(summary ? { summary } : {}),
     appliesTo:
-      "Saved. This takes effect on your next session — the current session keeps its existing configuration.",
+      `Saved (version ${nextVersion}). This is live from your next turn in this same session — your next reply (or the user's next message) uses the updated tools, instructions, skills, model, and schedules. No new session needed; only the reply you're finishing now keeps the previous configuration.`,
   };
 }
 

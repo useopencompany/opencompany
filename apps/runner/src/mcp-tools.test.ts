@@ -126,7 +126,7 @@ afterEach(() => {
 
 describe("createMcpToolSet", () => {
   it("registers a not-connected stub tool instead of aborting the turn when an integration is not set up", async () => {
-    // MCP beta is off (no experiment row), so Linear can't connect.
+    // No server row for the workspace, so Linear can't connect.
     const mcpTools = await createMcpToolSet(baseInput());
     const stub = (mcpTools.tools as ToolSet).linear__get_connection_status;
     expect(stub).toBeDefined();
@@ -138,7 +138,7 @@ describe("createMcpToolSet", () => {
     expect(output).toEqual({
       ok: false,
       error: {
-        message: "Linear MCP is enabled on this agent, but the workspace MCP beta is off.",
+        message: "Linear MCP is enabled on this agent, but Linear is not configured.",
         code: "mcp_not_connected",
         recoverable: true,
       },
@@ -164,14 +164,8 @@ describe("createMcpToolSet", () => {
       ...agentConfig,
       tools: [...agentConfig.tools, ...slackAgentConfig.tools],
     };
-    // Linear: beta on but no server row -> not configured (fails). Slack: fully connected.
-    db.queryResults = [
-      [{ enabled: true }],
-      [],
-      [{ enabled: true }],
-      [slackServerRow()],
-      [slackOAuthConnectionRow()],
-    ];
+    // Linear: no server row -> not configured (fails). Slack: fully connected.
+    db.queryResults = [[], [slackServerRow()], [slackOAuthConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
     mcpClient.toolsFromDefinitions.mockReturnValueOnce({
       search: {
@@ -204,7 +198,7 @@ describe("createMcpToolSet", () => {
   });
 
   it("uses the validated encryption key when process env is later unset", async () => {
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     vi.unstubAllEnvs();
 
     await createMcpToolSet(baseInput());
@@ -229,7 +223,7 @@ describe("createMcpToolSet", () => {
 
   it("dispatches a named tool through the lazy use_tool meta-tool", async () => {
     const execute = vi.fn(async () => ({ identifier: "OC-123" }));
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
     mcpClient.toolsFromDefinitions.mockReturnValueOnce({
       create_issue: {
@@ -284,7 +278,7 @@ describe("createMcpToolSet", () => {
 
   it("rejects schema-invalid use_tool arguments locally without calling the server", async () => {
     const execute = vi.fn(async () => ({ identifier: "OC-123" }));
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     // The catalog's inputSchema comes from the listTools response — that's the schema the
     // pre-flight validator uses.
     mcpClient.listTools.mockResolvedValueOnce({
@@ -337,7 +331,7 @@ describe("createMcpToolSet", () => {
 
   it("coerces use_tool arguments against the catalog schema before calling the server", async () => {
     const execute = vi.fn(async () => ({ ok: true }));
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({
       tools: [
         {
@@ -377,7 +371,7 @@ describe("createMcpToolSet", () => {
   });
 
   it("lists the server's tools through the search_tools meta-tool", async () => {
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({
       tools: [
         { name: "list_teams", description: "List Linear teams", inputSchema: { type: "object" } },
@@ -418,7 +412,7 @@ describe("createMcpToolSet", () => {
   });
 
   it("returns a recoverable error when use_tool names an unknown tool", async () => {
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
     mcpClient.toolsFromDefinitions.mockReturnValueOnce({
       create_issue: { description: "Create a Linear issue", execute: vi.fn() },
@@ -453,7 +447,7 @@ describe("createMcpToolSet", () => {
     const execute = vi.fn(async () => {
       throw new Error("Linear unavailable");
     });
-    db.queryResults = [[{ enabled: true }], [linearServerRow()], [linearConnectionRow()]];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "create_issue" }] } as never);
     mcpClient.toolsFromDefinitions.mockReturnValueOnce({
       create_issue: {
@@ -503,11 +497,7 @@ describe("createMcpToolSet", () => {
   });
 
   it("prefers stored Linear MCP OAuth credentials over bearer tokens", async () => {
-    db.queryResults = [
-      [{ enabled: true }],
-      [linearServerRow()],
-      [linearConnectionRow(), linearOAuthConnectionRow()],
-    ];
+    db.queryResults = [[linearServerRow()], [linearConnectionRow(), linearOAuthConnectionRow()]];
 
     await createMcpToolSet(baseInput());
 
@@ -535,7 +525,7 @@ describe("createMcpToolSet", () => {
 
   it("loads Slack MCP OAuth tools with static env-backed client credentials", async () => {
     const execute = vi.fn(async () => ({ messages: [{ text: "hello" }] }));
-    db.queryResults = [[{ enabled: true }], [slackServerRow()], [slackOAuthConnectionRow()]];
+    db.queryResults = [[slackServerRow()], [slackOAuthConnectionRow()]];
     mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "search" }] } as never);
     mcpClient.toolsFromDefinitions.mockReturnValueOnce({
       search: {

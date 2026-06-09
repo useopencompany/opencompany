@@ -26,7 +26,7 @@ export default async function PersonalOnboardingPage() {
     <PersonalOnboardingChat
       agentId={agent.id}
       defaultName={defaultName}
-      devReset={process.env.NODE_ENV !== "production"}
+      userEmail={authUser.email}
     />
   );
 }

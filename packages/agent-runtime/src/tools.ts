@@ -699,7 +699,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "update_agent_file",
     kind: "internal",
-    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
+    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect from your next turn in this same session (no new session needed); only the in-flight reply keeps its current configuration. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
     parameters: {
       type: "object",
       properties: {
@@ -764,7 +764,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
       "Pass the COMPLETE new Markdown body, not a diff.",
-      "Changes apply on your next session, not the current one — offer to start one.",
+      "Changes apply from your next turn in this same session — no new session needed; just continue.",
     ].join("\n"),
   },
   {

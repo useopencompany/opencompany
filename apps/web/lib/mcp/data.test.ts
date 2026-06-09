@@ -26,7 +26,6 @@ beforeEach(() => {
 describe("loadWorkspaceMcpSettingsForWorkspace", () => {
   it("reports Linear and Slack MCP configured states independently", async () => {
     db.queryResults = [
-      [{ enabled: true }],
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
@@ -39,7 +38,6 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
 
     const settings = await loadWorkspaceMcpSettingsForWorkspace("wks_123");
 
-    expect(settings.mcpEnabled).toBe(true);
     expect(settings.linear).toMatchObject({
       configured: true,
       serverId: "wmcps_linear",
@@ -54,7 +52,6 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
 
   it("does not treat Linear credentials as Slack credentials", async () => {
     db.queryResults = [
-      [{ enabled: true }],
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),

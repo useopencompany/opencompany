@@ -111,10 +111,10 @@ describe("skill catalog", () => {
     );
     const skillMd = creator?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
     expect(skillMd).toContain("agent/skills/<id>/SKILL.md");
-    // It must teach the required frontmatter and that activation is next-session.
+    // It must teach the required frontmatter and that activation is next-turn (same session).
     expect(skillMd).toMatch(/name/);
     expect(skillMd).toMatch(/description/);
-    expect(skillMd).toMatch(/next session/i);
+    expect(skillMd).toMatch(/next turn in this same session/i);
   });
 
   test("normalizeAgentSkills keeps known ids and drops unknown ones", () => {

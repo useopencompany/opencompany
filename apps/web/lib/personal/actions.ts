@@ -403,6 +403,76 @@ export async function enablePersonalAgentIntegrations(
   return { ok: true, config: saved.config };
 }
 
+type SetNameResult = { ok: true; config: AgentConfig } | { ok: false; error: string };
+
+/**
+ * Rename the caller's /personal agent — used by the onboarding agent-setup step, where the user
+ * names their agent before the first session.
+ *
+ * The `.agent` source title and the `agents.name` column are kept in lockstep everywhere else (see
+ * {@link derivePersonalAgentSave}, which serializes the source using `agent.name`), so we re-derive
+ * and re-serialize with the new name rather than poking `agents.name` alone — otherwise the stored
+ * source/hash would drift from the displayed name. Local-only and scoped to the caller's own default
+ * agent, like {@link updatePersonalAgentBehavior}.
+ */
+export async function setPersonalAgentName(
+  agentId: string,
+  name: string,
+): Promise<SetNameResult> {
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, error: "Enter a name for your agent." };
+  if (trimmed.length > 60) return { ok: false, error: "Keep the agent name under 60 characters." };
+
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  const [agent] = await db
+    .select({
+      id: agents.id,
+      name: agents.name,
+      body: agents.body,
+      config: agents.config,
+      version: agents.version,
+    })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.id, agentId),
+        eq(agents.workspaceId, workspace.id),
+        eq(agents.userId, user.id),
+        eq(agents.isDefault, true),
+      ),
+    )
+    .limit(1);
+
+  if (!agent) {
+    return { ok: false, error: "Personal agent not found." };
+  }
+
+  const saved = await derivePersonalAgentSave(
+    { name: trimmed, config: agent.config },
+    workspace.id,
+    agent.body,
+  );
+  const content = buildAgentTiptapDoc(saved.body, buildConfigMentionResolver(saved.config));
+  const contentHash = hashAgentSource(saved.source);
+
+  await db
+    .update(agents)
+    .set({
+      name: saved.title,
+      body: saved.body,
+      content,
+      contentHash,
+      version: agent.version + 1,
+      config: saved.config,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
+
+  return { ok: true, config: saved.config };
+}
+
 type ContextFileResult = { ok: true; file: AgentBundleFilePayload } | { ok: false; error: string };
 
 // Resolve the caller's own personal agent (workspace + user + isDefault) and validate that
