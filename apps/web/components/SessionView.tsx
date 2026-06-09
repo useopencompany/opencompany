@@ -3187,7 +3187,7 @@ function SessionInspector({
   isPending: boolean;
   onAbort: () => void;
 }) {
-  const agentHref = `/agents/${session.agentPath ?? session.agentId}`;
+  const agentHref = `/company/agents/${session.agentPath ?? session.agentId}`;
 
   return (
     <div className="space-y-8">
@@ -3197,7 +3197,7 @@ function SessionInspector({
           Session
         </div>
         <div className="mt-4 space-y-4">
-          <InspectorLink label="Session page" href={`/session/${session.id}`} value={session.id} />
+          <InspectorLink label="Session page" href={`/company/session/${session.id}`} value={session.id} />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
           <InspectorField label="Title" value={session.title} />
           <InspectorStatusField status={currentStatus} lastError={lastError} />
@@ -3451,7 +3451,7 @@ function RelatedSessionLink({
 }) {
   return (
     <Link
-      href={`/session/${session.id}`}
+      href={`/company/session/${session.id}`}
       target="_blank"
       rel="noreferrer"
       title={session.title}

@@ -64,7 +64,7 @@ export async function updateAvatar(input: { dataBase64: string }) {
   }
 
   revalidatePath("/", "layout");
-  revalidatePath("/settings");
+  revalidatePath("/company/settings");
   return { ok: true as const };
 }
 
@@ -82,6 +82,6 @@ export async function removeAvatar() {
   }
 
   revalidatePath("/", "layout");
-  revalidatePath("/settings");
+  revalidatePath("/company/settings");
   return { ok: true as const };
 }

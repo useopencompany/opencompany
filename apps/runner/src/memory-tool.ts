@@ -37,6 +37,8 @@ export async function runMemoryTool(input: {
   workdir: string;
   args: unknown;
   env: RunnerEnv;
+  // Selects the personal layout so MEMORY_ROOT pins to the top-level memory/ tree.
+  personal?: boolean;
   onOutput?: (stream: "stdout" | "stderr", delta: string) => Promise<void> | void;
 }): Promise<{ output: unknown; usage?: HostedToolUsage }> {
   const gatewayApiKey = input.env.vercelAiGatewayApiKey;
@@ -47,6 +49,7 @@ export async function runMemoryTool(input: {
     workdir: input.workdir,
     name: "memory",
     args: input.args,
+    personal: input.personal ?? false,
     envs: { VERCEL_AI_GATEWAY_API_KEY: gatewayApiKey },
     redactOutput: redact,
     ...(input.onOutput ? { onOutput: input.onOutput } : {}),

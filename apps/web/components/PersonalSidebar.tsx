@@ -4,15 +4,12 @@ import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
   Bot,
+  Brain,
   ChevronDown,
-  ChevronRight,
-  FileText,
-  Folder,
   Inbox,
   MessageCircle,
   PanelLeft,
   Plug,
-  Plus,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -26,7 +23,6 @@ import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
-import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
 import { deriveVisibleInbox } from "@/lib/collections/selectors";
 import { personalPaths } from "@/lib/personal/paths";
 
@@ -67,177 +63,6 @@ function CapabilityNavRow({
       {count !== undefined && count > 0 && (
         <span className="ml-auto text-[11px] tabular-nums text-ink-subtle">{count}</span>
       )}
-    </button>
-  );
-}
-
-type ContextFile = AgentBundleFilePayload;
-
-// The context tree mirrors the agent bundle exactly: every file sits at its real path under the
-// bundle dir, and folders are only the directories that actually contain files. There are no
-// synthetic buckets, canonical slots, or always-present folders — what the sidebar shows is the
-// true on-disk state of `agent/`.
-type ContextTreeFolder = {
-  kind: "folder";
-  name: string;
-  path: string;
-  children: ContextTreeNode[];
-};
-type ContextTreeFile = { kind: "file"; name: string; file: ContextFile };
-type ContextTreeNode = ContextTreeFolder | ContextTreeFile;
-
-function buildContextTree(files: ContextFile[]): ContextTreeNode[] {
-  const root: ContextTreeFolder = { kind: "folder", name: "", path: "", children: [] };
-  for (const file of files) {
-    const segments = file.relativePath.split("/").filter(Boolean);
-    let current = root;
-    for (const name of segments.slice(0, -1)) {
-      const folderPath = current.path ? `${current.path}/${name}` : name;
-      let next = current.children.find(
-        (child): child is ContextTreeFolder => child.kind === "folder" && child.name === name,
-      );
-      if (!next) {
-        next = { kind: "folder", name, path: folderPath, children: [] };
-        current.children.push(next);
-      }
-      current = next;
-    }
-    current.children.push({ kind: "file", name: segments.at(-1) ?? file.relativePath, file });
-  }
-  sortContextTree(root);
-  return root.children;
-}
-
-// Folders before files, each alphabetical — the conventional, stable file-tree ordering.
-function sortContextTree(folder: ContextTreeFolder) {
-  folder.children.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-  for (const child of folder.children) {
-    if (child.kind === "folder") sortContextTree(child);
-  }
-}
-
-// Indentation grows with tree depth so nested files sit under their folder. Plain px math keeps
-// folder headers and file rows on the same grid.
-function contextIndent(depth: number) {
-  return 8 + depth * 16;
-}
-
-// A single folder in the context tree. Toggles its own children open/closed like VS Code, and
-// starts collapsed so the tree opens compact — but auto-opens (and stays open) whenever the active
-// file lives inside it, so deep-linking a file reveals it. The chevron reflects the state; a
-// non-folder row reserves the same chevron column (see ContextTreeNodes) so icons stay aligned.
-function ContextFolderNode({
-  node,
-  depth,
-  activeFilePath,
-  onSelectFile,
-}: {
-  node: ContextTreeFolder;
-  depth: number;
-  activeFilePath: string | null;
-  onSelectFile: (relativePath: string) => void;
-}) {
-  const containsActive = activeFilePath?.startsWith(`${node.path}/`) ?? false;
-  // Open follows the user's explicit toggle once they make one; until then it defaults to "open
-  // when the active file lives inside" so deep-linking a file reveals it without an effect.
-  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const open = manualOpen ?? containsActive;
-  const Chevron = open ? ChevronDown : ChevronRight;
-  return (
-    <div className="flex flex-col gap-px">
-      <button
-        type="button"
-        onClick={() => setManualOpen(!open)}
-        aria-expanded={open}
-        style={{ paddingLeft: contextIndent(depth) }}
-        className="flex w-full items-center gap-2.5 rounded-md py-[5px] pr-2 text-left text-[13px] text-ink/90 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <Chevron size={12} strokeWidth={2} className="shrink-0 text-ink/40" />
-        <Folder size={14} strokeWidth={1.75} className="shrink-0 text-ink/55" />
-        <span className="truncate tracking-[-0.005em]">{node.name}/</span>
-      </button>
-      {open && (
-        <ContextTreeNodes
-          nodes={node.children}
-          depth={depth + 1}
-          activeFilePath={activeFilePath}
-          onSelectFile={onSelectFile}
-        />
-      )}
-    </div>
-  );
-}
-
-// Renders the context tree. Folders toggle open/closed (collapsed by default); files are
-// clickable and open in the editor. Every row maps 1:1 to a real bundle path — there are no
-// synthetic rows, counts, or empty-slot placeholders. Files reserve a leading chevron-width
-// spacer so their icons line up with folder icons at the same depth.
-function ContextTreeNodes({
-  nodes,
-  depth,
-  activeFilePath,
-  onSelectFile,
-}: {
-  nodes: ContextTreeNode[];
-  depth: number;
-  activeFilePath: string | null;
-  onSelectFile: (relativePath: string) => void;
-}) {
-  return (
-    <>
-      {nodes.map((node) =>
-        node.kind === "folder" ? (
-          <ContextFolderNode
-            key={`dir:${node.path}`}
-            node={node}
-            depth={depth}
-            activeFilePath={activeFilePath}
-            onSelectFile={onSelectFile}
-          />
-        ) : (
-          <button
-            type="button"
-            key={`file:${node.file.path}`}
-            onClick={() => onSelectFile(node.file.relativePath)}
-            title={node.file.relativePath}
-            style={{ paddingLeft: contextIndent(depth) }}
-            className={`flex w-full items-center gap-2.5 rounded-md py-[3px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-              activeFilePath === node.file.relativePath
-                ? "bg-surface-active text-ink"
-                : "text-ink/70 hover:bg-surface-hover hover:text-ink"
-            }`}
-          >
-            <span aria-hidden className="w-3 shrink-0" />
-            <FileText
-              size={13}
-              strokeWidth={1.75}
-              className={`shrink-0 ${
-                activeFilePath === node.file.relativePath ? "text-ink/70" : "text-ink/40"
-              }`}
-            />
-            <span className="truncate tracking-[-0.005em]">{node.name}</span>
-          </button>
-        ),
-      )}
-    </>
-  );
-}
-
-// Create a file anywhere in the bundle. Opens the editor with an empty path so the user types
-// the real relative path (e.g. "memory/notes.md") — no folder is assumed or invented.
-function NewContextFileRow({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{ paddingLeft: contextIndent(0) }}
-      className="flex w-full items-center gap-2.5 rounded-md py-[5px] pr-2 text-left text-[13px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      <Plus size={14} strokeWidth={1.75} className="shrink-0" />
-      <span className="truncate tracking-[-0.005em]">New file</span>
     </button>
   );
 }
@@ -401,6 +226,7 @@ function useActivePersonalRoute() {
   const inboxActive = segments.length === 1; // exactly "/personal"
   const activePanel =
     section === "agent" ||
+    section === "brain" ||
     section === "skills" ||
     section === "integrations" ||
     section === "tools" ||
@@ -458,15 +284,13 @@ function PersonalSidebarView({
     userName,
     userEmail,
     workspaceName,
-    files,
     config,
     personalSkills,
     githubRequested,
   } = usePersonalAgent();
-  const { inboxActive, activePanel, activeSessionId, activeFilePath } = useActivePersonalRoute();
+  const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
 
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
-  const contextTree = useMemo(() => buildContextTree(files), [files]);
   const skillCount = (config.skills?.length ?? 0) + personalSkills.length;
   const integrationCount = personalIntegrationCount({ config, githubRequested });
   const toolCount = config.tools.length;
@@ -493,6 +317,7 @@ function PersonalSidebarView({
           <SpaceSwitcher
             activeSpace="personal"
             workspaceName={workspaceName}
+            hideWorkspace
             className="min-w-0 flex-1 px-0 pb-0"
           />
         </div>
@@ -526,6 +351,12 @@ function PersonalSidebarView({
         <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
           <Section title="Configuration" defaultOpen={false}>
             <CapabilityNavRow
+              icon={Brain}
+              label="Personal Brain"
+              active={activePanel === "brain"}
+              onClick={() => router.push(personalPaths.brain)}
+            />
+            <CapabilityNavRow
               icon={Bot}
               label="Agent"
               active={activePanel === "agent"}
@@ -558,16 +389,6 @@ function PersonalSidebarView({
               active={activePanel === "channels"}
               onClick={() => router.push(personalPaths.channels)}
             />
-          </Section>
-
-          <Section title="Context" defaultOpen={false}>
-            <ContextTreeNodes
-              nodes={contextTree}
-              depth={0}
-              activeFilePath={activeFilePath}
-              onSelectFile={(relativePath) => router.push(personalPaths.file(relativePath))}
-            />
-            <NewContextFileRow onClick={() => router.push(personalPaths.newFile())} />
           </Section>
 
           <Section title="Sessions" defaultOpen={false}>

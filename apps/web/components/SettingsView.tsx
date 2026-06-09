@@ -1485,7 +1485,7 @@ export default function SettingsView({ profile, workspace, billing, mcp, toolPol
             description="Connect workspace resources agents can access."
           >
             <Link
-              href="/settings/integrations"
+              href="/company/settings/integrations"
               className="inline-flex h-8 w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted"
             >
               <Plug size={13} strokeWidth={1.9} />

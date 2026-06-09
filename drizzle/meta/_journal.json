@@ -358,6 +358,13 @@
       "when": 1780999079854,
       "tag": "0050_repair_agents_personal_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1781012197303,
+      "tag": "0051_add_user_personal_first",
+      "breakpoints": true
     }
   ]
 }

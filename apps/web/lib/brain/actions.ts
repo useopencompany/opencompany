@@ -130,7 +130,7 @@ export async function renameBrainFile(
     ]);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-    revalidatePath("/brain");
+    revalidatePath("/company/brain");
     return { ok: true, path: to };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Rename failed." };
@@ -227,7 +227,7 @@ export async function renameBrainFolder(
     ]);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-    revalidatePath("/brain");
+    revalidatePath("/company/brain");
     return { ok: true, path: to };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Move failed." };
@@ -260,7 +260,7 @@ export async function deleteBrainFile(path: string): Promise<BrainActionResult> 
     ]);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-    revalidatePath("/brain");
+    revalidatePath("/company/brain");
     return { ok: true, path: normalized };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Delete failed." };
@@ -301,7 +301,7 @@ export async function deleteBrainFolder(path: string): Promise<BrainActionResult
     await db.batch([firstDeleteQuery, ...deleteQueries.slice(1)]);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-    revalidatePath("/brain");
+    revalidatePath("/company/brain");
     return { ok: true, path: folderPath };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Delete failed." };
@@ -372,7 +372,7 @@ async function upsertBrainFile(input: {
     ]);
 
     scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-    revalidatePath("/brain");
+    revalidatePath("/company/brain");
     return { ok: true, path };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Save failed." };

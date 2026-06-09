@@ -20,13 +20,64 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 
 type AgentFileRow = typeof agentFiles.$inferSelect;
 
+// Map a bundle-relative path (under agents/<slug>/, e.g. "memory/x.md", "personal-brain/y.md",
+// "user.md", "skills/foo/SKILL.md") to its sandbox-relative path for the session layout. For a
+// personal session, memory/ and personal-brain/ are promoted to the top level; everything else
+// (profile, soul, skill authoring) stays under agent/. For company sessions everything is under
+// agent/.
+function bundleRelativeToSandboxRelative(relativePath: string, personal: boolean): string {
+  if (personal && isTopLevelPersonalRoot(relativePath)) return relativePath;
+  return `agent/${relativePath}`;
+}
+
+// Reverse of bundleRelativeToSandboxRelative. Returns null when the sandbox path is outside the
+// agent's writable bundle roots (so unrelated files like work/ are never synced back).
+function sandboxRelativeToBundleRelative(sandboxPath: string, personal: boolean): string | null {
+  if (sandboxPath === "agent" || sandboxPath.startsWith("agent/")) {
+    return sandboxPath.slice("agent/".length) || null;
+  }
+  if (personal && isTopLevelPersonalRoot(sandboxPath)) return sandboxPath;
+  return null;
+}
+
+function isTopLevelPersonalRoot(path: string): boolean {
+  return (
+    path === "memory" ||
+    path.startsWith("memory/") ||
+    path === "personal-brain" ||
+    path.startsWith("personal-brain/")
+  );
+}
+
+// The writable bundle roots a session materializes into. Personal promotes memory/ and
+// personal-brain/ to the top level alongside agent/; company uses agent/ only.
+function bundleSandboxRoots(layout: ReturnType<typeof sandboxLayout>): string[] {
+  if (layout.personal) {
+    return [layout.agentRoot, layout.memoryRoot, layout.personalBrainRoot].filter(
+      (root): root is string => Boolean(root),
+    );
+  }
+  return [layout.agentRoot];
+}
+
+// Defensive guard: these roots drive a destructive `rm -rf`. workdir comes from a system-controlled
+// session record, but refuse to run if a root ever resolves to a malformed path (empty, or not a
+// child segment of the workdir).
+function assertSafeDestructiveRoot(root: string, workdir: string) {
+  if (!root || !root.startsWith(`${workdir}/`) || root === `${workdir}/`) {
+    throw new Error(`Refusing destructive rm -rf on malformed bundle root: ${root}`);
+  }
+}
+
 export async function materializeAgentBundleForSession(input: {
   sandbox: SandboxHandle;
   sessionId: string;
   workspaceId: string;
   agentId: string;
   workdir: string;
+  personal?: boolean;
 }) {
+  const personal = input.personal ?? false;
   const db = getDb();
   const bundle = await loadAgentBundle(input.workspaceId, input.agentId);
   const rows = await db
@@ -40,31 +91,28 @@ export async function materializeAgentBundleForSession(input: {
     .filter((file): file is MountedAgentFile => Boolean(file))
     .sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   const limitedFiles = limitMountedAgentFiles(files);
-  const layout = sandboxLayout(input.workdir);
+  const layout = sandboxLayout(input.workdir, personal);
+  const roots = bundleSandboxRoots(layout);
 
-  // Defensive guard: agentRoot drives a destructive `rm -rf`. workdir comes
-  // from a system-controlled session record, but refuse to run if it ever
-  // resolves to a malformed path (empty workdir, missing /agent suffix).
-  if (!layout.agentRoot || !/.+\/agent$/.test(layout.agentRoot)) {
-    throw new Error(`Refusing destructive rm -rf on malformed agent root: ${layout.agentRoot}`);
+  for (const root of roots) {
+    assertSafeDestructiveRoot(root, input.workdir);
+    await input.sandbox.commands.run(
+      `rm -rf ${shellQuote(root)} && mkdir -p ${shellQuote(root)}`,
+    );
   }
-
-  await input.sandbox.commands.run(
-    `rm -rf ${shellQuote(layout.agentRoot)} && mkdir -p ${shellQuote(layout.agentRoot)}`,
-  );
 
   const mountedPaths = new Set<string>();
   for (const file of limitedFiles) {
-    await input.sandbox.commands.run(
-      `mkdir -p ${shellQuote(`${layout.agentRoot}/${dirname(file.relativePath)}`)}`,
-    );
-    await input.sandbox.files.write(`${layout.agentRoot}/${file.relativePath}`, file.content);
+    const sandboxRelative = bundleRelativeToSandboxRelative(file.relativePath, personal);
+    const destination = `${input.workdir}/${sandboxRelative}`;
+    await input.sandbox.commands.run(`mkdir -p ${shellQuote(dirname(destination))}`);
+    await input.sandbox.files.write(destination, file.content);
     mountedPaths.add(file.relativePath);
     await mountAgentBundleFile({
       sessionId: input.sessionId,
       workspaceId: input.workspaceId,
       repoPath: file.repoPath,
-      relativePath: file.relativePath,
+      sandboxPath: sandboxRelative,
       contentHash: file.contentHash,
     });
   }
@@ -72,20 +120,23 @@ export async function materializeAgentBundleForSession(input: {
   for (const path of [AGENT_USER_MEMORY_PATH]) {
     if (mountedPaths.has(path)) continue;
     const contentHash = hashContent("");
-    await input.sandbox.files.write(`${layout.agentRoot}/${path}`, "");
+    const sandboxRelative = bundleRelativeToSandboxRelative(path, personal);
+    await input.sandbox.files.write(`${input.workdir}/${sandboxRelative}`, "");
     await mountAgentBundleFile({
       sessionId: input.sessionId,
       workspaceId: input.workspaceId,
       repoPath: repoPathFor(bundle.dir, path),
-      relativePath: path,
+      sandboxPath: sandboxRelative,
       contentHash,
     });
   }
 
-  await input.sandbox.commands.run(`chown -R user:user ${shellQuote(layout.agentRoot)}`, {
-    user: "root",
-    timeoutMs: 30_000,
-  });
+  for (const root of roots) {
+    await input.sandbox.commands.run(`chown -R user:user ${shellQuote(root)}`, {
+      user: "root",
+      timeoutMs: 30_000,
+    });
+  }
 }
 
 export async function syncAgentBundleFromSandbox(input: {
@@ -94,7 +145,9 @@ export async function syncAgentBundleFromSandbox(input: {
   workspaceId: string;
   agentId: string;
   workdir: string;
+  personal?: boolean;
 }) {
+  const personal = input.personal ?? false;
   const db = getDb();
   const bundle = await loadAgentBundle(input.workspaceId, input.agentId);
   const mounts = await db
@@ -103,28 +156,39 @@ export async function syncAgentBundleFromSandbox(input: {
     .where(eq(agentSessionBundleMounts.sessionId, input.sessionId));
   if (mounts.length === 0) return;
 
+  // Personal sessions write to memory/ + personal-brain/ + agent/; company sessions to agent/ only.
+  // List all writable bundle roots that exist, then map each file back to its bundle-relative path.
+  const listRoots = personal ? ["memory", "personal-brain", "agent"] : ["agent"];
+  const findClause = listRoots
+    .map((root) => `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -print; fi`)
+    .join("; ");
   const result = await input.sandbox.commands.run(
-    `cd ${shellQuote(input.workdir)} && if [ -d agent ]; then find agent -type f -print | sort; fi`,
+    `cd ${shellQuote(input.workdir)} && { ${findClause}; } | sort`,
     { timeoutMs: 30_000 },
   );
-  const sandboxPaths = String(result.stdout ?? "")
+  // Each entry keeps the raw sandbox path (for reading) alongside its bundle-relative path.
+  const entries = String(result.stdout ?? "")
     .split("\n")
     .filter(Boolean)
-    .map((path) => normalizeAgentBundlePath(stripAgentSandboxPrefix(path)))
-    .filter((path): path is string => Boolean(path));
-  const sandboxPathSet = new Set(sandboxPaths);
+    .map((sandboxPath) => {
+      const bundleRelative = sandboxRelativeToBundleRelative(sandboxPath, personal);
+      const normalized = bundleRelative ? normalizeAgentBundlePath(bundleRelative) : null;
+      return normalized ? { sandboxPath, relativePath: normalized } : null;
+    })
+    .filter((entry): entry is { sandboxPath: string; relativePath: string } => Boolean(entry));
+  const sandboxPathSet = new Set(entries.map((entry) => entry.relativePath));
   const fileMounts = mounts.filter((mount) => mount.referenceType === "file");
   let syncedFiles = 0;
   let syncedBytes = 0;
 
-  for (const relativePath of sandboxPaths) {
+  for (const { sandboxPath, relativePath } of entries) {
     const repoPath = repoPathFor(bundle.dir, relativePath);
     assertInsideBundle(repoPath, bundle.dir);
     // A file can be deleted/become unreadable between the listing above and
     // this read. Skip it rather than aborting the whole sync.
     let content: string;
     try {
-      content = await input.sandbox.files.read(`${input.workdir}/agent/${relativePath}`);
+      content = await input.sandbox.files.read(`${input.workdir}/${sandboxPath}`);
     } catch (error) {
       logger.warn("Skipping unreadable file during agent bundle sync", {
         session_id: input.sessionId,
@@ -186,7 +250,7 @@ export async function syncAgentBundleFromSandbox(input: {
       .values({
         sessionId: input.sessionId,
         workspaceId: input.workspaceId,
-        requestedPath: `agent/${relativePath}`,
+        requestedPath: sandboxPath,
         path: targetPath,
         referenceType: "file",
         baseHash: hash,
@@ -261,7 +325,9 @@ async function mountAgentBundleFile(input: {
   sessionId: string;
   workspaceId: string;
   repoPath: string;
-  relativePath: string;
+  // The file's actual sandbox-relative path (e.g. "agent/user.md", "memory/x.md") — informational,
+  // used for conflict/mount bookkeeping.
+  sandboxPath: string;
   contentHash: string;
 }) {
   await getDb()
@@ -269,7 +335,7 @@ async function mountAgentBundleFile(input: {
     .values({
       sessionId: input.sessionId,
       workspaceId: input.workspaceId,
-      requestedPath: `agent/${input.relativePath}`,
+      requestedPath: input.sandboxPath,
       path: input.repoPath,
       referenceType: "file",
       baseHash: input.contentHash,
@@ -394,10 +460,6 @@ function normalizeAgentBundlePath(input: string) {
   const path = input.trim().replace(/^\/+/, "").split("/").filter(Boolean).join("/");
   if (!path || path.startsWith(".") || path.includes("..")) return null;
   return path;
-}
-
-function stripAgentSandboxPrefix(path: string) {
-  return path.startsWith("agent/") ? path.slice("agent/".length) : path;
 }
 
 function dirname(path: string) {

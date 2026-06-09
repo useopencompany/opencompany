@@ -123,7 +123,7 @@ function SessionHistoryItem({
     if (prefetchTimerRef.current) return;
     prefetchTimerRef.current = setTimeout(() => {
       prefetchTimerRef.current = null;
-      router.prefetch(`/session/${session.id}`);
+      router.prefetch(`/company/session/${session.id}`);
     }, SESSION_PREFETCH_HOVER_DELAY_MS);
   }, [router, session.id]);
 
@@ -147,7 +147,7 @@ function SessionHistoryItem({
       } ${archiving ? "ring-1 ring-red-500/80 bg-red-500/10" : ""}`}
     >
       <Link
-        href={`/session/${session.id}`}
+        href={`/company/session/${session.id}`}
         title={session.lastError ?? session.title}
         onMouseEnter={schedulePrefetch}
         onMouseLeave={cancelPrefetch}
@@ -376,7 +376,7 @@ function SidebarLive({
   const handleArchive = useCallback(
     (sessionId: string, active: boolean) => {
       const tx = agentSessions.delete(sessionId);
-      if (active) router.replace("/");
+      if (active) router.replace("/company");
       void tx.isPersisted.promise.catch((error) => {
         showError(
           error instanceof Error ? error.message : "Could not archive session.",
@@ -417,7 +417,7 @@ function SidebarContent({
   const [collapsed, setCollapsed] = useState(initialCollapsed);
   const [filterOpen, setFilterOpen] = useState(false);
   const [sessionQuery, setSessionQuery] = useState("");
-  const isHome = pathname === "/";
+  const isHome = pathname === "/company";
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   const filteredSessions = useMemo(
@@ -477,14 +477,14 @@ function SidebarContent({
 
           {/* Primary nav */}
           <nav className="flex flex-col gap-px px-2 pt-2">
-            <NavItem href="/" icon={MessageSquarePlus} label="New Session" active={isHome} />
-            <NavItem href="/agents" icon={Bot} label="Agents" active={isActive("/agents")} />
-            <NavItem href="/brain" icon={Brain} label="Brain" active={isActive("/brain")} />
+            <NavItem href="/company" icon={MessageSquarePlus} label="New Session" active={isHome} />
+            <NavItem href="/company/agents" icon={Bot} label="Agents" active={isActive("/company/agents")} />
+            <NavItem href="/company/brain" icon={Brain} label="Brain" active={isActive("/company/brain")} />
             <NavItem
-              href="/inbox"
+              href="/company/inbox"
               icon={Inbox}
               label="Inbox"
-              active={isActive("/inbox")}
+              active={isActive("/company/inbox")}
               trailing={<SoonBadge />}
               disabled
             />
@@ -548,7 +548,7 @@ function SidebarContent({
                         <SessionHistoryItem
                           key={session.id}
                           session={session}
-                          active={pathname === `/session/${session.id}`}
+                          active={pathname === `/company/session/${session.id}`}
                           starred
                           onToggleStar={onToggleStar}
                           onArchive={onArchive}
@@ -570,7 +570,7 @@ function SidebarContent({
                         <SessionHistoryItem
                           key={session.id}
                           session={session}
-                          active={pathname === `/session/${session.id}`}
+                          active={pathname === `/company/session/${session.id}`}
                           starred={false}
                           onToggleStar={onToggleStar}
                           onArchive={onArchive}

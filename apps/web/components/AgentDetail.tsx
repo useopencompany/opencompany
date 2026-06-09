@@ -408,7 +408,7 @@ function AgentDetailContent({
           return;
         }
         seedSessionQueries(queryClient, workspaceId, result.detail);
-        router.push(`/session/${result.session.id}`);
+        router.push(`/company/session/${result.session.id}`);
       } finally {
         setRunningScheduleId(null);
       }
@@ -427,7 +427,7 @@ function AgentDetailContent({
         <div className="mx-auto w-full max-w-[720px] px-6 pb-24 pt-10">
           <div className="flex items-center justify-between text-[12px] text-ink-muted">
             <Link
-              href="/agents"
+              href="/company/agents"
               prefetch
               onMouseEnter={() => {
                 router.prefetch("/agents");
@@ -456,7 +456,7 @@ function AgentDetailContent({
                       return;
                     }
                     seedSessionQueries(queryClient, workspaceId, result.detail);
-                    router.push(`/session/${result.session.id}`);
+                    router.push(`/company/session/${result.session.id}`);
                   });
                 }}
                 className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2 py-1 text-[12px] text-ink/85 hover:bg-surface-muted"
@@ -608,7 +608,7 @@ function AgentDetailContent({
           // optimistic removal; we only surface why.
           const tx = agentsCollection.delete(agent.id);
           setShowDeleteDialog(false);
-          router.push("/agents");
+          router.push("/company/agents");
           void tx.isPersisted.promise.catch((err) => {
             if (isNextRedirectError(err)) return;
             showError(

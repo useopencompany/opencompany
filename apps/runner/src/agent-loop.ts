@@ -486,6 +486,7 @@ async function runMessageWithContext(
       runLeaseOwner: ctx.leaseOwner,
       workspaceId: row.workspace.id,
       agentConfig,
+      personalAgent: row.agent.isDefault,
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
@@ -902,6 +903,7 @@ async function executeStreamingTurn(input: {
           workspaceId: row.workspace.id,
           agentId: row.agent.id,
           workdir: row.session.workdir,
+          personal: row.agent.isDefault,
         }),
       );
     } catch (error) {
@@ -1305,6 +1307,7 @@ async function runAfterSessionWithContext(
       internalMessages: true,
       workspaceId: row.workspace.id,
       agentConfig,
+      personalAgent: row.agent.isDefault,
       getSandbox: sandboxAcquirer.get,
       workdir: row.session.workdir,
       env: input.env,
@@ -1950,6 +1953,7 @@ async function continueTurnAfterToolResult(input: {
     runLeaseOwner: ctx.leaseOwner,
     workspaceId: row.workspace.id,
     agentConfig: input.agentConfig,
+    personalAgent: row.agent.isDefault,
     getSandbox: sandboxAcquirer.get,
     workdir: row.session.workdir,
     env: input.env,

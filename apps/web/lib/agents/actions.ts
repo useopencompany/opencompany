@@ -115,7 +115,7 @@ export async function createAgent() {
     agent_id: pending.id,
   });
 
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { path: result.path });
   redirect(`/agents/${result.path}`);
@@ -554,7 +554,7 @@ export async function updateAgent(
       : null,
   };
 
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   revalidatePath(`/agents/${result.path}`);
   if (previousPath) revalidatePath(`/agents/${previousPath}`);
   revalidatePath(`/agents/${result.id}`);
@@ -733,7 +733,7 @@ export async function deleteAgent(
     agent_id: agent.id,
   });
 
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   if (agent.path) revalidatePath(`/agents/${agent.path}`);
   revalidatePath(`/agents/${agent.id}`);
   if (agent.path) scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
@@ -905,7 +905,7 @@ export async function syncAgentsFromWorkspaceRepository() {
   }
 
   if (canonicalSyncQueued) scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   endTimingTrace(trace, { count: canonicalFiles.length });
 }
 

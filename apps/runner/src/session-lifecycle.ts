@@ -42,6 +42,9 @@ const logger = createLogger({ service: "opencompany-runner", runtime: "server" }
 export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
   let sandbox: SandboxHandle | null = null;
   const agentConfig = normalizeAgentConfig(row.agent.config);
+  // The user's personal/default agent gets the memory/ + personal-brain/ + work/ sandbox layout and
+  // no company brain mount; company/workspace agents keep the original agent/ + brain/ + work/ tree.
+  const personal = row.agent.isDefault;
   const template = resolveSandboxTemplate(agentConfig, env);
   const existingSandbox = Boolean(row.session.e2bSandboxId);
   const readyStartedAt = performance.now();
@@ -66,6 +69,7 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
     await prepareWorkspace({
       sandbox,
       workdir: row.session.workdir,
+      personal,
       agentFile: serializeAgentFile({
         title: agentConfig.title,
         body: agentConfig.instructions,
@@ -77,19 +81,23 @@ export async function ensureSandbox(row: LoadedSession, env: RunnerEnv) {
         triggers: agentConfig.triggers,
       }),
     });
-    await materializeBrainForSession({
-      sandbox,
-      sessionId: row.session.id,
-      workspaceId: row.workspace.id,
-      workdir: row.session.workdir,
-      references: agentConfig.brain,
-    });
+    // Personal agents have no company brain mount — skip materializing ./brain for them.
+    if (!personal) {
+      await materializeBrainForSession({
+        sandbox,
+        sessionId: row.session.id,
+        workspaceId: row.workspace.id,
+        workdir: row.session.workdir,
+        references: agentConfig.brain,
+      });
+    }
     await materializeAgentBundleForSession({
       sandbox,
       sessionId: row.session.id,
       workspaceId: row.workspace.id,
       agentId: row.agent.id,
       workdir: row.session.workdir,
+      personal,
     });
     await materializeSkillsForSession({
       sandbox,

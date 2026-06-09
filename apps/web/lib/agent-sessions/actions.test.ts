@@ -197,7 +197,7 @@ describe("createAgentSession", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
     expect(getDbMock).toHaveBeenCalled();
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
@@ -287,7 +287,7 @@ describe("createAgentSessionFromPrompt", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });

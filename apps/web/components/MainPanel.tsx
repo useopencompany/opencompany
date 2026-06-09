@@ -95,7 +95,7 @@ function Prompt({ agents }: { agents: AgentOption[] }) {
         return;
       }
       seedSessionQueries(queryClient, workspaceId, result.detail);
-      router.push(`/session/${result.session.id}`);
+      router.push(`/company/session/${result.session.id}`);
     });
   };
 

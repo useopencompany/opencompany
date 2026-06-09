@@ -86,6 +86,11 @@ export const users = pgTable(
     firstName: text("first_name"),
     lastName: text("last_name"),
     avatarUrl: text("avatar_url"),
+    // Per-user product-surface switch for the personal-agent-first pivot. When true the user's
+    // primary surface is the personal agent (root → /personal); when false they get the legacy
+    // company/workspace surface (root → /company). Defaults true in this phase. Keeps the company
+    // model fully alive per-user so we can flip individuals rather than the whole deployment.
+    personalFirst: boolean("personal_first").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

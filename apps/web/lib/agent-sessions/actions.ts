@@ -55,7 +55,7 @@ export async function createAgentSession(idOrPath: string) {
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     } as const;
   }
   const agent = await loadAgentForSession(idOrPath, workspace.id, user.id);
@@ -112,7 +112,7 @@ export async function createAgentSessionFromPrompt(
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     } as const;
   }
 
@@ -217,7 +217,7 @@ export async function createPersonalOnboardingSession(
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     } as const;
   }
 

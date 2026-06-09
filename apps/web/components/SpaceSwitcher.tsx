@@ -7,28 +7,37 @@ type Space = "personal" | "workspace";
 export function SpaceSwitcher({
   activeSpace,
   workspaceName,
-  workspaceHref = "/",
+  workspaceHref = "/company",
   personalHref = "/personal",
+  // The company/workspace surface is demoted in the personal-agent-first phase. When true, the
+  // switcher shows only the Personal space so the company tab stays out of the default UX.
+  hideWorkspace = false,
   className,
 }: {
   activeSpace: Space;
   workspaceName: string;
   workspaceHref?: string;
   personalHref?: string;
+  hideWorkspace?: boolean;
   className?: string;
 }) {
   return (
     <div className={cn("px-2 pb-2", className)}>
       <nav
         aria-label="Space"
-        className="grid grid-cols-2 gap-0.5 rounded-md border border-border bg-surface/45 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.36)]"
+        className={cn(
+          "grid gap-0.5 rounded-md border border-border bg-surface/45 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.36)]",
+          hideWorkspace ? "grid-cols-1" : "grid-cols-2",
+        )}
       >
         <SpaceLink href={personalHref} active={activeSpace === "personal"}>
           Personal
         </SpaceLink>
-        <SpaceLink href={workspaceHref} active={activeSpace === "workspace"} title={workspaceName}>
-          {workspaceName}
-        </SpaceLink>
+        {hideWorkspace ? null : (
+          <SpaceLink href={workspaceHref} active={activeSpace === "workspace"} title={workspaceName}>
+            {workspaceName}
+          </SpaceLink>
+        )}
       </nav>
     </div>
   );

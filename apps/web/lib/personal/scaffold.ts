@@ -54,6 +54,16 @@ This is how I operate for {{name}}. I read it before any work and keep it curren
 <tuned to {{name}}'s focus as I learn>
 `;
 
+// Starter note for the personal agent's Personal Brain (personal-brain/README.md). Personal Brain is
+// the user's own knowledge space, distinct from Memory (the agent's distilled understanding). Kept
+// short — it's the user's to edit and grow.
+export const DEFAULT_PERSONAL_BRAIN_README = `# {{name}}'s Personal Brain
+
+This is your private knowledge space. Save notes, research, decisions, and reference material here — it persists across sessions and your agent can read from it.
+
+This is different from Memory: Personal Brain holds your own files; Memory is what your agent distills about you over time.
+`;
+
 const EMPTY_TIPTAP_DOC: TiptapDoc = { type: "doc", content: [] };
 
 export type PersonalAgentRef = {
@@ -152,6 +162,13 @@ export async function ensurePersonalAgent(input: {
   const soulPath = `${agentBundleDir(path)}/soul.md`;
   const soulHash = hashBrainContent(soul);
 
+  // Seed a starter Personal Brain note. Personal Brain is the user's private, persistent knowledge
+  // space — stored in the bundle under personal-brain/ and surfaced by /personal/brain. Local-only,
+  // like the rest of the personal agent.
+  const personalBrainReadme = DEFAULT_PERSONAL_BRAIN_README.replaceAll("{{name}}", input.name);
+  const personalBrainReadmePath = `${agentBundleDir(path)}/personal-brain/README.md`;
+  const personalBrainReadmeHash = hashBrainContent(personalBrainReadme);
+
   await db.batch([
     db.insert(agents).values({
       ...pending.agent,
@@ -172,6 +189,15 @@ export async function ensurePersonalAgent(input: {
       content: soul,
       contentHash: soulHash,
       sizeBytes: brainContentSize(soul),
+      githubSyncStatus: "synced",
+    }),
+    db.insert(agentFiles).values({
+      workspaceId: input.workspaceId,
+      agentId: id,
+      path: personalBrainReadmePath,
+      content: personalBrainReadme,
+      contentHash: personalBrainReadmeHash,
+      sizeBytes: brainContentSize(personalBrainReadme),
       githubSyncStatus: "synced",
     }),
   ]);
