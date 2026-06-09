@@ -52,6 +52,7 @@ import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
+import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -1439,9 +1440,16 @@ function SessionTopBar({
   const ModelIcon = model?.icon ?? Sparkles;
   const modelLabel = model?.label ?? session.modelName.split("/").at(-1) ?? session.modelName;
   const contextMax = model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+  // On the /personal shell the "expand sidebar" button floats over this bar's top-left while the
+  // sidebar is collapsed; widen the left padding so the agent name clears it. (false elsewhere.)
+  const floatingNavInset = useFloatingNavInset();
 
   return (
-    <header className="flex items-center justify-between gap-3 px-6 py-2">
+    <header
+      className={`flex items-center justify-between gap-3 py-2 pr-6 ${
+        floatingNavInset ? "pl-14" : "pl-6"
+      }`}
+    >
       <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
         <span className="truncate font-medium text-ink">{session.agentName}</span>
         <span className="shrink-0 text-ink-subtle/60" aria-hidden>

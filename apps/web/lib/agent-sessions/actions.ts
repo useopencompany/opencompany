@@ -166,6 +166,69 @@ export async function createAgentSessionFromPrompt(
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
+// V2 onboarding (/onboarding/personal): the user's first message is a self-introduction. We seed
+// it as a normal user message (so it reads naturally in the transcript) but attach a hidden pointer
+// to the `onboarding` skill in the model-only content, so the agent runs the first-session
+// procedure (identify → save to memory → fetch any URL → personalized greeting + tailored
+// suggestions) without any of that machinery leaking into the UI.
+export async function createPersonalOnboardingSession(agentId: string, identityText: string) {
+  const { user, workspace } = await currentWorkspace();
+  const trimmed = identityText.trim();
+  if (!trimmed) {
+    return { ok: false, error: "Tell the agent a bit about yourself to get started." } as const;
+  }
+  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+    return {
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/settings?billing=insufficient",
+    } as const;
+  }
+
+  const agent = await loadAgentForSession(agentId, workspace.id, user.id);
+  if (!agent) {
+    return { ok: false, error: "Agent not found." } as const;
+  }
+
+  const { session, statusEvent } = await insertAgentSession({
+    agent,
+    title: titleFromPrompt(trimmed),
+    userId: user.id,
+    workspaceId: workspace.id,
+  });
+  const sessionId = session.id;
+
+  // Visible content = the intro verbatim. Model-only content appends the thin onboarding pointer;
+  // it never renders in the transcript (modelMessage), so the user just sees their own message.
+  const modelContent = `${trimmed}\n\n(This is my very first session. Read your \`onboarding\` skill with read_skill and follow it to get me set up.)`;
+  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed, modelContent);
+  const messageId = message.id;
+
+  after(() =>
+    Promise.all([
+      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
+      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      captureServerEvent("session_started", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        session_id: sessionId,
+        model_provider: agent.config.model.provider,
+        model_name: agent.config.model.name,
+        source: "onboarding",
+      }),
+    ]),
+  );
+
+  const detail = buildCreatedSessionDetail({
+    agent,
+    session,
+    messages: [message],
+    events: [statusEvent, createdEvent],
+  });
+  return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
+}
+
 export async function submitAgentSessionMessage(sessionId: string, content: string) {
   const { user, workspace } = await currentWorkspace();
   const trimmed = content.trim();

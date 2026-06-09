@@ -14,7 +14,7 @@ import {
 import type { AgentConfig, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agentFiles, agents } from "@opencompany/db/schema";
+import { agentFiles, agents, inboxItems } from "@opencompany/db/schema";
 import { and, asc, eq } from "drizzle-orm";
 import {
   type AgentBundleFilePayload,
@@ -151,6 +151,57 @@ export async function updatePersonalAgentBehavior(
   });
 
   return { ok: true, config: saved.config };
+}
+
+type ResetPersonalAgentResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Dev-only full reset of the caller's personal agent — wipes it to a clean slate so the V2
+ * onboarding surface (`/onboarding/personal`) can be tested repeatedly.
+ *
+ * Deletes the agent row (scoped to the caller's own default agent): FK cascades remove all of
+ * its sessions (→ messages, chunks, events, usage, run jobs, sandbox usage, stars), its bundle
+ * files, and its messaging channels. Inbox items aren't FK-tied to the agent (they're scoped to
+ * the user), so they're cleared separately.
+ *
+ * On the next `/onboarding/personal` (or `/personal`) load, `ensurePersonalAgent` provisions a
+ * fresh agent with a new id/path and the default behavior. We intentionally do NOT reuse
+ * `deleteAgent` — it requires admin role and enqueues GitHub sync jobs + E2B sandbox archival,
+ * none of which apply to the local-only personal agent. Any live E2B sandbox for a deleted
+ * session is simply left to expire on its own; acceptable for a dev reset.
+ */
+export async function resetPersonalAgent(): Promise<ResetPersonalAgentResult> {
+  if (process.env.NODE_ENV === "production") {
+    return { ok: false, error: "Reset is disabled in production." };
+  }
+
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  const [agent] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(
+      and(
+        eq(agents.workspaceId, workspace.id),
+        eq(agents.userId, user.id),
+        eq(agents.isDefault, true),
+      ),
+    )
+    .limit(1);
+
+  // Clear the user's inbox regardless — items survive the agent's FK cascade.
+  await db
+    .delete(inboxItems)
+    .where(and(eq(inboxItems.workspaceId, workspace.id), eq(inboxItems.userId, user.id)));
+
+  if (agent) {
+    await db
+      .delete(agents)
+      .where(and(eq(agents.id, agent.id), eq(agents.workspaceId, workspace.id)));
+  }
+
+  return { ok: true };
 }
 
 // The integrations the manual "Add integration" button can append, keyed by the @-mention token it

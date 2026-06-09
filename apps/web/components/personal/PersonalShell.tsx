@@ -13,6 +13,7 @@ import {
   hasPersonalGitHubIntegrationRequest,
   type PersonalGitHubIntegrationStatus,
 } from "@/components/personal/PersonalCapabilityPanel";
+import { FloatingNavInsetProvider } from "@/components/FloatingNavInsetContext";
 import { useToast } from "@/components/ToastProvider";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";
@@ -36,11 +37,13 @@ function subscribeSidebarCollapsed(onStoreChange: () => void) {
 }
 
 function getSidebarCollapsedSnapshot() {
-  return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+  // Collapsed by default: an unset value (first visit) reads as collapsed; only an explicit
+  // "false" (user expanded it before) keeps the sidebar open.
+  return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) !== "false";
 }
 
 function getSidebarCollapsedServerSnapshot() {
-  return false;
+  return true;
 }
 
 function persistSidebarCollapsed(next: boolean) {
@@ -172,12 +175,17 @@ export default function PersonalShell({
               aria-label="Expand sidebar"
               aria-expanded={false}
               onClick={() => persistSidebarCollapsed(false)}
-              className="fixed left-2 top-3 z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+              // top-[7px] (not top-3) so the button's center lines up with the session top bar's
+              // text + right-side icons, which sit ~21.5px down (py-2 over ~27px content). The
+              // button's own border makes it 2px taller, so it needs to ride slightly higher.
+              className="fixed left-2 top-[7px] z-50 rounded-md border border-border bg-canvas/85 p-1.5 text-ink/60 shadow-[0_1px_2px_rgba(15,15,15,0.04)] backdrop-blur-md transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
             >
               <PanelLeft size={15} strokeWidth={1.75} />
             </button>
           )}
-          {children}
+          {/* While collapsed the floating expand button sits over the top-left of this panel, so
+              tell the panel chrome (e.g. SessionView's top bar) to reserve left padding for it. */}
+          <FloatingNavInsetProvider value={collapsed}>{children}</FloatingNavInsetProvider>
         </div>
       </div>
     </PersonalAgentProvider>

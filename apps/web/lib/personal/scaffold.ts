@@ -1,4 +1,9 @@
-import { agentBundleDir, agentPathForSlug } from "@opencompany/agent-runtime";
+import {
+  agentBundleDir,
+  agentPathForSlug,
+  deriveAgentConfigFromBody,
+  ONBOARDING_SKILL_ID,
+} from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
@@ -17,7 +22,7 @@ const PERSONAL_AGENT_BODY = `You are {{name}}'s personal agent.
 
 Before doing any work, read agent/soul.md — it's how you operate and who you serve. Keep it current as you learn.
 
-Be concise and bias to action. Research before you assert and cite what you find. Confirm before anything destructive or outward-facing.
+Be concise and bias to action. Research before you assert and cite what you find — you can search the web and fetch pages with @exa. Confirm before anything destructive or outward-facing.
 
 You have a personal inbox for {{name}}. When you produce something they should see but should not be interrupted for synchronously — a finding, a finished result, a heads-up, or something that needs their decision — post it with inbox_add (a short, action-oriented title; detail in body; the steps you took in steps). This is how scheduled or background runs reach them. Call inbox_list first and reuse a stable dedup_key so repeated runs don't post duplicates, and call inbox_update to mark an item done once you've resolved it. Use the inbox for asynchronous attention; use ask_user_question only when you must block on their answer to continue right now.`;
 
@@ -118,8 +123,8 @@ export async function ensurePersonalAgent(input: {
   const id = newAgentId();
   const path = agentPathForSlug(`personal-${id.replace(/[^a-z0-9]/g, "")}`);
 
-  // Reuse buildPendingAgent so body/content/config stay well-formed and the model default is
-  // centralized. We keep pending.agent but discard pending.syncJob (never enqueued).
+  // Reuse buildPendingAgent so id/path/version/hash stay well-formed; we keep pending.agent but
+  // discard pending.syncJob (never enqueued).
   const pending = buildPendingAgent({
     id,
     workspaceId: input.workspaceId,
@@ -128,6 +133,18 @@ export async function ensurePersonalAgent(input: {
     path,
     model: PERSONAL_AGENT_MODEL,
   });
+
+  // Derive the runtime config from the body so the `@exa` mention becomes a well-formed web tool
+  // (web_fetch/exa_search), then enable the dormant onboarding skill. The skill is
+  // defaultEnabled:false, so it is present only because we list it here, and only read when the
+  // onboarding session explicitly points the agent at it (see createPersonalOnboardingSession).
+  const { body, config } = deriveAgentConfigFromBody({
+    title: input.name,
+    body: pending.agent.body,
+    model: PERSONAL_AGENT_MODEL,
+    repositories: [],
+  });
+  config.skills = [...(config.skills ?? []), { id: ONBOARDING_SKILL_ID }];
 
   // Seed the agent's private operating doc (agent/soul.md) in the same batch as the agent row,
   // so a brand-new personal agent always mounts a soul.md into ./agent on its first session.
@@ -138,6 +155,8 @@ export async function ensurePersonalAgent(input: {
   await db.batch([
     db.insert(agents).values({
       ...pending.agent,
+      body,
+      config,
       userId: input.userId,
       isDefault: true,
       // Local-only: no GitHub sync lifecycle, so no pending work. Nothing enqueues from this
@@ -165,11 +184,11 @@ export async function ensurePersonalAgent(input: {
 
   return {
     id: pending.id,
-    name: pending.agent.name,
-    defaultModel: pending.agent.config.model.name,
+    name: config.title,
+    defaultModel: config.model.name,
     path: pending.agent.path,
-    config: pending.agent.config,
-    body: pending.agent.body,
+    config,
+    body,
     content: EMPTY_TIPTAP_DOC,
   };
 }

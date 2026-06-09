@@ -548,6 +548,65 @@ provenance: agent
 
 const SKILL_CREATOR_SKILL_MD = buildSkillCreatorSkillMd();
 
+export const ONBOARDING_SKILL_ID = "onboarding";
+
+function buildOnboardingSkillMd(): string {
+  return `---
+name: onboarding
+description: First-session onboarding for a brand-new user. Only for the very first session, when the user has just introduced themselves. Ignore in normal sessions.
+---
+
+# First-session onboarding
+
+This is the user's **very first session**. Their opening message is a short self-introduction —
+who they are and what they're working on. Your job is to turn that into a warm, genuinely useful
+first interaction and a real foundation for memory. Move fast: this is one smooth conversational
+turn, not a form or an interview.
+
+## 1. Read who they are
+
+From their introduction, pull out what you can: their **name**, their **role**, the **company or
+project** they're working on and what it does, and any **URL** they mention. Don't ask them to
+repeat anything they already told you. If something's missing, don't interrogate for it — you'll
+learn it over time.
+
+## 2. If they dropped a URL, look first — silently
+
+If the introduction contains a link (a company site, product, profile), fetch it with
+\`web_fetch\` **before** you reply, and use what you learn to make your response specific. Do this
+quietly — don't narrate "let me check your website"; just come back already knowing their world.
+
+## 3. Save the foundation to memory
+
+Write what you learned so it persists:
+
+- Put their identity into your hot-memory file \`agent/user.md\` with \`write_file\` — name, role,
+  company/project and what it does, and how they seem to want to work. Keep it tight; this rides in
+  every future session.
+- For durable, retrievable facts about their company and themselves as distinct things, also capture
+  them with the \`memory\` tool (e.g. a \`company\` object and a \`person\` object) following its skill.
+
+(Hot-memory edits take effect from the next session, which is exactly right — \`user.md\` becomes the
+standing context for everything after this one.)
+
+## 4. Respond once — personal, concrete, forward
+
+Now reply with a single message that:
+
+- **Reflects what you learned** — greet them by name and show you understand their role and what
+  they're building (ideally a detail only the URL or their intro could have given you). One or two
+  sentences; warm, not effusive.
+- **Asks the cold-start question** — what do they want to get done today / first.
+- **Offers 2–3 concrete suggestions tailored to their role and company** — specific things you could
+  do for *them*, not generic capabilities. Make them easy to say yes to.
+
+Keep it concise and bias to action. The feeling to create: an agent that wanted to know them before
+helping — not a setup wizard. After this turn, behave as their normal personal agent.
+`;
+}
+
+const ONBOARDING_SKILL_MD = buildOnboardingSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -580,6 +639,16 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
       "Create or improve your own personal skills — save a reusable procedure as agent/skills/<id>/SKILL.md to load on demand later. Use when you spot a repeatable workflow worth keeping, or are asked to make or remember a skill.",
     defaultEnabled: true,
     files: [{ path: "SKILL.md", content: SKILL_CREATOR_SKILL_MD }],
+  },
+  {
+    id: ONBOARDING_SKILL_ID,
+    name: "First-session onboarding",
+    description:
+      "First-session onboarding for a brand-new user — turn their self-introduction into a personal, useful first interaction and seed memory. Only for the very first session; ignore in normal sessions.",
+    // Opt-in: enabled on the personal agent's config and invoked by the onboarding session's
+    // seeded pointer. Dormant (never read) in normal sessions.
+    defaultEnabled: false,
+    files: [{ path: "SKILL.md", content: ONBOARDING_SKILL_MD }],
   },
 ];
 

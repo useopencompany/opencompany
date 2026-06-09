@@ -524,7 +524,7 @@ function PersonalSidebarView({
 
         {/* Scrollable body */}
         <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
-          <Section title="Configuration">
+          <Section title="Configuration" defaultOpen={false}>
             <CapabilityNavRow
               icon={Bot}
               label="Agent"
@@ -560,7 +560,7 @@ function PersonalSidebarView({
             />
           </Section>
 
-          <Section title="Context">
+          <Section title="Context" defaultOpen={false}>
             <ContextTreeNodes
               nodes={contextTree}
               depth={0}
@@ -570,7 +570,7 @@ function PersonalSidebarView({
             <NewContextFileRow onClick={() => router.push(personalPaths.newFile())} />
           </Section>
 
-          <Section title="Sessions">
+          <Section title="Sessions" defaultOpen={false}>
             {sessions.length === 0 ? (
               <div className="mx-1 mt-1 rounded-md border border-dashed border-border bg-surface/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
                 Sessions you start will appear here.
