@@ -28,10 +28,23 @@ export function directDatabaseUrl(env = process.env) {
 /**
  * `docker run` args for Electric. Foreground (`--rm -it`) for the manual runner;
  * detached (`-d --restart unless-stopped`) for setup so it survives dev restarts
- * and machine reboots. Insecure mode serves shapes without an ELECTRIC_SECRET —
- * safe because the container binds to localhost behind the same-origin auth proxy.
+ * and machine reboots.
+ *
+ * Security mode: Electric is secure-by-default and its HTTP API is public unless an
+ * ELECTRIC_SECRET is set. When `env.ELECTRIC_SECRET` is present we run secure — every
+ * request must carry the `secret` query param, which the web auth proxy injects
+ * server-side (apps/web/app/api/electric/v1/shape/route.ts). With no secret we run
+ * insecure, which is safe for local dev only because the container binds to localhost
+ * behind the same-origin proxy. Shared/preview deployments MUST set ELECTRIC_SECRET
+ * (issue #351).
+ *
+ * Storage: when `env.ELECTRIC_STORAGE_DIR` is set we point Electric's on-disk shape
+ * log at it. Electric's storage is NOT disposable — it must stay in sync with the
+ * Postgres replication slot — so previews back this with a persistent volume.
  */
-export function dockerRunArgs(databaseUrl, { detached = false } = {}) {
+export function dockerRunArgs(databaseUrl, { detached = false, env = process.env } = {}) {
+  const secret = env.ELECTRIC_SECRET?.trim();
+  const storageDir = env.ELECTRIC_STORAGE_DIR?.trim();
   return [
     "run",
     ...(detached ? ["-d", "--restart", "unless-stopped"] : ["--rm", "-it"]),
@@ -39,8 +52,8 @@ export function dockerRunArgs(databaseUrl, { detached = false } = {}) {
     ELECTRIC_CONTAINER,
     "-e",
     `DATABASE_URL=${databaseUrl}`,
-    "-e",
-    "ELECTRIC_INSECURE=true",
+    ...(secret ? ["-e", `ELECTRIC_SECRET=${secret}`] : ["-e", "ELECTRIC_INSECURE=true"]),
+    ...(storageDir ? ["-e", `ELECTRIC_STORAGE_DIR=${storageDir}`] : []),
     "-p",
     `${ELECTRIC_PORT}:3000`,
     ELECTRIC_IMAGE,

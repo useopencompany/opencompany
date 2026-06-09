@@ -9,6 +9,8 @@ import {
   detectIncompleteTurn,
   isToolStepLimitExceeded,
   MAX_MODEL_STEPS,
+  SOFT_FINALIZATION_STEP,
+  softFinalizationStepSettings,
 } from "./model-turn";
 import {
   createRunControlGate,
@@ -785,6 +787,30 @@ describe("stream error handling", () => {
 
     expect(isToolStepLimitExceeded(streamResult)).toBe(true);
     expect(() => assertTurnComplete(streamResult)).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("uses a 32-step hard cap with a reserved finalization step", () => {
+    expect(MAX_MODEL_STEPS).toBe(32);
+    expect(SOFT_FINALIZATION_STEP).toBe(31);
+  });
+
+  it("keeps normal step settings until the reserved finalization step", () => {
+    expect(softFinalizationStepSettings({ stepNumber: 30, system: "Base system." })).toEqual({});
+  });
+
+  it("disables tools and appends final-answer guidance on the reserved finalization step", () => {
+    const settings = softFinalizationStepSettings({
+      stepNumber: SOFT_FINALIZATION_STEP,
+      system: "Base system.",
+    });
+
+    expect(settings).toMatchObject({
+      activeTools: [],
+      system: expect.stringContaining("Base system."),
+    });
+    const system = "system" in settings ? settings.system : "";
+    expect(system).toContain("Do not call any more tools");
+    expect(system).toContain("provide the best final answer now");
   });
 
   it("allows normal turns that end with final assistant text", () => {

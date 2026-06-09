@@ -24,6 +24,7 @@ import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
+import { isSessionUnseen } from "@/lib/agent-sessions/payload";
 import { deriveVisibleInbox } from "@/lib/collections/selectors";
 import { PERSONAL_INTEGRATION_TOOL_IDS } from "@/lib/personal/integrations-catalog";
 import { personalPaths } from "@/lib/personal/paths";
@@ -243,6 +244,7 @@ function useLivePersonalSessions(agentId: string, initialSessions: SidebarSessio
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         starredAt: null,
+        unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
       }))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }, [rows, isLoading, agentId, initialSessions]);

@@ -43,6 +43,7 @@ import {
 } from "@/lib/agent-sessions/message-runner";
 import { sidebarSessionFromDetail } from "@/lib/agent-sessions/payload";
 import { validateQuestionAnswers } from "@/lib/agent-sessions/question-validation";
+import { isSessionContinuable, isToolStepLimitResumable } from "@/lib/agent-sessions/resumable";
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
@@ -525,6 +526,7 @@ export async function continueInterruptedSession(sessionId: string) {
         agentId: agentSessions.agentId,
         status: agentSessions.status,
         runLeaseId: agentSessions.runLeaseId,
+        lastError: agentSessions.lastError,
         modelProvider: agentSessions.modelProvider,
         modelName: agentSessions.modelName,
       })
@@ -547,22 +549,33 @@ export async function continueInterruptedSession(sessionId: string) {
   if (!session) {
     return { ok: false, error: "Session not found." } as const;
   }
-  if (session.status !== "interrupted") {
+  if (!isSessionContinuable({ status: session.status, lastError: session.lastError })) {
     return { ok: false, error: "This session is not interrupted." } as const;
   }
   if (session.runLeaseId) {
     return { ok: false, error: "This session is still running. Try again shortly." } as const;
   }
 
+  const stepLimitResume = isToolStepLimitResumable({
+    status: session.status,
+    lastError: session.lastError,
+  });
   const { message } = await insertUserMessage(sessionId, "Continue", {
     workspaceId: workspace.id,
     attachments: [],
-    modelContent: [
-      "Continue from the interrupted turn.",
-      "The prior runner process was stopped while this session was active.",
-      "Inspect the current workspace and sandbox state before deciding what to do next.",
-      "Do not repeat completed work or duplicate side effects if the interrupted tool already made progress.",
-    ].join(" "),
+    modelContent: stepLimitResume
+      ? [
+          "Continue after the prior turn reached the tool-step limit before producing a final answer.",
+          "Inspect the persisted tool results, conversation, current workspace, and sandbox state before deciding what to do next.",
+          "Avoid repeating completed work or duplicating side effects.",
+          "Finish with a final answer if enough work is complete; otherwise continue only the missing work.",
+        ].join(" ")
+      : [
+          "Continue from the interrupted turn.",
+          "The prior runner process was stopped while this session was active.",
+          "Inspect the current workspace and sandbox state before deciding what to do next.",
+          "Do not repeat completed work or duplicate side effects if the interrupted tool already made progress.",
+        ].join(" "),
   });
   const messageId = message.id;
 
@@ -954,6 +967,29 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
       .where(and(eq(sessionStars.userId, user.id), eq(sessionStars.sessionId, sessionId))),
   );
   return { ok: true, txid, starredAt: null } as const;
+}
+
+// Record that the current user has viewed this session, clearing its sidebar "unseen"
+// blue dot. Writes ONLY last_seen_at — deliberately not updatedAt, so viewing a session
+// never reshuffles the sidebar's recency order. Fire-and-forget from the open session
+// view; the cleared state streams back to every tab via Electric. Scoped to the owning
+// user so it can only ever touch a session the caller can see.
+export async function markSessionSeen(sessionId: string) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  await db
+    .update(agentSessions)
+    .set({ lastSeenAt: new Date() })
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+      ),
+    );
+
+  return { ok: true } as const;
 }
 
 // Returns the Postgres txid of the archive write so an optimistic sidebar delete

@@ -412,6 +412,13 @@ export const agentSessions = pgTable(
     lastError: text("last_error"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     sandboxTerminatedAt: timestamp("sandbox_terminated_at", { withTimezone: true }),
+    // When the agent last yielded control back to the user (turn completed/failed or
+    // parked for approval/input) — set at the run-lease finish chokepoint, NOT on abort.
+    // Compared against lastSeenAt to derive the sidebar's "unseen" blue dot.
+    lastTurnFinishedAt: timestamp("last_turn_finished_at", { withTimezone: true }),
+    // When the current user last viewed this session. Written by the web (markSessionSeen);
+    // deliberately does NOT touch updatedAt so viewing never reshuffles sidebar recency.
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

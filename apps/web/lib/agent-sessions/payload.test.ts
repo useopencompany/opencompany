@@ -259,11 +259,13 @@ function sidebarSession(id: string, title: string) {
     id,
     title,
     status: "completed",
+    source: "user" as const,
     modelName: "model",
     lastError: null,
     createdAt: "2026-05-24T10:00:00.000Z",
     updatedAt: "2026-05-24T10:00:00.000Z",
     starredAt: null,
+    unseen: false,
   };
 }
 

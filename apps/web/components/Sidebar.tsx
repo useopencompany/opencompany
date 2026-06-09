@@ -156,11 +156,19 @@ function SessionHistoryItem({
         onTouchStart={schedulePrefetch}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-l-md px-2 py-[5px] focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        {session.status === "running" ||
-        session.status === "provisioning" ||
-        session.status === "awaiting_approval" ||
-        session.status === "awaiting_input" ||
-        session.status === "interrupted" ? (
+        {session.status === "running" || session.status === "provisioning" ? (
+          <SessionStatusDot status={session.status} pulse />
+        ) : session.unseen && !active ? (
+          // Unseen finished turn (completed/failed/awaiting_*) on a session you're not
+          // looking at — the "new activity" blue dot. Suppressed for the active session.
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: "var(--color-info)" }}
+            aria-label="New activity"
+          />
+        ) : session.status === "awaiting_approval" ||
+          session.status === "awaiting_input" ||
+          session.status === "interrupted" ? (
           <SessionStatusDot status={session.status} pulse />
         ) : null}
         <span className="min-w-0 flex-1 truncate tracking-[-0.005em]">{session.title}</span>

@@ -11,6 +11,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
+  isSessionUnseen,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
@@ -40,6 +41,8 @@ export async function loadSidebarSessionsForWorkspace(
     createdAt: agentSessions.createdAt,
     updatedAt: agentSessions.updatedAt,
     starredAt: sessionStars.starredAt,
+    lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+    lastSeenAt: agentSessions.lastSeenAt,
   };
 
   const visibilityFilter = and(
@@ -80,7 +83,9 @@ export async function loadSidebarSessionsForWorkspace(
 
   return Array.from(byId.values())
     .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
-    .map(serializeSidebarSession);
+    .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+      serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
+    );
 }
 
 // Personal sessions are the user's sessions against their private default agent. Same
@@ -104,6 +109,8 @@ export async function loadPersonalSessionsForAgent(
       lastError: agentSessions.lastError,
       createdAt: agentSessions.createdAt,
       updatedAt: agentSessions.updatedAt,
+      lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+      lastSeenAt: agentSessions.lastSeenAt,
     })
     .from(agentSessions)
     .where(
@@ -119,7 +126,15 @@ export async function loadPersonalSessionsForAgent(
     .orderBy(desc(agentSessions.updatedAt))
     .limit(SIDEBAR_RECENCY_LIMIT);
 
-  return rows.map((row) => serializeSidebarSession({ ...row, starredAt: null }));
+  // /personal has no star/pin state yet, so starredAt is always null; the "unseen"
+  // blue dot still applies (agent finished a turn since the user last viewed it).
+  return rows.map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+    serializeSidebarSession({
+      ...row,
+      starredAt: null,
+      unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt),
+    }),
+  );
 }
 
 export async function loadAgentSessionDetailForWorkspace(

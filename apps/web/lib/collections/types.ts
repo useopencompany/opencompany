@@ -50,6 +50,8 @@ export type AgentSessionRow = {
   last_error: string | null;
   abort_requested_at: string | null;
   archived_at: string | null;
+  last_turn_finished_at: string | null;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 };
