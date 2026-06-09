@@ -253,6 +253,43 @@ export async function prepareWorkspace(input: {
     command: `chown root:root ${shellQuote(layout.agentFile)} && chmod 600 ${shellQuote(layout.agentFile)}`,
     options: { user: SANDBOX_ROOT_USER, timeoutMs: 30_000 },
   });
+  // Wire git to GitHub's credential helper so plain `git push` / `git clone https://github.com/...`
+  // work whenever a GH token is present in the command env (the coding tools inject one) instead of
+  // failing with "could not read Username for github.com". Equivalent to `gh auth setup-git` but set
+  // directly so it does not require gh to be authenticated at prepare time. Written to the `user`
+  // global gitconfig — the same user the shell tool runs as.
+  await runSandboxPreparationCommand({
+    sandbox: input.sandbox,
+    stage: "configure_git_credential_helper",
+    commandName: "git_config_credential_helper",
+    command: [
+      `git config --global --replace-all ${shellQuote("credential.https://github.com.helper")} ${shellQuote("")}`,
+      `git config --global --add ${shellQuote("credential.https://github.com.helper")} ${shellQuote("!gh auth git-credential")}`,
+    ].join(" && "),
+    options: { user: SANDBOX_USER, timeoutMs: 30_000 },
+  });
+  await ensureSandboxDevTooling(input.sandbox);
+}
+
+// Best-effort install of the CLIs coding sessions reach for but that the base image may lack:
+// `rg` (ripgrep) for repo search and `bun` for running tests/builds. Presence-checked, so it is a
+// fast no-op once these are baked into the template — which is the proper fix; this is the safety
+// net until then. Never fatal: a failed install (e.g. a non-apt base image) must not block session
+// readiness, so the shell `|| true` guards swallow install errors and any sandbox-level error is
+// caught here. bun installs to /usr/local so it lands on PATH for the shell tool without sourcing a
+// profile.
+async function ensureSandboxDevTooling(sandbox: SandboxHandle) {
+  try {
+    await sandbox.commands.run(
+      [
+        "command -v rg >/dev/null 2>&1 || (apt-get update -y && apt-get install -y ripgrep) || true",
+        "command -v bun >/dev/null 2>&1 || curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash || true",
+      ].join("\n"),
+      { user: SANDBOX_ROOT_USER, timeoutMs: 180_000 },
+    );
+  } catch {
+    // Swallow: dev tooling is a convenience, not a precondition for the session to run.
+  }
 }
 
 async function runSandboxPreparationCommand(input: {
@@ -590,7 +627,7 @@ async function runCommandWithExitResult(
   }
 }
 
-function commandExitResult(error: unknown) {
+export function commandExitResult(error: unknown) {
   if (!error || typeof error !== "object") return null;
   const record = error as Record<string, unknown>;
   if (record.name !== "CommandExitError") return null;
@@ -601,6 +638,15 @@ function commandExitResult(error: unknown) {
     stderr: typeof record.stderr === "string" ? record.stderr : "",
     exitCode: record.exitCode,
   };
+}
+
+// E2B raises a `TimeoutError` when a command exceeds its `timeoutMs` (the process is killed
+// server-side). Matched by name to stay decoupled from the SDK's class identity, mirroring
+// `commandExitResult`. Lets long tool calls capture partial state instead of bubbling a bare throw.
+export function isCommandTimeoutError(error: unknown) {
+  return Boolean(
+    error && typeof error === "object" && (error as { name?: unknown }).name === "TimeoutError",
+  );
 }
 
 function gitDiffCommand(workRoot: string) {

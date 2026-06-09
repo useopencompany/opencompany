@@ -35,6 +35,7 @@ import {
   WHATSAPP_DELIVERY_SWEEP_CRON,
 } from "@/lib/messaging/events";
 import { SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT } from "@/lib/slack/events";
+import { runSlackSupportRecoverySweep, SLACK_SUPPORT_RECOVERY_CRON } from "@/lib/slack/recovery";
 import {
   sweepWorkspaceSyncOutbox as runWorkspaceSyncOutboxSweep,
   SYNC_OUTBOX_SWEEP_CRON,
@@ -526,6 +527,22 @@ export const sweepWhatsappDeliveries = inngest.createFunction(
     runWhatsappDeliverySweep(step as unknown as Parameters<typeof runWhatsappDeliverySweep>[0]),
 );
 
+// Hourly recovery: re-dispatch provisioning for workspaces stuck in `failed`/long-`pending`
+// so a transient failure (or onboarding before SLACK_SUPPORT_* was configured) self-heals.
+export const sweepFailedSlackSupportChannels = inngest.createFunction(
+  {
+    id: "sweep-failed-slack-support-channels",
+    name: "Recover failed Slack support channels",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: SLACK_SUPPORT_RECOVERY_CRON },
+  },
+  async ({ step }) =>
+    runSlackSupportRecoverySweep(
+      step as unknown as Parameters<typeof runSlackSupportRecoverySweep>[0],
+    ),
+);
+
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
@@ -544,4 +561,5 @@ export const inngestFunctions = [
   provisionSlackSupportChannel,
   deliverWhatsappReply,
   sweepWhatsappDeliveries,
+  sweepFailedSlackSupportChannels,
 ];

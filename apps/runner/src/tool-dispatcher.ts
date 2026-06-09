@@ -868,27 +868,55 @@ export async function executeRuntimeTool(input: {
     });
   }
 
-  const toolMessageId = newAgentSessionMessageId();
-  await requireLeaseWrite(
-    insertToolMessageForLease({
-      id: toolMessageId,
+  let persistedOutput = output;
+  let persistedFailedOutput = failedOutput;
+  try {
+    await persistToolResultMessage({
       sessionId: input.sessionId,
-      leaseId: input.runLeaseId,
-      leaseOwner: input.runLeaseOwner,
-      content: serializeToolOutputForStorage(output),
-      modelMessage: toPersistedModelMessage(
-        buildToolModelMessage({
-          toolCallId: input.toolCallId,
-          toolName: persistedToolName,
-          output,
-        }),
-      ),
-      toolName: persistedToolName,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
       toolCallId: input.toolCallId,
+      toolName: persistedToolName,
       internal: input.internalMessages ?? false,
-    }),
-  );
-  if (failedOutput) {
+      output: persistedOutput,
+    });
+  } catch (error) {
+    if (isFatalToolResultPersistenceError(error)) {
+      throw error;
+    }
+
+    const sanitizedError = new Error("Tool result persistence failed.");
+    sanitizedError.name = "ToolResultPersistenceError";
+    captureException(sanitizedError, {
+      event: "opencompany.runner_tool_result_persist_failed",
+      workspace_id: input.observabilityContext?.workspaceId,
+      user_id: input.observabilityContext?.userId,
+      agent_id: input.observabilityContext?.agentId,
+      session_id: input.sessionId,
+      message_id: input.assistantMessageId,
+      tool_call_id: input.toolCallId,
+      tool_name: input.definition.name,
+      persisted_tool_name: persistedToolName,
+      tool_kind: input.definition.kind,
+      model_provider: input.observabilityContext?.modelProvider,
+      model_name: input.observabilityContext?.modelName,
+      original_error_name: error instanceof Error ? error.name : typeof error,
+    });
+
+    persistedFailedOutput = buildToolResultPersistenceFailedOutput(error);
+    persistedOutput = persistedFailedOutput;
+    await persistToolResultMessage({
+      sessionId: input.sessionId,
+      runLeaseId: input.runLeaseId,
+      runLeaseOwner: input.runLeaseOwner,
+      toolCallId: input.toolCallId,
+      toolName: persistedToolName,
+      internal: input.internalMessages ?? false,
+      output: persistedOutput,
+    });
+  }
+
+  if (persistedFailedOutput) {
     await requireLeaseWrite(
       appendRuntimeEventForLease({
         sessionId: input.sessionId,
@@ -900,8 +928,8 @@ export async function executeRuntimeTool(input: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
           name: persistedToolName,
-          error: failedOutput.error,
-          outputPreview: formatRuntimePreview(output),
+          error: persistedFailedOutput.error,
+          outputPreview: formatRuntimePreview(persistedOutput),
           ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
@@ -918,14 +946,45 @@ export async function executeRuntimeTool(input: {
           messageId: input.assistantMessageId,
           toolCallId: input.toolCallId,
           name: persistedToolName,
-          outputPreview: formatRuntimePreview(output),
+          outputPreview: formatRuntimePreview(persistedOutput),
           ...(input.argResolution ? { argResolution: input.argResolution } : {}),
         },
       }),
     );
   }
 
-  return output;
+  return persistedOutput;
+}
+
+async function persistToolResultMessage(input: {
+  sessionId: string;
+  runLeaseId: string;
+  runLeaseOwner: string;
+  toolCallId: string;
+  toolName: string;
+  internal: boolean;
+  output: unknown;
+}) {
+  const toolMessageId = newAgentSessionMessageId();
+  await requireLeaseWrite(
+    insertToolMessageForLease({
+      id: toolMessageId,
+      sessionId: input.sessionId,
+      leaseId: input.runLeaseId,
+      leaseOwner: input.runLeaseOwner,
+      content: serializeToolOutputForStorage(input.output),
+      modelMessage: toPersistedModelMessage(
+        buildToolModelMessage({
+          toolCallId: input.toolCallId,
+          toolName: input.toolName,
+          output: input.output,
+        }),
+      ),
+      toolName: input.toolName,
+      toolCallId: input.toolCallId,
+      internal: input.internal,
+    }),
+  );
 }
 
 function createCommandOutputPublisher(input: {
@@ -1202,6 +1261,26 @@ function buildFailedToolOutput(error: unknown): FailedToolOutput {
       recoverable: true,
     },
   };
+}
+
+function buildToolResultPersistenceFailedOutput(_error: unknown): FailedToolOutput {
+  return {
+    ok: false,
+    error: {
+      message:
+        "The tool ran, but its output could not be stored safely. Retry with a narrower request or use a different approach.",
+      code: "tool_result_persistence_failed",
+      recoverable: true,
+    },
+  };
+}
+
+function isFatalToolResultPersistenceError(error: unknown) {
+  return (
+    error instanceof RunAbortError ||
+    error instanceof RunLeaseLostError ||
+    error instanceof StaleRunLeaseError
+  );
 }
 
 export function formatRuntimePreview(value: unknown) {

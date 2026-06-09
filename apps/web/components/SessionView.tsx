@@ -1,10 +1,13 @@
 "use client";
 
 import {
+  ATTACHMENT_MAX_PER_MESSAGE,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  modelSupportsAttachments,
   PERMISSION_GROUP_LABELS,
   PROVIDER_PERMISSION_REGISTRY,
   permissionDescriptionFor,
+  validateAttachmentCandidate,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { captureEvent } from "@opencompany/analytics/client";
@@ -37,6 +40,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -53,6 +57,12 @@ import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
 import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
+import {
+  AttachmentCard,
+  ComposerAttachments,
+  type PendingAttachment,
+  uploadAttachment,
+} from "@/components/composer-attachments";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -97,12 +107,18 @@ import {
   type SessionUsageSummary,
 } from "@/lib/agent-sessions/runtime-events";
 import { agentRowToListItem, deriveSessionDetailPlaceholder } from "@/lib/collections/selectors";
+import { fetchWorkspaceSkills } from "@/lib/skills/client";
 import {
   getSlashContext,
   matchSlashCommands,
   parseSlashCommand,
+  SLASH_COMMANDS,
   type SlashCommand,
 } from "@/lib/slash-commands/registry";
+import {
+  buildSkillSlashCommands,
+  type SkillCommandSource,
+} from "@/lib/slash-commands/skill-commands";
 
 // A turn has settled (no more streaming) — trigger an aggregates refresh.
 const TERMINAL_SESSION_STATUSES = new Set(["completed", "failed", "aborted", "archived"]);
@@ -299,6 +315,111 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const [, startModelTransition] = useTransition();
   const [attachMenuOpen, setAttachMenuOpen] = useState<boolean>(false);
   const [isDragActive, setIsDragActive] = useState<boolean>(false);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // Latest-attachments ref so the unmount cleanup can revoke all outstanding object URLs
+  // with an empty-dep effect (fires on unmount only) instead of re-running on every change.
+  const attachmentsRef = useRef(attachments);
+  // Sync the ref in an effect (not during render — that trips the react-compiler lint
+  // rule) so the empty-dep unmount cleanup below can revoke outstanding object URLs.
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentCapability = modelSupportsAttachments(session.modelName);
+  // Attaching is always available: text/code files need no model capability (they are
+  // inlined as text). The per-file image/pdf capability gate happens in acceptFiles.
+  const attachmentsEnabled = true;
+
+  const acceptFiles = useCallback(
+    (files: File[]) => {
+      setAttachments((prev) => {
+        const next = [...prev];
+        for (const file of files) {
+          if (next.length >= ATTACHMENT_MAX_PER_MESSAGE) {
+            showToast({
+              title: "Limit reached",
+              description: `Max ${ATTACHMENT_MAX_PER_MESSAGE} files.`,
+              tone: "default",
+            });
+            break;
+          }
+          const validation = validateAttachmentCandidate({
+            mediaType: file.type,
+            sizeBytes: file.size,
+            filename: file.name,
+          });
+          if (!validation.ok) {
+            showToast({
+              title: validation.reason === "size" ? "File too large" : "Unsupported file",
+              description:
+                validation.reason === "size"
+                  ? "Max 25 MB (images/PDFs) or 2 MB (text files)."
+                  : "Images, PDFs, and common text/code files.",
+              tone: "default",
+            });
+            continue;
+          }
+          // Image/PDF need the model to support them; text is always allowed.
+          if (validation.kind === "pdf" && !attachmentCapability.pdf) {
+            showToast({
+              title: "Unsupported file",
+              description: "This session's model can't read PDFs.",
+              tone: "default",
+            });
+            continue;
+          }
+          if (validation.kind === "image" && !attachmentCapability.images) {
+            showToast({
+              title: "Unsupported file",
+              description: "This session's model can't read images.",
+              tone: "default",
+            });
+            continue;
+          }
+          const id = crypto.randomUUID();
+          next.push({
+            id,
+            filename: file.name,
+            mediaType: file.type,
+            kind: validation.kind,
+            sizeBytes: file.size,
+            status: "uploading",
+            ...(validation.kind === "image" ? { previewUrl: URL.createObjectURL(file) } : {}),
+          });
+          void uploadAttachment({ id, file, workspaceId, sessionId: session.id })
+            .then((res) =>
+              setAttachments((cur) =>
+                cur.map((a) => (a.id === id ? { ...a, status: "ready", ...res } : a)),
+              ),
+            )
+            .catch((err) =>
+              setAttachments((cur) =>
+                cur.map((a) => (a.id === id ? { ...a, status: "error", error: String(err) } : a)),
+              ),
+            );
+        }
+        return next;
+      });
+    },
+    [attachmentCapability, session.id, workspaceId, showToast],
+  );
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }, []);
+  // Revoke any still-live preview object URLs when the composer unmounts (e.g. navigating
+  // away with unsent attachments) so they don't leak.
+  useEffect(() => {
+    return () => {
+      for (const att of attachmentsRef.current) {
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+      }
+    };
+  }, []);
   // Slash-command menu: highlighted item + a per-query dismiss flag (Escape).
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
@@ -479,6 +600,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       void queryClient.invalidateQueries({ queryKey: detailKey });
     }
   }, [runtime.currentStatus, detailKey, queryClient]);
+  // Reflect the open session's title in the browser tab so it's easy to tell tabs
+  // apart. Restored to the default on unmount / navigation away.
+  useEffect(() => {
+    const previousTitle = document.title;
+    const name = session.title.trim();
+    document.title = name ? `${name} · opencompany` : "opencompany";
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [session.title]);
   const inspectorEvents = useMemo(
     () => runtime.events.filter(isInspectableRuntimeEvent),
     [runtime.events],
@@ -593,7 +724,28 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               activeStartedAt={activeStartForAssistantMessage(message, visibleMessages)}
             />
           ) : (
-            message.content
+            <div className="flex flex-col gap-2">
+              {message.content ? <div>{message.content}</div> : null}
+              {message.attachments && message.attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {message.attachments.map((att) => (
+                    <a
+                      key={att.id}
+                      href={`/api/attachments/${att.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block"
+                    >
+                      <AttachmentCard
+                        kind={att.kind}
+                        filename={att.filename}
+                        src={att.kind === "image" ? `/api/attachments/${att.id}` : undefined}
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           )}
           {canCopy && message.status !== "running" && !awaitingInput ? (
             <div
@@ -671,6 +823,29 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     window.addEventListener("blur", reset);
     return () => window.removeEventListener("blur", reset);
   }, [isDragActive]);
+
+  // A file dropped anywhere in the window — not just on the composer drop zone — must NOT make
+  // the browser navigate to / open the file (its default). Prevent that window-wide, and route
+  // any in-window file drop into the composer as an attachment.
+  useEffect(() => {
+    const onWindowDragOver = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+    };
+    const onWindowDrop = (event: DragEvent) => {
+      if (!event.dataTransfer?.types.includes("Files")) return;
+      event.preventDefault();
+      dragCounterRef.current = 0;
+      setIsDragActive(false);
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length > 0) acceptFiles(files);
+    };
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [acceptFiles]);
 
   // The Durable Stream self-recovers (the client reconnects + resumes from its
   // offset) and refresh/visibility recovery is no longer needed — a refresh
@@ -787,13 +962,44 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     [],
   );
 
+  // Skills attached to this session's agent contribute `/<command>` entries alongside the
+  // built-ins — using each skill's declared `command:` when present, else a slug of its name.
+  // The attached set comes from the synced agent config; the command + metadata come from the
+  // workspace skill catalog.
+  const { agents } = useCollections();
+  const { data: agentRows } = useLiveQuery((q) => q.from({ agent: agents }));
+  const { data: skillCatalog } = useQuery({
+    queryKey: ["workspace-skills", workspaceId],
+    queryFn: fetchWorkspaceSkills,
+    staleTime: 60_000,
+  });
+  const allSlashCommands = useMemo(() => {
+    const attached = agentRows?.find((agent) => agent.id === session.agentId);
+    const attachedIds = new Set(
+      (attached ? (agentRowToListItem(attached).config.skills ?? []) : []).map((skill) => skill.id),
+    );
+    const sources: SkillCommandSource[] = (skillCatalog ?? [])
+      .filter((skill) => attachedIds.has(skill.id))
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        ...(skill.command ? { command: skill.command } : {}),
+      }));
+    if (sources.length === 0) return SLASH_COMMANDS;
+    return [
+      ...SLASH_COMMANDS,
+      ...buildSkillSlashCommands(sources, new Set(SLASH_COMMANDS.map((c) => c.id))),
+    ];
+  }, [agentRows, session.agentId, skillCatalog]);
+
   // Command mode is active while the caret sits on a `/token` (at the start of the
   // input or after whitespace). The token after the slash is the live filter query.
   const slashContext = useMemo(() => getSlashContext(input, caret), [input, caret]);
   const slashQuery = slashContext?.query ?? null;
   const slashCommands = useMemo(
-    () => (slashQuery !== null ? matchSlashCommands(slashQuery) : []),
-    [slashQuery],
+    () => (slashQuery !== null ? matchSlashCommands(slashQuery, allSlashCommands) : []),
+    [slashQuery, allSlashCommands],
   );
   const slashMenuOpen = slashQuery !== null && !slashDismissed && slashCommands.length > 0;
   const slashActiveId = slashCommands[slashActiveIndex]?.id ?? null;
@@ -816,7 +1022,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     slashCommandInFlightRef.current.add(commandKey);
     startTransition(async () => {
       try {
-        await command.run({ session, workspaceId, router, queryClient, setInput, showToast, args });
+        await command.run({
+          session,
+          workspaceId,
+          router,
+          queryClient,
+          setInput,
+          insertMention,
+          showToast,
+          args,
+        });
       } finally {
         slashCommandInFlightRef.current.delete(commandKey);
       }
@@ -843,6 +1058,52 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     });
   };
 
+  // Drop a literal token (e.g. `@skill/<id> `) into the composer and leave the caret after it.
+  // Used by skill-derived commands so invoking `/<command>` swaps in the skill's mention for the
+  // user to keep typing around. Targets the active slash token when the menu is open; otherwise
+  // (the run-on-send path, where the `/command ` token may carry a trailing space) it replaces
+  // the leading `/command` token, preserving any args the user typed after it.
+  const insertMention = (token: string) => {
+    let start: number;
+    let end: number;
+    if (slashContext) {
+      start = slashContext.start;
+      end = slashContext.end;
+    } else {
+      const leading = input.match(/^\s*\/\w+\s?/);
+      if (leading) {
+        start = 0;
+        end = leading[0].length;
+      } else {
+        start = caret;
+        end = caret;
+      }
+    }
+    const before = input.slice(0, start);
+    const after = input.slice(end);
+    const next = `${before}${token}${after}`;
+    const nextCaret = before.length + token.length;
+    setInput(next);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCaret, nextCaret);
+      setCaret(nextCaret);
+    });
+  };
+
+  // Choosing a command from the menu: an `applyOnSelect` command (skill commands) runs straight
+  // away so the slash token becomes its mention in one step; everything else inserts its trigger
+  // and waits for the user to send (so `/clear <prompt>` etc. can take args).
+  const selectSlashCommand = (command: SlashCommand) => {
+    if (command.applyOnSelect) {
+      runSlashCommand(command);
+    } else {
+      insertSlashCommand(command);
+    }
+  };
+
   // Land the cursor in the composer when arriving at a fresh, empty session (e.g.
   // right after `/clear` navigates here), so the user can start typing immediately.
   const didAutofocusRef = useRef(false);
@@ -857,7 +1118,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   // may run even while busy (they navigate away).
   const handleSend = () => {
     if (isPending) return;
-    const parsed = parseSlashCommand(input);
+    const parsed = parseSlashCommand(input, allSlashCommands);
     if (parsed) {
       runSlashCommand(parsed.command, parsed.args);
       return;
@@ -869,7 +1130,8 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
   const submit = () => {
     if (isBusy) return;
     const content = input.trim();
-    if (!content) return;
+    const ready = attachments.filter((a) => a.status === "ready" && a.blobPathname && a.blobUrl);
+    if (!content && ready.length === 0) return;
     setFormError(null);
     const optimisticId = newOptimisticMessageId();
     const submittedAtMs = Date.now();
@@ -892,9 +1154,25 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
     // dispatch latency is counted as part of what the user feels.
     pendingTtftRef.current = { startedAt: performance.now(), messageId: null };
     startTransition(async () => {
-      const result = await submitAgentSessionMessage(session.id, content);
+      const result = await submitAgentSessionMessage(
+        session.id,
+        content,
+        ready.map((a) => ({
+          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
+          blobPathname: a.blobPathname!,
+          // biome-ignore lint/style/noNonNullAssertion: filtered above on blobPathname/blobUrl
+          blobUrl: a.blobUrl!,
+          mediaType: a.mediaType,
+          filename: a.filename,
+          sizeBytes: a.sizeBytes,
+        })),
+      );
       if (result.ok) {
         if (pendingTtftRef.current) pendingTtftRef.current.messageId = result.messageId;
+        // Sent successfully — drop the previews and clear the tray. Revoke the object
+        // URLs so the not-yet-uploaded local-file previews don't leak.
+        attachments.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+        setAttachments([]);
         setOptimisticUserMessages((current) =>
           current.map((message) =>
             message.optimisticId === optimisticId
@@ -998,33 +1276,31 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
             isPinnedAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX;
           }}
           onDragEnter={(event) => {
+            if (!attachmentsEnabled) return;
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
             dragCounterRef.current += 1;
             setIsDragActive(true);
           }}
           onDragOver={(event) => {
+            if (!attachmentsEnabled) return;
             if (!event.dataTransfer.types.includes("Files")) return;
             event.preventDefault();
           }}
           onDragLeave={(event) => {
+            if (!attachmentsEnabled) return;
             event.preventDefault();
             dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
             if (dragCounterRef.current === 0) {
               setIsDragActive(false);
             }
           }}
-          onDrop={(event) => {
-            event.preventDefault();
+          onDrop={() => {
+            // The window-level drop handler (see effect above) preventDefaults + accepts, so a
+            // drop anywhere in the app attaches and the browser never opens the file. Here we
+            // only clear the hover overlay (avoids double-accepting the same drop).
             dragCounterRef.current = 0;
             setIsDragActive(false);
-            if (event.dataTransfer.files.length > 0) {
-              showToast({
-                title: "Coming soon",
-                description: "File attachments will be available soon.",
-                tone: "default",
-              });
-            }
           }}
         >
           {isDragActive ? (
@@ -1035,7 +1311,9 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
               <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-ink-subtle bg-canvas/85 px-8 py-6 backdrop-blur-sm">
                 <Upload size={22} strokeWidth={1.6} className="text-ink-muted" />
                 <p className="text-[13px] font-medium text-ink">Drop files to attach</p>
-                <p className="text-[11.5px] text-ink-subtle">PNG, JPG, PDF · or paste with ⌘V</p>
+                <p className="text-[11.5px] text-ink-subtle">
+                  Images, PDF, text &amp; code · or paste with ⌘V
+                </p>
               </div>
             </div>
           ) : null}
@@ -1122,6 +1400,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
         ) : (
           <div className="bg-canvas px-6 py-4">
             <div className="mx-auto max-w-[960px]">
+              <ComposerAttachments attachments={attachments} onRemove={removeAttachment} />
               <Composer
                 variant="compact"
                 error={formError}
@@ -1150,7 +1429,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       id={slashMenuId}
                       commands={slashCommands}
                       activeId={slashActiveId}
-                      onSelect={(command) => insertSlashCommand(command)}
+                      onSelect={(command) => selectSlashCommand(command)}
                       onHover={(id) => {
                         const idx = slashCommands.findIndex((command) => command.id === id);
                         if (idx >= 0) setSlashActiveIndex(idx);
@@ -1183,15 +1462,16 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                           );
                           return;
                         }
-                        // Enter and Tab both insert the highlighted command into the input
-                        // (they do not run it) — the user runs it by then pressing Enter to send.
+                        // Enter and Tab pick the highlighted command: built-ins insert their
+                        // trigger (the user then sends to run it), while skill commands
+                        // (`applyOnSelect`) apply immediately, swapping in the skill mention.
                         if (event.key === "Enter" || event.key === "Tab") {
                           if (event.key === "Enter" && event.shiftKey) {
                             // shift+Enter falls through to a normal newline.
                           } else {
                             event.preventDefault();
                             const command = slashCommands[slashActiveIndex];
-                            if (command) insertSlashCommand(command);
+                            if (command) selectSlashCommand(command);
                             return;
                           }
                         }
@@ -1211,26 +1491,21 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                       }
                     }}
                     onPaste={(event) => {
+                      if (!attachmentsEnabled) return;
                       const items = event.clipboardData?.items;
                       if (!items) return;
-                      const itemArray = Array.from(items);
-                      const hasImage = itemArray.some(
-                        (item) => item.kind === "file" && item.type.startsWith("image/"),
-                      );
-                      if (!hasImage) return;
-                      const hasText = itemArray.some((item) => item.kind === "string");
-                      // Pure-image paste: stop the browser default so nothing visible
-                      // changes in the textarea and the toast is the only signal.
-                      // Mixed text+image: let the browser paste the text portion
-                      // alongside the toast so the user keeps what they expected.
-                      if (!hasText) event.preventDefault();
-                      showToast({
-                        title: "Image upload coming soon",
-                        description: hasText
-                          ? "The text was pasted; the image was ignored."
-                          : "Image attachments aren't supported yet.",
-                        tone: "default",
-                      });
+                      const files: File[] = [];
+                      for (const item of Array.from(items)) {
+                        if (item.kind !== "file") continue;
+                        const file = item.getAsFile();
+                        if (file) files.push(file);
+                      }
+                      if (files.length === 0) return;
+                      // Files in the clipboard: take them as attachments and stop the browser
+                      // from also pasting them (e.g. an image) into the textarea. Any text
+                      // portion of a mixed paste still falls through normally.
+                      event.preventDefault();
+                      acceptFiles(files);
                     }}
                     placeholder="Ask this agent to do something"
                     role="combobox"
@@ -1246,13 +1521,28 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                 leftControls={
                   <>
                     <div ref={attachMenuRef} className="relative">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        // Text/code files often have no registered MIME, so listing extensions
+                        // keeps them pickable; the broad set plus `*` lets any file through and
+                        // validation rejects unsupported ones with a toast.
+                        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,application/xml,text/css,text/yaml,.txt,.md,.markdown,.html,.htm,.csv,.tsv,.json,.jsonc,.xml,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.cc,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.scss,.sass,.less"
+                        className="hidden"
+                        onChange={(event) => {
+                          acceptFiles(Array.from(event.target.files ?? []));
+                          event.target.value = "";
+                          setAttachMenuOpen(false);
+                        }}
+                      />
                       <button
                         type="button"
                         onClick={() => setAttachMenuOpen((prev) => !prev)}
                         aria-label="Attach file"
                         aria-expanded={attachMenuOpen}
                         aria-haspopup="menu"
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted hover:bg-surface-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-muted"
                       >
                         <Plus size={15} strokeWidth={1.75} />
                       </button>
@@ -1264,14 +1554,7 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                           <button
                             type="button"
                             role="menuitem"
-                            onClick={() => {
-                              showToast({
-                                title: "Coming soon",
-                                description: "File attachments will be available soon.",
-                                tone: "default",
-                              });
-                              setAttachMenuOpen(false);
-                            }}
+                            onClick={() => fileInputRef.current?.click()}
                             className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-ink/90 transition-colors hover:bg-surface-muted"
                           >
                             <Upload size={13} strokeWidth={1.75} />
@@ -1303,7 +1586,10 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
                     <button
                       type="button"
                       disabled={
-                        isPending || (!parseSlashCommand(input) && (isBusy || !input.trim()))
+                        isPending ||
+                        attachments.some((a) => a.status !== "ready") ||
+                        (!parseSlashCommand(input, allSlashCommands) &&
+                          (isBusy || (!input.trim() && attachments.length === 0)))
                       }
                       onClick={handleSend}
                       aria-label="Send message"

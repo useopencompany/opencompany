@@ -35,6 +35,7 @@ import type { ModelMessage } from "ai";
 import { and, asc, eq } from "drizzle-orm";
 import { setActiveRun } from "./active-runs";
 import { syncAgentBundleFromSandbox } from "./agent-bundle";
+import { hydrateMessageAttachments } from "./attachment-hydration";
 import { syncBrainFromSandbox } from "./brain";
 import { createAgentDelegationHandler } from "./delegation";
 import type { RunnerEnv } from "./env";
@@ -64,6 +65,7 @@ import {
 import {
   assertTurnComplete,
   detectIncompleteTurn,
+  isToolStepLimitExceeded,
   persistAssistantCompletion,
   streamAssistantResponse,
 } from "./model-turn";
@@ -450,9 +452,11 @@ async function runMessageWithContext(
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
     );
-    const messages = buildModelMessages(
+    const visibleStoredMessages = await hydrateMessageAttachments(
       storedMessages.filter((message) => message.id !== assistantMessageId && !message.internal),
+      { db: ctx.db, blobToken: ctx.env.blobReadWriteToken },
     );
+    const messages = buildModelMessages(visibleStoredMessages);
 
     sandboxAcquirer = createSandboxAcquirer({
       row,
@@ -914,12 +918,13 @@ async function executeStreamingTurn(input: {
   await input.checkAbort({ force: true });
 
   let incompleteTurn: ReturnType<typeof detectIncompleteTurn> = null;
+  const exceededToolStepLimit = isToolStepLimitExceeded(streamResult);
   if (input.emptyOutputFallback !== undefined) {
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = input.emptyOutputFallback;
       appendAssistantTextPart(assistantReplayParts, assistantContent);
     }
-  } else {
+  } else if (!exceededToolStepLimit) {
     assertTurnComplete(streamResult);
     // Only flag user-facing turns; internal after-session runs are exempt.
     if (!input.internal) incompleteTurn = detectIncompleteTurn(streamResult);
@@ -936,6 +941,10 @@ async function executeStreamingTurn(input: {
     reasoningContent,
     internal: input.internal,
   });
+
+  if (input.emptyOutputFallback === undefined && exceededToolStepLimit) {
+    assertTurnComplete(streamResult);
+  }
 
   if (incompleteTurn) {
     // Surface the abandoned turn distinctly so unattended/scheduled runs don't
@@ -1265,8 +1274,9 @@ async function runAfterSessionWithContext(
         .where(eq(agentSessionMessages.sessionId, input.sessionId))
         .orderBy(asc(agentSessionMessages.createdAt)),
     );
-    const visibleStoredMessages = storedMessages.filter(
-      (message) => message.id !== assistantMessageId && !message.internal,
+    const visibleStoredMessages = await hydrateMessageAttachments(
+      storedMessages.filter((message) => message.id !== assistantMessageId && !message.internal),
+      { db: ctx.db, blobToken: ctx.env.blobReadWriteToken },
     );
     const messages: ModelMessage[] = buildModelMessages(visibleStoredMessages);
     messages.push({
@@ -1918,14 +1928,18 @@ async function continueTurnAfterToolResult(input: {
     return "skipped_assistant_exists";
   }
 
+  const continuationStoredMessages = (
+    await ctx.db
+      .select()
+      .from(agentSessionMessages)
+      .where(eq(agentSessionMessages.sessionId, input.sessionId))
+      .orderBy(asc(agentSessionMessages.createdAt))
+  ).filter((message) => message.id !== continuationAssistantMessageId && !message.internal);
   const continuationMessages = buildModelMessages(
-    (
-      await ctx.db
-        .select()
-        .from(agentSessionMessages)
-        .where(eq(agentSessionMessages.sessionId, input.sessionId))
-        .orderBy(asc(agentSessionMessages.createdAt))
-    ).filter((message) => message.id !== continuationAssistantMessageId && !message.internal),
+    await hydrateMessageAttachments(continuationStoredMessages, {
+      db: ctx.db,
+      blobToken: ctx.env.blobReadWriteToken,
+    }),
   );
 
   const toolStartCoordinator = createToolStartCoordinator();

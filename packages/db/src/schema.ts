@@ -211,6 +211,9 @@ export const workspaceSkillSnapshots = pgTable(
     skillId: text("skill_id").notNull(),
     name: text("name").notNull(),
     description: text("description").notNull(),
+    // Optional slash-command slug declared in SKILL.md frontmatter; surfaced in the composer
+    // as `/<command>` for agents that enable this skill. Null when the skill declares none.
+    command: text("command"),
     sourceType: text("source_type").notNull().default("github"),
     sourceUrl: text("source_url").notNull(),
     requestedRef: text("requested_ref").notNull(),
@@ -629,6 +632,41 @@ export const agentSessionMessageChunks = pgTable(
     contentTrgmIdx: index("agent_session_message_chunks_content_trgm_idx").using(
       "gin",
       table.content.op("gin_trgm_ops"),
+    ),
+  }),
+);
+
+// User-uploaded attachments for a session message (images, PDFs, and text/code files).
+// References to Vercel Blob objects only — bytes live in the private Blob store, never in
+// Postgres. Cascade-deleted with the message; the blob objects are deleted explicitly in
+// app code.
+export const agentSessionMessageAttachments = pgTable(
+  "agent_session_message_attachments",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"image" | "pdf" | "text">().notNull(),
+    mediaType: text("media_type").notNull(),
+    filename: text("filename").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    blobUrl: text("blob_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    messageIdx: index("agent_session_message_attachments_message_idx").on(table.messageId),
+    sessionIdx: index("agent_session_message_attachments_session_idx").on(table.sessionId),
+    kindCheck: check(
+      "agent_session_message_attachments_kind_check",
+      sql`${table.kind} IN ('image', 'pdf', 'text')`,
     ),
   }),
 );

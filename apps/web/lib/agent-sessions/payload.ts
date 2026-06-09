@@ -398,8 +398,29 @@ function parseSessionMessage(value: unknown): SessionMessage {
   if ("thinkingDurationSeconds" in record) {
     message.thinkingDurationSeconds = readOptionalNumberField(record, "thinkingDurationSeconds");
   }
+  if ("attachments" in record && record.attachments !== undefined) {
+    message.attachments = parseSessionMessageAttachments(record.attachments);
+  }
 
   return message;
+}
+
+function parseSessionMessageAttachments(
+  value: unknown,
+): NonNullable<SessionMessage["attachments"]> {
+  return assertArray(value, "attachments").map((item) => {
+    const record = assertRecord(item, "attachment");
+    const kind = readStringField(record, "kind");
+    if (kind !== "image" && kind !== "pdf" && kind !== "text") {
+      throw new Error("Invalid attachment kind.");
+    }
+    return {
+      id: readStringField(record, "id"),
+      kind,
+      mediaType: readStringField(record, "mediaType"),
+      filename: readStringField(record, "filename"),
+    };
+  });
 }
 
 function parseRuntimeEventPayload(value: unknown): RuntimeEvent {

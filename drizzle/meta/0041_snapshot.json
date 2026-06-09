@@ -1,5 +1,5 @@
 {
-  "id": "02a88ff2-a24a-45d0-94e3-3cb9d7dfbc16",
+  "id": "2e57c837-5be0-441b-80c7-060a26204fc3",
   "prevId": "08de6ed0-4dc4-448e-abdc-eb1a7647b804",
   "version": "7",
   "dialect": "postgresql",
@@ -2947,19 +2947,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_default": {
-          "name": "is_default",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "path": {
           "name": "path",
           "type": "text",
@@ -3101,28 +3088,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "agents_workspace_user_default_idx": {
-          "name": "agents_workspace_user_default_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"agents\".\"is_default\" = true",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -3137,19 +3102,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agents_user_id_users_id_fk": {
-          "name": "agents_user_id_users_id_fk",
-          "tableFrom": "agents",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -5676,6 +5628,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "command": {
+          "name": "command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "source_type": {
           "name": "source_type",

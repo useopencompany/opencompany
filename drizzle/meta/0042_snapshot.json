@@ -1,6 +1,6 @@
 {
-  "id": "69dfc7a8-f094-4515-9103-7f32fc2ffd1b",
-  "prevId": "02a88ff2-a24a-45d0-94e3-3cb9d7dfbc16",
+  "id": "4830cb43-0a3b-4c27-8f81-a54d3d0117b2",
+  "prevId": "2e57c837-5be0-441b-80c7-060a26204fc3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1209,13 +1209,13 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.agent_session_message_chunks": {
-      "name": "agent_session_message_chunks",
+    "public.agent_session_message_attachments": {
+      "name": "agent_session_message_attachments",
       "schema": "",
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "text",
           "primaryKey": true,
           "notNull": true
         },
@@ -1231,52 +1231,47 @@
           "primaryKey": false,
           "notNull": true
         },
-        "agent_id": {
-          "name": "agent_id",
+        "workspace_id": {
+          "name": "workspace_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "role": {
-          "name": "role",
+        "media_type": {
+          "name": "media_type",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "sub_index": {
-          "name": "sub_index",
+        "filename": {
+          "name": "filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "size_bytes": {
+          "name": "size_bytes",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": 0
+          "notNull": true
         },
-        "content": {
-          "name": "content",
+        "blob_pathname": {
+          "name": "blob_pathname",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "message_created_at": {
-          "name": "message_created_at",
-          "type": "timestamp with time zone",
+        "blob_url": {
+          "name": "blob_url",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "tsv": {
-          "name": "tsv",
-          "type": "tsvector",
-          "primaryKey": false,
-          "notNull": false,
-          "generated": {
-            "as": "to_tsvector('english', \"content\")",
-            "type": "stored"
-          }
         },
         "created_at": {
           "name": "created_at",
@@ -1287,53 +1282,14 @@
         }
       },
       "indexes": {
-        "agent_session_message_chunks_message_sub_idx": {
-          "name": "agent_session_message_chunks_message_sub_idx",
+        "agent_session_message_attachments_message_idx": {
+          "name": "agent_session_message_attachments_message_idx",
           "columns": [
             {
               "expression": "message_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "sub_index",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_session_message_chunks_scope_idx": {
-          "name": "agent_session_message_chunks_scope_idx",
-          "columns": [
-            {
-              "expression": "agent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "message_created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1341,69 +1297,26 @@
           "method": "btree",
           "with": {}
         },
-        "agent_session_message_chunks_session_order_idx": {
-          "name": "agent_session_message_chunks_session_order_idx",
+        "agent_session_message_attachments_session_idx": {
+          "name": "agent_session_message_attachments_session_idx",
           "columns": [
             {
               "expression": "session_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "message_created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sub_index",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": false,
           "concurrently": false,
           "method": "btree",
-          "with": {}
-        },
-        "agent_session_message_chunks_tsv_idx": {
-          "name": "agent_session_message_chunks_tsv_idx",
-          "columns": [
-            {
-              "expression": "tsv",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
-          "with": {}
-        },
-        "agent_session_message_chunks_content_trgm_idx": {
-          "name": "agent_session_message_chunks_content_trgm_idx",
-          "columns": [
-            {
-              "expression": "content",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last",
-              "opclass": "gin_trgm_ops"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
           "with": {}
         }
       },
       "foreignKeys": {
-        "agent_session_message_chunks_message_id_agent_session_messages_id_fk": {
-          "name": "agent_session_message_chunks_message_id_agent_session_messages_id_fk",
-          "tableFrom": "agent_session_message_chunks",
+        "agent_session_message_attachments_message_id_agent_session_messages_id_fk": {
+          "name": "agent_session_message_attachments_message_id_agent_session_messages_id_fk",
+          "tableFrom": "agent_session_message_attachments",
           "tableTo": "agent_session_messages",
           "columnsFrom": [
             "message_id"
@@ -1414,9 +1327,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "agent_session_message_chunks_session_id_agent_sessions_id_fk": {
-          "name": "agent_session_message_chunks_session_id_agent_sessions_id_fk",
-          "tableFrom": "agent_session_message_chunks",
+        "agent_session_message_attachments_session_id_agent_sessions_id_fk": {
+          "name": "agent_session_message_attachments_session_id_agent_sessions_id_fk",
+          "tableFrom": "agent_session_message_attachments",
           "tableTo": "agent_sessions",
           "columnsFrom": [
             "session_id"
@@ -1427,25 +1340,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "agent_session_message_chunks_agent_id_agents_id_fk": {
-          "name": "agent_session_message_chunks_agent_id_agents_id_fk",
-          "tableFrom": "agent_session_message_chunks",
-          "tableTo": "agents",
+        "agent_session_message_attachments_workspace_id_workspaces_id_fk": {
+          "name": "agent_session_message_attachments_workspace_id_workspaces_id_fk",
+          "tableFrom": "agent_session_message_attachments",
+          "tableTo": "workspaces",
           "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agent_session_message_chunks_user_id_users_id_fk": {
-          "name": "agent_session_message_chunks_user_id_users_id_fk",
-          "tableFrom": "agent_session_message_chunks",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
+            "workspace_id"
           ],
           "columnsTo": [
             "id"
@@ -1457,7 +1357,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "agent_session_message_attachments_kind_check": {
+          "name": "agent_session_message_attachments_kind_check",
+          "value": "\"agent_session_message_attachments\".\"kind\" IN ('image', 'pdf')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.agent_session_messages": {
@@ -3198,19 +3103,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_default": {
-          "name": "is_default",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "path": {
           "name": "path",
           "type": "text",
@@ -3352,28 +3244,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "agents_workspace_user_default_idx": {
-          "name": "agents_workspace_user_default_idx",
-          "columns": [
-            {
-              "expression": "workspace_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"agents\".\"is_default\" = true",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -3388,19 +3258,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agents_user_id_users_id_fk": {
-          "name": "agents_user_id_users_id_fk",
-          "tableFrom": "agents",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -5927,6 +5784,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "command": {
+          "name": "command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "source_type": {
           "name": "source_type",
