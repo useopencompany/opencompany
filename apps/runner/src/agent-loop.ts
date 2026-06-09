@@ -90,6 +90,7 @@ import {
   appendAfterSessionSkipped,
   buildAfterSessionPrompt,
   completeAfterSessionRun,
+  completeSpawnedAfterSessionRunForChild,
   createAfterSessionRun,
   ensureSandbox,
   isSessionArchived,
@@ -261,10 +262,12 @@ async function runMessageWithContext(
   let outcome = "unknown";
   let sandboxAcquirer: ReturnType<typeof createSandboxAcquirer> | undefined;
   let nextSteerMessageId: string | undefined;
+  let memoryKeeperRun = false;
 
   try {
     const row = await observeRunStep(ctx, "load_session", () => loadSession(input.sessionId));
     const agentConfig = normalizeAgentConfig(row.agent.config);
+    memoryKeeperRun = row.session.source === "memory";
     if (row.session.archivedAt) {
       outcome = "skipped_archived";
       return;
@@ -288,6 +291,13 @@ async function runMessageWithContext(
       ))
     ) {
       outcome = "skipped_no_credits";
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "failed",
+          lastError: "Memory update skipped because workspace credits are exhausted.",
+        });
+      }
       await setStatus(input.sessionId, "ready");
       await appendRuntimeEvent(ctx.db, {
         sessionId: input.sessionId,
@@ -302,6 +312,13 @@ async function runMessageWithContext(
     );
     if (!userMessage) {
       outcome = "skipped_missing_user_message";
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "failed",
+          lastError: "Memory update could not find its kickoff message.",
+        });
+      }
       return;
     }
 
@@ -312,6 +329,12 @@ async function runMessageWithContext(
     );
     if (existingAssistantResponse?.status === "completed") {
       outcome = "skipped_duplicate";
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "completed",
+        });
+      }
       return;
     }
     if (existingAssistantResponse) {
@@ -345,7 +368,6 @@ async function runMessageWithContext(
     // under the personal agent's own bundle but with a platform-owned system prompt appended and a
     // restricted toolset. Keep the agent's model and the rest of `runtime` (file roots, hot memory,
     // tool index) intact — only the framing and the tools change.
-    const memoryKeeperRun = row.session.source === "memory";
     const enabledTools = memoryKeeperRun
       ? restrictToolsForMemoryKeeper(runtime.tools)
       : runtime.tools;
@@ -542,6 +564,14 @@ async function runMessageWithContext(
       return;
     }
     outcome = "completed";
+    if (memoryKeeperRun) {
+      await observeRunStep(ctx, "complete_memory_keeper_parent_after_session", () =>
+        completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "completed",
+        }),
+      );
+    }
     // If the user steered mid-run, answer that message as the next turn. The lease
     // is already released, so the next turn acquires its own. See
     // docs/agent-turn-vocabulary.md.
@@ -619,6 +649,13 @@ async function runMessageWithContext(
           "Run aborted.",
         );
       }
+      if (memoryKeeperRun) {
+        await completeSpawnedAfterSessionRunForChild({
+          childSessionId: input.sessionId,
+          status: "failed",
+          lastError: "Memory update aborted.",
+        });
+      }
       logger.info("Runner session aborted", {
         event: "opencompany.runner_session_aborted",
         workspace_id: workspaceId,
@@ -674,6 +711,13 @@ async function runMessageWithContext(
           message,
         )
       : false;
+    if (memoryKeeperRun) {
+      await completeSpawnedAfterSessionRunForChild({
+        childSessionId: input.sessionId,
+        status: "failed",
+        lastError: message,
+      });
+    }
     if (!updated && (await isSessionArchived(input.sessionId))) return;
     outcome = "failed";
     logger.error("Runner session failed", {

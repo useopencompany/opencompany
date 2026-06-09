@@ -3288,14 +3288,14 @@ function formatRuntimeDate(value: string) {
 }
 
 function summarizeEvent(event: RuntimeEvent) {
-  if (event.type === "after_session.started") return "After-session started";
-  if (event.type === "after_session.spawned") return "Memory pass started";
-  if (event.type === "after_session.completed") return "After-session completed";
+  if (event.type === "after_session.started") return "Updating memory started";
+  if (event.type === "after_session.spawned") return "Updating memory started";
+  if (event.type === "after_session.completed") return "Updating memory completed";
   if (event.type === "after_session.skipped") {
-    return `After-session skipped: ${readString(event.payload.reason)}`;
+    return `Updating memory skipped: ${readString(event.payload.reason)}`;
   }
   if (event.type === "after_session.failed") {
-    return `After-session failed: ${readString(event.payload.message)}`;
+    return `Updating memory failed: ${readString(event.payload.message)}`;
   }
   if (event.type === "message.reasoning_started") return "Thinking started";
   if (event.type === "message.reasoning_completed") return "Thinking completed";

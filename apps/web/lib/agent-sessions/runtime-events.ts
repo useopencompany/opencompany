@@ -777,7 +777,8 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
 
     const call: RuntimeToolCall = {
       id: `after-session:${key}`,
-      name: "after_session",
+      name: "updating_memory",
+      label: "Updating memory",
       status: "running",
       inputPreview: "",
       activityPreview: "",
@@ -804,14 +805,18 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
       call.status = "running";
       call.startedEventId = event.id ?? null;
     }
+    if (event.type === "after_session.spawned") {
+      call.status = "running";
+      call.startedEventId = event.id ?? null;
+    }
     if (event.type === "after_session.completed") {
       call.status = "completed";
-      call.outputPreview = "Completed";
+      call.outputPreview = "Memory updated";
       call.completedEventId = event.id ?? null;
     }
     if (event.type === "after_session.failed") {
       call.status = "failed";
-      call.outputPreview = readString(event.payload.message) || "After-session run failed.";
+      call.outputPreview = readString(event.payload.message) || "Memory update failed.";
       call.completedEventId = event.id ?? null;
     }
   }
