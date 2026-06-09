@@ -365,6 +365,59 @@ describe("buildModelMessages", () => {
       { role: "user", content: "Continue." },
     ]);
   });
+
+  it("replays tool results after an empty assistant message when its tool call was persisted", () => {
+    const assistant = buildAssistantModelMessage({
+      content: "",
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_at_step_limit",
+          toolName: "list_files",
+          input: { path: "work" },
+        },
+      ],
+    });
+    const tool = buildToolModelMessage({
+      toolCallId: "call_at_step_limit",
+      toolName: "list_files",
+      output: { entries: ["work/README.md"] },
+    });
+
+    expect(
+      buildModelMessages([
+        {
+          id: "msg_user_1",
+          role: "user",
+          content: "Inspect the PR.",
+          modelMessage: { role: "user", content: "Inspect the PR." },
+        },
+        {
+          id: "msg_assistant_step_limit",
+          role: "assistant",
+          content: "",
+          modelMessage: toPersistedModelMessage(assistant),
+        },
+        {
+          id: "msg_tool_step_limit",
+          role: "tool",
+          content: JSON.stringify({ entries: ["work/README.md"] }),
+          modelMessage: toPersistedModelMessage(tool),
+        },
+        {
+          id: "msg_user_continue",
+          role: "user",
+          content: "Continue.",
+          modelMessage: { role: "user", content: "Continue." },
+        },
+      ]),
+    ).toEqual([
+      { role: "user", content: "Inspect the PR." },
+      assistant,
+      tool,
+      { role: "user", content: "Continue." },
+    ]);
+  });
 });
 
 describe("buildModelMessages with attachments", () => {
