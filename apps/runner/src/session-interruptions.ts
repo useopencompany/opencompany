@@ -122,7 +122,7 @@ async function interruptStaleRunsSql(input: { staleBefore: Date; reason: Session
         id,
         NULL,
         'session.interrupted',
-        jsonb_build_object('reason', ${input.reason}, 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
+        jsonb_build_object('reason', ${input.reason}::text, 'leaseId', "leaseId", 'leaseOwner', "leaseOwner")
       FROM updated
       RETURNING id, session_id AS "sessionId", message_id AS "messageId", type, payload, created_at AS "createdAt"
     )
