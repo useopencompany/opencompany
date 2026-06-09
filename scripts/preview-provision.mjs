@@ -265,12 +265,25 @@ async function ensureService(render, { name, buildSpec, env }) {
     log(`Updating Render service ${name} (${existing.id}).`);
     await render.replaceEnvVars(existing.id, toRenderEnvVars(env));
     const deploy = await render.triggerDeploy(existing.id, { clearCache: false });
-    await render.waitForDeploy(existing.id, deploy.id);
+    try {
+      await render.waitForDeploy(existing.id, deploy.id);
+    } catch (error) {
+      log(
+        `Render update for ${name} (${existing.id}) failed: ${error.message}. Recreating the preview service.`,
+      );
+      await render.deleteService(existing.id);
+      await waitForServiceDeletion(render, name);
+      return createService(render, name, buildSpec(env));
+    }
     const svc = await render.getService(existing.id);
     return { id: existing.id, url: serviceUrl(svc, name) };
   }
+  return createService(render, name, buildSpec(env));
+}
+
+async function createService(render, name, spec) {
   log(`Creating Render service ${name}.`);
-  const { service, deployId } = await render.createService(buildSpec(env));
+  const { service, deployId } = await render.createService(spec);
   if (deployId) await render.waitForDeploy(service.id, deployId);
   const svc = await render.getService(service.id);
   return { id: service.id, url: serviceUrl(svc, name) };
@@ -278,6 +291,15 @@ async function ensureService(render, { name, buildSpec, env }) {
 
 function serviceUrl(service, name) {
   return service?.serviceDetails?.url ?? service?.url ?? `https://${name}.onrender.com`;
+}
+
+async function waitForServiceDeletion(render, name, { attempts = 12, delayMs = 5000 } = {}) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const existing = await render.findServiceByName(name);
+    if (!existing) return;
+    if (attempt < attempts) await sleep(delayMs);
+  }
+  throw new Error(`Timed out waiting for Render service ${name} to delete before recreation.`);
 }
 
 function emitOutputs({ manifest, webEnv }) {
@@ -317,6 +339,9 @@ function nowIso() {
 }
 function log(message) {
   console.log(`[preview-provision] ${message}`);
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function isTrue(value) {
   const raw = value?.trim().toLowerCase();
