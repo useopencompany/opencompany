@@ -1535,3 +1535,125 @@ describe("SessionViewContent — PRO-124: snap user message to top on send", () 
     });
   });
 });
+
+// ── Tool-call elapsed counter ─────────────────────────────────────────────
+
+describe("ToolCallCardDefault — elapsed counter for long-running tool calls", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function makeRunningToolCallPartWithStartedAt(startedAt: string): AssistantTurnPart {
+    return {
+      type: "tool-call",
+      toolCall: {
+        id: "call_long",
+        name: "search_files",
+        status: "running",
+        inputPreview: '{"pattern":"*.ts"}',
+        activityPreview: "",
+        outputPreview: "",
+        startedEventId: 1,
+        completedEventId: null,
+        startedAt,
+      },
+    };
+  }
+
+  it("does NOT show the elapsed counter when the tool call has been running for less than 20s", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    // Tool started 10s ago — under the 20s threshold
+    const startedAt = new Date(now.getTime() - 10_000).toISOString();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeRunningToolCallPartWithStartedAt(startedAt)];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // Running badge shows plain "running" without elapsed suffix
+    expect(screen.getByText("running")).toBeInTheDocument();
+    // No time text in the badge (no "10s" or "·")
+    expect(screen.queryByText(/running · /)).not.toBeInTheDocument();
+  });
+
+  it("shows the elapsed counter once the tool call crosses 20s", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    // Tool started 19s ago — just under threshold
+    const startedAt = new Date(now.getTime() - 19_000).toISOString();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeRunningToolCallPartWithStartedAt(startedAt)];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // Before threshold: no counter
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.queryByText(/·/)).not.toBeInTheDocument();
+
+    // Advance 1s to hit 20s total
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    // After threshold: counter appears
+    expect(screen.getByText("20s")).toBeInTheDocument();
+  });
+
+  it("increments the elapsed counter every second after it appears", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    // Tool started 20s ago — right at threshold
+    const startedAt = new Date(now.getTime() - 20_000).toISOString();
+    const message = makeMessage({ status: "running" });
+    const parts = [makeRunningToolCallPartWithStartedAt(startedAt)];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    // At 20s the counter is shown
+    expect(screen.getByText("20s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByText("21s")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(9000);
+    });
+    expect(screen.getByText("30s")).toBeInTheDocument();
+  });
+
+  it("does NOT show the elapsed counter for a completed tool call", () => {
+    const now = new Date("2026-06-09T10:00:00.000Z");
+    vi.setSystemTime(now);
+    const message = makeMessage({ status: "completed" });
+    // Even with a startedAt 60s ago, completed calls must not show the counter
+    const parts: AssistantTurnPart[] = [
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "call_done",
+          name: "search_files",
+          status: "completed",
+          inputPreview: '{"pattern":"*.ts"}',
+          activityPreview: "",
+          outputPreview: "3 files found",
+          startedEventId: 1,
+          completedEventId: 2,
+          startedAt: new Date(now.getTime() - 60_000).toISOString(),
+        },
+      },
+    ];
+
+    render(<AssistantMessageContent message={message} parts={parts} sessionCanGenerate={true} />);
+
+    expect(screen.queryByText(/running/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/60s/)).not.toBeInTheDocument();
+    // The step summary is shown (collapsed), but no running/elapsed chrome
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+  });
+});

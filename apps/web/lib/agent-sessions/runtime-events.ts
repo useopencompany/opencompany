@@ -188,6 +188,8 @@ export type RuntimeToolCall = {
   question?: RuntimeQuestionState | undefined;
   startedEventId: number | null;
   completedEventId: number | null;
+  // ISO timestamp from tool.started event, used to show an elapsed counter for long-running tools.
+  startedAt?: string | undefined;
 };
 
 export type AssistantTurnPart =
@@ -1007,6 +1009,9 @@ export function buildRuntimeToolCallsForMessage(
         call.issueUrl = issueUrl;
       }
       call.startedEventId = event.id ?? null;
+      if (event.createdAt) {
+        call.startedAt = event.createdAt;
+      }
     }
 
     if (event.type === "tool.completed" || event.type === "tool.failed") {

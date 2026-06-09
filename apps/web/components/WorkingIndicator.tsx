@@ -12,23 +12,14 @@ export function formatElapsed(seconds: number): string {
   return `${minutes}m ${secs}s`;
 }
 
-export function WorkingIndicator({
-  startedAt,
-  thinking = true,
-}: {
-  startedAt?: string | undefined;
-  thinking?: boolean;
-}) {
-  return <WorkingIndicatorTimer startedAt={startedAt} thinking={thinking} />;
-}
-
-function WorkingIndicatorTimer({
-  startedAt,
-  thinking,
-}: {
-  startedAt?: string | undefined;
-  thinking: boolean;
-}) {
+/**
+ * Returns a live elapsed-seconds counter that starts from the given ISO timestamp
+ * (or from mount time if none is provided). The value is recomputed every second.
+ * The same "take the earliest known start" semantics as WorkingIndicator apply:
+ * if a server timestamp arrives later and is earlier than the local mount time,
+ * the counter corrects upward; it never resets backward.
+ */
+export function useElapsedSeconds(startedAt?: string | undefined): number {
   const [mountedAtMs] = useState(() => Date.now());
   const parsedStartedAtMs = useMemo(() => parseTimestamp(startedAt), [startedAt]);
   const [trackedStart, setTrackedStart] = useState(() =>
@@ -53,7 +44,27 @@ function WorkingIndicatorTimer({
     return () => clearInterval(interval);
   }, []);
 
-  const elapsed = elapsedBetween(startedAtMs, now);
+  return elapsedBetween(startedAtMs, now);
+}
+
+export function WorkingIndicator({
+  startedAt,
+  thinking = true,
+}: {
+  startedAt?: string | undefined;
+  thinking?: boolean;
+}) {
+  return <WorkingIndicatorTimer startedAt={startedAt} thinking={thinking} />;
+}
+
+function WorkingIndicatorTimer({
+  startedAt,
+  thinking,
+}: {
+  startedAt?: string | undefined;
+  thinking: boolean;
+}) {
+  const elapsed = useElapsedSeconds(startedAt);
 
   return (
     <div role="status" aria-live="polite" className="inline-flex items-center gap-1.5">
