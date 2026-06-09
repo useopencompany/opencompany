@@ -12,10 +12,14 @@ view.
 | Local `.env.override.local` | Developer-owned local overrides | `bun run setup:personal`; never committed |
 | Local `.env.local` | Developer machine and agent worktrees | `bun run setup`, backed by Infisical dev shared values |
 | Vercel Development | Optional Vercel dev/preview runtime target | Infisical `dev` + `/web` sync |
-| Vercel Preview | Preview web deployments | Infisical `staging` + `/web` sync |
+| Vercel Preview | Per-PR preview web base env | Infisical `dev` + `/web` sync; per-PR dynamic values injected at deploy time by `pr-preview.yml` |
 | Vercel Production | Production web app and Inngest endpoint | Infisical `prod` + `/web` sync |
 | Render Production | Production runner service | Infisical `prod` + `/runner` sync |
+| Render Preview (per-PR) | Ephemeral per-PR runner / Electric / Durable Streams | Created by `scripts/preview-provision.mjs`; env minted by the orchestrator (not a static sync) |
 | GitHub Actions `production` | Release workflow migrations/deploy orchestration | Infisical OIDC fetch from `prod` + `/release` |
+| GitHub Actions `preview` | PR-preview provision/teardown + reaper | Infisical OIDC fetch from `dev` + `/release` (configurable) |
+
+> **Preview environments** are a full per-PR isolated stack (Neon branch + runner + Electric + Durable Streams + Vercel web), label-gated on `preview`. See [deployment.md → PR preview environments](./deployment.md#pr-preview-environments) and the dedicated section below.
 
 See [secret-management.md](./secret-management.md) for the Infisical setup and sync checklist.
 
@@ -261,6 +265,68 @@ Release-only script vars:
 | `SMOKE_WEB_ATTEMPTS` | No | Web health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_RUNNER_ATTEMPTS` | No | Runner health retry count. Falls back to `SMOKE_ATTEMPTS`; workflow uses `12`. |
 | `SMOKE_DELAY_MS` | No | Delay between retries. Defaults to `10000`. |
+
+## Preview Environments (per-PR)
+
+These power the label-gated per-PR preview stack (issue #351). They are read by the
+`pr-preview.yml` / `preview-reaper.yml` workflows and the `scripts/preview-*.mjs` scripts.
+Provision/orchestration credentials are fetched from Infisical (`dev` + `/release` by
+default, configurable). Runner static runtime secrets are fetched separately from
+Infisical (`prod` + `/runner` by default while previews reuse production service keys).
+The web/runner/electric preview-specific runtime values are minted per-PR by the
+orchestrator and are not stored anywhere long-term.
+
+### GitHub Actions `preview` environment — repo variables (`vars.*`)
+
+| Var | Required | Notes |
+|---|---|---|
+| `PREVIEW_BASE_DOMAIN` | Yes | Wildcard preview domain attached to the Vercel project, e.g. `preview.opencompany.cloud`. Alias = `pr-<n>.<domain>`. |
+| `PREVIEW_INFISICAL_ENV_SLUG` | No | Infisical env for provision creds. Defaults to `dev`. |
+| `PREVIEW_INFISICAL_SECRET_PATH` | No | Infisical path for provision creds. Defaults to `/release`. |
+| `PREVIEW_RUNNER_INFISICAL_ENV_SLUG` | No | Infisical env for runner runtime secrets. Defaults to `prod`. |
+| `PREVIEW_RUNNER_INFISICAL_SECRET_PATH` | No | Infisical path for runner runtime secrets. Defaults to `/runner`. |
+| `PREVIEW_SEED_BRANCH` | No | Neon branch to fork previews from. Defaults to `preview-seed`. |
+| `PREVIEW_NEON_TTL_HOURS` | No | Neon branch TTL backstop. Defaults to `24`. |
+| `PREVIEW_MAX_AGE_HOURS` | No | Reaper hard max age for any preview resource. Defaults to `24`. |
+| `PREVIEW_RENDER_REGION` | No | Render region for per-PR services. Defaults to `frankfurt`. |
+| `PREVIEW_RENDER_PLAN` | No | Render instance plan. Defaults to `starter`. |
+| `PREVIEW_ELECTRIC_STORAGE_DIR` | No | Persistent volume mount for Electric's shape log. Unset = ephemeral (reprovision-on-restart). |
+| `INFISICAL_MACHINE_IDENTITY_ID`, `INFISICAL_PROJECT_SLUG` | Yes | OIDC identity for the preview env (same as production env vars). |
+
+### Provision credentials (Infisical `dev` + `/release`, fetched via OIDC)
+
+| Var | Used by | Notes |
+|---|---|---|
+| `NEON_API_KEY`, `NEON_PROJECT_ID` | provision/teardown/reaper | Branch create/delete + endpoint verification. |
+| `RENDER_API_KEY` | provision/teardown/reaper | Create/destroy per-PR Render services. Same key model as the prod release CI. |
+| `RENDER_OWNER_ID` | provision (optional) | Workspace/owner id for create-service. Auto-resolved from the API when the key has a single workspace; only set it if the key spans multiple. |
+| `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | pr-preview.yml | Vercel build/deploy/alias. |
+
+### Runner runtime credentials (Infisical `prod` + `/runner`, fetched via OIDC)
+
+| Var | Used by | Notes |
+|---|---|---|
+| `E2B_API_KEY`, `VERCEL_AI_GATEWAY_API_KEY`, `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | runner | Required at runner boot. The encryption key must match web so preview runners can read seeded encrypted integration credentials. |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | runner | Enables runner Brain sync. |
+| `GITHUB_INTEGRATION_APP_ID`, `GITHUB_INTEGRATION_APP_PRIVATE_KEY` | runner | Enables connected-repository GitHub operations. |
+| Optional runner tool/provider keys | runner | `EXA_API_KEY`, `APIFY_API_TOKEN`, `X_API_BEARER_TOKEN`, `SUPADATA_API_KEY`, `AMP_API_KEY`, Google/Slack OAuth keys, and observability settings are passed through when present. |
+
+### Per-PR runtime values (minted by the orchestrator, injected — never stored)
+
+| Var | Target | Notes |
+|---|---|---|
+| `DATABASE_URL` | web (pooled), runner (direct) | This PR's Neon branch. Web pooled, runner/Electric direct endpoint. |
+| `PREVIEW_ENV` = `true` | runner | Activates the boot-time preview-identity gate (`apps/runner/src/preview-guard.ts`). |
+| `NEON_BRANCH_ID` | runner | Verified against the attached endpoint via the Neon API at boot. |
+| `PREVIEW_PR_NUMBER` | runner, web | The PR number. |
+| `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` / `RUNNER_INTERNAL_TOKEN` | web ↔ runner | Per-PR runner URL + a freshly minted shared token. |
+| `ELECTRIC_URL` / `ELECTRIC_SECRET` | web ↔ electric | Per-PR Electric URL + secret; the web proxy injects the secret server-side. |
+| `DURABLE_STREAMS_URL` | web, runner | Per-PR Durable Streams service URL. |
+| `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | web (build-time) | `https://pr-<n>.<domain>/auth/callback`. |
+| `PREVIEW_ALLOW_UNVERIFIED_ENDPOINT` | runner | Emergency escape hatch for the boot gate. Leave unset. |
+
+The prod runner carries **none** of `PREVIEW_ENV` / `NEON_BRANCH_ID` / `PREVIEW_PR_NUMBER`;
+the boot gate refuses to start if it sees a partial preview identity (symmetric guard).
 
 ## Local Development
 

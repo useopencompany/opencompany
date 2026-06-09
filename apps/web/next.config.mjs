@@ -1,13 +1,14 @@
 import { createMDX } from "fumadocs-mdx/next";
 
 const release =
-  process.env.VERCEL_GIT_COMMIT_SHA ||
   process.env.RELEASE_SHA ||
   process.env.GITHUB_SHA ||
   process.env.NEXT_PUBLIC_OBSERVABILITY_RELEASE ||
   process.env.OBSERVABILITY_RELEASE ||
+  process.env.VERCEL_GIT_COMMIT_SHA ||
   "";
-const deploymentId = release.slice(0, 32);
+const vercelManagedDeploymentId = process.env.NEXT_DEPLOYMENT_ID?.startsWith("dpl_") ?? false;
+const deploymentId = vercelManagedDeploymentId ? "" : release.slice(0, 32);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -18,8 +19,10 @@ const nextConfig = {
   // page instead of throwing into the error boundary. Must be unique per release
   // and must not start with `dpl_`. Vercel caps custom IDs at 32 characters, so
   // use the commit prefix for skew protection while preserving the full release
-  // value for observability. Only set when present so local `next dev`/`next build`
-  // are unaffected.
+  // value for observability. Vercel-managed builds already inject NEXT_DEPLOYMENT_ID
+  // with a platform `dpl_...` value; in that path, let Next use Vercel's deployment
+  // identity instead of providing a conflicting custom ID. Only set when present so
+  // local `next dev`/`next build` are unaffected.
   ...(deploymentId ? { deploymentId } : {}),
   env: {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
