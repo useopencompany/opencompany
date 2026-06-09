@@ -198,7 +198,7 @@ describe("createAgentSession", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
     expect(getDbMock).toHaveBeenCalled();
     expect(dispatchAgentSessionStartedMock).not.toHaveBeenCalled();
@@ -239,6 +239,7 @@ describe("createAgentSession", () => {
       id: "ses_123",
       title: "Ship it",
       status: "created",
+      source: "user",
       modelName: "openai/gpt-5.4-mini",
       lastError: null,
       createdAt: CREATED_AT.toISOString(),
@@ -289,7 +290,7 @@ describe("createAgentSessionFromPrompt", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
     expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });

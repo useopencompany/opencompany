@@ -35,6 +35,7 @@ export async function loadSidebarSessionsForWorkspace(
     id: agentSessions.id,
     title: agentSessions.title,
     status: agentSessions.status,
+    source: agentSessions.source,
     modelName: agentSessions.modelName,
     lastError: agentSessions.lastError,
     createdAt: agentSessions.createdAt,
@@ -85,6 +86,55 @@ export async function loadSidebarSessionsForWorkspace(
     .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
       serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
     );
+}
+
+// Personal sessions are the user's sessions against their private default agent. Same
+// shape as the sidebar list, but scoped to a single agent and without star state (the
+// /personal experiment has no pinning yet). Ordered most-recently-updated first so the
+// sidebar can group them by recency the same way the main app does.
+export async function loadPersonalSessionsForAgent(
+  userId: string,
+  workspaceId: string,
+  agentId: string,
+): Promise<SidebarSessionPayload[]> {
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      id: agentSessions.id,
+      title: agentSessions.title,
+      status: agentSessions.status,
+      source: agentSessions.source,
+      modelName: agentSessions.modelName,
+      lastError: agentSessions.lastError,
+      createdAt: agentSessions.createdAt,
+      updatedAt: agentSessions.updatedAt,
+      lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+      lastSeenAt: agentSessions.lastSeenAt,
+    })
+    .from(agentSessions)
+    .where(
+      and(
+        eq(agentSessions.workspaceId, workspaceId),
+        eq(agentSessions.userId, userId),
+        eq(agentSessions.agentId, agentId),
+        // Unified personal list: web-originated AND WhatsApp-originated threads (not delegated).
+        inArray(agentSessions.source, ["user", "whatsapp"]),
+        isNull(agentSessions.archivedAt),
+      ),
+    )
+    .orderBy(desc(agentSessions.updatedAt))
+    .limit(SIDEBAR_RECENCY_LIMIT);
+
+  // /personal has no star/pin state yet, so starredAt is always null; the "unseen"
+  // blue dot still applies (agent finished a turn since the user last viewed it).
+  return rows.map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+    serializeSidebarSession({
+      ...row,
+      starredAt: null,
+      unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt),
+    }),
+  );
 }
 
 export async function loadAgentSessionDetailForWorkspace(
@@ -145,6 +195,7 @@ export async function loadAgentSessionDetailForWorkspace(
             id: agentSessions.id,
             title: agentSessions.title,
             status: agentSessions.status,
+            source: agentSessions.source,
             agentName: agents.name,
             agentPath: agents.path,
             parentMessageId: agentSessions.parentMessageId,
@@ -169,6 +220,7 @@ export async function loadAgentSessionDetailForWorkspace(
         id: agentSessions.id,
         title: agentSessions.title,
         status: agentSessions.status,
+        source: agentSessions.source,
         agentName: agents.name,
         agentPath: agents.path,
         parentMessageId: agentSessions.parentMessageId,
@@ -183,7 +235,9 @@ export async function loadAgentSessionDetailForWorkspace(
           eq(agentSessions.parentSessionId, sessionId),
           eq(agentSessions.workspaceId, workspaceId),
           eq(agentSessions.userId, userId),
-          eq(agentSessions.source, "agent"),
+          // Both delegated children ("agent") and memory-keeper passes ("memory") are grouped
+          // under their parent; the live session list filters to source "user" so neither clutters it.
+          inArray(agentSessions.source, ["agent", "memory"]),
           isNull(agentSessions.archivedAt),
         ),
       )
@@ -411,7 +465,14 @@ export async function loadAgentSessionDetailForWorkspace(
   const cost = rollup.cost;
   const serializedSession = {
     ...session,
-    source: session.source === "agent" ? ("agent" as const) : ("user" as const),
+    source:
+      session.source === "agent"
+        ? ("agent" as const)
+        : session.source === "memory"
+          ? ("memory" as const)
+          : session.source === "whatsapp"
+            ? ("whatsapp" as const)
+            : ("user" as const),
   };
 
   return serializeAgentSessionDetail({

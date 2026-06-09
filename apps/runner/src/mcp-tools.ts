@@ -25,11 +25,7 @@ import {
   EncryptionKeyConfigError,
   encryptJson,
 } from "@opencompany/crypto";
-import {
-  workspaceExperiments,
-  workspaceMcpCredentials,
-  workspaceMcpServers,
-} from "@opencompany/db/schema";
+import { workspaceMcpCredentials, workspaceMcpServers } from "@opencompany/db/schema";
 import { captureException, createLogger } from "@opencompany/observability";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import { and, eq } from "drizzle-orm";
@@ -53,13 +49,14 @@ import {
 } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
-const MCP_EXPERIMENT_KEY = "mcp";
 const LINEAR_MCP_SERVER_KEY = "linear";
 const LINEAR_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_MCP_SERVER_KEY = "slack";
 const SLACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const POSTHOG_MCP_SERVER_KEY = "posthog";
 const POSTHOG_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const BETTERSTACK_MCP_SERVER_KEY = "betterstack";
+const BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_READ_SCOPES = [
   "search:read.public",
   "search:read.private",
@@ -85,7 +82,8 @@ const logger = createLogger({ service: "opencompany-runner" });
 type McpProviderKey =
   | typeof LINEAR_MCP_SERVER_KEY
   | typeof SLACK_MCP_SERVER_KEY
-  | typeof POSTHOG_MCP_SERVER_KEY;
+  | typeof POSTHOG_MCP_SERVER_KEY
+  | typeof BETTERSTACK_MCP_SERVER_KEY;
 
 type McpProvider = {
   key: McpProviderKey;
@@ -122,6 +120,13 @@ const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
     displayName: "PostHog",
     oauthCredentialKind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
     // OAuth-only with Dynamic Client Registration (no static client) — same as Linear.
+    supportsBearerToken: false,
+  },
+  betterstack: {
+    key: BETTERSTACK_MCP_SERVER_KEY,
+    displayName: "Better Stack",
+    oauthCredentialKind: BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
+    // OAuth-only with Dynamic Client Registration (no static client) — same as PostHog.
     supportsBearerToken: false,
   },
 };
@@ -585,7 +590,8 @@ function isMcpProviderKey(value: string): value is McpProviderKey {
   return (
     value === LINEAR_MCP_SERVER_KEY ||
     value === SLACK_MCP_SERVER_KEY ||
-    value === POSTHOG_MCP_SERVER_KEY
+    value === POSTHOG_MCP_SERVER_KEY ||
+    value === BETTERSTACK_MCP_SERVER_KEY
   );
 }
 
@@ -831,38 +837,21 @@ function isMcpFailedToolOutput(
 async function loadMcpConnection(input: McpToolContext, provider: McpProvider) {
   const db = getDb();
   const { workspaceId } = input;
-  const [[experiment], [server]] = await Promise.all([
-    db
-      .select({ enabled: workspaceExperiments.enabled })
-      .from(workspaceExperiments)
-      .where(
-        and(
-          eq(workspaceExperiments.workspaceId, workspaceId),
-          eq(workspaceExperiments.key, MCP_EXPERIMENT_KEY),
-        ),
-      )
-      .limit(1),
-    db
-      .select({
-        id: workspaceMcpServers.id,
-        endpointUrl: workspaceMcpServers.endpointUrl,
-        status: workspaceMcpServers.status,
-      })
-      .from(workspaceMcpServers)
-      .where(
-        and(
-          eq(workspaceMcpServers.workspaceId, workspaceId),
-          eq(workspaceMcpServers.serverKey, provider.key),
-        ),
-      )
-      .limit(1),
-  ]);
+  const [server] = await db
+    .select({
+      id: workspaceMcpServers.id,
+      endpointUrl: workspaceMcpServers.endpointUrl,
+      status: workspaceMcpServers.status,
+    })
+    .from(workspaceMcpServers)
+    .where(
+      and(
+        eq(workspaceMcpServers.workspaceId, workspaceId),
+        eq(workspaceMcpServers.serverKey, provider.key),
+      ),
+    )
+    .limit(1);
 
-  if (!experiment?.enabled) {
-    throw new Error(
-      `${provider.displayName} MCP is enabled on this agent, but the workspace MCP beta is off.`,
-    );
-  }
   if (!server || server.status !== "configured") {
     throw new Error(
       `${provider.displayName} MCP is enabled on this agent, but ${provider.displayName} is not configured.`,

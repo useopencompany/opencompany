@@ -37,7 +37,7 @@ export async function updateWorkspaceName(name: string) {
     .where(eq(workspaces.id, workspace.id));
 
   revalidatePath("/", "layout");
-  revalidatePath("/settings");
+  revalidatePath("/company/settings");
 
   return { ok: true as const, name: trimmed };
 }

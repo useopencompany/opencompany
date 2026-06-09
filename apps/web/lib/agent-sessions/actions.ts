@@ -22,8 +22,11 @@ import {
   agentSessions,
   agents,
   agentToolApprovals,
+  onboardingResponses,
   sessionStars,
+  workspaces,
 } from "@opencompany/db/schema";
+import { captureException } from "@opencompany/observability";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { buildCreatedSessionDetail } from "@/lib/agent-sessions/data";
@@ -44,6 +47,12 @@ import { isSessionContinuable, isToolStepLimitResumable } from "@/lib/agent-sess
 import { callRunner, getRunnerPublicUrl } from "@/lib/agent-sessions/runner";
 import { currentWorkspace } from "@/lib/auth";
 import { batchWithTxid } from "@/lib/db/txid";
+import { normalizeCompanyUrl } from "@/lib/onboarding/validation";
+import {
+  enablePersonalAgentIntegrations,
+  type PersonalIntegrationId,
+  setPersonalAgentName,
+} from "@/lib/personal/actions";
 import { determineApprovalResolution } from "./approval-resolution";
 
 export async function createAgentSession(idOrPath: string) {
@@ -52,10 +61,10 @@ export async function createAgentSession(idOrPath: string) {
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     } as const;
   }
-  const agent = await loadAgentForSession(idOrPath, workspace.id);
+  const agent = await loadAgentForSession(idOrPath, workspace.id, user.id);
 
   if (!agent) {
     return { ok: false, error: "Agent not found." } as const;
@@ -109,11 +118,11 @@ export async function createAgentSessionFromPrompt(
     return {
       ok: false,
       error: "Add workspace credits to start a session.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     } as const;
   }
 
-  const agent = await loadAgentForSession(agentId, workspace.id);
+  const agent = await loadAgentForSession(agentId, workspace.id, user.id);
   if (!agent) {
     return { ok: false, error: "Agent not found." } as const;
   }
@@ -162,6 +171,169 @@ export async function createAgentSessionFromPrompt(
         model_name: modelName,
         is_initial_message: true,
         message_length: trimmed.length,
+      }),
+    ]),
+  );
+
+  const detail = buildCreatedSessionDetail({
+    agent,
+    session,
+    messages: [message],
+    events: [statusEvent, createdEvent],
+  });
+  return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
+}
+
+// Background context the user gave on the onboarding screens (their role, company, team size, and
+// how familiar they are with agents). It is never typed into chat — the user no longer types a first
+// task — so we inject it invisibly into the first message's model content so the onboarding skill
+// starts already knowing them (see buildOnboardingModelContent).
+export type PersonalOnboardingContext = {
+  name: string;
+  website: string;
+  role: string;
+  teamSize?: string;
+  agentExperience?: string;
+};
+
+// The chosen preset (if any) from the agent-setup step, the integrations the user left enabled, the
+// name they gave the agent, and the short attribution survey we persist for analytics. The
+// integrations are written to the agent body before the run fires; the preset's mode + integration
+// list ride (invisibly) into the first message so the onboarding skill tunes the soul to that role;
+// the survey + context are persisted best-effort and never block the session.
+export type PersonalOnboardingOptions = {
+  integrations: PersonalIntegrationId[];
+  setup?: { id: string; title: string; intent: string };
+  agentName?: string;
+  survey?: { heardFrom: string; heardFromDetail: string };
+};
+
+// Persist the onboarding answers (attribution survey + role/team/company) the same way the legacy
+// workspace flow did — minus the leo scaffold, sales-call booking, and redirect. Best-effort: a
+// failure here must never block the user from starting their first session. Idempotent on userId, so
+// re-running onboarding (e.g. dev reset) doesn't duplicate the row.
+async function persistPersonalOnboardingSurvey(
+  userId: string,
+  workspaceId: string,
+  context: PersonalOnboardingContext,
+  survey: { heardFrom: string; heardFromDetail: string } | undefined,
+) {
+  try {
+    const db = getDb();
+    const now = new Date();
+    const heardFrom = survey?.heardFrom?.trim() ?? "";
+    const companyUrl = normalizeCompanyUrl(context.website.trim());
+
+    if (heardFrom) {
+      await db
+        .insert(onboardingResponses)
+        .values({
+          userId,
+          workspaceId,
+          heardFrom,
+          heardFromDetail: heardFrom === "other" ? survey?.heardFromDetail?.trim() || null : null,
+          role: context.role.trim(),
+          agentExperience: context.agentExperience?.trim() || "",
+          helpAreas: [],
+          updatedAt: now,
+        })
+        .onConflictDoNothing({ target: onboardingResponses.userId });
+    }
+
+    await db
+      .update(workspaces)
+      .set({
+        ...(context.teamSize?.trim() ? { teamSize: context.teamSize.trim() } : {}),
+        ...(companyUrl ? { companyUrl } : {}),
+        updatedAt: now,
+      })
+      .where(eq(workspaces.id, workspaceId));
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.personal_onboarding_survey_persist_failed",
+      workspace_id: workspaceId,
+      user_id: userId,
+    });
+  }
+}
+
+// V2 onboarding (/onboarding/personal): the visible first message is the user's "what do you want to
+// get done today?" answer. We seed it as a normal user message (so it reads naturally in the
+// transcript) but the model-only content also carries (a) the background context the user gave on
+// the first screen and (b) a thin pointer to the `onboarding` skill, so the agent runs the
+// first-session procedure (read context → save to memory → name itself + tune its soul → start the
+// task) without any of that machinery leaking into the UI.
+export async function createPersonalOnboardingSession(
+  agentId: string,
+  context: PersonalOnboardingContext,
+  prompt: string,
+  options: PersonalOnboardingOptions = { integrations: [] },
+) {
+  const { user, workspace } = await currentWorkspace();
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return { ok: false, error: "Tell the agent what you'd like to get done." } as const;
+  }
+  if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
+    return {
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/company/settings?billing=insufficient",
+    } as const;
+  }
+
+  // Persist the attribution survey + role/team/company (best-effort, never blocks the session).
+  await persistPersonalOnboardingSurvey(user.id, workspace.id, context, options.survey);
+
+  // Name the agent the user chose. Re-serializes the agent source so name + body stay in lockstep,
+  // and runs before integrations are enabled so the freshly-written name flows into that save too.
+  if (options.agentName?.trim()) {
+    await setPersonalAgentName(agentId, options.agentName.trim());
+  }
+
+  // Enable the integrations the user kept selected before the run fires. This appends their
+  // @mentions to the agent body (idempotent); the deferred run below reads the fresh agent, so the
+  // tools are wired in time. Best-effort — a failure here must not block starting the session.
+  if (options.integrations.length > 0) {
+    await enablePersonalAgentIntegrations(agentId, options.integrations);
+  }
+
+  const agent = await loadAgentForSession(agentId, workspace.id, user.id);
+  if (!agent) {
+    return { ok: false, error: "Agent not found." } as const;
+  }
+
+  const { session, statusEvent } = await insertAgentSession({
+    agent,
+    title: titleFromPrompt(trimmed),
+    userId: user.id,
+    workspaceId: workspace.id,
+  });
+  const sessionId = session.id;
+
+  // Visible content = the task verbatim. Model-only content appends the background context and the
+  // onboarding pointer; it never renders in the transcript (modelMessage), so the user just sees
+  // their own message.
+  const modelContent = buildOnboardingModelContent(trimmed, context, options);
+  const { message, createdEvent } = await insertUserMessage(sessionId, trimmed, {
+    workspaceId: workspace.id,
+    attachments: [],
+    modelContent,
+  });
+  const messageId = message.id;
+
+  after(() =>
+    Promise.all([
+      triggerAgentMessageRun({ sessionId, messageId, workspaceId: workspace.id }),
+      dispatchAgentAfterSessionCheck({ sessionId, messageId, workspaceId: workspace.id }),
+      captureServerEvent("session_started", user.id, {
+        user_id: user.id,
+        workspace_id: workspace.id,
+        agent_id: agent.id,
+        session_id: sessionId,
+        model_provider: agent.config.model.provider,
+        model_name: agent.config.model.name,
+        source: "onboarding",
       }),
     ]),
   );
@@ -870,7 +1042,7 @@ async function archiveSessionLocally(
   return txid;
 }
 
-async function loadAgentForSession(idOrPath: string, workspaceId: string) {
+async function loadAgentForSession(idOrPath: string, workspaceId: string, userId: string) {
   const db = getDb();
   const decodedPath = decodeURIComponent(idOrPath);
   const [agent] = await db
@@ -884,7 +1056,14 @@ async function loadAgentForSession(idOrPath: string, workspaceId: string) {
     )
     .limit(1);
 
-  return agent ?? null;
+  if (!agent) return null;
+
+  // Default agents are private to a single user (the personal agent). Workspace scoping alone is
+  // not enough here: a workspace peer who supplies another user's personal agent id must not be
+  // able to start a session against it. Shared (non-default) agents stay workspace-visible.
+  if (agent.isDefault && agent.userId !== userId) return null;
+
+  return agent;
 }
 
 async function insertAgentSession(input: {
@@ -1030,6 +1209,36 @@ async function insertUserMessage(
       createdAt: eventRow.createdAt,
     },
   };
+}
+
+// Compose the model-only first message for an onboarding session: the user's task, then the
+// background context they gave on the first screen (only the fields they filled in), then the thin
+// pointer that tells the agent to run its onboarding skill before tackling the task. None of the
+// appended context renders in the transcript — it rides in modelMessage only.
+function buildOnboardingModelContent(
+  prompt: string,
+  context: PersonalOnboardingContext,
+  options: PersonalOnboardingOptions = { integrations: [] },
+) {
+  const facts = [
+    context.name.trim() ? `- Name: ${context.name.trim()}` : null,
+    context.role.trim() ? `- Role: ${context.role.trim()}` : null,
+    context.website.trim() ? `- Website: ${context.website.trim()}` : null,
+    context.teamSize?.trim() ? `- Team size: ${context.teamSize.trim()}` : null,
+    context.agentExperience?.trim()
+      ? `- Experience with agents: ${context.agentExperience.trim()}`
+      : null,
+    options.setup ? `- Chosen setup: ${options.setup.title} — ${options.setup.intent}` : null,
+    options.integrations.length
+      ? `- Integrations I enabled: ${options.integrations.join(", ")}`
+      : null,
+  ].filter(Boolean);
+
+  const contextBlock = facts.length
+    ? `\n\nFirst-session background (I gave this during onboarding, not in chat):\n${facts.join("\n")}`
+    : "";
+
+  return `${prompt}${contextBlock}\n\n(This is my very first session. Read your \`onboarding\` skill with read_skill and follow it — get set up first, then take on what I asked above.)`;
 }
 
 function titleFromPrompt(content: string) {

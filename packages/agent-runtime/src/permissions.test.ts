@@ -19,6 +19,7 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("exa_search")).toEqual({ providerKey: "exa", group: "read" });
     expect(classifyRuntimeTool("edit_file")).toEqual({ providerKey: "system", group: "modify" });
     expect(classifyRuntimeTool("shell")).toEqual({ providerKey: "system", group: "admin" });
+    expect(classifyRuntimeTool("memory")).toEqual({ providerKey: "system", group: "read" });
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
     expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "modify" });
     expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
@@ -147,6 +148,22 @@ describe("classifyMcpTool", () => {
       providerKey: "linear",
       group: "modify",
     });
+    expect(classifyTool("betterstack__telemetry_query")).toEqual({
+      providerKey: "betterstack",
+      group: "read",
+    });
+    expect(classifyTool("betterstack__uptime_create_incident_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "post",
+    });
+    expect(classifyTool("betterstack__telemetry_edit_chart_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "modify",
+    });
+    expect(classifyTool("betterstack__telemetry_remove_dashboard_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "admin",
+    });
   });
 
   it("falls back to the verb heuristic for unmapped MCP tools", () => {
@@ -252,6 +269,11 @@ describe("resolveToolDecision", () => {
     expect(
       resolveToolDecision({ toolName: "exa_search", policy: empty, suspendable: true }).decision,
     ).toBe("allow");
+    expect(resolveToolDecision({ toolName: "memory", policy: empty, suspendable: true })).toEqual({
+      decision: "allow",
+      providerKey: "system",
+      group: "read",
+    });
   });
 
   it("applies the default hybrid stance for gated providers", () => {

@@ -5,6 +5,7 @@ export * from "./brain";
 export * from "./config";
 export * from "./events";
 export * from "./ids";
+export * from "./memory-keeper";
 export * from "./mentions";
 export * from "./models";
 export * from "./paths";

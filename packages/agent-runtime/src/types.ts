@@ -60,6 +60,7 @@ export type AgentToolId =
   | "linear"
   | "slack"
   | "posthog"
+  | "betterstack"
   | "gmail"
   | "google_calendar";
 export type AgentModelId =
@@ -116,9 +117,9 @@ export type AgentCodingToolConfig = {
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear" | "slack" | "posthog";
+  id: "linear" | "slack" | "posthog" | "betterstack";
   type: "mcp";
-  server: "linear" | "slack" | "posthog";
+  server: "linear" | "slack" | "posthog" | "betterstack";
   label: string;
   description: string;
 };

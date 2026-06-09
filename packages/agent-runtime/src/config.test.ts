@@ -118,6 +118,53 @@ describe("resolveAgentRuntimeConfig", () => {
     expect(resolved.systemPrompt).not.toContain("User last name:");
   });
 
+  const profileConfig = (): AgentConfig => ({
+    schemaVersion: "agent.v1",
+    title: "Personal agent",
+    instructions: "Help the user.",
+    model: { provider: "vercel-ai-gateway", name: "openai/gpt-5.4-mini" },
+    tools: [],
+    brain: [],
+    integrations: { github: { repositories: [] } },
+    triggers: [],
+  });
+
+  it("injects the populated profile verbatim into the system prompt", () => {
+    const resolved = resolveAgentRuntimeConfig({
+      agent: profileConfig(),
+      userMemory: "Goes by Lou. Prefers terse answers.",
+    });
+
+    expect(resolved.systemPrompt).toContain("## Your profile");
+    expect(resolved.systemPrompt).toContain("Goes by Lou. Prefers terse answers.");
+    // No invitation placeholder when the profile has content.
+    expect(resolved.systemPrompt).not.toContain("(empty — populate this as you learn");
+  });
+
+  it("injects a labeled empty section inviting population when the profile is absent", () => {
+    const resolved = resolveAgentRuntimeConfig({ agent: profileConfig() });
+
+    expect(resolved.systemPrompt).toContain("## Your profile");
+    expect(resolved.systemPrompt).toContain(
+      "(empty — populate this as you learn who your user is)",
+    );
+  });
+
+  it("truncates an oversized profile with a marker and bounds its length", () => {
+    const big = "x".repeat(10_000);
+    const resolved = resolveAgentRuntimeConfig({
+      agent: profileConfig(),
+      userMemory: big,
+    });
+
+    expect(resolved.systemPrompt).toContain("[truncated");
+    expect(resolved.systemPrompt).not.toContain(big);
+    // The injected profile body must not exceed the cap. The bound covers the truncated ~3KB body
+    // plus the section's fixed header/intro prose and the truncation marker.
+    const section = resolved.systemPrompt.slice(resolved.systemPrompt.indexOf("## Your profile"));
+    expect(Buffer.byteLength(section, "utf8")).toBeLessThan(3600);
+  });
+
   it("nudges the agent to read the self-edit skill before update_agent_file", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

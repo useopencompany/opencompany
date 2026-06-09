@@ -62,6 +62,7 @@ import {
   type PendingAttachment,
   uploadAttachment,
 } from "@/components/composer-attachments";
+import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -1752,9 +1753,16 @@ function SessionTopBar({
   const ModelIcon = model?.icon ?? Sparkles;
   const modelLabel = model?.label ?? session.modelName.split("/").at(-1) ?? session.modelName;
   const contextMax = model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+  // On the /personal shell the "expand sidebar" button floats over this bar's top-left while the
+  // sidebar is collapsed; widen the left padding so the agent name clears it. (false elsewhere.)
+  const floatingNavInset = useFloatingNavInset();
 
   return (
-    <header className="flex items-center justify-between gap-3 px-6 py-2">
+    <header
+      className={`flex items-center justify-between gap-3 py-2 pr-6 ${
+        floatingNavInset ? "pl-14" : "pl-6"
+      }`}
+    >
       <div className="flex min-w-0 items-center gap-2 text-[12px] text-ink-muted">
         <span className="truncate font-medium text-ink">{session.agentName}</span>
         <span className="shrink-0 text-ink-subtle/60" aria-hidden>
@@ -3206,7 +3214,7 @@ function SessionInspector({
   isPending: boolean;
   onAbort: () => void;
 }) {
-  const agentHref = `/agents/${session.agentPath ?? session.agentId}`;
+  const agentHref = `/company/agents/${session.agentPath ?? session.agentId}`;
 
   return (
     <div className="space-y-8">
@@ -3216,7 +3224,11 @@ function SessionInspector({
           Session
         </div>
         <div className="mt-4 space-y-4">
-          <InspectorLink label="Session page" href={`/session/${session.id}`} value={session.id} />
+          <InspectorLink
+            label="Session page"
+            href={`/company/session/${session.id}`}
+            value={session.id}
+          />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
           <InspectorField label="Title" value={session.title} />
           <InspectorStatusField status={currentStatus} lastError={lastError} />
@@ -3470,7 +3482,7 @@ function RelatedSessionLink({
 }) {
   return (
     <Link
-      href={`/session/${session.id}`}
+      href={`/company/session/${session.id}`}
       target="_blank"
       rel="noreferrer"
       title={session.title}
@@ -3481,6 +3493,11 @@ function RelatedSessionLink({
         <span className="block truncate font-medium">{session.title}</span>
         <span className="block truncate text-[11px] text-ink-subtle">{session.agentName}</span>
       </span>
+      {session.source === "memory" ? (
+        <span className="shrink-0 rounded-sm bg-surface px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-subtle">
+          Memory
+        </span>
+      ) : null}
       <ExternalLink size={11} strokeWidth={1.9} className="shrink-0 text-ink-subtle" />
     </Link>
   );
@@ -3596,13 +3613,14 @@ function formatRuntimeDate(value: string) {
 }
 
 function summarizeEvent(event: RuntimeEvent) {
-  if (event.type === "after_session.started") return "After-session started";
-  if (event.type === "after_session.completed") return "After-session completed";
+  if (event.type === "after_session.started") return "Updating memory started";
+  if (event.type === "after_session.spawned") return "Updating memory started";
+  if (event.type === "after_session.completed") return "Updating memory completed";
   if (event.type === "after_session.skipped") {
-    return `After-session skipped: ${readString(event.payload.reason)}`;
+    return `Updating memory skipped: ${readString(event.payload.reason)}`;
   }
   if (event.type === "after_session.failed") {
-    return `After-session failed: ${readString(event.payload.message)}`;
+    return `Updating memory failed: ${readString(event.payload.message)}`;
   }
   if (event.type === "message.reasoning_started") return "Thinking started";
   if (event.type === "message.reasoning_completed") return "Thinking completed";

@@ -12,6 +12,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { grantDefaultSignupCreditForWorkspace } from "@/lib/billing/service";
+import { isPersonalFirst } from "@/lib/flags/personalFirst";
 import { getWorkOSClient } from "@/lib/workos";
 
 // Workspace auth is a small data access layer: one request-memoized resolver loads
@@ -398,7 +399,9 @@ export async function currentWorkspace(options: CurrentWorkspaceOptions = {}) {
   }
 
   if (!options.skipOnboarding && !(await hasCompletedOnboardingForUser(context.user))) {
-    redirect("/onboarding");
+    // Personal-first users get the personal onboarding chatbox; company-first users get the
+    // legacy onboarding form.
+    redirect(isPersonalFirst(context.user) ? "/onboarding/personal" : "/onboarding");
   }
 
   if (options.requireAdmin && context.role !== ADMIN_ROLE) {

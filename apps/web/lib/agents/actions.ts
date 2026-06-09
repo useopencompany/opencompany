@@ -115,7 +115,7 @@ export async function createAgent() {
     agent_id: pending.id,
   });
 
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { path: result.path });
   redirect(`/agents/${result.path}`);
@@ -545,7 +545,6 @@ export async function updateAgent(
           usableRepositories,
           workspaceAgentReferences,
           {
-            mcpEnabled: mcpSettings.mcpEnabled,
             linearConfigured: mcpSettings.linear.configured,
             slackConfigured: mcpSettings.slack.configured,
           },
@@ -554,7 +553,7 @@ export async function updateAgent(
       : null,
   };
 
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   revalidatePath(`/agents/${result.path}`);
   if (previousPath) revalidatePath(`/agents/${previousPath}`);
   revalidatePath(`/agents/${result.id}`);
@@ -620,7 +619,7 @@ export async function deleteAgent(
   }
 
   // Enqueue async deletion of the agent's repo files (the .agent definition and
-  // any bundle files such as agent/memory.md) through the unified projector. We
+  // any bundle files such as agent/user.md) through the unified projector. We
   // read the bundle files before the cascade delete below removes the agentFiles
   // rows. NOTE: unlike the previous GitHub-first delete, this is asynchronous —
   // a deleted agent's files linger in the repo until the next projection commit,
@@ -733,7 +732,7 @@ export async function deleteAgent(
     agent_id: agent.id,
   });
 
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   if (agent.path) revalidatePath(`/agents/${agent.path}`);
   revalidatePath(`/agents/${agent.id}`);
   if (agent.path) scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
@@ -905,7 +904,7 @@ export async function syncAgentsFromWorkspaceRepository() {
   }
 
   if (canonicalSyncQueued) scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
-  revalidatePath("/agents");
+  revalidatePath("/company/agents");
   endTimingTrace(trace, { count: canonicalFiles.length });
 }
 

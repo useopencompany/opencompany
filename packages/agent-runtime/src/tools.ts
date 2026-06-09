@@ -11,6 +11,12 @@ import type { AgentConfigTool, AgentMcpToolConfig, AgentToolId } from "./types";
 export type RuntimeToolName =
   | "shell"
   | "gh"
+  | "memory"
+  | "recall"
+  | "inbox_list"
+  | "inbox_add"
+  | "inbox_update"
+  | "fetch_transcript"
   | "read_file"
   | "read_skill"
   | "edit_file"
@@ -72,7 +78,8 @@ export type RuntimeToolName =
   | "calendar_delete_event"
   | "web_fetch"
   | "tool_help"
-  | "find_tools";
+  | "find_tools"
+  | "discover_capabilities";
 
 export type RuntimeToolDefinition = {
   name: RuntimeToolName;
@@ -272,6 +279,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     credentialSource: "workspace",
   },
   {
+    id: "betterstack",
+    type: "mcp",
+    server: "betterstack",
+    label: "betterstack",
+    description: "Use workspace-configured Better Stack MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
+  {
     id: "gmail",
     type: "hosted_tool",
     label: "gmail",
@@ -353,6 +370,189 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       "Commands run from ./work. Clone a repository first (git clone or gh repo clone <owner>/<repo> work/<repo>) when you need its code or files.",
       "Use this tool for gh pr create / gh pr view / gh issue list / gh api as needed.",
       "Never push to or open a PR against a repository's default branch directly; always use a feature branch.",
+    ].join("\n"),
+  },
+  {
+    name: "memory",
+    kind: "sandbox",
+    description:
+      "Run the structured `memory` CLI over agent/memory/ — create canonical objects, append cited evidence, rewrite compiled truth, and run hybrid retrieval. This is the only way to read or write structured memory; never edit files under agent/memory/ directly. Pass the subcommand and flags via args (e.g. 'query \"acme blockers\"').",
+    parameters: {
+      type: "object",
+      properties: {
+        args: {
+          type: "string",
+          description:
+            'Arguments passed to the memory CLI, without the leading "memory". Example: \'query "acme enterprise blockers" --limit 5\'.',
+        },
+      },
+      required: ["args"],
+      additionalProperties: false,
+    },
+    help: [
+      "Run memory subcommands; the agent never sees retrieval credentials — they are injected only into this subprocess.",
+      "Commands: create, get, query, append-evidence, rewrite, alias, link, merge, delete, doctor. Add --json for machine-readable output.",
+      "Status lifecycle: objects start as draft (uncited scratch) and become active once rewrite backs their compiled truth with evidence citations. create --status active requires the truth to already be cited; the normal path is create → append-evidence → rewrite.",
+      'Capture evidence first, then rewrite an object\'s compiled truth citing it (e.g. append-evidence --kind meeting --id acme-call --subject acme --source-ref "..." --summary "...", then rewrite acme --truth "... [^ev:acme-call]").',
+      "Query before answering questions about people, companies, projects, or past decisions: query \"topic\" --type company --limit 5. For relationship questions add --hops 1 to pull in linked objects (a person's company, a company's decisions). query hides merged stubs and invalid records by default.",
+      "get --section truth|timeline|frontmatter scopes both the text and the --json payload to that part.",
+      "Writes are last-write-wins — do not issue two memory writes against the same object in parallel.",
+      "Do not pass file paths under agent/memory/ to edit_file/write_file; the CLI is the only safe path and enforces structure, provenance, and links.",
+    ].join("\n"),
+  },
+  {
+    name: "recall",
+    kind: "internal",
+    description:
+      "Search your own past sessions with this user (the raw transcript) and pull back the best-matching message exchanges. Use to remember earlier discussions, decisions, or facts that are not in your current context. The live session is excluded. This searches conversation history; use the memory tool for curated, structured knowledge.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            "What to look for, in natural language or keywords. Typo-tolerant. Example: 'pricing decision for acme' or 'what did we agree about the launch date'.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of matching exchanges to return (default 5, max 20).",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    help: [
+      "Searches the raw transcript of your previous sessions with this user (this agent only); the current session is excluded.",
+      "Returns each hit as a short window: the matching message plus the one before and after it for context.",
+      "Combines keyword relevance with fuzzy/typo matching — you do not need exact wording.",
+      "Use recall for 'what did we say/decide/do' questions; use the memory tool for curated facts about people, companies, and projects.",
+    ].join("\n"),
+  },
+  {
+    name: "inbox_list",
+    kind: "internal",
+    description:
+      "List the items currently in this user's personal inbox (the attention items you and other runs have posted for them). Returns open and snoozed items, plus recently resolved ones when include_resolved is set. Call this BEFORE inbox_add so you can reuse a dedup_key and avoid posting a duplicate of something already there.",
+    parameters: {
+      type: "object",
+      properties: {
+        include_resolved: {
+          type: "boolean",
+          description:
+            "Also include recently done/dismissed items (default false). Useful to check whether the user already dealt with something before re-raising it.",
+        },
+      },
+      additionalProperties: false,
+    },
+    help: [
+      "Items are scoped to the current user; the live session's agent posts on their behalf.",
+      "status is one of open | snoozed | done | dismissed. A snoozed item is hidden from the user's inbox until snoozed_until passes, but you still see it here.",
+      "Match on dedup_key (or title) to decide whether to skip an inbox_add.",
+    ].join("\n"),
+  },
+  {
+    name: "inbox_add",
+    kind: "internal",
+    description:
+      "Post a new attention item to the user's personal inbox — an FYI, a finished result, or something that needs their decision. Use this when, during your run (including scheduled runs), you produce something the user should see but you should not interrupt them for synchronously. Keep the title short and action-oriented; put detail in body and the play-by-play in steps. Pass a stable dedup_key (e.g. a slug for the underlying thing) so re-running on a schedule does not create duplicates.",
+    parameters: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Short, action-oriented headline shown on the card. Required.",
+        },
+        body: {
+          type: "string",
+          description: "Optional markdown summary / FYI detail shown under the title.",
+        },
+        steps: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional 'what happened' — the few steps you took that led to this item, newest-relevant last. Shown when the user expands the card.",
+        },
+        priority: {
+          type: "string",
+          enum: ["urgent", "high", "med", "low"],
+          description: "Optional priority. Omit if it's a routine FYI.",
+        },
+        due_at: {
+          type: "string",
+          description: "Optional ISO-8601 timestamp for when this is due or time-sensitive.",
+        },
+        source: {
+          type: "string",
+          description:
+            "Optional short origin label shown on the card (e.g. your name or the schedule that produced this). Defaults to your agent name.",
+        },
+        dedup_key: {
+          type: "string",
+          description:
+            "Optional stable key. If a live (open/snoozed) item with this key already exists, this call is a no-op and returns that item — use it to make scheduled posts idempotent.",
+        },
+      },
+      required: ["title"],
+      additionalProperties: false,
+    },
+    help: [
+      "Call inbox_list first and reuse a dedup_key to avoid duplicates across scheduled runs.",
+      "The item links back to this session automatically, so the user can open the conversation from the card.",
+      "Use inbox_add for asynchronous attention items; use ask_user_question only when you must block the current run on the user's answer.",
+    ].join("\n"),
+  },
+  {
+    name: "inbox_update",
+    kind: "internal",
+    description:
+      "Update an existing inbox item you posted — typically to mark it done once you've resolved it, or to revise its title/body/priority. Pass the item id from inbox_list.",
+    parameters: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The inbox item id (from inbox_list). Required." },
+        status: {
+          type: "string",
+          enum: ["open", "done", "dismissed"],
+          description:
+            "New status. Set 'done' when you've resolved the item so it leaves the user's inbox.",
+        },
+        title: { type: "string", description: "Optional new title." },
+        body: { type: "string", description: "Optional new markdown body." },
+        priority: {
+          type: "string",
+          enum: ["urgent", "high", "med", "low"],
+          description: "Optional new priority.",
+        },
+        due_at: { type: "string", description: "Optional new ISO-8601 due timestamp." },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    help: [
+      "Only items in the current user's inbox can be updated.",
+      "Marking an item done/dismissed stamps it resolved and removes it from the user's inbox view.",
+    ].join("\n"),
+  },
+  {
+    name: "fetch_transcript",
+    kind: "internal",
+    description:
+      "Fetch the full, ordered transcript of one of your past sessions by its session id. Use after `recall` surfaces a relevant session and you want the complete conversation, not just the matching snippets. Read-only; you can only fetch your own sessions (or the session you were asked to review).",
+    parameters: {
+      type: "object",
+      properties: {
+        sessionId: {
+          type: "string",
+          description: "The id of the session whose transcript to fetch.",
+        },
+      },
+      required: ["sessionId"],
+      additionalProperties: false,
+    },
+    help: [
+      "Returns every visible user and assistant message in the session, in chronological order.",
+      "Scoped to your own sessions with this user; internal/background messages are excluded.",
+      "Pair with recall: recall finds the relevant session, fetch_transcript reads it in full.",
     ].join("\n"),
   },
   {
@@ -534,7 +734,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
   {
     name: "update_agent_file",
     kind: "internal",
-    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect on the next session, not the current one. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
+    description: `Update your own .agent definition (your instructions, explicitly selected model, the tools you reference, and your recurring schedule triggers). Submit the COMPLETE new Markdown body, not a diff. The change is validated and applied atomically: on success it is versioned and synced to the workspace repo; on failure it returns errors and nothing is saved, so you can fix and retry. Changes take effect from your next turn in this same session (no new session needed); only the in-flight reply keeps its current configuration. Required: read the agent-self-edit skill first with read_skill({skillId:"agent-self-edit"}); this tool is rejected until you have.`,
     parameters: {
       type: "object",
       properties: {
@@ -542,6 +742,11 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           type: "string",
           description:
             "The full new Markdown instructions body. Keep any @mentions for tools and @brain/... paths you still want active; tools and brain follow the mentions in this body.",
+        },
+        title: {
+          type: "string",
+          description:
+            "Optional new display name for yourself (e.g. a name the user picked). If omitted, your current name is kept. This is your shown name, not your file path.",
         },
         model: {
           type: "string",
@@ -594,7 +799,7 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     help: [
       'Read the full protocol first: read_skill({skillId:"agent-self-edit"}). It is the source of truth for how to self-edit, and this tool is rejected until you have read it.',
       "Pass the COMPLETE new Markdown body, not a diff.",
-      "Changes apply on your next session, not the current one — offer to start one.",
+      "Changes apply from your next turn in this same session — no new session needed; just continue.",
     ].join("\n"),
   },
   {
@@ -2270,6 +2475,23 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "discover_capabilities",
+    kind: "hosted",
+    description:
+      "List capabilities you could add to yourself but have not enabled yet — the opinionated tools beyond what is already in your ## Tools index. Each result reports whether it is already enabled, available to enable now, or needs setup first, plus how to enable it. Use this when a task needs something you cannot currently do; then confirm with the user and enable it via self-edit. Read-only — discovering a capability does not enable it.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description:
+            'Optional case-insensitive substring filter over capability ids, labels, and descriptions (e.g. "web", "video", "email"). Omit to list every capability.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 export const RUNTIME_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
@@ -2285,14 +2507,30 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   tools: ReadonlyArray<{ id?: unknown }> | undefined;
   agents?: ReadonlyArray<unknown> | undefined;
   repositories?: ReadonlyArray<unknown> | undefined;
-  // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on.
+  // Skill-gated tools. `update_agent_file` is only exposed when the self-edit skill is on;
+  // `memory` only when the memory skill is on.
   selfEditEnabled?: boolean;
+  memorySkillEnabled?: boolean;
+  // The inbox tools are hard-gated to the user's personal/default agent so team agents never
+  // post to a personal inbox. The runner passes `row.agent.isDefault`.
+  personalInboxEnabled?: boolean;
 }) {
   const hasAttachedRepository = (input.repositories ?? []).length > 0;
   const names = new Set<RuntimeToolName>();
   for (const tool of CORE_TOOL_DEFINITIONS) {
     // Skill- and reference-gated tools are added below, not unconditionally.
-    if (tool.name === "delegate_to_agent" || tool.name === "update_agent_file") continue;
+    if (
+      tool.name === "delegate_to_agent" ||
+      tool.name === "update_agent_file" ||
+      tool.name === "memory" ||
+      tool.name === "recall" ||
+      tool.name === "inbox_list" ||
+      tool.name === "inbox_add" ||
+      tool.name === "inbox_update" ||
+      tool.name === "fetch_transcript"
+    ) {
+      continue;
+    }
     // Unconditional core tools (no configToolId) are always available, except
     // those gated on an attached repository (e.g. gh).
     if (tool.configToolId) continue;
@@ -2301,8 +2539,19 @@ export function resolveRuntimeToolNamesForConfigTools(input: {
   }
   names.add("tool_help");
   names.add("find_tools");
+  names.add("discover_capabilities");
   if (input.selfEditEnabled) {
     names.add("update_agent_file");
+  }
+  if (input.memorySkillEnabled) {
+    names.add("memory");
+    names.add("recall");
+    names.add("fetch_transcript");
+  }
+  if (input.personalInboxEnabled) {
+    names.add("inbox_list");
+    names.add("inbox_add");
+    names.add("inbox_update");
   }
 
   const selectedToolIds = new Set(
@@ -2370,6 +2619,12 @@ export const BUILTIN_USE_TOOL_NAME = "use_tool";
 export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   shell: "Run command",
   gh: "GitHub CLI",
+  memory: "Memory",
+  recall: "Recall past sessions",
+  inbox_list: "List inbox",
+  inbox_add: "Add to inbox",
+  inbox_update: "Update inbox item",
+  fetch_transcript: "Fetch transcript",
   read_file: "Read file",
   read_skill: "Read skill",
   edit_file: "Edit file",
@@ -2432,6 +2687,7 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   web_fetch: "Fetch web page",
   tool_help: "Tool help",
   find_tools: "Find tools",
+  discover_capabilities: "Discover capabilities",
 };
 
 // Resolve the display title for any tool name the UI may encounter. The `use_tool` dispatcher
@@ -2474,10 +2730,17 @@ export const ALWAYS_DIRECT_TOOL_NAMES: readonly RuntimeToolName[] = [
   "shell",
   "read_skill",
   "gh",
+  "memory",
+  "recall",
+  "inbox_list",
+  "inbox_add",
+  "inbox_update",
+  "fetch_transcript",
   "ask_user_question",
   "delegate_to_agent",
   "tool_help",
   "find_tools",
+  "discover_capabilities",
 ];
 
 // Deferrable runtime tools that are not capability-catalog entries but are still loaded on demand
@@ -2572,5 +2835,90 @@ export function searchRuntimeTools(
       parameters: definition.parameters,
     });
   }
+  return results;
+}
+
+export type CapabilityDiscoveryStatus = "enabled" | "available" | "needs_setup";
+
+export type CapabilityDiscoveryResult = {
+  id: AgentToolId;
+  label: string;
+  description: string;
+  status: CapabilityDiscoveryStatus;
+  // Present only when status is "needs_setup": a short human reason for what's missing.
+  reason?: string;
+  // What the agent should do to enable it — the @-mention to add to its behavior.
+  howToEnable: string;
+};
+
+// Capabilities whose eligibility this v1 can determine honestly and synchronously: those gated only
+// on a platform secret (`"platform"`) or a platform secret plus an attached repo (`"mixed"`).
+// `"workspace"`-credentialed capabilities (MCP servers like Linear/Slack, and the Google tools
+// Gmail/Calendar) are intentionally excluded — their eligibility needs per-workspace/per-account
+// OAuth connection state that isn't available in this pure path, and the agent cannot self-connect
+// them anyway. They're a clean phase-2 follow-up once that state is threaded into the session.
+const DISCOVERABLE_CREDENTIAL_SOURCES = new Set<AgentToolDefinition["credentialSource"]>([
+  "platform",
+  "mixed",
+]);
+
+// Back the `discover_capabilities` tool: list the opinionated capability catalog (the same entries
+// surfaced as @-mentions in the editor) with an eligibility verdict, so the agent can find a tool it
+// has not enabled yet and offer to add it. Unlike `searchRuntimeTools` (which only expands the
+// agent's already-enabled set), this advertises the *not-yet-enabled* shop.
+//
+// `credentialAvailable` is supplied by the caller (the runner) so the platform-secret check reuses
+// the exact same validation that gates execution — discovery and execution can never disagree.
+export function buildCapabilityDiscovery(input: {
+  enabledTools: readonly RuntimeToolName[];
+  hasAttachedRepository: boolean;
+  credentialAvailable: (entry: AgentToolDefinition) => boolean;
+  query?: string;
+}): CapabilityDiscoveryResult[] {
+  const enabledSet = new Set(input.enabledTools);
+  const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : "";
+  const results: CapabilityDiscoveryResult[] = [];
+
+  for (const entry of AGENT_TOOL_CATALOG) {
+    if (entry.type !== "hosted_tool" && entry.type !== "coding_agent") continue;
+    if (!DISCOVERABLE_CREDENTIAL_SOURCES.has(entry.credentialSource)) continue;
+    if (
+      query &&
+      !entry.id.toLowerCase().includes(query) &&
+      !entry.label.toLowerCase().includes(query) &&
+      !entry.description.toLowerCase().includes(query)
+    ) {
+      continue;
+    }
+
+    let status: CapabilityDiscoveryStatus;
+    let reason: string | undefined;
+    if (entry.runtimeTools.some((name) => enabledSet.has(name))) {
+      status = "enabled";
+    } else if (!input.credentialAvailable(entry)) {
+      status = "needs_setup";
+      reason = entry.requiredPlatformEnvVars?.length
+        ? `requires ${entry.requiredPlatformEnvVars.join(", ")}`
+        : "missing platform credentials";
+    } else if (
+      entry.requiredWorkspaceResource?.provider === "github" &&
+      !input.hasAttachedRepository
+    ) {
+      status = "needs_setup";
+      reason = "attach a GitHub repository first";
+    } else {
+      status = "available";
+    }
+
+    results.push({
+      id: entry.id,
+      label: entry.label,
+      description: entry.description,
+      status,
+      ...(reason ? { reason } : {}),
+      howToEnable: `add @${entry.id} to your behavior`,
+    });
+  }
+
   return results;
 }

@@ -1,0 +1,89 @@
+---
+title: Messaging channels
+description: Reach your personal agent from messaging apps like WhatsApp. How linking, routing, and replies work.
+---
+
+## What it is
+
+Messaging channels let you talk to your **personal agent** from a messaging app. WhatsApp is the
+first channel; the system is built behind a provider abstraction so Telegram and others can slot in
+later. Channels are a personal-only surface — only your personal agent can have them, and they live
+under **Personal → Channels**, not in the `.agent` file.
+
+## How it works
+
+```
+WhatsApp message → webhook → route by sender → personal agent session → reply back over WhatsApp
+```
+
+- **One shared number.** We run a single WhatsApp Business number (Meta Cloud API). You're identified
+  by your own phone number after a one-time link step — there are no per-user WhatsApp credentials.
+- **Linking.** In Personal → Channels, click **Connect WhatsApp** and scan the QR. It opens a chat to
+  our number with a prefilled `link <token>` message; send it and you're connected.
+- **Routing.** Each inbound message routes to your personal agent. Messages within 6 hours of your
+  last one continue the same session; after a 6-hour gap, a fresh session starts.
+- **Replies.** The agent's reply is delivered back to the same WhatsApp chat automatically.
+- **Unified transcripts.** WhatsApp sessions appear in your Personal session list with a WhatsApp
+  badge — you can read and continue them from the web.
+
+## Setup (operators)
+
+The feature stays **dormant** until the platform WhatsApp credentials are set — with any var
+missing, the webhook acks-and-ignores and the Channels tab shows "Setup pending". Nothing else in
+the app is affected. This is a one-time platform setup (one shared number for all users), not
+per-user.
+
+### 1. Create the Meta app + WhatsApp product
+
+1. In the [Meta for Developers](https://developers.facebook.com/) dashboard, create an app (type
+   **Business**) and add the **WhatsApp** product to it.
+2. Adding WhatsApp auto-creates a **WhatsApp Business Account (WABA)** and a **free test number**.
+
+### 2. Pick the sender number
+
+- **Dev / first test:** use the **test number** Meta provisioned. It needs no verification but can
+  only message up to 5 recipient numbers you add under *API Setup → To*. Add your own phone there.
+- **Production:** under *WhatsApp → API Setup*, add and verify your own number (via SMS/call). The
+  number **must not already be registered on the regular WhatsApp or WhatsApp Business app** — delete
+  that account first if so. To message anyone beyond the test allowlist (and to raise daily limits),
+  complete **Meta Business verification** for your company (this is the slow, multi-day step).
+
+You don't run any telephony — Meta hosts the number. The agent always appears to text *from this one
+number*; users are identified by their own phone after the link step.
+
+### 3. Map dashboard values → env vars
+
+Set these in Infisical (`bun run env:pull` to sync locally). See `.env.example` for inline notes.
+
+| Env var | Where to find it |
+| --- | --- |
+| `WHATSAPP_PHONE_NUMBER_ID` | *WhatsApp → API Setup* → the **Phone number ID** under your sender (NOT the digits). |
+| `WHATSAPP_DISPLAY_NUMBER` | The sender's number in E.164 (e.g. `+15551234567`). Only used to build the `wa.me` link QR. |
+| `WHATSAPP_BUSINESS_ACCESS_TOKEN` | Create a **System User** in [Business Settings](https://business.facebook.com/) with the `whatsapp_business_messaging` permission and generate a **permanent** token. (The 24h token on the API Setup page is fine for a quick test only.) |
+| `WHATSAPP_APP_SECRET` | *App settings → Basic → App secret*. Used to verify inbound webhook signatures. |
+| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Any string you invent. You'll paste the **same** value into the webhook config in step 4. |
+| `WHATSAPP_GRAPH_API_VERSION` | Optional override; defaults to a recent stable version. |
+
+### 4. Configure the webhook
+
+1. In *WhatsApp → Configuration → Webhook*, set the **Callback URL** to
+   `‹your-app-url›/api/webhooks/whatsapp` and the **Verify token** to the exact value of
+   `WHATSAPP_WEBHOOK_VERIFY_TOKEN`. Meta calls the endpoint with a `GET` challenge; it must already
+   be deployed with the env var set so the handshake succeeds.
+2. Under **Webhook fields**, subscribe to **`messages`** (this is what delivers inbound texts +
+   delivery statuses).
+
+For local development, expose your dev server with a tunnel (e.g. `OPENCOMPANY_NGROK_URL`) and use
+that origin as the callback URL.
+
+### 5. Verify end to end
+
+Open **Personal → Channels → Connect WhatsApp**, scan the QR, and send the prefilled `link …`
+message. You should get a "✅ Connected" reply, after which any message you send runs your personal
+agent and the reply comes back in the same chat.
+
+## Limits
+
+WhatsApp's Cloud API only allows free-form business replies within 24 hours of the user's last
+message. That covers normal back-and-forth chat. Agent-initiated/proactive messages outside that
+window would require pre-approved message templates and aren't supported yet.

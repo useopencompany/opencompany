@@ -298,12 +298,10 @@ basing that image on e2b's prebuilt `opencode` template and layering `git`/`gh`/
 not point the runner directly at e2b's stock `opencode` template because a session uses one template
 and still needs `gh`/`amp` for the other tools.
 
-Experimental MCP tools are enabled by workspace setup plus agent configuration:
+MCP tools are enabled by workspace setup plus agent configuration:
 
-- `linear__*` tools when the workspace has the MCP beta on, Linear MCP is configured, and the
-  agent mentions `@linear`
-- `slack__*` tools when the workspace has the MCP beta on, Slack MCP is configured, and the agent
-  mentions `@slack`
+- `linear__*` tools when Linear MCP is configured for the workspace and the agent mentions `@linear`
+- `slack__*` tools when Slack MCP is configured for the workspace and the agent mentions `@slack`
 
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 

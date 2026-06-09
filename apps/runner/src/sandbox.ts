@@ -1,5 +1,10 @@
 import path from "node:path";
-import { parseGitHubCliArgs, resolveWorkspacePath, shellQuote } from "@opencompany/agent-runtime";
+import {
+  MEMORY_CLI_FILE,
+  parseGitHubCliArgs,
+  resolveWorkspacePath,
+  shellQuote,
+} from "@opencompany/agent-runtime";
 import { Sandbox } from "e2b";
 import { gitHubPermissionErrorHint } from "./github";
 
@@ -59,16 +64,29 @@ export function sandboxPreparationErrorFields(error: unknown) {
   };
 }
 
-export function sandboxLayout(workdir: string) {
+// The session sandbox has two layout variants. The company/workspace agent keeps the original tree
+// (agent/, brain/, work/). The personal-agent-first pivot promotes the personal agent's two durable
+// spaces to the top level — memory/ (the agent's structured self-knowledge, MEMORY_ROOT) and
+// personal-brain/ (the user's private knowledge files) — so a personal session's tree reads as
+// memory/ + personal-brain/ + work/. agent/ is retained (smaller) for the agent's private profile,
+// soul, and writable skill authoring (which must not collide with the read-only skills/ mount), and
+// personal agents have no company brain/ mount. `personal` selects the variant; all other roots are
+// identical so non-personal-aware call sites are unaffected.
+export function sandboxLayout(workdir: string, personal = false) {
   return {
     workspaceRoot: workdir,
     agentRoot: `${workdir}/agent`,
     brainRoot: `${workdir}/brain`,
     workRoot: `${workdir}/work`,
     skillsRoot: `${workdir}/skills`,
+    // Personal: memory/ is its own top-level root. Company: it stays under the agent bundle.
+    memoryRoot: personal ? `${workdir}/memory` : `${workdir}/agent/memory`,
+    // Only mounted for personal sessions; null for company so the difference is explicit.
+    personalBrainRoot: personal ? `${workdir}/personal-brain` : null,
     metadataRoot: METADATA_ROOT,
     agentFile: `${METADATA_ROOT}/agent.agent`,
     brainManifest: `${METADATA_ROOT}/brain-manifest.json`,
+    personal,
   };
 }
 
@@ -211,15 +229,25 @@ export async function prepareWorkspace(input: {
   sandbox: SandboxHandle;
   workdir: string;
   agentFile: string;
+  personal?: boolean;
 }) {
-  const layout = sandboxLayout(input.workdir);
+  const layout = sandboxLayout(input.workdir, input.personal ?? false);
+
+  // Personal sessions get memory/ + personal-brain/ at the top level instead of a company brain/
+  // mount; agent/ is still created for the agent's private profile/soul/skill authoring.
+  const layoutDirs = layout.personal
+    ? [layout.agentRoot, layout.memoryRoot, layout.personalBrainRoot, layout.workRoot]
+    : [layout.agentRoot, layout.brainRoot, layout.workRoot];
 
   await runSandboxPreparationCommand({
     sandbox: input.sandbox,
     stage: "create_workspace_layout",
     commandName: "mkdir_chown_metadata",
     command: [
-      `mkdir -p ${shellQuote(layout.agentRoot)} ${shellQuote(layout.brainRoot)} ${shellQuote(layout.workRoot)} ${shellQuote(layout.metadataRoot)}`,
+      `mkdir -p ${layoutDirs
+        .filter((dir): dir is string => Boolean(dir))
+        .map(shellQuote)
+        .join(" ")} ${shellQuote(layout.metadataRoot)}`,
       `chown -R ${SANDBOX_USER}:${SANDBOX_USER} ${shellQuote(layout.workspaceRoot)}`,
       `chown root:root ${shellQuote(layout.metadataRoot)}`,
       `chmod 700 ${shellQuote(layout.metadataRoot)}`,
@@ -393,9 +421,14 @@ export async function runSandboxTool(input: {
   envs?: Record<string, string> | undefined;
   redactOutput?: ((value: string) => string) | undefined;
   onOutput?: (stream: "stdout" | "stderr", delta: string) => Promise<void> | void;
+  // True for the user's personal agent: selects the memory/ + personal-brain/ + work/ sandbox layout
+  // and the matching path whitelist. Defaults false (company/workspace layout) so existing callers
+  // are unaffected.
+  personal?: boolean;
 }) {
   const args = asRecord(input.args);
   const redact = input.redactOutput ?? ((value: string) => value);
+  const personal = input.personal ?? false;
 
   if (input.name === "shell") {
     const command = readString(args, "command");
@@ -454,8 +487,48 @@ export async function runSandboxTool(input: {
     });
   }
 
+  if (input.name === "memory") {
+    const memoryArgv = parseGitHubCliArgs(readString(args, "args"));
+    if (!memoryArgv || memoryArgv.length === 0) {
+      throw new Error("Memory CLI arguments are empty or malformed.");
+    }
+    const layout = sandboxLayout(input.workdir, personal);
+    // The CLI bundle is delivered to the read-only skills mount (see apps/runner/src/skills.ts).
+    // Build the command from the parsed, shell-quoted argv so the agent only controls argv tokens
+    // and cannot break out to read the injected Gateway key. --report-usage makes the CLI emit its
+    // model-backed retrieval footprint on stderr for billing.
+    const cliPath = `${layout.skillsRoot}/memory/${MEMORY_CLI_FILE}`;
+    const command = [
+      "node",
+      shellQuote(cliPath),
+      ...memoryArgv.map(shellQuote),
+      "--report-usage",
+    ].join(" ");
+    // Pin the memory root to the agent's memory tree (top-level memory/ for personal, agent/memory
+    // for company). The CLI treats MEMORY_ROOT as authoritative and ignores any agent-supplied
+    // `--root` (see resolveRoot), so the agent cannot point the memory tool outside its tree even
+    // though it controls every argv token.
+    const memoryRoot = layout.memoryRoot;
+    const result = await runCommandWithExitResult(input.sandbox, command, {
+      cwd: layout.workspaceRoot,
+      envs: { ...input.envs, MEMORY_ROOT: memoryRoot },
+      timeoutMs: 120_000,
+      onStdout: async (data: string) => {
+        await input.onOutput?.("stdout", redact(data));
+      },
+      onStderr: async (data: string) => {
+        await input.onOutput?.("stderr", redact(data));
+      },
+    });
+    return truncate({
+      stdout: redact(String(result.stdout ?? "")),
+      stderr: redact(String(result.stderr ?? "")),
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+    });
+  }
+
   if (input.name === "read_file") {
-    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"), personal);
     return truncate({
       path: relativePath(input.workdir, filePath),
       content: await input.sandbox.files.read(filePath),
@@ -480,7 +553,7 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "write_file") {
-    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"), personal);
     const content = readString(args, "content");
     await input.sandbox.commands.run(`mkdir -p ${shellQuote(path.posix.dirname(filePath))}`, {
       timeoutMs: 30_000,
@@ -493,7 +566,7 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "edit_file") {
-    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"));
+    const filePath = resolveSandboxToolPath(input.workdir, readString(args, "path"), personal);
     const toolRelativePath = relativePath(input.workdir, filePath);
     readString(args, "instructions");
     const edits = readEditOperations(args);
@@ -555,7 +628,11 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "list_files") {
-    const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"));
+    const dirPath = resolveSandboxToolPath(
+      input.workdir,
+      readOptionalString(args, "path"),
+      personal,
+    );
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
     const toolRelativePath = relativePath(input.workdir, dirPath);
     const result = await input.sandbox.commands.run(
@@ -664,23 +741,30 @@ function gitDiffCommand(workRoot: string) {
   ].join("\n");
 }
 
-export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
-  const allowedRootsMessage = "Path must be inside work/, brain/, or agent/ for this session.";
+export function resolveSandboxToolPath(workdir: string, inputPath = "work", personal = false) {
+  // Personal sessions use the memory/ + personal-brain/ + work/ tree (agent/ retained for the
+  // agent's private profile/soul/skill authoring); company sessions use work/ + brain/ + agent/.
+  const allowedRoots = personal
+    ? ["work", "memory", "personal-brain", "agent"]
+    : ["work", "brain", "agent"];
+  const allowedRootsList = allowedRoots.map((root) => `${root}/`);
+  // Oxford-"or" join so the company message stays "work/, brain/, or agent/".
+  const allowedRootsMessage = `Path must be inside ${
+    allowedRootsList.length > 1
+      ? `${allowedRootsList.slice(0, -1).join(", ")}, or ${allowedRootsList.at(-1)}`
+      : allowedRootsList[0]
+  } for this session.`;
   let resolved: string;
   try {
-    resolved = resolveWorkspacePath(workdir, inputPath);
+    resolved = resolveWorkspacePath(workdir, inputPath, personal);
   } catch {
     throw new Error(allowedRootsMessage);
   }
   const relative = relativePath(workdir, resolved);
 
-  const inAllowedRoot =
-    relative === "work" ||
-    relative.startsWith("work/") ||
-    relative === "brain" ||
-    relative.startsWith("brain/") ||
-    relative === "agent" ||
-    relative.startsWith("agent/");
+  const inAllowedRoot = allowedRoots.some(
+    (root) => relative === root || relative.startsWith(`${root}/`),
+  );
 
   if (inAllowedRoot) {
     return resolved;
@@ -698,8 +782,12 @@ export function resolveSandboxToolPath(workdir: string, inputPath = "work") {
 export function resolveSandboxBrainRelativePath(
   workdir: string,
   inputPath?: string,
+  personal = false,
 ): string | null {
-  const resolved = resolveSandboxToolPath(workdir, inputPath);
+  const resolved = resolveSandboxToolPath(workdir, inputPath, personal);
+  // Personal sessions have no company brain mount; personal-brain/ is a plain writable space, not a
+  // gated brain, so nothing is treated as a brain-relative path here.
+  if (personal) return null;
   const relative = relativePath(workdir, resolved);
   if (relative === "brain") return "";
   if (relative.startsWith("brain/")) return relative.slice("brain/".length);

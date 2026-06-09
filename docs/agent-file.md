@@ -309,15 +309,30 @@ Ask @agent/sales-research.       ← @agent/sales-research (workspace agent)
 
 Unknown `@text` that doesn't match a tool, Brain path, repository, or workspace agent stays in the body as plain text — no error, no contribution to frontmatter.
 
+### Profile (`agent/user.md`)
+
+Every session injects one small "profile" file from the agent folder directly into the system
+prompt, so the agent carries durable context into each session without having to retrieve it:
+
+- **`agent/user.md`** — who the user is: identity, preferences, communication style, goals.
+
+It is auto-created empty on first use and edited by the agent with ordinary file tools as it
+learns. It is deliberately small: hard-capped at ~3 KB when injected (content beyond the cap is
+truncated with a visible marker). The profile is **not** a general facts store — every other
+durable fact (specific people, companies, projects, decisions, lessons, conventions) belongs in
+structured memory (`agent/memory/`, via the `memory` tool). Because the prompt is built at session
+start, edits take effect on the **next** session (a frozen snapshot per session). This applies to
+any agent that has this file — it is not specific to the personal agent.
+
 ### After-session memory hook
 
 Add `#after-session` inside the body to enable a background pass after a session has been idle for 3 minutes. The hook prompt is the text after the first `#after-session` marker through the end of that paragraph. The marker remains part of the normal instructions, but the runtime also uses the parsed prompt for an internal after-session run.
 
 ```text
-Help the user during the session. #after-session Update agent/memory.md with durable preferences and decisions from the transcript.
+Help the user during the session. #after-session Update memory with durable preferences and decisions from the transcript.
 ```
 
-The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward in the agent folder (`agent/memory.md` for durable learnings) when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
+The after-session run is not a visible chat turn. It reuses the agent loop, can use configured tools, and should capture anything worth carrying forward — durable facts about who the user is into the profile (`agent/user.md`, kept tight given the ~3 KB cap), and every other durable fact into structured memory via the `memory` tool — when there is useful long-lived context to preserve. Use Brain only for shared company knowledge.
 
 ## Storage layout
 
@@ -435,7 +450,7 @@ The runtime consumes a normalized `AgentConfig` (defined in `packages/db/src/sch
   ],
   afterSession: {
     enabled: true,
-    prompt: "Update agent/memory.md with durable preferences and decisions from the transcript.",
+    prompt: "Update memory with durable preferences and decisions from the transcript.",
     idleDelaySeconds: 180,
   },
   integrations: {

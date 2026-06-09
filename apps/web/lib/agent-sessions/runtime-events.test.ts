@@ -2148,11 +2148,12 @@ describe("buildBackgroundActivityParts", () => {
         type: "tool-call",
         toolCall: {
           id: "after-session:12",
-          name: "after_session",
+          name: "updating_memory",
+          label: "Updating memory",
           status: "completed",
           inputPreview: "",
           activityPreview: "",
-          outputPreview: "Completed",
+          outputPreview: "Memory updated",
           startedEventId: 1,
           completedEventId: 2,
         },
@@ -2193,11 +2194,67 @@ describe("buildBackgroundActivityParts", () => {
     expect(parts[0]).toMatchObject({
       type: "tool-call",
       toolCall: {
+        name: "updating_memory",
         status: "completed",
         startedEventId: 1,
         completedEventId: 2,
       },
     });
+  });
+
+  it("keeps spawned memory-keeper passes running until the child reports completion", () => {
+    const runningParts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+      ],
+      [],
+    );
+
+    expect(runningParts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "after-session:12",
+          name: "updating_memory",
+          status: "running",
+          startedEventId: 1,
+        },
+      },
+    ]);
+
+    const completedParts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+        event(9, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+      ],
+      [],
+    );
+
+    expect(completedParts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "after-session:12",
+          name: "updating_memory",
+          status: "completed",
+          outputPreview: "Memory updated",
+          startedEventId: 1,
+          completedEventId: 9,
+        },
+      },
+    ]);
   });
 
   it("reuses assistant tool-call rendering data for internal after-session tool calls", () => {
@@ -2257,7 +2314,7 @@ describe("buildBackgroundActivityParts", () => {
         type: "tool-call",
         toolCall: {
           id: "after-session:12",
-          name: "after_session",
+          name: "updating_memory",
           status: "completed",
         },
       },

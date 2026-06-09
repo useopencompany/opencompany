@@ -160,7 +160,7 @@ export async function redeemCreditCode(code: string) {
   });
 
   if (result.ok) {
-    revalidatePath("/settings");
+    revalidatePath("/company/settings");
     revalidatePath("/", "layout");
   }
 

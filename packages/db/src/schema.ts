@@ -6,7 +6,7 @@ import type {
   TiptapDoc,
 } from "@opencompany/agent-runtime/types";
 import type { EncryptedPayload } from "@opencompany/crypto";
-import { relations, sql } from "drizzle-orm";
+import { relations, type SQL, sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -68,6 +68,15 @@ const bytea = customType<{ data: Buffer }>({
   },
 });
 
+// Postgres full-text search vector. Only ever written by the database (a STORED
+// generated column), so no from/toDriver mapping is needed — the app reads `content`,
+// never the tsvector itself.
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
 export const users = pgTable(
   "users",
   {
@@ -77,6 +86,16 @@ export const users = pgTable(
     firstName: text("first_name"),
     lastName: text("last_name"),
     avatarUrl: text("avatar_url"),
+    // Per-user product-surface switch for the personal-agent-first pivot. When true the user's
+    // primary surface is the personal agent (root → /personal); when false they get the legacy
+    // company/workspace surface (root → /company). Defaults true in this phase. Keeps the company
+    // model fully alive per-user so we can flip individuals rather than the whole deployment.
+    personalFirst: boolean("personal_first").notNull().default(true),
+    // Per-user "Pro mode" switch for the personal-agent surface. When true the user sees advanced
+    // surfaces (e.g. the read-only agent Memory inspector) that are hidden by default. Off for
+    // everyone until they opt in from personal Settings. Kept on `users` (a tiny boolean) so the
+    // auth hot path loads it for free, mirroring `personalFirst`.
+    proMode: boolean("pro_mode").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -146,6 +165,12 @@ export const agents = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    // null = workspace-wide agent (existing behaviour, incl. the onboarding "leo").
+    // set = private agent owned by this user (e.g. the /personal experiment agent).
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    // Marks a user's primary personal agent. Unique per (workspace, user) — see
+    // agentsWorkspaceUserDefaultIdx below.
+    isDefault: boolean("is_default").notNull().default(false),
     path: text("path"),
     name: text("name").notNull().default("Untitled agent"),
     body: text("body").notNull().default(""),
@@ -174,6 +199,11 @@ export const agents = pgTable(
   (table) => ({
     workspaceIdx: index("agents_workspace_idx").on(table.workspaceId),
     workspacePathIdx: uniqueIndex("agents_workspace_path_idx").on(table.workspaceId, table.path),
+    // At most one default agent per user per workspace. Scoped by workspace (not
+    // user alone) because a user can belong to multiple workspaces.
+    workspaceUserDefaultIdx: uniqueIndex("agents_workspace_user_default_idx")
+      .on(table.workspaceId, table.userId)
+      .where(sql`${table.isDefault} = true`),
   }),
 );
 
@@ -303,7 +333,7 @@ export const agentFiles = pgTable(
 //   - "agent_file" -> agentFiles row keyed by (workspaceId, repoPath)
 //   - "agent"      -> agents row keyed by sourceRef (agentId); re-serialized
 // `repoPath` is always the full repo-relative path (e.g. "brain/spec.md",
-// "agents/leo.agent", "agents/leo/memory.md").
+// "agents/leo.agent", "agents/leo/user.md").
 export const workspaceSyncJobs = pgTable(
   "workspace_sync_jobs",
   {
@@ -362,7 +392,10 @@ export const agentSessions = pgTable(
       .references(() => agents.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled session"),
     status: text("status").notNull().default("created"),
-    source: text("source").$type<"user" | "agent">().notNull().default("user"),
+    source: text("source")
+      .$type<"user" | "agent" | "memory" | "whatsapp">()
+      .notNull()
+      .default("user"),
     modelProvider: text("model_provider").notNull().default("vercel-ai-gateway"),
     modelName: text("model_name").notNull().default("openai/gpt-5.4-mini"),
     parentSessionId: text("parent_session_id"),
@@ -416,7 +449,10 @@ export const agentSessions = pgTable(
       columns: [table.parentSessionId],
       foreignColumns: [table.id],
     }).onDelete("set null"),
-    sourceCheck: check("agent_sessions_source_check", sql`${table.source} IN ('user', 'agent')`),
+    sourceCheck: check(
+      "agent_sessions_source_check",
+      sql`${table.source} IN ('user', 'agent', 'memory', 'whatsapp')`,
+    ),
   }),
 );
 
@@ -561,6 +597,62 @@ export const agentSessionMessages = pgTable(
   }),
 );
 
+// Derived search index over `agent_session_messages` for cross-session recall. The transcript
+// (sessions + messages) stays the source of truth; chunks are a rebuildable projection: one row
+// per user/assistant message (oversized messages split by char budget into `sub_index` slices),
+// indexed for Postgres FTS (`tsv`) and pg_trgm fuzzy/typo matching (`content`). Populated by an
+// idempotent sweep (see packages/db/src/recall.ts); searched by the runner-side `recall` tool.
+// `agent_id`/`user_id` are denormalized from the session so a scoped search needs no join.
+export const agentSessionMessageChunks = pgTable(
+  "agent_session_message_chunks",
+  {
+    id: serial("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    subIndex: integer("sub_index").notNull().default(0),
+    content: text("content").notNull(),
+    messageCreatedAt: timestamp("message_created_at", { withTimezone: true }).notNull(),
+    tsv: tsvector("tsv").generatedAlwaysAs((): SQL => sql`to_tsvector('english', "content")`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    messageSubIdx: uniqueIndex("agent_session_message_chunks_message_sub_idx").on(
+      table.messageId,
+      table.subIndex,
+    ),
+    // Scope filter for recall: agent + user, with session/recency for ordering and exclusion.
+    scopeIdx: index("agent_session_message_chunks_scope_idx").on(
+      table.agentId,
+      table.userId,
+      table.sessionId,
+      table.messageCreatedAt,
+    ),
+    // Neighbor expansion: walk a session's chunks in transcript order.
+    sessionOrderIdx: index("agent_session_message_chunks_session_order_idx").on(
+      table.sessionId,
+      table.messageCreatedAt,
+      table.subIndex,
+    ),
+    // Keyword relevance (FTS) and typo/fuzzy (trigram) — both GIN.
+    tsvIdx: index("agent_session_message_chunks_tsv_idx").using("gin", table.tsv),
+    contentTrgmIdx: index("agent_session_message_chunks_content_trgm_idx").using(
+      "gin",
+      table.content.op("gin_trgm_ops"),
+    ),
+  }),
+);
+
 // User-uploaded attachments for a session message (images, PDFs, and text/code files).
 // References to Vercel Blob objects only — bytes live in the private Blob store, never in
 // Postgres. Cascade-deleted with the message; the blob objects are deleted explicitly in
@@ -596,6 +688,114 @@ export const agentSessionMessageAttachments = pgTable(
   }),
 );
 
+// A user's binding to a messaging transport (WhatsApp today). Scoped to the personal agent —
+// messaging is a personal-only surface, so this always points at the user's default agent. Holds
+// the link-flow state, the bound peer address, and the rolling session pointer used for the idle
+// window. Provider secrets are platform-level env and never stored here.
+export const messagingChannels = pgTable(
+  "messaging_channels",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    // Provider id from @opencompany/messaging (e.g. "whatsapp").
+    provider: text("provider").notNull(),
+    // disconnected → pending_link (token minted, awaiting the user's first message) → connected.
+    status: text("status").notNull().default("disconnected"),
+    // The bound peer address (WhatsApp wa_id, E.164 digits, no `+`). Null until the link completes.
+    externalId: text("external_id"),
+    // The peer's WhatsApp profile/display name, captured at link time for the health view.
+    profileName: text("profile_name"),
+    // One-time link token rendered into the connect QR; cleared once a peer binds to it.
+    linkToken: text("link_token"),
+    linkTokenExpiresAt: timestamp("link_token_expires_at", { withTimezone: true }),
+    // The session inbound messages currently route into. Reset to null when the idle window lapses
+    // so the next inbound message hard-starts a fresh session.
+    activeSessionId: text("active_session_id").references(() => agentSessions.id, {
+      onDelete: "set null",
+    }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    lastOutboundAt: timestamp("last_outbound_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // At most one channel per (user, provider) per workspace.
+    workspaceUserProviderIdx: uniqueIndex("messaging_channels_workspace_user_provider_idx").on(
+      table.workspaceId,
+      table.userId,
+      table.provider,
+    ),
+    // Inbound routing key: a bound peer address maps to exactly one channel for a provider. Partial
+    // so unbound channels (null external_id) don't collide.
+    providerExternalIdx: uniqueIndex("messaging_channels_provider_external_idx")
+      .on(table.provider, table.externalId)
+      .where(sql`${table.externalId} is not null`),
+    // Link-token lookup when the user's first (pre-binding) message arrives.
+    linkTokenIdx: index("messaging_channels_link_token_idx").on(table.linkToken),
+    activeSessionIdx: index("messaging_channels_active_session_idx").on(table.activeSessionId),
+    statusCheck: check(
+      "messaging_channels_status_check",
+      sql`${table.status} IN ('disconnected', 'pending_link', 'connected', 'error')`,
+    ),
+  }),
+);
+
+// Append-only log of inbound/outbound messages across messaging channels. Serves three jobs:
+// inbound idempotency (dedupe provider webhook retries by providerMessageId), outbound delivery
+// tracking (pending → sent/failed), and the Channels health view (including unknown-sender hits,
+// which have a null channelId). Message bodies are not the system of record — the agent transcript
+// is — so we keep only a short preview here.
+export const messagingMessages = pgTable(
+  "messaging_messages",
+  {
+    id: text("id").primaryKey(),
+    // Null when an unrecognized number messages our platform line (no channel to attribute it to).
+    channelId: text("channel_id").references(() => messagingChannels.id, { onDelete: "set null" }),
+    provider: text("provider").notNull(),
+    direction: text("direction").notNull(), // 'inbound' | 'outbound'
+    // The peer's channel address (wa_id).
+    externalContactId: text("external_contact_id").notNull(),
+    // Provider-issued message id (WhatsApp wamid). Globally unique across providers, so a single
+    // partial-unique index dedupes inbound retries and records outbound delivery ids.
+    providerMessageId: text("provider_message_id"),
+    sessionId: text("session_id").references(() => agentSessions.id, { onDelete: "set null" }),
+    // For outbound rows: the assistant message we delivered.
+    agentMessageId: text("agent_message_id").references(() => agentSessionMessages.id, {
+      onDelete: "set null",
+    }),
+    // inbound: 'received' | 'unlinked' | 'linked' ; outbound: 'pending' | 'sent' | 'failed'.
+    status: text("status").notNull().default("received"),
+    // Truncated body for the health view; not authoritative.
+    preview: text("preview"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    channelIdx: index("messaging_messages_channel_idx").on(table.channelId, table.createdAt),
+    sessionIdx: index("messaging_messages_session_idx").on(table.sessionId),
+    providerMessageIdIdx: uniqueIndex("messaging_messages_provider_message_id_idx")
+      .on(table.providerMessageId)
+      .where(sql`${table.providerMessageId} is not null`),
+    directionCheck: check(
+      "messaging_messages_direction_check",
+      sql`${table.direction} IN ('inbound', 'outbound')`,
+    ),
+  }),
+);
+
 export const agentSessionAfterSessionRuns = pgTable(
   "agent_session_after_session_runs",
   {
@@ -615,6 +815,11 @@ export const agentSessionAfterSessionRuns = pgTable(
     agentVersion: integer("agent_version").notNull(),
     status: text("status").notNull().default("queued"),
     runLeaseId: text("run_lease_id"),
+    // For runs that spawn a dedicated memory-keeper session (status "spawned"),
+    // this links to that background session so the pass is auditable.
+    childSessionId: text("child_session_id").references(() => agentSessions.id, {
+      onDelete: "set null",
+    }),
     skippedReason: text("skipped_reason"),
     lastError: text("last_error"),
     startedAt: timestamp("started_at", { withTimezone: true }),
@@ -1390,6 +1595,91 @@ export const agentSessionArtifacts = pgTable(
   }),
 );
 
+// A forward-flexible artifact attached to an inbox item. v1 renders `fyi` only; `actions` and
+// `reply` are stored so the agent can attach them now and we can make them interactive later.
+export type InboxItemArtifact =
+  | { kind: "fyi" }
+  | {
+      kind: "actions";
+      actions: { id: string; label: string; tone?: "primary" | "default" | "danger" }[];
+    }
+  | { kind: "reply"; placeholder?: string; suggestions?: string[] };
+
+// Personal-agent inbox: attention items an agent posts for a user to triage. Scoped per
+// (workspace, user). The agent writes via the inbox_list/inbox_add/inbox_update tools (runner,
+// internal kind); the user triages from the /personal inbox (done / snooze 6h / dismiss). A
+// snoozed row keeps status='snoozed' + snoozed_until so the agent still sees it; the UI hides it
+// until snoozed_until elapses. Only live items (open/snoozed) are synced to the client.
+export const inboxItems = pgTable(
+  "inbox_items",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Provenance: the agent session that created the item, so the UI can link back to it.
+    sourceSessionId: text("source_session_id").references(() => agentSessions.id, {
+      onDelete: "set null",
+    }),
+    // Free-text origin label shown on the card (the agent's name or a schedule name).
+    source: text("source"),
+    title: text("title").notNull(),
+    // Markdown summary / FYI body.
+    body: text("body"),
+    // "What happened": the agent's steps leading to this item.
+    steps: jsonb("steps").$type<string[]>(),
+    priority: text("priority").$type<"urgent" | "high" | "med" | "low">(),
+    dueAt: timestamp("due_at", { withTimezone: true }),
+    // Forward-flexible payload; defaults to a plain FYI.
+    artifact: jsonb("artifact").$type<InboxItemArtifact>(),
+    status: text("status")
+      .$type<"open" | "snoozed" | "done" | "dismissed">()
+      .notNull()
+      .default("open"),
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
+    // Optional agent-supplied key; a live (open/snoozed) duplicate makes inbox_add a no-op.
+    dedupKey: text("dedup_key"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (table) => ({
+    workspaceUserIdx: index("inbox_items_workspace_user_idx").on(table.workspaceId, table.userId),
+    statusIdx: index("inbox_items_status_idx").on(table.workspaceId, table.userId, table.status),
+    // One live item per dedup key per user, so inbox_add can no-op a re-post on a schedule rerun.
+    dedupIdx: uniqueIndex("inbox_items_dedup_idx")
+      .on(table.workspaceId, table.userId, table.dedupKey)
+      .where(sql`${table.dedupKey} IS NOT NULL AND ${table.status} IN ('open', 'snoozed')`),
+    statusCheck: check(
+      "inbox_items_status_check",
+      sql`${table.status} IN ('open', 'snoozed', 'done', 'dismissed')`,
+    ),
+    priorityCheck: check(
+      "inbox_items_priority_check",
+      sql`${table.priority} IS NULL OR ${table.priority} IN ('urgent', 'high', 'med', 'low')`,
+    ),
+  }),
+);
+
+export const inboxItemsRelations = relations(inboxItems, ({ one }) => ({
+  workspace: one(workspaces, {
+    fields: [inboxItems.workspaceId],
+    references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [inboxItems.userId],
+    references: [users.id],
+  }),
+  sourceSession: one(agentSessions, {
+    fields: [inboxItems.sourceSessionId],
+    references: [agentSessions.id],
+  }),
+}));
+
 export const onboardingResponses = pgTable(
   "onboarding_responses",
   {
@@ -1487,6 +1777,10 @@ export const agentsRelations = relations(agents, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [agents.workspaceId],
     references: [workspaces.id],
+  }),
+  user: one(users, {
+    fields: [agents.userId],
+    references: [users.id],
   }),
   files: many(agentFiles),
   sessions: many(agentSessions),
@@ -1838,3 +2132,5 @@ export type OnboardingResponse = typeof onboardingResponses.$inferSelect;
 export type WorkspaceToolPolicy = typeof workspaceToolPolicies.$inferSelect;
 export type AgentToolApproval = typeof agentToolApprovals.$inferSelect;
 export type AgentSessionQuestion = typeof agentSessionQuestions.$inferSelect;
+export type MessagingChannel = typeof messagingChannels.$inferSelect;
+export type MessagingMessage = typeof messagingMessages.$inferSelect;
