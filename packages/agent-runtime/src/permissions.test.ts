@@ -4,6 +4,7 @@ import {
   classifyByVerbHeuristic,
   classifyGitHubCliArgs,
   classifyMcpTool,
+  classifyNeonSql,
   classifyRuntimeTool,
   classifyTool,
   formatWorkspaceToolPolicyContext,
@@ -45,11 +46,39 @@ describe("classifyRuntimeTool", () => {
       providerKey: "system",
       group: "read",
     });
+    expect(classifyRuntimeTool("neon_list_databases")).toEqual({
+      providerKey: "neon",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("neon_create_branch")).toEqual({
+      providerKey: "neon",
+      group: "admin",
+    });
   });
 
   it("treats delegation and tool help as never gated", () => {
     expect(classifyRuntimeTool("delegate_to_agent")).toBeNull();
     expect(classifyRuntimeTool("tool_help")).toBeNull();
+  });
+});
+
+describe("classifyNeonSql", () => {
+  it("classifies reads, mutations, and admin SQL conservatively", () => {
+    expect(classifyNeonSql("select * from users")).toBe("read");
+    expect(classifyNeonSql("WITH recent AS (SELECT 1) SELECT * FROM recent")).toBe("read");
+    expect(classifyNeonSql("show search_path")).toBe("read");
+    expect(classifyNeonSql("explain select * from users")).toBe("read");
+    expect(classifyNeonSql("insert into users(id) values (1)")).toBe("modify");
+    expect(classifyNeonSql("update users set name = 'a'")).toBe("modify");
+    expect(classifyNeonSql("delete from users where id = 1")).toBe("modify");
+    expect(classifyNeonSql("create table t(id int)")).toBe("admin");
+    expect(classifyNeonSql("explain analyze select * from users")).toBe("admin");
+    expect(classifyNeonSql("select 1; select 2")).toBe("admin");
+    expect(classifyNeonSql(undefined)).toBe("admin");
+  });
+
+  it("ignores semicolons inside string literals", () => {
+    expect(classifyNeonSql("select ';' as semi;")).toBe("read");
   });
 });
 
@@ -346,6 +375,48 @@ describe("resolveToolDecision", () => {
         suspendable: true,
       }),
     ).toEqual({ decision: "ask", providerKey: "github", group: "admin" });
+  });
+
+  it("uses SQL text to apply Neon read/modify/admin policies", () => {
+    const allowModify: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("neon", "modify"), "allow"],
+    ]);
+
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: {
+          tool: "neon_run_sql",
+          arguments: { sql: "select * from users", databaseId: "wres_1" },
+        },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "neon", group: "read" });
+
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: {
+          tool: "neon_run_sql",
+          arguments: { sql: "update users set name = 'a'", databaseId: "wres_1" },
+        },
+        policy: allowModify,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "neon", group: "modify" });
+
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: {
+          tool: "neon_run_sql",
+          arguments: { sql: "drop table users", databaseId: "wres_1" },
+        },
+        policy: allowModify,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "ask", providerKey: "neon", group: "admin" });
   });
 
   it("collapses ask to deny in non-suspendable runs", () => {

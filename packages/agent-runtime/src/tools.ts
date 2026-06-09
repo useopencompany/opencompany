@@ -50,6 +50,13 @@ export type RuntimeToolName =
   | "instagram_get_metadata"
   | "instagram_get_transcript"
   | "social_get_job"
+  | "neon_list_databases"
+  | "neon_describe_schema"
+  | "neon_run_sql"
+  | "neon_explain_sql"
+  | "neon_create_branch"
+  | "neon_delete_branch"
+  | "neon_reset_branch"
   | "gmail_list_messages"
   | "gmail_get_message"
   | "gmail_search"
@@ -185,6 +192,24 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     defaultEnabled: true,
     credentialSource: "platform",
     requiredPlatformEnvVars: ["APIFY_API_TOKEN", "SUPADATA_API_KEY"],
+  },
+  {
+    id: "neon",
+    type: "hosted_tool",
+    label: "neon",
+    description:
+      "Inspect and administer workspace-connected Neon Postgres databases with hard permission gates for SQL, branch, and migration operations.",
+    runtimeTools: [
+      "neon_list_databases",
+      "neon_describe_schema",
+      "neon_run_sql",
+      "neon_explain_sql",
+      "neon_create_branch",
+      "neon_delete_branch",
+      "neon_reset_branch",
+    ],
+    defaultEnabled: true,
+    credentialSource: "workspace",
   },
   {
     id: "amp",
@@ -2055,6 +2080,158 @@ export const HOSTED_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
     },
   },
   {
+    name: "neon_list_databases",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "List the Neon project/branch/database resources connected to this workspace. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    help: [
+      "Use this first when you need to choose a Neon database resource.",
+      "The returned database id is the stable resource id to pass to other Neon tools.",
+      "Connection strings and API keys are never returned.",
+    ].join("\n"),
+  },
+  {
+    name: "neon_describe_schema",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "Describe schemas, tables, columns, primary keys, foreign keys, and indexes for a connected Neon database. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        databaseId: {
+          type: "string",
+          description: "Connected Neon database resource id from neon_list_databases.",
+        },
+        schema: {
+          type: "string",
+          description: "Optional schema name filter. Defaults to all non-system schemas.",
+        },
+      },
+      required: ["databaseId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "neon_run_sql",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "Run one SQL statement against a connected Neon database. The runner classifies SQL before execution: SELECT/SHOW/WITH reads are read permission; INSERT/UPDATE/DELETE/MERGE/CALL are modify; DDL, transaction control, role/security, COPY, VACUUM, and other admin statements require admin approval.",
+    parameters: {
+      type: "object",
+      properties: {
+        databaseId: {
+          type: "string",
+          description: "Connected Neon database resource id from neon_list_databases.",
+        },
+        sql: {
+          type: "string",
+          description:
+            "Exactly one SQL statement. Do not include secrets. Multi-statement input is blocked.",
+        },
+        limit: {
+          type: "number",
+          description:
+            "Maximum returned rows for read queries. Defaults to 100 and is capped by the runner.",
+          default: 100,
+        },
+      },
+      required: ["databaseId", "sql"],
+      additionalProperties: false,
+    },
+    help: [
+      "Use neon_run_sql for direct SQL after selecting a database id with neon_list_databases.",
+      "Submit exactly one statement. The runner rejects multi-statement input.",
+      "Read queries return a capped number of rows. Mutating and admin statements return row count / command metadata only.",
+      "Never ask for or print connection strings; this tool resolves them internally.",
+    ].join("\n"),
+  },
+  {
+    name: "neon_explain_sql",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "Run EXPLAIN for one SQL statement against a connected Neon database. Read-only by default; EXPLAIN ANALYZE is blocked because it can execute the statement.",
+    parameters: {
+      type: "object",
+      properties: {
+        databaseId: {
+          type: "string",
+          description: "Connected Neon database resource id from neon_list_databases.",
+        },
+        sql: {
+          type: "string",
+          description:
+            "Exactly one SQL statement to explain. Do not include the leading EXPLAIN keyword.",
+        },
+      },
+      required: ["databaseId", "sql"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "neon_create_branch",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "Create a Neon branch in a connected project. Admin operation; approval is required unless workspace policy explicitly allows Neon admin actions.",
+    parameters: {
+      type: "object",
+      properties: {
+        projectId: {
+          type: "string",
+          description: "Neon project id visible in a connected database resource.",
+        },
+        name: { type: "string", description: "New branch name." },
+        parentBranchId: {
+          type: "string",
+          description: "Optional parent branch id. Defaults to Neon's project default branch.",
+        },
+      },
+      required: ["projectId", "name"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "neon_delete_branch",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "Delete a Neon branch in a connected project. Admin operation; approval is required unless workspace policy explicitly allows Neon admin actions.",
+    parameters: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Connected Neon project id." },
+        branchId: { type: "string", description: "Branch id to delete." },
+      },
+      required: ["projectId", "branchId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "neon_reset_branch",
+    kind: "hosted",
+    configToolId: "neon",
+    description:
+      "Reset a Neon branch from its parent. Admin operation; approval is required unless workspace policy explicitly allows Neon admin actions.",
+    parameters: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "Connected Neon project id." },
+        branchId: { type: "string", description: "Branch id to reset from its parent." },
+      },
+      required: ["projectId", "branchId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "tool_help",
     kind: "hosted",
     description:
@@ -2232,6 +2409,13 @@ export const RUNTIME_TOOL_TITLES: Record<RuntimeToolName, string> = {
   instagram_get_metadata: "Instagram metadata",
   instagram_get_transcript: "Instagram transcript",
   social_get_job: "Social job status",
+  neon_list_databases: "List Neon databases",
+  neon_describe_schema: "Describe database schema",
+  neon_run_sql: "Run SQL",
+  neon_explain_sql: "Explain SQL",
+  neon_create_branch: "Create Neon branch",
+  neon_delete_branch: "Delete Neon branch",
+  neon_reset_branch: "Reset Neon branch",
   gmail_list_messages: "List emails",
   gmail_search: "Search email",
   gmail_get_message: "Read email",

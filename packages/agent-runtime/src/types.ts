@@ -54,6 +54,7 @@ export type AgentToolId =
   | "youtube"
   | "tiktok"
   | "instagram"
+  | "neon"
   | "amp"
   | "opencode"
   | "linear"
@@ -99,7 +100,7 @@ export type AgentModelId =
   | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
-  id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "gmail" | "google_calendar";
+  id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "neon" | "gmail" | "google_calendar";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;
@@ -205,6 +206,29 @@ export type AgentGitHubRepositoryConfig = {
   binding?: AgentGitHubRepositoryBinding;
 };
 
+export type AgentNeonDatabaseBinding = {
+  provider: "neon";
+  resourceType: "database";
+  externalId: string;
+  displayName: string;
+  connection: {
+    externalId: string;
+    label: string;
+    accountName: string | null;
+    accountType: string | null;
+  };
+};
+
+export type AgentNeonDatabaseConfig = {
+  id: string;
+  projectId: string;
+  branchId: string;
+  databaseName: string;
+  roleName: string;
+  displayName: string;
+  binding?: AgentNeonDatabaseBinding;
+};
+
 export type AgentGitHubPullRequestTriggerConfig = {
   id: string;
   type: "github.pull_request";
@@ -241,6 +265,9 @@ export type AgentConfig = {
   integrations: {
     github: {
       repositories: AgentGitHubRepositoryConfig[];
+    };
+    neon?: {
+      databases: AgentNeonDatabaseConfig[];
     };
   };
   triggers: AgentTriggerConfig[];

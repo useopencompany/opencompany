@@ -561,6 +561,59 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips optional Neon database connection binding without credentials", () => {
+    const binding = {
+      provider: "neon" as const,
+      resourceType: "database" as const,
+      externalId: "proj_1:br_1:neondb:neondb_owner",
+      displayName: "Project/main/neondb",
+      connection: {
+        externalId: "proj_1",
+        label: "Project",
+        accountName: "Project",
+        accountType: "Project",
+      },
+    };
+    const source = serializeAgentFile({
+      title: "Database",
+      body: "Use @neon for database work.",
+      tools: [{ id: "neon", type: "hosted_tool", label: "neon", description: "Neon." }],
+      integrations: {
+        github: { repositories: [] },
+        neon: {
+          databases: [
+            {
+              id: "proj-1-br-1-neondb",
+              projectId: "proj_1",
+              branchId: "br_1",
+              databaseName: "neondb",
+              roleName: "neondb_owner",
+              displayName: "Project/main/neondb",
+              binding,
+            },
+          ],
+        },
+      },
+    });
+
+    const parsed = parseAgentFile(source);
+
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "neon" })]);
+    expect(parsed.config.integrations.neon?.databases).toEqual([
+      {
+        id: "proj-1-br-1-neondb",
+        projectId: "proj_1",
+        branchId: "br_1",
+        databaseName: "neondb",
+        roleName: "neondb_owner",
+        displayName: "Project/main/neondb",
+        binding,
+      },
+    ]);
+    expect(source).not.toContain("apiKey");
+    expect(source).not.toContain("DATABASE_URL");
+  });
+
   test("keeps legacy GitHub repository config valid without binding", () => {
     const parsed = parseAgentFile(
       [

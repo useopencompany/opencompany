@@ -10,6 +10,7 @@ import {
   type GoogleToolContext,
   isGoogleHostedTool,
 } from "./google-tools";
+import { executeNeonHostedTool, isNeonHostedTool, type NeonToolContext } from "./neon-tools";
 
 export type HostedToolUsage = {
   provider: string;
@@ -215,6 +216,7 @@ export async function executeHostedTool(input: {
   enabledTools: RuntimeToolName[];
   signal: AbortSignal;
   googleContext?: GoogleToolContext | undefined;
+  neonContext?: NeonToolContext | undefined;
 }): Promise<HostedToolResult> {
   // Google (Gmail + Calendar) tools resolve per-account workspace credentials rather than a
   // platform env var, so they take a different path with the credential context attached.
@@ -223,6 +225,14 @@ export async function executeHostedTool(input: {
       name: input.name,
       args: input.args,
       context: input.googleContext,
+      signal: input.signal,
+    });
+  }
+  if (isNeonHostedTool(input.name)) {
+    return executeNeonHostedTool({
+      name: input.name,
+      args: input.args,
+      context: input.neonContext,
       signal: input.signal,
     });
   }

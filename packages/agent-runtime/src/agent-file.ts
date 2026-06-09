@@ -20,6 +20,8 @@ import type {
   AgentGitHubRepositoryBinding,
   AgentGitHubRepositoryConfig,
   AgentModelId,
+  AgentNeonDatabaseBinding,
+  AgentNeonDatabaseConfig,
   AgentReference,
   AgentScheduleTriggerConfig,
   AgentSkillReference,
@@ -65,6 +67,7 @@ export function parseAgentFile(source: string): AgentFile {
   const brain = normalizeBrainReferences(frontmatter.brain);
   const agents = normalizeAgentReferences(frontmatter.agents);
   const repositories = normalizeGitHubRepositories(frontmatter.integrations);
+  const neonDatabases = normalizeNeonDatabases(frontmatter.integrations);
   const tools = normalizeTools(frontmatter.tools);
   const skills = normalizeAgentSkills(frontmatter.skills);
   const triggers = normalizeTriggers(frontmatter.triggers, repositories);
@@ -81,6 +84,7 @@ export function parseAgentFile(source: string): AgentFile {
       agents,
       skills,
       repositories,
+      neonDatabases,
       triggers,
     }),
   };
@@ -207,6 +211,7 @@ export function serializeAgentFile(input: {
   const agents = normalizeAgentReferences(agentInput);
   const skills = normalizeAgentSkills(input.skills);
   const repositories = normalizeGitHubRepositories(input.integrations);
+  const neonDatabases = normalizeNeonDatabases(input.integrations);
   const toolInput = input.tools && input.tools.length > 0 ? input.tools : fromMentions.tools;
   const tools = normalizeTools(toolInput);
   const triggers = normalizeTriggers(input.triggers ?? [], repositories);
@@ -223,6 +228,7 @@ export function serializeAgentFile(input: {
         github: {
           repositories,
         },
+        ...(neonDatabases.length > 0 ? { neon: { databases: neonDatabases } } : {}),
       },
       triggers,
     }),
@@ -259,6 +265,7 @@ export function serializeAgentFrontmatter(input: {
   const title = normalizeTitle(input.title);
   const model = normalizeModelId(input.model ?? DEFAULT_MODEL_ID);
   const repositories = normalizeGitHubRepositories(input.integrations);
+  const neonDatabases = normalizeNeonDatabases(input.integrations);
   const tools = normalizeTools(input.tools);
   const brain = normalizeBrainReferences(input.brain);
   const agents = normalizeAgentReferences(input.agents);
@@ -280,6 +287,7 @@ export function serializeAgentFrontmatter(input: {
       github: {
         repositories,
       },
+      ...(neonDatabases.length > 0 ? { neon: { databases: neonDatabases } } : {}),
     },
     triggers,
   };
@@ -301,6 +309,7 @@ export function buildAgentFile(input: {
   const agents = normalizeAgentReferences(input.config?.agents ?? mentioned.agents);
   const skills = normalizeAgentSkills(input.config?.skills);
   const repositories = normalizeGitHubRepositories(input.config?.integrations);
+  const neonDatabases = normalizeNeonDatabases(input.config?.integrations);
   const tools = normalizeTools(input.config?.tools ?? mentioned.tools);
   const triggers = normalizeTriggers(input.config?.triggers ?? [], repositories);
 
@@ -316,6 +325,7 @@ export function buildAgentFile(input: {
       agents,
       skills,
       repositories,
+      neonDatabases,
       triggers,
     }),
   };
@@ -371,6 +381,7 @@ function buildAgentConfig(input: {
   agents: AgentReference[];
   skills: AgentSkillReference[];
   repositories: AgentGitHubRepositoryConfig[];
+  neonDatabases: AgentNeonDatabaseConfig[];
   triggers: AgentTriggerConfig[];
 }): AgentConfig {
   const afterSession = extractAfterSessionConfig(input.body);
@@ -392,6 +403,13 @@ function buildAgentConfig(input: {
       github: {
         repositories: input.repositories,
       },
+      ...(input.neonDatabases.length > 0
+        ? {
+            neon: {
+              databases: input.neonDatabases,
+            },
+          }
+        : {}),
     },
     triggers: input.triggers,
   };
@@ -633,6 +651,89 @@ function normalizeGitHubRepositoryBinding(value: unknown): AgentGitHubRepository
       accountType: readString(connection?.accountType),
     },
   };
+}
+
+function normalizeNeonDatabases(value: unknown): AgentNeonDatabaseConfig[] {
+  const databasesValue = isRecord(value)
+    ? isRecord(value.neon)
+      ? value.neon.databases
+      : undefined
+    : undefined;
+  const rows = Array.isArray(databasesValue) ? databasesValue : [];
+  const databases: AgentNeonDatabaseConfig[] = [];
+  const seen = new Set<string>();
+
+  for (const item of rows) {
+    if (!isRecord(item)) continue;
+    const projectId = normalizeNeonId(readString(item.projectId));
+    const branchId = normalizeNeonId(readString(item.branchId));
+    const databaseName = normalizeDatabaseIdentifier(readString(item.databaseName));
+    const roleName = normalizeDatabaseIdentifier(readString(item.roleName));
+    if (!projectId || !branchId || !databaseName || !roleName) continue;
+    const id = normalizeRepositoryId(
+      readString(item.id) ?? `${projectId}-${branchId}-${databaseName}-${roleName}`,
+    );
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const binding = normalizeNeonDatabaseBinding(item.binding);
+    const displayName =
+      readString(item.displayName) ?? `${projectId}/${branchId}/${databaseName} (${roleName})`;
+    databases.push({
+      id,
+      projectId,
+      branchId,
+      databaseName,
+      roleName,
+      displayName,
+      ...(binding ? { binding } : {}),
+    });
+  }
+
+  return databases;
+}
+
+function normalizeNeonDatabaseBinding(value: unknown): AgentNeonDatabaseBinding | null {
+  if (!isRecord(value)) return null;
+  const provider = readString(value.provider);
+  const resourceType = readString(value.resourceType);
+  const externalId = readString(value.externalId);
+  const displayName = readString(value.displayName);
+  const connection = isRecord(value.connection) ? value.connection : null;
+  const connectionExternalId = readString(connection?.externalId);
+  if (
+    provider !== "neon" ||
+    resourceType !== "database" ||
+    !externalId ||
+    !displayName ||
+    !connectionExternalId
+  ) {
+    return null;
+  }
+
+  return {
+    provider,
+    resourceType,
+    externalId,
+    displayName,
+    connection: {
+      externalId: connectionExternalId,
+      label: readString(connection?.label) ?? connectionExternalId,
+      accountName: readString(connection?.accountName),
+      accountType: readString(connection?.accountType),
+    },
+  };
+}
+
+function normalizeNeonId(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9_.-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function normalizeDatabaseIdentifier(value: string | null) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z_][A-Za-z0-9_$-]*$/.test(trimmed) ? trimmed : null;
 }
 
 function normalizeTriggers(value: unknown, repositories: AgentGitHubRepositoryConfig[]) {
