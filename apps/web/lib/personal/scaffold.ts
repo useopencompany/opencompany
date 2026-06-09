@@ -1,21 +1,53 @@
-import { agentPathForSlug } from "@opencompany/agent-runtime";
+import { agentBundleDir, agentPathForSlug } from "@opencompany/agent-runtime";
 import type { AgentConfig, AgentModelId, TiptapDoc } from "@opencompany/agent-runtime/types";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { getDb } from "@opencompany/db/client";
-import { agents } from "@opencompany/db/schema";
+import { agentFiles, agents } from "@opencompany/db/schema";
 import { and, eq } from "drizzle-orm";
 import { buildPendingAgent, newAgentId } from "@/lib/agents/create";
+import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
 
 // The /personal experiment agent is a low-latency, capable default. Mirrors leo's choice.
 const PERSONAL_AGENT_MODEL: AgentModelId = "minimax/minimax-m2.7-highspeed";
 
-// Self-contained starter instructions. The /personal agent has no agent/ bundle files seeded,
-// so the body must NOT reference agent/soul.md or @brain/ mounts — none of those exist for it.
+// Self-contained starter instructions. The /personal agent's richer operating guidance lives in
+// agent/soul.md (seeded at creation, see DEFAULT_PERSONAL_SOUL_MD). It has no @brain/ mounts, so
+// the body must NOT reference those — none exist for it.
 const PERSONAL_AGENT_BODY = `You are {{name}}'s personal agent.
+
+Before doing any work, read agent/soul.md — it's how you operate and who you serve. Keep it current as you learn.
 
 Be concise and bias to action. Research before you assert and cite what you find. Confirm before anything destructive or outward-facing.
 
 You have a personal inbox for {{name}}. When you produce something they should see but should not be interrupted for synchronously — a finding, a finished result, a heads-up, or something that needs their decision — post it with inbox_add (a short, action-oriented title; detail in body; the steps you took in steps). This is how scheduled or background runs reach them. Call inbox_list first and reuse a stable dedup_key so repeated runs don't post duplicates, and call inbox_update to mark an item done once you've resolved it. Use the inbox for asynchronous attention; use ask_user_question only when you must block on their answer to continue right now.`;
+
+// Default operating doc seeded into the /personal agent's private folder (agent/soul.md). Tailored
+// to the personal agent: no @brain/ mounts (it has none), and it leans on the personal inbox. The
+// angle-bracket placeholders are the agent's to fill in and evolve as it learns. {{name}} is
+// substituted at creation. Keep it short; it's the agent's to evolve via edit_file.
+export const DEFAULT_PERSONAL_SOUL_MD = `# {{name}}'s personal agent — soul
+
+This is how I operate for {{name}}. I read it before any work and keep it current as I learn.
+
+## Who I serve
+
+{{name}}. <what they care about — I keep this current as I learn>
+
+## How I work
+
+- I'm concise and bias to action.
+- I research before I assert and cite what I find.
+- I confirm before anything destructive or outward-facing.
+
+## How I reach {{name}}
+
+- For things {{name}} should see but shouldn't be interrupted for, I post to the inbox (inbox_add) with a short title, detail, and the steps I took; I reuse a stable dedup_key and mark items done with inbox_update.
+- I use ask_user_question only when I must block on an answer to continue right now.
+
+## What good looks like
+
+<tuned to {{name}}'s focus as I learn>
+`;
 
 const EMPTY_TIPTAP_DOC: TiptapDoc = { type: "doc", content: [] };
 
@@ -97,14 +129,33 @@ export async function ensurePersonalAgent(input: {
     model: PERSONAL_AGENT_MODEL,
   });
 
-  await db.insert(agents).values({
-    ...pending.agent,
-    userId: input.userId,
-    isDefault: true,
-    // Local-only: no GitHub sync lifecycle, so no pending work. Nothing enqueues from this
-    // field; the projector keys off the sync outbox, which we intentionally leave empty.
-    githubSyncStatus: "synced",
-  });
+  // Seed the agent's private operating doc (agent/soul.md) in the same batch as the agent row,
+  // so a brand-new personal agent always mounts a soul.md into ./agent on its first session.
+  const soul = DEFAULT_PERSONAL_SOUL_MD.replaceAll("{{name}}", input.name);
+  const soulPath = `${agentBundleDir(path)}/soul.md`;
+  const soulHash = hashBrainContent(soul);
+
+  await db.batch([
+    db.insert(agents).values({
+      ...pending.agent,
+      userId: input.userId,
+      isDefault: true,
+      // Local-only: no GitHub sync lifecycle, so no pending work. Nothing enqueues from this
+      // field; the projector keys off the sync outbox, which we intentionally leave empty.
+      githubSyncStatus: "synced",
+    }),
+    // Local-only too: we deliberately skip the agent_file sync job (unlike leo's onboarding seed),
+    // so soul.md is never projected to GitHub — consistent with the personal agent itself.
+    db.insert(agentFiles).values({
+      workspaceId: input.workspaceId,
+      agentId: id,
+      path: soulPath,
+      content: soul,
+      contentHash: soulHash,
+      sizeBytes: brainContentSize(soul),
+      githubSyncStatus: "synced",
+    }),
+  ]);
 
   await captureServerEvent("agent_created", input.userId, {
     user_id: input.userId,
