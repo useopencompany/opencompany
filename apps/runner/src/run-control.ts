@@ -155,6 +155,10 @@ export function createDbRunControlStore(): RunControlStore {
           runLeaseExpiresAt: null,
           runHeartbeatAt: null,
           lastError: input.lastError ?? null,
+          // Stamp the turn-finished marker the sidebar's "unseen" dot reads. This is the
+          // single chokepoint for every yield back to the user (completed/failed/awaiting_*),
+          // so the dot can never fire mid-turn. Skip user-initiated abort — they caused it.
+          ...(input.status === "aborting" ? {} : { lastTurnFinishedAt: now }),
           updatedAt: now,
         })
         .where(

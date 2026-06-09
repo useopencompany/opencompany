@@ -76,6 +76,7 @@ import {
   abortAgentSession,
   cancelAgentSessionQuestion,
   continueInterruptedSession,
+  markSessionSeen,
   resolveToolApproval,
   setAgentSessionModel,
   submitAgentSessionMessage,
@@ -599,6 +600,20 @@ function SessionViewContentBody({ detail, workspaceId }: SessionViewContentProps
       void queryClient.invalidateQueries({ queryKey: detailKey });
     }
   }, [runtime.currentStatus, detailKey, queryClient]);
+  // Clear this session's sidebar "unseen" dot while the user is actually looking at it:
+  // on open, on each status change (so watching a turn finish never leaves a stale dot),
+  // and when the tab regains focus. Visibility-gated so a session left open in a
+  // BACKGROUND tab still earns its dot when its turn finishes. Fire-and-forget — the
+  // cleared state streams back via Electric, and the sidebar already suppresses the dot
+  // for the active session, so there is no flash.
+  useEffect(() => {
+    const markSeen = () => {
+      if (document.visibilityState === "visible") void markSessionSeen(session.id);
+    };
+    markSeen();
+    document.addEventListener("visibilitychange", markSeen);
+    return () => document.removeEventListener("visibilitychange", markSeen);
+  }, [session.id, runtime.currentStatus]);
   // Reflect the open session's title in the browser tab so it's easy to tell tabs
   // apart. Restored to the default on unmount / navigation away.
   useEffect(() => {
