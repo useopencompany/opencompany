@@ -310,6 +310,7 @@ jobs:
       - name: Smoke check web + runner health
         env:
           WEB_URL: https://${{ steps.provision.outputs.alias }}
+          SMOKE_WEB_VERCEL_DEPLOYMENT: ${{ steps.deploy-web.outputs.url }}
           RUNNER_PUBLIC_URL: ${{ steps.provision.outputs.runner_url }}
           EXPECTED_RELEASE: ${{ env.PR_SHA }}
           SMOKE_WEB_ATTEMPTS: "18"
