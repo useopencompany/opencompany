@@ -304,6 +304,8 @@ Experimental MCP tools are enabled by workspace setup plus agent configuration:
   agent mentions `@linear`
 - `slack__*` tools when the workspace has the MCP beta on, Slack MCP is configured, and the agent
   mentions `@slack`
+- `figma__*` tools when the workspace has the MCP beta on, Figma MCP is configured, and the agent
+  mentions `@figma`
 
 **Source of truth:** `packages/agent-runtime/src/tools.ts`.
 

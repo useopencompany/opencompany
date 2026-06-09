@@ -60,6 +60,8 @@ const SLACK_MCP_SERVER_KEY = "slack";
 const SLACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const POSTHOG_MCP_SERVER_KEY = "posthog";
 const POSTHOG_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+const FIGMA_MCP_SERVER_KEY = "figma";
+const FIGMA_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 const SLACK_READ_SCOPES = [
   "search:read.public",
   "search:read.private",
@@ -85,7 +87,8 @@ const logger = createLogger({ service: "opencompany-runner" });
 type McpProviderKey =
   | typeof LINEAR_MCP_SERVER_KEY
   | typeof SLACK_MCP_SERVER_KEY
-  | typeof POSTHOG_MCP_SERVER_KEY;
+  | typeof POSTHOG_MCP_SERVER_KEY
+  | typeof FIGMA_MCP_SERVER_KEY;
 
 type McpProvider = {
   key: McpProviderKey;
@@ -122,6 +125,12 @@ const MCP_PROVIDER_CATALOG: Record<McpProviderKey, McpProvider> = {
     displayName: "PostHog",
     oauthCredentialKind: POSTHOG_MCP_OAUTH_CREDENTIAL_KIND,
     // OAuth-only with Dynamic Client Registration (no static client) — same as Linear.
+    supportsBearerToken: false,
+  },
+  figma: {
+    key: FIGMA_MCP_SERVER_KEY,
+    displayName: "Figma",
+    oauthCredentialKind: FIGMA_MCP_OAUTH_CREDENTIAL_KIND,
     supportsBearerToken: false,
   },
 };
@@ -585,7 +594,8 @@ function isMcpProviderKey(value: string): value is McpProviderKey {
   return (
     value === LINEAR_MCP_SERVER_KEY ||
     value === SLACK_MCP_SERVER_KEY ||
-    value === POSTHOG_MCP_SERVER_KEY
+    value === POSTHOG_MCP_SERVER_KEY ||
+    value === FIGMA_MCP_SERVER_KEY
   );
 }
 

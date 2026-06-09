@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Monitor,
   Moon,
+  PenTool,
   Plug,
   Sun,
   Trash2,
@@ -36,6 +37,7 @@ import {
   TOP_UP_AMOUNTS_CENTS,
 } from "@/lib/billing/constants";
 import {
+  removeFigmaMcpConnection,
   removeLinearMcpToken,
   removePostHogMcpConnection,
   removeSlackMcpConnection,
@@ -53,6 +55,8 @@ const SLACK_MCP_DOCS_URL = "https://docs.slack.dev/ai/slack-mcp-server/";
 const SLACK_MCP_START_URL = "/api/mcp/slack/start?returnTo=/settings";
 const POSTHOG_MCP_DOCS_URL = "https://posthog.com/docs/model-context-protocol";
 const POSTHOG_MCP_START_URL = "/api/mcp/posthog/start?returnTo=/settings";
+const FIGMA_MCP_DOCS_URL = "https://developers.figma.com/docs/figma-mcp-server/";
+const FIGMA_MCP_START_URL = "/api/mcp/figma/start?returnTo=/settings";
 const SETTINGS_FORMAT_LOCALE = "en-US";
 const SETTINGS_FORMAT_TIME_ZONE = "UTC";
 
@@ -118,6 +122,12 @@ type Props = {
       updatedAt: string | null;
     };
     posthog: {
+      configured: boolean;
+      status: "configured" | "missing_credential" | "disabled" | "error" | null;
+      statusReason: string | null;
+      updatedAt: string | null;
+    };
+    figma: {
       configured: boolean;
       status: "configured" | "missing_credential" | "disabled" | "error" | null;
       statusReason: string | null;
@@ -684,6 +694,10 @@ function ExperimentsSection({
       : null;
   const posthogSetupReason =
     searchParams.get("mcp") === "posthog" ? searchParams.get("reason") : null;
+  const figmaSetupStatus = searchParams.get("mcp") === "figma" ? searchParams.get("setup") : null;
+  const normalizedFigmaSetupStatus =
+    figmaSetupStatus === "connected" || figmaSetupStatus === "error" ? figmaSetupStatus : null;
+  const figmaSetupReason = searchParams.get("mcp") === "figma" ? searchParams.get("reason") : null;
 
   return (
     <div className="space-y-3">
@@ -752,6 +766,12 @@ function ExperimentsSection({
             setupStatus={normalizedPosthogSetupStatus}
             setupReason={posthogSetupReason}
             policyOverrides={toolPolicies.posthog}
+          />
+          <FigmaMcpCard
+            figma={mcp.figma}
+            setupStatus={normalizedFigmaSetupStatus}
+            setupReason={figmaSetupReason}
+            policyOverrides={toolPolicies.figma}
           />
         </>
       ) : null}
@@ -1159,6 +1179,120 @@ function PostHogMcpCard({
   );
 }
 
+function FigmaMcpCard({
+  figma,
+  setupStatus,
+  setupReason,
+  policyOverrides,
+}: {
+  figma: Props["mcp"]["figma"];
+  setupStatus: "connected" | "error" | null;
+  setupReason: string | null;
+  policyOverrides: WorkspaceToolPolicyOverrides[string] | undefined;
+}) {
+  const router = useRouter();
+  const [dismissedSetupStatus, setDismissedSetupStatus] = useState<"connected" | "error" | null>(
+    null,
+  );
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const configured = figma.configured;
+  const setupMessage =
+    setupStatus && setupStatus !== dismissedSetupStatus
+      ? {
+          type: setupStatus === "connected" ? ("success" as const) : ("error" as const),
+          text:
+            setupStatus === "connected"
+              ? "Figma connected."
+              : figmaMcpSetupErrorMessage(setupReason),
+        }
+      : null;
+  const visibleMessage = message ?? setupMessage;
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/65 p-4 shadow-[0_1px_2px_rgba(15,15,15,0.03)]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-canvas text-ink-muted">
+            <PenTool size={15} strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[13px] font-medium tracking-[-0.005em] text-ink">Figma MCP</div>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${
+                  configured
+                    ? "border-success-border bg-success-bg text-success"
+                    : "border-warning-border bg-warning-bg text-warning"
+                }`}
+              >
+                {configured ? "Configured" : "Not connected"}
+              </span>
+            </div>
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">
+              Agents can opt in with @figma after Figma is connected.
+            </p>
+            {figma.statusReason ? (
+              <p className="mt-1 text-[11.5px] leading-4 text-ink-subtle">{figma.statusReason}</p>
+            ) : null}
+          </div>
+        </div>
+        {configured ? (
+          <button
+            type="button"
+            disabled={isPending}
+            onClick={() => {
+              setMessage(null);
+              setDismissedSetupStatus(setupStatus);
+              startTransition(async () => {
+                const result = await removeFigmaMcpConnection();
+                if (result.ok) {
+                  setMessage({ type: "success", text: "Figma MCP connection removed." });
+                  router.refresh();
+                }
+              });
+            }}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink transition-colors duration-150 hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Remove
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-4 border-t border-border-subtle pt-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={FIGMA_MCP_START_URL}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors duration-150 hover:bg-ink/85"
+          >
+            <ExternalLink size={13} strokeWidth={1.9} />
+            {configured ? "Reconnect Figma" : "Connect Figma"}
+          </a>
+          <a
+            href={FIGMA_MCP_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium text-ink-muted transition-colors duration-150 hover:bg-surface-muted hover:text-ink"
+          >
+            MCP docs
+            <ExternalLink size={12} strokeWidth={1.9} />
+          </a>
+        </div>
+      </div>
+      {visibleMessage && (
+        <div
+          className={`mt-2 text-[12px] ${
+            visibleMessage.type === "success" ? "text-success" : "text-danger"
+          }`}
+        >
+          {visibleMessage.text}
+        </div>
+      )}
+      {configured ? <ToolPolicyEditor providerKey="figma" overrides={policyOverrides} /> : null}
+    </div>
+  );
+}
+
 function linearMcpSetupErrorMessage(reason: string | null) {
   switch (reason) {
     case "invalid_state":
@@ -1213,6 +1347,25 @@ function posthogMcpSetupErrorMessage(reason: string | null) {
       return "Could not start PostHog authorization. Check the server logs and try again.";
     default:
       return "PostHog connection failed. Try reconnecting PostHog.";
+  }
+}
+
+function figmaMcpSetupErrorMessage(reason: string | null) {
+  switch (reason) {
+    case "invalid_state":
+      return "Figma connection expired or was started in another browser tab. Try reconnecting Figma.";
+    case "session_mismatch":
+      return "Figma returned to a different OpenCompany session. Sign in to the same workspace and try again.";
+    case "figma_denied":
+      return "Figma did not authorize the connection.";
+    case "missing_code":
+      return "Figma did not return an authorization code. Try reconnecting Figma.";
+    case "token_exchange_failed":
+      return "Figma authorized the connection, but token exchange failed. Check the server logs and try again.";
+    case "start_failed":
+      return "Could not start Figma authorization. Check the server logs and try again.";
+    default:
+      return "Figma connection failed. Try reconnecting Figma.";
   }
 }
 

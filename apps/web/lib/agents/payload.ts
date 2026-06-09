@@ -47,6 +47,8 @@ export type AgentDetailPayload = AgentListItemPayload & {
     mcpEnabled: boolean;
     linearConfigured: boolean;
     slackConfigured: boolean;
+    posthogConfigured: boolean;
+    figmaConfigured: boolean;
   };
 };
 
@@ -76,6 +78,8 @@ export function serializeAgentDetail(
     mcpEnabled: false,
     linearConfigured: false,
     slackConfigured: false,
+    posthogConfigured: false,
+    figmaConfigured: false,
   },
   bundleFiles: AgentBundleFilePayload[] = [],
 ): AgentDetailPayload {

@@ -58,6 +58,8 @@ describe("agent detail API route", () => {
         mcpEnabled: false,
         linearConfigured: false,
         slackConfigured: false,
+        posthogConfigured: false,
+        figmaConfigured: false,
       },
     });
 

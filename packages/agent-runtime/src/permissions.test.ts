@@ -99,6 +99,18 @@ describe("classifyMcpTool", () => {
       providerKey: "posthog",
       group: "admin",
     });
+    expect(classifyTool("figma__get_design_context")).toEqual({
+      providerKey: "figma",
+      group: "read",
+    });
+    expect(classifyTool("figma__create_new_file")).toEqual({
+      providerKey: "figma",
+      group: "post",
+    });
+    expect(classifyTool("figma__use_figma")).toEqual({
+      providerKey: "figma",
+      group: "modify",
+    });
     // Admin gating for "*-set-active" must survive both hyphenated and sanitized
     // (underscored) name forms — otherwise the verb heuristic reads "set" as modify.
     for (const name of [
@@ -132,6 +144,10 @@ describe("classifyMcpTool", () => {
       group: "modify",
     });
     expect(classifyMcpTool("acme__delete_widget")).toEqual({ providerKey: "acme", group: "admin" });
+    expect(classifyMcpTool("figma__frobnicate_widget")).toEqual({
+      providerKey: "figma",
+      group: "admin",
+    });
   });
 });
 

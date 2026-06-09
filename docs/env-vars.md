@@ -44,6 +44,7 @@ These values are cross-service contracts. Treat drift as a deploy blocker.
 | `GOOGLE_INTEGRATION_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign Google integration OAuth state. |
 | `MCP_OAUTH_STATE_SECRET` | Vercel web envs | 32+ character secret used only to sign MCP OAuth setup state. Separate from the credential encryption key. |
 | `SLACK_MCP_CLIENT_ID` / `SLACK_MCP_CLIENT_SECRET` | Vercel, Render | Slack hosted MCP OAuth app credentials. |
+| `MCP_OAUTH_STATE_SECRET` / `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY` | Vercel, Render | Required for workspace MCP OAuth providers, including Figma remote MCP. Figma does not require provider-specific env vars. |
 | `OBSERVABILITY_RELEASE` | Vercel, Render | Manual override only. Normal hosted deploys should use Vercel/Render commit metadata and leave this unset. |
 
 ## Vercel Web

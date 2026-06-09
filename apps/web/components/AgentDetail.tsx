@@ -260,6 +260,8 @@ function AgentDetailContent({
     const enabledMcpToolIds: AgentToolId[] = [];
     if (agent.mcp.mcpEnabled && agent.mcp.linearConfigured) enabledMcpToolIds.push("linear");
     if (agent.mcp.mcpEnabled && agent.mcp.slackConfigured) enabledMcpToolIds.push("slack");
+    if (agent.mcp.mcpEnabled && agent.mcp.posthogConfigured) enabledMcpToolIds.push("posthog");
+    if (agent.mcp.mcpEnabled && agent.mcp.figmaConfigured) enabledMcpToolIds.push("figma");
     return buildAgentMentionItems(agent.usableGitHubIntegrationRepositories, agent.brainPaths, {
       enabledMcpToolIds,
       mcpEnabled: agent.mcp.mcpEnabled,
@@ -270,7 +272,9 @@ function AgentDetailContent({
     agent.brainPaths,
     agent.mcp.linearConfigured,
     agent.mcp.mcpEnabled,
+    agent.mcp.posthogConfigured,
     agent.mcp.slackConfigured,
+    agent.mcp.figmaConfigured,
     agent.usableGitHubIntegrationRepositories,
     agent.workspaceAgents,
     availableSkills,
@@ -1624,14 +1628,26 @@ function SyncTrack({ saveState, status }: { saveState: SaveState; status: string
 // workspace, so the inspector can show a "Needs setup" badge linking to the connect
 // flow. Mirrors the picker logic in agent-editor/tools.ts.
 function enrichToolWithSetupState(tool: AgentTool, mcp: AgentDetailPayload["mcp"]): AgentTool {
-  const connected =
-    (tool.id === "linear" && mcp.linearConfigured) || (tool.id === "slack" && mcp.slackConfigured);
-  if ((tool.id !== "linear" && tool.id !== "slack") || connected) return tool;
+  if (!isMcpAgentToolId(tool.id)) return tool;
+  const connected = mcpProviderConfigured(tool.id, mcp);
+  if (connected) return tool;
   return {
     ...tool,
     needsSetup: true,
     connectUrl: mcpConnectUrl(tool.id),
   };
+}
+
+function isMcpAgentToolId(id: AgentToolId) {
+  return id === "linear" || id === "slack" || id === "posthog" || id === "figma";
+}
+
+function mcpProviderConfigured(id: AgentToolId, mcp: AgentDetailPayload["mcp"]) {
+  if (id === "linear") return mcp.linearConfigured;
+  if (id === "slack") return mcp.slackConfigured;
+  if (id === "posthog") return mcp.posthogConfigured;
+  if (id === "figma") return mcp.figmaConfigured;
+  return false;
 }
 
 function mergeSkillCatalog(

@@ -205,6 +205,8 @@ const detailAgent: AgentDetailPayload = {
     mcpEnabled: false,
     linearConfigured: false,
     slackConfigured: false,
+    posthogConfigured: false,
+    figmaConfigured: false,
   },
 };
 

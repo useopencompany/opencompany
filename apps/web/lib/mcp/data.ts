@@ -16,11 +16,15 @@ export const SLACK_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 export const POSTHOG_MCP_SERVER_KEY = "posthog";
 export const POSTHOG_MCP_ENDPOINT_URL = "https://mcp.posthog.com/mcp";
 export const POSTHOG_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
+export const FIGMA_MCP_SERVER_KEY = "figma";
+export const FIGMA_MCP_ENDPOINT_URL = "https://mcp.figma.com/mcp";
+export const FIGMA_MCP_OAUTH_CREDENTIAL_KIND = "oauth";
 
 export const MCP_PROVIDER_KEYS = [
   LINEAR_MCP_SERVER_KEY,
   SLACK_MCP_SERVER_KEY,
   POSTHOG_MCP_SERVER_KEY,
+  FIGMA_MCP_SERVER_KEY,
 ] as const;
 
 export type McpProviderKey = (typeof MCP_PROVIDER_KEYS)[number];
@@ -30,6 +34,7 @@ export type WorkspaceMcpSettings = {
   linear: WorkspaceMcpProviderSettings;
   slack: WorkspaceMcpProviderSettings;
   posthog: WorkspaceMcpProviderSettings;
+  figma: WorkspaceMcpProviderSettings;
 };
 
 export type WorkspaceMcpProviderSettings = {
@@ -101,6 +106,9 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
       if (provider === POSTHOG_MCP_SERVER_KEY) {
         return credential.kind === POSTHOG_MCP_OAUTH_CREDENTIAL_KIND;
       }
+      if (provider === FIGMA_MCP_SERVER_KEY) {
+        return credential.kind === FIGMA_MCP_OAUTH_CREDENTIAL_KIND;
+      }
       return credential.kind === SLACK_MCP_OAUTH_CREDENTIAL_KIND;
     });
     return {
@@ -117,5 +125,6 @@ export async function loadWorkspaceMcpSettingsForWorkspace(
     linear: settingsFor(LINEAR_MCP_SERVER_KEY),
     slack: settingsFor(SLACK_MCP_SERVER_KEY),
     posthog: settingsFor(POSTHOG_MCP_SERVER_KEY),
+    figma: settingsFor(FIGMA_MCP_SERVER_KEY),
   };
 }

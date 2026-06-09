@@ -137,6 +137,27 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Figma MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Figma implementation",
+      body: "Implement the design with @figma.",
+    });
+
+    expect(source).toContain("id: figma");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: figma");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "figma",
+        type: "mcp",
+        server: "figma",
+        label: "figma",
+        description: "Use workspace-configured Figma MCP tools.",
+      },
+    ]);
+  });
+
   test("round-trips X hosted tool config without secrets", () => {
     const source = serializeAgentFile({
       title: "X research",

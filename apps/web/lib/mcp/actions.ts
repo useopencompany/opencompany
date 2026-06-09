@@ -6,6 +6,9 @@ import { revalidatePath } from "next/cache";
 import { currentWorkspace } from "@/lib/auth";
 import { deleteMcpCredential, saveMcpCredential } from "@/lib/mcp/credential-storage";
 import {
+  FIGMA_MCP_ENDPOINT_URL,
+  FIGMA_MCP_OAUTH_CREDENTIAL_KIND,
+  FIGMA_MCP_SERVER_KEY,
   LINEAR_MCP_ENDPOINT_URL,
   LINEAR_MCP_SERVER_KEY,
   MCP_EXPERIMENT_KEY,
@@ -119,6 +122,23 @@ export async function removePostHogMcpConnection() {
   return { ok: true as const };
 }
 
+export async function removeFigmaMcpConnection() {
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  const server = await upsertFigmaMcpServer(
+    workspace.id,
+    "missing_credential",
+    "Figma MCP connection was removed.",
+  );
+  await deleteMcpCredential({
+    workspaceId: workspace.id,
+    serverId: server.id,
+    kind: FIGMA_MCP_OAUTH_CREDENTIAL_KIND,
+  });
+
+  revalidateMcpPaths();
+  return { ok: true as const };
+}
+
 export async function upsertLinearMcpServer(
   workspaceId: string,
   status: "configured" | "missing_credential" | "error",
@@ -159,6 +179,21 @@ export async function upsertPostHogMcpServer(
     serverKey: POSTHOG_MCP_SERVER_KEY,
     displayName: "PostHog",
     endpointUrl: POSTHOG_MCP_ENDPOINT_URL,
+    status,
+    statusReason,
+  });
+}
+
+export async function upsertFigmaMcpServer(
+  workspaceId: string,
+  status: "configured" | "missing_credential" | "error",
+  statusReason: string | null,
+) {
+  return upsertMcpServer({
+    workspaceId,
+    serverKey: FIGMA_MCP_SERVER_KEY,
+    displayName: "Figma",
+    endpointUrl: FIGMA_MCP_ENDPOINT_URL,
     status,
     statusReason,
   });

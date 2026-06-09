@@ -247,6 +247,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     credentialSource: "workspace",
   },
   {
+    id: "figma",
+    type: "mcp",
+    server: "figma",
+    label: "figma",
+    description: "Use workspace-configured Figma MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
+  {
     id: "gmail",
     type: "hosted_tool",
     label: "gmail",

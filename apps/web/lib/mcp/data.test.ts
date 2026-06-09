@@ -24,16 +24,20 @@ beforeEach(() => {
 });
 
 describe("loadWorkspaceMcpSettingsForWorkspace", () => {
-  it("reports Linear and Slack MCP configured states independently", async () => {
+  it("reports MCP configured states independently", async () => {
     db.queryResults = [
       [{ enabled: true }],
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
+        mcpServerRow("wmcps_posthog", "posthog", "configured"),
+        mcpServerRow("wmcps_figma", "figma", "configured"),
       ],
       [
         { serverKey: "linear", kind: "bearer_token" },
         { serverKey: "slack", kind: "oauth" },
+        { serverKey: "posthog", kind: "oauth" },
+        { serverKey: "figma", kind: "oauth" },
       ],
     ];
 
@@ -50,6 +54,16 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
       serverId: "wmcps_slack",
       status: "configured",
     });
+    expect(settings.posthog).toMatchObject({
+      configured: true,
+      serverId: "wmcps_posthog",
+      status: "configured",
+    });
+    expect(settings.figma).toMatchObject({
+      configured: true,
+      serverId: "wmcps_figma",
+      status: "configured",
+    });
   });
 
   it("does not treat Linear credentials as Slack credentials", async () => {
@@ -58,6 +72,8 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
       [
         mcpServerRow("wmcps_linear", "linear", "configured"),
         mcpServerRow("wmcps_slack", "slack", "configured"),
+        mcpServerRow("wmcps_posthog", "posthog", "configured"),
+        mcpServerRow("wmcps_figma", "figma", "configured"),
       ],
       [{ serverKey: "linear", kind: "oauth" }],
     ];
@@ -66,12 +82,14 @@ describe("loadWorkspaceMcpSettingsForWorkspace", () => {
 
     expect(settings.linear.configured).toBe(true);
     expect(settings.slack.configured).toBe(false);
+    expect(settings.posthog.configured).toBe(false);
+    expect(settings.figma.configured).toBe(false);
   });
 });
 
 function mcpServerRow(
   id: string,
-  serverKey: "linear" | "slack",
+  serverKey: "linear" | "slack" | "posthog" | "figma",
   status: "configured" | "missing_credential" | "disabled" | "error",
 ) {
   return {

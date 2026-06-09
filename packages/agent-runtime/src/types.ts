@@ -59,6 +59,7 @@ export type AgentToolId =
   | "linear"
   | "slack"
   | "posthog"
+  | "figma"
   | "gmail"
   | "google_calendar";
 export type AgentModelId =
@@ -115,9 +116,9 @@ export type AgentCodingToolConfig = {
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear" | "slack" | "posthog";
+  id: "linear" | "slack" | "posthog" | "figma";
   type: "mcp";
-  server: "linear" | "slack" | "posthog";
+  server: "linear" | "slack" | "posthog" | "figma";
   label: string;
   description: string;
 };

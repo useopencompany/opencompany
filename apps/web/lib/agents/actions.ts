@@ -548,6 +548,8 @@ export async function updateAgent(
             mcpEnabled: mcpSettings.mcpEnabled,
             linearConfigured: mcpSettings.linear.configured,
             slackConfigured: mcpSettings.slack.configured,
+            posthogConfigured: mcpSettings.posthog.configured,
+            figmaConfigured: mcpSettings.figma.configured,
           },
           bundleFiles,
         )

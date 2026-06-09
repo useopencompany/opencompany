@@ -100,6 +100,21 @@ const slackAgentConfig: AgentConfig = {
   ],
 };
 
+const figmaAgentConfig: AgentConfig = {
+  ...agentConfig,
+  title: "Figma",
+  instructions: "Use @figma.",
+  tools: [
+    {
+      id: "figma",
+      type: "mcp",
+      server: "figma",
+      label: "figma",
+      description: "Use workspace-configured Figma MCP tools.",
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", credentialKey());
@@ -157,6 +172,25 @@ describe("createMcpToolSet", () => {
     expect(
       resolveToolDecision({ toolName: stubName, policy: new Map(), suspendable: true }).decision,
     ).toBe("allow");
+  });
+
+  it("registers a Figma not-connected stub tool instead of aborting the turn", async () => {
+    const mcpTools = await createMcpToolSet(baseInput(figmaAgentConfig));
+    const stub = (mcpTools.tools as ToolSet).figma__get_connection_status;
+    expect(stub).toBeDefined();
+
+    const output = await stub?.execute?.(
+      {},
+      { toolCallId: "call_stub", messages: [], abortSignal: new AbortController().signal },
+    );
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message: "Figma MCP is enabled on this agent, but the workspace MCP beta is off.",
+        code: "mcp_not_connected",
+        recoverable: true,
+      },
+    });
   });
 
   it("keeps a healthy provider when another provider in the same agent is not set up", async () => {
@@ -604,6 +638,50 @@ describe("createMcpToolSet", () => {
     await mcpTools.close();
     expect(mcpClient.close).toHaveBeenCalled();
   });
+
+  it("loads Figma MCP OAuth tools with dynamic client credentials", async () => {
+    db.queryResults = [[{ enabled: true }], [figmaServerRow()], [figmaOAuthConnectionRow()]];
+    mcpClient.listTools.mockResolvedValueOnce({ tools: [{ name: "get_design_context" }] } as never);
+    mcpClient.toolsFromDefinitions.mockReturnValueOnce({
+      get_design_context: {
+        description: "Get design context",
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { url: { type: "string" } },
+          required: ["url"],
+        }),
+        execute: vi.fn(async () => ({ ok: true })),
+      },
+    });
+
+    const mcpTools = await createMcpToolSet(baseInput(figmaAgentConfig));
+
+    expect((mcpTools.tools as ToolSet).figma__search_tools).toBeDefined();
+    expect((mcpTools.tools as ToolSet).figma__use_tool).toBeDefined();
+    expect(createMCPClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transport: expect.objectContaining({
+          type: "http",
+          url: "https://mcp.figma.com/mcp",
+          authProvider: expect.any(Object),
+        }),
+      }),
+    );
+    const call = vi.mocked(createMCPClient).mock.calls.at(-1)?.[0] as {
+      transport?: { authProvider?: { tokens: () => unknown; clientInformation: () => unknown } };
+    };
+    expect(call.transport?.authProvider?.tokens()).toEqual({
+      access_token: "figma_access",
+      refresh_token: "figma_refresh",
+      token_type: "Bearer",
+    });
+    expect(call.transport?.authProvider?.clientInformation()).toEqual({
+      client_id: "figma_client",
+    });
+
+    await mcpTools.close();
+    expect(mcpClient.close).toHaveBeenCalled();
+  });
 });
 
 function baseInput(
@@ -689,6 +767,34 @@ function slackOAuthConnectionRow() {
       },
       "oauth",
       "wmcps_slack",
+    ),
+  };
+}
+
+function figmaServerRow() {
+  return {
+    id: "wmcps_figma",
+    endpointUrl: "https://mcp.figma.com/mcp",
+    status: "configured",
+  };
+}
+
+function figmaOAuthConnectionRow() {
+  return {
+    serverId: "wmcps_figma",
+    credentialKind: "oauth",
+    encryptionKeyVersion: 1,
+    encryptedPayload: encryptPayload(
+      {
+        clientInformation: { client_id: "figma_client" },
+        tokens: {
+          access_token: "figma_access",
+          refresh_token: "figma_refresh",
+          token_type: "Bearer",
+        },
+      },
+      "oauth",
+      "wmcps_figma",
     ),
   };
 }

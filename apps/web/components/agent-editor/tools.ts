@@ -25,6 +25,7 @@ import {
   MessageSquare,
   MessagesSquare,
   Music2,
+  PenTool,
   Plus,
   Search,
   Sparkles,
@@ -165,6 +166,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   linear: ListTodo,
   slack: MessageSquare,
   posthog: BarChart3,
+  figma: PenTool,
   gmail: Mail,
   google_calendar: CalendarDays,
 };
@@ -345,7 +347,7 @@ export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentS
   return items;
 }
 
-// Non-MCP tools are always available. MCP-backed tools (Linear, Slack) are shown
+// Non-MCP tools are always available. MCP-backed tools are shown
 // whenever the workspace MCP beta is on: connected ones behave normally, while
 // not-yet-connected ones stay selectable but carry `needsSetup`/`connectUrl` so
 // the UI can flag them and link to the connect flow. With the beta off they are
@@ -403,7 +405,7 @@ function agentMentionId(path: string) {
 }
 
 function isMcpToolId(id: AgentToolId) {
-  return id === "linear" || id === "slack" || id === "posthog";
+  return id === "linear" || id === "slack" || id === "posthog" || id === "figma";
 }
 
 function repositoryMentionId(repository: {
