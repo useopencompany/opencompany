@@ -81,7 +81,9 @@ async function checkUntilReady(name, url, maxAttempts, waitMs) {
 
 async function readHealthBody(name, url) {
   if (name === "web" && webVercelDeployment) {
-    return execFileSync("bunx", ["vercel", "curl", "/api/healthz", "--deployment", url], {
+    const args = ["vercel", "curl", "/api/healthz", "--deployment", url];
+    if (process.env.VERCEL_TOKEN?.trim()) args.push("--token", process.env.VERCEL_TOKEN.trim());
+    return execFileSync("bunx", args, {
       encoding: "utf8",
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
