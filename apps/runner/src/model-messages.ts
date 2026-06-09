@@ -165,12 +165,12 @@ export function validateModelMessage(value: unknown, messageId = "unknown"): Mod
 
 export function serializeToolOutputForStorage(output: unknown) {
   try {
-    const serialized = JSON.stringify(output);
+    const serialized = stringifyJsonForStorage(output);
     if (serialized !== undefined) return serialized;
   } catch {
     // Fall through to a text representation for non-JSON values.
   }
-  return String(output);
+  return sanitizeStringForJsonStorage(String(output));
 }
 
 function legacyModelMessage(message: StoredSessionMessageForModelReplay): ModelMessage | null {
@@ -319,10 +319,51 @@ function toToolResultOutput(output: unknown): ToolResultPart["output"] {
 
 function toJsonValue(output: unknown): { ok: true; value: unknown } | { ok: false } {
   try {
-    const serialized = JSON.stringify(output);
+    const serialized = stringifyJsonForStorage(output);
     if (serialized === undefined) return { ok: false };
     return { ok: true, value: JSON.parse(serialized) };
   } catch {
     return { ok: false };
   }
+}
+
+function stringifyJsonForStorage(value: unknown) {
+  return JSON.stringify(value, (_key, nestedValue: unknown) => {
+    if (typeof nestedValue === "string") {
+      return sanitizeStringForJsonStorage(nestedValue);
+    }
+    return nestedValue;
+  });
+}
+
+function sanitizeStringForJsonStorage(value: string) {
+  return replaceLoneSurrogates(value).replace(
+    /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+    "\uFFFD",
+  );
+}
+
+function replaceLoneSurrogates(value: string) {
+  let output = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        output += value.slice(index, index + 2);
+        index += 1;
+      } else {
+        output += "\uFFFD";
+      }
+      continue;
+    }
+
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      output += "\uFFFD";
+      continue;
+    }
+
+    output += value.charAt(index);
+  }
+  return output;
 }
