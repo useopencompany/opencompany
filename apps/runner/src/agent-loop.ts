@@ -150,12 +150,12 @@ export { recordStepUsage, recordToolUsage } from "./usage-recorder";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
-// Load the session-start bundle context the runtime config needs: the agent's "hot memory" files
-// (agent/user.md, agent/memory.md) and its discovered personal skills (agent/skills/<id>/SKILL.md).
-// We read from agent_files (not the sandbox) because the runtime config is resolved before the
-// bundle materializes; this is what gives hot memory and personal skills their frozen-snapshot
-// behavior — in-session edits sync back at session end and surface next session. A missing/never-
-// written file resolves to undefined (empty-section path); malformed skills are skipped.
+// Load the session-start bundle context the runtime config needs: the agent's profile file
+// (agent/user.md) and its discovered personal skills (agent/skills/<id>/SKILL.md). We read from
+// agent_files (not the sandbox) because the runtime config is resolved before the bundle
+// materializes; this is what gives the profile and personal skills their frozen-snapshot behavior
+// — in-session edits sync back at session end and surface next session. A missing/never-written
+// file resolves to undefined (empty-section path); malformed skills are skipped.
 async function loadAgentBundleContext(
   db: RunContext["db"],
   workspaceId: string,
@@ -163,7 +163,6 @@ async function loadAgentBundleContext(
   agentPath: string | null,
 ): Promise<{
   userMemory?: string | undefined;
-  agentMemory?: string | undefined;
   personalSkills?: ResolvedSkillMetadata[];
 }> {
   if (!agentPath) return {};
@@ -183,7 +182,6 @@ async function loadAgentBundleContext(
   }
   return {
     userMemory: byPath.get(`${bundleDir}/user.md`),
-    agentMemory: byPath.get(`${bundleDir}/memory.md`),
     personalSkills: skills.map((skill) => skill.metadata),
   };
 }
@@ -343,7 +341,7 @@ async function runMessageWithContext(
     });
     // Memory-keeper mode: a `source: "memory"` session is an invisible background pass that runs
     // under the personal agent's own bundle but with a platform-owned system prompt appended and a
-    // restricted toolset. Keep the agent's model and the rest of `runtime` (file roots, hot memory,
+    // restricted toolset. Keep the agent's model and the rest of `runtime` (file roots, profile,
     // tool index) intact — only the framing and the tools change.
     const memoryKeeperRun = row.session.source === "memory";
     const enabledTools = memoryKeeperRun
@@ -1275,7 +1273,7 @@ async function runAfterSessionWithContext(
         ...runtime,
         tools: runtime.tools.filter((tool) => tool !== "delegate_to_agent"),
       },
-      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward in your hot-memory files — durable facts about the user in agent/user.md, durable environment/workflow lessons in agent/memory.md — but keep both tight (they load into every future session, ~3KB cap each); push longer-tail durable facts into structured memory instead. Skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
+      system: `${runtime.systemPrompt}\n\nThis is an internal after-session run. Do not address the user; any final text is stored internally and not shown in chat, so keep it brief. Capture anything worth carrying forward: durable facts about who the user is in your profile (agent/user.md), kept tight (it loads into every future session, ~3KB cap); every other durable fact (people, companies, projects, decisions, lessons) into structured memory via the memory tool. Skip the update if nothing is worth preserving. Use ./brain only for shared company knowledge in mounted Brain files.`,
       messages,
       tools,
       mcpContext: {

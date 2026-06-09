@@ -12,10 +12,9 @@ import { type SandboxHandle, sandboxLayout } from "./sandbox";
 const MAX_AGENT_BUNDLE_FILE_BYTES = MAX_BRAIN_FILE_BYTES;
 const MAX_AGENT_BUNDLE_MOUNT_FILES = MAX_BRAIN_MOUNT_FILES;
 const MAX_AGENT_BUNDLE_MOUNT_BYTES = MAX_BRAIN_MOUNT_BYTES;
-// Hot-memory files: always-present so the agent can read/edit them and so the runtime can
-// inject them into the system prompt every session (see resolveAgentRuntimeConfig). Created
-// empty when absent, exactly like a freshly-seeded scratchpad.
-const AGENT_MEMORY_PATH = "memory.md";
+// Profile file: always-present so the agent can read/edit it and so the runtime can inject it
+// into the system prompt every session (see resolveAgentRuntimeConfig). Created empty when
+// absent, exactly like a freshly-seeded scratchpad.
 const AGENT_USER_MEMORY_PATH = "user.md";
 const logger = createLogger({ service: "opencompany-runner", runtime: "server" });
 
@@ -70,7 +69,7 @@ export async function materializeAgentBundleForSession(input: {
     });
   }
 
-  for (const path of [AGENT_MEMORY_PATH, AGENT_USER_MEMORY_PATH]) {
+  for (const path of [AGENT_USER_MEMORY_PATH]) {
     if (mountedPaths.has(path)) continue;
     const contentHash = hashContent("");
     await input.sandbox.files.write(`${layout.agentRoot}/${path}`, "");

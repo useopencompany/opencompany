@@ -102,7 +102,7 @@ describe("materializeAgentBundleForSession", () => {
     );
   });
 
-  it("creates empty hot-memory files (memory.md + user.md) and records mounts when no rows exist", async () => {
+  it("creates the empty profile file (user.md) and records its mount when no rows exist", async () => {
     const db = createAgentBundleDb({
       selectResults: [[{ path: "agents/sales/sales.agent" }], []],
     });
@@ -120,16 +120,14 @@ describe("materializeAgentBundleForSession", () => {
       workdir: "/home/user/workspace",
     });
 
-    expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/memory.md", "");
     expect(sandbox.files.write).toHaveBeenCalledWith("/home/user/workspace/agent/user.md", "");
+    // memory.md is no longer auto-created — durable facts live in structured memory.
+    expect(sandbox.files.write).not.toHaveBeenCalledWith(
+      "/home/user/workspace/agent/memory.md",
+      "",
+    );
     expect(db.insertedValues).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          requestedPath: "agent/memory.md",
-          path: "agents/sales/memory.md",
-          baseHash: expect.any(String),
-          lastSyncedHash: expect.any(String),
-        }),
         expect.objectContaining({
           requestedPath: "agent/user.md",
           path: "agents/sales/user.md",

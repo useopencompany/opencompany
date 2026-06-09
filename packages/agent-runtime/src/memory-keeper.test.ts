@@ -53,7 +53,9 @@ describe("MEMORY_KEEPER_SYSTEM_PROMPT", () => {
   it("instructs the keeper on the core memory discipline", () => {
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("fetch_transcript");
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("agent/user.md");
-    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("agent/memory.md");
+    // Everything else durable routes to the single structured-memory store.
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).toContain("structured memory");
+    expect(MEMORY_KEEPER_SYSTEM_PROMPT).not.toContain("agent/memory.md");
     // Defaults to a no-op so trivial sessions cost nothing meaningful.
     expect(MEMORY_KEEPER_SYSTEM_PROMPT).toMatch(/NO update|nothing durable|do nothing/i);
     // Corrections are prioritized.

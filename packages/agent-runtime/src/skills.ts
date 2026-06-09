@@ -379,9 +379,9 @@ You have a persistent, structured memory under \`agent/memory/\` that survives a
 Manage it **only** through the \`memory\` tool — do not hand-edit files under \`agent/memory/\` with
 \`edit_file\`/\`write_file\`, and do not run the CLI yourself with \`shell\`; the \`memory\` tool enforces
 the structure, provenance, and links that keep memory trustworthy (and runs model-backed retrieval
-with credentials you never handle). (This structured tree is separate from your hot-memory files
-\`agent/user.md\` and \`agent/memory.md\`, which are small, always-loaded, and edited directly — use
-this tree for the deep, retrieved long tail, not for facts that should ride in every session.)
+with credentials you never handle). (This structured tree is separate from your profile
+\`agent/user.md\`, which is small, always-loaded, and edited directly to capture who your user is —
+use this tree for every other durable fact, the deep retrieved long tail.)
 
 Call the \`memory\` tool, passing the subcommand and flags in its \`args\` string:
 

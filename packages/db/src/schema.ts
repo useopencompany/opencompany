@@ -320,7 +320,7 @@ export const agentFiles = pgTable(
 //   - "agent_file" -> agentFiles row keyed by (workspaceId, repoPath)
 //   - "agent"      -> agents row keyed by sourceRef (agentId); re-serialized
 // `repoPath` is always the full repo-relative path (e.g. "brain/spec.md",
-// "agents/leo.agent", "agents/leo/memory.md").
+// "agents/leo.agent", "agents/leo/user.md").
 export const workspaceSyncJobs = pgTable(
   "workspace_sync_jobs",
   {

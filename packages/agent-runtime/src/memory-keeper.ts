@@ -7,7 +7,7 @@ import type { RuntimeToolName } from "./tools";
 // `source: "memory"` on the session row; the runner keys both overrides off that flag.
 
 // Appended to the personal agent's resolved system prompt (not a replacement — the file-root,
-// hot-memory, and tool-index context all still apply). Opinionated on purpose: most idle sessions
+// profile, and tool-index context all still apply). Opinionated on purpose: most idle sessions
 // should produce no memory write at all.
 export const MEMORY_KEEPER_SYSTEM_PROMPT = [
   "You are running as an invisible background MEMORY KEEPER. A conversation between this agent and its user just finished and went idle. You are not part of that conversation and the user will never see your output. Your only job is to update durable memory so the agent is sharper next time.",
@@ -16,9 +16,9 @@ export const MEMORY_KEEPER_SYSTEM_PROMPT = [
   "1. First call fetch_transcript with the session id you were given to read the full conversation. If you were not given a session id, you have nothing to do — stop.",
   "2. Decide what, if anything, is worth preserving. Most idle conversations need NO update. If nothing durable was learned, do nothing and end with a one-line internal note. Never record throwaway or one-off context (scheduling chatter, transient task state, anything that won't matter next session).",
   "3. Route what you keep:",
-  "   - Durable facts about the user (identity, preferences, communication style, goals) → agent/user.md.",
-  "   - Durable environment, conventions, and workflow lessons → agent/memory.md. Keep both tight; they load into every future session (~3KB cap each).",
-  "   - Long-tail facts about specific people, companies, projects, or decisions → structured memory via the memory tool: capture evidence first, then rewrite the object's compiled truth citing it ([^ev:id]).",
+  "   - Who the user is (identity, preferences, communication style, goals) → agent/user.md, the agent's profile. Keep it tight; it loads into every future session (~3KB cap). This is NOT a general facts store.",
+  "   - Every other durable fact — specific people, companies, projects, decisions, lessons, conventions, workflows → structured memory via the memory tool: capture evidence first, then rewrite the object's compiled truth citing it ([^ev:id]).",
+  "   - A repeatable procedure worth reusing → a personal skill under agent/skills/ (read the skill-creator skill first).",
   "4. Treat user corrections as HIGH PRIORITY: if the user corrected a prior belief or the agent's mistake, update or replace the stale memory first so it stops being repeated.",
   "5. Before adding structured facts, query memory so you update existing objects instead of creating duplicates.",
   "",
@@ -27,8 +27,8 @@ export const MEMORY_KEEPER_SYSTEM_PROMPT = [
 
 // The minimal toolset a memory-keeper run is allowed to use. The runner intersects the personal
 // agent's resolved tools with this allowlist, so the keeper can read the transcript, recall and
-// query memory, and write hot/structured memory — but cannot delegate, ask the user, run coding
-// agents, or reach search/social/hosted tools.
+// query memory, and write its profile and structured memory — but cannot delegate, ask the user,
+// run coding agents, or reach search/social/hosted tools.
 export const MEMORY_KEEPER_RUNTIME_TOOLS: ReadonlySet<RuntimeToolName> = new Set([
   "memory",
   "recall",
