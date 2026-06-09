@@ -26,10 +26,21 @@ import { normalizeReasoningSummary } from "./stream-helpers";
 import { createToolSet, pickRuntimeTools } from "./tool-dispatcher";
 import type { ToolStartCoordinator } from "./tool-start-coordinator";
 
-export const MAX_MODEL_STEPS = 16;
+export const MAX_MODEL_STEPS = 32;
+export const SOFT_FINALIZATION_STEP = MAX_MODEL_STEPS - 1;
+const SOFT_FINALIZATION_SYSTEM_INSTRUCTION =
+  "You are on the final reserved step for this turn. Do not call any more tools. Use the tool results and conversation so far to provide the best final answer now. Summarize what was done, clearly state any incomplete work or uncertainty, and avoid repeating side effects.";
 const INCOMPLETE_TURN_REASON = "announced_unexecuted_next_action" as const;
 const INCOMPLETE_TURN_REASON_DETAIL =
   "Model stopped after announcing a next action it never took (trailing text ends mid-task).";
+
+export function softFinalizationStepSettings(input: { stepNumber: number; system: string }) {
+  if (input.stepNumber < SOFT_FINALIZATION_STEP) return {};
+  return {
+    activeTools: [],
+    system: `${input.system}\n\n${SOFT_FINALIZATION_SYSTEM_INSTRUCTION}`,
+  };
+}
 
 export async function streamAssistantResponse(input: {
   ctx: RunContext;
@@ -147,6 +158,8 @@ export async function streamAssistantResponse(input: {
           messages: input.messages,
           tools: selectedTools,
           stopWhen: [ai.stepCountIs(MAX_MODEL_STEPS), ...(input.extraStopConditions ?? [])],
+          prepareStep: ({ stepNumber }) =>
+            softFinalizationStepSettings({ stepNumber, system: input.system }),
           abortSignal: input.ctx.controller.signal,
           includeRawChunks: input.runtime.model.reasoningExposure === "raw",
           ...(input.runtime.model.providerOptions
