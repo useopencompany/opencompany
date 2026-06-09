@@ -122,7 +122,7 @@ jobs:
                 return;
               }
               core.info(run ? `CI status: ${run.status}…` : "CI check not reported yet, waiting…");
-              await sleep(20000);
+              await sleep(10000);
             }
             core.warning(`Timed out waiting for CI "${checkName}" on ${sha.slice(0, 7)} — skipping preview.`);
             core.setOutput("passed", "false");

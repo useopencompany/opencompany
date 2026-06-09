@@ -163,7 +163,7 @@ async function main() {
     DURABLE_STREAMS_DEV_HOST: "0.0.0.0",
     DURABLE_STREAMS_TOKEN: streamsToken,
   });
-  const streams = await ensureService(render, {
+  const streamsPromise = ensureService(render, {
     name: names.streamsService,
     env: streamsEnv,
     buildSpec: (env) =>
@@ -183,7 +183,7 @@ async function main() {
     electricSecret,
     storageDir: electricStorageDir,
   });
-  const electric = await ensureService(render, {
+  const electricPromise = ensureService(render, {
     name: names.electricService,
     env: electricEnv,
     buildSpec: (env) =>
@@ -197,6 +197,9 @@ async function main() {
       }),
   });
 
+  // Streams and Electric are independent. Start them together, then start the runner
+  // as soon as Streams has a URL; Electric can keep deploying in parallel.
+  const streams = await streamsPromise;
   const runnerEnv = runnerServiceEnv({
     pr,
     directDatabaseUrl: directUrl,
@@ -210,7 +213,7 @@ async function main() {
     streamsToken,
     allowedOrigins: names.aliasUrl,
   });
-  const runner = await ensureService(render, {
+  const runnerPromise = ensureService(render, {
     name: names.runnerService,
     env: runnerEnv,
     buildSpec: (env) =>
@@ -224,6 +227,7 @@ async function main() {
         env,
       }),
   });
+  const [electric, runner] = await Promise.all([electricPromise, runnerPromise]);
 
   // 4) Manifest + outputs for the workflow (Vercel deploy + GitHub Deployment record).
   const manifest = buildManifest({
