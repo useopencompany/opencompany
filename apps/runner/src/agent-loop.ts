@@ -57,6 +57,7 @@ import {
 import {
   assertTurnComplete,
   detectIncompleteTurn,
+  isToolStepLimitExceeded,
   persistAssistantCompletion,
   streamAssistantResponse,
 } from "./model-turn";
@@ -808,12 +809,13 @@ async function executeStreamingTurn(input: {
   await input.checkAbort({ force: true });
 
   let incompleteTurn: ReturnType<typeof detectIncompleteTurn> = null;
+  const exceededToolStepLimit = isToolStepLimitExceeded(streamResult);
   if (input.emptyOutputFallback !== undefined) {
     if (!assistantContent && assistantReplayParts.length === 0) {
       assistantContent = input.emptyOutputFallback;
       appendAssistantTextPart(assistantReplayParts, assistantContent);
     }
-  } else {
+  } else if (!exceededToolStepLimit) {
     assertTurnComplete(streamResult);
     // Only flag user-facing turns; internal after-session runs are exempt.
     if (!input.internal) incompleteTurn = detectIncompleteTurn(streamResult);
@@ -830,6 +832,10 @@ async function executeStreamingTurn(input: {
     reasoningContent,
     internal: input.internal,
   });
+
+  if (input.emptyOutputFallback === undefined && exceededToolStepLimit) {
+    assertTurnComplete(streamResult);
+  }
 
   if (incompleteTurn) {
     // Surface the abandoned turn distinctly so unattended/scheduled runs don't
