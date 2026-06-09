@@ -19,6 +19,10 @@ export type SidebarSessionPayload = {
   updatedAt: string;
   // ISO timestamp the current user starred this session, or null if unstarred.
   starredAt: string | null;
+  // True when the agent finished a turn (completed/failed/awaiting_*) more recently than
+  // the user last viewed this session. Drives the sidebar's "unseen" blue dot. Derived
+  // from agent_sessions.last_turn_finished_at vs last_seen_at via isSessionUnseen.
+  unseen: boolean;
 };
 
 export type AgentSessionPayload = {
@@ -136,6 +140,23 @@ export function serializeSidebarSession(
   };
 }
 
+/**
+ * Single source of truth for the sidebar "unseen" rule: the agent has yielded a turn
+ * (lastTurnFinishedAt set) more recently than the user last viewed it (lastSeenAt).
+ * Accepts Date or ISO string so the SSR loader and the client Electric selector share
+ * one implementation; parsing via Date avoids any timestamp string-format assumption.
+ */
+export function isSessionUnseen(
+  lastTurnFinishedAt: Date | string | null,
+  lastSeenAt: Date | string | null,
+): boolean {
+  if (lastTurnFinishedAt == null) return false;
+  const finished = new Date(lastTurnFinishedAt).getTime();
+  if (Number.isNaN(finished)) return false;
+  if (lastSeenAt == null) return true;
+  return new Date(lastSeenAt).getTime() < finished;
+}
+
 export function serializeAgentSessionDetail(
   detail: AgentSessionDetailSerializable,
 ): AgentSessionDetailPayload {
@@ -201,6 +222,9 @@ export function sidebarSessionFromDetail(detail: AgentSessionDetailPayload): Sid
     // from detail keeps whatever the cached sidebar entry already had (see
     // upsertSidebarSession), and is treated as unstarred when it is brand new.
     starredAt: null,
+    // Projected from detail only for freshly created/submitted sessions (about to run),
+    // never a finished-but-unseen turn; the live Electric row corrects this if it ever is.
+    unseen: false,
   };
 }
 
@@ -250,6 +274,8 @@ export function parseSidebarSessionPayload(value: unknown): SidebarSessionPayloa
     createdAt: readStringField(record, "createdAt"),
     updatedAt: readStringField(record, "updatedAt"),
     starredAt: readNullableStringField(record, "starredAt"),
+    // Tolerate payloads serialized before this field existed: absent ⇒ not unseen.
+    unseen: readOptionalBooleanField(record, "unseen") ?? false,
   };
 }
 
@@ -377,8 +403,29 @@ function parseSessionMessage(value: unknown): SessionMessage {
   if ("thinkingDurationSeconds" in record) {
     message.thinkingDurationSeconds = readOptionalNumberField(record, "thinkingDurationSeconds");
   }
+  if ("attachments" in record && record.attachments !== undefined) {
+    message.attachments = parseSessionMessageAttachments(record.attachments);
+  }
 
   return message;
+}
+
+function parseSessionMessageAttachments(
+  value: unknown,
+): NonNullable<SessionMessage["attachments"]> {
+  return assertArray(value, "attachments").map((item) => {
+    const record = assertRecord(item, "attachment");
+    const kind = readStringField(record, "kind");
+    if (kind !== "image" && kind !== "pdf" && kind !== "text") {
+      throw new Error("Invalid attachment kind.");
+    }
+    return {
+      id: readStringField(record, "id"),
+      kind,
+      mediaType: readStringField(record, "mediaType"),
+      filename: readStringField(record, "filename"),
+    };
+  });
 }
 
 function parseRuntimeEventPayload(value: unknown): RuntimeEvent {

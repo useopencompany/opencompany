@@ -4,7 +4,14 @@ import { createLeaseDb, usage } from "./agent-loop-test-support";
 import { appendRuntimeEvent, publishTransientRuntimeEvent } from "./events";
 import { buildAssistantModelMessage } from "./model-messages";
 import { collectAssistantStream } from "./model-stream-runner";
-import { assertTurnComplete, detectIncompleteTurn, MAX_MODEL_STEPS } from "./model-turn";
+import {
+  assertTurnComplete,
+  detectIncompleteTurn,
+  isToolStepLimitExceeded,
+  MAX_MODEL_STEPS,
+  SOFT_FINALIZATION_STEP,
+  softFinalizationStepSettings,
+} from "./model-turn";
 import {
   createRunControlGate,
   RunAbortError,
@@ -764,21 +771,46 @@ describe("stream error handling", () => {
   });
 
   it("rejects turn completion when the model is still requesting tools at the step cap", () => {
-    expect(() =>
-      assertTurnComplete({
-        assistantContent: "Partial progress.",
-        assistantReplayParts: [
-          {
-            type: "tool-call",
-            toolCallId: "call_123",
-            toolName: "list_files",
-            input: {},
-          },
-        ],
-        lastStepEndedWithToolCalls: true,
-        stepCount: MAX_MODEL_STEPS,
-      }),
-    ).toThrow(ToolStepLimitExceededError);
+    const streamResult = {
+      assistantContent: "Partial progress.",
+      assistantReplayParts: [
+        {
+          type: "tool-call" as const,
+          toolCallId: "call_123",
+          toolName: "list_files",
+          input: {},
+        },
+      ],
+      lastStepEndedWithToolCalls: true,
+      stepCount: MAX_MODEL_STEPS,
+    };
+
+    expect(isToolStepLimitExceeded(streamResult)).toBe(true);
+    expect(() => assertTurnComplete(streamResult)).toThrow(ToolStepLimitExceededError);
+  });
+
+  it("uses a 32-step hard cap with a reserved finalization step", () => {
+    expect(MAX_MODEL_STEPS).toBe(32);
+    expect(SOFT_FINALIZATION_STEP).toBe(31);
+  });
+
+  it("keeps normal step settings until the reserved finalization step", () => {
+    expect(softFinalizationStepSettings({ stepNumber: 30, system: "Base system." })).toEqual({});
+  });
+
+  it("disables tools and appends final-answer guidance on the reserved finalization step", () => {
+    const settings = softFinalizationStepSettings({
+      stepNumber: SOFT_FINALIZATION_STEP,
+      system: "Base system.",
+    });
+
+    expect(settings).toMatchObject({
+      activeTools: [],
+      system: expect.stringContaining("Base system."),
+    });
+    const system = "system" in settings ? settings.system : "";
+    expect(system).toContain("Do not call any more tools");
+    expect(system).toContain("provide the best final answer now");
   });
 
   it("allows normal turns that end with final assistant text", () => {

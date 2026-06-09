@@ -18,6 +18,7 @@ import {
   triggerAgentApprovalResume,
   triggerAgentQuestionResume,
 } from "@/lib/agent-sessions/message-runner";
+import { ORPHANED_RUN_REAP_CRON, reapOrphanedRunningSessions } from "@/lib/agent-sessions/reaper";
 import { callRunner } from "@/lib/agent-sessions/runner";
 import { BRAIN_SYNC_DELAY_MS } from "@/lib/brain/jobs";
 import { SIGNUP_WELCOME_EMAIL_REQUESTED_EVENT } from "@/lib/email/events";
@@ -25,6 +26,7 @@ import { type SignupWelcomeEmailInput, sendSignupWelcomeEmail } from "@/lib/emai
 import { inngest } from "@/lib/inngest/client";
 import { runProvisionSlackSupport } from "@/lib/inngest/provision-slack-support";
 import { SLACK_SUPPORT_CHANNEL_REQUESTED_EVENT } from "@/lib/slack/events";
+import { runSlackSupportRecoverySweep, SLACK_SUPPORT_RECOVERY_CRON } from "@/lib/slack/recovery";
 import {
   sweepWorkspaceSyncOutbox as runWorkspaceSyncOutboxSweep,
   SYNC_OUTBOX_SWEEP_CRON,
@@ -72,6 +74,25 @@ export const sweepWorkspaceSyncOutbox = inngest.createFunction(
   },
   async ({ step }) => {
     return runWorkspaceSyncOutboxSweep(step);
+  },
+);
+
+// Backstop reaper: a runner that dies mid-turn (crash, redeploy, OOM) leaves its
+// session stranded in `running`/`aborting` with an expired run lease — nothing else
+// transitions it, so the UI spins forever. This sweep fails those sessions so the
+// turn ends and the next message can cleanly reclaim the (already-expired) lease.
+export const sweepOrphanedRunningSessions = inngest.createFunction(
+  {
+    id: "sweep-orphaned-running-sessions",
+    name: "Reap orphaned running sessions",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: ORPHANED_RUN_REAP_CRON },
+  },
+  async ({ step }) => {
+    return step.run("reap orphaned running sessions", async () => {
+      return reapOrphanedRunningSessions();
+    });
   },
 );
 
@@ -444,9 +465,26 @@ export const provisionSlackSupportChannel = inngest.createFunction(
     >[0]),
 );
 
+// Hourly recovery: re-dispatch provisioning for workspaces stuck in `failed`/long-`pending`
+// so a transient failure (or onboarding before SLACK_SUPPORT_* was configured) self-heals.
+export const sweepFailedSlackSupportChannels = inngest.createFunction(
+  {
+    id: "sweep-failed-slack-support-channels",
+    name: "Recover failed Slack support channels",
+    retries: 3,
+    concurrency: { limit: 1 },
+    triggers: { cron: SLACK_SUPPORT_RECOVERY_CRON },
+  },
+  async ({ step }) =>
+    runSlackSupportRecoverySweep(
+      step as unknown as Parameters<typeof runSlackSupportRecoverySweep>[0],
+    ),
+);
+
 export const inngestFunctions = [
   syncWorkspaceToGitHub,
   sweepWorkspaceSyncOutbox,
+  sweepOrphanedRunningSessions,
   startAgentSession,
   runAgentSessionMessage,
   generateAgentSessionTitle,
@@ -459,4 +497,5 @@ export const inngestFunctions = [
   sweepExpiredSessionQuestions,
   sendSignupWelcome,
   provisionSlackSupportChannel,
+  sweepFailedSlackSupportChannels,
 ];

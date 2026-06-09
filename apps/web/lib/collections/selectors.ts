@@ -4,6 +4,7 @@ import type {
   RelatedSessionPayload,
   SidebarSessionPayload,
 } from "@/lib/agent-sessions/payload";
+import { isSessionUnseen } from "@/lib/agent-sessions/payload";
 import { type AgentListItemPayload, normalizeAgentConfig } from "@/lib/agents/payload";
 import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
 
@@ -73,6 +74,7 @@ export function deriveSidebarSessions(
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       starredAt: starredAtBySession.get(row.id) ?? null,
+      unseen: isSessionUnseen(row.last_turn_finished_at, row.last_seen_at),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 

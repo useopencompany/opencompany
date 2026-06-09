@@ -19,6 +19,7 @@
     "@opencompany/db": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@sentry/bun": "^10.53.1",
+    "@vercel/blob": "^2.4.0",
     "ai": "^6.0.189",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",

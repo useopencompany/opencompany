@@ -1,15 +1,17 @@
 import { getDb } from "@opencompany/db/client";
 import {
   agentSessionEvents,
+  agentSessionMessageAttachments,
   agentSessionMessages,
   agentSessions,
   agentSessionUsage,
   agents,
   sessionStars,
 } from "@opencompany/db/schema";
-import { and, asc, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
+  isSessionUnseen,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
@@ -38,6 +40,8 @@ export async function loadSidebarSessionsForWorkspace(
     createdAt: agentSessions.createdAt,
     updatedAt: agentSessions.updatedAt,
     starredAt: sessionStars.starredAt,
+    lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+    lastSeenAt: agentSessions.lastSeenAt,
   };
 
   const visibilityFilter = and(
@@ -78,7 +82,9 @@ export async function loadSidebarSessionsForWorkspace(
 
   return Array.from(byId.values())
     .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
-    .map(serializeSidebarSession);
+    .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+      serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
+    );
 }
 
 export async function loadAgentSessionDetailForWorkspace(
@@ -349,6 +355,42 @@ export async function loadAgentSessionDetailForWorkspace(
     ...event,
     createdAt: event.createdAt.toISOString(),
   }));
+  // Batch-load attachment metadata for these messages (only user messages can carry
+  // attachments, but we key by id so the join is a single query). Only the 4 client-safe
+  // fields are projected — blobUrl/blobPathname/sizeBytes never reach the browser; the UI
+  // fetches the bytes through /api/attachments/[id].
+  const messageIds = messages.map((message) => message.id);
+  const attachmentRows =
+    messageIds.length > 0
+      ? await db
+          .select({
+            id: agentSessionMessageAttachments.id,
+            messageId: agentSessionMessageAttachments.messageId,
+            kind: agentSessionMessageAttachments.kind,
+            mediaType: agentSessionMessageAttachments.mediaType,
+            filename: agentSessionMessageAttachments.filename,
+          })
+          .from(agentSessionMessageAttachments)
+          .where(inArray(agentSessionMessageAttachments.messageId, messageIds))
+      : [];
+  const attachmentsByMessageId = new Map<
+    string,
+    Array<{ id: string; kind: "image" | "pdf" | "text"; mediaType: string; filename: string }>
+  >();
+  for (const row of attachmentRows) {
+    const attachment = {
+      id: row.id,
+      kind: row.kind,
+      mediaType: row.mediaType,
+      filename: row.filename,
+    };
+    const existing = attachmentsByMessageId.get(row.messageId);
+    if (existing) {
+      existing.push(attachment);
+    } else {
+      attachmentsByMessageId.set(row.messageId, [attachment]);
+    }
+  }
   const messagesWithUsage = messages.map((message) => {
     const outputReasoningTokens = usageByMessageId.get(message.id)?.outputReasoningTokens ?? 0;
     const sessionMessage = {
@@ -357,10 +399,12 @@ export async function loadAgentSessionDetailForWorkspace(
       createdAt: message.createdAt.toISOString(),
       completedAt: message.completedAt?.toISOString() ?? null,
     };
+    const attachments = attachmentsByMessageId.get(message.id);
     return {
       ...message,
       outputReasoningTokens,
       thinkingDurationSeconds: computeThinkingDurationSeconds(sessionMessage, eventsWithCreatedAt),
+      ...(attachments ? { attachments } : {}),
     };
   });
   const toolUsage = rollup.toolUsage;

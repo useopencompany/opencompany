@@ -122,6 +122,61 @@ Set these in Vercel Production.
 | `NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL` | No | Browser log level. |
 | `NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN` | No | Browser and fallback server error DSN. |
 
+## Slack support channel (Slack Connect)
+
+`SLACK_SUPPORT_*` power the post-onboarding Slack Connect channel (see the Vercel Web table
+above). They live in **Infisical `prod` + `/web`** (synced to Vercel `opencompany-web`
+Production — *not* `opencompany-dashboard`), because the Inngest provisioning function runs on
+the web deployment.
+
+Setup checklist:
+
+1. Create a Slack app for OC's own support workspace (api.slack.com/apps → From scratch).
+2. Bot Token Scopes: `groups:write` (create the private channel, invite members, stamp the
+   ownership purpose), `groups:read` (adopt this workspace's own channel on a `name_taken`
+   retry instead of duplicating), `chat:write` (intro message), `conversations.connect:write`
+   (the external customer invite).
+3. Install to the workspace → copy the Bot User OAuth Token (`xoxb-…`) → `SLACK_SUPPORT_BOT_TOKEN`.
+4. `SLACK_SUPPORT_TEAM_ID` = the host workspace team id (`T…`); derive via `auth.test`.
+5. `SLACK_SUPPORT_MEMBER_IDS` = comma-separated `U…` of the OC support people to auto-add to
+   every customer channel (private channels are only visible to their members).
+6. The host Slack workspace must be on a **paid plan** (Pro or a Pro trial). Slack Connect
+   shared channels are unavailable on Free — `conversations.inviteShared` errors `not_paid`.
+
+If `SLACK_SUPPORT_BOT_TOKEN` is empty the feature is disabled: provisioning no-ops to `failed`
+and the workspace-home card degrades to the booking fallback (onboarding never breaks).
+
+Channel naming: each customer channel is `<customer-slug>-<id8>-x-opencompany` (the
+`-x-opencompany` convention plus a short per-workspace suffix so two same-named customers
+practically never collide). Ownership is also stamped in the channel purpose
+(`opencompany-support:<workspaceId>`) and checked before adopting on a retry, so a channel is
+never hijacked across workspaces.
+
+Recovery: an hourly Inngest cron (`sweep-failed-slack-support-channels`) re-dispatches
+provisioning for workspaces stuck in `failed` or `pending` — so a transient failure, or a
+workspace onboarded *before* `SLACK_SUPPORT_*` was configured, self-heals on the next sweep
+(no manual backfill). It waits ~15 min before retrying a failure (so the provisioning function's
+own Inngest retries run first), gives up on failures older than 7 days, and drains oldest-first.
+
+### Testing & operations
+
+- **Delivery:** `conversations.inviteShared` returns no shareable `url`, so Slack delivers the
+  invite itself — by **email** to recipients without a Slack account, **in-app** (under "Slack
+  Connect" invitations) to those who have one. The card therefore says "check your email"; both
+  paths reach the customer. The invitee chooses which of *their* Slack orgs to file the shared
+  channel into.
+- **Visibility:** the channel is private — only its members see it. `SLACK_SUPPORT_MEMBER_IDS`
+  must list the OC support people, or no human (only the bot) will see the channels. Being a
+  workspace member is not enough.
+- **Testing a fresh onboarding:** a Google-Workspace **plus-alias** (`you+test@domain`) receives
+  mail but is **not** a Google account, so it can't complete Google SSO login. To re-test with a
+  real account, reset the user (full delete is blocked by an FK): `delete from
+  workspace_slack_channels where workspace_id=:ws; delete from onboarding_responses where
+  user_id=:u; delete from agents where workspace_id=:ws and path='agents/leo/leo.agent';` then
+  re-onboard.
+- **Sandbox:** don't test against the real customer-facing Slack in a way that spams colleagues —
+  use a Pro-trial workspace and set `SLACK_SUPPORT_MEMBER_IDS` to just yourself.
+
 ## Render Runner
 
 Set these in the Render `opencompany-runner` service.

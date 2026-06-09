@@ -1,0 +1,132 @@
+"use client";
+
+import type { AttachmentKind } from "@opencompany/agent-runtime";
+import { upload } from "@vercel/blob/client";
+import { FileText, X } from "lucide-react";
+// (AttachmentCard is also imported by SessionView for the sent-message thread render.)
+
+export type PendingAttachment = {
+  id: string;
+  filename: string;
+  mediaType: string;
+  kind: AttachmentKind;
+  sizeBytes: number;
+  status: "uploading" | "ready" | "error";
+  previewUrl?: string;
+  blobPathname?: string;
+  blobUrl?: string;
+  error?: string;
+};
+
+export async function uploadAttachment(input: {
+  id: string;
+  file: File;
+  workspaceId: string;
+  sessionId: string;
+}): Promise<{ blobPathname: string; blobUrl: string }> {
+  const safeName = input.file.name.replace(/[^\w.\-]+/g, "_") || "file";
+  const pathname = `workspace/${input.workspaceId}/sessions/${input.sessionId}/${input.id}-${safeName}`;
+  // PRIVATE Blob store: `access` is required (BlobAccessType = "public" | "private")
+  // in @vercel/blob@2.4.0. The token is minted by /api/upload (handleUpload).
+  const blob = await upload(pathname, input.file, {
+    access: "private",
+    handleUploadUrl: "/api/upload",
+    contentType: input.file.type,
+  });
+  return { blobPathname: blob.pathname, blobUrl: blob.url };
+}
+
+// Short type label shown under the filename (ChatGPT-style file card). Prefer the extension
+// (PNG, PDF, TS, …) since it's the most recognizable; fall back to the kind.
+function attachmentTypeLabel(kind: AttachmentKind, filename: string): string {
+  const ext = filename.includes(".") ? filename.split(".").pop()?.toUpperCase() : undefined;
+  if (ext && ext.length <= 5) return ext;
+  if (kind === "image") return "Image";
+  if (kind === "pdf") return "PDF";
+  return "Text";
+}
+
+// One compact, uniform attachment card — used both in the composer (with a remove button +
+// upload status) and in the sent message thread (wrapped in a link). Images show a small
+// thumbnail; everything else shows a file icon. Fixed size so it never overflows or reflows.
+export function AttachmentCard({
+  kind,
+  filename,
+  src,
+  status,
+  error,
+  onRemove,
+}: {
+  kind: AttachmentKind;
+  filename: string;
+  /** Thumbnail source for images (object URL in the composer, served URL in the thread). */
+  src?: string | undefined;
+  status?: "uploading" | "ready" | "error" | undefined;
+  error?: string | undefined;
+  onRemove?: (() => void) | undefined;
+}) {
+  const subtitle =
+    status === "uploading"
+      ? "Uploading…"
+      : status === "error"
+        ? (error ?? "Upload failed")
+        : attachmentTypeLabel(kind, filename);
+
+  return (
+    <div className="group/att relative flex w-[200px] items-center gap-2.5 rounded-xl border border-ink-subtle/30 bg-surface px-2.5 py-2">
+      {kind === "image" && src ? (
+        // eslint-disable-next-line @next/next/no-img-element -- thumbnail of a blob:/served URL; next/image can't optimize these.
+        <img src={src} alt={filename} className="h-9 w-9 shrink-0 rounded-md object-cover" />
+      ) : (
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-surface-muted text-ink-muted">
+          <FileText size={16} strokeWidth={1.75} />
+        </div>
+      )}
+      <div className="min-w-0 flex-1 text-left">
+        <div className="truncate text-[12.5px] font-medium text-ink">{filename}</div>
+        <div className={`text-[11px] ${status === "error" ? "text-danger" : "text-ink-subtle"}`}>
+          {subtitle}
+        </div>
+      </div>
+      {onRemove ? (
+        <button
+          type="button"
+          aria-label={`Remove ${filename}`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRemove();
+          }}
+          className="-mr-0.5 shrink-0 rounded p-0.5 text-ink-muted transition-opacity hover:text-ink sm:opacity-0 sm:group-hover/att:opacity-100"
+        >
+          <X size={14} strokeWidth={2} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function ComposerAttachments({
+  attachments,
+  onRemove,
+}: {
+  attachments: PendingAttachment[];
+  onRemove: (id: string) => void;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2 px-1 pb-2">
+      {attachments.map((att) => (
+        <AttachmentCard
+          key={att.id}
+          kind={att.kind}
+          filename={att.filename}
+          src={att.previewUrl}
+          status={att.status}
+          error={att.error}
+          onRemove={() => onRemove(att.id)}
+        />
+      ))}
+    </div>
+  );
+}

@@ -379,6 +379,13 @@ export const agentSessions = pgTable(
     lastError: text("last_error"),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     sandboxTerminatedAt: timestamp("sandbox_terminated_at", { withTimezone: true }),
+    // When the agent last yielded control back to the user (turn completed/failed or
+    // parked for approval/input) — set at the run-lease finish chokepoint, NOT on abort.
+    // Compared against lastSeenAt to derive the sidebar's "unseen" blue dot.
+    lastTurnFinishedAt: timestamp("last_turn_finished_at", { withTimezone: true }),
+    // When the current user last viewed this session. Written by the web (markSessionSeen);
+    // deliberately does NOT touch updatedAt so viewing never reshuffles sidebar recency.
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -550,6 +557,41 @@ export const agentSessionMessages = pgTable(
     ),
     responseToMessageIdx: uniqueIndex("agent_session_messages_response_to_message_idx").on(
       table.responseToMessageId,
+    ),
+  }),
+);
+
+// User-uploaded attachments for a session message (images, PDFs, and text/code files).
+// References to Vercel Blob objects only — bytes live in the private Blob store, never in
+// Postgres. Cascade-deleted with the message; the blob objects are deleted explicitly in
+// app code.
+export const agentSessionMessageAttachments = pgTable(
+  "agent_session_message_attachments",
+  {
+    id: text("id").primaryKey(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => agentSessionMessages.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"image" | "pdf" | "text">().notNull(),
+    mediaType: text("media_type").notNull(),
+    filename: text("filename").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    blobPathname: text("blob_pathname").notNull(),
+    blobUrl: text("blob_url").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    messageIdx: index("agent_session_message_attachments_message_idx").on(table.messageId),
+    sessionIdx: index("agent_session_message_attachments_session_idx").on(table.sessionId),
+    kindCheck: check(
+      "agent_session_message_attachments_kind_check",
+      sql`${table.kind} IN ('image', 'pdf', 'text')`,
     ),
   }),
 );

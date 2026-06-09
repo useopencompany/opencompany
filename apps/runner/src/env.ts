@@ -21,9 +21,24 @@ export type RunnerEnv = {
   e2bTemplate: string | undefined;
   ampE2bTemplate: string | undefined;
   e2bSandboxIdleTimeoutMs: number;
+  blobReadWriteToken?: string | undefined;
+  // Wall-clock ceiling for a single opencode_coder delegation. Large monorepo tasks routinely
+  // exceed the old hard 10 minutes; tunable per environment. On timeout the run no longer throws
+  // away its work — the partial diff + resumable opencode session id are surfaced (opencode-tool.ts).
+  // The job lease TTL (jobs.ts) must comfortably exceed this so a long run is not re-claimed.
+  opencodeTimeoutMs: number;
   // Kill switch for the model-based deferred-tool argument repair layer (Layer 3). Deterministic
   // validation + coercion always run; this only gates the small-model fallback. Default on.
   toolArgRepairEnabled: boolean;
+  // Delivery-lease TTL for runner jobs. The lease heartbeats every 5s while a job runs, so this only
+  // matters when the heartbeat stops (deploy, instance recycle, GC, network blip). The old 90s was
+  // shorter than such gaps during a long blocking tool call, letting another instance re-claim the
+  // job and replay the whole turn (double model + opencode billing). Sized to absorb a normal deploy.
+  jobLeaseTtlMs: number;
+  // Hard ceiling on how many times a job may be re-claimed while its execution (run) lease is busy
+  // elsewhere. Lease-busy re-claims are normally deferred indefinitely; this caps the runaway case
+  // (one job hit 17) by giving up once the in-flight run clearly owns the message.
+  jobMaxLeaseBusyAttempts: number;
   workerConcurrency: number;
   port: number;
   allowedOrigins: string[];
@@ -48,7 +63,11 @@ export function loadEnv(): RunnerEnv {
     e2bTemplate: process.env.OPENCOMPANY_E2B_TEMPLATE || undefined,
     ampE2bTemplate: optionalEnv("OPENCOMPANY_AMP_E2B_TEMPLATE"),
     e2bSandboxIdleTimeoutMs: optionalPositiveIntegerEnv("RUNNER_E2B_IDLE_TIMEOUT_MS", 30_000),
+    blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
+    opencodeTimeoutMs: optionalPositiveIntegerEnv("RUNNER_OPENCODE_TIMEOUT_MS", 1_200_000),
     toolArgRepairEnabled: optionalBooleanEnv("RUNNER_TOOL_ARG_REPAIR_ENABLED", true),
+    jobLeaseTtlMs: optionalPositiveIntegerEnv("RUNNER_JOB_LEASE_TTL_MS", 300_000),
+    jobMaxLeaseBusyAttempts: optionalPositiveIntegerEnv("RUNNER_JOB_MAX_LEASE_BUSY_ATTEMPTS", 10),
     // Max parallel sessions this instance runs. Sessions are I/O-bound (mostly waiting on
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not

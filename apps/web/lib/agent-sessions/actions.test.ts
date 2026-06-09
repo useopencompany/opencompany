@@ -11,6 +11,7 @@ import {
   triggerAgentApprovalResume,
   triggerAgentMessageRun,
 } from "@/lib/agent-sessions/message-runner";
+import { TOOL_STEP_LIMIT_EXCEEDED_MESSAGE } from "@/lib/agent-sessions/resumable";
 import { currentWorkspace } from "@/lib/auth";
 import {
   continueInterruptedSession,
@@ -21,10 +22,17 @@ import {
   submitAgentSessionMessage,
 } from "./actions";
 
-vi.mock("@opencompany/agent-runtime", () => ({
-  newAgentSessionId: vi.fn(),
-  newAgentSessionMessageId: vi.fn(),
-}));
+vi.mock(import("@opencompany/agent-runtime"), async (importOriginal) => {
+  const actual = await importOriginal();
+  // Keep the pure attachment helpers (catalog lookup, MIME/size validation, limit) real so
+  // server-side re-validation is exercised against the actual rules; only the id factories
+  // are stubbed so tests can assert on deterministic ids.
+  return {
+    ...actual,
+    newAgentSessionId: vi.fn(),
+    newAgentSessionMessageId: vi.fn(),
+  };
+});
 
 vi.mock("@opencompany/billing", () => ({
   hasPositiveWorkspaceBalance: vi.fn(),
@@ -236,6 +244,7 @@ describe("createAgentSession", () => {
       createdAt: CREATED_AT.toISOString(),
       updatedAt: CREATED_AT.toISOString(),
       starredAt: null,
+      unseen: false,
     });
     expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
@@ -540,6 +549,7 @@ describe("continueInterruptedSession", () => {
     agentId: "agt_123",
     status: "interrupted",
     runLeaseId: null,
+    lastError: null,
     modelProvider: "vercel-ai-gateway",
     modelName: "openai/gpt-5.4-mini",
   };
@@ -619,6 +629,64 @@ describe("continueInterruptedSession", () => {
       messageId: "msg_continue",
       workspaceId: "wks_123",
     });
+  });
+
+  it("continues failed sessions that stopped at the tool-step limit", async () => {
+    const { db, values } = dbForContinue({
+      ...interruptedSession,
+      status: "failed",
+      lastError: TOOL_STEP_LIMIT_EXCEEDED_MESSAGE,
+    });
+    getDbMock.mockReturnValue(db);
+
+    const result = await continueInterruptedSession("ses_123");
+
+    expect(result).toEqual({ ok: true, messageId: "msg_continue" });
+    const insertedMessage = values.mock.calls[0]?.[0];
+    expect(insertedMessage).toMatchObject({
+      content: "Continue",
+      modelMessage: {
+        role: "user",
+        content: expect.stringContaining("tool-step limit"),
+      },
+    });
+    expect(insertedMessage.modelMessage.content).toContain("Avoid repeating completed work");
+    expect(triggerAgentMessageRunMock).toHaveBeenCalledWith({
+      sessionId: "ses_123",
+      messageId: "msg_continue",
+      workspaceId: "wks_123",
+    });
+  });
+
+  it("rejects ordinary failed sessions", async () => {
+    const { db } = dbForContinue({
+      ...interruptedSession,
+      status: "failed",
+      lastError: "Gateway down",
+    });
+    getDbMock.mockReturnValue(db);
+
+    await expect(continueInterruptedSession("ses_123")).resolves.toEqual({
+      ok: false,
+      error: "This session is not interrupted.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects tool-step-limit sessions with an active lease", async () => {
+    const { db } = dbForContinue({
+      ...interruptedSession,
+      status: "failed",
+      lastError: TOOL_STEP_LIMIT_EXCEEDED_MESSAGE,
+      runLeaseId: "run_active",
+    });
+    getDbMock.mockReturnValue(db);
+
+    await expect(continueInterruptedSession("ses_123")).resolves.toEqual({
+      ok: false,
+      error: "This session is still running. Try again shortly.",
+    });
+    expect(triggerAgentMessageRunMock).not.toHaveBeenCalled();
   });
 });
 

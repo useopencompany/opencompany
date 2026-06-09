@@ -148,6 +148,43 @@ describe("dispatchBuiltinUseTool", () => {
     });
   });
 
+  it("turns tool-result persistence failures into recoverable tool results", async () => {
+    leaseWrites.insertToolMessageForLease.mockRejectedValueOnce(
+      new Error("unsupported Unicode escape sequence"),
+    );
+
+    const output = (await dispatchBuiltinUseTool({
+      ...baseInput({ tool: "exa_search", arguments: { query: "vercel" } }),
+      enabledTools: ["exa_search"],
+    })) as { ok: boolean; error: { message: string; code: string; recoverable: boolean } };
+
+    expect(output).toEqual({
+      ok: false,
+      error: {
+        message:
+          "The tool ran, but its output could not be stored safely. Retry with a narrower request or use a different approach.",
+        code: "tool_result_persistence_failed",
+        recoverable: true,
+      },
+    });
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenCalledTimes(2);
+    expect(leaseWrites.insertToolMessageForLease).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        toolName: "use_tool",
+        toolCallId: "call_use",
+        content: expect.stringContaining("tool_result_persistence_failed"),
+      }),
+    );
+
+    const events = leaseWrites.appendRuntimeEventForLease.mock.calls.map(
+      (call) => call[0] as { type: string; payload: { error?: { code?: string } } },
+    );
+    expect(events.some((event) => event.type === "tool.completed")).toBe(false);
+    expect(events.find((event) => event.type === "tool.failed")?.payload.error?.code).toBe(
+      "tool_result_persistence_failed",
+    );
+  });
+
   it("rejects a tool that exists but is not enabled for the session", async () => {
     const output = (await dispatchBuiltinUseTool({
       ...baseInput({ tool: "amp_coder", arguments: {} }),
