@@ -486,8 +486,18 @@ function SidebarContent({
           {/* Primary nav */}
           <nav className="flex flex-col gap-px px-2 pt-2">
             <NavItem href="/company" icon={MessageSquarePlus} label="New Session" active={isHome} />
-            <NavItem href="/company/agents" icon={Bot} label="Agents" active={isActive("/company/agents")} />
-            <NavItem href="/company/brain" icon={Brain} label="Brain" active={isActive("/company/brain")} />
+            <NavItem
+              href="/company/agents"
+              icon={Bot}
+              label="Agents"
+              active={isActive("/company/agents")}
+            />
+            <NavItem
+              href="/company/brain"
+              icon={Brain}
+              label="Brain"
+              active={isActive("/company/brain")}
+            />
             <NavItem
               href="/company/inbox"
               icon={Inbox}

@@ -34,7 +34,11 @@ export function SpaceSwitcher({
           Personal
         </SpaceLink>
         {hideWorkspace ? null : (
-          <SpaceLink href={workspaceHref} active={activeSpace === "workspace"} title={workspaceName}>
+          <SpaceLink
+            href={workspaceHref}
+            active={activeSpace === "workspace"}
+            title={workspaceName}
+          >
             {workspaceName}
           </SpaceLink>
         )}

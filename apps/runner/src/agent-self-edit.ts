@@ -187,8 +187,7 @@ export async function applyAgentSelfUpdate(input: {
     version: nextVersion,
     changedFields,
     ...(summary ? { summary } : {}),
-    appliesTo:
-      `Saved (version ${nextVersion}). This is live from your next turn in this same session — your next reply (or the user's next message) uses the updated tools, instructions, skills, model, and schedules. No new session needed; only the reply you're finishing now keeps the previous configuration.`,
+    appliesTo: `Saved (version ${nextVersion}). This is live from your next turn in this same session — your next reply (or the user's next message) uses the updated tools, instructions, skills, model, and schedules. No new session needed; only the reply you're finishing now keeps the previous configuration.`,
   };
 }
 

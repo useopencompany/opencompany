@@ -92,7 +92,9 @@ function Section({
       <div className="grid grid-cols-[200px_1fr] gap-8">
         <div>
           <h2 className="text-[13px] font-semibold tracking-[-0.005em] text-ink">{title}</h2>
-          {description && <p className="mt-1 text-[12px] leading-5 text-ink-muted">{description}</p>}
+          {description && (
+            <p className="mt-1 text-[12px] leading-5 text-ink-muted">{description}</p>
+          )}
         </div>
         <div className="flex flex-col gap-4">{children}</div>
       </div>

@@ -12,7 +12,6 @@ import {
 } from "@opencompany/agent-runtime";
 import { captureServerEvent } from "@opencompany/analytics/server";
 import { hasPositiveWorkspaceBalance } from "@opencompany/billing";
-import { captureException } from "@opencompany/observability";
 import { getDb } from "@opencompany/db/client";
 import {
   type Agent,
@@ -27,6 +26,7 @@ import {
   sessionStars,
   workspaces,
 } from "@opencompany/db/schema";
+import { captureException } from "@opencompany/observability";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { buildCreatedSessionDetail } from "@/lib/agent-sessions/data";
@@ -231,8 +231,7 @@ async function persistPersonalOnboardingSurvey(
           userId,
           workspaceId,
           heardFrom,
-          heardFromDetail:
-            heardFrom === "other" ? (survey?.heardFromDetail?.trim() || null) : null,
+          heardFromDetail: heardFrom === "other" ? survey?.heardFromDetail?.trim() || null : null,
           role: context.role.trim(),
           agentExperience: context.agentExperience?.trim() || "",
           helpAreas: [],

@@ -166,7 +166,9 @@ export async function renamePersonalBrainFolder(
       .from(agentFiles)
       .where(and(eq(agentFiles.workspaceId, ref.workspaceId), eq(agentFiles.agentId, ref.agentId)));
     const brainRows = rows.filter((row) => row.path.startsWith(prefix));
-    const logicalByPath = new Map(brainRows.map((row) => [row.path, row.path.slice(prefix.length)]));
+    const logicalByPath = new Map(
+      brainRows.map((row) => [row.path, row.path.slice(prefix.length)]),
+    );
 
     const moving = brainRows.filter((row) => logicalByPath.get(row.path)?.startsWith(`${from}/`));
     if (moving.length === 0) return { ok: false, error: "Personal Brain folder not found." };
@@ -229,7 +231,9 @@ export async function deletePersonalBrainFolder(path: string): Promise<BrainActi
       .select({ path: agentFiles.path })
       .from(agentFiles)
       .where(and(eq(agentFiles.workspaceId, ref.workspaceId), eq(agentFiles.agentId, ref.agentId)));
-    const deleted = rows.filter((row) => row.path.slice(prefix.length).startsWith(`${folderPath}/`));
+    const deleted = rows.filter((row) =>
+      row.path.slice(prefix.length).startsWith(`${folderPath}/`),
+    );
     if (deleted.length === 0) return { ok: false, error: "Personal Brain folder not found." };
 
     const deletes = deleted.map((row) =>

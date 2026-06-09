@@ -56,13 +56,13 @@ import { ModelPicker } from "@/components/agent-editor/ModelPicker";
 import { findModel } from "@/components/agent-editor/tools";
 import { useCollections } from "@/components/CollectionsProvider";
 import { Composer } from "@/components/Composer";
-import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import {
   AttachmentCard,
   ComposerAttachments,
   type PendingAttachment,
   uploadAttachment,
 } from "@/components/composer-attachments";
+import { useFloatingNavInset } from "@/components/FloatingNavInsetContext";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SlashCommandMenu } from "@/components/session/SlashCommandMenu";
 import { shouldAnimateStreamingAppend } from "@/components/sessionStreamingAnimation";
@@ -3224,7 +3224,11 @@ function SessionInspector({
           Session
         </div>
         <div className="mt-4 space-y-4">
-          <InspectorLink label="Session page" href={`/company/session/${session.id}`} value={session.id} />
+          <InspectorLink
+            label="Session page"
+            href={`/company/session/${session.id}`}
+            value={session.id}
+          />
           <InspectorLink label="Agent" href={agentHref} value={session.agentName} />
           <InspectorField label="Title" value={session.title} />
           <InspectorStatusField status={currentStatus} lastError={lastError} />

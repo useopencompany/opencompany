@@ -628,7 +628,11 @@ export async function runSandboxTool(input: {
   }
 
   if (input.name === "list_files") {
-    const dirPath = resolveSandboxToolPath(input.workdir, readOptionalString(args, "path"), personal);
+    const dirPath = resolveSandboxToolPath(
+      input.workdir,
+      readOptionalString(args, "path"),
+      personal,
+    );
     const depth = Math.min(Math.max(readOptionalNumber(args, "depth") ?? 2, 1), 5);
     const toolRelativePath = relativePath(input.workdir, dirPath);
     const result = await input.sandbox.commands.run(

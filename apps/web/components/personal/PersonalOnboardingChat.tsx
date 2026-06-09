@@ -1,13 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  ExternalLink,
-  LoaderCircle,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ExternalLink, LoaderCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useWorkspaceContext } from "@/components/WorkspaceContext";
@@ -48,8 +42,7 @@ import { personalPaths } from "@/lib/personal/paths";
 // (or a sensible default for "start from scratch").
 
 const SCRATCH = "__scratch__";
-const DEFAULT_SCRATCH_TASK =
-  "Introduce yourself, then help me figure out the best place to start.";
+const DEFAULT_SCRATCH_TASK = "Introduce yourself, then help me figure out the best place to start.";
 
 const SETUP_EYEBROW = "Let's set up your personal agent";
 
@@ -77,7 +70,8 @@ const STEPS = [
   {
     eyebrow: SETUP_EYEBROW,
     title: "Connect what your agent can use",
-    subtitle: "Connecting these makes your first session much better — but you can do it later too.",
+    subtitle:
+      "Connecting these makes your first session much better — but you can do it later too.",
   },
   {
     eyebrow: SETUP_EYEBROW,
@@ -550,7 +544,7 @@ export function PersonalOnboardingChat({
                   }`}
                 >
                   <span className="text-[13px] font-medium text-ink">Start from scratch</span>
-                  <span className="text-[12px] text-ink-muted">I'll set it up myself</span>
+                  <span className="text-[12px] text-ink-muted">I&apos;ll set it up myself</span>
                 </button>
               </div>
             </div>
@@ -655,9 +649,7 @@ export function PersonalOnboardingChat({
               {isPending ? (
                 <LoaderCircle size={13} strokeWidth={2} className="animate-spin" />
               ) : null}
-              <span>
-                {isPending ? "Setting up" : `Set up ${agentName.trim() || "my agent"}`}
-              </span>
+              <span>{isPending ? "Setting up" : `Set up ${agentName.trim() || "my agent"}`}</span>
               {isPending ? null : <ArrowRight size={12} strokeWidth={2} />}
             </button>
           ) : (

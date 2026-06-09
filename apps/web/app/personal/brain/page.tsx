@@ -1,4 +1,5 @@
 import BrainView from "@/components/BrainView";
+import { loadPersonalBrainFiles } from "@/lib/personal/brain";
 import {
   createPersonalBrainFile,
   deletePersonalBrainFile,
@@ -7,7 +8,6 @@ import {
   renamePersonalBrainFolder,
   updatePersonalBrainFile,
 } from "@/lib/personal/brain-actions";
-import { loadPersonalBrainFiles } from "@/lib/personal/brain";
 
 // The personal agent's Personal Brain: the same workspace-Brain UX, scoped to the personal agent's
 // bundle personal-brain/ subtree and backed by local-only CRUD (never projected to GitHub).

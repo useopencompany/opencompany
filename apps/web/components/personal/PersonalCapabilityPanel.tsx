@@ -26,10 +26,10 @@ import {
 } from "@/lib/onboarding/setups";
 import type { PersonalIntegrationId } from "@/lib/personal/actions";
 import {
-  type PersonalIntegrationCatalogEntry,
-  type PersonalIntegrationConnections,
   PERSONAL_INTEGRATION_TOOL_IDS,
   PERSONAL_INTEGRATIONS_CATALOG,
+  type PersonalIntegrationCatalogEntry,
+  type PersonalIntegrationConnections,
   personalIntegrationConnectUrl,
 } from "@/lib/personal/integrations-catalog";
 

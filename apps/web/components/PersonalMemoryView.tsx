@@ -171,7 +171,9 @@ function MemoryTreeItem({
         onClick={() => (node.type === "folder" ? onToggleFolder(node.path) : onSelect(node.path))}
         style={paddingStyle}
         className={`group flex w-full items-center gap-1.5 rounded-md py-[5px] pr-2 text-left text-[12.5px] transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
-          active ? "bg-surface-active text-ink" : "text-ink/85 hover:bg-surface-subtle hover:text-ink"
+          active
+            ? "bg-surface-active text-ink"
+            : "text-ink/85 hover:bg-surface-subtle hover:text-ink"
         }`}
       >
         {node.type === "folder" ? (

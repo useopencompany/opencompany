@@ -427,7 +427,7 @@ describe("AgentDetail", () => {
       expect(runAgentScheduleNowMock).toHaveBeenCalledWith("agt_123", "weekday-brief"),
     );
     expect(seedSessionQueriesMock).toHaveBeenCalledWith(queryClient, "wks_123", detail);
-    expect(routerMocks.push).toHaveBeenCalledWith("/session/ses_schedule");
+    expect(routerMocks.push).toHaveBeenCalledWith("/company/session/ses_schedule");
   });
 
   it("does not expose Run now for an unsaved schedule", async () => {

@@ -4,6 +4,7 @@ import { agentBundleDir, type ResolvedSkillMetadata } from "@opencompany/agent-r
 import type { AgentConfig } from "@opencompany/agent-runtime/types";
 import { PanelLeft } from "lucide-react";
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { FloatingNavInsetProvider } from "@/components/FloatingNavInsetContext";
 import PersonalSidebar from "@/components/PersonalSidebar";
 import {
   type PersonalAgent,
@@ -13,7 +14,6 @@ import {
   hasPersonalGitHubIntegrationRequest,
   type PersonalGitHubIntegrationStatus,
 } from "@/components/personal/PersonalCapabilityPanel";
-import { FloatingNavInsetProvider } from "@/components/FloatingNavInsetContext";
 import { useToast } from "@/components/ToastProvider";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import type { AgentBundleFilePayload } from "@/lib/agents/bundle-files";

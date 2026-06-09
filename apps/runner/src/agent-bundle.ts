@@ -96,9 +96,7 @@ export async function materializeAgentBundleForSession(input: {
 
   for (const root of roots) {
     assertSafeDestructiveRoot(root, input.workdir);
-    await input.sandbox.commands.run(
-      `rm -rf ${shellQuote(root)} && mkdir -p ${shellQuote(root)}`,
-    );
+    await input.sandbox.commands.run(`rm -rf ${shellQuote(root)} && mkdir -p ${shellQuote(root)}`);
   }
 
   const mountedPaths = new Set<string>();
@@ -160,7 +158,9 @@ export async function syncAgentBundleFromSandbox(input: {
   // List all writable bundle roots that exist, then map each file back to its bundle-relative path.
   const listRoots = personal ? ["memory", "personal-brain", "agent"] : ["agent"];
   const findClause = listRoots
-    .map((root) => `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -print; fi`)
+    .map(
+      (root) => `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -type f -print; fi`,
+    )
     .join("; ");
   const result = await input.sandbox.commands.run(
     `cd ${shellQuote(input.workdir)} && { ${findClause}; } | sort`,
