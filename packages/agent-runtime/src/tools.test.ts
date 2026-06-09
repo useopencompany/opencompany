@@ -509,6 +509,7 @@ describe("buildCapabilityDiscovery", () => {
       "slack",
       "posthog",
       "betterstack",
+      "braintrust",
       "gmail",
       "google_calendar",
     ]) {

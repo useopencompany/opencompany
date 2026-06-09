@@ -135,6 +135,15 @@ describe("classifyMcpTool", () => {
       providerKey: "betterstack",
       group: "admin",
     });
+    // Braintrust's MCP server is read-only — every tool maps to read.
+    expect(classifyTool("braintrust__sql_query")).toEqual({
+      providerKey: "braintrust",
+      group: "read",
+    });
+    expect(classifyTool("braintrust__summarize_experiment")).toEqual({
+      providerKey: "braintrust",
+      group: "read",
+    });
   });
 
   it("falls back to the verb heuristic for unmapped MCP tools", () => {

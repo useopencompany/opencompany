@@ -264,6 +264,16 @@ export const AGENT_TOOL_CATALOG: AgentToolDefinition[] = [
     credentialSource: "workspace",
   },
   {
+    id: "braintrust",
+    type: "mcp",
+    server: "braintrust",
+    label: "braintrust",
+    description: "Use workspace-configured Braintrust MCP tools.",
+    runtimeTools: [],
+    defaultEnabled: true,
+    credentialSource: "workspace",
+  },
+  {
     id: "gmail",
     type: "hosted_tool",
     label: "gmail",

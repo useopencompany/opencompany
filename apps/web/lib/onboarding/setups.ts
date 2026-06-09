@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  FlaskConical,
   GitBranch,
   type LucideIcon,
   Mail,
@@ -142,5 +143,12 @@ export const ONBOARDING_INTEGRATIONS: OnboardingIntegration[] = [
     description: "Pull observability, incidents, and uptime context.",
     icon: Monitor,
     connectHref: `/api/mcp/betterstack/start?returnTo=${ONBOARDING_RETURN_TO}`,
+  },
+  {
+    id: "braintrust",
+    label: "Braintrust",
+    description: "Query evals, experiments, datasets, and logs.",
+    icon: FlaskConical,
+    connectHref: `/api/mcp/braintrust/start?returnTo=${ONBOARDING_RETURN_TO}`,
   },
 ];

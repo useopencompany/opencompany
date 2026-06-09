@@ -86,6 +86,7 @@ describe("PersonalCapabilityPanel integrations", () => {
           slack: false,
           posthog: false,
           betterstack: false,
+          braintrust: false,
         }}
       />,
     );

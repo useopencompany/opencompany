@@ -9,6 +9,9 @@ import {
   BETTERSTACK_MCP_ENDPOINT_URL,
   BETTERSTACK_MCP_OAUTH_CREDENTIAL_KIND,
   BETTERSTACK_MCP_SERVER_KEY,
+  BRAINTRUST_MCP_ENDPOINT_URL,
+  BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
+  BRAINTRUST_MCP_SERVER_KEY,
   LINEAR_MCP_ENDPOINT_URL,
   LINEAR_MCP_SERVER_KEY,
   type McpProviderKey,
@@ -117,6 +120,23 @@ export async function removeBetterStackMcpConnection() {
   return { ok: true as const };
 }
 
+export async function removeBraintrustMcpConnection() {
+  const { workspace } = await currentWorkspace({ requireAdmin: true });
+  const server = await upsertBraintrustMcpServer(
+    workspace.id,
+    "missing_credential",
+    "Braintrust MCP connection was removed.",
+  );
+  await deleteMcpCredential({
+    workspaceId: workspace.id,
+    serverId: server.id,
+    kind: BRAINTRUST_MCP_OAUTH_CREDENTIAL_KIND,
+  });
+
+  revalidateMcpPaths();
+  return { ok: true as const };
+}
+
 export async function upsertLinearMcpServer(
   workspaceId: string,
   status: "configured" | "missing_credential" | "error",
@@ -172,6 +192,21 @@ export async function upsertBetterStackMcpServer(
     serverKey: BETTERSTACK_MCP_SERVER_KEY,
     displayName: "Better Stack",
     endpointUrl: BETTERSTACK_MCP_ENDPOINT_URL,
+    status,
+    statusReason,
+  });
+}
+
+export async function upsertBraintrustMcpServer(
+  workspaceId: string,
+  status: "configured" | "missing_credential" | "error",
+  statusReason: string | null,
+) {
+  return upsertMcpServer({
+    workspaceId,
+    serverKey: BRAINTRUST_MCP_SERVER_KEY,
+    displayName: "Braintrust",
+    endpointUrl: BRAINTRUST_MCP_ENDPOINT_URL,
     status,
     statusReason,
   });

@@ -1,6 +1,7 @@
 import {
   BarChart3,
   CalendarDays,
+  FlaskConical,
   GitBranch,
   ListTodo,
   type LucideIcon,
@@ -96,6 +97,14 @@ export const PERSONAL_INTEGRATIONS_CATALOG: PersonalIntegrationCatalogEntry[] = 
     kind: "mcp",
     connectUrl: (returnTo) => `/api/mcp/betterstack/start?returnTo=${encodeURIComponent(returnTo)}`,
   },
+  {
+    id: "braintrust",
+    label: "Braintrust",
+    description: "Query experiments, datasets, logs, and prompts.",
+    icon: FlaskConical,
+    kind: "mcp",
+    connectUrl: (returnTo) => `/api/mcp/braintrust/start?returnTo=${encodeURIComponent(returnTo)}`,
+  },
 ];
 
 const CATALOG_BY_ID = new Map(PERSONAL_INTEGRATIONS_CATALOG.map((entry) => [entry.id, entry]));
@@ -120,4 +129,5 @@ export const PERSONAL_INTEGRATION_TOOL_IDS = new Set<string>([
   "slack",
   "posthog",
   "betterstack",
+  "braintrust",
 ]);

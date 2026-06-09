@@ -17,6 +17,7 @@ import {
   Clock3,
   Code2,
   FileText,
+  FlaskConical,
   Folder,
   GitBranch,
   ListTodo,
@@ -167,6 +168,7 @@ const TOOL_ICONS: Record<AgentToolId, LucideIcon> = {
   slack: MessageSquare,
   posthog: BarChart3,
   betterstack: Monitor,
+  braintrust: FlaskConical,
   gmail: Mail,
   google_calendar: CalendarDays,
 };
@@ -395,7 +397,13 @@ function agentMentionId(path: string) {
 }
 
 function isMcpToolId(id: AgentToolId) {
-  return id === "linear" || id === "slack" || id === "posthog" || id === "betterstack";
+  return (
+    id === "linear" ||
+    id === "slack" ||
+    id === "posthog" ||
+    id === "betterstack" ||
+    id === "braintrust"
+  );
 }
 
 function repositoryMentionId(repository: {

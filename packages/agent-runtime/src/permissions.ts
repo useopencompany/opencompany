@@ -274,6 +274,26 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       telemetry_remove_dashboard_tool: "admin",
     },
   },
+  braintrust: {
+    providerKey: "braintrust",
+    displayName: "Braintrust",
+    // Braintrust's MCP server exposes only read/query tools (search, schema inference,
+    // SQL reads, experiment summaries, permalink generation) — no create/update/delete.
+    groups: ["read"],
+    gated: true,
+    permissionDescriptions: {
+      read: "Search docs and query experiments, datasets, logs, and prompts",
+    },
+    toolGroups: {
+      search_docs: "read",
+      resolve_object: "read",
+      list_recent_objects: "read",
+      infer_schema: "read",
+      sql_query: "read",
+      summarize_experiment: "read",
+      generate_permalink: "read",
+    },
+  },
   github: {
     providerKey: "github",
     displayName: "GitHub",

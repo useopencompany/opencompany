@@ -218,6 +218,7 @@ const PERSONAL_INTEGRATION_MENTIONS = {
   slack: "@slack",
   posthog: "@posthog",
   betterstack: "@betterstack",
+  braintrust: "@braintrust",
 } as const;
 
 export type PersonalIntegrationId = keyof typeof PERSONAL_INTEGRATION_MENTIONS;
