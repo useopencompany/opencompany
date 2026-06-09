@@ -796,6 +796,29 @@ export async function setSessionStar(sessionId: string, starred: boolean) {
   return { ok: true, txid, starredAt: null } as const;
 }
 
+// Record that the current user has viewed this session, clearing its sidebar "unseen"
+// blue dot. Writes ONLY last_seen_at — deliberately not updatedAt, so viewing a session
+// never reshuffles the sidebar's recency order. Fire-and-forget from the open session
+// view; the cleared state streams back to every tab via Electric. Scoped to the owning
+// user so it can only ever touch a session the caller can see.
+export async function markSessionSeen(sessionId: string) {
+  const { user, workspace } = await currentWorkspace();
+  const db = getDb();
+
+  await db
+    .update(agentSessions)
+    .set({ lastSeenAt: new Date() })
+    .where(
+      and(
+        eq(agentSessions.id, sessionId),
+        eq(agentSessions.workspaceId, workspace.id),
+        eq(agentSessions.userId, user.id),
+      ),
+    );
+
+  return { ok: true } as const;
+}
+
 // Returns the Postgres txid of the archive write so an optimistic sidebar delete
 // can reconcile against the row leaving the agent_sessions shape (archived_at is
 // set here, which removes it from the shape).

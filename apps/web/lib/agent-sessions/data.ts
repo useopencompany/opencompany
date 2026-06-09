@@ -11,6 +11,7 @@ import {
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import {
   type AgentSessionDetailPayload,
+  isSessionUnseen,
   type SidebarSessionPayload,
   serializeAgentSessionDetail,
   serializeSidebarSession,
@@ -39,6 +40,8 @@ export async function loadSidebarSessionsForWorkspace(
     createdAt: agentSessions.createdAt,
     updatedAt: agentSessions.updatedAt,
     starredAt: sessionStars.starredAt,
+    lastTurnFinishedAt: agentSessions.lastTurnFinishedAt,
+    lastSeenAt: agentSessions.lastSeenAt,
   };
 
   const visibilityFilter = and(
@@ -79,7 +82,9 @@ export async function loadSidebarSessionsForWorkspace(
 
   return Array.from(byId.values())
     .toSorted((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
-    .map(serializeSidebarSession);
+    .map(({ lastTurnFinishedAt, lastSeenAt, ...row }) =>
+      serializeSidebarSession({ ...row, unseen: isSessionUnseen(lastTurnFinishedAt, lastSeenAt) }),
+    );
 }
 
 export async function loadAgentSessionDetailForWorkspace(
