@@ -452,6 +452,41 @@ describe("resolveAgentRuntimeConfig", () => {
     );
   });
 
+  it("includes workspace tool policy guidance for Neon hosted tools", () => {
+    const config: AgentConfig = {
+      schemaVersion: "agent.v1",
+      title: "Database agent",
+      instructions: "Inspect Neon.",
+      model: {
+        provider: "vercel-ai-gateway",
+        name: "openai/gpt-5.4-mini",
+      },
+      tools: [
+        {
+          id: "neon",
+          type: "hosted_tool",
+          label: "neon",
+          description: "Inspect and administer Neon databases.",
+        },
+      ],
+      brain: [],
+      integrations: { github: { repositories: [] } },
+      triggers: [],
+    };
+
+    const resolved = resolveAgentRuntimeConfig({
+      agent: config,
+      toolPolicy: {
+        policy: new Map([[policyMapKey("neon", "admin"), "deny"]]),
+        suspendable: true,
+      },
+    });
+
+    expect(resolved.tools).toContain("neon_run_sql");
+    expect(resolved.systemPrompt).toContain("- neon —");
+    expect(resolved.systemPrompt).toContain("Neon: Read=allow, Modify=ask first, Admin=deny.");
+  });
+
   it("enables agent delegation when workspace agent references are configured", () => {
     const config: AgentConfig = {
       schemaVersion: "agent.v1",

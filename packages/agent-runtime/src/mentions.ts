@@ -13,6 +13,7 @@ import type {
   AgentGitHubRepositoryConfig,
   AgentHostedToolConfig,
   AgentModelId,
+  AgentNeonDatabaseConfig,
   AgentReference,
   AgentToolId,
   AgentTriggerConfig,
@@ -34,6 +35,8 @@ export type AgentConfigDerivationRepository = {
   defaultBranch: string;
   binding?: AgentGitHubRepositoryBinding;
 };
+
+export type AgentConfigDerivationNeonDatabase = AgentNeonDatabaseConfig;
 
 export type AgentConfigDerivationAgent = {
   path: string;
@@ -132,6 +135,7 @@ export function deriveAgentConfigFromBody(input: {
   body: string;
   model?: AgentModelId;
   repositories: AgentConfigDerivationRepository[];
+  neonDatabases?: AgentConfigDerivationNeonDatabase[];
   agents?: AgentConfigDerivationAgent[];
   skills?: AgentConfigDerivationSkill[];
   preferredRepositories?: AgentConfigDerivationRepository[];
@@ -149,6 +153,7 @@ export function deriveAgentConfigFromBody(input: {
   const model =
     MODEL_BY_ID.get(input.model ?? DEFAULT_MODEL_ID) ?? MODEL_BY_ID.get(DEFAULT_MODEL_ID)!;
   const tools = bodyToolsToConfig(mentions.tools);
+  const neonEnabled = mentions.tools.includes("neon");
 
   return {
     body,
@@ -169,6 +174,9 @@ export function deriveAgentConfigFromBody(input: {
         github: {
           repositories: mentions.repositories,
         },
+        ...(neonEnabled && input.neonDatabases?.length
+          ? { neon: { databases: input.neonDatabases } }
+          : {}),
       },
       triggers: mentions.activeRepository
         ? syncTriggersToRepository(input.triggers ?? [], mentions.activeRepository)

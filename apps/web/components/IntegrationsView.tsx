@@ -3,6 +3,7 @@
 import {
   CalendarDays,
   CheckCircle2,
+  Database,
   ExternalLink,
   GitBranch,
   type LucideIcon,
@@ -25,6 +26,12 @@ import {
   setGoogleCalendarSelection,
 } from "@/lib/integrations/google-actions";
 import type { GoogleConnectionState, GoogleProviderState } from "@/lib/integrations/google-data";
+import {
+  disconnectNeonIntegrationAction,
+  refreshNeonConnectionAction,
+  saveNeonApiKeyAction,
+  setNeonDatabaseSelectionAction,
+} from "@/lib/integrations/neon";
 import type { WorkspaceToolPolicyOverrides } from "@/lib/tool-policies/data";
 
 type IntegrationStatus =
@@ -35,8 +42,8 @@ type IntegrationStatus =
   | "sync_failed"
   | "error";
 type ResourceStatus = "available" | "permission_lost" | "archived" | "sync_failed";
-type IntegrationProviderId = "github" | "gmail" | "google_calendar";
-type IntegrationCategory = "Code" | "Communication" | "Productivity";
+type IntegrationProviderId = "github" | "neon" | "gmail" | "google_calendar";
+type IntegrationCategory = "Code" | "Data" | "Communication" | "Productivity";
 
 type WorkspaceIntegrationState = {
   github: {
@@ -62,8 +69,38 @@ type WorkspaceIntegrationState = {
   };
   gmail: GoogleProviderState;
   google_calendar: GoogleProviderState;
+  neon: {
+    status: IntegrationStatus;
+    connections: Array<{
+      id: string;
+      projectId: string;
+      connectionLabel: string;
+      accountName: string | null;
+      status: "connected" | "needs_reauth" | "sync_failed" | "disconnected";
+      statusReason: string | null;
+      updatedAt: string;
+      databases: Array<{
+        id: string;
+        externalId: string;
+        name: string;
+        displayName: string;
+        status: ResourceStatus;
+        statusReason: string | null;
+        selectedAt: string | null;
+        metadata: {
+          projectId: string;
+          projectName: string | null;
+          branchId: string;
+          branchName: string | null;
+          databaseName: string;
+          roleName: string;
+        };
+      }>;
+    }>;
+  };
 };
 type GitHubConnection = WorkspaceIntegrationState["github"]["connections"][number];
+type NeonConnection = WorkspaceIntegrationState["neon"]["connections"][number];
 type DisconnectFeedback = {
   connectionId: string;
   type: "success" | "error";
@@ -93,6 +130,14 @@ const INTEGRATIONS: IntegrationDefinition[] = [
     category: "Code",
     description: "Connect repositories agents can clone, edit, and open pull requests against.",
     icon: GitBranch,
+  },
+  {
+    id: "neon",
+    name: "Neon",
+    category: "Data",
+    description:
+      "Let agents inspect, query, and administer selected Neon Postgres databases with approval gates.",
+    icon: Database,
   },
   {
     id: "gmail",
@@ -278,6 +323,8 @@ function IntegrationControls({
   switch (provider) {
     case "github":
       return <GitHubControls integration={integrations.github} />;
+    case "neon":
+      return <NeonControls integration={integrations.neon} />;
     case "gmail":
       return <GoogleControls provider="gmail" integration={integrations.gmail} />;
     case "google_calendar":
@@ -479,6 +526,117 @@ function GitHubControls({ integration }: { integration: WorkspaceIntegrationStat
         onCancel={() => setDisconnectCandidate(null)}
         onConfirm={confirmDisconnectGitHub}
       />
+    </div>
+  );
+}
+
+function NeonControls({ integration }: { integration: WorkspaceIntegrationState["neon"] }) {
+  const router = useRouter();
+  const [isDisconnecting, startDisconnectTransition] = useTransition();
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<DisconnectFeedback | null>(null);
+  const connected = integration.connections.length > 0;
+  const databaseCount = integration.connections.reduce(
+    (count, connection) => count + connection.databases.length,
+    0,
+  );
+  const selectedDatabaseCount = integration.connections.reduce(
+    (count, connection) =>
+      count +
+      connection.databases.filter(
+        (database) => database.status === "available" && database.selectedAt !== null,
+      ).length,
+    0,
+  );
+
+  function disconnect(connection: NeonConnection) {
+    if (isDisconnecting) return;
+    setFeedback(null);
+    setDisconnectingId(connection.id);
+    startDisconnectTransition(async () => {
+      try {
+        const result = await disconnectNeonIntegrationAction(connection.id);
+        setFeedback({
+          connectionId: connection.id,
+          type: result.ok ? "success" : "error",
+          message: result.message,
+        });
+        if (result.ok) router.refresh();
+      } finally {
+        setDisconnectingId(null);
+      }
+    });
+  }
+
+  return (
+    <div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <InfoField label="Projects" value={String(integration.connections.length)} />
+        <InfoField label="Databases" value={`${selectedDatabaseCount}/${databaseCount} selected`} />
+        <InfoField
+          label="Last updated"
+          value={latestRefreshLabel(
+            integration.connections.map((connection) => connection.updatedAt),
+          )}
+        />
+      </div>
+      <form action={saveNeonApiKeyAction} className="mt-4 flex flex-wrap items-center gap-2">
+        <input
+          type="password"
+          name="apiKey"
+          placeholder={connected ? "Replace Neon API key" : "Neon API key"}
+          autoComplete="off"
+          className="h-8 min-w-[260px] flex-1 rounded-md border border-border bg-surface px-2.5 text-[12.5px] text-ink outline-none placeholder:text-ink-subtle"
+        />
+        <SaveNeonButton connected={connected} />
+      </form>
+      {connected ? (
+        <div className="mt-4 overflow-hidden rounded-md border border-border bg-surface/55">
+          {integration.connections.map((connection) => (
+            <div key={connection.id} className="border-t border-border-subtle p-3 first:border-t-0">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-[12.5px] font-semibold text-ink">
+                    {connection.connectionLabel}
+                  </div>
+                  <div className="mt-0.5 text-[11.5px] text-ink-subtle">
+                    Neon project - {formatDateTime(connection.updatedAt)}
+                  </div>
+                  {connection.status !== "connected" ? (
+                    <p className="mt-1 text-[11.5px] leading-4 text-warning">
+                      {connection.statusReason ?? "Reconnect Neon to restore access."}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <form action={refreshNeonConnectionAction.bind(null, connection.id)}>
+                    <RefreshNeonButton />
+                  </form>
+                  <button
+                    type="button"
+                    onClick={() => disconnect(connection)}
+                    disabled={isDisconnecting}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-danger-border bg-surface px-3 text-[12.5px] font-medium text-danger hover:bg-danger-bg disabled:cursor-not-allowed disabled:opacity-65"
+                  >
+                    <Trash2 size={13} strokeWidth={1.9} />
+                    {disconnectingId === connection.id ? "Disconnecting" : "Disconnect"}
+                  </button>
+                </div>
+              </div>
+              {feedback?.connectionId === connection.id ? (
+                <p
+                  className={`mt-2 text-[12px] leading-5 ${
+                    feedback.type === "success" ? "text-success" : "text-danger"
+                  }`}
+                >
+                  {feedback.message}
+                </p>
+              ) : null}
+              <NeonDatabaseSelection connection={connection} />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -714,6 +872,131 @@ function GoogleCalendarSelection({ connection }: { connection: GoogleConnectionS
   );
 }
 
+function neonSelectionMap(connection: NeonConnection): Record<string, boolean> {
+  return Object.fromEntries(
+    connection.databases.map((database) => [database.id, database.selectedAt !== null]),
+  );
+}
+
+function neonSelectionSignature(connection: NeonConnection): string {
+  return connection.databases
+    .map((database) => `${database.id}:${database.selectedAt ?? ""}`)
+    .join("|");
+}
+
+function NeonDatabaseSelection({ connection }: { connection: NeonConnection }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [selected, setSelected] = useState<Record<string, boolean>>(() =>
+    neonSelectionMap(connection),
+  );
+  const [syncedSignature, setSyncedSignature] = useState(() => neonSelectionSignature(connection));
+  const signature = neonSelectionSignature(connection);
+  if (signature !== syncedSignature) {
+    setSyncedSignature(signature);
+    setSelected(neonSelectionMap(connection));
+  }
+
+  if (connection.databases.length === 0) {
+    return (
+      <p className="mt-3 rounded-md border border-border-subtle bg-surface/60 px-3 py-2 text-[12px] text-ink-muted">
+        No databases are visible to this Neon API key.
+      </p>
+    );
+  }
+
+  function toggle(resourceId: string, next: boolean) {
+    const previous = selected[resourceId] ?? false;
+    setSelected((current) => ({ ...current, [resourceId]: next }));
+    startTransition(async () => {
+      try {
+        const result = await setNeonDatabaseSelectionAction({ resourceId, selected: next });
+        if (!result.ok) {
+          setSelected((current) => ({ ...current, [resourceId]: previous }));
+          return;
+        }
+        router.refresh();
+      } catch {
+        setSelected((current) => ({ ...current, [resourceId]: previous }));
+      }
+    });
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border-subtle bg-surface/60">
+      <div className="border-b border-border-subtle px-3 py-2 text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
+        Databases agents can use
+      </div>
+      <div className="max-h-[220px] overflow-y-auto">
+        {connection.databases.map((database) => (
+          <label
+            key={database.id}
+            className="flex cursor-pointer items-center justify-between gap-3 border-t border-border-subtle px-3 py-2 first:border-t-0"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected[database.id] ?? false}
+                disabled={isPending || database.status !== "available"}
+                onChange={(event) => toggle(database.id, event.target.checked)}
+                className="h-3.5 w-3.5 accent-ink"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-[12.5px] font-medium text-ink">
+                  {database.displayName}
+                </span>
+                <span className="block truncate text-[11.5px] text-ink-subtle">
+                  {database.metadata.branchName ?? database.metadata.branchId} /{" "}
+                  {database.metadata.databaseName} / {database.metadata.roleName}
+                </span>
+              </span>
+            </span>
+            {database.status !== "available" ? (
+              <span
+                className={`shrink-0 rounded border px-1.5 py-0.5 text-[10.5px] font-medium ${resourceStatusClass(
+                  database.status,
+                )}`}
+              >
+                {resourceStatusLabel(database.status)}
+              </span>
+            ) : null}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SaveNeonButton({ connected }: { connected: boolean }) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-65"
+    >
+      <ExternalLink size={13} strokeWidth={1.9} />
+      {pending ? "Connecting" : connected ? "Update key" : "Connect Neon"}
+    </button>
+  );
+}
+
+function RefreshNeonButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[12.5px] font-medium text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-65"
+    >
+      <RefreshCw size={13} strokeWidth={1.9} />
+      {pending ? "Refreshing" : "Refresh"}
+    </button>
+  );
+}
+
 function RefreshRepositoriesButton() {
   const { pending } = useFormStatus();
 
@@ -826,6 +1109,8 @@ function integrationState(
   switch (provider) {
     case "github":
       return githubIntegrationState(integrations.github.status);
+    case "neon":
+      return neonIntegrationState(integrations.neon.status);
     case "gmail":
       return googleIntegrationState(integrations.gmail.status, "Gmail");
     case "google_calendar":
@@ -863,6 +1148,38 @@ function googleIntegrationState(status: IntegrationStatus, name: string): Integr
     status: "not_connected",
     label: "Available",
     description: `Connect ${name} to let agents use it.`,
+  };
+}
+
+function neonIntegrationState(status: IntegrationStatus): IntegrationCardState {
+  if (status === "connected") {
+    return { status: "connected", label: "Connected", description: "Neon is connected." };
+  }
+  if (status === "needs_repository_access") {
+    return {
+      status: "needs_repository_access",
+      label: "Needs databases",
+      description: "Neon is connected but no databases are selected.",
+    };
+  }
+  if (status === "needs_reauth") {
+    return {
+      status: "needs_reauth",
+      label: "Needs key",
+      description: "The Neon API key needs to be replaced.",
+    };
+  }
+  if (status === "sync_failed") {
+    return {
+      status: "sync_failed",
+      label: "Sync failed",
+      description: "Neon database sync failed.",
+    };
+  }
+  return {
+    status: "not_connected",
+    label: "Available",
+    description: "Connect Neon to let agents use selected Postgres databases.",
   };
 }
 

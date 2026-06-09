@@ -604,6 +604,12 @@ export async function executeRuntimeTool(input: {
                 clientSecret: input.env.googleOAuthClientSecret,
               }
             : undefined,
+          neonContext: input.workspaceId
+            ? {
+                workspaceId: input.workspaceId,
+                encryptionKey: input.env.integrationCredentialEncryptionKey,
+              }
+            : undefined,
         });
         usage = result.usage;
         return result.output;

@@ -30,6 +30,7 @@ import type {
   AgentConfigTool,
   AgentGitHubRepositoryConfig,
   AgentMcpToolConfig,
+  AgentNeonDatabaseConfig,
   AgentToolId,
 } from "./types";
 
@@ -37,6 +38,9 @@ type PartialPersistedAgentConfig = Omit<Partial<AgentConfig>, "integrations"> & 
   integrations?: {
     github?: {
       repositories?: AgentGitHubRepositoryConfig[];
+    };
+    neon?: {
+      databases?: AgentNeonDatabaseConfig[];
     };
   };
 };
@@ -329,6 +333,11 @@ export function normalizeAgentConfig(config: AgentConfig): AgentConfig {
           ? persisted.integrations.github.repositories
           : [],
       },
+      neon: {
+        databases: Array.isArray(persisted.integrations?.neon?.databases)
+          ? persisted.integrations.neon.databases
+          : [],
+      },
     },
     triggers: Array.isArray(persisted.triggers) ? persisted.triggers : [],
   };
@@ -349,6 +358,9 @@ function enabledGatedProviderKeys(
     }
     if (tool.type === "coding_agent") {
       providerKeys.add("github");
+    }
+    if (tool.id === "neon") {
+      providerKeys.add("neon");
     }
   }
   if (repositories.length > 0) {

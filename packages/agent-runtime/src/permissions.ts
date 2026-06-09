@@ -354,6 +354,17 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       admin: "Delete events",
     },
   },
+  neon: {
+    providerKey: "neon",
+    displayName: "Neon",
+    groups: ["read", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      read: "List databases, inspect schema, explain SQL, and run read-only queries",
+      modify: "Run data-changing SQL statements",
+      admin: "Manage branches or run DDL/security/maintenance SQL",
+    },
+  },
   [SYSTEM_PROVIDER_KEY]: {
     providerKey: SYSTEM_PROVIDER_KEY,
     displayName: "Sandbox",
@@ -421,6 +432,15 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   calendar_create_event: { providerKey: "google_calendar", group: "post" },
   calendar_update_event: { providerKey: "google_calendar", group: "modify" },
   calendar_delete_event: { providerKey: "google_calendar", group: "admin" },
+  // Neon hosted database tools. `neon_run_sql` is reclassified from its SQL text in
+  // resolveToolDecision; the static admin group is the safe fallback when SQL is missing/invalid.
+  neon_list_databases: { providerKey: "neon", group: "read" },
+  neon_describe_schema: { providerKey: "neon", group: "read" },
+  neon_explain_sql: { providerKey: "neon", group: "read" },
+  neon_run_sql: { providerKey: "neon", group: "admin" },
+  neon_create_branch: { providerKey: "neon", group: "admin" },
+  neon_delete_branch: { providerKey: "neon", group: "admin" },
+  neon_reset_branch: { providerKey: "neon", group: "admin" },
   // Sandbox-local file IO.
   read_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   list_files: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
@@ -581,6 +601,78 @@ function isMcpToolName(name: string) {
 
 export function classifyTool(toolName: string): ToolClassification {
   return isMcpToolName(toolName) ? classifyMcpTool(toolName) : classifyRuntimeTool(toolName);
+}
+
+export type NeonSqlStatementClass = "read" | "modify" | "admin";
+
+export function classifyNeonSql(sql: unknown): PermissionGroup {
+  if (typeof sql !== "string") return "admin";
+  const normalized = stripSqlComments(sql).trim();
+  if (!normalized || hasMultipleSqlStatements(normalized)) return "admin";
+
+  const head = normalized.match(/^[a-zA-Z_]+/)?.[0]?.toLowerCase();
+  if (!head) return "admin";
+  if (head === "explain") {
+    return /\banalyze\b/i.test(normalized) ? "admin" : "read";
+  }
+  if (["select", "show", "values", "with"].includes(head)) return "read";
+  if (["insert", "update", "delete", "merge", "call"].includes(head)) return "modify";
+  return "admin";
+}
+
+export function hasMultipleSqlStatements(sql: string): boolean {
+  let quote: "'" | '"' | "`" | null = null;
+  let dollarTag: string | null = null;
+  let sawStatementTerminator = false;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]!;
+    const next = sql[index + 1];
+
+    if (dollarTag) {
+      if (sql.startsWith(dollarTag, index)) {
+        index += dollarTag.length - 1;
+        dollarTag = null;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") {
+          index += 1;
+          continue;
+        }
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      continue;
+    }
+
+    if (char === "$") {
+      const match = sql.slice(index).match(/^\$[a-zA-Z_][a-zA-Z0-9_]*\$|^\$\$/);
+      if (match?.[0]) {
+        dollarTag = match[0];
+        index += match[0].length - 1;
+        continue;
+      }
+    }
+
+    if (char !== ";") continue;
+    const rest = sql.slice(index + 1).trim();
+    if (rest.length > 0) return true;
+    sawStatementTerminator = true;
+  }
+
+  return sawStatementTerminator && sql.slice(sql.lastIndexOf(";") + 1).trim().length > 0;
+}
+
+function stripSqlComments(sql: string) {
+  return sql.replace(/--[^\n\r]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
 const GH_READ_COMMANDS: Record<string, readonly string[]> = {
@@ -828,12 +920,14 @@ export function resolveToolDecision(input: {
               : undefined,
           ),
         }
-      : classifyTool(
-          mcpInvokeEffectiveToolName(
-            builtinInvokeEffectiveToolName(input.toolName, input.toolInput),
-            input.toolInput,
-          ),
-        );
+      : input.toolName === "neon_run_sql" || input.toolName === BUILTIN_USE_TOOL_NAME
+        ? classifyNeonRunSqlIfNeeded(input.toolName, input.toolInput)
+        : classifyTool(
+            mcpInvokeEffectiveToolName(
+              builtinInvokeEffectiveToolName(input.toolName, input.toolInput),
+              input.toolInput,
+            ),
+          );
   if (!classification) {
     return { decision: "allow", providerKey: SYSTEM_PROVIDER_KEY, group: "read" };
   }
@@ -851,6 +945,33 @@ export function resolveToolDecision(input: {
     suspendable: input.suspendable,
   });
   return { decision, providerKey, group };
+}
+
+function classifyNeonRunSqlIfNeeded(toolName: string, toolInput: unknown): ToolClassification {
+  const effectiveName = builtinInvokeEffectiveToolName(toolName, toolInput);
+  if (effectiveName !== "neon_run_sql") {
+    return classifyTool(mcpInvokeEffectiveToolName(effectiveName, toolInput));
+  }
+
+  const sql =
+    toolName === BUILTIN_USE_TOOL_NAME &&
+    toolInput &&
+    typeof toolInput === "object" &&
+    !Array.isArray(toolInput)
+      ? readSqlFromBuiltinArguments(toolInput as Record<string, unknown>)
+      : readSqlFromArgs(toolInput);
+  return { providerKey: "neon", group: classifyNeonSql(sql) };
+}
+
+function readSqlFromBuiltinArguments(input: Record<string, unknown>) {
+  const args = input.arguments;
+  return readSqlFromArgs(args);
+}
+
+function readSqlFromArgs(args: unknown) {
+  return args && typeof args === "object" && !Array.isArray(args)
+    ? (args as Record<string, unknown>).sql
+    : undefined;
 }
 
 export type DeniedToolOutput = {
