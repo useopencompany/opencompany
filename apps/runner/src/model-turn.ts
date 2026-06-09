@@ -273,9 +273,18 @@ export function assertTurnComplete(
     throw new Error("Model stream completed without text or tool calls.");
   }
 
-  if (streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS) {
+  if (isToolStepLimitExceeded(streamResult)) {
     throw new ToolStepLimitExceededError();
   }
+}
+
+export function isToolStepLimitExceeded(
+  streamResult: Pick<
+    Awaited<ReturnType<typeof collectAssistantStream>>,
+    "lastStepEndedWithToolCalls" | "stepCount"
+  >,
+) {
+  return streamResult.lastStepEndedWithToolCalls && streamResult.stepCount >= MAX_MODEL_STEPS;
 }
 
 // A healthy completed turn ends with `finishReason === "stop"` after the model
