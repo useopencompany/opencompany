@@ -90,8 +90,10 @@ async function teardownVercelAlias() {
       return;
     }
     const token = process.env.VERCEL_TOKEN?.trim();
+    const scope = process.env.VERCEL_ORG_ID?.trim();
     const args = ["vercel", "alias", "rm", names.alias, "--yes"];
     if (token) args.push("--token", token);
+    if (scope) args.push("--scope", scope);
     const output = execFileSync("bunx", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],

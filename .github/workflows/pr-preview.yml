@@ -253,7 +253,7 @@ jobs:
         env:
           WEB_ENV: ${{ steps.provision.outputs.web_env }}
         run: |
-          bunx vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          bunx vercel pull --yes --environment=preview --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
           # Per-PR dynamic env passed at deploy time as both runtime (-e) and build (-b)
           # vars so NEXT_PUBLIC_* are inlined and server vars are present at runtime,
           # without mutating the shared Vercel Preview env.
@@ -266,7 +266,7 @@ jobs:
               }
             }
           ')
-          output="$(bunx vercel deploy --token="$VERCEL_TOKEN" "${flags[@]}")"
+          output="$(bunx vercel deploy --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" "${flags[@]}")"
           echo "$output"
           url="$(printf "%s\n" "$output" | grep -Eo 'https://[^[:space:]]+' | tail -n 1)"
           if [ -z "$url" ]; then echo "::error::No Vercel deployment URL."; exit 1; fi
@@ -274,7 +274,7 @@ jobs:
 
       - name: Assign deterministic alias
         run: |
-          bunx vercel alias set "${{ steps.deploy-web.outputs.url }}" "${{ steps.provision.outputs.alias }}" --token="$VERCEL_TOKEN"
+          bunx vercel alias set "${{ steps.deploy-web.outputs.url }}" "${{ steps.provision.outputs.alias }}" --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID"
 
       - name: Post preview URL (early)
         if: ${{ steps.provision.outputs.alias != '' }}
