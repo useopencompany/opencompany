@@ -83,9 +83,17 @@ function main() {
   } else {
     console.log("\nNext steps:");
     console.log("  1) Sanitize the seed (removes prod PII/secrets) — REQUIRED before using it:");
-    console.log(`       psql "${maskUrl(direct)}" -f scripts/sql/preview-seed-sanitize.sql`);
     console.log(
-      "     (or run this script with --apply-sanitize, or paste the SQL in the Neon Console)",
+      `       psql "${maskUrl(direct)}" -v ON_ERROR_STOP=1 -f scripts/sql/preview-seed-sanitize.sql`,
+    );
+    console.log(
+      "     (or run this script with --apply-sanitize, or paste the SQL in the Neon Console).",
+    );
+    console.log(
+      "     The SQL ends with a coverage guard that fails (and rolls back) if the schema has",
+    );
+    console.log(
+      "     gained an unreviewed content column — update the SQL and re-run if it errors.",
     );
     console.log(
       "  2) (optional hardening) apply scripts/sql/preview-seed-electric-role.sql after testing.",
@@ -102,6 +110,9 @@ function runSanitize(directUrl) {
     );
   }
   log("Running sanitization SQL against the seed branch…");
+  // ON_ERROR_STOP makes psql exit non-zero if the sanitizer's coverage guard raises (an
+  // unreviewed content column exists), which throws here and rolls the seed back to an
+  // obviously-unsanitized state rather than silently leaving prod data in place.
   execFileSync(
     "psql",
     [directUrl, "-v", "ON_ERROR_STOP=1", "-f", "scripts/sql/preview-seed-sanitize.sql"],
@@ -109,7 +120,9 @@ function runSanitize(directUrl) {
       stdio: "inherit",
     },
   );
-  log("Sanitization complete. The seed branch is safe to fork previews from.");
+  log(
+    "Sanitization complete (coverage guard passed). The seed branch is safe to fork previews from.",
+  );
 }
 
 function neon(neonctlArgs) {

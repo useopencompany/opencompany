@@ -322,10 +322,18 @@ computes — already done for this project).
    the bundled tooling:
 
    ```bash
-   NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed                 # create the branch
-   psql "$SEED_DIRECT_URL" -f scripts/sql/preview-seed-sanitize.sql      # scrub PII/secrets (REQUIRED)
+   NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed                            # create the branch
+   psql "$SEED_DIRECT_URL" -v ON_ERROR_STOP=1 -f scripts/sql/preview-seed-sanitize.sql  # scrub PII/secrets (REQUIRED)
    # or: NEON_PARENT_BRANCH=<prod-branch> bun run preview:seed -- --apply-sanitize
    ```
+
+   The sanitizer deletes credential/billing/transient rows, scrubs every customer-authored
+   or identifying text/jsonb column, and ends with a **coverage guard**: it re-scans the live
+   schema and aborts (rolling back the whole run) if any unreviewed content column exists.
+   Run it with `ON_ERROR_STOP=1` so a guard failure is fatal — if it errors, classify the
+   reported column(s) in `scripts/sql/preview-seed-sanitize.sql` and re-run before using the
+   seed. This is why the seed must be re-sanitized after every schema change, not just every
+   re-fork.
 
    Re-fork + re-sanitize on a cadence (`--refresh`) so the seed stays realistic. Electric
    uses the branch owner role by default; `scripts/sql/preview-seed-electric-role.sql` is

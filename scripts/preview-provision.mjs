@@ -96,6 +96,11 @@ const runnerStreamTokenSecret =
 const electricSecret = process.env.ELECTRIC_SECRET?.trim() || `pv-${randomUUID()}`;
 const streamsToken = process.env.PREVIEW_DURABLE_STREAMS_TOKEN?.trim() || `pv-${randomUUID()}`;
 
+// Register the per-PR secrets as GitHub Actions masks the moment they exist, so they're
+// redacted everywhere downstream (step logs, the web_env job output) — GITHUB_OUTPUT values
+// are NOT masked by default. DB URLs are masked later, once the Neon branch is resolved.
+maskSecrets([runnerInternalToken, runnerStreamTokenSecret, electricSecret, streamsToken]);
+
 const names = previewNames(pr, { baseDomain });
 
 await main().catch((error) => {
@@ -128,6 +133,8 @@ async function main() {
     branchId = conn.branchId;
     pooledUrl = conn.pooledUrl;
     directUrl = conn.directUrl;
+    // Connection strings embed credentials — mask before they can reach any log/output.
+    maskSecrets([pooledUrl, directUrl]);
     log(`Neon branch ${names.neonBranch} ready (${branchId}).`);
   }
 
@@ -257,7 +264,9 @@ async function main() {
 async function ensureService(render, { name, buildSpec, env }) {
   if (dryRun) {
     log(`would ensure Render service ${name}`);
-    console.log(JSON.stringify(buildSpec(env), null, 2));
+    // Redact env var values: a dry run loaded with real secrets must not dump them to stdout.
+    // Keys stay visible so the payload shape can still be validated.
+    console.log(JSON.stringify(redactSpecEnv(buildSpec(env)), null, 2));
     return { id: `srv-DRYRUN-${name}`, url: `https://${name}.onrender.com` };
   }
   const existing = await render.findServiceByName(name);
@@ -330,6 +339,25 @@ function compact(obj) {
     if (value !== undefined && value !== null && value !== "") out[key] = value;
   }
   return out;
+}
+// Emit GitHub Actions mask commands so the given secret values are redacted in all job
+// logs (and any step that echoes an output carrying them). No-op outside Actions. Skip
+// short/placeholder values — masking a 1-2 char string would redact unrelated log text.
+function maskSecrets(values) {
+  if (!process.env.GITHUB_ACTIONS) return;
+  for (const value of values) {
+    const v = typeof value === "string" ? value.trim() : "";
+    if (v.length >= 8) console.log(`::add-mask::${v}`);
+  }
+}
+// Return a copy of a Render service spec with every env var value replaced by a redaction
+// marker, preserving keys. Used for dry-run logging only.
+function redactSpecEnv(spec) {
+  if (!spec || !Array.isArray(spec.envVars)) return spec;
+  return {
+    ...spec,
+    envVars: spec.envVars.map((entry) => ({ key: entry.key, value: "***redacted***" })),
+  };
 }
 function expiresAt(hours) {
   return new Date(Date.now() + hours * 3600 * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
