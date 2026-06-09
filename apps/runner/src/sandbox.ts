@@ -438,14 +438,18 @@ export async function runSandboxTool(input: {
     });
     const stdout = redact(String(result.stdout ?? ""));
     const stderr = redact(String(result.stderr ?? ""));
+    const exitCode = typeof result.exitCode === "number" ? result.exitCode : null;
     // Turn GitHub's opaque "Resource not accessible by integration" 403 into an actionable hint so
     // the agent stops retrying a permanently-blocked call (e.g. `gh issue create` when the App lacks
-    // Issues:write) and an operator reading the result knows exactly which grant is missing.
-    const permissionHint = gitHubPermissionErrorHint(`${stdout}\n${stderr}`);
+    // Issues:write) and an operator reading the result knows exactly which grant is missing. Only on
+    // a FAILED command — otherwise a successful `gh pr view`/`gh issue view` whose body merely quotes
+    // the phrase would get a spurious hint.
+    const permissionHint =
+      exitCode !== 0 ? gitHubPermissionErrorHint(`${stdout}\n${stderr}`) : null;
     return truncate({
       stdout,
       stderr,
-      exitCode: typeof result.exitCode === "number" ? result.exitCode : null,
+      exitCode,
       ...(permissionHint ? { permissionHint } : {}),
     });
   }
