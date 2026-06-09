@@ -114,6 +114,7 @@ vi.mock("@/lib/agent-sessions/actions", () => ({
   abortAgentSession: actionMocks.abortAgentSession,
   cancelAgentSessionQuestion: actionMocks.cancelAgentSessionQuestion,
   continueInterruptedSession: actionMocks.continueInterruptedSession,
+  markSessionSeen: vi.fn(),
   resolveToolApproval: actionMocks.resolveToolApproval,
   submitAgentSessionMessage: actionMocks.submitAgentSessionMessage,
   submitAgentSessionQuestionResponse: actionMocks.submitAgentSessionQuestionResponse,

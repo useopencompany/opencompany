@@ -244,6 +244,7 @@ describe("createAgentSession", () => {
       createdAt: CREATED_AT.toISOString(),
       updatedAt: CREATED_AT.toISOString(),
       starredAt: null,
+      unseen: false,
     });
     expect(dispatchAgentSessionStartedMock).toHaveBeenCalledWith({
       sessionId: "ses_123",
