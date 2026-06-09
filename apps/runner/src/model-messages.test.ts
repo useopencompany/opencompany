@@ -6,10 +6,39 @@ import {
   buildAssistantModelMessage,
   buildModelMessages,
   buildToolModelMessage,
+  serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
 
 describe("buildModelMessages", () => {
+  it("sanitizes DB-hostile tool output before storage and model replay", () => {
+    const output = {
+      results: [
+        {
+          title: "Search result",
+          highlights: ["before\u0000after\u0014tail\uD800"],
+        },
+      ],
+    };
+
+    const storedOutput = serializeToolOutputForStorage(output);
+    expect(storedOutput).not.toContain("\\u0000");
+    expect(storedOutput).not.toContain("\\u0014");
+    expect(storedOutput).toContain("before\uFFFDafter\uFFFDtail\uFFFD");
+
+    const tool = buildToolModelMessage({
+      toolCallId: "call_search",
+      toolName: "exa_search",
+      output,
+    });
+    const persisted = JSON.stringify(toPersistedModelMessage(tool));
+
+    expect(persisted).not.toContain("\\u0000");
+    expect(persisted).not.toContain("\\u0014");
+    expect(persisted).toContain("before�after�tail�");
+    expect(modelMessageSchema.safeParse(tool).success).toBe(true);
+  });
+
   it("replays assistant tool calls and matching tool results for follow-up turns", () => {
     const assistant = buildAssistantModelMessage({
       content: "Checking.",
