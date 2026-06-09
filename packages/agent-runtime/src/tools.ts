@@ -708,6 +708,11 @@ export const CORE_TOOL_DEFINITIONS: RuntimeToolDefinition[] = [
           description:
             "The full new Markdown instructions body. Keep any @mentions for tools and @brain/... paths you still want active; tools and brain follow the mentions in this body.",
         },
+        title: {
+          type: "string",
+          description:
+            "Optional new display name for yourself (e.g. a name the user picked). If omitted, your current name is kept. This is your shown name, not your file path.",
+        },
         model: {
           type: "string",
           enum: AGENT_MODEL_CATALOG.map((model) => model.id),

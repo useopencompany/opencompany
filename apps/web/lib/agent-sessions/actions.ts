@@ -166,16 +166,30 @@ export async function createAgentSessionFromPrompt(
   return { ok: true, session: sidebarSessionFromDetail(detail), detail } as const;
 }
 
-// V2 onboarding (/onboarding/personal): the user's first message is a self-introduction. We seed
-// it as a normal user message (so it reads naturally in the transcript) but attach a hidden pointer
-// to the `onboarding` skill in the model-only content, so the agent runs the first-session
-// procedure (identify → save to memory → fetch any URL → personalized greeting + tailored
-// suggestions) without any of that machinery leaking into the UI.
-export async function createPersonalOnboardingSession(agentId: string, identityText: string) {
+// Background context the user gave on the first onboarding screen (name / website / role). It is
+// never typed into chat — the prompt screen only asks "what do you want to get done today?" — so we
+// inject it invisibly into the first message's model content (see buildOnboardingModelContent).
+export type PersonalOnboardingContext = {
+  name: string;
+  website: string;
+  role: string;
+};
+
+// V2 onboarding (/onboarding/personal): the visible first message is the user's "what do you want to
+// get done today?" answer. We seed it as a normal user message (so it reads naturally in the
+// transcript) but the model-only content also carries (a) the background context the user gave on
+// the first screen and (b) a thin pointer to the `onboarding` skill, so the agent runs the
+// first-session procedure (read context → save to memory → name itself + tune its soul → start the
+// task) without any of that machinery leaking into the UI.
+export async function createPersonalOnboardingSession(
+  agentId: string,
+  context: PersonalOnboardingContext,
+  prompt: string,
+) {
   const { user, workspace } = await currentWorkspace();
-  const trimmed = identityText.trim();
+  const trimmed = prompt.trim();
   if (!trimmed) {
-    return { ok: false, error: "Tell the agent a bit about yourself to get started." } as const;
+    return { ok: false, error: "Tell the agent what you'd like to get done." } as const;
   }
   if (!(await hasPositiveWorkspaceBalance({ db: getDb(), workspaceId: workspace.id }))) {
     return {
@@ -198,9 +212,10 @@ export async function createPersonalOnboardingSession(agentId: string, identityT
   });
   const sessionId = session.id;
 
-  // Visible content = the intro verbatim. Model-only content appends the thin onboarding pointer;
-  // it never renders in the transcript (modelMessage), so the user just sees their own message.
-  const modelContent = `${trimmed}\n\n(This is my very first session. Read your \`onboarding\` skill with read_skill and follow it to get me set up.)`;
+  // Visible content = the task verbatim. Model-only content appends the background context and the
+  // onboarding pointer; it never renders in the transcript (modelMessage), so the user just sees
+  // their own message.
+  const modelContent = buildOnboardingModelContent(trimmed, context);
   const { message, createdEvent } = await insertUserMessage(sessionId, trimmed, modelContent);
   const messageId = message.id;
 
@@ -974,6 +989,24 @@ async function insertUserMessage(sessionId: string, content: string, modelConten
       createdAt: eventRow.createdAt,
     },
   };
+}
+
+// Compose the model-only first message for an onboarding session: the user's task, then the
+// background context they gave on the first screen (only the fields they filled in), then the thin
+// pointer that tells the agent to run its onboarding skill before tackling the task. None of the
+// appended context renders in the transcript — it rides in modelMessage only.
+function buildOnboardingModelContent(prompt: string, context: PersonalOnboardingContext) {
+  const facts = [
+    context.name.trim() ? `- Name: ${context.name.trim()}` : null,
+    context.role.trim() ? `- Role: ${context.role.trim()}` : null,
+    context.website.trim() ? `- Website: ${context.website.trim()}` : null,
+  ].filter(Boolean);
+
+  const contextBlock = facts.length
+    ? `\n\nFirst-session background (I gave this during onboarding, not in chat):\n${facts.join("\n")}`
+    : "";
+
+  return `${prompt}${contextBlock}\n\n(This is my very first session. Read your \`onboarding\` skill with read_skill and follow it — get set up first, then take on what I asked above.)`;
 }
 
 function titleFromPrompt(content: string) {

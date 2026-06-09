@@ -53,6 +53,7 @@ Set these in Vercel Production.
 | Var | Required | Purpose |
 |---|---:|---|
 | `DATABASE_URL` | Hosted only | Hosted Neon pooled connection string. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
+| `VERCEL_AI_GATEWAY_API_KEY` | Yes | Fast-model calls made directly from web (e.g. tailored example pills on `/onboarding/personal`). Same key the runner uses. |
 | `WORKOS_CLIENT_ID` | Yes | WorkOS AuthKit client id. |
 | `WORKOS_API_KEY` | Yes | WorkOS server API key. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |

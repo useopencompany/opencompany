@@ -114,6 +114,7 @@
         "@tiptap/suggestion": "^3.23.5",
         "@workos-inc/authkit-nextjs": "^4.1.0",
         "@workos-inc/node": "^9.3.1",
+        "ai": "^6.0.189",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
         "drizzle-orm": "^0.45.2",

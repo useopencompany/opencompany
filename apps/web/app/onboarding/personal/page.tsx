@@ -15,9 +15,12 @@ export default async function PersonalOnboardingPage() {
     name: agentName,
   });
 
+  const defaultName = user.firstName?.trim() || "";
+
   return (
     <PersonalOnboardingChat
       agentId={agent.id}
+      defaultName={defaultName}
       devReset={process.env.NODE_ENV !== "production"}
     />
   );

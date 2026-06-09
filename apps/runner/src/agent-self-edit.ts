@@ -23,8 +23,13 @@ export type AgentSelfUpdateResult =
   | { ok: true; version: number; changedFields: string[]; summary?: string; appliesTo: string }
   | { ok: false; errors: string[] };
 
+// Cap so a self-chosen name can't blow past the agent name column / UI; matches the practical
+// limit elsewhere for agent titles.
+const MAX_AGENT_TITLE_LENGTH = 80;
+
 type ParsedArgs = {
   body: string;
+  title?: string;
   model?: AgentModelId;
   summary?: string;
   // Present only when the caller passed `triggers`. Undefined means "keep current schedules";
@@ -47,7 +52,7 @@ export async function applyAgentSelfUpdate(input: {
 }): Promise<AgentSelfUpdateResult> {
   const parsed = parseArgs(input.args);
   if (!parsed.ok) return { ok: false, errors: parsed.errors };
-  const { body, model, summary, scheduleTriggers } = parsed.value;
+  const { body, title, model, summary, scheduleTriggers } = parsed.value;
 
   const db = getDb();
   const [row] = await db
@@ -70,12 +75,13 @@ export async function applyAgentSelfUpdate(input: {
 
   const current = normalizeAgentConfig(row.config);
 
-  // The body is the source of truth: tools and brain follow its @mentions. Title/path,
-  // delegated agents, repositories, and skills are preserved — they cannot be changed
-  // through self-edit in this version. The model changes only via the explicit `model`
-  // argument; otherwise the current model is kept. Schedule triggers are replaced wholesale
-  // when `triggers` is provided (omitted = keep current); GitHub PR triggers are always
-  // preserved, since they reference repositories the agent cannot manage here.
+  // The body is the source of truth: tools and brain follow its @mentions. The title changes only
+  // when an explicit `title` is passed (otherwise the current name is kept); path, delegated
+  // agents, repositories, and skills are preserved — they cannot be changed through self-edit in
+  // this version. The model changes only via the explicit `model` argument; otherwise the current
+  // model is kept. Schedule triggers are replaced wholesale when `triggers` is provided (omitted =
+  // keep current); GitHub PR triggers are always preserved, since they reference repositories the
+  // agent cannot manage here.
   const preservedNonScheduleTriggers = current.triggers.filter(
     (trigger) => trigger.type !== AGENT_SCHEDULE_TRIGGER_TYPE,
   );
@@ -85,7 +91,7 @@ export async function applyAgentSelfUpdate(input: {
       : [...scheduleTriggers, ...preservedNonScheduleTriggers];
 
   const source = serializeAgentFile({
-    title: row.name,
+    title: title ?? row.name,
     body,
     model: model ?? current.model.name,
     agents: current.agents ?? [],
@@ -158,6 +164,8 @@ export async function applyAgentSelfUpdate(input: {
   }
 
   const changedFields = diffChangedFields(current, nextConfig);
+  // Title isn't part of AgentConfig, so diffChangedFields can't see it — surface a rename here.
+  if (title && title !== row.name) changedFields.push("name");
 
   await requireLeaseWrite(
     appendRuntimeEventForLease({
@@ -195,6 +203,17 @@ function parseArgs(
     errors.push("`body` is required and must be a non-empty string.");
   }
 
+  let title: string | undefined;
+  if (record.title !== undefined) {
+    if (typeof record.title !== "string" || !record.title.trim()) {
+      errors.push("`title` must be a non-empty string when provided.");
+    } else if (record.title.trim().length > MAX_AGENT_TITLE_LENGTH) {
+      errors.push(`\`title\` must be ${MAX_AGENT_TITLE_LENGTH} characters or fewer.`);
+    } else {
+      title = record.title.trim();
+    }
+  }
+
   let model: AgentModelId | undefined;
   if (record.model !== undefined) {
     if (typeof record.model !== "string" || !getAgentModelDefinition(record.model)) {
@@ -219,6 +238,7 @@ function parseArgs(
     ok: true,
     value: {
       body,
+      ...(title ? { title } : {}),
       ...(model ? { model } : {}),
       ...(summary ? { summary } : {}),
       ...(scheduleTriggers ? { scheduleTriggers } : {}),

@@ -33,6 +33,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@sentry/nextjs": "^10.53.1",
     "@slack/web-api": "^7.16.0",
+    "ai": "^6.0.189",
     "@tanstack/electric-db-collection": "^0.3.5",
     "@tanstack/react-db": "^0.1.85",
     "@tanstack/react-query": "^5.100.14",
