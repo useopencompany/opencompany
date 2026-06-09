@@ -20,7 +20,6 @@ import { usePersonalAgent } from "@/components/personal/PersonalAgentContext";
 import { personalIntegrationCount } from "@/components/personal/PersonalCapabilityPanel";
 import { SessionStatusDot } from "@/components/SessionStatusDot";
 import { SidebarAccountFooter } from "@/components/SidebarAccountFooter";
-import { SpaceSwitcher } from "@/components/SpaceSwitcher";
 import { useHydrated } from "@/components/useHydrated";
 import type { SidebarSessionPayload } from "@/lib/agent-sessions/payload";
 import { deriveVisibleInbox } from "@/lib/collections/selectors";
@@ -279,15 +278,8 @@ function PersonalSidebarView({
   inboxCount?: number;
 }) {
   const router = useRouter();
-  const {
-    agent,
-    userName,
-    userEmail,
-    workspaceName,
-    config,
-    personalSkills,
-    githubRequested,
-  } = usePersonalAgent();
+  const { agent, userName, userEmail, config, personalSkills, githubRequested } =
+    usePersonalAgent();
   const { inboxActive, activePanel, activeSessionId } = useActivePersonalRoute();
 
   const groupedSessions = useMemo(() => groupSessions(sessions), [sessions]);
@@ -314,12 +306,6 @@ function PersonalSidebarView({
           >
             <PanelLeft size={15} strokeWidth={1.75} />
           </button>
-          <SpaceSwitcher
-            activeSpace="personal"
-            workspaceName={workspaceName}
-            hideWorkspace
-            className="min-w-0 flex-1 px-0 pb-0"
-          />
         </div>
 
         {/* Primary nav */}
@@ -349,7 +335,7 @@ function PersonalSidebarView({
 
         {/* Scrollable body */}
         <div className="mt-1 flex flex-1 flex-col overflow-y-auto pb-3">
-          <Section title="Configuration" defaultOpen={false}>
+          <Section title="Configuration">
             <CapabilityNavRow
               icon={Brain}
               label="Personal Brain"
@@ -391,7 +377,7 @@ function PersonalSidebarView({
             />
           </Section>
 
-          <Section title="Sessions" defaultOpen={false}>
+          <Section title="Sessions">
             {sessions.length === 0 ? (
               <div className="mx-1 mt-1 rounded-md border border-dashed border-border bg-surface/35 px-2.5 py-3 text-[12px] leading-5 text-ink-muted">
                 Sessions you start will appear here.
