@@ -1,5 +1,9 @@
 # Changelog media (screen recordings)
 
+> For the overall changelog process (categories, entry style, working from the
+> true merge history), see [changelog.md](./changelog.md). This page covers
+> only the media hosting and upload flow.
+
 The public `/changelog` page (rendered from the root `CHANGELOG.md`) supports
 inline images and short screen recordings via standard Markdown image syntax:
 
