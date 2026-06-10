@@ -20,6 +20,11 @@ export type AgentSkillDefinition = {
   // being listed in the agent's `skills:` frontmatter. The config field lets agents
   // (and, later, the editor) add more skills over time.
   defaultEnabled: boolean;
+  // Built-in skills with `addable` are offered in the agent editor's @-mention menu and
+  // can be self-added via self-edit, so an agent or user can turn them on per-agent. Only
+  // meaningful for `defaultEnabled: false` skills; `defaultEnabled: true` ones are always on,
+  // and internal skills (e.g. onboarding) leave this unset so they stay out of the picker.
+  addable?: boolean;
   files: AgentSkillFile[];
 };
 
@@ -95,6 +100,7 @@ changes here when you pass the explicit \`model\` argument to \`update_agent_fil
 
 - \`@brain/path\` or \`@brain/folder/\` — mount Brain context.
 - \`@toolname\` — enable a tool (see the list below).
+- \`@skill/<id>\` — turn on an addable built-in skill (see "Skills you can add" below).
 
 ## Keep the body light
 
@@ -190,6 +196,20 @@ triggers: [
 
 Set \`enabled: true\` only when you actually want it to run. A schedule with an unsupported
 cron or an empty prompt is rejected and nothing is saved — fix it and call again.
+
+## Skills you can add
+
+Some built-in skills are **available but off by default** — turn one on by mentioning it as
+\`@skill/<id>\` in your body, turn it off by dropping the mention. The skill then loads on
+demand whenever a matching task comes up. (This only works for built-in skills; skills added
+from a GitHub/skills.sh URL are managed by a human in the editor and are preserved as-is.)
+
+- \`@skill/first-principles\` — a 15-prompt framework for breaking a hard problem down to
+  fundamentals and rebuilding the answer from scratch. Add it when you regularly face stuck or
+  high-stakes decisions and want a sharper way to reason through them.
+
+Add a skill only when it genuinely fits how you work — an unused skill is just noise in your
+definition.
 
 ## How to make a change
 
@@ -634,6 +654,109 @@ not a setup wizard.
 
 const ONBOARDING_SKILL_MD = buildOnboardingSkillMd();
 
+export const FIRST_PRINCIPLES_SKILL_ID = "first-principles";
+
+function buildFirstPrinciplesSkillMd(): string {
+  return `---
+name: first-principles
+description: Break a hard problem down to fundamental truths and rebuild the solution from scratch. Use for high-stakes or stuck decisions where the conventional approach isn't working, the assumptions feel shaky, or you need an answer better than "how it's usually done."
+---
+
+# First-principles thinking
+
+Most reasoning is **reasoning by analogy** — copying what already exists with small tweaks.
+First-principles thinking instead strips a problem down to the few things you *know* are true,
+then rebuilds an answer from only those, ignoring how it's normally done. It's slower, so spend
+it where it pays off, not on routine choices.
+
+## When to use this
+
+- A decision is hard, high-stakes, or you're stuck, and the obvious approach isn't working.
+- You suspect the "best practice" everyone copies doesn't actually fit this situation.
+- You're told something is impossible or fixed, and you're not sure the constraint is real.
+- You want an answer that's genuinely better than the default, not just a safe variation of it.
+
+Don't reach for it on reversible, low-stakes, or well-understood choices — there, analogy is
+faster and fine. Use judgement: the goal is a better decision, not a longer one.
+
+## How to run it
+
+Work the 15 prompts below **in order**, in five passes. Write your answers down (a scratch file
+in \`work/\` is ideal) — externalizing the reasoning is most of the value. You don't need a
+paragraph per prompt; a tight, honest answer beats a long one. Skip a prompt only when it
+genuinely doesn't apply, and say why. End at pass 5 with a decision and the single truth it
+rests on.
+
+### Pass 1 — Strip to fundamentals
+
+1. **State the real goal as an outcome, not a solution.** What are we *actually* trying to
+   achieve? Phrase it as the end result we want, with no method baked in. ("Move people across
+   the city in 10 minutes," not "build a faster train.")
+2. **List the bedrock facts.** What do we know to be true here that can't be reduced further —
+   physical limits, hard numbers, contractual or legal givens, things we've directly verified?
+   Keep only what you could defend if challenged.
+3. **Separate convention from truth.** Go through everything you "know" about this problem and
+   sort each item into *proven truth* vs *inherited convention* ("this is how it's done").
+   Convention is not evidence — set it aside for now.
+
+### Pass 2 — Challenge the assumptions
+
+4. **Test each constraint for necessity.** For every constraint and assumption, ask: is this
+   *actually* required by the fundamentals, or just how it's currently done? What's the evidence
+   it must be true? Demand a reason, not a precedent.
+5. **Sort real vs imagined constraints.** Split the constraints into ones rooted in the bedrock
+   facts (real) and ones that are habit, fear, or convenience (imagined). Be honest — most
+   "hard" constraints are softer than they look.
+6. **Five whys to a root cause.** Pick the core difficulty and ask "why" about five times in a
+   row, each answer feeding the next question, until you hit something fundamental that you
+   can't reduce further. That root is what you actually have to solve.
+
+### Pass 3 — Reason up from the ground
+
+7. **Rebuild from only the fundamentals.** Ignoring the current approach entirely, if you
+   assembled a solution using *only* the bedrock facts from pass 1 and the real constraints from
+   pass 2, what would it look like? Design it from scratch, not as an edit of the status quo.
+8. **Interrogate what you're copying.** Whatever convention or best practice you'd otherwise
+   reach for — what is it actually optimizing for, and was that the same goal as yours (prompt
+   1)? If the goals differ, the practice may be solving someone else's problem.
+9. **Find the simplest mechanism.** What is the simplest possible mechanism that satisfies the
+   fundamentals? Prefer the answer with the fewest moving parts that still works — added
+   complexity has to earn its place against this baseline.
+
+### Pass 4 — Stress-test and reconstruct
+
+10. **Find where it breaks.** Where does the from-scratch solution fail? Walk the edge cases and
+    the second- and third-order effects — what does it set in motion once it's running?
+11. **Pre-mortem.** Assume it's a year later and this failed badly. What would have had to be
+    true for that to happen? Which of those failure conditions are plausible, and what would
+    you change now to defuse them?
+12. **Flex the resources.** How would the fundamental solution change with 10× the resources, or
+    with one-tenth? The extremes expose which parts are essential and which are just sized to
+    today's budget — and often reveal a better middle.
+
+### Pass 5 — Decide and translate to action
+
+13. **Name the real tradeoff.** Put the conventional approach and the from-scratch one
+    side by side and state the tradeoff between them *in fundamentals* — not "safer vs riskier"
+    but what each actually buys and costs against the goal.
+14. **Design the cheapest test.** What is the smallest, fastest, cheapest experiment that would
+    validate (or kill) the core assumption everything rests on? Find a way to learn the truth
+    before committing fully.
+15. **Commit and stay falsifiable.** State the decision, name the single fundamental truth it
+    rests on, and write down exactly what evidence would change your mind. If you can't name
+    what would change your mind, you haven't finished reasoning.
+
+## The point
+
+The output isn't fifteen filled-in answers — it's a decision you can defend from the ground up,
+a clear view of which constraints were never real, and one cheap test before you bet on it. If
+the conventional answer survives all five passes, that's a real result too: now you *know* why
+it's right instead of just assuming it.
+`;
+}
+
+const FIRST_PRINCIPLES_SKILL_MD = buildFirstPrinciplesSkillMd();
+
 export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
   {
     id: AGENT_SELF_EDIT_SKILL_ID,
@@ -676,6 +799,17 @@ export const AGENT_SKILL_CATALOG: AgentSkillDefinition[] = [
     // seeded pointer. Dormant (never read) in normal sessions.
     defaultEnabled: false,
     files: [{ path: "SKILL.md", content: ONBOARDING_SKILL_MD }],
+  },
+  {
+    id: FIRST_PRINCIPLES_SKILL_ID,
+    name: "First-principles thinking",
+    description:
+      "Break a hard problem down to fundamental truths and rebuild the solution from scratch — a 15-prompt framework for stuck or high-stakes decisions where the conventional approach isn't working.",
+    // Offered, not default-on: surfaced in the @-mention menu and self-addable, so any agent
+    // (company or personal) can turn it on per-agent without it loading in every session.
+    defaultEnabled: false,
+    addable: true,
+    files: [{ path: "SKILL.md", content: FIRST_PRINCIPLES_SKILL_MD }],
   },
 ];
 
@@ -744,6 +878,18 @@ export function resolveEnabledSkillMetadata(
     }
   }
   return out;
+}
+
+// Built-in skills the agent editor offers in its @-mention menu and that agents can self-add:
+// the `addable` catalog members (always `defaultEnabled: false`). Metadata only — no file
+// contents — so callers (incl. the web client) never pull the inline SKILL.md strings.
+export function listAddableBuiltinSkills(): ResolvedSkillMetadata[] {
+  return AGENT_SKILL_CATALOG.filter((skill) => skill.addable).map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    origin: "builtin" as const,
+  }));
 }
 
 // The built-in skills whose files (shipped in code) should be materialized for a session.

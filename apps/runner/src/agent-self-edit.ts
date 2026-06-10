@@ -6,7 +6,9 @@ import {
   type AgentScheduleTriggerConfig,
   buildAgentTiptapDoc,
   buildConfigMentionResolver,
+  collectBuiltinSkillMentions,
   getAgentModelDefinition,
+  isExternalSkillReference,
   isSupportedScheduleCron,
   normalizeAgentConfig,
   normalizeScheduleTimezone,
@@ -77,11 +79,13 @@ export async function applyAgentSelfUpdate(input: {
 
   // The body is the source of truth: tools and brain follow its @mentions. The title changes only
   // when an explicit `title` is passed (otherwise the current name is kept); path, delegated
-  // agents, repositories, and skills are preserved — they cannot be changed through self-edit in
-  // this version. The model changes only via the explicit `model` argument; otherwise the current
-  // model is kept. Schedule triggers are replaced wholesale when `triggers` is provided (omitted =
-  // keep current); GitHub PR triggers are always preserved, since they reference repositories the
-  // agent cannot manage here.
+  // agents, and repositories are preserved — they cannot be changed through self-edit in this
+  // version. Built-in skills DO follow the body's `@skill/<id>` mentions (add by mentioning,
+  // remove by dropping the mention); external skills are preserved as-is, since they need
+  // workspace resolution the agent can't perform here. The model changes only via the explicit
+  // `model` argument; otherwise the current model is kept. Schedule triggers are replaced
+  // wholesale when `triggers` is provided (omitted = keep current); GitHub PR triggers are always
+  // preserved, since they reference repositories the agent cannot manage here.
   const preservedNonScheduleTriggers = current.triggers.filter(
     (trigger) => trigger.type !== AGENT_SCHEDULE_TRIGGER_TYPE,
   );
@@ -90,12 +94,15 @@ export async function applyAgentSelfUpdate(input: {
       ? current.triggers
       : [...scheduleTriggers, ...preservedNonScheduleTriggers];
 
+  const preservedExternalSkills = (current.skills ?? []).filter(isExternalSkillReference);
+  const nextSkills = [...collectBuiltinSkillMentions(body), ...preservedExternalSkills];
+
   const source = serializeAgentFile({
     title: title ?? row.name,
     body,
     model: model ?? current.model.name,
     agents: current.agents ?? [],
-    skills: current.skills ?? [],
+    skills: nextSkills,
     integrations: current.integrations,
     triggers: nextTriggers,
   });
@@ -326,8 +333,13 @@ function diffChangedFields(previous: AgentConfig, next: AgentConfig): string[] {
   if (previous.model.name !== next.model.name) changed.push("model");
   if (toolIdSignature(previous) !== toolIdSignature(next)) changed.push("tools");
   if (brainSignature(previous) !== brainSignature(next)) changed.push("brain");
+  if (skillIdSignature(previous) !== skillIdSignature(next)) changed.push("skills");
   if (triggerSignature(previous) !== triggerSignature(next)) changed.push("triggers");
   return changed;
+}
+
+function skillIdSignature(config: AgentConfig) {
+  return [...(config.skills ?? []).map((skill) => skill.id)].sort().join(",");
 }
 
 function triggerSignature(config: AgentConfig) {

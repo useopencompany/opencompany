@@ -1,9 +1,11 @@
 import { AFTER_SESSION_TAG, extractAfterSessionConfig } from "./after-session";
 import { AGENT_MODEL_CATALOG, type ModelRatings } from "./models";
+import { isKnownAgentSkillId } from "./skills";
 import type { MentionResolver } from "./tiptap-builder";
 import { AGENT_TOOL_CATALOG, type AgentToolDefinition } from "./tools";
 import type {
   AgentBrainReference,
+  AgentBuiltinSkillReference,
   AgentCodingToolConfig,
   AgentConfig,
   AgentConfigTool,
@@ -15,6 +17,7 @@ import type {
   AgentModelId,
   AgentNeonDatabaseConfig,
   AgentReference,
+  AgentSkillReference,
   AgentToolId,
   AgentTriggerConfig,
 } from "./types";
@@ -123,6 +126,23 @@ export function extractConfigFromMentions(body: string): {
 
 export function collectBodyRepositoryMentions(body: string) {
   return extractMentionIds(body).filter((id) => isValidGitHubFullName(id));
+}
+
+// Built-in skills mentioned as `@skill/<id>` in a body, as bare references. Built-in ids
+// resolve straight from code (no catalog), so this powers self-edit: an agent adds a built-in
+// skill (e.g. first-principles) by mentioning it, removes it by dropping the mention. External
+// skills are intentionally excluded — they need workspace resolution and can't be self-added.
+export function collectBuiltinSkillMentions(body: string): AgentBuiltinSkillReference[] {
+  const seen = new Set<string>();
+  const references: AgentBuiltinSkillReference[] = [];
+  for (const rawId of extractMentionIds(body)) {
+    if (!rawId.toLowerCase().startsWith("skill/")) continue;
+    const id = rawId.slice("skill/".length).toLowerCase();
+    if (!id || seen.has(id) || !isKnownAgentSkillId(id)) continue;
+    seen.add(id);
+    references.push({ id });
+  }
+  return references;
 }
 
 /**
@@ -234,15 +254,21 @@ function collectBodyMentions(
   const tools = new Set<AgentToolId>();
   const brain = new Map<string, AgentBrainReference>();
   const agentReferences = new Map<string, AgentReference>();
-  const enabledSkills = new Map<string, AgentExternalSkillReference>();
+  const enabledSkills = new Map<string, AgentSkillReference>();
 
   for (const rawId of extractMentionIds(body)) {
-    // `@skill/<id>` enables a workspace skill. The mention is the enable signal; the resolved
-    // object (with provenance) comes from the injected catalog. An unknown id is dropped so it
+    // `@skill/<id>` enables a skill. A known built-in id (e.g. first-principles) resolves to a
+    // bare reference straight from code — no catalog needed. Otherwise the id must match the
+    // injected external catalog (which carries provenance); an unknown id is dropped so it
     // renders as an unresolved mention in the editor and never reaches the runtime config.
     if (rawId.toLowerCase().startsWith("skill/")) {
-      const resolved = skillCatalog.get(rawId.slice("skill/".length).toLowerCase());
-      if (resolved) enabledSkills.set(resolved.id, resolved);
+      const skillId = rawId.slice("skill/".length).toLowerCase();
+      if (isKnownAgentSkillId(skillId)) {
+        enabledSkills.set(skillId, { id: skillId });
+      } else {
+        const resolved = skillCatalog.get(skillId);
+        if (resolved) enabledSkills.set(resolved.id, resolved);
+      }
       continue;
     }
 

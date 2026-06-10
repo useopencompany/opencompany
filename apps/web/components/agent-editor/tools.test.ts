@@ -157,6 +157,20 @@ describe("agent editor mention tools", () => {
     expect(betterstack?.connectUrl).toBe("/api/mcp/betterstack/start?returnTo=%2Fsettings");
   });
 
+  test("offers the addable built-in first-principles skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/first-principles",
+          label: "skill/first-principles",
+          displayLabel: "First-principles thinking",
+        }),
+      ]),
+    );
+  });
+
   test("exposes workspace agents as stable agent slug mentions", () => {
     const items = buildWorkspaceAgentMentionItems([
       { path: "agents/research/research.agent", name: "Research" },

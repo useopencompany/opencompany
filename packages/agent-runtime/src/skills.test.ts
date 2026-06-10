@@ -4,11 +4,14 @@ import { resolveAgentRuntimeConfig } from "./config";
 import {
   AGENT_SELF_EDIT_SKILL_ID,
   computeSkillFolderIntegrity,
+  FIRST_PRINCIPLES_SKILL_ID,
   isKnownAgentSkillId,
+  listAddableBuiltinSkills,
   MAX_PERSONAL_SKILLS,
   MEMORY_SKILL_ID,
   normalizeAgentSkills,
   normalizeExternalSkillReference,
+  ONBOARDING_SKILL_ID,
   OPENCOMPANY_SETUP_SKILL_ID,
   resolveEnabledBuiltinSkillFiles,
   resolveEnabledSkillMetadata,
@@ -127,6 +130,52 @@ describe("skill catalog", () => {
     expect(
       normalizeAgentSkills([AGENT_SELF_EDIT_SKILL_ID, { id: AGENT_SELF_EDIT_SKILL_ID }]),
     ).toEqual([{ id: AGENT_SELF_EDIT_SKILL_ID }]);
+  });
+});
+
+describe("first-principles skill (addable built-in)", () => {
+  test("is a known built-in but off by default", () => {
+    expect(isKnownAgentSkillId(FIRST_PRINCIPLES_SKILL_ID)).toBe(true);
+    // Not in the default-on set: a base config (no skills listed) must not materialize it.
+    expect(resolveEnabledBuiltinSkillFiles(baseConfig()).map((s) => s.id)).not.toContain(
+      FIRST_PRINCIPLES_SKILL_ID,
+    );
+    expect(resolveEnabledSkillMetadata(baseConfig()).map((s) => s.id)).not.toContain(
+      FIRST_PRINCIPLES_SKILL_ID,
+    );
+  });
+
+  test("materializes once listed in config.skills as a bare built-in ref", () => {
+    const config = baseConfig({ skills: [{ id: FIRST_PRINCIPLES_SKILL_ID }] });
+    const skill = resolveEnabledBuiltinSkillFiles(config).find(
+      (s) => s.id === FIRST_PRINCIPLES_SKILL_ID,
+    );
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    // Ships the framework: 15 numbered prompts plus the read-on-demand framing.
+    expect(skillMd).toContain("first-principles");
+    expect(skillMd).toMatch(/15-prompt|15 prompts|fundamental/i);
+    expect(skillMd).toContain("15.");
+    expect(
+      resolveEnabledSkillMetadata(config).find((s) => s.id === FIRST_PRINCIPLES_SKILL_ID)?.origin,
+    ).toBe("builtin");
+  });
+
+  test("listAddableBuiltinSkills offers it and excludes internal/default-on skills", () => {
+    const addable = listAddableBuiltinSkills();
+    const ids = addable.map((s) => s.id);
+    expect(ids).toContain(FIRST_PRINCIPLES_SKILL_ID);
+    // Internal first-session skill must never be offered in the picker.
+    expect(ids).not.toContain(ONBOARDING_SKILL_ID);
+    // Always-on built-ins aren't "addable" — they're already present.
+    expect(ids).not.toContain(AGENT_SELF_EDIT_SKILL_ID);
+    expect(addable.every((s) => s.origin === "builtin" && s.name && s.description)).toBe(true);
+  });
+
+  test("the self-edit skill documents adding a built-in skill via @skill mention", () => {
+    const [skill] = resolveEnabledBuiltinSkillFiles(baseConfig());
+    const skillMd = skill?.files.find((file) => file.path === "SKILL.md")?.content ?? "";
+    expect(skillMd).toContain("@skill/");
+    expect(skillMd).toContain(`@skill/${FIRST_PRINCIPLES_SKILL_ID}`);
   });
 });
 

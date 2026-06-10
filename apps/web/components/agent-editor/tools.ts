@@ -2,6 +2,7 @@ import type { ModelRatings, ModelRatingTier } from "@opencompany/agent-runtime";
 import {
   AFTER_SESSION_TAG,
   agentMentionIdForPath,
+  listAddableBuiltinSkills,
   repositoryIdForFullName,
 } from "@opencompany/agent-runtime";
 import type {
@@ -324,11 +325,16 @@ export function buildAgentMentionItems(
   ];
 }
 
-// Workspace external skills as @skill/<id> mentions, plus an "Add skill from GitHub URL"
-// action that opens the resolve dialog. The pill renders @skill/<id> in the body (so it
-// matches the runtime derivation); the dropdown shows the friendly skill name.
+// Addable built-in skills (shipped in code, off by default) plus the workspace's external
+// skills, all as @skill/<id> mentions, plus an "Add skill from GitHub URL" action that opens
+// the resolve dialog. The pill renders @skill/<id> in the body (so it matches the runtime
+// derivation); the dropdown shows the friendly skill name. Built-ins lead since they're always
+// available regardless of workspace setup.
 export function buildSkillMentionItems(skills: AgentSkillCatalogEntry[]): AgentSkillMention[] {
-  const items: AgentSkillMention[] = skills.map((skill) => ({
+  const builtin = listAddableBuiltinSkills();
+  const seen = new Set(builtin.map((skill) => skill.id));
+  const catalog = [...builtin, ...skills.filter((skill) => !seen.has(skill.id))];
+  const items: AgentSkillMention[] = catalog.map((skill) => ({
     id: `skill/${skill.id}`,
     mentionId: `skill/${skill.id}`,
     kind: "skill" as const,
