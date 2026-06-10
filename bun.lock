@@ -7,6 +7,7 @@
       "dependencies": {
         "@neondatabase/serverless": "^1.1.0",
         "dotenv": "^17.4.2",
+        "pg": "^8.13.1",
         "vercel": "^54.5.0",
       },
       "devDependencies": {

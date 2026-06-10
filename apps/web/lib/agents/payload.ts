@@ -157,7 +157,7 @@ export function agentDetailToListItem(agent: AgentDetailPayload): AgentListItemP
 }
 
 export function agentHref(agent: Pick<AgentListItemPayload, "id" | "path">) {
-  return `/agents/${agent.path ?? agent.id}`;
+  return `/company/agents/${agent.path ?? agent.id}`;
 }
 
 export const agentQueryKeys = {

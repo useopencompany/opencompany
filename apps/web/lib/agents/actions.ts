@@ -118,7 +118,7 @@ export async function createAgent() {
   revalidatePath("/company/agents");
   scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { path: result.path });
-  redirect(`/agents/${result.path}`);
+  redirect(`/company/agents/${result.path}`);
 }
 
 export async function updateAgent(
@@ -554,9 +554,9 @@ export async function updateAgent(
   };
 
   revalidatePath("/company/agents");
-  revalidatePath(`/agents/${result.path}`);
-  if (previousPath) revalidatePath(`/agents/${previousPath}`);
-  revalidatePath(`/agents/${result.id}`);
+  revalidatePath(`/company/agents/${result.path}`);
+  if (previousPath) revalidatePath(`/company/agents/${previousPath}`);
+  revalidatePath(`/company/agents/${result.id}`);
   // One coalesced dispatch covers the agent definition and any bundle-file moves.
   scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { found: true, path: result.path, pathChanged });
@@ -733,8 +733,8 @@ export async function deleteAgent(
   });
 
   revalidatePath("/company/agents");
-  if (agent.path) revalidatePath(`/agents/${agent.path}`);
-  revalidatePath(`/agents/${agent.id}`);
+  if (agent.path) revalidatePath(`/company/agents/${agent.path}`);
+  revalidatePath(`/company/agents/${agent.id}`);
   if (agent.path) scheduleWorkspaceSyncDispatch({ workspaceId: workspace.id });
   endTimingTrace(trace, { found: true, path: agent.path });
   return { ok: true, txid };

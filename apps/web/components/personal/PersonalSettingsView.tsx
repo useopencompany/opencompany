@@ -121,7 +121,7 @@ export default function PersonalSettingsView({ billing }: { billing: BillingData
       </Section>
 
       <Section title="Billing" description="Your credit balance, usage, and top-ups.">
-        <BillingPanel billing={billing} />
+        <BillingPanel billing={billing} sessionPathPrefix="/personal" />
       </Section>
     </div>
   );

@@ -59,6 +59,11 @@ export type ProviderPermissionSpec = {
 // in v1 — the sandbox is ephemeral and isolated, so the blast radius is local.
 export const SYSTEM_PROVIDER_KEY = "system";
 
+// Provider key for tool names that cannot be classified at all. Deliberately has no
+// PROVIDER_PERMISSION_REGISTRY entry: resolveToolDecision then applies the workspace
+// policy gate with the admin-group default stance (ask → deny when non-suspendable).
+export const UNKNOWN_PROVIDER_KEY = "unknown";
+
 export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec> = {
   slack: {
     providerKey: "slack",
@@ -382,8 +387,12 @@ export function permissionDescriptionFor(providerKey: string, group: PermissionG
 
 // First-party / built-in runtime tools mapped to a provider + group. Returning null
 // means the tool is never gated (always allowed) — e.g. delegation and tool help.
-const RUNTIME_TOOL_CLASSIFICATION: Partial<
-  Record<RuntimeToolName, { providerKey: string; group: PermissionGroup } | null>
+// Exhaustive over RuntimeToolName so adding a runtime tool fails the build until it is
+// classified here — an unmapped tool must not silently ship ungated (the old Partial
+// map let new tools ride the ungated `system` fallback).
+const RUNTIME_TOOL_CLASSIFICATION: Record<
+  RuntimeToolName,
+  { providerKey: string; group: PermissionGroup } | null
 > = {
   // Exa hosted research tools — read-only external lookups.
   exa_search: { providerKey: "exa", group: "read" },
@@ -452,6 +461,18 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // memory only touches the sandbox-local agent/memory/ tree and the routed Gateway; it is a
   // first-party, parsed-argv tool (no shell breakout), so it stays in the ungated system group.
   memory: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  // Session-history and inbox tools derive their scope from the session row server-side
+  // (caller's own transcripts/inbox only), so they live in the ungated system group.
+  recall: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  fetch_transcript: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  inbox_list: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  inbox_add: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
+  inbox_update: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
+  // Reads a mounted skill file from the sandbox.
+  read_skill: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  // Self-edit of the agent's own definition; its safety flow (validation + skill-read
+  // gate) lives in the tool itself, not the policy gate.
+  update_agent_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // GitHub-effecting tools. gh is conservatively admin unless resolveToolDecision
   // can classify the concrete CLI args; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },
@@ -460,6 +481,9 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,
+  // Pure capability discovery — no side effects.
+  find_tools: null,
+  discover_capabilities: null,
   // Suspends the run for user input via a dedicated branch, not the policy "ask" gate.
   ask_user_question: null,
 };
@@ -470,8 +494,17 @@ export function classifyRuntimeTool(name: string): ToolClassification {
   if (name in RUNTIME_TOOL_CLASSIFICATION) {
     return RUNTIME_TOOL_CLASSIFICATION[name as RuntimeToolName] ?? null;
   }
-  // Unknown runtime tool: be conservative but classify under system.
-  return { providerKey: SYSTEM_PROVIDER_KEY, group: UNKNOWN_GROUP_FALLBACK };
+  // A `use_tool` invoke whose `tool` argument is missing/invalid resolves to the literal
+  // invoke name. Never gated: the dispatcher rejects it with a recoverable validation
+  // error, which is better model feedback than a permission denial.
+  if (name === BUILTIN_USE_TOOL_NAME) return null;
+  // Unknown runtime tool: classify under a provider with no registry spec so
+  // resolveToolDecision routes it through the policy gate (admin defaults to ask, which
+  // collapses to deny in non-suspendable runs) instead of short-circuiting through the
+  // ungated `system` provider — the old fallback's "conservative" admin group was
+  // illusory because system is never gated. Unreachable for typed runtime tools now
+  // that the classification map is exhaustive; defense in depth for raw names.
+  return { providerKey: UNKNOWN_PROVIDER_KEY, group: UNKNOWN_GROUP_FALLBACK };
 }
 
 const READ_VERBS = ["get", "list", "search", "read", "fetch", "view", "describe", "find", "query"];
@@ -615,9 +648,83 @@ export function classifyNeonSql(sql: unknown): PermissionGroup {
   if (head === "explain") {
     return /\banalyze\b/i.test(normalized) ? "admin" : "read";
   }
-  if (["select", "show", "values", "with"].includes(head)) return "read";
+  if (["select", "show", "values", "with"].includes(head)) {
+    // A read-shaped head can still write: Postgres allows data-modifying CTEs
+    // (`WITH d AS (DELETE FROM users RETURNING *) SELECT ...`) and `SELECT ... INTO
+    // new_table`. Scan with quoted regions blanked so string literals/quoted
+    // identifiers can't trigger (or hide) a match; a false positive on an unquoted
+    // keyword degrades safely to the gated modify tier.
+    const scannable = blankQuotedSqlRegions(normalized);
+    if (head === "with" && /\b(?:insert|update|delete|merge)\b/i.test(scannable)) {
+      return "modify";
+    }
+    if ((head === "select" || head === "with") && /\binto\b/i.test(scannable)) {
+      return "modify";
+    }
+    return "read";
+  }
   if (["insert", "update", "delete", "merge", "call"].includes(head)) return "modify";
   return "admin";
+}
+
+// Replace the contents of quoted SQL regions ('…', "…", $tag$…$tag$) with spaces so
+// keyword scans only see unquoted SQL text. Mirrors the quoting rules in
+// hasMultipleSqlStatements below.
+function blankQuotedSqlRegions(sql: string): string {
+  let out = "";
+  let quote: "'" | '"' | "`" | null = null;
+  let dollarTag: string | null = null;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]!;
+    const next = sql[index + 1];
+
+    if (dollarTag) {
+      if (sql.startsWith(dollarTag, index)) {
+        out += dollarTag;
+        index += dollarTag.length - 1;
+        dollarTag = null;
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") {
+          out += "  ";
+          index += 1;
+          continue;
+        }
+        quote = null;
+        out += char;
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      out += char;
+      continue;
+    }
+
+    if (char === "$") {
+      const match = sql.slice(index).match(/^\$[a-zA-Z_][a-zA-Z0-9_]*\$|^\$\$/);
+      if (match?.[0]) {
+        dollarTag = match[0];
+        out += match[0];
+        index += match[0].length - 1;
+        continue;
+      }
+    }
+
+    out += char;
+  }
+
+  return out;
 }
 
 export function hasMultipleSqlStatements(sql: string): boolean {
@@ -743,8 +850,11 @@ function classifyGhApi(argv: string[]): PermissionGroup {
 function hasGhApiRequestBody(argv: string[]) {
   return argv.some((arg) => {
     return (
-      arg === "-f" ||
-      arg === "-F" ||
+      // gh is a pflag CLI, so shorthand flags accept attached values: `-ftitle=x` and
+      // `-f=title=x` are valid body fields, not just the bare `-f value` form. Match
+      // by prefix so the attached forms can't classify as a body-less read.
+      arg.startsWith("-f") ||
+      arg.startsWith("-F") ||
       arg === "--field" ||
       arg === "--raw-field" ||
       arg === "--input" ||
@@ -764,6 +874,15 @@ function readGhApiMethod(argv: string[]): string | undefined {
     }
     if (arg.startsWith("--method=")) {
       return arg.slice("--method=".length).toUpperCase();
+    }
+    // pflag shorthand with an attached value: `-XDELETE` / `-X=DELETE`. Without this,
+    // the attached forms fell through to "no method" and a destructive call classified
+    // as read. An empty attached value (`-X=`) is unparseable → "DELETE" so it lands
+    // in the admin group rather than being waved through.
+    if (arg.startsWith("-X")) {
+      const attached = arg.slice(2);
+      const value = attached.startsWith("=") ? attached.slice(1) : attached;
+      return value ? value.toUpperCase() : "DELETE";
     }
   }
   return undefined;

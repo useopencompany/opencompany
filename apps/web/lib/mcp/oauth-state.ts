@@ -4,7 +4,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 // (Linear, Slack, …). Signed with MCP_OAUTH_STATE_SECRET — a secret dedicated to this
 // purpose, distinct from the credential encryption key.
 
-const DEFAULT_RETURN_TO = "/settings";
+const DEFAULT_RETURN_TO = "/company/settings";
 const STATE_TTL_MS = 10 * 60 * 1000;
 const STATE_SECRET_ENV = "MCP_OAUTH_STATE_SECRET";
 

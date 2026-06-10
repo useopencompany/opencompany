@@ -354,7 +354,7 @@ function AgentDetailContent({
         updateAgentQueries(queryClient, workspaceId, result.agent, idOrPath);
         submittedPatchRef.current = null;
         if (result.pathChanged) {
-          router.replace(`/agents/${result.path}`);
+          router.replace(`/company/agents/${result.path}`);
         }
       } catch (error) {
         submittedPatchRef.current = null;
@@ -428,10 +428,10 @@ function AgentDetailContent({
               href="/company/agents"
               prefetch
               onMouseEnter={() => {
-                router.prefetch("/agents");
+                router.prefetch("/company/agents");
               }}
               onFocus={() => {
-                router.prefetch("/agents");
+                router.prefetch("/company/agents");
               }}
               className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-surface-subtle/70"
             >
