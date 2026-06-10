@@ -6,7 +6,7 @@ import { ensurePersonalAgent } from "@/lib/personal/scaffold";
 // (the layout already called it), so this just resolves the agent so we can hand its id to the
 // client composer.
 export default async function PersonalOnboardingPage() {
-  const { authUser, user, workspace } = await currentWorkspace();
+  const { authUser, user, workspace } = await currentWorkspace({ skipOnboarding: true });
 
   const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
   const agent = await ensurePersonalAgent({

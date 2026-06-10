@@ -19,7 +19,7 @@ export default async function PersonalOnboardingLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { authUser, user, workspace } = await currentWorkspace();
+  const { authUser, user, workspace } = await currentWorkspace({ skipOnboarding: true });
 
   const agentName = user.firstName?.trim() || authUser.email.split("@")[0] || "You";
   await ensurePersonalAgent({
