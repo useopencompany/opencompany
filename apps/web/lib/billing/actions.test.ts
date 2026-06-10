@@ -127,8 +127,8 @@ describe("createCreditCheckoutSession", () => {
     expect(create).toHaveBeenCalledWith({
       mode: "payment",
       customer_email: "user@example.com",
-      success_url: "https://app.example.com/settings?billing=success",
-      cancel_url: "https://app.example.com/settings?billing=cancelled",
+      success_url: "https://app.example.com/personal/settings?billing=success",
+      cancel_url: "https://app.example.com/personal/settings?billing=cancelled",
       metadata: {
         workspaceId: "wks_123",
         userId: "usr_123",
