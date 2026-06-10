@@ -12,6 +12,7 @@ import {
   isInspectableRuntimeEvent,
   isReasoningInProgress,
   mergeEvents,
+  mergeLiveSessionAggregates,
   mergeMessages,
   type RuntimeEvent,
   resolveToolDisplay,
@@ -79,6 +80,77 @@ describe("mergeEvents", () => {
     const merged = mergeEvents(snapshot, overlay);
 
     expect(merged.map((e) => e.id)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("mergeLiveSessionAggregates", () => {
+  it("adds only usage and cost events newer than the server high-water mark", () => {
+    const snapshot = {
+      usage: {
+        inputTokens: 100,
+        inputNoCacheTokens: 90,
+        inputCacheReadTokens: 10,
+        inputCacheWriteTokens: 0,
+        outputTokens: 20,
+        outputTextTokens: 18,
+        outputReasoningTokens: 2,
+        totalTokens: 120,
+      },
+      toolUsage: { totalCostUsdMicros: 500, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 1000,
+        platformFeeUsdMicros: 100,
+        totalCostUsdMicros: 1100,
+        modelCostUsdMicros: 1100,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 120,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        event(3, "session.usage", {
+          inputTokens: 1_000,
+          outputTokens: 250,
+          totalTokens: 1_250,
+          providerCostUsdMicros: 10_000,
+          platformFeeUsdMicros: 1_000,
+          chargedCostUsdMicros: 11_000,
+        }),
+        event(4, "session.usage", {
+          inputTokens: 40,
+          inputNoCacheTokens: 35,
+          inputCacheReadTokens: 5,
+          outputTokens: 10,
+          outputTextTokens: 8,
+          outputReasoningTokens: 2,
+          totalTokens: 50,
+          providerCostUsdMicros: 400,
+          platformFeeUsdMicros: 40,
+          chargedCostUsdMicros: 440,
+        }),
+        event(5, "session.tool_usage", {
+          provider: "exa",
+          operation: "search",
+          costUsdMicros: 700,
+          providerCostUsdMicros: 700,
+          chargedCostUsdMicros: 700,
+        }),
+      ],
+      3,
+    );
+
+    expect(merged.usage.totalTokens).toBe(170);
+    expect(merged.cost.totalCostUsdMicros).toBe(2240);
+    expect(merged.cost.modelCostUsdMicros).toBe(1540);
+    expect(merged.cost.toolCostUsdMicros).toBe(700);
+    expect(merged.toolUsage).toEqual({
+      totalCostUsdMicros: 1200,
+      byProviderOperation: [{ provider: "exa", operation: "search", costUsdMicros: 700, calls: 1 }],
+    });
+    expect(merged.currentContextTokens).toBe(50);
   });
 });
 
