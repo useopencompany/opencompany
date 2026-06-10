@@ -152,6 +152,47 @@ describe("mergeLiveSessionAggregates", () => {
     });
     expect(merged.currentContextTokens).toBe(50);
   });
+
+  it("uses the highest-id session.usage event for currentContextTokens when events arrive out of order", () => {
+    // Event id 5 (higher) arrives before event id 4 (lower) in the overlay array.
+    // currentContextTokens must reflect the tokens from id 5, not the stale id 4 that follows it.
+    const snapshot = {
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 0,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        // Higher-id event arrives first in iteration order (stream replay out-of-order).
+        event(5, "session.usage", { inputTokens: 800, outputTokens: 200 }),
+        // Lower-id event arrives second — must NOT overwrite currentContextTokens.
+        event(4, "session.usage", { inputTokens: 100, outputTokens: 50 }),
+      ],
+      3,
+    );
+
+    // currentContextTokens must come from the higher-id event (id 5): 800 + 200 = 1000.
+    expect(merged.currentContextTokens).toBe(1000);
+  });
 });
 
 function initialState(): SessionRuntimeState {

@@ -154,6 +154,7 @@ export function mergeLiveSessionAggregates(
   let toolUsage = snapshot.toolUsage;
   let cost = snapshot.cost;
   let currentContextTokens = snapshot.currentContextTokens;
+  let lastUsageEventId = afterEventId;
 
   for (const event of overlayEvents) {
     if (typeof event.id !== "number" || event.id <= afterEventId) continue;
@@ -161,8 +162,11 @@ export function mergeLiveSessionAggregates(
     if (event.type === "session.usage") {
       usage = addUsageSummary(usage, event.payload);
       cost = addCostSummary(cost, event.payload, "model");
-      currentContextTokens =
-        readNumber(event.payload.inputTokens) + readNumber(event.payload.outputTokens);
+      if (event.id > lastUsageEventId) {
+        currentContextTokens =
+          readNumber(event.payload.inputTokens) + readNumber(event.payload.outputTokens);
+        lastUsageEventId = event.id;
+      }
       continue;
     }
 
@@ -184,6 +188,11 @@ export function mergeLiveSessionAggregates(
       usage = addUsageSummary(usage, eventUsage);
       cost = addCostRollup(cost, eventCost);
       toolUsage = addToolUsageRollup(toolUsage, eventToolUsage);
+      if (event.id > lastUsageEventId) {
+        currentContextTokens =
+          readNumber(eventUsage.inputTokens) + readNumber(eventUsage.outputTokens);
+        lastUsageEventId = event.id;
+      }
     }
   }
 
