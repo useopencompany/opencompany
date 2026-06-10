@@ -21,12 +21,12 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  createBrainFile,
-  deleteBrainFile,
-  deleteBrainFolder,
-  renameBrainFile,
-  renameBrainFolder,
-  updateBrainFile,
+  createBrainFile as createWorkspaceBrainFile,
+  deleteBrainFile as deleteWorkspaceBrainFile,
+  deleteBrainFolder as deleteWorkspaceBrainFolder,
+  renameBrainFile as renameWorkspaceBrainFile,
+  renameBrainFolder as renameWorkspaceBrainFolder,
+  updateBrainFile as updateWorkspaceBrainFile,
 } from "@/lib/brain/actions";
 import {
   brainFileRenameSelectionEnd,
@@ -80,7 +80,47 @@ type BrainViewSnapshot = {
 const AUTO_SAVE_DELAY_MS = 800;
 const BRAIN_TREE_DRAG_MIME = "application/x-opencompany-brain-tree-item";
 
-export default function BrainView({ files: serverFiles }: { files: BrainFile[] }) {
+// The Brain CRUD surface, injected so the same view serves both the workspace Brain (brainFiles,
+// GitHub-synced) and the personal Brain (the personal agent's bundle personal-brain/ subtree,
+// local-only). Defaults to the workspace actions so existing callers need no change.
+export type BrainActionResult = { ok: true; path: string } | { ok: false; error: string };
+export type BrainActions = {
+  createFile: (path: string, content?: string) => Promise<BrainActionResult>;
+  updateFile: (path: string, content: string) => Promise<BrainActionResult>;
+  renameFile: (fromPath: string, toPath: string) => Promise<BrainActionResult>;
+  renameFolder: (fromPath: string, toPath: string) => Promise<BrainActionResult>;
+  deleteFile: (path: string) => Promise<BrainActionResult>;
+  deleteFolder: (path: string) => Promise<BrainActionResult>;
+};
+
+const WORKSPACE_BRAIN_ACTIONS: BrainActions = {
+  createFile: createWorkspaceBrainFile,
+  updateFile: updateWorkspaceBrainFile,
+  renameFile: renameWorkspaceBrainFile,
+  renameFolder: renameWorkspaceBrainFolder,
+  deleteFile: deleteWorkspaceBrainFile,
+  deleteFolder: deleteWorkspaceBrainFolder,
+};
+
+export default function BrainView({
+  files: serverFiles,
+  actions = WORKSPACE_BRAIN_ACTIONS,
+  title = "Project brain",
+  emptyHint = "Create a Brain file to start adding long-lived context.",
+}: {
+  files: BrainFile[];
+  actions?: BrainActions;
+  title?: string;
+  emptyHint?: string;
+}) {
+  const {
+    createFile: createBrainFile,
+    updateFile: updateBrainFile,
+    renameFile: renameBrainFile,
+    renameFolder: renameBrainFolder,
+    deleteFile: deleteBrainFile,
+    deleteFolder: deleteBrainFolder,
+  } = actions;
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [files, setFiles] = useState(serverFiles);
@@ -979,6 +1019,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
   return (
     <main className="flex h-full min-w-0 flex-1 overflow-hidden bg-canvas">
       <BrainSidebar
+        title={title}
         files={files}
         tree={tree}
         query={query}
@@ -1083,7 +1124,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
           </div>
         ) : (
           <div className="flex flex-1 items-center justify-center px-6 text-[13px] text-ink-muted">
-            Create a Brain file to start adding long-lived context.
+            {emptyHint}
           </div>
         )}
       </section>
@@ -1105,6 +1146,7 @@ export default function BrainView({ files: serverFiles }: { files: BrainFile[] }
 }
 
 function BrainSidebar({
+  title,
   files,
   tree,
   query,
@@ -1143,6 +1185,7 @@ function BrainSidebar({
   onAutoExpandFolder,
   onContextMenu,
 }: {
+  title: string;
   files: BrainFile[];
   tree: BrainTreeNode<BrainFile>;
   query: string;
@@ -1191,7 +1234,7 @@ function BrainSidebar({
             <FileText size={14} strokeWidth={1.9} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13px] font-medium text-ink">Project brain</div>
+            <div className="truncate text-[13px] font-medium text-ink">{title}</div>
             <div className="mt-0.5 text-[11.5px] text-ink-muted">{files.length} files</div>
           </div>
           <button

@@ -82,7 +82,7 @@ describe("GitHub integration state", () => {
       returnTo: "https://example.com/phish",
     });
 
-    expect(verifyGitHubIntegrationState(state).returnTo).toBe("/settings/integrations");
+    expect(verifyGitHubIntegrationState(state).returnTo).toBe("/company/settings/integrations");
   });
 
   it("reports whether work integration env vars are configured", () => {

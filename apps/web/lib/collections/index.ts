@@ -1,7 +1,13 @@
 import { archiveAgentSession, setSessionStar } from "@/lib/agent-sessions/actions";
 import { deleteAgent } from "@/lib/agents/actions";
 import { createElectricCollection } from "@/lib/collections/electric";
-import type { AgentRow, AgentSessionRow, SessionStarRow } from "@/lib/collections/types";
+import type {
+  AgentRow,
+  AgentSessionRow,
+  InboxItemRow,
+  SessionStarRow,
+} from "@/lib/collections/types";
+import { completeInboxItem, dismissInboxItem, snoozeInboxItem } from "@/lib/inbox/actions";
 
 /**
  * All client collections for a workspace. Built by a factory (not module
@@ -68,7 +74,34 @@ export function createCollections(workspaceId: string) {
     },
   });
 
-  return { workspaceId, agents, agentSessions, sessionStars };
+  const inboxItems = createElectricCollection<InboxItemRow>({
+    id: `inbox_items:${workspaceId}`,
+    table: "inbox_items",
+    getKey: (row) => row.id,
+    // Triage is a single optimistic update() whose new status decides the action: the UI sets
+    // status (and snoozed_until for snooze); the handler dispatches to the matching server action
+    // and returns the txid Electric reconciles against. Done/dismissed/elapsed-snooze rows are
+    // hidden by the client filter (deriveVisibleInbox) and then stream out of the shape.
+    onUpdate: async ({ transaction }) => {
+      const mutation = transaction.mutations[0];
+      if (!mutation) throw new Error("Inbox mutation had no target row.");
+      const id = String(mutation.key);
+      const status = mutation.modified.status;
+      const result =
+        status === "snoozed"
+          ? await snoozeInboxItem(id)
+          : status === "done"
+            ? await completeInboxItem(id)
+            : status === "dismissed"
+              ? await dismissInboxItem(id)
+              : null;
+      if (!result) throw new Error(`Unsupported inbox transition to status "${status}".`);
+      if (!result.ok) throw new Error(result.error);
+      return { txid: result.txid };
+    },
+  });
+
+  return { workspaceId, agents, agentSessions, sessionStars, inboxItems };
 }
 
 export type Collections = ReturnType<typeof createCollections>;

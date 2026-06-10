@@ -125,37 +125,25 @@ describe("agent editor mention tools", () => {
     );
   });
 
-  test("only exposes configured MCP tools for the workspace", () => {
+  test("always exposes MCP tools for the workspace", () => {
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:linear")).toBe(
-      false,
+      true,
     );
     expect(buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:slack")).toBe(
-      false,
+      true,
     );
     expect(
-      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
-        (item) => item.mentionId === "tool:linear",
-      ),
-    ).toBe(true);
-    expect(
-      buildAgentMentionItems([], [], { enabledMcpToolIds: ["linear"] }).some(
-        (item) => item.mentionId === "tool:slack",
-      ),
-    ).toBe(false);
-    expect(
-      buildAgentMentionItems([], [], { enabledMcpToolIds: ["slack"] }).some(
-        (item) => item.mentionId === "tool:slack",
-      ),
+      buildAgentMentionItems([], []).some((item) => item.mentionId === "tool:betterstack"),
     ).toBe(true);
   });
 
-  test("shows not-connected MCP tools with a needs-setup badge when the beta is on", () => {
+  test("shows not-connected MCP tools with a needs-setup badge", () => {
     const items = buildAgentMentionItems([], [], {
-      mcpEnabled: true,
       enabledMcpToolIds: ["linear"],
     });
     const linear = items.find((item) => item.mentionId === "tool:linear");
     const slack = items.find((item) => item.mentionId === "tool:slack");
+    const betterstack = items.find((item) => item.mentionId === "tool:betterstack");
 
     // Connected provider behaves normally.
     expect(linear).toBeDefined();
@@ -164,7 +152,26 @@ describe("agent editor mention tools", () => {
     // Not-connected provider stays selectable but is flagged + linkable.
     expect(slack).toBeDefined();
     expect(slack?.needsSetup).toBe(true);
-    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fsettings");
+    expect(slack?.connectUrl).toBe("/api/mcp/slack/start?returnTo=%2Fcompany%2Fsettings");
+    expect(betterstack).toBeDefined();
+    expect(betterstack?.needsSetup).toBe(true);
+    expect(betterstack?.connectUrl).toBe(
+      "/api/mcp/betterstack/start?returnTo=%2Fcompany%2Fsettings",
+    );
+  });
+
+  test("offers the addable built-in first-principles skill in the mention menu", () => {
+    const items = buildAgentMentionItems();
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "skill",
+          mentionId: "skill/first-principles",
+          label: "skill/first-principles",
+          displayLabel: "First-principles thinking",
+        }),
+      ]),
+    );
   });
 
   test("exposes workspace agents as stable agent slug mentions", () => {

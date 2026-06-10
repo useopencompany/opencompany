@@ -4,6 +4,7 @@ import {
   classifyByVerbHeuristic,
   classifyGitHubCliArgs,
   classifyMcpTool,
+  classifyNeonSql,
   classifyRuntimeTool,
   classifyTool,
   formatWorkspaceToolPolicyContext,
@@ -18,6 +19,7 @@ describe("classifyRuntimeTool", () => {
     expect(classifyRuntimeTool("exa_search")).toEqual({ providerKey: "exa", group: "read" });
     expect(classifyRuntimeTool("edit_file")).toEqual({ providerKey: "system", group: "modify" });
     expect(classifyRuntimeTool("shell")).toEqual({ providerKey: "system", group: "admin" });
+    expect(classifyRuntimeTool("memory")).toEqual({ providerKey: "system", group: "read" });
     expect(classifyRuntimeTool("gh")).toEqual({ providerKey: "github", group: "admin" });
     expect(classifyRuntimeTool("amp_coder")).toEqual({ providerKey: "github", group: "modify" });
     expect(classifyRuntimeTool("x_search_posts")).toEqual({ providerKey: "x", group: "read" });
@@ -45,11 +47,86 @@ describe("classifyRuntimeTool", () => {
       providerKey: "system",
       group: "read",
     });
+    expect(classifyRuntimeTool("neon_list_databases")).toEqual({
+      providerKey: "neon",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("neon_create_branch")).toEqual({
+      providerKey: "neon",
+      group: "admin",
+    });
   });
 
-  it("treats delegation and tool help as never gated", () => {
+  it("maps session-history, inbox, and self-edit tools to the system provider", () => {
+    expect(classifyRuntimeTool("recall")).toEqual({ providerKey: "system", group: "read" });
+    expect(classifyRuntimeTool("fetch_transcript")).toEqual({
+      providerKey: "system",
+      group: "read",
+    });
+    expect(classifyRuntimeTool("inbox_list")).toEqual({ providerKey: "system", group: "read" });
+    expect(classifyRuntimeTool("inbox_add")).toEqual({ providerKey: "system", group: "modify" });
+    expect(classifyRuntimeTool("inbox_update")).toEqual({ providerKey: "system", group: "modify" });
+    expect(classifyRuntimeTool("read_skill")).toEqual({ providerKey: "system", group: "read" });
+    expect(classifyRuntimeTool("update_agent_file")).toEqual({
+      providerKey: "system",
+      group: "modify",
+    });
+  });
+
+  it("treats delegation, discovery, and tool help as never gated", () => {
     expect(classifyRuntimeTool("delegate_to_agent")).toBeNull();
     expect(classifyRuntimeTool("tool_help")).toBeNull();
+    expect(classifyRuntimeTool("find_tools")).toBeNull();
+    expect(classifyRuntimeTool("discover_capabilities")).toBeNull();
+  });
+
+  it("routes unknown tool names through the gated unknown provider, not ungated system", () => {
+    expect(classifyRuntimeTool("totally_unknown_tool")).toEqual({
+      providerKey: "unknown",
+      group: "admin",
+    });
+  });
+});
+
+describe("classifyNeonSql", () => {
+  it("classifies reads, mutations, and admin SQL conservatively", () => {
+    expect(classifyNeonSql("select * from users")).toBe("read");
+    expect(classifyNeonSql("WITH recent AS (SELECT 1) SELECT * FROM recent")).toBe("read");
+    expect(classifyNeonSql("show search_path")).toBe("read");
+    expect(classifyNeonSql("explain select * from users")).toBe("read");
+    expect(classifyNeonSql("insert into users(id) values (1)")).toBe("modify");
+    expect(classifyNeonSql("update users set name = 'a'")).toBe("modify");
+    expect(classifyNeonSql("delete from users where id = 1")).toBe("modify");
+    expect(classifyNeonSql("create table t(id int)")).toBe("admin");
+    expect(classifyNeonSql("explain analyze select * from users")).toBe("admin");
+    expect(classifyNeonSql("select 1; select 2")).toBe("admin");
+    expect(classifyNeonSql(undefined)).toBe("admin");
+  });
+
+  it("ignores semicolons inside string literals", () => {
+    expect(classifyNeonSql("select ';' as semi;")).toBe("read");
+  });
+
+  it("classifies data-modifying CTEs and SELECT INTO as modify", () => {
+    expect(
+      classifyNeonSql("WITH d AS (DELETE FROM users RETURNING *) SELECT count(*) FROM d"),
+    ).toBe("modify");
+    expect(
+      classifyNeonSql("with u as (update users set name = 'a' returning id) select * from u"),
+    ).toBe("modify");
+    expect(classifyNeonSql("WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x")).toBe("modify");
+    expect(classifyNeonSql("SELECT * INTO archived_users FROM users")).toBe("modify");
+    expect(classifyNeonSql("WITH x AS (SELECT 1) SELECT * INTO t FROM x")).toBe("modify");
+  });
+
+  it("does not let quoted text affect CTE classification", () => {
+    // DML keyword inside a string literal must not bump a pure read to modify…
+    expect(classifyNeonSql("WITH x AS (SELECT 'delete me' AS label) SELECT * FROM x")).toBe("read");
+    expect(classifyNeonSql("WITH x AS (SELECT 1) SELECT 'into the void' FROM x")).toBe("read");
+    // …and a quoted identifier can't hide a real one (the DELETE here is unquoted).
+    expect(
+      classifyNeonSql(`WITH "select" AS (DELETE FROM users RETURNING *) SELECT * FROM "select"`),
+    ).toBe("modify");
   });
 });
 
@@ -117,6 +194,31 @@ describe("classifyMcpTool", () => {
     expect(classifyTool("linear__save_issue")).toEqual({
       providerKey: "linear",
       group: "modify",
+    });
+    expect(classifyTool("betterstack__telemetry_query")).toEqual({
+      providerKey: "betterstack",
+      group: "read",
+    });
+    expect(classifyTool("betterstack__uptime_create_incident_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "post",
+    });
+    expect(classifyTool("betterstack__telemetry_edit_chart_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "modify",
+    });
+    expect(classifyTool("betterstack__telemetry_remove_dashboard_tool")).toEqual({
+      providerKey: "betterstack",
+      group: "admin",
+    });
+    // Braintrust's MCP server is read-only — every tool maps to read.
+    expect(classifyTool("braintrust__sql_query")).toEqual({
+      providerKey: "braintrust",
+      group: "read",
+    });
+    expect(classifyTool("braintrust__summarize_experiment")).toEqual({
+      providerKey: "braintrust",
+      group: "read",
     });
   });
 
@@ -190,6 +292,12 @@ describe("classifyGitHubCliArgs", () => {
       "api repos/opencompany/web/issues --raw-field=title=bug",
       "api repos/opencompany/web/issues --input=body.json",
       "api graphql -f query='mutation { __typename }'",
+      // pflag attached-value shorthands must classify like their spaced forms.
+      "api repos/opencompany/web/issues -ftitle=bug",
+      "api repos/opencompany/web/issues -Ftitle=bug",
+      "api repos/opencompany/web/issues -f=title=bug",
+      "api -XPOST repos/opencompany/web/issues",
+      "api -X=PATCH repos/opencompany/web/issues/123",
     ]) {
       expect(classifyGitHubCliArgs(args)).toBe("modify");
     }
@@ -199,6 +307,11 @@ describe("classifyGitHubCliArgs", () => {
     for (const args of [
       "repo delete opencompany/web --yes",
       "api --method DELETE repos/opencompany/web/issues/comments/1",
+      // Attached shorthand method: previously fell through to "no method" → read.
+      "api -XDELETE repos/opencompany/web/issues/comments/1",
+      "api -X=DELETE repos/opencompany/web/issues/comments/1",
+      // Empty attached value is unparseable → treated as DELETE, not waved through.
+      "api -X= repos/opencompany/web",
       "pr frobnicate 301",
       "workflow run deploy.yml",
       "",
@@ -223,6 +336,21 @@ describe("resolveToolDecision", () => {
     expect(
       resolveToolDecision({ toolName: "exa_search", policy: empty, suspendable: true }).decision,
     ).toBe("allow");
+    expect(resolveToolDecision({ toolName: "memory", policy: empty, suspendable: true })).toEqual({
+      decision: "allow",
+      providerKey: "system",
+      group: "read",
+    });
+  });
+
+  it("gates unknown tool names instead of allowing them through system", () => {
+    expect(
+      resolveToolDecision({ toolName: "totally_unknown_tool", policy: empty, suspendable: true }),
+    ).toEqual({ decision: "ask", providerKey: "unknown", group: "admin" });
+    expect(
+      resolveToolDecision({ toolName: "totally_unknown_tool", policy: empty, suspendable: false })
+        .decision,
+    ).toBe("deny");
   });
 
   it("applies the default hybrid stance for gated providers", () => {
@@ -346,6 +474,48 @@ describe("resolveToolDecision", () => {
         suspendable: true,
       }),
     ).toEqual({ decision: "ask", providerKey: "github", group: "admin" });
+  });
+
+  it("uses SQL text to apply Neon read/modify/admin policies", () => {
+    const allowModify: WorkspaceToolPolicyMap = new Map([
+      [policyMapKey("neon", "modify"), "allow"],
+    ]);
+
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: {
+          tool: "neon_run_sql",
+          arguments: { sql: "select * from users", databaseId: "wres_1" },
+        },
+        policy: new Map(),
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "neon", group: "read" });
+
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: {
+          tool: "neon_run_sql",
+          arguments: { sql: "update users set name = 'a'", databaseId: "wres_1" },
+        },
+        policy: allowModify,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "allow", providerKey: "neon", group: "modify" });
+
+    expect(
+      resolveToolDecision({
+        toolName: "use_tool",
+        toolInput: {
+          tool: "neon_run_sql",
+          arguments: { sql: "drop table users", databaseId: "wres_1" },
+        },
+        policy: allowModify,
+        suspendable: true,
+      }),
+    ).toEqual({ decision: "ask", providerKey: "neon", group: "admin" });
   });
 
   it("collapses ask to deny in non-suspendable runs", () => {

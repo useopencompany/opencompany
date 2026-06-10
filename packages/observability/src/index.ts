@@ -212,6 +212,7 @@ function emitLog(
 
   const record = {
     ...sanitizeLogFields(input.defaultContext),
+    ...sanitizeLogFields(getServerRuntimeContext()),
     ...sanitizeLogFields(fields),
     timestamp: new Date().toISOString(),
     level,
@@ -223,6 +224,26 @@ function emitLog(
   };
 
   writeLog(level, JSON.stringify(record));
+}
+
+function getServerRuntimeContext(): LogFields {
+  if (isBrowser()) return {};
+
+  return compactLogFields({
+    preview_env: isTrue(getEnv("PREVIEW_ENV")) ? true : undefined,
+    preview_pr_number: getEnv("PREVIEW_PR_NUMBER"),
+    render_git_commit: getEnv("RENDER_GIT_COMMIT"),
+    render_service_id: getEnv("RENDER_SERVICE_ID"),
+    render_instance_id: getEnv("RENDER_INSTANCE_ID"),
+  });
+}
+
+function compactLogFields(fields: LogFields): LogFields {
+  const compacted: LogFields = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null && value !== "") compacted[key] = value;
+  }
+  return compacted;
 }
 
 function shouldLog(level: LogLevel) {
@@ -280,6 +301,11 @@ export function isObservabilityEnabled() {
     isBrowser() ? "NEXT_PUBLIC_OBSERVABILITY_ENABLED" : "OBSERVABILITY_ENABLED",
   )?.toLowerCase();
   return raw !== "0" && raw !== "false" && raw !== "off";
+}
+
+function isTrue(value: string | undefined) {
+  const raw = value?.trim().toLowerCase();
+  return raw === "true" || raw === "1" || raw === "on" || raw === "yes";
 }
 
 function logTiming(trace: TimingTrace, step: string, durationMs: number, metadata?: LogFields) {

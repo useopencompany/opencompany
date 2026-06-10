@@ -27,9 +27,11 @@ export async function handleGoogleOAuthStart(
   request: Request,
 ) {
   // Per-user connection: any workspace member can attach their own Google account.
-  const { user, workspace } = await currentWorkspace();
+  // skipOnboarding: the onboarding integrations step opens this in a popup before onboarding is
+  // marked complete; the default gate would render the onboarding stepper inside the popup.
+  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo") ?? "/settings/integrations";
+  const returnTo = url.searchParams.get("returnTo") ?? "/company/settings/integrations";
   const config = GOOGLE_PROVIDER_CONFIG[provider];
   const oauthRedirectUri = googleOAuthRedirectUri(config);
   const targetOrigin = googleOAuthTargetOriginForState();
@@ -56,7 +58,8 @@ export async function handleGoogleOAuthCallback(
   provider: GoogleIntegrationProvider,
   request: Request,
 ) {
-  const current = await currentWorkspace();
+  // skipOnboarding: see handleGoogleOAuthStart — this popup flow runs mid-onboarding too.
+  const current = await currentWorkspace({ skipOnboarding: true });
   const url = new URL(request.url);
   const config = GOOGLE_PROVIDER_CONFIG[provider];
   const errorRedirect = (returnTo: string) =>
@@ -71,7 +74,7 @@ export async function handleGoogleOAuthCallback(
       reason: "invalid_state",
       provider,
     });
-    return errorRedirect("/settings/integrations");
+    return errorRedirect("/company/settings/integrations");
   }
 
   if (

@@ -15,6 +15,15 @@ const materializeMocks = vi.hoisted(() => ({
   materializeSkillsForSession: vi.fn(),
 }));
 
+const dbMocks = vi.hoisted(() => ({
+  getDb: vi.fn(),
+}));
+
+const durableStreamMocks = vi.hoisted(() => ({
+  closeSessionStream: vi.fn(),
+  publishToDurableStream: vi.fn(),
+}));
+
 vi.mock("e2b", () => ({
   Sandbox: e2bMocks,
 }));
@@ -35,7 +44,21 @@ vi.mock("./skills", () => ({
   materializeSkillsForSession: materializeMocks.materializeSkillsForSession,
 }));
 
-import { ensureSandbox, optionalUserContext } from "./session-lifecycle";
+vi.mock("./db", () => ({
+  getDb: dbMocks.getDb,
+}));
+
+vi.mock("./durable-streams", () => ({
+  closeSessionStream: durableStreamMocks.closeSessionStream,
+  publishToDurableStream: durableStreamMocks.publishToDurableStream,
+}));
+
+import { agentSessionEvents } from "@opencompany/db/schema";
+import {
+  completeSpawnedAfterSessionRunForChild,
+  ensureSandbox,
+  optionalUserContext,
+} from "./session-lifecycle";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -43,6 +66,7 @@ beforeEach(() => {
   materializeMocks.materializeAgentBundleForSession.mockResolvedValue(undefined);
   materializeMocks.materializeBrainForSession.mockResolvedValue(undefined);
   materializeMocks.materializeSkillsForSession.mockResolvedValue(undefined);
+  durableStreamMocks.publishToDurableStream.mockResolvedValue(undefined);
 });
 
 describe("optionalUserContext", () => {
@@ -71,6 +95,85 @@ describe("optionalUserContext", () => {
     ).toEqual({
       userEmail: "ada@example.com",
     });
+  });
+});
+
+describe("completeSpawnedAfterSessionRunForChild", () => {
+  it("marks the spawned parent run completed and appends a parent completion event", async () => {
+    const updates: Record<string, unknown>[] = [];
+    const inserts: Array<{ table: unknown; values: Record<string, unknown> }> = [];
+    const db = {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => [
+              {
+                id: 12,
+                sessionId: "ses_parent",
+                lastUserMessageId: "msg_user",
+                status: "spawned",
+              },
+            ],
+          }),
+        }),
+      })),
+      update: vi.fn(() => ({
+        set: (values: Record<string, unknown>) => {
+          updates.push(values);
+          return { where: async () => undefined };
+        },
+      })),
+      insert: vi.fn((table: unknown) => ({
+        values: (values: Record<string, unknown>) => {
+          inserts.push({ table, values });
+          return {
+            returning: async () => [
+              {
+                id: 101,
+                sessionId: values.sessionId,
+                messageId: values.messageId ?? null,
+                type: values.type,
+                payload: values.payload,
+                createdAt: new Date("2026-06-09T10:00:00.000Z"),
+              },
+            ],
+          };
+        },
+      })),
+    };
+    dbMocks.getDb.mockReturnValue(db);
+
+    await completeSpawnedAfterSessionRunForChild({
+      childSessionId: "ses_memory",
+      status: "completed",
+    });
+
+    expect(updates[0]).toMatchObject({
+      status: "completed",
+      lastError: null,
+    });
+    expect(inserts).toEqual([
+      {
+        table: agentSessionEvents,
+        values: {
+          sessionId: "ses_parent",
+          messageId: null,
+          type: "after_session.completed",
+          payload: {
+            runId: 12,
+            messageId: "msg_user",
+            childSessionId: "ses_memory",
+          },
+        },
+      },
+    ]);
+    expect(durableStreamMocks.publishToDurableStream).toHaveBeenCalledWith(
+      "ses_parent",
+      expect.objectContaining({
+        type: "after_session.completed",
+        payload: expect.objectContaining({ childSessionId: "ses_memory" }),
+      }),
+    );
   });
 });
 

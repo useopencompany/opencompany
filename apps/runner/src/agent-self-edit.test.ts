@@ -151,6 +151,39 @@ describe("applyAgentSelfUpdate", () => {
     });
   });
 
+  it("renames the agent when a title is provided", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping.", title: "Friday" }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.changedFields).toContain("name");
+    expect(calls.update[0]).toMatchObject({ name: "Friday" });
+  });
+
+  it("keeps the current name when title is omitted", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping." }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.changedFields).not.toContain("name");
+    expect(calls.update[0]).toMatchObject({ name: "Leo" });
+  });
+
+  it("rejects a blank title without writing", async () => {
+    const { db, calls } = createDb({ row: baseRow });
+    dbMocks.getDb.mockReturnValue(db);
+
+    const result = await applyAgentSelfUpdate(input({ body: "Keep helping.", title: "   " }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors.join(" ")).toMatch(/title/i);
+    expect(calls.update).toHaveLength(0);
+  });
+
   it("keeps the current model when model is omitted even if the body contains legacy model mentions", async () => {
     const { db, calls } = createDb({ row: baseRow });
     dbMocks.getDb.mockReturnValue(db);

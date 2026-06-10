@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Provision (or idempotently update) a full per-PR preview stack — issue #351.
-// Single owner: GitHub Actions calls this; it creates the Neon branch from the sanitized
-// seed, migrates it, then creates/updates the per-PR Render services (Durable Streams →
+// Single owner: GitHub Actions calls this; it creates or reuses the Neon branch from the
+// sanitized seed, migrates it, then creates/updates the per-PR Render services (Durable Streams →
 // Electric → runner) wired to the branch, and emits a manifest + GITHUB_OUTPUT the
 // workflow uses to deploy the Vercel web app and record the GitHub Deployment.
 //
@@ -53,6 +53,7 @@ const repoUrl =
 const prBranch = requireEnv("PREVIEW_PR_BRANCH");
 const renderRegion = process.env.RENDER_REGION?.trim() || "frankfurt";
 const renderPlan = process.env.RENDER_PLAN?.trim() || "starter";
+const previewRenderLogStream = previewRenderLogStreamConfig(process.env);
 const electricImage = process.env.ELECTRIC_IMAGE?.trim() || "docker.io/electricsql/electric:latest";
 const electricStorageDir = process.env.ELECTRIC_STORAGE_DIR?.trim();
 const googleOAuthCallbackUrl = process.env.GOOGLE_OAUTH_CALLBACK_URL?.trim();
@@ -100,7 +101,13 @@ const streamsToken = process.env.PREVIEW_DURABLE_STREAMS_TOKEN?.trim() || `pv-${
 // Register the per-PR secrets as GitHub Actions masks the moment they exist, so they're
 // redacted everywhere downstream (step logs, the web_env job output) — GITHUB_OUTPUT values
 // are NOT masked by default. DB URLs are masked later, once the Neon branch is resolved.
-maskSecrets([runnerInternalToken, runnerStreamTokenSecret, electricSecret, streamsToken]);
+maskSecrets([
+  runnerInternalToken,
+  runnerStreamTokenSecret,
+  electricSecret,
+  streamsToken,
+  previewRenderLogStream?.token,
+]);
 
 const names = previewNames(pr, { baseDomain });
 
@@ -114,7 +121,8 @@ async function main() {
     `Provisioning preview stack for PR #${pr} (sha ${sha.slice(0, 7)})${dryRun ? " [DRY RUN]" : ""}`,
   );
 
-  // 1) Neon branch from the sanitized seed (reset on synchronize for determinism).
+  // 1) Neon branch from the sanitized seed. Existing branches are reused unless an
+  // operator explicitly sets PREVIEW_RESET for a clean reprovision.
   const neon = createNeonClient({
     apiKey: neonApiKey,
     projectId: neonProjectId,
@@ -217,6 +225,11 @@ async function main() {
   const runnerPromise = ensureService(render, {
     name: names.runnerService,
     env: runnerEnv,
+    afterServiceId: (serviceId) =>
+      configureRunnerLogStream(render, serviceId, {
+        serviceName: names.runnerService,
+        logStream: previewRenderLogStream,
+      }),
     buildSpec: (env) =>
       buildRunnerServiceSpec({
         name: names.runnerService,
@@ -252,6 +265,7 @@ async function main() {
     sha,
     appUrl: names.aliasUrl,
     databaseUrl: pooledUrl,
+    appUrl: names.aliasUrl,
     runnerUrl: runner.url,
     runnerInternalToken,
     electricUrl: electric.url,
@@ -268,17 +282,19 @@ async function main() {
 
 // Create the service if missing, else replace its env vars + trigger a fresh deploy.
 // `env` is the single source of truth: the create payload and the update both use it.
-async function ensureService(render, { name, buildSpec, env }) {
+async function ensureService(render, { name, buildSpec, env, afterServiceId }) {
   if (dryRun) {
     log(`would ensure Render service ${name}`);
     // Redact env var values: a dry run loaded with real secrets must not dump them to stdout.
     // Keys stay visible so the payload shape can still be validated.
     console.log(JSON.stringify(redactSpecEnv(buildSpec(env)), null, 2));
+    if (afterServiceId) await afterServiceId(`srv-DRYRUN-${name}`);
     return { id: `srv-DRYRUN-${name}`, url: `https://${name}.onrender.com` };
   }
   const existing = await render.findServiceByName(name);
   if (existing) {
     log(`Updating Render service ${name} (${existing.id}).`);
+    if (afterServiceId) await afterServiceId(existing.id);
     await render.replaceEnvVars(existing.id, toRenderEnvVars(env));
     const deploy = await render.triggerDeploy(existing.id, { clearCache: false });
     try {
@@ -289,20 +305,36 @@ async function ensureService(render, { name, buildSpec, env }) {
       );
       await render.deleteService(existing.id);
       await waitForServiceDeletion(render, name);
-      return createService(render, name, buildSpec(env));
+      return createService(render, name, buildSpec(env), { afterServiceId });
     }
     const svc = await render.getService(existing.id);
     return { id: existing.id, url: serviceUrl(svc, name) };
   }
-  return createService(render, name, buildSpec(env));
+  return createService(render, name, buildSpec(env), { afterServiceId });
 }
 
-async function createService(render, name, spec) {
+async function createService(render, name, spec, { afterServiceId } = {}) {
   log(`Creating Render service ${name}.`);
   const { service, deployId } = await render.createService(spec);
+  if (afterServiceId) await afterServiceId(service.id);
   if (deployId) await render.waitForDeploy(service.id, deployId);
   const svc = await render.getService(service.id);
   return { id: service.id, url: serviceUrl(svc, name) };
+}
+
+async function configureRunnerLogStream(render, serviceId, { serviceName, logStream }) {
+  if (!logStream) {
+    log(
+      `Skipping runner log stream override for ${serviceName}; PREVIEW_RENDER_LOG_ENDPOINT is unset.`,
+    );
+    return;
+  }
+  if (dryRun) {
+    log(`would configure runner log stream override for ${serviceName} (${serviceId}).`);
+    return;
+  }
+  await render.updateResourceLogStream(serviceId, logStream);
+  log(`Configured runner log stream override for ${serviceName} (${serviceId}).`);
 }
 
 function serviceUrl(service, name) {
@@ -346,6 +378,19 @@ function compact(obj) {
     if (value !== undefined && value !== null && value !== "") out[key] = value;
   }
   return out;
+}
+
+function previewRenderLogStreamConfig(env) {
+  const endpoint = env.PREVIEW_RENDER_LOG_ENDPOINT?.trim();
+  const token = env.PREVIEW_RENDER_LOG_TOKEN?.trim();
+  if (!endpoint && !token) return null;
+  if (!endpoint || !token) {
+    console.error(
+      "PREVIEW_RENDER_LOG_ENDPOINT and PREVIEW_RENDER_LOG_TOKEN must be set together, or both omitted.",
+    );
+    process.exit(1);
+  }
+  return { endpoint, token, setting: "send" };
 }
 // Emit GitHub Actions mask commands so the given secret values are redacted in all job
 // logs (and any step that echoes an output carrying them). No-op outside Actions. Skip
