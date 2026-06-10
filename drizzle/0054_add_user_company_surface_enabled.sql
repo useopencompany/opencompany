@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "company_surface_enabled" boolean DEFAULT false NOT NULL;

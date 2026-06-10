@@ -82,6 +82,8 @@ test("webDeployEnv wires per-PR cross-service vars and drops empties", () => {
     env.GOOGLE_OAUTH_CALLBACK_URL,
     "https://oauth.opencompany.cloud/api/google/callback",
   );
+  assert.equal(env.INNGEST_ENV, "preview-pr-42");
+  assert.equal(env.INNGEST_SERVE_ORIGIN, "https://pr-42.preview.opencompany.cloud");
   assert.equal(env.OBSERVABILITY_ENV, "preview");
   assert.equal(env.NEXT_PUBLIC_OBSERVABILITY_RELEASE, "abc1234");
   // Server-side OBSERVABILITY_RELEASE stays unset (manual-override-only convention).

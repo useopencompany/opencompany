@@ -29,6 +29,7 @@ import {
 import { syncBrainFromSandbox } from "./brain";
 import type { RunnerEnv } from "./env";
 import { publishTransientRuntimeEvent } from "./events";
+import { runFetchTranscriptTool } from "./fetch-transcript-tool";
 import { getGitHubWorkInstallationToken } from "./github";
 import {
   executeHostedTool,
@@ -36,18 +37,21 @@ import {
   type HostedToolUsage,
   MissingEnvError,
 } from "./hosted-tools";
+import { runInboxTool } from "./inbox-tool";
 import {
   appendRuntimeEventForLease,
   insertToolMessageForLease,
   requireLeaseWrite,
   StaleRunLeaseError,
 } from "./lease-writes";
+import { runMemoryTool } from "./memory-tool";
 import {
   buildToolModelMessage,
   serializeToolOutputForStorage,
   toPersistedModelMessage,
 } from "./model-messages";
 import { runOpencodeCoderTool } from "./opencode-tool";
+import { runRecallTool } from "./recall-tool";
 import {
   RunAbortError,
   type RunControlCheck,
@@ -150,6 +154,9 @@ export function createToolSet(input: {
   internalMessages?: boolean;
   workspaceId: string;
   agentConfig: AgentConfig;
+  // True for the user's personal/default agent — selects the memory/ + personal-brain/ + work/
+  // sandbox layout and matching path whitelist for the file/memory tools.
+  personalAgent?: boolean;
   getSandbox: () => Promise<SandboxHandle>;
   workdir: string;
   env: RunnerEnv;
@@ -207,6 +214,7 @@ export function createToolSet(input: {
           ...(input.internalMessages ? { internalMessages: true } : {}),
           workspaceId: input.workspaceId,
           agentConfig: input.agentConfig,
+          personalAgent: input.personalAgent ?? false,
           toolCallId: options.toolCallId,
           definition,
           args: toolInput,
@@ -270,6 +278,7 @@ export function createToolSet(input: {
         ...(input.internalMessages ? { internalMessages: true } : {}),
         workspaceId: input.workspaceId,
         agentConfig: input.agentConfig,
+        personalAgent: input.personalAgent ?? false,
         toolCallId: options.toolCallId,
         args: toolInput,
         getSandbox: input.getSandbox,
@@ -325,6 +334,7 @@ export async function dispatchBuiltinUseTool(input: {
   internalMessages?: boolean;
   workspaceId: string;
   agentConfig: AgentConfig;
+  personalAgent?: boolean;
   toolCallId: string;
   args: unknown;
   getSandbox: () => Promise<SandboxHandle>;
@@ -409,6 +419,7 @@ export async function dispatchBuiltinUseTool(input: {
     ...(input.internalMessages ? { internalMessages: true } : {}),
     workspaceId: input.workspaceId,
     agentConfig: input.agentConfig,
+    personalAgent: input.personalAgent ?? false,
     toolCallId: input.toolCallId,
     definition,
     args: prepared.args,
@@ -537,6 +548,7 @@ export async function executeRuntimeTool(input: {
   internalMessages?: boolean;
   workspaceId?: string;
   agentConfig?: AgentConfig;
+  personalAgent?: boolean;
   toolCallId: string;
   definition: RuntimeToolDefinition;
   args: unknown;
@@ -583,6 +595,7 @@ export async function executeRuntimeTool(input: {
           env: input.env,
           enabledTools: input.enabledTools,
           signal: input.signal,
+          hasAttachedRepository: Boolean(input.repository),
           googleContext: input.workspaceId
             ? {
                 workspaceId: input.workspaceId,
@@ -591,11 +604,40 @@ export async function executeRuntimeTool(input: {
                 clientSecret: input.env.googleOAuthClientSecret,
               }
             : undefined,
+          neonContext: input.workspaceId
+            ? {
+                workspaceId: input.workspaceId,
+                encryptionKey: input.env.integrationCredentialEncryptionKey,
+              }
+            : undefined,
         });
         usage = result.usage;
         return result.output;
       }
       if (input.definition.kind === "internal") {
+        if (input.definition.name === "recall") {
+          // Runner-side, no sandbox, no Gateway key: queries Postgres directly, scoped to this
+          // agent + user via the current session row, excluding the live session.
+          return runRecallTool({ sessionId: input.sessionId, args: input.args });
+        }
+        if (
+          input.definition.name === "inbox_list" ||
+          input.definition.name === "inbox_add" ||
+          input.definition.name === "inbox_update"
+        ) {
+          // Runner-side write to the user's personal inbox, scoped to this session's
+          // (workspace, user). Hard-gated to the personal agent at config resolution.
+          return runInboxTool({
+            name: input.definition.name,
+            sessionId: input.sessionId,
+            args: input.args,
+          });
+        }
+        if (input.definition.name === "fetch_transcript") {
+          // Runner-side, no sandbox: reads the full transcript of a session the caller is allowed
+          // to see (its own past sessions, or the parent it was spawned to review).
+          return runFetchTranscriptTool({ callerSessionId: input.sessionId, args: input.args });
+        }
         if (input.definition.name === "update_agent_file") {
           if (!hasReadSkill(input.sessionId, AGENT_SELF_EDIT_SKILL_ID)) {
             return {
@@ -642,6 +684,7 @@ export async function executeRuntimeTool(input: {
         args: input.args,
         workdir: input.workdir,
         brainReferences: input.agentConfig?.brain ?? [],
+        personal: input.personalAgent ?? false,
       });
       const activeSandbox = await input.getSandbox();
       sandboxIdForCapture = activeSandbox.sandboxId;
@@ -697,6 +740,23 @@ export async function executeRuntimeTool(input: {
         }
         return opencodeResult;
       }
+      if (input.definition.name === "memory") {
+        const memoryResult = await runMemoryTool({
+          sandbox: activeSandbox,
+          workdir: input.workdir,
+          args: input.args,
+          env: input.env,
+          personal: input.personalAgent ?? false,
+          onOutput: async (stream, delta) => {
+            await input.checkAbort();
+            commandOutput.push(stream, delta);
+          },
+        });
+        if (memoryResult.usage) {
+          usage = memoryResult.usage;
+        }
+        return memoryResult.output;
+      }
       const brainSnapshotBefore =
         input.definition.name === "shell"
           ? await readSandboxBrainSnapshot(activeSandbox, input.workdir)
@@ -714,6 +774,7 @@ export async function executeRuntimeTool(input: {
         workdir: input.workdir,
         name: input.definition.name,
         args: input.args,
+        personal: input.personalAgent ?? false,
         ...(shellGitHubAuth
           ? { envs: shellGitHubAuth.env, redactOutput: shellGitHubAuth.redact }
           : {}),
@@ -1064,7 +1125,9 @@ export function preflightSandboxToolArgs(input: {
   args: unknown;
   workdir: string;
   brainReferences: AgentBrainReference[];
+  personal?: boolean;
 }) {
+  const personal = input.personal ?? false;
   if (
     input.name !== "read_file" &&
     input.name !== "write_file" &&
@@ -1087,13 +1150,13 @@ export function preflightSandboxToolArgs(input: {
 
   let brainRelativePath: string | null;
   try {
-    brainRelativePath = resolveSandboxBrainRelativePath(input.workdir, requestedPath);
+    brainRelativePath = resolveSandboxBrainRelativePath(input.workdir, requestedPath, personal);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid sandbox path.";
-    throw new RecoverableToolError(
-      `${message} Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.`,
-      "invalid_sandbox_path",
-    );
+    const hint = personal
+      ? "Use paths prefixed with work/ for scratch files, personal-brain/ for the user's private knowledge, memory/ for your structured memory, or agent/ for your private agent folder."
+      : "Use paths prefixed with work/ for scratch files, brain/ for mounted Brain files, or agent/ for your private agent folder.";
+    throw new RecoverableToolError(`${message} ${hint}`, "invalid_sandbox_path");
   }
 
   // Enforce the agent's true Brain access scope. The root check above only

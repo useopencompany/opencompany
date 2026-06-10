@@ -43,7 +43,7 @@ export async function runAgentScheduleNow(agentId: string, triggerId: string) {
       return {
         ok: false,
         error: "Add workspace credits to run this schedule.",
-        redirectTo: "/settings?billing=insufficient",
+        redirectTo: "/company/settings?billing=insufficient",
       } as const;
     }
     return { ok: false, error: result.reason || "Could not run schedule." } as const;

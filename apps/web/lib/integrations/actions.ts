@@ -252,7 +252,7 @@ function readGitHubRepositoryMetadata(metadata: Record<string, unknown>) {
 }
 
 function revalidateIntegrationPaths() {
-  revalidatePath("/agents");
-  revalidatePath("/settings");
-  revalidatePath("/settings/integrations");
+  revalidatePath("/company/agents");
+  revalidatePath("/company/settings");
+  revalidatePath("/company/settings/integrations");
 }

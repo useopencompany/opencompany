@@ -71,6 +71,30 @@ bun run setup
 
 When teammates pull your branch, their `db:migrate` will catch them up on their own Neon branch.
 
+### Rebasing across an already-deployed migration
+
+Drizzle's migrator does not track applied migrations individually. It applies a journal entry only
+when its `when` timestamp in `drizzle/meta/_journal.json` is **newer than the last applied row** in
+`__drizzle_migrations` — a single timestamp comparison, no per-migration hash check.
+
+This bites when a rebase re-sequences your migrations in front of one that already shipped: e.g.
+main's `0044_x` is deployed to prod (and thus baked into the preview seed), and your branch renames
+it to `0053_x` and inserts your own `0044`–`0049` before it. Your inserted migrations keep their
+original generation timestamps, which are *older* than `0044_x`'s — so on any DB that already
+applied `0044_x` (prod, preview seed forks), `db:migrate` exits 0 but **silently skips them**. The
+first symptom is a runtime `relation "..." does not exist`, not a migration failure.
+
+When you re-sequence migrations across a deployed one:
+
+1. Bump the inserted entries' `when` values in `drizzle/meta/_journal.json` so they sort *after*
+   the deployed migration's `when` (keep the journal strictly ascending).
+2. Make the *renamed* already-deployed migration idempotent (`IF NOT EXISTS` / `DO $$ ... $$`
+   guards) — its new `when` is newer than what prod recorded, so prod will re-execute it on the
+   next release and it must no-op.
+
+Already-broken preview branches self-heal on the next push: the PR-preview workflow re-forks the
+Neon branch from the seed on `synchronize` and re-runs the full migrate.
+
 ## Production
 
 Production migrations run from the `Release Production` GitHub Actions workflow before the web app

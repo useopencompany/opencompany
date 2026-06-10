@@ -1,6 +1,7 @@
 import {
   BUILTIN_USE_TOOL_NAME,
   effectiveToolCall,
+  parseGitHubCliArgs,
   toolDisplayTitle,
 } from "@opencompany/agent-runtime";
 
@@ -783,7 +784,8 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
 
     const call: RuntimeToolCall = {
       id: `after-session:${key}`,
-      name: "after_session",
+      name: "updating_memory",
+      label: "Updating memory",
       status: "running",
       inputPreview: "",
       activityPreview: "",
@@ -810,14 +812,18 @@ function buildAfterSessionLifecycleToolCalls(events: RuntimeEvent[]) {
       call.status = "running";
       call.startedEventId = event.id ?? null;
     }
+    if (event.type === "after_session.spawned") {
+      call.status = "running";
+      call.startedEventId = event.id ?? null;
+    }
     if (event.type === "after_session.completed") {
       call.status = "completed";
-      call.outputPreview = "Completed";
+      call.outputPreview = "Memory updated";
       call.completedEventId = event.id ?? null;
     }
     if (event.type === "after_session.failed") {
       call.status = "failed";
-      call.outputPreview = readString(event.payload.message) || "After-session run failed.";
+      call.outputPreview = readString(event.payload.message) || "Memory update failed.";
       call.completedEventId = event.id ?? null;
     }
   }
@@ -1513,9 +1519,130 @@ export function describeToolCall(name: string, input: unknown): string | undefin
     }
     case "update_agent_file":
       return "Updating its agent configuration";
+    case "memory":
+      return describeMemoryToolCall(field("args"));
     default:
       return undefined;
   }
+}
+
+function describeMemoryToolCall(args: string) {
+  const argv = parseGitHubCliArgs(args);
+  if (!argv || argv.length === 0) return "Using memory";
+
+  const command = argv[0];
+  switch (command) {
+    case "query": {
+      const query = findMemoryPositionalArg(argv, 1);
+      return query ? `Looking in memory for “${truncateLabelText(query)}”` : "Looking in memory";
+    }
+    case "get": {
+      const id = findMemoryPositionalArg(argv, 1);
+      return id ? `Reading memory for ${truncateLabelText(id)}` : "Reading memory";
+    }
+    case "create": {
+      const id = firstCliOptionValue(argv, "--id");
+      const type = firstCliOptionValue(argv, "--type");
+      if (id) return `Saving ${truncateLabelText(id)} to memory`;
+      return type ? `Creating a ${truncateLabelText(type)} memory` : "Saving to memory";
+    }
+    case "append-evidence": {
+      const subject = firstCliOptionValue(argv, "--subject");
+      const id = firstCliOptionValue(argv, "--id");
+      if (subject) return `Saving evidence to memory for ${truncateLabelText(subject)}`;
+      return id
+        ? `Saving evidence ${truncateLabelText(id)} to memory`
+        : "Saving evidence to memory";
+    }
+    case "rewrite": {
+      const id = findMemoryPositionalArg(argv, 1);
+      return id ? `Updating memory for ${truncateLabelText(id)}` : "Updating memory";
+    }
+    case "alias": {
+      const id = findMemoryPositionalArg(argv, 1);
+      return id
+        ? `Updating memory aliases for ${truncateLabelText(id)}`
+        : "Updating memory aliases";
+    }
+    case "link": {
+      const id = findMemoryPositionalArg(argv, 1);
+      const target = firstCliOptionValue(argv, "--to");
+      if (id && target) {
+        return `Linking ${truncateLabelText(id)} to ${truncateLabelText(target)} in memory`;
+      }
+      return id ? `Linking memory records for ${truncateLabelText(id)}` : "Linking memory records";
+    }
+    case "merge": {
+      const from = firstCliOptionValue(argv, "--from");
+      const into = firstCliOptionValue(argv, "--into");
+      if (from && into) {
+        return `Merging ${truncateLabelText(from)} into ${truncateLabelText(into)} in memory`;
+      }
+      return "Merging memory records";
+    }
+    case "delete": {
+      const id = findMemoryPositionalArg(argv, 1);
+      return id ? `Deleting ${truncateLabelText(id)} from memory` : "Deleting from memory";
+    }
+    case "doctor":
+      return "Checking memory consistency";
+    case "help":
+      return "Opening memory help";
+    default:
+      return "Using memory";
+  }
+}
+
+const MEMORY_CLI_VALUE_OPTIONS = new Set([
+  "--add",
+  "--alias",
+  "--as",
+  "--captured-at",
+  "--folder",
+  "--from",
+  "--hops",
+  "--id",
+  "--into",
+  "--kind",
+  "--limit",
+  "--remove",
+  "--root",
+  "--section",
+  "--since",
+  "--source-ref",
+  "--status",
+  "--subject",
+  "--summary",
+  "--to",
+  "--truth",
+  "--type",
+]);
+
+function findMemoryPositionalArg(argv: string[], startIndex: number) {
+  for (let index = startIndex; index < argv.length; index++) {
+    const arg = argv[index] ?? "";
+    if (!arg) continue;
+    if (arg.startsWith("--")) {
+      if (!arg.includes("=") && MEMORY_CLI_VALUE_OPTIONS.has(arg)) index += 1;
+      continue;
+    }
+    return arg;
+  }
+  return "";
+}
+
+function firstCliOptionValue(argv: string[], option: string) {
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index] ?? "";
+    if (arg === option) {
+      const value = argv[index + 1] ?? "";
+      return value.startsWith("--") ? "" : value;
+    }
+    if (arg.startsWith(`${option}=`)) {
+      return arg.slice(option.length + 1);
+    }
+  }
+  return "";
 }
 
 // Resolve the user-facing name + label for a (possibly use_tool-wrapped) call. `name` is the inner

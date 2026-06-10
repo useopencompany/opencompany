@@ -59,6 +59,11 @@ export type ProviderPermissionSpec = {
 // in v1 — the sandbox is ephemeral and isolated, so the blast radius is local.
 export const SYSTEM_PROVIDER_KEY = "system";
 
+// Provider key for tool names that cannot be classified at all. Deliberately has no
+// PROVIDER_PERMISSION_REGISTRY entry: resolveToolDecision then applies the workspace
+// policy gate with the admin-group default stance (ask → deny when non-suspendable).
+export const UNKNOWN_PROVIDER_KEY = "unknown";
+
 export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec> = {
   slack: {
     providerKey: "slack",
@@ -170,6 +175,130 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       organization_set_active: "admin",
     },
   },
+  betterstack: {
+    providerKey: "betterstack",
+    displayName: "Better Stack",
+    groups: ["read", "post", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      read: "View telemetry, incidents, monitors, status pages, and documentation",
+      post: "Create incidents, comments, status updates, monitors, charts, or telemetry resources",
+      modify: "Edit alerts, charts, dashboards, monitors, statuses, or telemetry resources",
+      admin: "Delete telemetry resources, monitors, alerts, dashboards, or status resources",
+    },
+    toolGroups: {
+      better_stack_search_documentation_tool: "read",
+      telemetry_build_explore_query_tool: "read",
+      telemetry_build_metric_query_tool: "read",
+      telemetry_chart: "read",
+      telemetry_get_application_details_tool: "read",
+      telemetry_get_chart_alert_details_tool: "read",
+      telemetry_get_chart_alert_instructions_tool: "read",
+      telemetry_get_chart_building_instructions_tool: "read",
+      telemetry_get_chart_details_tool: "read",
+      telemetry_get_dashboard_details_tool: "read",
+      telemetry_get_error_details_tool: "read",
+      telemetry_get_errors_query_instructions_tool: "read",
+      telemetry_get_metric_details_tool: "read",
+      telemetry_get_metric_query_instructions_tool: "read",
+      telemetry_get_metrics_and_cardinality_tool: "read",
+      telemetry_get_query_instructions_tool: "read",
+      telemetry_get_replays_query_instructions_tool: "read",
+      telemetry_get_source_details_tool: "read",
+      telemetry_get_source_fields_tool: "read",
+      telemetry_list_applications_tool: "read",
+      telemetry_list_chart_alerts_tool: "read",
+      telemetry_list_clusters_tool: "read",
+      telemetry_list_dashboard_templates_tool: "read",
+      telemetry_list_dashboards_tool: "read",
+      telemetry_list_data_regions_tool: "read",
+      telemetry_list_errors_tool: "read",
+      telemetry_list_metric_expressions_tool: "read",
+      telemetry_list_releases_tool: "read",
+      telemetry_list_sources_tool: "read",
+      telemetry_list_teams_tool: "read",
+      telemetry_query: "read",
+      uptime_get_escalation_policy_tool: "read",
+      uptime_get_heartbeat_availability_tool: "read",
+      uptime_get_heartbeat_tool: "read",
+      uptime_get_incident_comments_tool: "read",
+      uptime_get_incident_escalation_options_tool: "read",
+      uptime_get_incident_timeline_tool: "read",
+      uptime_get_incident_tool: "read",
+      uptime_get_monitor_availability_tool: "read",
+      uptime_get_monitor_response_times_tool: "read",
+      uptime_get_monitor_tool: "read",
+      uptime_get_on_call_event_tool: "read",
+      uptime_get_on_call_rotation_tool: "read",
+      uptime_get_on_call_tool: "read",
+      uptime_get_severity_tool: "read",
+      uptime_get_status_page_report_update_tool: "read",
+      uptime_get_status_page_resources_tool: "read",
+      uptime_get_status_page_tool: "read",
+      uptime_list_escalation_policies_tool: "read",
+      uptime_list_heartbeats_tool: "read",
+      uptime_list_incidents_tool: "read",
+      uptime_list_monitors_tool: "read",
+      uptime_list_on_call_events_tool: "read",
+      uptime_list_on_calls_tool: "read",
+      uptime_list_severities_tool: "read",
+      uptime_list_status_page_report_updates_tool: "read",
+      uptime_list_status_page_reports_tool: "read",
+      uptime_list_status_pages_tool: "read",
+      telemetry_add_chart_to_dashboard_tool: "post",
+      telemetry_add_dashboard_section_tool: "post",
+      telemetry_create_application_tool: "post",
+      telemetry_create_chart_alert_tool: "post",
+      telemetry_create_cloud_connection_tool: "post",
+      telemetry_create_dashboard_tool: "post",
+      telemetry_create_metric_expression_tool: "post",
+      telemetry_create_source_tool: "post",
+      telemetry_import_dashboard_tool: "post",
+      uptime_acknowledge_incident_tool: "post",
+      uptime_create_incident_comment_tool: "post",
+      uptime_create_incident_tool: "post",
+      uptime_create_monitor_tool: "post",
+      uptime_create_status_page_report_tool: "post",
+      uptime_create_status_page_report_update_tool: "post",
+      uptime_escalate_incident_tool: "post",
+      uptime_reopen_incident_tool: "post",
+      uptime_resolve_incident_tool: "post",
+      telemetry_edit_chart_alert_tool: "modify",
+      telemetry_edit_chart_tool: "modify",
+      telemetry_edit_dashboard_section_tool: "modify",
+      telemetry_export_dashboard_tool: "modify",
+      telemetry_move_charts_tool: "modify",
+      telemetry_rename_dashboard_tool: "modify",
+      telemetry_toggle_chart_alert_pause_tool: "modify",
+      telemetry_update_error_state_tool: "modify",
+      telemetry_update_metric_expression_tool: "modify",
+      telemetry_delete_chart_alert_tool: "admin",
+      telemetry_delete_metric_expression_tool: "admin",
+      telemetry_remove_chart_tool: "admin",
+      telemetry_remove_dashboard_section_tool: "admin",
+      telemetry_remove_dashboard_tool: "admin",
+    },
+  },
+  braintrust: {
+    providerKey: "braintrust",
+    displayName: "Braintrust",
+    // Braintrust's MCP server exposes only read/query tools (search, schema inference,
+    // SQL reads, experiment summaries, permalink generation) — no create/update/delete.
+    groups: ["read"],
+    gated: true,
+    permissionDescriptions: {
+      read: "Search docs and query experiments, datasets, logs, and prompts",
+    },
+    toolGroups: {
+      search_docs: "read",
+      resolve_object: "read",
+      list_recent_objects: "read",
+      infer_schema: "read",
+      sql_query: "read",
+      summarize_experiment: "read",
+      generate_permalink: "read",
+    },
+  },
   github: {
     providerKey: "github",
     displayName: "GitHub",
@@ -230,6 +359,17 @@ export const PROVIDER_PERMISSION_REGISTRY: Record<string, ProviderPermissionSpec
       admin: "Delete events",
     },
   },
+  neon: {
+    providerKey: "neon",
+    displayName: "Neon",
+    groups: ["read", "modify", "admin"],
+    gated: true,
+    permissionDescriptions: {
+      read: "List databases, inspect schema, explain SQL, and run read-only queries",
+      modify: "Run data-changing SQL statements",
+      admin: "Manage branches or run DDL/security/maintenance SQL",
+    },
+  },
   [SYSTEM_PROVIDER_KEY]: {
     providerKey: SYSTEM_PROVIDER_KEY,
     displayName: "Sandbox",
@@ -247,8 +387,12 @@ export function permissionDescriptionFor(providerKey: string, group: PermissionG
 
 // First-party / built-in runtime tools mapped to a provider + group. Returning null
 // means the tool is never gated (always allowed) — e.g. delegation and tool help.
-const RUNTIME_TOOL_CLASSIFICATION: Partial<
-  Record<RuntimeToolName, { providerKey: string; group: PermissionGroup } | null>
+// Exhaustive over RuntimeToolName so adding a runtime tool fails the build until it is
+// classified here — an unmapped tool must not silently ship ungated (the old Partial
+// map let new tools ride the ungated `system` fallback).
+const RUNTIME_TOOL_CLASSIFICATION: Record<
+  RuntimeToolName,
+  { providerKey: string; group: PermissionGroup } | null
 > = {
   // Exa hosted research tools — read-only external lookups.
   exa_search: { providerKey: "exa", group: "read" },
@@ -297,6 +441,15 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   calendar_create_event: { providerKey: "google_calendar", group: "post" },
   calendar_update_event: { providerKey: "google_calendar", group: "modify" },
   calendar_delete_event: { providerKey: "google_calendar", group: "admin" },
+  // Neon hosted database tools. `neon_run_sql` is reclassified from its SQL text in
+  // resolveToolDecision; the static admin group is the safe fallback when SQL is missing/invalid.
+  neon_list_databases: { providerKey: "neon", group: "read" },
+  neon_describe_schema: { providerKey: "neon", group: "read" },
+  neon_explain_sql: { providerKey: "neon", group: "read" },
+  neon_run_sql: { providerKey: "neon", group: "admin" },
+  neon_create_branch: { providerKey: "neon", group: "admin" },
+  neon_delete_branch: { providerKey: "neon", group: "admin" },
+  neon_reset_branch: { providerKey: "neon", group: "admin" },
   // Sandbox-local file IO.
   read_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
   list_files: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
@@ -305,6 +458,21 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   edit_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // shell can run anything, so it is the most restrictive system group.
   shell: { providerKey: SYSTEM_PROVIDER_KEY, group: "admin" },
+  // memory only touches the sandbox-local agent/memory/ tree and the routed Gateway; it is a
+  // first-party, parsed-argv tool (no shell breakout), so it stays in the ungated system group.
+  memory: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  // Session-history and inbox tools derive their scope from the session row server-side
+  // (caller's own transcripts/inbox only), so they live in the ungated system group.
+  recall: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  fetch_transcript: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  inbox_list: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  inbox_add: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
+  inbox_update: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
+  // Reads a mounted skill file from the sandbox.
+  read_skill: { providerKey: SYSTEM_PROVIDER_KEY, group: "read" },
+  // Self-edit of the agent's own definition; its safety flow (validation + skill-read
+  // gate) lives in the tool itself, not the policy gate.
+  update_agent_file: { providerKey: SYSTEM_PROVIDER_KEY, group: "modify" },
   // GitHub-effecting tools. gh is conservatively admin unless resolveToolDecision
   // can classify the concrete CLI args; amp_coder writes code → modify.
   gh: { providerKey: "github", group: "admin" },
@@ -313,6 +481,9 @@ const RUNTIME_TOOL_CLASSIFICATION: Partial<
   // Never gated.
   delegate_to_agent: null,
   tool_help: null,
+  // Pure capability discovery — no side effects.
+  find_tools: null,
+  discover_capabilities: null,
   // Suspends the run for user input via a dedicated branch, not the policy "ask" gate.
   ask_user_question: null,
 };
@@ -323,8 +494,17 @@ export function classifyRuntimeTool(name: string): ToolClassification {
   if (name in RUNTIME_TOOL_CLASSIFICATION) {
     return RUNTIME_TOOL_CLASSIFICATION[name as RuntimeToolName] ?? null;
   }
-  // Unknown runtime tool: be conservative but classify under system.
-  return { providerKey: SYSTEM_PROVIDER_KEY, group: UNKNOWN_GROUP_FALLBACK };
+  // A `use_tool` invoke whose `tool` argument is missing/invalid resolves to the literal
+  // invoke name. Never gated: the dispatcher rejects it with a recoverable validation
+  // error, which is better model feedback than a permission denial.
+  if (name === BUILTIN_USE_TOOL_NAME) return null;
+  // Unknown runtime tool: classify under a provider with no registry spec so
+  // resolveToolDecision routes it through the policy gate (admin defaults to ask, which
+  // collapses to deny in non-suspendable runs) instead of short-circuiting through the
+  // ungated `system` provider — the old fallback's "conservative" admin group was
+  // illusory because system is never gated. Unreachable for typed runtime tools now
+  // that the classification map is exhaustive; defense in depth for raw names.
+  return { providerKey: UNKNOWN_PROVIDER_KEY, group: UNKNOWN_GROUP_FALLBACK };
 }
 
 const READ_VERBS = ["get", "list", "search", "read", "fetch", "view", "describe", "find", "query"];
@@ -456,6 +636,152 @@ export function classifyTool(toolName: string): ToolClassification {
   return isMcpToolName(toolName) ? classifyMcpTool(toolName) : classifyRuntimeTool(toolName);
 }
 
+export type NeonSqlStatementClass = "read" | "modify" | "admin";
+
+export function classifyNeonSql(sql: unknown): PermissionGroup {
+  if (typeof sql !== "string") return "admin";
+  const normalized = stripSqlComments(sql).trim();
+  if (!normalized || hasMultipleSqlStatements(normalized)) return "admin";
+
+  const head = normalized.match(/^[a-zA-Z_]+/)?.[0]?.toLowerCase();
+  if (!head) return "admin";
+  if (head === "explain") {
+    return /\banalyze\b/i.test(normalized) ? "admin" : "read";
+  }
+  if (["select", "show", "values", "with"].includes(head)) {
+    // A read-shaped head can still write: Postgres allows data-modifying CTEs
+    // (`WITH d AS (DELETE FROM users RETURNING *) SELECT ...`) and `SELECT ... INTO
+    // new_table`. Scan with quoted regions blanked so string literals/quoted
+    // identifiers can't trigger (or hide) a match; a false positive on an unquoted
+    // keyword degrades safely to the gated modify tier.
+    const scannable = blankQuotedSqlRegions(normalized);
+    if (head === "with" && /\b(?:insert|update|delete|merge)\b/i.test(scannable)) {
+      return "modify";
+    }
+    if ((head === "select" || head === "with") && /\binto\b/i.test(scannable)) {
+      return "modify";
+    }
+    return "read";
+  }
+  if (["insert", "update", "delete", "merge", "call"].includes(head)) return "modify";
+  return "admin";
+}
+
+// Replace the contents of quoted SQL regions ('…', "…", $tag$…$tag$) with spaces so
+// keyword scans only see unquoted SQL text. Mirrors the quoting rules in
+// hasMultipleSqlStatements below.
+function blankQuotedSqlRegions(sql: string): string {
+  let out = "";
+  let quote: "'" | '"' | "`" | null = null;
+  let dollarTag: string | null = null;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]!;
+    const next = sql[index + 1];
+
+    if (dollarTag) {
+      if (sql.startsWith(dollarTag, index)) {
+        out += dollarTag;
+        index += dollarTag.length - 1;
+        dollarTag = null;
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") {
+          out += "  ";
+          index += 1;
+          continue;
+        }
+        quote = null;
+        out += char;
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      out += char;
+      continue;
+    }
+
+    if (char === "$") {
+      const match = sql.slice(index).match(/^\$[a-zA-Z_][a-zA-Z0-9_]*\$|^\$\$/);
+      if (match?.[0]) {
+        dollarTag = match[0];
+        out += match[0];
+        index += match[0].length - 1;
+        continue;
+      }
+    }
+
+    out += char;
+  }
+
+  return out;
+}
+
+export function hasMultipleSqlStatements(sql: string): boolean {
+  let quote: "'" | '"' | "`" | null = null;
+  let dollarTag: string | null = null;
+  let sawStatementTerminator = false;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]!;
+    const next = sql[index + 1];
+
+    if (dollarTag) {
+      if (sql.startsWith(dollarTag, index)) {
+        index += dollarTag.length - 1;
+        dollarTag = null;
+      }
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") {
+          index += 1;
+          continue;
+        }
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      continue;
+    }
+
+    if (char === "$") {
+      const match = sql.slice(index).match(/^\$[a-zA-Z_][a-zA-Z0-9_]*\$|^\$\$/);
+      if (match?.[0]) {
+        dollarTag = match[0];
+        index += match[0].length - 1;
+        continue;
+      }
+    }
+
+    if (char !== ";") continue;
+    const rest = sql.slice(index + 1).trim();
+    if (rest.length > 0) return true;
+    sawStatementTerminator = true;
+  }
+
+  return sawStatementTerminator && sql.slice(sql.lastIndexOf(";") + 1).trim().length > 0;
+}
+
+function stripSqlComments(sql: string) {
+  return sql.replace(/--[^\n\r]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
 const GH_READ_COMMANDS: Record<string, readonly string[]> = {
   pr: ["view", "list", "diff", "status", "checks"],
   issue: ["view", "list", "status"],
@@ -524,8 +850,11 @@ function classifyGhApi(argv: string[]): PermissionGroup {
 function hasGhApiRequestBody(argv: string[]) {
   return argv.some((arg) => {
     return (
-      arg === "-f" ||
-      arg === "-F" ||
+      // gh is a pflag CLI, so shorthand flags accept attached values: `-ftitle=x` and
+      // `-f=title=x` are valid body fields, not just the bare `-f value` form. Match
+      // by prefix so the attached forms can't classify as a body-less read.
+      arg.startsWith("-f") ||
+      arg.startsWith("-F") ||
       arg === "--field" ||
       arg === "--raw-field" ||
       arg === "--input" ||
@@ -545,6 +874,15 @@ function readGhApiMethod(argv: string[]): string | undefined {
     }
     if (arg.startsWith("--method=")) {
       return arg.slice("--method=".length).toUpperCase();
+    }
+    // pflag shorthand with an attached value: `-XDELETE` / `-X=DELETE`. Without this,
+    // the attached forms fell through to "no method" and a destructive call classified
+    // as read. An empty attached value (`-X=`) is unparseable → "DELETE" so it lands
+    // in the admin group rather than being waved through.
+    if (arg.startsWith("-X")) {
+      const attached = arg.slice(2);
+      const value = attached.startsWith("=") ? attached.slice(1) : attached;
+      return value ? value.toUpperCase() : "DELETE";
     }
   }
   return undefined;
@@ -701,12 +1039,14 @@ export function resolveToolDecision(input: {
               : undefined,
           ),
         }
-      : classifyTool(
-          mcpInvokeEffectiveToolName(
-            builtinInvokeEffectiveToolName(input.toolName, input.toolInput),
-            input.toolInput,
-          ),
-        );
+      : input.toolName === "neon_run_sql" || input.toolName === BUILTIN_USE_TOOL_NAME
+        ? classifyNeonRunSqlIfNeeded(input.toolName, input.toolInput)
+        : classifyTool(
+            mcpInvokeEffectiveToolName(
+              builtinInvokeEffectiveToolName(input.toolName, input.toolInput),
+              input.toolInput,
+            ),
+          );
   if (!classification) {
     return { decision: "allow", providerKey: SYSTEM_PROVIDER_KEY, group: "read" };
   }
@@ -724,6 +1064,33 @@ export function resolveToolDecision(input: {
     suspendable: input.suspendable,
   });
   return { decision, providerKey, group };
+}
+
+function classifyNeonRunSqlIfNeeded(toolName: string, toolInput: unknown): ToolClassification {
+  const effectiveName = builtinInvokeEffectiveToolName(toolName, toolInput);
+  if (effectiveName !== "neon_run_sql") {
+    return classifyTool(mcpInvokeEffectiveToolName(effectiveName, toolInput));
+  }
+
+  const sql =
+    toolName === BUILTIN_USE_TOOL_NAME &&
+    toolInput &&
+    typeof toolInput === "object" &&
+    !Array.isArray(toolInput)
+      ? readSqlFromBuiltinArguments(toolInput as Record<string, unknown>)
+      : readSqlFromArgs(toolInput);
+  return { providerKey: "neon", group: classifyNeonSql(sql) };
+}
+
+function readSqlFromBuiltinArguments(input: Record<string, unknown>) {
+  const args = input.arguments;
+  return readSqlFromArgs(args);
+}
+
+function readSqlFromArgs(args: unknown) {
+  return args && typeof args === "object" && !Array.isArray(args)
+    ? (args as Record<string, unknown>).sql
+    : undefined;
 }
 
 export type DeniedToolOutput = {

@@ -137,6 +137,27 @@ describe(".agent files", () => {
     ]);
   });
 
+  test("round-trips Better Stack MCP tool config without secrets", () => {
+    const source = serializeAgentFile({
+      title: "Better Stack ops",
+      body: "Investigate production telemetry with @betterstack.",
+    });
+
+    expect(source).toContain("id: betterstack");
+    expect(source).toContain("type: mcp");
+    expect(source).toContain("server: betterstack");
+    expect(source).not.toContain("token");
+    expect(parseAgentFile(source).config.tools).toEqual([
+      {
+        id: "betterstack",
+        type: "mcp",
+        server: "betterstack",
+        label: "betterstack",
+        description: "Use workspace-configured Better Stack MCP tools.",
+      },
+    ]);
+  });
+
   test("round-trips X hosted tool config without secrets", () => {
     const source = serializeAgentFile({
       title: "X research",
@@ -559,6 +580,59 @@ describe(".agent files", () => {
         binding,
       },
     ]);
+  });
+
+  test("round-trips optional Neon database connection binding without credentials", () => {
+    const binding = {
+      provider: "neon" as const,
+      resourceType: "database" as const,
+      externalId: "proj_1:br_1:neondb:neondb_owner",
+      displayName: "Project/main/neondb",
+      connection: {
+        externalId: "proj_1",
+        label: "Project",
+        accountName: "Project",
+        accountType: "Project",
+      },
+    };
+    const source = serializeAgentFile({
+      title: "Database",
+      body: "Use @neon for database work.",
+      tools: [{ id: "neon", type: "hosted_tool", label: "neon", description: "Neon." }],
+      integrations: {
+        github: { repositories: [] },
+        neon: {
+          databases: [
+            {
+              id: "proj-1-br-1-neondb",
+              projectId: "proj_1",
+              branchId: "br_1",
+              databaseName: "neondb",
+              roleName: "neondb_owner",
+              displayName: "Project/main/neondb",
+              binding,
+            },
+          ],
+        },
+      },
+    });
+
+    const parsed = parseAgentFile(source);
+
+    expect(parsed.config.tools).toEqual([expect.objectContaining({ id: "neon" })]);
+    expect(parsed.config.integrations.neon?.databases).toEqual([
+      {
+        id: "proj-1-br-1-neondb",
+        projectId: "proj_1",
+        branchId: "br_1",
+        databaseName: "neondb",
+        roleName: "neondb_owner",
+        displayName: "Project/main/neondb",
+        binding,
+      },
+    ]);
+    expect(source).not.toContain("apiKey");
+    expect(source).not.toContain("DATABASE_URL");
   });
 
   test("keeps legacy GitHub repository config valid without binding", () => {

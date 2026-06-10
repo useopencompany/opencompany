@@ -54,11 +54,14 @@ export type AgentToolId =
   | "youtube"
   | "tiktok"
   | "instagram"
+  | "neon"
   | "amp"
   | "opencode"
   | "linear"
   | "slack"
   | "posthog"
+  | "betterstack"
+  | "braintrust"
   | "gmail"
   | "google_calendar";
 export type AgentModelId =
@@ -70,6 +73,7 @@ export type AgentModelId =
   | "anthropic/claude-sonnet-4.6"
   | "anthropic/claude-opus-4.7"
   | "anthropic/claude-opus-4.8"
+  | "anthropic/claude-fable-5"
   | "google/gemini-3-flash"
   | "google/gemini-3.1-flash-lite-preview"
   | "deepseek/deepseek-v4-flash"
@@ -99,7 +103,7 @@ export type AgentModelId =
   | "zai/glm-5v-turbo";
 
 export type AgentHostedToolConfig = {
-  id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "gmail" | "google_calendar";
+  id: "exa" | "x" | "youtube" | "tiktok" | "instagram" | "neon" | "gmail" | "google_calendar";
   type: "tool" | "hosted_tool";
   label: string;
   description: string;
@@ -115,9 +119,9 @@ export type AgentCodingToolConfig = {
 };
 
 export type AgentMcpToolConfig = {
-  id: "linear" | "slack" | "posthog";
+  id: "linear" | "slack" | "posthog" | "betterstack" | "braintrust";
   type: "mcp";
-  server: "linear" | "slack" | "posthog";
+  server: "linear" | "slack" | "posthog" | "betterstack" | "braintrust";
   label: string;
   description: string;
 };
@@ -205,6 +209,29 @@ export type AgentGitHubRepositoryConfig = {
   binding?: AgentGitHubRepositoryBinding;
 };
 
+export type AgentNeonDatabaseBinding = {
+  provider: "neon";
+  resourceType: "database";
+  externalId: string;
+  displayName: string;
+  connection: {
+    externalId: string;
+    label: string;
+    accountName: string | null;
+    accountType: string | null;
+  };
+};
+
+export type AgentNeonDatabaseConfig = {
+  id: string;
+  projectId: string;
+  branchId: string;
+  databaseName: string;
+  roleName: string;
+  displayName: string;
+  binding?: AgentNeonDatabaseBinding;
+};
+
 export type AgentGitHubPullRequestTriggerConfig = {
   id: string;
   type: "github.pull_request";
@@ -241,6 +268,9 @@ export type AgentConfig = {
   integrations: {
     github: {
       repositories: AgentGitHubRepositoryConfig[];
+    };
+    neon?: {
+      databases: AgentNeonDatabaseConfig[];
     };
   };
   triggers: AgentTriggerConfig[];

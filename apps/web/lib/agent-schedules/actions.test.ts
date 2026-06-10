@@ -83,7 +83,7 @@ describe("runAgentScheduleNow", () => {
     expect(result).toEqual({
       ok: false,
       error: "Add workspace credits to run this schedule.",
-      redirectTo: "/settings?billing=insufficient",
+      redirectTo: "/company/settings?billing=insufficient",
     });
   });
 });

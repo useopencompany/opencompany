@@ -1022,6 +1022,9 @@ describe("describeToolCall", () => {
     expect(describeToolCall("delegate_to_agent", { agent: "research" })).toBe(
       "Delegating to research",
     );
+    expect(describeToolCall("memory", { args: 'query "acme blockers" --limit 5' })).toBe(
+      "Looking in memory for “acme blockers”",
+    );
   });
 
   it("falls back to a generic phrase when the primary input is missing", () => {
@@ -1040,6 +1043,21 @@ describe("describeToolCall", () => {
     expect(describeToolCall("x_search_posts", { query: "AI agents" })).toBe(
       "Searching X for “AI agents”",
     );
+  });
+
+  it("derives action-oriented one-liners for memory commands", () => {
+    expect(
+      describeToolCall("memory", { args: 'create --type company --id acme --alias "Acme Inc"' }),
+    ).toBe("Saving acme to memory");
+    expect(
+      describeToolCall("memory", {
+        args: "append-evidence --kind conversation --id acme-call --subject acme",
+      }),
+    ).toBe("Saving evidence to memory for acme");
+    expect(describeToolCall("memory", { args: 'rewrite acme --truth "Updated [^ev:x]"' })).toBe(
+      "Updating memory for acme",
+    );
+    expect(describeToolCall("memory", { args: "doctor" })).toBe("Checking memory consistency");
   });
 });
 
@@ -2148,11 +2166,12 @@ describe("buildBackgroundActivityParts", () => {
         type: "tool-call",
         toolCall: {
           id: "after-session:12",
-          name: "after_session",
+          name: "updating_memory",
+          label: "Updating memory",
           status: "completed",
           inputPreview: "",
           activityPreview: "",
-          outputPreview: "Completed",
+          outputPreview: "Memory updated",
           startedEventId: 1,
           completedEventId: 2,
         },
@@ -2193,11 +2212,67 @@ describe("buildBackgroundActivityParts", () => {
     expect(parts[0]).toMatchObject({
       type: "tool-call",
       toolCall: {
+        name: "updating_memory",
         status: "completed",
         startedEventId: 1,
         completedEventId: 2,
       },
     });
+  });
+
+  it("keeps spawned memory-keeper passes running until the child reports completion", () => {
+    const runningParts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+      ],
+      [],
+    );
+
+    expect(runningParts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "after-session:12",
+          name: "updating_memory",
+          status: "running",
+          startedEventId: 1,
+        },
+      },
+    ]);
+
+    const completedParts = buildBackgroundActivityParts(
+      [
+        event(1, "after_session.spawned", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+        event(9, "after_session.completed", {
+          runId: 12,
+          messageId: "msg_user",
+          childSessionId: "ses_memory",
+        }),
+      ],
+      [],
+    );
+
+    expect(completedParts).toMatchObject([
+      {
+        type: "tool-call",
+        toolCall: {
+          id: "after-session:12",
+          name: "updating_memory",
+          status: "completed",
+          outputPreview: "Memory updated",
+          startedEventId: 1,
+          completedEventId: 9,
+        },
+      },
+    ]);
   });
 
   it("reuses assistant tool-call rendering data for internal after-session tool calls", () => {
@@ -2257,7 +2332,7 @@ describe("buildBackgroundActivityParts", () => {
         type: "tool-call",
         toolCall: {
           id: "after-session:12",
-          name: "after_session",
+          name: "updating_memory",
           status: "completed",
         },
       },

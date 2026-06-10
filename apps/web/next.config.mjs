@@ -26,8 +26,33 @@ const nextConfig = {
   ...(deploymentId ? { deploymentId } : {}),
   env: {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,
+    // Stamped when this config is evaluated during `vercel build` in the release
+    // workflow, which runs minutes before `vercel deploy --prebuilt` — close
+    // enough to serve as the "last deployed" time without extra CI plumbing.
+    // Only set for release builds (commit sha present) so local dev doesn't show
+    // a misleading dev-server start time.
+    ...(release ? { NEXT_PUBLIC_BUILD_TIMESTAMP: new Date().toISOString() } : {}),
   },
   transpilePackages: ["@opencompany/analytics", "@opencompany/db", "@opencompany/observability"],
+  // The workspace route group moved from the root to /company. Keep old root
+  // links (bookmarks, emails, stale clients) working with temporary redirects.
+  async redirects() {
+    const workspaceRoutes = [
+      "agents",
+      "settings",
+      "session",
+      "inbox",
+      "brain",
+      "people",
+      "org-chart",
+      "companies",
+    ];
+    return workspaceRoutes.map((route) => ({
+      source: `/${route}/:path*`,
+      destination: `/company/${route}/:path*`,
+      permanent: false,
+    }));
+  },
 };
 
 const withMDX = createMDX();

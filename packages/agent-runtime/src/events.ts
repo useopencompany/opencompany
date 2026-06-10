@@ -330,7 +330,11 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "after_session.completed";
-      payload: { runId?: number; messageId: string };
+      payload: { runId?: number; messageId: string; childSessionId?: string };
+    }
+  | {
+      type: "after_session.spawned";
+      payload: { runId?: number; messageId: string; childSessionId: string };
     }
   | {
       type: "after_session.skipped";
@@ -338,7 +342,7 @@ export type AgentRuntimeEvent =
     }
   | {
       type: "after_session.failed";
-      payload: { runId?: number; messageId: string; message: string };
+      payload: { runId?: number; messageId: string; childSessionId?: string; message: string };
     };
 
 export type AgentRuntimeEventType = AgentRuntimeEvent["type"];

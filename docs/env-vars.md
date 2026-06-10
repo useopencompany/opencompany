@@ -79,6 +79,7 @@ Set these in Vercel Production.
 | Var | Required | Purpose |
 |---|---:|---|
 | `DATABASE_URL` | Hosted only | Hosted Neon pooled connection string. Do not store this in Infisical `dev`; local setup writes branch DB URLs to `.env.local`. |
+| `VERCEL_AI_GATEWAY_API_KEY` | Yes | Fast-model calls made directly from web (e.g. tailored example pills on `/onboarding/personal`). Same key the runner uses. |
 | `WORKOS_CLIENT_ID` | Yes | WorkOS AuthKit client id. |
 | `WORKOS_API_KEY` | Yes | WorkOS server API key. |
 | `WORKOS_COOKIE_PASSWORD` | Yes | AuthKit cookie encryption secret, 32+ characters. |
@@ -107,6 +108,8 @@ Set these in Vercel Production.
 | `SLACK_SUPPORT_MEMBER_IDS` | Slack Connect only | Comma-separated `U…` ids of OC support members auto-invited to each channel. |
 | `INNGEST_EVENT_KEY` | Hosted only | Sends events to Inngest Cloud. Not needed for local dev. |
 | `INNGEST_SIGNING_KEY` | Hosted only | Verifies Inngest requests to `/api/inngest`. Not needed for local dev. |
+| `INNGEST_ENV` | Hosted preview only | Inngest branch environment name. PR previews set this dynamically to `preview-pr-<n>`. Leave unset in production. |
+| `INNGEST_SERVE_ORIGIN` | Hosted preview only | Public origin Inngest should call for this deployment. PR previews set this dynamically to the deterministic preview custom domain. |
 | `INNGEST_DEV` | No | Do not set in hosted envs. Local dev only. |
 | `RUNNER_PUBLIC_URL` | Yes | Browser-reachable Render runner URL. |
 | `RUNNER_INTERNAL_URL` | No | Server-to-server runner URL. Defaults to `RUNNER_PUBLIC_URL`. |
@@ -140,6 +143,7 @@ Set these in Vercel Production.
 | `BRAINTRUST_PROJECT_ID` | No | Braintrust project UUID for runner traces. Takes precedence over `BRAINTRUST_PROJECT_NAME`. |
 | `BRAINTRUST_PROJECT_NAME` | No | Braintrust project name for runner traces. Defaults to `OpenCompany Runner`. |
 | `BETTER_STACK_ERRORS_DSN` | No | Server-side error capture DSN override. |
+| `BETTER_STACK_PREVIEW_SOURCE_NAME` | No | Local/operator override for `bun run preview:debug-session` output. Defaults to `opencompany-runner-preview`; not a source token. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENABLED` | No | Browser observability toggle. |
 | `NEXT_PUBLIC_OBSERVABILITY_ENV` | No | Browser observability environment. |
 | `NEXT_PUBLIC_OBSERVABILITY_RELEASE` | No | Browser release tag. Production release workflow sets this from the released commit during build. |
@@ -325,6 +329,7 @@ orchestrator and are not stored anywhere long-term.
 | `NEON_API_KEY`, `NEON_PROJECT_ID` | provision/teardown/reaper | Branch create/delete + endpoint verification. |
 | `RENDER_API_KEY` | provision/teardown/reaper | Create/destroy per-PR Render services. Same key model as the prod release CI. |
 | `RENDER_OWNER_ID` | provision (optional) | Workspace/owner id for create-service. Auto-resolved from the API when the key has a single workspace; only set it if the key spans multiple. |
+| `PREVIEW_RENDER_LOG_ENDPOINT`, `PREVIEW_RENDER_LOG_TOKEN` | preview log stream automation | Shared Better Stack Render syslog endpoint and source token for preview runner logs. Keep the token secret. |
 | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | pr-preview.yml | Vercel build/deploy/alias. |
 
 ### Runner runtime credentials (Infisical `prod` + `/runner`, fetched via OIDC)
@@ -347,13 +352,20 @@ orchestrator and are not stored anywhere long-term.
 | `RUNNER_INTERNAL_URL` / `RUNNER_PUBLIC_URL` / `RUNNER_INTERNAL_TOKEN` | web ↔ runner | Per-PR runner URL + a freshly minted shared token. |
 | `ELECTRIC_URL` / `ELECTRIC_SECRET` | web ↔ electric | Per-PR Electric URL + secret; the web proxy injects the secret server-side. |
 | `DURABLE_STREAMS_URL` | web, runner | Per-PR Durable Streams service URL. |
-| `NEXT_PUBLIC_APP_URL` | web (build-time) | `https://pr-<n>.<domain>`. Used in signed OAuth state so the stable Google broker can forward back to the right preview. |
+| `INNGEST_ENV` | web | `preview-pr-<n>`, routing events and function syncs into the isolated Inngest branch environment. |
+| `INNGEST_SERVE_ORIGIN` | web | `https://pr-<n>.<domain>`, ensuring Inngest calls the deterministic preview custom domain rather than a protected Vercel deployment URL. |
+| `NEXT_PUBLIC_APP_URL` | web (build-time + runtime) | `https://pr-<n>.<domain>`. Used in signed OAuth state so the stable Google broker can forward back to the right preview. |
 | `NEXT_PUBLIC_WORKOS_REDIRECT_URI` | web (build-time) | `https://pr-<n>.<domain>/auth/callback`. |
 | `GOOGLE_OAUTH_CALLBACK_URL` | web | Optional pass-through from the provision environment. Set to `https://oauth.opencompany.cloud/api/google/callback` to use the stable Google OAuth broker for previews. |
 | `PREVIEW_ALLOW_UNVERIFIED_ENDPOINT` | runner | Emergency escape hatch for the boot gate. Leave unset. |
 
 The prod runner carries **none** of `PREVIEW_ENV` / `NEON_BRANCH_ID` / `PREVIEW_PR_NUMBER`;
 the boot gate refuses to start if it sees a partial preview identity (symmetric guard).
+
+Preview Render logs use the shared Better Stack Render source, normally
+`opencompany-runner-preview`. Store its syslog endpoint and source token in Infisical `dev` +
+`/release` as `PREVIEW_RENDER_LOG_ENDPOINT` and `PREVIEW_RENDER_LOG_TOKEN`; the token must never be
+committed or printed.
 
 ## Local Development
 

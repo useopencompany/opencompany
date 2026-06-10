@@ -102,6 +102,17 @@ export function createRenderClient({
     async deleteService(id) {
       await request(`/services/${id}`, { method: "DELETE" }, { allowEmpty: true });
     },
+    /**
+     * Configure a resource-level log stream override. Render documents this for
+     * servers/cron jobs/databases/Redis at PUT /logs/streams/resource/{resourceId};
+     * the override takes precedence over the workspace default stream.
+     */
+    async updateResourceLogStream(id, { endpoint, token, setting = "send" }) {
+      await request(`/logs/streams/resource/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        body: JSON.stringify(compact({ endpoint, token, setting })),
+      });
+    },
     /** Replace the full env-var set (idempotent re-provision on PR synchronize). */
     async replaceEnvVars(id, envVars) {
       await request(`/services/${id}/env-vars`, {
@@ -252,6 +263,14 @@ function safeJson(text) {
   } catch {
     return null;
   }
+}
+
+function compact(obj) {
+  const out = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined && value !== null && value !== "") out[key] = value;
+  }
+  return out;
 }
 
 function defaultSleep(ms) {

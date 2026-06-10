@@ -50,8 +50,8 @@ describe("MCP OAuth state", () => {
   });
 
   it("falls back to a safe return path for off-site redirects", () => {
-    expect(sanitizeReturnTo("//evil.example")).toBe("/settings");
-    expect(sanitizeReturnTo("https://evil.example")).toBe("/settings");
+    expect(sanitizeReturnTo("//evil.example")).toBe("/company/settings");
+    expect(sanitizeReturnTo("https://evil.example")).toBe("/company/settings");
     expect(sanitizeReturnTo("/agents")).toBe("/agents");
   });
 });
