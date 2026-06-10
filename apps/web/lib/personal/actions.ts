@@ -394,7 +394,8 @@ export async function enablePersonalAgentIntegrations(
       Boolean(mention),
     );
 
-  const { user, workspace } = await currentWorkspace();
+  // skipOnboarding: invoked from the onboarding submit, before onboarding is marked complete.
+  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const db = getDb();
 
   const [agent] = await db
@@ -481,7 +482,8 @@ export async function setPersonalAgentName(agentId: string, name: string): Promi
   if (!trimmed) return { ok: false, error: "Enter a name for your agent." };
   if (trimmed.length > 60) return { ok: false, error: "Keep the agent name under 60 characters." };
 
-  const { user, workspace } = await currentWorkspace();
+  // skipOnboarding: invoked from the onboarding submit, before onboarding is marked complete.
+  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const db = getDb();
 
   const [agent] = await db

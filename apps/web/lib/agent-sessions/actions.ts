@@ -269,7 +269,10 @@ export async function createPersonalOnboardingSession(
   prompt: string,
   options: PersonalOnboardingOptions = { integrations: [] },
 ) {
-  const { user, workspace } = await currentWorkspace();
+  // skipOnboarding: this action IS the final onboarding step — the caller has not completed
+  // onboarding yet (the survey row that marks completion is persisted below), so the default
+  // gate would bounce the submit straight back to /onboarding/personal.
+  const { user, workspace } = await currentWorkspace({ skipOnboarding: true });
   const trimmed = prompt.trim();
   if (!trimmed) {
     return { ok: false, error: "Tell the agent what you'd like to get done." } as const;

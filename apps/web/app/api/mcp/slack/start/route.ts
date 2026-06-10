@@ -7,7 +7,9 @@ import { appendSlackMcpSetupStatus, startSlackMcpOAuth } from "@/lib/mcp/slack-o
 const logger = createLogger({ service: "opencompany-web", runtime: "server" });
 
 export async function GET(request: Request) {
-  const { user, workspace } = await currentWorkspace({ requireAdmin: true });
+  // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
+  // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
+  const { user, workspace } = await currentWorkspace({ requireAdmin: true, skipOnboarding: true });
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
 

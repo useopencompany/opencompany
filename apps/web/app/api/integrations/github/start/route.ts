@@ -8,7 +8,9 @@ import {
 } from "@/lib/integrations/github";
 
 export async function GET(request: Request) {
-  const { user, workspace } = await currentWorkspace({ requireAdmin: true });
+  // skipOnboarding: the onboarding integrations step opens this OAuth flow in a popup before
+  // onboarding is marked complete; the default gate would bounce the popup to /onboarding.
+  const { user, workspace } = await currentWorkspace({ requireAdmin: true, skipOnboarding: true });
   const url = new URL(request.url);
   const intent = url.searchParams.get("intent") === "agent" ? "agent" : "settings";
   const returnTo = url.searchParams.get("returnTo") ?? "/settings/integrations";

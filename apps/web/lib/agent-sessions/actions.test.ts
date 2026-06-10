@@ -17,6 +17,7 @@ import {
   continueInterruptedSession,
   createAgentSession,
   createAgentSessionFromPrompt,
+  createPersonalOnboardingSession,
   resolveToolApproval,
   setSessionStar,
   submitAgentSessionMessage,
@@ -259,6 +260,37 @@ describe("createAgentSession", () => {
       model_provider: "vercel-ai-gateway",
       model_name: "openai/gpt-5.4-mini",
       source: "agent",
+    });
+  });
+});
+
+describe("createPersonalOnboardingSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentWorkspaceMock.mockResolvedValue({
+      user: { id: "usr_123" },
+      workspace: { id: "wks_123" },
+    } as never);
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(true);
+  });
+
+  it("skips the onboarding gate — the caller has not completed onboarding yet", async () => {
+    // Regression: without skipOnboarding, currentWorkspace() redirects the submit straight back
+    // to /onboarding/personal (the survey row that marks completion is only written inside this
+    // action), trapping the user in an onboarding loop.
+    hasPositiveWorkspaceBalanceMock.mockResolvedValue(false);
+
+    const result = await createPersonalOnboardingSession(
+      "agt_123",
+      { name: "Ada", website: "", role: "Founder" },
+      "Help me get started",
+    );
+
+    expect(currentWorkspaceMock).toHaveBeenCalledWith({ skipOnboarding: true });
+    expect(result).toEqual({
+      ok: false,
+      error: "Add workspace credits to start a session.",
+      redirectTo: "/company/settings?billing=insufficient",
     });
   });
 });
