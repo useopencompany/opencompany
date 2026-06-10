@@ -24,7 +24,9 @@ import {
   normalizeAgentBundleRelativePath,
   serializeAgentBundleFiles,
 } from "@/lib/agents/bundle-files";
+import { loadGitHubIntegrationRepositoriesForWorkspace } from "@/lib/agents/data";
 import { hashAgentSource } from "@/lib/agents/hash";
+import { buildGitHubRepositoryCatalogs } from "@/lib/agents/payload";
 import { sanitizeTiptapDoc } from "@/lib/agents/tiptap";
 import { currentWorkspace } from "@/lib/auth";
 import { brainContentSize, hashBrainContent } from "@/lib/brain/hash";
@@ -45,11 +47,19 @@ async function derivePersonalAgentSave(
   body: string,
 ): Promise<{ title: string; body: string; config: AgentConfig; source: string }> {
   const currentConfig = agent.config;
-  const repositories = currentConfig.integrations.github.repositories.map((repository) => ({
+  const savedRepositories = currentConfig.integrations.github.repositories.map((repository) => ({
     fullName: repository.fullName,
     defaultBranch: repository.defaultBranch,
     ...(repository.binding ? { binding: repository.binding } : {}),
   }));
+  // Resolve repo mentions against the workspace GitHub integration's catalog (plus repos
+  // already saved on the config, so existing bindings keep resolving even if a repo drops out
+  // of the synced catalog). Previously only saved config repos were passed, which made
+  // @owner/repo mentions unresolvable until a repo somehow reached the config — chicken-and-egg.
+  const { derivationRepositories } = buildGitHubRepositoryCatalogs({
+    repositories: await loadGitHubIntegrationRepositoriesForWorkspace(workspaceId),
+    savedRepositories: currentConfig.integrations.github.repositories,
+  });
   const skillsById = new Map(
     (currentConfig.skills ?? [])
       .filter(isExternalSkillReference)
@@ -67,9 +77,9 @@ async function derivePersonalAgentSave(
     title: agent.name,
     body,
     model: currentConfig.model.name,
-    repositories,
+    repositories: derivationRepositories,
     skills,
-    preferredRepositories: repositories.filter((repository) => repository.binding),
+    preferredRepositories: savedRepositories.filter((repository) => repository.binding),
     triggers: currentConfig.triggers,
   });
 
