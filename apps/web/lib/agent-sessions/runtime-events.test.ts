@@ -193,6 +193,93 @@ describe("mergeLiveSessionAggregates", () => {
     // currentContextTokens must come from the higher-id event (id 5): 800 + 200 = 1000.
     expect(merged.currentContextTokens).toBe(1000);
   });
+
+  it("updates currentContextTokens from a session.delegated_usage event", () => {
+    const snapshot = {
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 0,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        event(5, "session.delegated_usage", {
+          childSessionId: "ses_child",
+          usage: { inputTokens: 300, outputTokens: 100, totalTokens: 400 },
+          cost: { providerCostUsdMicros: 500, platformFeeUsdMicros: 50, totalCostUsdMicros: 550 },
+          toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+        }),
+      ],
+      3,
+    );
+
+    // currentContextTokens = inputTokens + outputTokens from the delegated usage payload.
+    expect(merged.currentContextTokens).toBe(400);
+    expect(merged.usage.totalTokens).toBe(400);
+  });
+
+  it("applies the highest-id guard across mixed session.usage and session.delegated_usage events", () => {
+    // A session.delegated_usage (id 4) and a session.usage (id 6) both arrive.
+    // The session.usage has the higher id so it wins for currentContextTokens.
+    const snapshot = {
+      usage: {
+        inputTokens: 0,
+        inputNoCacheTokens: 0,
+        inputCacheReadTokens: 0,
+        inputCacheWriteTokens: 0,
+        outputTokens: 0,
+        outputTextTokens: 0,
+        outputReasoningTokens: 0,
+        totalTokens: 0,
+      },
+      toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+      cost: {
+        providerCostUsdMicros: 0,
+        platformFeeUsdMicros: 0,
+        totalCostUsdMicros: 0,
+        modelCostUsdMicros: 0,
+        toolCostUsdMicros: 0,
+        sandboxCostUsdMicros: 0,
+      },
+      currentContextTokens: 0,
+    };
+
+    const merged = mergeLiveSessionAggregates(
+      snapshot,
+      [
+        // Delegated usage arrives first with a lower id — sets currentContextTokens initially.
+        event(4, "session.delegated_usage", {
+          usage: { inputTokens: 200, outputTokens: 50, totalTokens: 250 },
+          cost: {},
+          toolUsage: { totalCostUsdMicros: 0, byProviderOperation: [] },
+        }),
+        // Direct session.usage with a higher id must win for currentContextTokens.
+        event(6, "session.usage", { inputTokens: 500, outputTokens: 100 }),
+      ],
+      3,
+    );
+
+    // currentContextTokens must come from the higher-id event (id 6): 500 + 100 = 600.
+    expect(merged.currentContextTokens).toBe(600);
+  });
 });
 
 function initialState(): SessionRuntimeState {
