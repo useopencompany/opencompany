@@ -123,6 +123,33 @@ function statusPageMeta({
   };
 }
 
+// Baked into the bundle at build time (see next.config.mjs); absent in local dev.
+const BUILD_TIMESTAMP = process.env.NEXT_PUBLIC_BUILD_TIMESTAMP;
+const RELEASE_SHA_SHORT = (process.env.NEXT_PUBLIC_OBSERVABILITY_RELEASE ?? "").slice(0, 7);
+
+function relativeTime(iso: string): string {
+  const min = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  return day === 1 ? "1d ago" : `${day}d ago`;
+}
+
+function LastDeployedLine() {
+  if (!BUILD_TIMESTAMP || Number.isNaN(Date.parse(BUILD_TIMESTAMP))) return null;
+  const exact = new Date(BUILD_TIMESTAMP).toLocaleString();
+  return (
+    <div
+      className="mt-1 truncate text-[11.5px] leading-4 text-ink-subtle/80"
+      title={RELEASE_SHA_SHORT ? `${exact} · ${RELEASE_SHA_SHORT}` : exact}
+    >
+      Last deployed {relativeTime(BUILD_TIMESTAMP)}
+    </div>
+  );
+}
+
 function StatusPageMenuItem({ onClose }: { onClose: () => void }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["status-page", STATUS_PAGE_JSON_URL],
@@ -184,6 +211,7 @@ function AccountMenu({
         </div>
         <div className="mt-0.5 text-[12.5px] leading-[1.2] text-ink-subtle">{userEmail}</div>
         <StatusPageMenuItem onClose={onClose} />
+        <LastDeployedLine />
       </div>
 
       <div className="border-t border-black/[0.07] py-2">
