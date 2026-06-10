@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // Provision (or idempotently update) a full per-PR preview stack — issue #351.
-// Single owner: GitHub Actions calls this; it creates the Neon branch from the sanitized
-// seed, migrates it, then creates/updates the per-PR Render services (Durable Streams →
+// Single owner: GitHub Actions calls this; it creates or reuses the Neon branch from the
+// sanitized seed, migrates it, then creates/updates the per-PR Render services (Durable Streams →
 // Electric → runner) wired to the branch, and emits a manifest + GITHUB_OUTPUT the
 // workflow uses to deploy the Vercel web app and record the GitHub Deployment.
 //
@@ -121,7 +121,8 @@ async function main() {
     `Provisioning preview stack for PR #${pr} (sha ${sha.slice(0, 7)})${dryRun ? " [DRY RUN]" : ""}`,
   );
 
-  // 1) Neon branch from the sanitized seed (reset on synchronize for determinism).
+  // 1) Neon branch from the sanitized seed. Existing branches are reused unless an
+  // operator explicitly sets PREVIEW_RESET for a clean reprovision.
   const neon = createNeonClient({
     apiKey: neonApiKey,
     projectId: neonProjectId,

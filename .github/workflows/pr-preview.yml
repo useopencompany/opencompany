@@ -206,9 +206,9 @@ jobs:
           PREVIEW_PR_NUMBER: ${{ env.PR_NUMBER }}
           PREVIEW_SHA: ${{ env.PR_SHA }}
           PREVIEW_PR_BRANCH: ${{ env.PR_BRANCH }}
-          # Reset-on-synchronize: re-fork the branch from the seed on every new commit so
-          # the preview DB is deterministic for the SHA's migrations.
-          PREVIEW_RESET: ${{ github.event.action == 'synchronize' }}
+          # Preserve the per-PR database across preview updates. A fresh DB comes from
+          # tearing down the preview stack and provisioning it again.
+          PREVIEW_RESET: "false"
           NEON_BRANCH_TTL_HOURS: ${{ vars.PREVIEW_NEON_TTL_HOURS || '24' }}
           ELECTRIC_STORAGE_DIR: ${{ vars.PREVIEW_ELECTRIC_STORAGE_DIR }}
           RENDER_REGION: ${{ vars.PREVIEW_RENDER_REGION || 'frankfurt' }}
@@ -360,7 +360,7 @@ jobs:
               "",
               ok ? `<details><summary>Stack</summary>\n\n- Runner: ${process.env.RUNNER_URL}\n- Electric: ${process.env.ELECTRIC_URL}\n- Commit: \`${sha}\`\n\n</details>` : "",
               "",
-              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams + Inngest branch env). The DB is **reset from the sanitized seed on every push**. Auto-expires ~24h after the last push (Neon TTL + the reaper, every 6h; Inngest branch envs auto-archive separately); removing the `preview` label or closing the PR tears down the stack resources immediately.",
+              "> Isolated per-PR stack (own Neon branch + runner + Electric + Durable Streams + Inngest branch env). The DB is seeded once from the sanitized seed branch, then preserved across preview updates. Auto-expires ~24h after the last update (Neon TTL + the reaper, every 6h; Inngest branch envs auto-archive separately); removing the `preview` label or closing the PR tears down the stack resources immediately.",
             ].join("\n");
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,

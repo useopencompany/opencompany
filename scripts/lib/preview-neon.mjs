@@ -1,7 +1,7 @@
 // Neon operations for per-PR preview branches (issue #351), wrapping `neonctl` the same
 // way scripts/neon-branch.mjs does for local dev — but headless (always --api-key) and
-// returning structured data instead of writing .env.local. Reset-on-synchronize re-forks
-// the branch from the sanitized seed so a preview's DB always matches its SHA's migrations.
+// returning structured data instead of writing .env.local. Preview branches are preserved
+// across updates unless callers explicitly request a reset.
 
 import { execFileSync } from "node:child_process";
 import { toDirectConnectionString } from "./preview-config.mjs";
@@ -40,7 +40,7 @@ export function createNeonClient({ apiKey, projectId, parentBranch } = {}) {
     neon(["branches", "delete", name]);
   }
 
-  // create-from-seed; with reset, drop+recreate so the branch data is deterministic for the SHA.
+  // Create from the sanitized seed; with explicit reset, drop+recreate for a clean branch.
   function ensureBranch(name, { reset = false } = {}) {
     let branch = getBranchByName(name);
     if (branch && reset) {

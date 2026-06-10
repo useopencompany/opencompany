@@ -297,7 +297,8 @@ every 6h ─► .github/workflows/preview-reaper.yml  (desired = labeled-open PR
   keep the CI quality check as the merge gate. Preview failures still update the PR
   comment, plus GitHub Deployment status when a deployment record exists.
 - **Data:** previews fork from a sanitized `preview-seed` branch, **never** prod `main`
-  (no prod PII). DB resets from the seed on every push (deterministic per SHA).
+  (no prod PII). The DB is seeded when the per-PR branch is first created and preserved
+  across preview updates.
 - **Base secrets:** Infisical `dev`; runner static runtime secrets currently reuse
   Infisical `prod` + `/runner`; per-PR dynamic values are minted by the orchestrator.
 - **Safety gate:** `apps/runner/src/preview-guard.ts` refuses to boot a preview runner unless
@@ -386,7 +387,8 @@ computes — already done for this project).
 
 - **Create / update:** add the `preview` label (or push to an already-labeled PR). The PR
   gets a comment with the URL + stack links.
-- **Reset data:** push a commit (reset-on-synchronize re-forks from the seed).
+- **Reset data:** remove the `preview` label or close the PR to tear down the stack, then
+  add the label/reopen to create a fresh branch from the seed.
 - **Destroy:** close the PR or remove the `preview` label. The reaper is the backstop.
 - **Local script use:** `bun run preview:provision` / `bun run preview:teardown`
   (`--dry-run` supported); `node scripts/preview-reaper.mjs --dry-run` to preview cleanup.
